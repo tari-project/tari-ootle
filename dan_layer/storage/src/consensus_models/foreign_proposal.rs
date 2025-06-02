@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use tari_consensus_types::{BlockId, LeafBlock};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{committee::CommitteeInfo, Epoch, NodeHeight, ShardGroup};
-use tari_sidechain::{CommitProofElement, QuorumCertificate};
+use tari_sidechain::QuorumCertificate;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 
@@ -147,7 +147,7 @@ impl ForeignProposalRecord {
         tx.foreign_proposals_save(self)
     }
 
-    pub fn set_status<TTx: StateStoreWriteTransaction>(
+    pub fn update_status<TTx: StateStoreWriteTransaction>(
         &mut self,
         tx: &mut TTx,
         status: ForeignProposalStatus,
@@ -363,16 +363,8 @@ impl ForeignProposal {
     pub fn get_justify_qc(&self) -> Option<&QuorumCertificate> {
         self.commit_proof
             .sidechain_block_commit_proof()
-            .proof_elements
-            // Should be the last element
-            .last()
-            .and_then(|elem| {
-                if let CommitProofElement::QuorumCertificate(qc) = elem {
-                    Some(qc)
-                } else {
-                    None
-                }
-            })
+            // Should be the last QC in the commit proof
+            .last_qc()
     }
 
     pub fn epoch(&self) -> Epoch {

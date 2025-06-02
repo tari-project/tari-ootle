@@ -63,7 +63,7 @@ impl<V: Vote + Display> VoteCollector<V> {
 
         // We only generate the next qc once when we have a quorum of votes. Any votes received after this
         // are not included in the QC.
-        if threshold_decision.count != quorum_threshold {
+        if threshold_decision.count < quorum_threshold {
             info!(
                 target: LOG_TARGET,
                 "🔥 Received {} from {} ({} of {}).",

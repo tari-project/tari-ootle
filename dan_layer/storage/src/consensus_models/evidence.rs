@@ -188,8 +188,9 @@ impl Evidence {
                     e.is_prepare_justified()
                 } else {
                     // Local is Output-only: we consider the input shard groups prepared if we've received prepare OR
-                    // accept justification TODO: Technically, we should only have received accept
-                    // justification, so is being more lenient a problem?
+                    // accept justification
+                    // TODO: Technically, we should only have received accept justification. Is being more lenient a
+                    // problem?
                     e.is_prepare_justified() || e.is_accept_justified()
                 }
             })
@@ -375,11 +376,16 @@ impl Display for Evidence {
                     write!(f, ", ")?;
                 }
                 match (
+                    !shard_evidence.inputs().is_empty(),
                     shard_evidence.is_prepare_justified(),
                     shard_evidence.is_accept_justified(),
                 ) {
-                    (_, true) => write!(f, "{}: ACCEPTED", shard_group)?,
-                    (true, false) => write!(f, "{}: PREPARED", shard_group)?,
+                    (true, true, true) => write!(f, "{}: ACCEPTED", shard_group)?,
+                    (true, false, true) => write!(f, "{}: ACCEPTED (not prepared)", shard_group)?,
+                    (true, true, false) => write!(f, "{}: PREPARED (need accept)", shard_group)?,
+                    // Output only
+                    (false, _, true) => write!(f, "{}: ACCEPTED (output-only)", shard_group)?,
+                    (false, true, false) => write!(f, "{}: PREPARED (output-only, need accept)", shard_group)?,
                     _ => write!(f, "{}: NO EVIDENCE", shard_group)?,
                 }
             }
@@ -547,6 +553,10 @@ impl ShardGroupEvidence {
         self
     }
 
+    pub fn prepare_qc(&self) -> Option<&QcId> {
+        self.prepare_qc.as_ref()
+    }
+
     pub fn set_accept_qc(&mut self, qc_id: QcId) -> &mut Self {
         debug!(
             target: LOG_TARGET,
@@ -554,6 +564,10 @@ impl ShardGroupEvidence {
         );
         self.accept_qc = Some(qc_id);
         self
+    }
+
+    pub fn accept_qc(&self) -> Option<&QcId> {
+        self.accept_qc.as_ref()
     }
 }
 

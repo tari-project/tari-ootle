@@ -92,7 +92,7 @@ export default function InspectCf() {
     setError(null);
     setIsLoading(true);
 
-    const query = { limit: pagination.pageSize, page: pagination.page, query_prefix_hex: pagination.query || "" };
+    const query = { limit: pagination.pageSize, page: pagination.page, query: pagination.query || "" };
     client.listCfItems(dbName!, cfName!, query as Params).then((res) => {
       setData(res);
     }).catch((err) => {
@@ -151,11 +151,6 @@ export default function InspectCf() {
               onChange={(e) => {
                 const hex = e.target.value;
                 setQueryString(hex);
-                // check if valid hex
-                if (hex && !/^[0-9a-fA-F]*$/.test(hex)) {
-                  setError("Invalid hex string");
-                  return;
-                }
                 setPagination({ ...pagination, page: 0, query: e.target.value });
               }}
               value={queryString}

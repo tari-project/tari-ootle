@@ -12,7 +12,8 @@ use axum::{
 };
 use serde::Serialize;
 use serde_json::json;
-use tari_dan_storage::Ordering;
+use tari_dan_common_types::displayable::Displayable;
+use tari_dan_storage::{consensus_models::Evidence, Ordering};
 use tari_state_store_rocksdb::{codecs::DbCodec, column_families, error::RocksDbStorageError, traits::Cf};
 
 use crate::webserver::{
@@ -37,6 +38,7 @@ where
                 const OPERATION: &str = "list_cf";
                 let db = context.open_db(&db_name)?;
                 let mut table = create_table_for_cf(CF::name());
+                let transformer = create_transformer::<CF>();
 
                 let tx = db.read_only_context();
                 let cf = tx.cf(cf())?;
@@ -48,7 +50,7 @@ where
                 };
                 #[allow(clippy::type_complexity)]
                 let iter: Box<dyn Iterator<Item = Result<(CF::Key, CF::Value), RocksDbStorageError>>> =
-                    if let Some(prefix_hex) = req.query_prefix_hex.as_ref() {
+                    if let Some(prefix_hex) = req.query.as_ref() {
                         let key_prefix = decode_hex_prefix(prefix_hex)?;
                         Box::new(cf.prefix_range_iterator_raw_key(ordering, key_prefix))
                     } else {
@@ -75,8 +77,8 @@ where
                         smallest_row_size = size;
                     }
 
-                    let mut value =
-                        serde_json::to_value(value).map_err(|e| anyhow!("Failed to serialize value: {}", e))?;
+                    let value = serde_json::to_value(value).map_err(|e| anyhow!("Failed to serialize value: {}", e))?;
+                    let mut value = transformer(value).map_err(|e| anyhow!("Failed to transform value: {}", e))?;
                     let key = key_codec
                         .encode(&key)
                         .map_err(|e| anyhow!("Failed to encode key: {}", e))?;
@@ -165,17 +167,18 @@ fn create_table_for_cf(cf_name: &str) -> TableResponse {
         },
         s if s == column_families::certificates::proposal::ProposalCertificateCf::name() => {
             table.with_columns([
-                Column::new("qc_id", "QC ID"),
-                Column::new("block_id", "Block ID"),
+                Column::new("height", "Height"),
                 Column::new("header_hash", "Header hash"),
                 Column::new("parent_id", "Parent ID"),
                 Column::new("epoch", "Epoch"),
                 Column::new("decision", "Decision"),
+                Column::new("num_signatures", "# sigs"),
             ]);
         },
         "transaction_pool" => {
             table.with_columns([
                 Column::new("transaction_id", "Transaction ID"),
+                Column::new("summary", "Summary"),
                 Column::new("evidence", "Evidence"),
                 Column::new("transaction_fee", "Transaction Fee"),
                 Column::new("leader_fee", "Leader Fee"),
@@ -205,4 +208,80 @@ fn create_table_for_cf(cf_name: &str) -> TableResponse {
     }
 
     table
+}
+
+fn create_transformer<CF: Cf>() -> Box<dyn Fn(serde_json::Value) -> anyhow::Result<serde_json::Value>> {
+    match CF::name() {
+        n if n == column_families::transaction_pool::TransactionPoolCf::name() => Box::new(|mut v| {
+            let stage = v["pending_stage"].as_str().unwrap_or_else(|| {
+                v["stage"]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("{} Stage should be a string", CF::name()))
+            });
+            let evidence: Evidence = serde_json::from_value(v["evidence"].clone())?;
+            let summary = evidence
+                .iter()
+                .map(|(shard_group, ev)| {
+                    let num_outputs = ev.outputs().len();
+                    let num_inputs = ev.inputs().len();
+                    let prepared = ev.prepare_qc();
+                    let accept = ev.accept_qc();
+                    let ok_sym = match stage {
+                        "New" => {
+                            if num_inputs > 0 {
+                                if prepared.is_some() {
+                                    "✅ Prepared "
+                                } else {
+                                    "🔴"
+                                }
+                            } else {
+                                "🌟"
+                            }
+                        },
+                        "LocalPrepared" => {
+                            if num_inputs > 0 {
+                                if prepared.is_some() {
+                                    "✅ Prepared "
+                                } else {
+                                    "🔴"
+                                }
+                            } else {
+                                // Only expect LocalPrepared for local evidence, otherwise we're waiting for the foreign
+                                // shard
+                                "⌛️"
+                            }
+                        },
+                        "LocalAccepted" => {
+                            if accept.is_some() {
+                                "🟢 Accepted "
+                            } else {
+                                "🔴"
+                            }
+                        },
+                        s => s,
+                    };
+
+                    format!(
+                        "[[ {}{}: in: {} | out: {} | p: {} | a: {} ]] ",
+                        ok_sym,
+                        shard_group.to_parsable_string(),
+                        num_inputs,
+                        num_outputs,
+                        prepared.display(),
+                        accept.display(),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            v["summary"] = serde_json::Value::String(summary);
+            Ok(v)
+        }),
+
+        n if n == column_families::certificates::proposal::ProposalCertificateCf::name() => Box::new(|mut v| {
+            v["num_signatures"] =
+                serde_json::Value::Number(v["signatures"].as_array().map_or(0, |sigs| sigs.len()).into());
+            Ok(v)
+        }),
+        _ => Box::new(Ok),
+    }
 }

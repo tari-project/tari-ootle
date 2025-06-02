@@ -547,10 +547,14 @@ where TConsensusSpec: ConsensusSpec
         start_of_chain_block: HighestSeenBlock,
     ) -> Result<ProposalBatch, HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "fetch_next_proposal_batch");
+        // Foreign proposals are weighted by 10x. Each foreign proposal can contain max_number_commands_in_block*inputs
+        // substate pledges. TODO: this is a loosey goosey upper bound. We need to evaluate this, find an acceptable
+        // upper bound or perhaps re-design how foreign proposals work
+        const FP_WEIGHT_MULTIPLIER: usize = 10;
         let foreign_proposals = ForeignProposalRecord::get_all_new(
             tx,
             start_of_chain_block.block_id(),
-            self.config.consensus_constants.max_block_size / 4,
+            self.config.consensus_constants.max_number_commands_in_block / FP_WEIGHT_MULTIPLIER,
         )?;
 
         if !foreign_proposals.is_empty() {
@@ -562,8 +566,8 @@ where TConsensusSpec: ConsensusSpec
         }
 
         let mut remaining_block_size = subtract_block_size_checked(
-            Some(self.config.consensus_constants.max_block_size),
-            foreign_proposals.len() * 4,
+            Some(self.config.consensus_constants.max_number_commands_in_block),
+            foreign_proposals.len() * FP_WEIGHT_MULTIPLIER,
         );
 
         let burnt_utxos = remaining_block_size

@@ -224,7 +224,8 @@ impl Block {
     }
 
     pub fn is_epoch_end(&self) -> bool {
-        self.commands.iter().any(|c| c.is_epoch_end())
+        // EOE block only has a single EndEpoch command
+        self.commands.first().is_some_and(|c| c.is_epoch_end())
     }
 
     pub fn all_transaction_ids(&self) -> impl Iterator<Item = &TransactionId> + '_ {
@@ -448,6 +449,10 @@ impl Block {
 
     pub fn set_commit_qc(&mut self, commit_qc_id: QcId) {
         self.commit_qc_id = Some(commit_qc_id);
+    }
+
+    pub fn commit_qc_id(&self) -> Option<&QcId> {
+        self.commit_qc_id.as_ref()
     }
 }
 
@@ -858,7 +863,7 @@ impl Block {
             // (otherwise the transaction would not be committed and therefore the pledges still available).
             // This would not be a concern if we were able to force commits without having to execute everything
             // historically.
-            warn!(
+            debug!(
                 target: LOG_TARGET,
                 "get_block_pledge: Block {} is already committed. Some substates may be DOWN and therefore these pledges will not be provided", self.as_leaf()
             );
@@ -983,7 +988,7 @@ impl Display for Block {
         }
         write!(
             f,
-            "[{}, justify: {} ({}), TC: {}, {}, {}, {} cmd(s), {}->{}]",
+            "[{}, justify: {} ({}), TC: {}, {}, {}, {} cmd(s){}, {}->{}]",
             self.height(),
             self.justify().height(),
             if self.timeout_certificate().is_none() && !self.is_dummy() {
@@ -995,6 +1000,7 @@ impl Display for Block {
             self.epoch(),
             self.shard_group(),
             self.commands().len(),
+            if self.is_epoch_end() { " EOE" } else { "" },
             self.id(),
             self.parent()
         )

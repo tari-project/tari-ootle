@@ -11,7 +11,14 @@ use tari_dan_common_types::{
     NodeHeight,
 };
 use tari_dan_storage::{
-    consensus_models::{Block, ForeignParkedProposal, ForeignProposal, TransactionRecord},
+    consensus_models::{
+        Block,
+        ForeignParkedProposal,
+        ForeignProposal,
+        ForeignProposalRecord,
+        ForeignProposalStatus,
+        TransactionRecord,
+    },
     StateStore,
     StateStoreWriteTransaction,
 };
@@ -243,7 +250,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         proposal: &ForeignProposal,
         committee: &Committee<TConsensusSpec::Addr>,
     ) -> Result<(), HotStuffError> {
-        validations::check_foreign_proposal::<TConsensusSpec>(proposal, committee, &self.leader_strategy, &self.config)
+        validations::check_foreign_proposal::<TConsensusSpec>(proposal, committee, &self.config)
     }
 
     fn handle_missing_transactions_local_block(
@@ -348,17 +355,16 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             .await?;
 
         if let Err(err) = self.check_foreign_proposal(&msg.proposal, &committee) {
-            if cfg!(debug_assertions) {
-                // This helps to quickly identify the issue in tests. Otherwise, the chain would just continue until the
-                // tests timeout due to block height limits and we'd have to wade through logs.
-                panic!("❌ Foreign proposal {} failed validation: {}", msg.proposal, err);
-            } else {
-                return Ok(MessageValidationResult::Invalid {
-                    from,
-                    message: HotstuffMessage::ForeignProposal(msg),
-                    err,
-                });
-            }
+            // Save the proposal as invalid in the store (TODO: just for debugging purposes, perhaps provide a
+            // config for this to avoid storing debug data in production)
+            let mut fp = ForeignProposalRecord::new((*msg.proposal).clone());
+            fp.set_proposal_status(ForeignProposalStatus::Invalid);
+            self.store.with_write_tx(|tx| fp.save(tx))?;
+            return Ok(MessageValidationResult::Invalid {
+                from,
+                message: HotstuffMessage::ForeignProposal(msg),
+                err,
+            });
         }
 
         self.store.with_write_tx(|tx| {

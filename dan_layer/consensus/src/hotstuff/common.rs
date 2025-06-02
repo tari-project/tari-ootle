@@ -251,12 +251,12 @@ pub fn calculate_state_merkle_root<'a, TTx: StateStoreReadTransaction, I: IntoIt
 pub(crate) fn generate_epoch_checkpoint<TTx>(
     tx: &TTx,
     eoe_block: &Block,
-    tip_qc: &ProposalCertificate,
+    commit_qc: &ProposalCertificate,
 ) -> Result<EpochCheckpoint, HotStuffError>
 where
     TTx: StateStoreReadTransaction,
 {
-    let commit_proof = generate_end_of_epoch_commit_proof(tx, tip_qc, eoe_block)?;
+    let commit_proof = generate_end_of_epoch_commit_proof(tx, commit_qc, eoe_block)?;
     let shard_group = eoe_block.shard_group();
 
     // Fetch the state roots of the shards in the shard group
@@ -428,7 +428,8 @@ pub fn process_newly_justified_block<TStore: StateStore>(
     let timer = TraceTimer::info(LOG_TARGET, "Process newly justified chain");
     fn process_newly_justified_block_inner<TStore: StateStore>(
         tx: &<TStore as StateStore>::ReadTransaction<'_>,
-        new_leaf_block: &Block,
+        block: &Block,
+        new_leaf_block: &LeafBlock,
         justify_id: QcId,
         local_committee_info: &CommitteeInfo,
         change_set: &mut ProposedBlockChangeSet,
@@ -437,22 +438,21 @@ pub fn process_newly_justified_block<TStore: StateStore>(
         info!(
             target: LOG_TARGET,
             "✅ New leaf block {} is justified. Updating evidence for transactions",
-            new_leaf_block,
+            block,
         );
 
         let mut num_applicable_commands = 0;
-        let leaf = new_leaf_block.as_leaf();
-        if new_leaf_block.is_epoch_end() {
+        if block.is_epoch_end() {
             debug!(
                 target: LOG_TARGET,
                 "✅ New leaf block {} is an epoch end. No commands to process in process_newly_justified_block",
-                new_leaf_block,
+                block,
             );
             return Ok(());
         }
         let local_shard_group = local_committee_info.shard_group();
 
-        for cmd in new_leaf_block.commands() {
+        for cmd in block.commands() {
             if !cmd.is_local_prepare() && !cmd.is_local_accept() {
                 continue;
             }
@@ -461,28 +461,31 @@ pub fn process_newly_justified_block<TStore: StateStore>(
 
             let atom = cmd.transaction().expect("Command must be a transaction");
 
+            // NOTE: we use new_leaf_block here to ensure that we are always updating the latest evidence for the
+            // transaction.
             let Some(mut pool_tx) = change_set
-                .get_transaction_pool_record(tx, &leaf, atom.id())
+                .get_transaction_pool_record(tx, new_leaf_block, atom.id())
                 .optional()?
             else {
                 return Err(HotStuffError::InvariantError(format!(
                     "Transaction {} in newly justified block {} not found in the pool",
                     atom.id(),
-                    leaf,
+                    new_leaf_block,
                 )));
             };
 
             if cmd.is_local_prepare() {
-                debug!(
-                    target: LOG_TARGET,
-                    "🔍 Updating evidence for LocalPrepare command in block {} for transaction {}",
-                    leaf,
-                    atom.id(),
-                );
                 pool_tx
                     .evidence_mut()
                     .add_shard_group(local_shard_group)
                     .set_prepare_qc(justify_id);
+                debug!(
+                    target: LOG_TARGET,
+                    "🔍 Updating evidence for LocalPrepare command in block {} for transaction {}. {}",
+                    new_leaf_block,
+                    atom.id(),
+                    pool_tx.evidence()
+                );
             } else if cmd.is_local_accept() {
                 pool_tx
                     .evidence_mut()
@@ -490,8 +493,8 @@ pub fn process_newly_justified_block<TStore: StateStore>(
                     .set_accept_qc(justify_id);
                 debug!(
                     target: LOG_TARGET,
-                    "🔍 Updating evidence for LocalAccept command in block {} for transaction {}. {:#}",
-                    leaf,
+                    "🔍 Updating evidence for LocalAccept command in block {} for transaction {}. {}",
+                    new_leaf_block,
                     atom.id(),
                     pool_tx.evidence()
                 );
@@ -505,7 +508,7 @@ pub fn process_newly_justified_block<TStore: StateStore>(
                     target: LOG_TARGET,
                     "✅ Setting READY for transaction {} in block {}",
                     atom.id(),
-                    leaf,
+                    new_leaf_block,
                 );
                 pool_tx.set_ready(true);
             }
@@ -541,8 +544,9 @@ pub fn process_newly_justified_block<TStore: StateStore>(
         blocks_to_process.len(),
     );
 
+    let leaf = new_leaf_block.as_leaf();
     for block in blocks_to_process.iter().rev().chain(iter::once(new_leaf_block)) {
-        process_newly_justified_block_inner::<TStore>(tx, block, justify_id, local_committee_info, change_set)?;
+        process_newly_justified_block_inner::<TStore>(tx, block, &leaf, justify_id, local_committee_info, change_set)?;
     }
 
     Ok(blocks_to_process)

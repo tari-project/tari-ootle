@@ -40,7 +40,7 @@ pub async fn list(
     } else {
         Ordering::Descending
     };
-    let iter = if let Some(prefix_hex) = req.query_prefix_hex.as_ref() {
+    let iter = if let Some(prefix_hex) = req.query.as_ref() {
         let key_prefix = decode_hex_prefix(prefix_hex)?;
         cf.range_iterator(ordering, key_prefix.as_slice()..)
     } else {

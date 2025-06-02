@@ -831,6 +831,16 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         cf.put(&(*block.block_id(), *update.transaction_id()), &value, OPERATION)?;
 
+        // TODO: remove CF - this is only used for debugging (or maybe make it configurable)
+        let cf = self
+            .db()
+            .cf(transaction_pool_state_update::TransactionPoolStateUpdateDebugHistoryCf)?;
+        cf.put(
+            &(block.epoch(), block.height(), *update.transaction_id()),
+            &value,
+            OPERATION,
+        )?;
+
         // Set is_ready and pending_stage to the updated values. This allows has_uncommitted_transactions to return an
         // accurate value without querying records in the updates table.
         let cf = self.db().cf(TransactionPoolCf)?;

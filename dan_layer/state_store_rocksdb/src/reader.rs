@@ -46,6 +46,7 @@ use tari_consensus_types::{
     TimeoutCertificate,
 };
 use tari_dan_common_types::{
+    displayable::Displayable,
     optional::Optional,
     shard::Shard,
     Epoch,
@@ -1165,20 +1166,32 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         }
 
         let cf = self.db().cf(TransactionPoolCf)?;
-        let query = self.db().cf(transaction_pool_state_update::ByBlockIdQuery)?;
+        let query = self
+            .db()
+            .cf(transaction_pool_state_update::TransactionPoolStateUpdateCf)?;
 
         let mut transaction = cf.get(transaction_id, OPERATION)?;
 
         let pending_chain = self.get_pending_chain_ordered(to_block_id)?;
 
-        // TODO: optimise
-        for block_id in pending_chain.into_iter().rev() {
-            let iter = query.query_prefix_range_iterator(Ordering::default(), &block_id);
-            for result in iter {
-                let ((_, tx_id), update) = result?;
-                if tx_id == *transaction_id {
-                    update.merge_into(&mut transaction);
-                }
+        trace!(
+            target: LOG_TARGET,
+            "{OPERATION}: pending_chain: {} for block {}",
+            pending_chain.display(), to_block_id
+        );
+
+        for block_id in pending_chain {
+            let mut iter = query.prefix_range_value_iterator(Ordering::default(), &(block_id, *transaction_id));
+            if let Some(update) = iter.next().transpose()? {
+                trace!(
+                    target: LOG_TARGET,
+                    "{OPERATION}: found update {} for block {}: {:#} -> {:#}",
+                    update.transaction_id, block_id,
+                    transaction.evidence(),
+                    update.evidence
+                );
+                update.merge_into(&mut transaction);
+                return Ok(transaction);
             }
         }
 
@@ -1690,7 +1703,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let query = self.db().cf(foreign_substate_pledge::ByTransactionIdQuery)?;
 
-        let mut pledges = SubstatePledges::new();
+        let count = query.count_prefix(transaction_id)?;
+        let mut pledges = SubstatePledges::with_capacity(count);
         let iter = query.query_prefix_range_iterator(Ordering::default(), transaction_id);
         for result in iter {
             let (_, pledge) = result?;

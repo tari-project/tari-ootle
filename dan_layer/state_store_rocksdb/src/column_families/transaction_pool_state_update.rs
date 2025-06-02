@@ -22,12 +22,12 @@
 
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::{BlockId, Decision};
-use tari_dan_common_types::NodeHeight;
+use tari_dan_common_types::{Epoch, NodeHeight};
 use tari_dan_storage::consensus_models::{Evidence, LeaderFee, TransactionPoolRecord, TransactionPoolStage};
 use tari_transaction::TransactionId;
 
 use crate::{
-    codecs::{BlockIdCodec, DefaultCodec, TupleBytesCodec},
+    codecs::{BlockIdCodec, BytesCodec, DefaultCodec, EpochCodec, NumberCodec, TupleBytesCodec},
     traits::{Cf, QueryCf},
 };
 
@@ -80,4 +80,17 @@ impl QueryCf for ByBlockIdQuery {
     type Cf = TransactionPoolStateUpdateCf;
     type Key = BlockId;
     type KeyCodec = BlockIdCodec;
+}
+
+pub struct TransactionPoolStateUpdateDebugHistoryCf;
+
+impl Cf for TransactionPoolStateUpdateDebugHistoryCf {
+    type Key = (Epoch, NodeHeight, TransactionId);
+    type KeyCodec = (EpochCodec, NumberCodec<NodeHeight>, BytesCodec);
+    type Value = TransactionPoolStateUpdateData;
+    type ValueCodec = DefaultCodec<TransactionPoolStateUpdateData>;
+
+    fn name() -> &'static str {
+        "transaction_pool_updates_debug_history"
+    }
 }

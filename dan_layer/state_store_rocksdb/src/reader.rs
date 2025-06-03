@@ -151,18 +151,21 @@ use crate::{
         validator_node_epoch_stats::ValidatorNodeEpochStatsCf,
     },
     error::RocksDbStorageError,
+    read_only::ReadOnly,
 };
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
+pub(crate) type ReadOnlyTransaction<'a> = ReadOnly<Transaction<'a, TransactionDB>>;
+
 pub struct RocksDbStateStoreReadTransaction<'a, TAddr> {
-    tx: Transaction<'a, TransactionDB>,
+    tx: ReadOnlyTransaction<'a>,
     db: &'a TransactionDB,
     _addr: PhantomData<TAddr>,
 }
 
 impl<'a, TAddr> RocksDbStateStoreReadTransaction<'a, TAddr> {
-    pub(crate) fn new(db: &'a TransactionDB, tx: Transaction<'a, TransactionDB>) -> Self {
+    pub(crate) fn new(db: &'a TransactionDB, tx: ReadOnlyTransaction<'a>) -> Self {
         Self {
             tx,
             db,
@@ -170,28 +173,16 @@ impl<'a, TAddr> RocksDbStateStoreReadTransaction<'a, TAddr> {
         }
     }
 
-    pub fn db(&self) -> DbContext<'_> {
+    pub fn db(&self) -> DbContext<'_, ReadOnlyTransaction<'_>> {
         DbContext::new(self.db, &self.tx)
     }
 
     pub(crate) fn rocksdb_transaction(&self) -> &Transaction<'a, TransactionDB> {
-        &self.tx
+        &self.tx.inner
     }
 
-    pub(crate) fn commit(self) -> Result<(), RocksDbStorageError> {
-        self.tx.commit().map_err(|source| RocksDbStorageError::RocksDbError {
-            source,
-            operation: "commit",
-        })?;
-        Ok(())
-    }
-
-    pub(crate) fn rollback(self) -> Result<(), RocksDbStorageError> {
-        self.tx.rollback().map_err(|source| RocksDbStorageError::RocksDbError {
-            source,
-            operation: "commit",
-        })?;
-        Ok(())
+    pub(crate) fn into_rocksdb_transaction(self) -> Transaction<'a, TransactionDB> {
+        self.tx.inner
     }
 }
 
@@ -246,7 +237,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
             "{OPERATION}: end block {end_block} is in pending chain",
         );
 
-        let commit_block = self.get_commit_block_id()?;
+        let commit_block = self.get_commit_block()?;
 
         while let Some(parent_id) = chain_cf.get(&block_id, OPERATION).optional()? {
             trace!(
@@ -355,7 +346,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
         Ok(blocks)
     }
 
-    pub fn get_commit_block_id(&self) -> Result<CommitBlock, RocksDbStorageError> {
+    pub fn get_commit_block(&self) -> Result<CommitBlock, RocksDbStorageError> {
         let cf = self.db().cf(CommitBlockCf)?;
         let value = cf.get_by_default_key("get_commit_block")?;
         Ok(value)
@@ -782,7 +773,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(exists)
     }
 
-    fn blocks_is_ancestor(&self, descendant: &BlockId, ancestor: &BlockId) -> Result<bool, StorageError> {
+    fn blocks_is_pending_ancestor(&self, descendant: &BlockId, ancestor: &BlockId) -> Result<bool, StorageError> {
         const OPERATION: &str = "blocks_is_ancestor";
         // Defensive checks, technically not needed as this will return false if the blocks do not exist.
         // We could remove them to save some reads on the blocks CF.
@@ -798,12 +789,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             });
         }
 
-        // TODO: This only works for non-committed/pending blocks - we only use this for the safenode predicate where
+        // NOTE: This only works for non-committed/pending blocks - we only use this for the safenode predicate where
         // the ancestor block is the locked block and so is in the pending chain. Therefore, the pending chain
-        // index is sufficient. This differs from the Sqlite implementation which provides the correct result
-        // for any block. Changing the trait method name and SQLite impl to reflect that this only returns the
-        // result for pending blocks would be a good idea.
-
+        // index is sufficient.
         let chain_cf = self.db().cf(chain::PendingChainIndex)?;
 
         let mut block_id = *descendant;
@@ -1211,7 +1199,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         const OPERATION: &str = "transaction_pool_get_all";
         let cf = self.db().cf(TransactionPoolCf)?;
 
-        let commit_block = self.get_commit_block_id()?;
+        let commit_block = self.get_commit_block()?;
         let pending_chain = self.get_pending_chain_ordered(&commit_block.block_id)?;
         let query = self.db().cf(transaction_pool_state_update::ByBlockIdQuery)?;
         let mut updates = HashMap::new();
@@ -1463,6 +1451,12 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(locked_substates)
     }
 
+    /// Returns the transaction ID of any write lock found for any of the given substates, or None if there are no write
+    /// locks.
+    ///
+    /// # Used for:
+    /// Foreign proposal conflict resolution, to check if there is a conflicting write lock in a foreign proposal by
+    /// another locally proposed transaction.
     fn substate_locks_has_any_write_locks_for_substates<'a, I: IntoIterator<Item = &'a SubstateId>>(
         &self,
         exclude_transaction_id: Option<&TransactionId>,
@@ -1483,10 +1477,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 if !lock_type.is_write() {
                     continue;
                 }
-                if let Some(exclude_transaction_id) = exclude_transaction_id {
-                    if key.transaction_id == *exclude_transaction_id {
-                        continue;
-                    }
+                if exclude_transaction_id.is_some_and(|ex| *ex == key.transaction_id) {
+                    continue;
                 }
 
                 return Ok(Some(key.transaction_id));
@@ -1496,12 +1488,58 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(None)
     }
 
-    fn substate_locks_get_latest_for_substate(&self, substate_id: &SubstateId) -> Result<SubstateLock, StorageError> {
+    /// Returns the latest substate lock for a given substate ID, searching through the pending chain and committed
+    /// chain.
+    ///
+    /// # Used for:
+    /// Local proposal conflict resolution, to check if a substate is locked by another transaction.
+    fn substate_locks_get_latest_for_substate(
+        &self,
+        leaf_block: &LeafBlock,
+        substate_id: &SubstateId,
+    ) -> Result<SubstateLock, StorageError> {
         const OPERATION: &str = "substate_locks_get_latest_for_substate";
-
         let cf = self.db().cf(SubstateLockModel)?;
-        let index = self.db().cf(substate_locks::HeadIndex)?;
-        let key = index.get(substate_id, OPERATION)?;
+
+        let pending_chain = self.get_pending_chain_ordered(leaf_block.block_id())?;
+
+        // Check if the substate lock is in the head index (typical case optimisation)
+        let head_idx = self.db().cf(substate_locks::HeadIndex)?;
+        if let Some(head) = head_idx.get(substate_id, OPERATION).optional()? {
+            if pending_chain.contains(&head.block_id) {
+                let lock = cf.get(&head, OPERATION)?;
+                return Ok(lock);
+            }
+        }
+
+        let query = self.db().cf(substate_locks::ByBlockIdSubstateIdQuery::default())?;
+
+        // TODO: this is on the critical path, improve performance
+        for block_id in &pending_chain {
+            let mut iter = query.query_prefix_range_key_iterator(Ordering::default(), &(*block_id, substate_id));
+            if let Some(result) = iter.next() {
+                let key = result?;
+                let lock = cf.get(&key, OPERATION)?;
+                return Ok(lock);
+            }
+        }
+
+        // In the committed chain?
+        let commit_block = self.get_commit_block()?;
+        let query = self.db().cf(substate_locks::BySubstateIdQuery)?;
+        let mut iter = query.query_prefix_range_key_iterator(Ordering::default(), substate_id);
+        let key = iter
+            .find_map(|r| match r {
+                Ok(key) if key.block_height <= commit_block.height => Some(Ok(key)),
+                Ok(_) => None,
+                Err(err) => Some(Err(err)),
+            })
+            .transpose()?
+            .ok_or_else(|| StorageError::NotFound {
+                item: "SubstateLock",
+                key: format!("for substate {substate_id} in block {leaf_block}"),
+            })?;
+
         let lock = cf.get(&key, OPERATION)?;
         Ok(lock)
     }

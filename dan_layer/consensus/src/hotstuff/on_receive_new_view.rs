@@ -66,15 +66,20 @@ where TConsensusSpec: ConsensusSpec
         let _timer = TraceTimer::debug(LOG_TARGET, "OnReceiveNewView");
 
         let NewViewMessage {
-            high_pc: high_qc,
+            high_pc,
             last_vote,
             timeout,
         } = message;
         let timeout_height = timeout.height;
         info!(
             target: LOG_TARGET,
-            "🌟 NEWVIEW from {from} with timeout height {timeout_height} with qc {high_qc}",
+            "🌟 NEWVIEW from {from} with timeout height {timeout_height} with qc {high_pc}",
         );
+        if high_pc.epoch() != epoch_state.epoch() {
+            warn!(target: LOG_TARGET, "❌ NEWVIEW from {from} with epoch {} but current epoch is {}", high_pc.epoch(), epoch_state.epoch());
+            return Ok(());
+        }
+
         if timeout_height < current_height {
             warn!(target: LOG_TARGET, "❌ Ignoring NEWVIEW for {timeout_height} less than the current {current_height}.");
             return Ok(());
@@ -83,16 +88,16 @@ where TConsensusSpec: ConsensusSpec
         let is_qc_valid = self.store.with_read_tx(|tx| {
             let local_high_qc = HighPc::get(tx, epoch_state.epoch())?;
             // Only accept a higher QC than the local one
-            if local_high_qc.block_height > high_qc.height() {
+            if local_high_qc.block_height > high_pc.height() {
                 return Ok(false);
             }
 
-            if let Err(err) = self.validate_qc(&high_qc, epoch_state, self.proposal_vote_collector.signing_service()) {
+            if let Err(err) = self.validate_qc(&high_pc, epoch_state, self.proposal_vote_collector.signing_service()) {
                 warn!(target: LOG_TARGET, "❌ NEWVIEW: Invalid QC: {}", err);
                 return Ok(false);
             }
 
-            if !Block::record_exists(tx, &high_qc.calculate_block_id())? {
+            if !Block::record_exists(tx, &high_pc.calculate_block_id())? {
                 // Sync if we do not have the block for this valid QC
                 let local_height = LeafBlock::get(tx, epoch_state.epoch())
                     .optional()?
@@ -100,7 +105,7 @@ where TConsensusSpec: ConsensusSpec
                     .unwrap_or_default();
                 return Err(HotStuffError::FallenBehind {
                     local_height,
-                    qc_height: high_qc.height(),
+                    qc_height: high_pc.height(),
                 });
             }
 

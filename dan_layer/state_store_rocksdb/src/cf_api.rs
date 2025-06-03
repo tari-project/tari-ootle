@@ -8,7 +8,7 @@ use std::{
     ops::Range,
 };
 
-use rocksdb::{ColumnFamily, IterateBounds, IteratorMode, Transaction, TransactionDB};
+use rocksdb::{ColumnFamily, IterateBounds, IteratorMode, TransactionDB};
 use tari_dan_common_types::displayable::Displayable;
 use tari_dan_storage::Ordering;
 
@@ -18,20 +18,17 @@ use crate::{
     traits::{Cf, QueryCf, RocksReader, RocksWriter},
 };
 
-pub struct DbContext<'db> {
+pub struct DbContext<'db, TX> {
     db: &'db TransactionDB,
-    tx: &'db Transaction<'db, TransactionDB>,
+    tx: &'db TX,
 }
 
-impl<'db> DbContext<'db> {
-    pub(crate) fn new(db: &'db TransactionDB, tx: &'db Transaction<'db, TransactionDB>) -> Self {
+impl<'db, TX> DbContext<'db, TX> {
+    pub(crate) fn new(db: &'db TransactionDB, tx: &'db TX) -> Self {
         Self { db, tx }
     }
 
-    pub fn cf<CF: Cf>(
-        &self,
-        _cf: CF,
-    ) -> Result<CfContext<'db, Transaction<'db, TransactionDB>, CF>, RocksDbStorageError> {
+    pub fn cf<CF: Cf>(&self, _cf: CF) -> Result<CfContext<'db, TX, CF>, RocksDbStorageError> {
         let handle = self
             .db
             .cf_handle(CF::name())

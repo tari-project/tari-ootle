@@ -730,7 +730,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             }
         }
 
-        self.propose_now(epoch_state, next_height, *local_claim_public_key)
+        self.propose_now(epoch_state, next_height, false, *local_claim_public_key)
             .await?;
 
         Ok(())
@@ -799,8 +799,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 .len(),
         );
 
-        self.propose_now(epoch_state, next_height_to_propose, *local_claim_public_key)
-            .await?;
+        self.propose_now(
+            epoch_state,
+            next_height_to_propose,
+            forced_height.is_some(),
+            *local_claim_public_key,
+        )
+        .await?;
 
         Ok(())
     }
@@ -809,6 +814,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         &mut self,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         next_height: NodeHeight,
+        is_timeout: bool,
         local_claim_public_key: RistrettoPublicKeyBytes,
     ) -> Result<(), HotStuffError> {
         // We use the highest seen block - specifically to handle the case where a block is proposed and locally
@@ -854,6 +860,16 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             ) {
                 dummy_block = Some(dummy);
             }
+        } else if is_timeout {
+            // If this is a timeout (without dummies because the highest block is the parent), we need to propose with
+            // the highest timeout certificate
+            let high_tc = self.state_store.with_read_tx(|tx| {
+                let high_tc = HighTc::get(tx, epoch_state.epoch())?;
+                TimeoutCertificate::get(tx, high_tc.epoch(), high_tc.id())
+            })?;
+            propose_high_tc = Some(high_tc);
+        } else {
+            // Nothing to do
         }
 
         // TODO: suggest adding self.epoch_manager.did_epoch_change_recently() and only propose when that is not the

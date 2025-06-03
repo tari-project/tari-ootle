@@ -20,11 +20,11 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::fmt::Display;
+use std::{fmt::Display, marker::PhantomData};
 
 use serde::Serialize;
 use tari_consensus_types::BlockId;
-use tari_dan_common_types::SubstateLockType;
+use tari_dan_common_types::{NodeHeight, SubstateLockType};
 use tari_dan_storage::consensus_models::SubstateLock;
 use tari_engine_types::substate::SubstateId;
 use tari_transaction::TransactionId;
@@ -37,6 +37,7 @@ use crate::{
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub struct SubstateLockKey {
     pub block_id: BlockId,
+    pub block_height: NodeHeight,
     pub substate_id: SubstateId,
     pub transaction_id: TransactionId,
 }
@@ -45,8 +46,8 @@ impl Display for SubstateLockKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "SubstateLockKey {{ block_id: {}, substate_id: {}, transaction_id: {} }}",
-            self.block_id, self.substate_id, self.transaction_id
+            "SubstateLockKey {{ block: {}/{}, substate_id: {}, transaction_id: {} }}",
+            self.block_height, self.block_id, self.substate_id, self.transaction_id
         )
     }
 }
@@ -55,7 +56,7 @@ pub struct SubstateLockModel;
 
 impl Cf for SubstateLockModel {
     type Key = SubstateLockKey;
-    type KeyCodec = SubstateLockKeyCodec<(TransactionId, SubstateId, BlockId)>;
+    type KeyCodec = SubstateLockKeyCodec<(TransactionId, SubstateId, BlockId, NodeHeight)>;
     type Value = SubstateLock;
     type ValueCodec = DefaultCodec<Self::Value>;
 
@@ -70,7 +71,7 @@ impl Cf for HeadIndex {
     type Key = SubstateId;
     type KeyCodec = SubstateIdCodec;
     type Value = SubstateLockKey;
-    type ValueCodec = SubstateLockKeyCodec<(TransactionId, SubstateId, BlockId)>;
+    type ValueCodec = SubstateLockKeyCodec<(TransactionId, SubstateId, BlockId, NodeHeight)>;
 
     fn name() -> &'static str {
         "locks_head_idx"
@@ -89,7 +90,7 @@ pub struct BlockIdIndex;
 
 impl Cf for BlockIdIndex {
     type Key = SubstateLockKey;
-    type KeyCodec = SubstateLockKeyCodec<(BlockId, SubstateId, TransactionId)>;
+    type KeyCodec = SubstateLockKeyCodec<(BlockId, SubstateId, TransactionId, NodeHeight)>;
     type Value = ();
     type ValueCodec = UnitCodec;
 
@@ -106,11 +107,20 @@ impl QueryCf for ByBlockIdQuery {
     type KeyCodec = BlockIdCodec;
 }
 
+#[derive(Default)]
+pub struct ByBlockIdSubstateIdQuery<'a>(PhantomData<&'a ()>);
+
+impl<'a> QueryCf for ByBlockIdSubstateIdQuery<'a> {
+    type Cf = BlockIdIndex;
+    type Key = (BlockId, &'a SubstateId);
+    type KeyCodec = (BlockIdCodec, SubstateIdCodec);
+}
+
 pub struct SubstateIdIndex;
 
 impl Cf for SubstateIdIndex {
     type Key = SubstateLockKey;
-    type KeyCodec = SubstateLockKeyCodec<(SubstateId, TransactionId, BlockId)>;
+    type KeyCodec = SubstateLockKeyCodec<(SubstateId, TransactionId, BlockId, NodeHeight)>;
     type Value = SubstateLockType;
     type ValueCodec = DefaultCodec<Self::Value>;
 

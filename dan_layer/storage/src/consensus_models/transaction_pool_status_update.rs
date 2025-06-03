@@ -64,6 +64,10 @@ impl TransactionPoolStatusUpdate {
     pub fn apply(&self, tx_rec_mut: &mut TransactionPoolRecord) {
         tx_rec_mut.set_evidence(self.evidence().clone());
         tx_rec_mut.set_ready(self.is_ready_now());
+        tx_rec_mut.set_local_decision(self.transaction().current_decision());
+        if let Some(decision) = self.transaction().remote_decision() {
+            tx_rec_mut.set_remote_decision(decision);
+        }
     }
 }
 

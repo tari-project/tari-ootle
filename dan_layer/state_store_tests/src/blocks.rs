@@ -159,15 +159,15 @@ mod block_parent_operations {
         assert_eq!(res.calculate_id(), *block2.id());
 
         // blocks_is_ancestor
-        let res = tx.blocks_is_ancestor(block2.id(), block1.id()).unwrap();
+        let res = tx.blocks_is_pending_ancestor(block2.id(), block1.id()).unwrap();
         assert!(res);
-        let res = tx.blocks_is_ancestor(block2.id(), zero_block.id()).unwrap();
+        let res = tx.blocks_is_pending_ancestor(block2.id(), zero_block.id()).unwrap();
         assert!(res);
-        let res = tx.blocks_is_ancestor(block1.id(), zero_block.id()).unwrap();
+        let res = tx.blocks_is_pending_ancestor(block1.id(), zero_block.id()).unwrap();
         assert!(res);
-        let res = tx.blocks_is_ancestor(block1.id(), block2.id()).unwrap();
+        let res = tx.blocks_is_pending_ancestor(block1.id(), block2.id()).unwrap();
         assert!(!res);
-        let res = tx.blocks_is_ancestor(block2.id(), block2.id()).unwrap();
+        let res = tx.blocks_is_pending_ancestor(block2.id(), block2.id()).unwrap();
         assert!(!res);
 
         // blocks_get_ids_by_parent

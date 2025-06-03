@@ -181,7 +181,7 @@ fn msg_relative_view(msg: &HotstuffMessage, current_epoch: Epoch, current_height
                 // Special case, the justify height and the current height are zero
                 ((current_height.is_zero() && justify_height.is_zero()) ||
                     // The proposal (supposedly) justifies the next view change
-                    justify_height == next_height ||
+                    justify_height >= next_height ||
                     // The proposal is for the current view (catch up)
                     block_height == next_height ||
                     // or, the timeout certificate height is higher than the current height

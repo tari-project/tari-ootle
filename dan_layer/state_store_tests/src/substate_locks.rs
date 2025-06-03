@@ -19,27 +19,34 @@ use crate::helpers::{
     create_chain,
     create_random_substate_id,
     create_rocksdb,
-    substate_id_seed,
+    substate_id_tx_seed,
     transaction_id_from_seed,
 };
 
 #[test]
 fn rocksdb() {
+    env_logger::builder().filter_level(log::LevelFilter::Debug).init();
     let (db, _tmp) = create_rocksdb();
     run_test(db);
 }
 
 fn run_test(db: impl StateStore) {
     let mut tx = db.create_write_tx().unwrap();
-    let s1 = create_random_substate_id();
-    // tx.substate_locks_get_locked_substates_for_transaction()
-    let s = tx.substate_locks_get_latest_for_substate(&s1).optional().unwrap();
-    assert!(s.is_none());
 
     let chain = create_chain(10);
     commit_chain(&mut tx, &chain);
-    let b8 = *chain[8].id();
-    let b9 = *chain[9].id();
+    let b7 = chain[7].as_leaf();
+    let b8 = chain[8].as_leaf();
+    let b9 = chain[9].as_leaf();
+
+    log::debug!("b7: {}, b8: {}, b9: {}", b7, b8, b9);
+
+    let s1 = create_random_substate_id();
+    let s = tx
+        .substate_locks_get_latest_for_substate(&chain[0].as_leaf(), &s1)
+        .optional()
+        .unwrap();
+    assert!(s.is_none());
 
     let tx_1 = transaction_id_from_seed(1);
     let tx_1_locks = gen_locks(tx_1, 5).collect::<IndexMap<_, _>>();
@@ -84,7 +91,7 @@ fn run_test(db: impl StateStore) {
     }
 
     for (id, locks) in &all_locks {
-        let s = tx.substate_locks_get_latest_for_substate(id).unwrap();
+        let s = tx.substate_locks_get_latest_for_substate(&b9, id).unwrap();
         let l = locks.last().unwrap();
         assert_eq!(s.lock_type(), l.lock_type());
         assert_eq!(s.version(), l.version());
@@ -94,12 +101,16 @@ fn run_test(db: impl StateStore) {
             .unwrap();
         assert_eq!(locked_by_tx.len(), *tx_id_counts.get(l.transaction_id()).unwrap());
     }
+    for id in locks_for_b9.keys() {
+        let s = tx.substate_locks_get_latest_for_substate(&b8, id).optional().unwrap();
+        assert!(s.is_none());
+    }
 
     tx.substate_locks_remove_many_for_transactions(Some(&tx_1)).unwrap();
     let locked_by_tx = tx.substate_locks_get_locked_substates_for_transaction(&tx_1).unwrap();
     assert_eq!(locked_by_tx.len(), 0);
 
-    tx.substate_locks_remove_any_by_block_id(&b9).unwrap();
+    tx.substate_locks_remove_any_by_block_id(b9.block_id()).unwrap();
     let locked_by_tx = tx.substate_locks_get_locked_substates_for_transaction(&tx_3).unwrap();
     assert_eq!(locked_by_tx.len(), 0);
     let locked_by_tx = tx.substate_locks_get_locked_substates_for_transaction(&tx_4).unwrap();
@@ -110,7 +121,7 @@ fn run_test(db: impl StateStore) {
 
 fn gen_locks(transaction_id: TransactionId, num: usize) -> impl Iterator<Item = (SubstateId, SubstateLock)> {
     (0..num as u64).map(move |i| {
-        let id = substate_id_seed(i as u32);
+        let id = substate_id_tx_seed(transaction_id, i as u32);
         let lock = SubstateLock::new(transaction_id, i as u32, SubstateLockType::Write, false);
         (id, lock)
     })

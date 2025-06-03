@@ -25,3 +25,5 @@ tari_consensus_types = { workspace = true }
 indexmap = { workspace = true }
 rand = { workspace = true }
 tempfile = { workspace = true }
+log = { workspace = true }
+env_logger = { version = "0.11.8" }

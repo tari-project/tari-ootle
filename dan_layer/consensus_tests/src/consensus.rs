@@ -1245,11 +1245,11 @@ async fn multishard_unversioned_input_conflict() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn multishard_unversioned_input_conflict_delay_prepare() {
-    // CASE: Tx1 and Tx2 use id1 as an input, Comm1 sequences Tx1 and simultaneously Comm2 sequences Tx2.
-    // Since the id2 and id3 substates are uncommon to the transactions and live in Comm2, Comm2 and lock both
-    // transactions. Comm1 will not have yet pledged a value for id1 to Tx1. This allows Comm1 to delay sequencing Tx1
-    // (due to a soft lock conflict) until Tx2 is finalized. The output of Tx2 will be pledged to Tx1.
-    // This is a natural consequence (i.e. no special code) of the local substate locks.
+    // CASE: Tx1 and Tx2 use id1 as an input, Committee0 sequences Tx1 and simultaneously Committee1 sequences Tx2.
+    // Since the id2 and id3 substates are uncommon to the transactions and live in Committee1, Committee1 can lock both
+    // transactions. Committee0 will not have yet pledged the value for id1 to Tx1. This allows Committee0 to delay
+    // sequencing Tx1 (due to a soft lock conflict) until Tx2 is finalized. The output of Tx2 will be pledged to
+    // Tx1. This is a natural consequence (i.e. no special code) of the local substate locks.
     setup_logger();
     let mut test = Test::builder()
         .add_committee(0, vec!["1", "2"])

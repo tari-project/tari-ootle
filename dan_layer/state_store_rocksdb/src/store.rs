@@ -70,7 +70,8 @@ use crate::{
     error::RocksDbStorageError,
     info::ColumnFamilyInfo,
     options::DatabaseOptions,
-    read_only::ReadOnlyContext,
+    read_only::ReadOnly,
+    read_only_ctx::ReadOnlyContext,
     reader::RocksDbStateStoreReadTransaction,
     snapshot::SnapshotContext,
     traits::{Cf, RocksDatabase, RocksReader},
@@ -291,7 +292,7 @@ impl<TAddr: NodeAddressable + Serialize + DeserializeOwned> StateStore for Rocks
         // are incorrect, they can be simply be defaulted.
         opts.set_max_write_batch_size(1);
         write_opts.disable_wal(true);
-        let tx = self.db.transaction_opt(&write_opts, &opts);
+        let tx = ReadOnly::new(self.db.transaction_opt(&write_opts, &opts));
         Ok(RocksDbStateStoreReadTransaction::new(&self.db, tx))
     }
 

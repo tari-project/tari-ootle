@@ -5,7 +5,7 @@ use std::{collections::HashSet, fmt, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
-use tari_consensus_types::{BlockId, ProposalCertificate, QcId};
+use tari_consensus_types::{BlockId, LeafBlock, ProposalCertificate, QcId};
 use tari_dan_common_types::{
     displayable::Displayable,
     shard::Shard,
@@ -153,10 +153,10 @@ impl SubstateRecord {
         I: IntoIterator<Item = (&'a SubstateId, &'a Vec<SubstateLock>)>,
     >(
         tx: &mut TTx,
-        block_id: &BlockId,
+        block: &LeafBlock,
         locks: I,
     ) -> Result<(), StorageError> {
-        tx.substate_locks_insert_all(block_id, locks)
+        tx.substate_locks_insert_all(block, locks)
     }
 
     pub fn unlock_all<'a, TTx: StateStoreWriteTransaction, I: Iterator<Item = &'a TransactionId>>(

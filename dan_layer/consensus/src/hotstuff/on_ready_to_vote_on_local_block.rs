@@ -283,7 +283,7 @@ where TConsensusSpec: ConsensusSpec
         // Store used for transactions that have inputs without specific versions.
         // It lives through the entire block so multiple transactions can be sequenced together in the same block
         let mut substate_store =
-            PendingSubstateStore::new(tx, *block.parent(), self.config.consensus_constants.num_preshards);
+            PendingSubstateStore::new(tx, block.as_leaf(), self.config.consensus_constants.num_preshards);
         let mut total_leader_fee = 0;
 
         for cmd in block.commands() {
@@ -1447,7 +1447,7 @@ where TConsensusSpec: ConsensusSpec
         if let Err(err) = process_foreign_block(
             tx,
             &local_block.as_leaf(),
-            &fp,
+            fp.proposal(),
             local_committee_info,
             substate_store,
             proposed_block_change_set,

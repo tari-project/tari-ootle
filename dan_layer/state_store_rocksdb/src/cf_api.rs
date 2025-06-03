@@ -311,6 +311,22 @@ impl<CF: Cf, DB: RocksReader> CfContext<'_, DB, CF> {
             Ok::<_, RocksDbStorageError>(k)
         })
     }
+
+    pub fn prefix_range_value_iterator(
+        &self,
+        ordering: Ordering,
+        key: &CF::Key,
+    ) -> impl Iterator<Item = Result<CF::Value, RocksDbStorageError>> + '_ {
+        let key = self.encode_key(key);
+        let iter = self.range_iterator_with_codecs::<UnitCodec, CF::ValueCodec, (), CF::Value>(
+            ordering,
+            rocksdb::PrefixRange(key),
+        );
+        iter.map(|res| {
+            let (_, v) = res?;
+            Ok::<_, RocksDbStorageError>(v)
+        })
+    }
 }
 
 impl<CF, DB> CfContext<'_, DB, CF>

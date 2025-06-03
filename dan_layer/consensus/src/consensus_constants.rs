@@ -42,7 +42,7 @@ pub struct ConsensusConstants {
     /// participate (vote) in. Once this reaches zero, the node is considered online and will be reinstated.
     pub missed_proposal_recovery_threshold: u64,
     /// The maximum number of commands that a block may contain.
-    pub max_block_size: usize,
+    pub max_number_commands_in_block: usize,
     /// The value that fees are divided by to determine the amount of fees to burn. 0 means no fees are burned.
     pub fee_exhaust_divisor: u64,
     pub epochs_per_era: Epoch,
@@ -62,7 +62,7 @@ impl ConsensusConstants {
             missed_proposal_suspend_threshold: 5,
             missed_proposal_evict_threshold: 10,
             missed_proposal_recovery_threshold: 5,
-            max_block_size: 500,
+            max_number_commands_in_block: 500,
             fee_exhaust_divisor: 20, // 5%
             epochs_per_era: Epoch(10),
             template_binary_max_size_bytes: 1000 * 1000 * 5, // 5 MB

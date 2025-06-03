@@ -208,7 +208,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                         warn!(target: LOG_TARGET, "⚠️❌ Validation failed for foreign proposal: {}", err);
                         // if a node sent us an invalid foreign proposal, we immediately reject the block
                         foreign_proposal.save(tx)?;
-                        foreign_proposal.set_status(
+                        foreign_proposal.update_status(
                             tx,
                             ForeignProposalStatus::Invalid,
                             Some(valid_block.block().id()),
@@ -404,6 +404,8 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 } else {
                     self.send_vote_to_leader(next_leader.address, valid_block.block(), decision)
                         .await?;
+                    self.store
+                        .with_write_tx(|tx| valid_block.block().as_last_voted().set(tx))?;
                 }
             }
         }

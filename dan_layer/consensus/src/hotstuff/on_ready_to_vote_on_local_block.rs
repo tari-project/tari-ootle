@@ -4,7 +4,7 @@
 use std::num::NonZeroU64;
 
 use log::*;
-use tari_consensus_types::{Decision, HighPc, LastVoted, LeafBlock, QcId};
+use tari_consensus_types::{Decision, LastVoted, LeafBlock, QcId};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_common_types::{committee::CommitteeInfo, optional::Optional, Epoch, ShardGroup, SubstateAddress};
 use tari_dan_storage::{
@@ -120,27 +120,57 @@ where TConsensusSpec: ConsensusSpec
         );
 
         let block_qc_id = valid_block.block().justify().calculate_id();
-        if self.should_vote(tx, valid_block.block())? {
-            let mut justified_block = Block::get(&**tx, &valid_block.justify().calculate_block_id())?;
-            // This comes before decide so that all evidence can be in place before LocalPrepare and LocalAccept
-            if !justified_block.has_justify_qc() {
-                // We need to process this before to ensure that we have the latest state when checking the new block
-                let processed_blocks = process_newly_justified_block::<TConsensusSpec::StateStore>(
-                    tx,
-                    &justified_block,
-                    block_qc_id,
-                    local_committee_info,
-                    change_set,
-                )?;
-                for mut block in processed_blocks {
-                    block.add_justify_qc(tx, &block_qc_id)?;
-                }
-                justified_block.add_justify_qc(tx, &block_qc_id)?;
-                // Even if we do not yet see the next epoch (e.g. race condition), if a majority have, we allow the
-                // epoch end to be proposed.
-                can_propose_epoch_end |= justified_block.is_epoch_end();
-            }
+        // The QC is valid, update high QC - Regardless if we accept the proposal commands.
+        // Update high TC
+        let maybe_high_tc = valid_block
+            .block()
+            .timeout_certificate()
+            .map(|tc| tc.update_highest(tx))
+            .transpose()?;
 
+        let mut commit_blocks = Vec::new();
+        let mut finalized_transactions = Vec::new();
+        // Update nodes
+        let high_qc = valid_block.block().update_nodes(
+            tx,
+            |tx, _prev_locked, block, _justify_qc| self.on_lock_block(tx, block),
+            |tx, mut commit_block| {
+                let committed = self.on_commit(tx, &block_qc_id, &commit_block, local_committee_info)?;
+                // NOTE: update the commit QC in the local copy so that foreign proposals can obtain the commit QC
+                // on_commit already sets the persisted commit_qc for the block
+                commit_block.set_commit_qc(block_qc_id);
+                if !commit_block.is_dummy() {
+                    commit_blocks.push(commit_block);
+                }
+                if !committed.is_empty() {
+                    finalized_transactions.push(committed);
+                }
+                Ok(())
+            },
+        )?;
+
+        // Process newly justified block
+        let mut justified_block = Block::get(&**tx, &valid_block.justify().calculate_block_id())?;
+        // This comes before decide so that all evidence can be in place before LocalPrepare and LocalAccept
+        if !justified_block.has_justify_qc() {
+            // We need to process this before to ensure that we have the latest state when checking the new block
+            let processed_blocks = process_newly_justified_block::<TConsensusSpec::StateStore>(
+                tx,
+                &justified_block,
+                block_qc_id,
+                local_committee_info,
+                change_set,
+            )?;
+            for mut block in processed_blocks {
+                block.add_justify_qc(tx, &block_qc_id)?;
+            }
+            justified_block.add_justify_qc(tx, &block_qc_id)?;
+            // Even if we do not yet see the next epoch (e.g. race condition), if a majority have, we allow the
+            // epoch end to be proposed.
+            can_propose_epoch_end |= justified_block.is_epoch_end();
+        }
+
+        if self.should_vote(tx, valid_block.block())? {
             self.decide_what_to_vote(
                 tx,
                 valid_block.block(),
@@ -153,50 +183,40 @@ where TConsensusSpec: ConsensusSpec
             change_set.set_no_vote(NoVoteReason::AlreadyVotedAtHeight);
         }
 
-        let mut commit_blocks = Vec::new();
-        let mut finalized_transactions = Vec::new();
-        let mut maybe_high_qc = None;
-        let mut maybe_high_tc = None;
-
-        if change_set.is_accept() {
-            // Update high TC
-            maybe_high_tc = valid_block
-                .block()
-                .timeout_certificate()
-                .map(|tc| tc.update_highest(tx))
-                .transpose()?;
-
-            // Update nodes
-            let high_qc = valid_block.block().update_nodes(
-                tx,
-                |tx, _prev_locked, block, _justify_qc| self.on_lock_block(tx, block),
-                |tx, mut commit_block| {
-                    let committed = self.on_commit(tx, &block_qc_id, &commit_block, local_committee_info)?;
-                    // NOTE: update the commit QC in the local copy so that foreign proposals can obtain the commit QC
-                    // on_commit already sets the persisted commit_qc for the block
-                    commit_block.set_commit_qc(block_qc_id);
-                    if !commit_block.is_dummy() {
-                        commit_blocks.push(commit_block);
-                    }
-                    if !committed.is_empty() {
-                        finalized_transactions.push(committed);
-                    }
-                    Ok(())
-                },
-            )?;
-
-            maybe_high_qc = Some(high_qc);
-
-            valid_block.block().as_last_voted().set(tx)?;
-        }
+        // if change_set.is_accept() {
+        // Update high TC
+        // maybe_high_tc = valid_block
+        //     .block()
+        //     .timeout_certificate()
+        //     .map(|tc| tc.update_highest(tx))
+        //     .transpose()?;
+        //
+        // // Update nodes
+        // let high_qc = valid_block.block().update_nodes(
+        //     tx,
+        //     |tx, _prev_locked, block, _justify_qc| self.on_lock_block(tx, block),
+        //     |tx, mut commit_block| {
+        //         let committed = self.on_commit(tx, &block_qc_id, &commit_block, local_committee_info)?;
+        //         // NOTE: update the commit QC in the local copy so that foreign proposals can obtain the commit QC
+        //         // on_commit already sets the persisted commit_qc for the block
+        //         commit_block.set_commit_qc(block_qc_id);
+        //         if !commit_block.is_dummy() {
+        //             commit_blocks.push(commit_block);
+        //         }
+        //         if !committed.is_empty() {
+        //             finalized_transactions.push(committed);
+        //         }
+        //         Ok(())
+        //     },
+        // )?;
+        //
+        // maybe_high_qc = Some(high_qc);
 
         let quorum_decision = change_set.quorum_decision();
         if change_set.is_accept() {
             info!(
                 target: LOG_TARGET,
-                "✅ Saving changeset for Local block {} decision {:?}, change set: {}",
-                valid_block.block(),
-                quorum_decision,
+                "✅ Saving changeset: {}",
                 change_set
             );
             change_set.save(tx)?;
@@ -209,9 +229,9 @@ where TConsensusSpec: ConsensusSpec
             );
         }
 
-        let high_qc = maybe_high_qc
-            .map(Ok)
-            .unwrap_or_else(|| HighPc::get(&**tx, valid_block.epoch()))?;
+        // let high_qc = maybe_high_qc
+        //     .map(Ok)
+        //     .unwrap_or_else(|| HighPc::get(&**tx, valid_block.epoch()))?;
 
         Ok(BlockDecision {
             quorum_decision,

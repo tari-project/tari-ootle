@@ -85,7 +85,11 @@ where TConsensusSpec: ConsensusSpec
             );
             return Ok(None);
         };
-        let signatures = quorum_votes.into_iter().map(|vote| vote.signature).collect();
+        let signatures = quorum_votes
+            .into_iter()
+            .take(quorum_threshold)
+            .map(|vote| vote.signature)
+            .collect();
         let new_qc = create_proposal_certificate(signatures, quorum_decision, block);
         let high_qc = self.store.with_write_tx(|tx| new_qc.update_highest(tx))?;
         if new_qc.calculate_id() == *high_qc.id() {

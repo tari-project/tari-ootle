@@ -31,6 +31,6 @@ impl LockedBlock {
 
 impl Display for LockedBlock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "LockedBlock({}, {})", self.height, self.block_id)
+        write!(f, "LockedBlock({}, {}, {})", self.epoch, self.height, self.block_id)
     }
 }

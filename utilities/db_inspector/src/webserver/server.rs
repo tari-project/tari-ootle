@@ -85,6 +85,7 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         column_families::transaction::TransactionCf,
         column_families::transaction_pool::TransactionPoolCf,
         column_families::transaction_pool_state_update::TransactionPoolStateUpdateCf,
+        column_families::transaction_pool_state_update::TransactionPoolStateUpdateDebugHistoryCf,
         column_families::missing_transactions::MissingTransactionCf,
         column_families::parked_block::ParkedBlockCf,
         column_families::foreign_parked_blocks::ForeignParkedBlockCf,

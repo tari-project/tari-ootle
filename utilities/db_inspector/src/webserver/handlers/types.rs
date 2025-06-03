@@ -8,7 +8,7 @@ use crate::webserver::error::WebError;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TableRequest {
-    pub query_prefix_hex: Option<String>,
+    pub query: Option<String>,
     pub page: Option<usize>,
     pub limit: Option<usize>,
     #[serde(default)]
@@ -59,7 +59,7 @@ impl TableResponse {
             total_entries: None,
             total_bytes: 0,
             largest_row_size: 0,
-            smallest_row_size: usize::MAX,
+            smallest_row_size: 0,
         }
     }
 

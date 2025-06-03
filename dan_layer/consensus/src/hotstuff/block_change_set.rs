@@ -341,12 +341,33 @@ impl ProposedBlockChangeSet {
         let rec = self
             .transaction_changes
             .get(transaction_id)
-            .and_then(|change| change.next_update.as_ref().map(|u| u.transaction()))
+            .and_then(|change| {
+                change.next_update.as_ref().map(|u| {
+                    debug!(
+                        target: LOG_TARGET,
+                        "Found cached transaction update for {} in block {}",
+                        transaction_id,
+                        leaf_block.block_id()
+                    );
+                    u.transaction()
+                })
+            })
             .cloned()
             .map(Ok)
             .or_else(|| {
                 TransactionPoolRecord::get(tx, leaf_block.block_id(), transaction_id)
                     .optional()
+                    .inspect(|a| {
+                        a.as_ref().inspect(|a| {
+                            debug!(
+                                target: LOG_TARGET,
+                                "LOADED transaction pool record for {} in block {}: {:#}",
+                                transaction_id,
+                                leaf_block.block_id(),
+                                a.evidence()
+                            );
+                        });
+                    })
                     .transpose()
             })
             .transpose()?

@@ -7,28 +7,22 @@ use tari_dan_storage::consensus_models::{CommandsCommitProof, ForeignProposal};
 
 use crate::{
     hotstuff::{HotStuffError, HotstuffConfig, ProposalValidationError},
-    traits::{ConsensusSpec, LeaderStrategy},
+    traits::ConsensusSpec,
 };
 
 pub fn check_foreign_proposal<TConsensusSpec: ConsensusSpec>(
     proposal: &ForeignProposal,
     foreign_committee: &Committee<TConsensusSpec::Addr>,
-    leader_strategy: &TConsensusSpec::LeaderStrategy,
     config: &HotstuffConfig,
 ) -> Result<(), HotStuffError> {
     check_network(proposal, config.network)?;
-    check_header::<TConsensusSpec>(proposal, foreign_committee, leader_strategy)?;
+    check_header(proposal)?;
     check_commit_proof::<TConsensusSpec>(proposal.commit_proof(), foreign_committee)?;
     Ok(())
 }
 
-fn check_header<TConsensusSpec: ConsensusSpec>(
-    proposal: &ForeignProposal,
-    foreign_committee: &Committee<TConsensusSpec::Addr>,
-    leader_strategy: &TConsensusSpec::LeaderStrategy,
-) -> Result<(), ProposalValidationError> {
-    let (_, leader) = leader_strategy.get_leader(foreign_committee, proposal.height());
-    proposal.commit_proof().validate_header(leader)?;
+fn check_header(proposal: &ForeignProposal) -> Result<(), ProposalValidationError> {
+    proposal.commit_proof().validate_header()?;
     Ok(())
 }
 

@@ -49,12 +49,9 @@ impl CommandsCommitProof {
         }
     }
 
-    pub fn validate_header(
-        &self,
-        expected_proposed: &RistrettoPublicKeyBytes,
-    ) -> Result<(), ForeignProposalCommitProofError> {
+    pub fn validate_header(&self) -> Result<(), ForeignProposalCommitProofError> {
         match self {
-            Self::V1(proof) => proof.validate_header(expected_proposed),
+            Self::V1(proof) => proof.validate_header(),
         }
     }
 
@@ -97,10 +94,7 @@ impl CommandsCommitProofV1 {
         Ok(())
     }
 
-    pub fn validate_header(
-        &self,
-        _expected_proposer: &RistrettoPublicKeyBytes,
-    ) -> Result<(), ForeignProposalCommitProofError> {
+    pub fn validate_header(&self) -> Result<(), ForeignProposalCommitProofError> {
         self.validate_well_formed()?;
         let header = &self.commit_proof.header;
         if header.height == 0 {
@@ -114,14 +108,6 @@ impl CommandsCommitProofV1 {
             .to_schnorr_signature()
             .map_err(|e| ForeignProposalCommitProofError::Invalid(anyhow!("Malformed signature: {e}")))?;
         let block_id = header.calculate_block_id();
-        // TODO: we currently cannot determine the correct leader from the proof data
-        // if header.proposed_by.as_bytes() != expected_proposer.as_bytes() {
-        //     return Err(ForeignProposalCommitProofError::Invalid(anyhow::anyhow!(
-        //         "Proposed by public key {} does not match expected proposer {}",
-        //         header.proposed_by,
-        //         expected_proposer
-        //     )));
-        // }
 
         let proposed_by = header
             .proposed_by
@@ -188,27 +174,6 @@ impl CommandsCommitProofV1 {
         if self.commit_proof.header.proposed_by.as_bytes().len() != RistrettoPublicKeyBytes::length() {
             return Err(ForeignProposalCommitProofError::Invalid(anyhow::anyhow!(
                 "Proposed by public key is not a valid RistrettoPublicKey"
-            )));
-        }
-        let last_qc = self
-            .commit_proof
-            .proof_elements
-            .last()
-            .and_then(|elem| {
-                if let CommitProofElement::QuorumCertificate(qc) = elem {
-                    Some(qc)
-                } else {
-                    None
-                }
-            })
-            .ok_or_else(|| {
-                ForeignProposalCommitProofError::Invalid(anyhow::anyhow!(
-                    "Last element in commit proof is not a QuorumCertificate"
-                ))
-            })?;
-        if last_qc.calculate_justified_block() != self.commit_proof.header.calculate_block_id() {
-            return Err(ForeignProposalCommitProofError::Invalid(anyhow::anyhow!(
-                "Last QuorumCertificate does not justify the block id"
             )));
         }
 

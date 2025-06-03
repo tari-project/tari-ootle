@@ -93,7 +93,7 @@ where TConsensusSpec: ConsensusSpec
                 error!(target: LOG_TARGET, "❌ Error validating and saving foreign proposal: {}", err);
                 // Should not cause consensus to crash and should commit the Invalid proposal status
                 proposal.save(tx)?;
-                proposal.set_status(tx, ForeignProposalStatus::Invalid, None)?;
+                proposal.update_status(tx, ForeignProposalStatus::Invalid, None)?;
                 // TODO: reattempt from different node? and then abort on persistent failure
                 // If we miss a foreign proposal, we want to implement the ability to request it - so we could just rely
                 // on that functionality without doing anything extra here
@@ -183,7 +183,8 @@ where TConsensusSpec: ConsensusSpec
 
         info!(
             target: LOG_TARGET,
-            "🌐 REQUEST foreign proposal for block {} from {}",
+            "🌐 REQUEST foreign proposal {} for block {} from {}",
+            foreign_committee_info.shard_group(),
             message.block_id,
             selected,
         );
@@ -212,6 +213,7 @@ where TConsensusSpec: ConsensusSpec
         let outbound_messaging = self.outbound_messaging.clone();
 
         // No need for consensus to wait for the task to complete
+        // TODO: bounded spawn to limit the number of concurrent tasks created by possibly malicious requests
         task::spawn(async move {
             let _timer = TraceTimer::debug(LOG_TARGET, "OnReceiveForeignProposalRequest");
             if let Err(err) = Self::handle_requested_task(store, outbound_messaging, from, message).await {
@@ -260,7 +262,8 @@ where TConsensusSpec: ConsensusSpec
                 else {
                     warn!(
                         target: LOG_TARGET,
-                        "FOREIGN PROPOSAL: Requested block {} not found. Ignoring.",
+                        "FOREIGN PROPOSAL[{}]: Requested block {} not found. Ignoring.",
+                        for_shard_group,
                         block_id,
                     );
                     return Ok(());
@@ -465,11 +468,12 @@ fn validate_evidence_and_pledges_match(
 
 fn generate_transaction_commands_commit_proof_for_shard_group<TTx: StateStoreReadTransaction>(
     tx: &TTx,
-    block: &Block,
+    committed_block: &Block,
     commit_qc: &ProposalCertificate,
     for_shard_group: ShardGroup,
 ) -> Result<CommandsCommitProof, HotStuffError> {
-    let applicable_commands = block.commands().iter().map(|cmd| {
+    let _timer = TraceTimer::info(LOG_TARGET, "generate_transaction_commands_commit_proof_for_shard_group");
+    let applicable_commands = committed_block.commands().iter().map(|cmd| {
         let is_involved_local_prepare_with_inputs = cmd
             .local_prepare()
             .map(|atom| atom.evidence.has_inputs(for_shard_group))
@@ -487,7 +491,7 @@ fn generate_transaction_commands_commit_proof_for_shard_group<TTx: StateStoreRea
         }
     });
 
-    let proof = generate_block_commit_proof(tx, commit_qc, block)?;
+    let proof = generate_block_commit_proof(tx, commit_qc, committed_block)?;
     let command_commit_proof = CommandsCommitProof::new_latest(applicable_commands.collect(), proof);
     Ok(command_commit_proof)
 }

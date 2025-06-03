@@ -155,6 +155,11 @@ loggers:
       - stdout
     additive: false
 
+  c::sidechain::validations:
+    level: debug
+    appenders:
+      - consensus
+
   tari::dan::consensus:
     level: debug
     appenders:

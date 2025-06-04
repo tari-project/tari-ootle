@@ -46,7 +46,7 @@ use serde::{Deserialize, Serialize};
 use tari_common::exit_codes::{ExitCode, ExitError};
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_dan_app_utilities::{
-    keypair::setup_keypair_prompt,
+    keypair::RistrettoKeypair,
     template_download_queue::TemplateDownloadQueue,
     utxo_store::StateUtxoStore,
 };
@@ -90,12 +90,12 @@ pub struct ShardKey {
     substate_address: Option<SubstateAddress>,
 }
 
-pub async fn run_validator_node(config: ApplicationConfig, shutdown: Shutdown) -> Result<(), anyhow::Error> {
+pub async fn run_validator_node(
+    keypair: RistrettoKeypair,
+    config: ApplicationConfig,
+    shutdown: Shutdown,
+) -> Result<(), anyhow::Error> {
     info!(target: LOG_TARGET, "Starting validator node on network {}", config.network);
-    let keypair = setup_keypair_prompt(
-        &config.validator_node.identity_file,
-        !config.validator_node.dont_create_id,
-    )?;
 
     let db_factory = SqliteDbFactory::new(config.validator_node.data_dir.clone());
     db_factory

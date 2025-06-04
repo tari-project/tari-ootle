@@ -39,7 +39,7 @@ impl<TConsensusSpec: ConsensusSpec> OnCatchUpSync<TConsensusSpec> {
         let block_height = if high_qc.epoch() == epoch {
             high_qc.block_height()
         } else {
-            NodeHeight::zero()
+            NodeHeight(1)
         };
 
         // Reset leader timeout to previous height since we're behind and need to process catch up blocks. This is the

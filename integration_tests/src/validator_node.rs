@@ -29,7 +29,11 @@ use std::{
 use reqwest::Url;
 use tari_common::configuration::{CommonConfig, StringList};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_dan_app_utilities::{epoch_oracle_config::EpochOracleConfig, p2p_config::PeerSeedsConfig};
+use tari_dan_app_utilities::{
+    epoch_oracle_config::EpochOracleConfig,
+    keypair::create_new_keypair,
+    p2p_config::PeerSeedsConfig,
+};
 use tari_dan_common_types::layer_one_transaction::{LayerOneTransactionDef, ValidatorRegistrationParams};
 use tari_engine_types::FromByteType;
 use tari_p2p::Network;
@@ -171,7 +175,8 @@ pub async fn spawn_validator_node(
 
             // Add all other VNs as peer seeds
             config.peer_seeds.peer_seeds = StringList::from(peer_seeds);
-            run_validator_node(config, shutdown).await
+            let keypair = create_new_keypair(&config.validator_node.identity_file).expect("Could not create keypair");
+            run_validator_node(keypair, config, shutdown).await
         }
     });
 

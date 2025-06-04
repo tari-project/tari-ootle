@@ -482,6 +482,13 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
+    fn last_sent_new_view_clear(&mut self) -> Result<(), StorageError> {
+        self.db()
+            .cf(LastSentNewViewCf)?
+            .delete(&ByteColumn, "last_sent_new_view_clear")?;
+        Ok(())
+    }
+
     fn locked_block_set(&mut self, locked_block: &LockedBlock) -> Result<(), StorageError> {
         self.db()
             .cf(LockedBlockCf)?

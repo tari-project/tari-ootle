@@ -48,6 +48,7 @@ pub enum EpochEvent {
     },
     DoneForNow {
         epoch: Epoch,
+        epoch_hash: FixedHash,
     },
 }
 
@@ -123,7 +124,9 @@ impl Display for EpochEvent {
             EpochEvent::EpochChanged { epoch, epoch_hash } => {
                 write!(f, "EpochChanged {{ epoch: {}, epoch_hash: {} }}", epoch, epoch_hash)
             },
-            EpochEvent::DoneForNow { epoch } => write!(f, "DoneForNow {{ epoch: {} }}", epoch),
+            EpochEvent::DoneForNow { epoch, epoch_hash } => {
+                write!(f, "DoneForNow {{ epoch: {}, hash: {} }}", epoch, epoch_hash)
+            },
         }
     }
 }

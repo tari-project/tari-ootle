@@ -84,11 +84,7 @@ function PublishTemplateDialog(props: DialogProps) {
   };
   const [disabled, setDisabled] = useState(false);
   const [formState, setFormState] = useState<FormState>(INITIAL_VALUES);
-  const [validity, setValidity] = useState<object>({
-    file: false,
-    account: false,
-    maxFee: true,
-  });
+
   const [allValid, setAllValid] = useState(false);
 
   const { account, setPopup } = useAccountStore();
@@ -97,6 +93,11 @@ function PublishTemplateDialog(props: DialogProps) {
 
   let { data: accountsResp } = useAccountsList(0, 1000);
   let accounts = accountsResp?.accounts;
+  const [validity, setValidity] = useState<object>({
+    file: false,
+    account: Boolean(accounts?.length),
+    maxFee: true,
+  });
 
   const { mutateAsync: publishTemplate } = usePublishTemplate();
 

@@ -168,7 +168,10 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                     let epoch = constants.height_to_epoch(lagged_height);
                     // If no progress has been made since restarting, we still need to tell the epoch manager that
                     // scanning is done
-                    self.pending_events.push_back(EpochEvent::DoneForNow { epoch });
+                    self.pending_events.push_back(EpochEvent::DoneForNow {
+                        epoch,
+                        epoch_hash: self.last_epoch_hash.unwrap_or_else(FixedHash::zero),
+                    });
                 }
             },
         }
@@ -554,7 +557,10 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
         } else {
             let constants = self.base_node_client.get_consensus_constants(lagged_height).await?;
             let epoch = constants.height_to_epoch(lagged_height);
-            self.pending_events.push_back(EpochEvent::DoneForNow { epoch });
+            self.pending_events.push_back(EpochEvent::DoneForNow {
+                epoch,
+                epoch_hash: current_hash.unwrap_or_else(FixedHash::zero),
+            });
         }
 
         Ok(())

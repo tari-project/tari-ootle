@@ -3,7 +3,7 @@
 
 use log::*;
 use tari_consensus_types::{LastProposed, LastSentVote, LeafBlock};
-use tari_dan_common_types::{optional::Optional, Epoch};
+use tari_dan_common_types::{optional::Optional, Epoch, NodeHeight};
 use tari_dan_storage::{
     consensus_models::{Block, BookkeepingModel},
     StateStore,
@@ -98,7 +98,7 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
                 let blocks = Block::get_all_blocks_between(
                     tx,
                     msg.epoch,
-                    msg.block_height,
+                    msg.block_height.max(NodeHeight(1)),
                     leaf_block.height(),
                     false,
                     1000,

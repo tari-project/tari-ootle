@@ -232,7 +232,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
             EpochEvent::NewConfidentialOutput { epoch, substate } => {
                 self.utxo_store.add_unclaimed_utxo(epoch, substate)?;
             },
-            EpochEvent::DoneForNow { epoch } => {
+            EpochEvent::DoneForNow { epoch, .. } => {
                 debug!(target: LOG_TARGET, "Epoch event scanner done for now at {epoch}. Current epoch: {}", self.inner.current_epoch());
                 self.inner.on_scanning_complete().await?;
             },

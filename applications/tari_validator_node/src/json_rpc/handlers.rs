@@ -30,7 +30,7 @@ use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use log::*;
 use serde_json::{self as json, json};
 use tari_base_node_client::types::BaseLayerValidatorNode;
-use tari_common_types::types::{CompressedPublicKey, FixedHash};
+use tari_common_types::types::CompressedPublicKey;
 use tari_consensus_types::{Decision, LeafBlock};
 use tari_core::transactions::transaction_components::ValidatorNodeSignature;
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
@@ -57,10 +57,10 @@ use tari_dan_storage::{
     StateStoreReadTransaction,
     StorageError,
 };
-use tari_dan_storage_sqlite::{error::SqliteStorageError, global::SqliteGlobalDbAdapter};
+use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_engine_types::{FromByteType, ToByteType};
 use tari_epoch_manager::{service::EpochManagerHandle, traits::LayerOneTransactionSubmitter, EpochManagerReader};
-use tari_epoch_oracles::{configured::calc_static_epoch_hash, store::StoreKey};
+use tari_epoch_oracles::store::StoreKey;
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
 use tari_sidechain::QuorumDecision;
 use tari_template_lib::prelude::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
@@ -562,29 +562,19 @@ impl JsonRpcHandlers {
             .await
             .map_err(internal_error(answer_id))?;
         let current_epoch = self.epoch_manager.get_current_epoch();
+        let current_epoch_hash = self
+            .epoch_manager
+            .get_current_epoch_hash()
+            .await
+            .map_err(internal_error(answer_id))?;
 
-        let (current_block_hash, current_block_height) = self
+        let current_block_height = self
             .global_db
             .create_transaction()
             .and_then(|mut tx| {
-                // This pokes into the internals of the oracles a bit. And can give incorrect results if we switch
-                // between them.
-                let current_epoch = self
-                    .global_db
+                self.global_db
                     .metadata(&mut tx)
-                    .get_metadata::<Epoch>(StoreKey::StaticCurrentEpoch.as_key_bytes())?;
-                let block_hash = self
-                    .global_db
-                    .metadata(&mut tx)
-                    .get_metadata::<FixedHash>(StoreKey::BaseLayerLastScannedBlockHash.as_key_bytes())?
-                    .or_else(|| current_epoch.map(calc_static_epoch_hash));
-                let block_height = self
-                    .global_db
-                    .metadata(&mut tx)
-                    .get_metadata::<u64>(StoreKey::BaseLayerLastScannedBlockHeight.as_key_bytes())?
-                    // Just use the epoch here
-                    .or(current_epoch.map(|e| e.as_u64()));
-                Ok::<_, SqliteStorageError>((block_hash.unwrap_or_default(), block_height.unwrap_or_default()))
+                    .get_metadata::<u64>(StoreKey::BaseLayerLastScannedBlockHeight.as_key_bytes())
             })
             .map_err(|e| {
                 JsonRpcResponse::error(
@@ -642,8 +632,8 @@ impl JsonRpcHandlers {
             .map_err(internal_error(answer_id))?;
         let response = GetEpochManagerStatsResponse {
             current_epoch,
-            current_block_height,
-            current_block_hash,
+            current_block_height: current_block_height.unwrap_or(0),
+            current_block_hash: current_epoch_hash,
             is_initial_scanning_complete,
             is_valid: committee_info.is_some(),
             start_epoch: local_vn_start_epoch,

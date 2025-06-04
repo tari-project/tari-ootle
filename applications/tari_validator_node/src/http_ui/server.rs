@@ -29,7 +29,7 @@ use axum::{
     Router,
 };
 use include_dir::{include_dir, Dir};
-use log::{error, info};
+use log::*;
 use reqwest::{header, header::HeaderValue, StatusCode};
 
 const LOG_TARGET: &str = "tari::validator_node::web_ui::server";
@@ -42,7 +42,7 @@ pub async fn run_http_ui_server(address: SocketAddr, json_rpc_address: String) -
 
     info!(target: LOG_TARGET, "🕸️ Web UI started at http://{}", address);
     let server = axum::Server::try_bind(&address).or_else(|_| {
-        error!(
+        warn!(
             target: LOG_TARGET,
             "🕸️ Failed to bind on preferred address {}. Trying OS-assigned", address
         );

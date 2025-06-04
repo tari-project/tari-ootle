@@ -124,7 +124,7 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         .layer(Extension(Arc::new(context)));
 
     let server = axum::Server::try_bind(&bind_address).or_else(|_| {
-        error!(
+        warn!(
             target: LOG_TARGET,
             "🕸️ Failed to bind on preferred address {}. Trying OS-assigned", bind_address
         );

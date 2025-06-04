@@ -62,6 +62,10 @@ impl CertificateStore for ProposalCertificate {
     {
         match HighPc::get(&**tx, self.epoch()).optional()? {
             Some(high_pc) if high_pc.block_height() >= self.height() => {
+                // EDGE CASE: If we receive a new high PC, clear the last sent new view. This is because we could have
+                // sent many unsuccessful NEWVIEWs (likely we're offline) and the chain progressed
+                // without us. But then if we need to send NEWVIEWs again, it will be aligned with the network view.
+                tx.last_sent_new_view_clear()?;
                 info!(
                     target: LOG_TARGET,
                     "🔥 HIGH_PC ({}, previous high PC: {} {}) - not new",

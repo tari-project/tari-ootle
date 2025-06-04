@@ -61,8 +61,8 @@ use tari_epoch_manager::{
 };
 use tari_epoch_oracles::{
     base_layer::BaseLayerOracle,
-    configured::ConfiguredEpochOracle,
-    hybrid::HybridEpochOracle,
+    configured::{ConfiguredEpochOracle, IntervalEpochTicker},
+    hybrid::{watch_ticker, HybridEpochOracle},
     store::EpochOracleStore,
     EpochOracle,
 };
@@ -532,12 +532,8 @@ async fn create_epoch_oracle<TStore: EpochOracleStore + Send + Clone + 'static>(
             Ok(EpochOracle::Configured(oracle))
         },
         EpochOracleType::Hybrid => {
-            let base_layer_oracle = create_base_layer_epoch_oracle(config, store.clone(), consensus_constants).await?;
-            let configured_oracle = create_configured_epoch_oracle(config, store).await?;
-            Ok(EpochOracle::Hybrid(HybridEpochOracle::new(
-                configured_oracle,
-                base_layer_oracle,
-            )))
+            let oracle = create_hybrid_epoch_oracle(config, store, consensus_constants).await?;
+            Ok(EpochOracle::Hybrid(oracle))
         },
     }
 }
@@ -575,7 +571,19 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + 'static>(
 async fn create_configured_epoch_oracle<TStore: EpochOracleStore + Send>(
     config: &ApplicationConfig,
     store: TStore,
-) -> Result<ConfiguredEpochOracle<TStore>, ExitError> {
+) -> Result<ConfiguredEpochOracle<TStore, IntervalEpochTicker>, ExitError> {
     let oracle_config = config.epoch_oracle.configured.load().await?;
     Ok(ConfiguredEpochOracle::new(oracle_config, store))
+}
+
+async fn create_hybrid_epoch_oracle<TStore: EpochOracleStore + Clone + Send + 'static>(
+    config: &ApplicationConfig,
+    store: TStore,
+    consensus_constants: &ConsensusConstants,
+) -> Result<HybridEpochOracle<TStore>, ExitError> {
+    let base_layer_oracle = create_base_layer_epoch_oracle(config, store.clone(), consensus_constants).await?;
+    let oracle_config = config.epoch_oracle.configured.load().await?;
+    let (ticker, trigger) = watch_ticker();
+    let configured_oracle = ConfiguredEpochOracle::with_custom_ticker(oracle_config, store, ticker);
+    Ok(HybridEpochOracle::new(configured_oracle, base_layer_oracle, trigger))
 }

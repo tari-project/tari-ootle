@@ -54,6 +54,15 @@ impl DanNode {
         // let mut sigterm = signal(SignalKind::terminate())?;
 
         loop {
+            let metrics = tokio::runtime::Handle::current().metrics();
+            info!(
+                target: LOG_TARGET,
+                "Tokio runtime metrics: num_alive_tasks={}, num_workers={}, global_queue_depth={}",
+                metrics.num_alive_tasks(),
+                metrics.num_workers(),
+                metrics.global_queue_depth(),
+            );
+
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {
                     info!(target: LOG_TARGET, "💤 Received SIGINT");

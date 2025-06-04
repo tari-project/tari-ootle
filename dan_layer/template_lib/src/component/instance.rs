@@ -43,7 +43,7 @@ impl<T> ComponentBuilder<T> {
     /// Component::new(..)
     /// .with_address_allocation(allocation)
     /// ```
-    /// Calling this followed by `with_address_allocation` will cause the transaction to fail
+    /// Calling this followed by `with_address_allocation` will cause execution to fail
     pub fn with_public_key_address(mut self, public_key: RistrettoPublicKeyBytes) -> Self {
         self.address_allocation = Some(CallerContext::allocate_component_address(Some(public_key)));
         self

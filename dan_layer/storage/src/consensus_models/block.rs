@@ -648,7 +648,20 @@ impl Block {
         tx.blocks_set_qcs(self.id(), None, Some(qc_id))
     }
 
-    pub fn extends<TTx: StateStoreReadTransaction>(&self, tx: &TTx, ancestor: &BlockId) -> Result<bool, StorageError> {
+    /// Checks if this block extends the given ancestor block.
+    ///
+    /// ## Behaviour
+    /// 1. if self.id == ancestor.id, then this returns false
+    /// 2. if self.parent == ancestor.id, then this returns true
+    /// 3. this only checks for uncommitted (pending) blocks and will return false if the block is committed (unless the
+    ///    two blocks happen to be direct descendants i.e. point 2).
+    /// 4. if self.parent does not exist, then false is returned.
+    /// 5. if ancestor does not exist, an error is returned.
+    pub fn extends_pending<TTx: StateStoreReadTransaction>(
+        &self,
+        tx: &TTx,
+        ancestor: &BlockId,
+    ) -> Result<bool, StorageError> {
         if self.id() == ancestor {
             return Ok(false);
         }
@@ -660,7 +673,7 @@ impl Block {
             return Ok(false);
         }
 
-        tx.blocks_is_ancestor(self.parent(), ancestor)
+        tx.blocks_is_pending_ancestor(self.parent(), ancestor)
     }
 
     pub fn get_parent<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<Block, StorageError> {
@@ -839,7 +852,7 @@ impl Block {
         }
 
         // Safety rule
-        if self.extends(tx, locked.block_id())? {
+        if self.extends_pending(tx, locked.block_id())? {
             return Ok(true);
         }
 

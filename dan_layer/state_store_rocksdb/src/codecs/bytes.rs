@@ -4,8 +4,6 @@
 use std::any::type_name;
 
 use anyhow::anyhow;
-use tari_common_types::types::FixedHash;
-use tari_consensus_types::BlockId;
 
 use crate::{
     codecs::{DbCodec, EncodeVec},
@@ -36,6 +34,7 @@ where
 }
 pub type FixedBytesCodec32 = FixedBytesCodec<32>;
 pub type TransactionIdCodec = FixedBytesCodec<32>;
+pub type BlockIdCodec = FixedBytesCodec<32>;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct FixedBytesCodec<const LEN: usize>;
@@ -55,21 +54,5 @@ where
         })?;
         let ret = T::from(fixed);
         Ok(ret)
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct BlockIdCodec;
-
-impl DbCodec<BlockId> for BlockIdCodec {
-    fn encode(&self, value: &BlockId) -> Result<EncodeVec, RocksDbStorageError> {
-        Ok(EncodeVec::new_from_array(value.into_array()))
-    }
-
-    fn decode(&self, mut bytes: &[u8]) -> Result<BlockId, RocksDbStorageError> {
-        let hash = read_to_fixed(&mut bytes).ok_or_else(|| RocksDbStorageError::DecodeError {
-            source: anyhow!("BlockIdCodec: failed to decode too few bytes"),
-        })?;
-        Ok(BlockId::new(FixedHash::new(hash)))
     }
 }

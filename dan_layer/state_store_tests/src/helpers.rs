@@ -149,6 +149,16 @@ pub fn build_substate_value(entity_id: Option<EntityId>) -> SubstateValue {
     })
 }
 
+pub fn substate_id_tx_seed(transaction_id: TransactionId, seed: u32) -> SubstateId {
+    let mut buf = [0u8; EntityId::LENGTH];
+    buf[..].copy_from_slice(&transaction_id.as_hash().as_slice()[..EntityId::LENGTH]);
+    let entity_id = EntityId::from_array(buf);
+    let mut buf = [0u8; ComponentKey::LENGTH];
+    buf[..size_of::<u32>()].copy_from_slice(&seed.to_be_bytes());
+    let component_key = ComponentKey::new(buf);
+    SubstateId::Component(ComponentAddress::new(ObjectKey::new(entity_id, component_key)))
+}
+
 pub fn substate_id_seed(seed: u32) -> SubstateId {
     let mut buf = [0u8; EntityId::LENGTH];
     buf[..size_of::<u32>()].copy_from_slice(&seed.to_be_bytes());

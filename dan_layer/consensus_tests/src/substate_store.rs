@@ -6,8 +6,17 @@ use tari_consensus::{
     hotstuff::substate_store::{LockFailedError, PendingSubstateStore, SubstateStoreError},
     traits::{CertificateStore, ReadableSubstateStore, WriteableSubstateStore},
 };
-use tari_consensus_types::{BlockId, QcId};
-use tari_dan_common_types::{shard::Shard, NumPreshards, PeerAddress, SubstateLockType, VersionedSubstateId};
+use tari_consensus_types::{BlockId, LeafBlock, QcId};
+use tari_dan_common_types::{
+    shard::Shard,
+    Epoch,
+    NodeHeight,
+    NumPreshards,
+    PeerAddress,
+    ShardGroup,
+    SubstateLockType,
+    VersionedSubstateId,
+};
 use tari_dan_storage::{
     consensus_models::{Block, RequireLockIntentRef, SubstateChange, SubstateRecord},
     StateStore,
@@ -235,7 +244,16 @@ fn create_store() -> (TestStore, TempDir) {
 fn create_pending_store<'a, 'tx, TStore: StateStore>(
     tx: &'a TStore::ReadTransaction<'tx>,
 ) -> PendingSubstateStore<'a, 'tx, TStore> {
-    PendingSubstateStore::new(tx, BlockId::zero(), TEST_NUM_PRESHARDS)
+    PendingSubstateStore::new(
+        tx,
+        LeafBlock {
+            block_id: BlockId::zero(),
+            height: NodeHeight::zero(),
+            epoch: Epoch::zero(),
+            shard_group: ShardGroup::all_shards(TEST_NUM_PRESHARDS),
+        },
+        TEST_NUM_PRESHARDS,
+    )
 }
 
 fn new_substate_id(seed: u8) -> SubstateId {

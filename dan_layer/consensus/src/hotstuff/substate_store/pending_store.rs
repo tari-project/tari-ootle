@@ -5,7 +5,7 @@ use std::{borrow::Cow, collections::HashMap, fmt::Display};
 
 use indexmap::IndexMap;
 use log::*;
-use tari_consensus_types::BlockId;
+use tari_consensus_types::LeafBlock;
 use tari_dan_common_types::{
     displayable::Displayable,
     optional::Optional,
@@ -44,12 +44,12 @@ pub struct PendingSubstateStore<'store, 'tx, TStore: StateStore + 'store + 'tx> 
     /// Append only list of changes ordered oldest to newest
     diff: Vec<SubstateChange>,
     new_locks: IndexMap<SubstateId, Vec<SubstateLock>>,
-    parent_block: BlockId,
+    parent_block: LeafBlock,
     num_preshards: NumPreshards,
 }
 
 impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
-    pub fn new(store: &'a TStore::ReadTransaction<'tx>, parent_block: BlockId, num_preshards: NumPreshards) -> Self {
+    pub fn new(store: &'a TStore::ReadTransaction<'tx>, parent_block: LeafBlock, num_preshards: NumPreshards) -> Self {
         Self {
             store,
             pending: HashMap::new(),
@@ -67,7 +67,8 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
 
     fn get_latest_change_from_store(&self, id: &SubstateId) -> Result<SubstateChange, SubstateStoreError> {
         if let Some(change) =
-            BlockDiff::get_last_change_for_substate(self.read_transaction(), &self.parent_block, id).optional()?
+            BlockDiff::get_last_change_for_substate(self.read_transaction(), self.parent_block.block_id(), id)
+                .optional()?
         {
             return Ok(change);
         }
@@ -198,7 +199,8 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> ReadableSubstateStore
         }
 
         if let Some(change) =
-            BlockDiff::get_for_versioned_substate(self.read_transaction(), &self.parent_block, id).optional()?
+            BlockDiff::get_for_versioned_substate(self.read_transaction(), self.parent_block.block_id(), id)
+                .optional()?
         {
             return change
                 .into_up()
@@ -312,7 +314,8 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
         }
 
         if let Some(change) =
-            BlockDiff::get_last_change_for_substate(self.read_transaction(), &self.parent_block, id).optional()?
+            BlockDiff::get_last_change_for_substate(self.read_transaction(), self.parent_block.block_id(), id)
+                .optional()?
         {
             let version = change.versioned_substate_id().version();
             return Ok(LatestSubstateVersion {
@@ -438,7 +441,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
         is_local_only: bool,
     ) -> Result<(), SubstateStoreError> {
         let requested_lock_type = requested_lock.lock_type();
-        info!(
+        debug!(
             target: LOG_TARGET,
             "🔒️ Requested substate lock: {}",
             requested_lock
@@ -446,7 +449,8 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
 
         let versioned_substate_id = requested_lock.to_versioned_substate_id_ref();
 
-        let Some(existing) = self.get_latest_lock_by_id(versioned_substate_id.substate_id())? else {
+        let Some(existing) = self.get_latest_lock_by_id(&self.parent_block, versioned_substate_id.substate_id())?
+        else {
             if requested_lock_type.is_output() {
                 self.lock_assert_not_exist(versioned_substate_id)?;
             } else {
@@ -696,14 +700,18 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
         self.diff.push(change)
     }
 
-    pub fn get_latest_lock_by_id(&self, id: &SubstateId) -> Result<Option<Cow<'_, SubstateLock>>, SubstateStoreError> {
+    pub fn get_latest_lock_by_id(
+        &self,
+        block: &LeafBlock,
+        id: &SubstateId,
+    ) -> Result<Option<Cow<'_, SubstateLock>>, SubstateStoreError> {
         if let Some(lock) = self.new_locks.get(id).and_then(|locks| locks.last()) {
             return Ok(Some(Cow::Borrowed(lock)));
         }
 
         let maybe_lock = self
             .read_transaction()
-            .substate_locks_get_latest_for_substate(id)
+            .substate_locks_get_latest_for_substate(block, id)
             .optional()?;
         Ok(maybe_lock.map(Cow::Owned))
     }
@@ -740,7 +748,8 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
         );
 
         if let Some(change) =
-            BlockDiff::get_for_versioned_substate(self.read_transaction(), &self.parent_block, id).optional()?
+            BlockDiff::get_for_versioned_substate(self.read_transaction(), self.parent_block.block_id(), id)
+                .optional()?
         {
             if change.is_up() {
                 return Ok(());
@@ -780,7 +789,8 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
         }
 
         if let Some(change) =
-            BlockDiff::get_for_versioned_substate(self.read_transaction(), &self.parent_block, id).optional()?
+            BlockDiff::get_for_versioned_substate(self.read_transaction(), self.parent_block.block_id(), id)
+                .optional()?
         {
             if change.is_up() {
                 return Err(SubstateStoreError::ExpectedSubstateDown { id: id.to_owned() });
@@ -811,7 +821,8 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
         }
 
         if let Some(change) =
-            BlockDiff::get_for_versioned_substate(self.read_transaction(), &self.parent_block, id).optional()?
+            BlockDiff::get_for_versioned_substate(self.read_transaction(), self.parent_block.block_id(), id)
+                .optional()?
         {
             if change.is_up() {
                 return Err(SubstateStoreError::LockFailed(LockFailedError::SubstateIsUp {

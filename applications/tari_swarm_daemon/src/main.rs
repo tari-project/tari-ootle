@@ -1,9 +1,14 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, future::Future, pin::Pin};
+use std::{
+    collections::HashMap,
+    future::Future,
+    pin::{pin, Pin},
+};
 
 use anyhow::{anyhow, Context};
+use futures::future::{select, Either};
 use tari_common::configuration::Network;
 use tari_shutdown::Shutdown;
 use tokio::fs;
@@ -231,24 +236,38 @@ async fn start(cli: &Cli) -> anyhow::Result<()> {
     tokio::select! {
         _ = signal => {
             log::info!("Terminating all instances...");
+            terminate_all_instances(&pm_handle).await?;
             shutdown.trigger();
-            let num_instances = pm_handle.stop_all().await?;
-            log::info!("Terminated {num_instances} instances");
         },
         result = webserver => {
             log::info!("Terminating all instances...");
-            let num_instances = pm_handle.stop_all().await?;
-            log::info!("Terminated {num_instances} instances");
+            terminate_all_instances(&pm_handle).await?;
             result?.context("web server crashed")?;
             log::info!("Webserver exited");
         },
         result = task_handle => {
+            // We cannot call terminate_all_instances since the process manager has crashed
+            shutdown.trigger();
             result?.context("process manager crashed")?;
             log::info!("Process manager exited");
         }
     }
 
     Ok(())
+}
+
+async fn terminate_all_instances(pm_handle: &process_manager::ProcessManagerHandle) -> anyhow::Result<()> {
+    let exit_sig = exit_signal().context("exit_signal")?;
+    let stop_all = pm_handle.stop_all();
+    match select(exit_sig, pin!(stop_all)).await {
+        // If the exit signal was received first (second ctrl+c), we exit immediately
+        Either::Left(_) => Err(anyhow!("Received interrupt while stopping instances")),
+        Either::Right((r, _)) => {
+            let num_instances = r?;
+            log::info!("Terminated {num_instances} instances");
+            Ok(())
+        },
+    }
 }
 
 async fn create_paths(config: &Config) -> anyhow::Result<()> {

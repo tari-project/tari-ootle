@@ -53,11 +53,11 @@ impl SubstateLock {
     }
 
     pub fn is_input(&self) -> bool {
-        self.lock_type.is_input()
+        self.lock_type().is_input()
     }
 
     pub fn is_output(&self) -> bool {
-        self.lock_type.is_output()
+        self.lock_type().is_output()
     }
 }
 
@@ -90,12 +90,12 @@ impl LockedSubstateValue {
 
     pub fn satisfies_requirements<'a, T: Into<SubstateRequirementRef<'a>>>(&self, requirement: T) -> bool {
         let requirement = requirement.into();
-        requirement.version().is_none_or(|v| v == self.lock.version) && *requirement.substate_id() == self.substate_id
+        requirement.version().is_none_or(|v| v == self.lock.version()) && *requirement.substate_id() == self.substate_id
     }
 
     pub fn satisfies_lock_intent<T: LockIntent>(&self, lock_intent: T) -> bool {
-        lock_intent.version_to_lock() == self.lock.version &&
-            self.lock.lock_type.allows(lock_intent.lock_type()) &&
+        lock_intent.version_to_lock() == self.lock.version() &&
+            self.lock.lock_type().allows(lock_intent.lock_type()) &&
             *lock_intent.substate_id() == self.substate_id
     }
 

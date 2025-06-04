@@ -1,27 +1,55 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::any::type_name;
+use rocksdb::{AsColumnFamilyRef, DBIteratorWithThreadMode, DBPinnableSlice, Error, IteratorMode, ReadOptions};
 
-use crate::{cf_api::CfContext, dbs::read_only::ReadOnlyDb, error::RocksDbStorageError, traits::Cf};
+use crate::traits::RocksReader;
 
-pub struct ReadOnlyContext<'db> {
-    db: &'db ReadOnlyDb,
+#[derive(Debug, Clone)]
+pub struct ReadOnly<TX> {
+    pub(crate) inner: TX,
 }
 
-impl<'db> ReadOnlyContext<'db> {
-    pub(crate) fn new(db: &'db ReadOnlyDb) -> Self {
-        Self { db }
+impl<TX> ReadOnly<TX> {
+    pub fn new(inner: TX) -> Self {
+        Self { inner }
+    }
+}
+
+impl<TX: RocksReader> RocksReader for ReadOnly<TX> {
+    type Db = TX::Db;
+
+    fn get_pinned_cf<K: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        key: K,
+    ) -> Result<Option<DBPinnableSlice>, Error> {
+        self.inner.get_pinned_cf(cf, key)
     }
 
-    pub fn cf<CF: Cf>(&'db self, _cf: CF) -> Result<CfContext<'db, ReadOnlyDb, CF>, RocksDbStorageError> {
-        let handle = self
-            .db
-            .cf_handle(CF::name())
-            .ok_or_else(|| RocksDbStorageError::ColumnFamilyNotFound {
-                operation: "create CF context",
-                cf: format!("CF={}, cf_name={}", type_name::<CF>(), CF::name()),
-            })?;
-        CfContext::create(self.db, handle)
+    fn iterator_cf<'a: 'b, 'b>(
+        &'a self,
+        cf_handle: &impl AsColumnFamilyRef,
+        mode: IteratorMode,
+    ) -> DBIteratorWithThreadMode<'b, Self::Db> {
+        self.inner.iterator_cf(cf_handle, mode)
+    }
+
+    fn iterator_cf_opt<'a: 'b, 'b>(
+        &'a self,
+        cf_handle: &impl AsColumnFamilyRef,
+        readopts: ReadOptions,
+        mode: IteratorMode,
+    ) -> DBIteratorWithThreadMode<'b, Self::Db> {
+        self.inner.iterator_cf_opt(cf_handle, readopts, mode)
+    }
+
+    fn multi_get_cf<'a, 'b: 'a, K, I, W>(&'a self, keys: I) -> Vec<Result<Option<Vec<u8>>, Error>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = (&'b W, K)>,
+        W: 'b + AsColumnFamilyRef,
+    {
+        self.inner.multi_get_cf(keys)
     }
 }

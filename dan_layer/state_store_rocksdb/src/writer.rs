@@ -153,12 +153,16 @@ use crate::{
         transaction_pool_state_update::{TransactionPoolStateUpdateCf, TransactionPoolStateUpdateData},
         validator_node_epoch_stats::ValidatorNodeEpochStatsCf,
     },
+    error::RocksDbStorageError,
     options::DatabaseOptions,
+    read_only::ReadOnly,
     reader::RocksDbStateStoreReadTransaction,
     utils::now,
 };
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::writer";
+
+type DbWriteContext<'a> = DbContext<'a, Transaction<'a, TransactionDB>>;
 
 pub struct RocksDbStateStoreWriteTransaction<'a, TAddr> {
     /// None indicates if the transaction has been explicitly committed/rolled back
@@ -171,12 +175,13 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
     pub(crate) fn new(db: &'a TransactionDB, tx: Transaction<'a, TransactionDB>, options: &'a DatabaseOptions) -> Self {
         Self {
             db,
-            transaction: Some(RocksDbStateStoreReadTransaction::new(db, tx)),
+            // We have access to the inner transaction so we can use it to read/write
+            transaction: Some(RocksDbStateStoreReadTransaction::new(db, ReadOnly::new(tx))),
             options,
         }
     }
 
-    fn db(&self) -> DbContext<'_> {
+    pub fn db(&self) -> DbWriteContext<'_> {
         DbContext::new(self.db, self.tx())
     }
 
@@ -233,7 +238,14 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn commit(&mut self) -> Result<(), StorageError> {
         // Take so that we mark this transaction as complete in the drop impl
-        self.transaction.take().expect("commit: already committed").commit()?;
+        let tx = self.transaction.take().expect("commit: already committed");
+
+        tx.into_rocksdb_transaction()
+            .commit()
+            .map_err(|source| RocksDbStorageError::RocksDbError {
+                source,
+                operation: "commit",
+            })?;
         Ok(())
     }
 
@@ -242,7 +254,12 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         self.transaction
             .take()
             .expect("rollback: already committed")
-            .rollback()?;
+            .into_rocksdb_transaction()
+            .rollback()
+            .map_err(|source| RocksDbStorageError::RocksDbError {
+                source,
+                operation: "commit",
+            })?;
         Ok(())
     }
 
@@ -1071,7 +1088,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn substate_locks_insert_all<'a, I: IntoIterator<Item = (&'a SubstateId, &'a Vec<SubstateLock>)>>(
         &mut self,
-        block_id: &BlockId,
+        block: &LeafBlock,
         locks: I,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "substate_locks_insert_all";
@@ -1083,9 +1100,9 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         for (substate_id, locks) in locks {
             let mut last_key = None;
             for lock in locks {
-                // TODO: reference the substate id
                 let key = SubstateLockKey {
-                    block_id: *block_id,
+                    block_id: *block.block_id(),
+                    block_height: block.height(),
                     substate_id: substate_id.clone(),
                     transaction_id: *lock.transaction_id(),
                 };
@@ -1130,11 +1147,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 index_cf.delete(&key, OPERATION)?;
                 substate_index_cf.delete(&key, OPERATION)?;
                 // TODO: this could leave the head index in an inconsistent state - I suspect we should implement locks
-                // in-memory instead of in persistence perhaps only persisting the entire lock state when consensus
-                // shuts down - that is to say, not fixing this now :)
-                for result in head_index_cf.value_iterator(Ordering::default(), OPERATION) {
-                    let head_key = result?;
-                    if head_key == key {
+                // in-memory instead of in persistence perhaps (or not) persisting the entire lock state asynchronously
+                // as blocks are processed (to account for node restarts)
+                if let Some(head_key) = head_index_cf.get(&key.substate_id, OPERATION).optional()? {
+                    if head_key.transaction_id == key.transaction_id {
                         head_index_cf.delete(&key.substate_id, OPERATION)?;
                     }
                 }
@@ -1150,6 +1166,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let cf = self.db().cf(SubstateLockModel)?;
         let index_cf = self.db().cf(substate_locks::BlockIdIndex)?;
         let substate_index_cf = self.db().cf(substate_locks::SubstateIdIndex)?;
+        let head_index_cf = self.db().cf(substate_locks::HeadIndex)?;
         let query_cf = self.db().cf(substate_locks::ByBlockIdQuery)?;
         let iter = query_cf.query_prefix_range_key_iterator(Ordering::Ascending, block_id);
         for result in iter {
@@ -1157,6 +1174,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             cf.delete(&key, OPERATION)?;
             index_cf.delete(&key, OPERATION)?;
             substate_index_cf.delete(&key, OPERATION)?;
+            if let Some(head_key) = head_index_cf.get(&key.substate_id, OPERATION).optional()? {
+                if head_key.block_id == key.block_id {
+                    head_index_cf.delete(&key.substate_id, OPERATION)?;
+                }
+            }
         }
 
         Ok(())
@@ -1783,13 +1805,23 @@ impl<'a, TAddr> Deref for RocksDbStateStoreWriteTransaction<'a, TAddr> {
 
 impl<TAddr> Drop for RocksDbStateStoreWriteTransaction<'_, TAddr> {
     fn drop(&mut self) {
-        if let Some(tx) = self.transaction.take() {
+        if self.transaction.is_some() {
             warn!(
                 target: LOG_TARGET,
                 "State store write transaction was not committed/rolled back. Rolling back"
             );
-
-            if let Err(err) = tx.rollback() {
+            // Take so that we mark this transaction as complete in the drop impl
+            if let Err(err) = self
+                .transaction
+                .take()
+                .expect("rollback: already committed")
+                .into_rocksdb_transaction()
+                .rollback()
+                .map_err(|source| RocksDbStorageError::RocksDbError {
+                    source,
+                    operation: "commit",
+                })
+            {
                 error!(
                     target: LOG_TARGET,
                     "Failed to rollback state store write transaction: {}", err
@@ -1848,7 +1880,7 @@ mod cleanup {
         certificates::{proposal::ProposalCertificateCf, timeout::TimeoutCertificateCf},
     };
 
-    pub fn foreign_proposals_for_epoch(db: &DbContext<'_>, up_to_epoch: Epoch) -> Result<(), StorageError> {
+    pub fn foreign_proposals_for_epoch(db: &DbWriteContext<'_>, up_to_epoch: Epoch) -> Result<(), StorageError> {
         const OPERATION: &str = "cleanup::foreign_proposals_for_epoch";
         let up_to_epoch = up_to_epoch + Epoch(1); // Make it inclusive
         let cf = db.cf(foreign_proposal::ByEpochQuery)?;
@@ -1877,7 +1909,7 @@ mod cleanup {
         Ok(())
     }
 
-    pub fn cleanup_blocks_for_epoch(db: &DbContext<'_>, up_to_epoch: Epoch) -> Result<(), StorageError> {
+    pub fn cleanup_blocks_for_epoch(db: &DbWriteContext<'_>, up_to_epoch: Epoch) -> Result<(), StorageError> {
         const OPERATION: &str = "cleanup::cleanup_blocks_for_epoch";
         let up_to_epoch = up_to_epoch + Epoch(1); // Make it inclusive
         let cf = db.cf(BlockCf)?;
@@ -1907,7 +1939,7 @@ mod cleanup {
         Ok(())
     }
 
-    pub fn cleanup_qcs_for_epoch(db: &DbContext<'_>, up_to_epoch: Epoch) -> Result<(), StorageError> {
+    pub fn cleanup_qcs_for_epoch(db: &DbWriteContext<'_>, up_to_epoch: Epoch) -> Result<(), StorageError> {
         const OPERATION: &str = "cleanup::cleanup_qcs_for_epoch";
         let up_to_epoch = up_to_epoch + Epoch(1); // Make it inclusive
         let cf = db.cf(ProposalCertificateCf)?;

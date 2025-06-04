@@ -32,7 +32,10 @@ pub fn create_rocksdb(cf_names: impl IntoIterator<Item = &'static str>) -> (Tran
     (db, temp_dir)
 }
 
-pub fn ctx<'a>(db: &'a TransactionDB<SingleThreaded>, tx: &'a Transaction<TransactionDB>) -> DbContext<'a> {
+pub fn ctx<'a>(
+    db: &'a TransactionDB<SingleThreaded>,
+    tx: &'a Transaction<TransactionDB>,
+) -> DbContext<'a, Transaction<'a, TransactionDB<SingleThreaded>>> {
     DbContext::new(db, tx)
 }
 

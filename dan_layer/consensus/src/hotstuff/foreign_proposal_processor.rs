@@ -18,7 +18,7 @@ use tari_dan_storage::{
         BlockPledge,
         Command,
         Evidence,
-        ForeignProposalRecord,
+        ForeignProposal,
         LockedSubstateValue,
         TransactionAtom,
         TransactionExecution,
@@ -49,21 +49,28 @@ const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::foreign_proposal_proce
 pub fn process_foreign_block<TStore: StateStore>(
     tx: &TStore::ReadTransaction<'_>,
     local_leaf: &LeafBlock,
-    foreign_proposal: &ForeignProposalRecord,
+    proposal: &ForeignProposal,
     local_committee_info: &CommitteeInfo,
     substate_store: &mut PendingSubstateStore<TStore>,
     proposed_block_change_set: &mut ProposedBlockChangeSet,
 ) -> Result<(), HotStuffError> {
     let _timer = TraceTimer::info(LOG_TARGET, "process_foreign_block");
 
-    let foreign_shard_group = foreign_proposal.proposal().shard_group_unchecked();
+    let foreign_shard_group = proposal.shard_group_unchecked();
     info!(
         target: LOG_TARGET,
         "🧩 Processing FOREIGN PROPOSAL {}",
-        foreign_proposal,
+        proposal,
     );
+    // Used for logging purposes
+    let foreign_block_id = proposal.calculate_block_id();
+    let foreign_proposal_as_leaf = LeafBlock {
+        block_id: foreign_block_id,
+        height: proposal.height(),
+        epoch: proposal.epoch(),
+        shard_group: foreign_shard_group,
+    };
 
-    let proposal = foreign_proposal.proposal();
     let block_pledge = proposal.block_pledge();
     let mut command_count = 0usize;
 
@@ -78,7 +85,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                     warn!(
                         target: LOG_TARGET,
                         "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Command: LocalPrepare({}, {}), block: {} not relevant to local committee",
-                        atom.id, atom.decision, foreign_proposal.block_id(),
+                        atom.id, atom.decision, foreign_block_id,
                     );
                     continue;
                 }
@@ -86,7 +93,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                 debug!(
                     target: LOG_TARGET,
                     "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Command: LocalPrepare({}, {}), block: {}",
-                    atom.id,atom.decision, foreign_proposal.block_id(),
+                    atom.id,atom.decision, foreign_block_id,
                 );
 
                 let Some(mut tx_rec) = get_or_sequence_transaction(
@@ -95,7 +102,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                     local_committee_info.num_committees(),
                     &atom.id,
                     local_leaf,
-                    foreign_proposal.block_id(),
+                    &foreign_block_id,
                     proposed_block_change_set,
                 )?
                 else {
@@ -111,7 +118,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                     warn!(
                         target: LOG_TARGET,
                         "⚠️ Foreign LocalPrepare proposal ({}) received LOCAL_PREPARE for transaction {} but current transaction stage is {}. Ignoring.",
-                        foreign_proposal,
+                        proposal,
                         tx_rec.transaction_id(),
                         tx_rec.current_stage()
                     );
@@ -145,7 +152,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                 // Update the transaction record with any new information provided by this foreign block
                 let Some(foreign_evidence) = atom.evidence.get(&foreign_shard_group) else {
                     return Err(ProposalValidationError::ForeignInvalidPledge {
-                        block: foreign_proposal.as_leaf(),
+                        block: foreign_proposal_as_leaf,
                         transaction_id: atom.id,
                         shard_group: foreign_shard_group,
                         details: "Foreign proposal did not contain evidence for its own shard group".to_string(),
@@ -160,8 +167,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                         HotStuffError::InvariantError(format!(
                             "Foreign proposal {} does not contain a justify QC for shard group {} - this should have \
                              been rejected by validations",
-                            foreign_proposal.block_id(),
-                            foreign_shard_group
+                            foreign_block_id, foreign_shard_group
                         ))
                     })?;
 
@@ -235,7 +241,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                             warn!(
                                 target: LOG_TARGET,
                                 "⚠️ Foreign proposal {} received for transaction {} but a conflicting transaction ({}) has already been prepared by this node. Abort.",
-                                foreign_proposal,
+                                proposal,
                                 tx_rec.transaction_id(),
                                 conflicting_transaction_id
                             );
@@ -260,7 +266,7 @@ pub fn process_foreign_block<TStore: StateStore>(
 
                 add_pledges(
                     &tx_rec,
-                    foreign_proposal.as_leaf(),
+                    foreign_proposal_as_leaf,
                     atom,
                     block_pledge,
                     foreign_shard_group,
@@ -355,7 +361,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                     warn!(
                         target: LOG_TARGET,
                         "🧩❓️ FOREIGN PROPOSAL {foreign_shard_group}: Command: LocalAccept({}, {}), block: {} not relevant to local committee",
-                        atom.id, atom.decision, foreign_proposal.block_id(),
+                        atom.id, atom.decision, foreign_block_id,
                     );
                     continue;
                 }
@@ -363,7 +369,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                 debug!(
                     target: LOG_TARGET,
                     "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Command: LocalAccept({}, {}), block: {}",
-                    atom.id, atom.decision, foreign_proposal.block_id(),
+                    atom.id, atom.decision, foreign_block_id,
                 );
 
                 let Some(mut tx_rec) = get_or_sequence_transaction(
@@ -372,7 +378,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                     local_committee_info.num_committees(),
                     &atom.id,
                     local_leaf,
-                    foreign_proposal.block_id(),
+                    &foreign_block_id,
                     proposed_block_change_set,
                 )?
                 else {
@@ -388,7 +394,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                     warn!(
                         target: LOG_TARGET,
                         "⚠️ Foreign proposal {} received LOCAL_ACCEPT for transaction {} but current transaction stage is {}. Ignoring.",
-                        foreign_proposal,
+                        proposal,
                         tx_rec.transaction_id(),
                         tx_rec.current_stage(),
                     );
@@ -421,7 +427,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                 // Update the transaction record with any new information provided by this foreign block
                 let Some(foreign_evidence) = atom.evidence.get(&foreign_shard_group) else {
                     return Err(ProposalValidationError::ForeignInvalidPledge {
-                        block: foreign_proposal.as_leaf(),
+                        block: foreign_proposal_as_leaf,
                         transaction_id: atom.id,
                         shard_group: foreign_shard_group,
                         details: "Foreign proposal did not contain evidence for its own shard group".to_string(),
@@ -435,8 +441,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                         HotStuffError::InvariantError(format!(
                             "Foreign proposal {} does not contain a justify QC for shard group {} - this should have \
                              already been validated",
-                            foreign_proposal.block_id(),
-                            foreign_shard_group
+                            foreign_block_id, foreign_shard_group
                         ))
                     })?;
 
@@ -449,7 +454,7 @@ pub fn process_foreign_block<TStore: StateStore>(
 
                 add_pledges(
                     &tx_rec,
-                    foreign_proposal.as_leaf(),
+                    foreign_proposal_as_leaf,
                     atom,
                     block_pledge,
                     foreign_shard_group,
@@ -537,7 +542,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                 warn!(
                     target: LOG_TARGET,
                     "❓️ NEVER HAPPEN: Foreign proposal received {} contains an EndEpoch command. This is invalid behaviour but continuing anyway.",
-                    foreign_proposal
+                    proposal
                 );
                 continue;
             },
@@ -559,13 +564,13 @@ pub fn process_foreign_block<TStore: StateStore>(
         target: LOG_TARGET,
         "🧩 FOREIGN PROPOSAL: Processed {} commands from foreign block {}",
         command_count,
-        foreign_proposal
+        proposal
     );
     if command_count == 0 {
         warn!(
             target: LOG_TARGET,
             "⚠️ FOREIGN PROPOSAL: No commands were applicable for foreign block {}. Ignoring.",
-            foreign_proposal
+            proposal
         );
     }
 

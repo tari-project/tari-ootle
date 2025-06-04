@@ -169,7 +169,7 @@ pub trait StateStoreReadTransaction: Sized {
         limit: usize,
     ) -> Result<Vec<Block>, StorageError>;
     fn blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError>;
-    fn blocks_is_ancestor(&self, descendant: &BlockId, ancestor: &BlockId) -> Result<bool, StorageError>;
+    fn blocks_is_pending_ancestor(&self, descendant: &BlockId, ancestor: &BlockId) -> Result<bool, StorageError>;
     fn blocks_get_committed_by_parent(&self, parent: &BlockId) -> Result<Block, StorageError>;
     fn blocks_get_pending_ids_by_parent(&self, parent: &BlockId) -> Result<Vec<BlockId>, StorageError>;
 
@@ -264,7 +264,11 @@ pub trait StateStoreReadTransaction: Sized {
         substate_ids: I,
     ) -> Result<Option<TransactionId>, StorageError>;
 
-    fn substate_locks_get_latest_for_substate(&self, substate_id: &SubstateId) -> Result<SubstateLock, StorageError>;
+    fn substate_locks_get_latest_for_substate(
+        &self,
+        leaf_block: &LeafBlock,
+        substate_id: &SubstateId,
+    ) -> Result<SubstateLock, StorageError>;
 
     fn pending_state_tree_diffs_get_all_up_to_commit_block(
         &self,
@@ -463,7 +467,7 @@ pub trait StateStoreWriteTransaction {
     //---------------------------------- Substates --------------------------------------------//
     fn substate_locks_insert_all<'a, I: IntoIterator<Item = (&'a SubstateId, &'a Vec<SubstateLock>)>>(
         &mut self,
-        block_id: &BlockId,
+        block: &LeafBlock,
         locks: I,
     ) -> Result<(), StorageError>;
 

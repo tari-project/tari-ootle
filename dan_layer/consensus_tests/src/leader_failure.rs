@@ -291,7 +291,6 @@ async fn multi_shard_node_goes_down() {
     // proof still validates with dummy blocks included
     setup_logger();
     let mut test = Test::builder()
-        .with_rocks_path("/tmp/test{}")
         // Allow enough time for leader failures
         .with_test_timeout(Duration::from_secs(60))
         .modify_consensus_constants(|config_mut| {

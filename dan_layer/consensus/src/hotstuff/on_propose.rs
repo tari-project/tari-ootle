@@ -65,6 +65,7 @@ use crate::{
         epoch_state::EpochState,
         error::HotStuffError,
         filter_diff_for_committee,
+        foreign_proposal_processor::process_foreign_block,
         process_newly_justified_block,
         substate_store::PendingSubstateStore,
         transaction_manager::{
@@ -325,16 +326,6 @@ where TConsensusSpec: ConsensusSpec
         let justify_block = Block::get(tx, &high_qc_certificate.calculate_block_id())?;
         let start_of_chain_block = highest_seen_block;
         let parent_block = dummy_block.unwrap_or_else(|| highest_seen_block.as_leaf());
-        // // The parent block will only ever not exist if it is a dummy block
-        // let parent_exists = Block::record_exists(tx, parent_block.block_id())?;
-        // let start_of_chain_block = if parent_exists {
-        //     // Parent exists - we can include its state in the MR calc, foreign propose etc.
-        //     parent_block
-        // } else {
-        //     // Parent does not exist which means we have dummy blocks between the parent and the justified block so
-        // we     // can exclude them from the query. There are a few queries that will fail if we used a
-        // non-existent block.     justify_block.as_leaf_block()
-        // };
 
         let should_not_propose_commands = can_propose_epoch_end || {
             // TODO: prevent proposers from proposing transactions after an epoch end command is in the justified
@@ -355,7 +346,7 @@ where TConsensusSpec: ConsensusSpec
 
         let mut substate_store = PendingSubstateStore::new(
             tx,
-            *start_of_chain_block.block_id(),
+            start_of_chain_block.as_leaf(),
             self.config.consensus_constants.num_preshards,
         );
 
@@ -392,30 +383,28 @@ where TConsensusSpec: ConsensusSpec
             // evidence. And that should determine if they are ready. However this is difficult because we
             // get the batch from the database which isnt aware of which foreign proposals we're going to
             // propose. This is why the system currently never proposes foreign proposals affecting a
-            // transaction in the same block for LocalPrepare/LocalAccept and can result in evidence in the
-            // atom having missing Prepare/Accept QCs (which are added on subsequent proposals).
-            // let locked_block = LockedBlock::get(tx, epoch)?;
-            // let num_proposals = batch.foreign_proposals.len();
-            // let foreign_proposals = mem::replace(&mut batch.foreign_proposals, Vec::with_capacity(num_proposals));
-            // for fp in foreign_proposals {
-            //     if let Err(err) = process_foreign_block(
-            //         tx,
-            //         &high_qc_certificate.as_leaf_block(),
-            //         &locked_block,
-            //         &fp,
-            //         local_committee_info,
-            //         &mut change_set,
-            //     ) {
-            //         warn!(
-            //             target: LOG_TARGET,
-            //             "Failed to process foreign proposal: {}. Skipping this proposal...",
-            //             err
-            //         );
-            //         // TODO: mark as invalid
-            //         continue;
-            //     }
-            //     batch.foreign_proposals.push(fp);
-            // }
+            // transaction in the same block for LocalPrepare/LocalAccept.
+            for fp in &batch.foreign_proposals {
+                if let Err(err) = process_foreign_block(
+                    tx,
+                    &high_qc_certificate.as_leaf_block(),
+                    fp,
+                    local_committee_info,
+                    &mut substate_store,
+                    &mut change_set,
+                ) {
+                    warn!(
+                        target: LOG_TARGET,
+                        "Failed to process foreign proposal: {}. Not proposing...",
+                        err
+                    );
+                    // TODO: should mark as invalid?
+                    continue;
+                }
+            }
+
+            // Add all (ABORT) executions that may have resulted from foreign proposals
+            executed_transactions.extend(change_set.take_all_transaction_executions());
 
             if !justify_block.has_justify_qc() {
                 // TODO: we dont need to process transactions here that are not in the batch

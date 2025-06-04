@@ -314,6 +314,17 @@ impl ProposedBlockChangeSet {
             .and_then(|change| change.execution.take())
     }
 
+    pub fn take_all_transaction_executions(
+        &mut self,
+    ) -> impl Iterator<Item = (TransactionId, TransactionExecution)> + '_ {
+        self.transaction_changes.drain(..).filter_map(|(tx_id, mut change)| {
+            change
+                .execution
+                .take()
+                .map(|execution| (tx_id, execution.into_transaction_execution()))
+        })
+    }
+
     pub fn add_transaction_execution(
         &mut self,
         transaction_id: TransactionId,
@@ -444,7 +455,7 @@ impl ProposedBlockChangeSet {
         }
 
         // Save locks
-        SubstateRecord::lock_all(tx, &self.block.block_id, &self.substate_locks)?;
+        SubstateRecord::lock_all(tx, &self.block, &self.substate_locks)?;
 
         // Sequence new transactions
         for pool_rec in &self.new_transactions_to_sequence {

@@ -10,6 +10,8 @@ license.workspace = true
 [features]
 default = ["metrics", "web_ui"]
 metrics = ["prometheus"]
+# Note: must be compiled with RUSTFLAGS='--cfg rust_unstable' to use
+tokio_debug = ["console-subscriber"]
 web_ui = []
 
 [dependencies]
@@ -76,6 +78,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["default", "macros", "time", "sync", "rt-multi-thread", "fs", "signal"] }
 tower-http = { workspace = true, features = ["default", "cors"] }
+
+console-subscriber = { version = "0.4.1", optional = true }
 
 [build-dependencies]
 tari_common = { workspace = true, features = ["build"] }

@@ -1851,12 +1851,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "console-api"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8030735ecb0d128428b64cd379809817e620a40e5001c54465b99ec5feec2857"
+dependencies = [
+ "futures-core",
+ "prost 0.13.5",
+ "prost-types 0.13.5",
+ "tonic 0.12.3",
+ "tracing-core",
+]
+
+[[package]]
 name = "console-subscriber"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4cf42660ac07fcebed809cfe561dd8730bcd35b075215e6479c516bcd0d11cb"
 dependencies = [
- "console-api",
+ "console-api 0.5.0",
  "crossbeam-channel",
  "crossbeam-utils",
  "futures 0.3.31",
@@ -1869,6 +1882,32 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tonic 0.9.2",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "console-subscriber"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6539aa9c6a4cd31f4b1c040f860a1eac9aa80e7df6b05d506a6e7179936d6a01"
+dependencies = [
+ "console-api 0.8.1",
+ "crossbeam-channel",
+ "crossbeam-utils",
+ "futures-task",
+ "hdrhistogram",
+ "humantime 2.2.0",
+ "hyper-util",
+ "prost 0.13.5",
+ "prost-types 0.13.5",
+ "serde",
+ "serde_json",
+ "thread_local",
+ "tokio",
+ "tokio-stream",
+ "tonic 0.12.3",
  "tracing",
  "tracing-core",
  "tracing-subscriber",
@@ -6420,7 +6459,7 @@ dependencies = [
  "chrono",
  "clap 3.2.25",
  "config",
- "console-subscriber",
+ "console-subscriber 0.1.10",
  "crossterm 0.28.1",
  "dialoguer 0.10.4",
  "digest",
@@ -6511,7 +6550,7 @@ dependencies = [
  "chrono",
  "clap 3.2.25",
  "config",
- "console-subscriber",
+ "console-subscriber 0.1.10",
  "crossterm 0.28.1",
  "derive_more 0.99.19",
  "either",
@@ -11723,6 +11762,7 @@ dependencies = [
  "axum-jrpc",
  "clap 3.2.25",
  "config",
+ "console-subscriber 0.4.1",
  "either",
  "futures 0.3.31",
  "include_dir",

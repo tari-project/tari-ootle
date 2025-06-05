@@ -45,7 +45,6 @@ impl ExecutableManager {
                 self.prepared.push(Executable {
                     instance_type: exec.instance_type,
                     path: exec_path,
-                    env: exec.env.clone(),
                 });
                 continue;
             }
@@ -62,7 +61,12 @@ impl ExecutableManager {
                 exec.instance_type,
                 compile.working_dir().display()
             );
-            let mut child = cargo_build(compile.working_dir(), &compile.package_name, &compile.features)?;
+            let mut child = cargo_build(
+                compile.working_dir(),
+                &compile.package_name,
+                &compile.features,
+                &compile.envs,
+            )?;
             tasks.push(async move {
                 let status = child.wait().await?;
                 Ok::<_, anyhow::Error>((status, exec))
@@ -87,7 +91,6 @@ impl ExecutableManager {
             self.prepared.push(Executable {
                 instance_type: exec.instance_type,
                 path: bin_path,
-                env: exec.env.clone(),
             })
         }
 
@@ -119,7 +122,7 @@ impl ExecutableManager {
                 .context("working_dir does not exist")?;
             let package = &compile.package_name;
 
-            let mut child = cargo_build(&working_dir, package, &compile.features)?;
+            let mut child = cargo_build(&working_dir, package, &compile.features, &compile.envs)?;
             let status = child.wait().await?;
 
             if !status.success() {
@@ -139,7 +142,6 @@ impl ExecutableManager {
                     path: bin_path.canonicalize().with_context(|| {
                         anyhow!("The compiled binary at path '{}' does not exist.", bin_path.display())
                     })?,
-                    env: exec.env.clone(),
                 });
                 self.prepared.last().unwrap()
             };
@@ -160,7 +162,18 @@ impl ExecutableManager {
     }
 }
 
-fn cargo_build<P: AsRef<Path>>(working_dir: P, package: &str, features: &[String]) -> io::Result<Child> {
+fn cargo_build<'env, P, TENVS, K, V>(
+    working_dir: P,
+    package: &str,
+    features: &[String],
+    envs: TENVS,
+) -> io::Result<Child>
+where
+    P: AsRef<Path>,
+    TENVS: IntoIterator<Item = &'env (K, V)>,
+    K: AsRef<str> + 'env,
+    V: AsRef<str> + 'env,
+{
     let mut cmd = Command::new("cargo");
     cmd.args(["build", "--release", "--bin", package]);
     for feature in features {
@@ -170,6 +183,7 @@ fn cargo_build<P: AsRef<Path>>(working_dir: P, package: &str, features: &[String
     cmd
         // Ensure host environment vars are available
         .envs(env::vars())
+        .envs(envs.into_iter().map(|(k, v)| (k.as_ref(), v.as_ref())))
         .current_dir(working_dir)
         .kill_on_drop(true)
         .spawn()

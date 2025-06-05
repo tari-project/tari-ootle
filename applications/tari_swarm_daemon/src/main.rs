@@ -84,8 +84,8 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
                 // Default is "{working_dir}/target/release"
                 target_dir: None,
                 features: vec![],
+                envs: vec![],
             }),
-            env: vec![],
         },
         ExecutableConfig {
             instance_type: InstanceType::MinoTariConsoleWallet,
@@ -95,8 +95,8 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
                 package_name: "minotari_console_wallet".to_string(),
                 target_dir: None,
                 features: vec![],
+                envs: vec![],
             }),
-            env: vec![],
         },
         ExecutableConfig {
             instance_type: InstanceType::MinoTariMiner,
@@ -106,8 +106,8 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
                 package_name: "minotari_miner".to_string(),
                 target_dir: None,
                 features: vec![],
+                envs: vec![],
             }),
-            env: vec![],
         },
         ExecutableConfig {
             instance_type: InstanceType::TariValidatorNode,
@@ -117,8 +117,8 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
                 package_name: "tari_validator_node".to_string(),
                 target_dir: None,
                 features: vec!["web_ui".to_string()],
+                envs: vec![],
             }),
-            env: vec![],
         },
         ExecutableConfig {
             instance_type: InstanceType::TariIndexer,
@@ -128,8 +128,8 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
                 package_name: "tari_indexer".to_string(),
                 target_dir: None,
                 features: vec!["web_ui".to_string()],
+                envs: vec![],
             }),
-            env: vec![],
         },
         // ExecutableConfig {
         //     instance_type: InstanceType::TariSignalingServer,
@@ -149,8 +149,8 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
                 package_name: "tari_dan_wallet_daemon".to_string(),
                 target_dir: None,
                 features: vec!["web_ui".to_string()],
+                envs: vec![],
             }),
-            env: vec![],
         },
     ];
     let instances = vec![

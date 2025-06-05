@@ -8,5 +8,4 @@ use crate::config::InstanceType;
 pub struct Executable {
     pub instance_type: InstanceType,
     pub path: PathBuf,
-    pub env: Vec<(String, String)>,
 }

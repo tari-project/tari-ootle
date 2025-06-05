@@ -17,6 +17,7 @@ pub struct Instance {
     allocated_ports: AllocatedPorts,
     base_path: PathBuf,
     settings: HashMap<String, String>,
+    envs: Vec<(String, String)>,
     exit_status: Option<ExitStatus>,
 }
 
@@ -28,6 +29,7 @@ impl Instance {
         child: Child,
         allocated_ports: AllocatedPorts,
         base_path: PathBuf,
+        envs: Vec<(String, String)>,
         settings: HashMap<String, String>,
     ) -> Self {
         Self {
@@ -37,6 +39,7 @@ impl Instance {
             child,
             allocated_ports,
             base_path,
+            envs,
             settings,
             exit_status: None,
         }
@@ -68,6 +71,10 @@ impl Instance {
 
     pub fn base_path(&self) -> &PathBuf {
         &self.base_path
+    }
+
+    pub fn envs(&self) -> &[(String, String)] {
+        &self.envs
     }
 
     pub fn settings(&self) -> &HashMap<String, String> {

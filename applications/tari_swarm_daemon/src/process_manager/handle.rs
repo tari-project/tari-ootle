@@ -21,7 +21,7 @@ pub enum ProcessManagerRequest {
     CreateInstance {
         name: String,
         instance_type: InstanceType,
-        args: HashMap<String, String>,
+        settings: HashMap<String, String>,
         reply: Reply<InstanceId>,
     },
     ListInstances {
@@ -197,14 +197,14 @@ impl ProcessManagerHandle {
         &self,
         name: String,
         instance_type: InstanceType,
-        args: A,
+        settings: A,
     ) -> anyhow::Result<InstanceId> {
         let (tx_reply, rx_reply) = oneshot::channel();
         self.tx_request
             .send(ProcessManagerRequest::CreateInstance {
                 name,
                 instance_type,
-                args: args.into(),
+                settings: settings.into(),
                 reply: tx_reply,
             })
             .await?;

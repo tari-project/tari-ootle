@@ -392,10 +392,10 @@ impl ProcessManager {
             CreateInstance {
                 name,
                 instance_type,
-                args,
+                settings,
                 reply,
             } => {
-                if self.instance_manager.instances().any(|i| i.name() == name) {
+                let Some(instance) = self.instance_manager.instances().find(|i| i.name() == name) else {
                     if reply
                         .send(Err(anyhow!(
                             "Instance with name '{name}' already exists. Please choose a different name",
@@ -405,7 +405,9 @@ impl ProcessManager {
                         log::warn!("Request cancelled before response could be sent")
                     }
                     return Ok(());
-                }
+                };
+
+                let envs = instance.envs().to_vec();
 
                 let executable = self.executable_manager.get_executable(instance_type).ok_or_else(|| {
                     anyhow!(
@@ -414,7 +416,7 @@ impl ProcessManager {
                 })?;
                 let result = self
                     .instance_manager
-                    .fork_new(executable, instance_type, name, None, args)
+                    .fork_new(executable, instance_type, name, None, envs, settings)
                     .await;
 
                 if reply.send(result).is_err() {
@@ -675,10 +677,17 @@ impl ProcessManager {
                 anyhow!("No executable configuration for 'MinoTariMiner'. Please add this to the configuration")
             })?;
 
-        let args = HashMap::from([("max_blocks".to_string(), blocks.to_string())]);
+        let settings = HashMap::from([("max_blocks".to_string(), blocks.to_string())]);
         let id = self
             .instance_manager
-            .fork_new(executable, InstanceType::MinoTariMiner, "miner".to_string(), None, args)
+            .fork_new(
+                executable,
+                InstanceType::MinoTariMiner,
+                "miner".to_string(),
+                None,
+                vec![],
+                settings,
+            )
             .await?;
 
         let status = self.instance_manager.wait(id).await?;

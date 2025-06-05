@@ -67,6 +67,10 @@ impl ProcessDefinition for ValidatorNode {
             .arg(format!("-pvalidator_node.web_ui_listener_address={web_ui_address}"))
             .arg("-pepoch_oracle.base_layer.scanning_interval=1");
 
+        if let Some(console_port) = context.get_setting("tokio_console_port") {
+            command.arg(format!("--tokio-console-port={console_port}"));
+        }
+
         Ok(command)
     }
 

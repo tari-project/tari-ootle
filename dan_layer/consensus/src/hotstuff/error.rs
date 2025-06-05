@@ -87,9 +87,11 @@ pub enum HotStuffError {
     InvariantError(String),
     #[error("Sync error: {0}")]
     SyncError(anyhow::Error),
-    #[error("Fallen behind: local_height={local_height}, qc_height={qc_height}")]
+    #[error("Fallen behind: local={local_epoch}/{local_height}, qc={qc_epoch}/{qc_height}")]
     FallenBehind {
+        local_epoch: Epoch,
         local_height: NodeHeight,
+        qc_epoch: Epoch,
         qc_height: NodeHeight,
     },
     #[error("Transaction executor error: {0}")]

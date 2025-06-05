@@ -25,6 +25,10 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 url = { workspace = true, optional = true }
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["time", "macros"] }
+
+
 [features]
 base_layer = [
     "tari_base_node_client",

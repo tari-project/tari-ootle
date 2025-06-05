@@ -47,7 +47,7 @@ pub fn spawn_json_rpc(preferred_address: SocketAddr, handlers: JsonRpcHandlers) 
         .layer(CorsLayer::permissive());
 
     let server = axum::Server::try_bind(&preferred_address).or_else(|_| {
-        error!(
+        warn!(
             target: LOG_TARGET,
             "🌐 Failed to bind on preferred address {}. Trying OS-assigned", preferred_address
         );

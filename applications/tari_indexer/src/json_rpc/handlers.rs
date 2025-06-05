@@ -31,21 +31,20 @@ use axum_jrpc::{
 use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use log::{error, info, warn};
 use serde_json::{self as json, json, Value};
-use tari_common_types::types::FixedHash;
 use tari_consensus_types::Decision;
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::hex::to_hex};
 use tari_dan_app_utilities::{keypair::RistrettoKeypair, substate_file_cache::SubstateFileCache};
-use tari_dan_common_types::{optional::Optional, public_key_to_peer_id, Epoch, PeerAddress, SubstateRequirement};
+use tari_dan_common_types::{optional::Optional, public_key_to_peer_id, PeerAddress, SubstateRequirement};
 use tari_dan_engine::{template::TemplateModuleLoader, wasm::WasmModule};
 use tari_dan_p2p::TariMessagingSpec;
 use tari_dan_storage::{
     global::GlobalDb,
     time::{PrimitiveDateTime, UtcDateTime},
 };
-use tari_dan_storage_sqlite::{error::SqliteStorageError, global::SqliteGlobalDbAdapter};
+use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_engine_types::{FromByteType, ToByteType};
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
-use tari_epoch_oracles::{configured::calc_static_epoch_hash, store::StoreKey};
+use tari_epoch_oracles::store::StoreKey;
 use tari_indexer_client::types::{
     self,
     AddPeerRequest,
@@ -512,38 +511,20 @@ impl JsonRpcHandlers {
 
     pub async fn get_epoch_manager_stats(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
-        let current_epoch = self.epoch_manager.current_epoch().await.map_err(|e| {
-            JsonRpcResponse::error(
-                answer_id,
-                JsonRpcError::new(
-                    JsonRpcErrorReason::InternalError,
-                    format!("Could not get current epoch: {}", e),
-                    json::Value::Null,
-                ),
-            )
-        })?;
-        let (current_block_hash, current_block_height) = self
+        let current_epoch = self.epoch_manager.get_current_epoch();
+        let current_epoch_hash = self
+            .epoch_manager
+            .get_current_epoch_hash()
+            .await
+            .map_err(internal_error(answer_id))?;
+
+        let current_block_height = self
             .global_db
             .create_transaction()
             .and_then(|mut tx| {
-                // This pokes into the internals of the oracles a bit. And can give incorrect results if we switch
-                // between them.
-                let current_epoch = self
-                    .global_db
+                self.global_db
                     .metadata(&mut tx)
-                    .get_metadata::<Epoch>(StoreKey::StaticCurrentEpoch.as_key_bytes())?;
-                let block_hash = self
-                    .global_db
-                    .metadata(&mut tx)
-                    .get_metadata::<FixedHash>(StoreKey::BaseLayerLastScannedBlockHash.as_key_bytes())?
-                    .or_else(|| current_epoch.map(calc_static_epoch_hash));
-                let block_height = self
-                    .global_db
-                    .metadata(&mut tx)
-                    .get_metadata::<u64>(StoreKey::BaseLayerLastScannedBlockHeight.as_key_bytes())?
-                    // Just use the epoch here
-                    .or(current_epoch.map(|e| e.as_u64()));
-                Ok::<_, SqliteStorageError>((block_hash.unwrap_or_default(), block_height.unwrap_or_default()))
+                    .get_metadata::<u64>(StoreKey::BaseLayerLastScannedBlockHeight.as_key_bytes())
             })
             .map_err(|e| {
                 JsonRpcResponse::error(
@@ -558,8 +539,8 @@ impl JsonRpcHandlers {
 
         let response = GetEpochManagerStatsResponse {
             current_epoch,
-            current_block_height,
-            current_block_hash,
+            current_block_height: current_block_height.unwrap_or(0),
+            current_block_hash: current_epoch_hash,
         };
         Ok(JsonRpcResponse::success(answer_id, response))
     }

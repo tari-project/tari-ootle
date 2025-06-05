@@ -17,8 +17,8 @@ pub enum StoreKey {
     BaseLayerLastScannedBlockHash,
     BaseLayerLastEpochHash,
     BaseLayerNextBlockHash,
-    StaticIsInitialized,
-    StaticCurrentEpoch,
+    ConfiguredIsInitialized,
+    ConfiguredCurrentEpoch,
 }
 
 impl StoreKey {
@@ -29,8 +29,8 @@ impl StoreKey {
             Self::BaseLayerLastScannedBlockHeight => b"base_layer.last_scanned_block_height",
             Self::BaseLayerLastEpochHash => b"base_layer.last_epoch_hash",
             Self::BaseLayerNextBlockHash => b"base_layer.next_block_hash",
-            Self::StaticIsInitialized => b"configured_oracle.is_initialized",
-            Self::StaticCurrentEpoch => b"configured_oracle.current_epoch",
+            Self::ConfiguredIsInitialized => b"configured_oracle.is_initialized",
+            Self::ConfiguredCurrentEpoch => b"configured_oracle.current_epoch",
         }
     }
 }

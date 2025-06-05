@@ -39,7 +39,7 @@ pub enum EpochOracleType {
 pub struct BaseLayerOracleConfig {
     /// The Tari base node's GRPC URL. If none is specified, http://localhost:{port} will be used where {port} is the network-specific default.
     pub base_node_grpc_url: Option<Url>,
-    /// Interval between base layer scans
+    /// Interval between base layer scans in seconds.
     #[serde(with = "serde_with::duration::seconds")]
     pub scanning_interval: Duration,
 }
@@ -48,7 +48,7 @@ impl Default for BaseLayerOracleConfig {
     fn default() -> Self {
         Self {
             base_node_grpc_url: None,
-            scanning_interval: Duration::from_secs(10),
+            scanning_interval: Duration::from_secs(5),
         }
     }
 }

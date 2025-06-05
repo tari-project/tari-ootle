@@ -3,19 +3,36 @@
 
 use log::*;
 use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle};
+use tokio::sync::watch;
 
-use crate::{base_layer::BaseLayerOracle, configured::ConfiguredEpochOracle, store::EpochOracleStore};
+use crate::{
+    base_layer::BaseLayerOracle,
+    configured::{ConfiguredEpochOracle, EpochTickerData},
+    hybrid::watch_ticker::WatchEpochTicker,
+    store::EpochOracleStore,
+};
 
 const LOG_TARGET: &str = "tari::dan::epoch_oracles::hybrid";
 
 pub struct HybridEpochOracle<TStore> {
-    configured: ConfiguredEpochOracle<TStore>,
+    configured: ConfiguredEpochOracle<TStore, WatchEpochTicker>,
     base_layer: BaseLayerOracle<TStore>,
+    trigger: watch::Sender<EpochTickerData>,
+    has_initial_sync_completed: bool,
 }
 
 impl<TStore: EpochOracleStore + Send + 'static> HybridEpochOracle<TStore> {
-    pub fn new(configured: ConfiguredEpochOracle<TStore>, base_layer: BaseLayerOracle<TStore>) -> Self {
-        Self { configured, base_layer }
+    pub fn new(
+        configured: ConfiguredEpochOracle<TStore, WatchEpochTicker>,
+        base_layer: BaseLayerOracle<TStore>,
+        trigger: watch::Sender<EpochTickerData>,
+    ) -> Self {
+        Self {
+            configured,
+            base_layer,
+            trigger,
+            has_initial_sync_completed: false,
+        }
     }
 
     fn should_emit_configured(&self, event: &EpochEvent) -> bool {
@@ -26,11 +43,11 @@ impl<TStore: EpochOracleStore + Send + 'static> HybridEpochOracle<TStore> {
             EpochEvent::NewValidatorRegistered { .. } |
             EpochEvent::NewValidatorNodeExit { .. } |
             EpochEvent::NewCodeTemplateDownload { .. } |
-            EpochEvent::NewEvictionProof { .. } => true,
-            // These events are handled by the base layer oracle
-            EpochEvent::NewConfidentialOutput { .. } |
             EpochEvent::EpochChanged { .. } |
-            EpochEvent::DoneForNow { .. } => false,
+            EpochEvent::NewEvictionProof { .. } |
+            EpochEvent::DoneForNow { .. } => true,
+            // These events are handled by the base layer oracle
+            EpochEvent::NewConfidentialOutput { .. }  => false
         }
     }
 
@@ -39,9 +56,9 @@ impl<TStore: EpochOracleStore + Send + 'static> HybridEpochOracle<TStore> {
             EpochEvent::Error(_) |
             // Let the base layer oracle handle epoch timing and UTXO events
             EpochEvent::NewConfidentialOutput { .. } |
+            EpochEvent::NewCodeTemplateDownload { .. } => true,
+            EpochEvent::DoneForNow { .. }  |
             EpochEvent::EpochChanged { .. } |
-            EpochEvent::NewCodeTemplateDownload { .. } |
-            EpochEvent::DoneForNow { .. } => true,
             EpochEvent::ActiveValidatorNodeSetChanged { .. } |
             EpochEvent::NewValidatorRegistered { .. } |
             EpochEvent::NewValidatorNodeExit { .. } |
@@ -54,6 +71,8 @@ impl<TStore: EpochOracleStore + Send + 'static> EpochEventOracle for HybridEpoch
     async fn next_epoch_event(&mut self) -> Option<EpochEvent> {
         loop {
             tokio::select! {
+                biased;
+
                 event = self.configured.next_epoch_event() => {
                     let event = event?;
                     debug!(target: LOG_TARGET, "📝 Configured epoch event: {}", event);
@@ -64,6 +83,28 @@ impl<TStore: EpochOracleStore + Send + 'static> EpochEventOracle for HybridEpoch
                 event = self.base_layer.next_epoch_event() => {
                     let event = event?;
                     debug!(target: LOG_TARGET, "⛓️ Base layer epoch event: {}", event);
+                    match event {
+                        // Trigger the watch sender for epoch changes
+                        EpochEvent::EpochChanged { epoch, epoch_hash } => {
+                            let _ignore = self.trigger.send(EpochTickerData {
+                                epoch,
+                                epoch_hash,
+                                done_for_now: self.has_initial_sync_completed,
+                            });
+                        },
+                        EpochEvent::DoneForNow {epoch, epoch_hash} => {
+                            if !self.has_initial_sync_completed {
+                                let _ignore = self.trigger.send(EpochTickerData{
+                                    epoch,
+                                    epoch_hash,
+                                    done_for_now: true,
+                                });
+                                self.has_initial_sync_completed = true;
+                            }
+                        },
+                        // Ignore other events that are not epoch changes
+                        _ => {},
+                    }
                     if self.should_emit_base_layer(&event) {
                         return Some(event);
                     }

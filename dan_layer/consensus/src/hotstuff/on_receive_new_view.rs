@@ -7,6 +7,7 @@ use tari_dan_common_types::{optional::Optional, NodeHeight};
 use tari_dan_storage::{
     consensus_models::{Block, BookkeepingModel},
     StateStore,
+    StateStoreWriteTransaction,
 };
 
 use super::vote_collector::{ProposalVoteCollector, TimeoutVoteCollector};
@@ -104,7 +105,9 @@ where TConsensusSpec: ConsensusSpec
                     .map(|leaf| leaf.height())
                     .unwrap_or_default();
                 return Err(HotStuffError::FallenBehind {
+                    local_epoch: epoch_state.epoch(),
                     local_height,
+                    qc_epoch: high_pc.epoch(),
                     qc_height: high_pc.height(),
                 });
             }
@@ -169,6 +172,8 @@ where TConsensusSpec: ConsensusSpec
         info!(target: LOG_TARGET, "🌟✅ NEWVIEW height {} (high_tc: {}) has reached quorum ({}/{})", timeout_height, high_tc, timeout_certificate.signatures().len(), threshold);
         if timeout_certificate.calculate_id() == *high_tc.id() {
             info!(target: LOG_TARGET, "🕒️ New HIGH TC {}", timeout_certificate);
+            // Clear the last sent new view since we have a new certificate
+            self.store.with_write_tx(|tx| tx.last_sent_new_view_clear())?;
             self.pacemaker.force_beat(high_tc.height());
         } else {
             info!(target: LOG_TARGET, "❓️ New TC from votes {} but it is not the highest TC {}", timeout_certificate, high_tc);

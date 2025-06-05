@@ -27,7 +27,7 @@ use std::{fs, panic, process};
 use clap::Parser;
 use log::*;
 use tari_common::initialize_logging;
-use tari_dan_app_utilities::configuration::load_configuration;
+use tari_dan_app_utilities::{configuration::load_configuration, keypair::setup_keypair_prompt};
 use tari_shutdown::Shutdown;
 use tari_validator_node::{run_validator_node, ApplicationConfig};
 
@@ -79,10 +79,36 @@ async fn main() -> anyhow::Result<()> {
         },
         Some(cli::Subcommand::Start) | None => {
             let shutdown = Shutdown::new();
-            run_validator_node(config, shutdown).await?;
+            let keypair = setup_keypair_prompt(
+                &config.validator_node.identity_file,
+                !config.validator_node.dont_create_id,
+            )?;
+
+            run_validator_node(keypair, config, shutdown).await?;
             info!(target: LOG_TARGET, "Validator node shutdown successfully");
         },
+        Some(cli::Subcommand::GenerateIdentity) => {
+            let keypair = setup_keypair_prompt(
+                &config.validator_node.identity_file,
+                !config.validator_node.dont_create_id,
+            )?;
+
+            info!(
+                target: LOG_TARGET,
+                "Generated identity with public key: {}",
+                keypair.public_key()
+            );
+        },
     }
+
+    let metrics = tokio::runtime::Handle::current().metrics();
+    info!(
+        target: LOG_TARGET,
+        "Tokio runtime metrics: num_alive_tasks={}, num_workers={}, global_queue_depth={}",
+        metrics.num_alive_tasks(),
+        metrics.num_workers(),
+        metrics.global_queue_depth(),
+    );
 
     Ok(())
 }

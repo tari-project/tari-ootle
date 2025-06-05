@@ -379,6 +379,8 @@ pub trait StateStoreWriteTransaction {
     fn leaf_block_set(&mut self, leaf_node: &LeafBlock) -> Result<(), StorageError>;
     fn highest_seen_block_set(&mut self, last_seen_block: &HighestSeenBlock) -> Result<(), StorageError>;
     fn last_sent_new_view_set(&mut self, last_sent_new_view: &LastSentNewView) -> Result<(), StorageError>;
+    /// Clears the last sent new view record for the current epoch. If there is no record, it is a no-op.
+    fn last_sent_new_view_clear(&mut self) -> Result<(), StorageError>;
     fn locked_block_set(&mut self, locked_block: &LockedBlock) -> Result<(), StorageError>;
     fn high_pc_set(&mut self, high_pc: &HighPc) -> Result<(), StorageError>;
     fn high_tc_set(&mut self, high_tc: &HighTc) -> Result<(), StorageError>;

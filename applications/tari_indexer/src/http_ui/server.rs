@@ -29,7 +29,7 @@ use axum::{
     Router,
 };
 use include_dir::{include_dir, Dir};
-use log::{error, info};
+use log::*;
 use url::Url;
 
 const LOG_TARGET: &str = "tari::indexer::web_ui::server";
@@ -51,7 +51,7 @@ pub async fn run_http_ui_server(
 
     info!(target: LOG_TARGET, "🕸️ Web UI started at http://{}", address);
     let server = axum::Server::try_bind(&address).or_else(|_| {
-        error!(
+        warn!(
             target: LOG_TARGET,
             "🕸️ Failed to bind on preferred address {}. Trying OS-assigned", address
         );

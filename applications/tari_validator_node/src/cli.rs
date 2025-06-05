@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Parser;
 use minotari_app_utilities::common_cli_args::CommonCliArgs;
@@ -45,7 +45,9 @@ pub struct Cli {
     #[clap(long, env = "TARI_VN_JSON_RPC_PUBLIC_URL")]
     pub json_rpc_public_url: Option<String>,
     #[clap(long, alias = "node-grpc", short = 'g', env = "TARI_VN_MINOTARI_NODE_GRPC_URL")]
-    pub minotari_node_grpc_url: Option<Url>,
+    pub epoch_oracle_minotari_node_grpc_url: Option<Url>,
+    #[clap(long, alias = "oracle-config")]
+    pub epoch_oracle_config: Option<PathBuf>,
     #[clap(long, short = 's')]
     pub peer_seeds: Vec<String>,
     #[clap(long)]
@@ -106,10 +108,19 @@ impl ConfigOverrideProvider for Cli {
         if self.disable_mdns {
             overrides.push(("validator_node.p2p.enable_mdns".to_string(), "false".to_string()));
         }
-        if let Some(url) = self.minotari_node_grpc_url.as_ref() {
+        if let Some(url) = self.epoch_oracle_minotari_node_grpc_url.as_ref() {
             overrides.push((
                 "epoch_oracle.base_layer.base_node_grpc_url".to_string(),
                 url.to_string(),
+            ));
+        }
+        if let Some(ref config_path) = self.epoch_oracle_config {
+            overrides.push((
+                "epoch_oracle.configured.config_file".to_string(),
+                config_path
+                    .to_str()
+                    .expect("epoch_oracle_config must be a UTF-8 string")
+                    .to_string(),
             ));
         }
         overrides
@@ -122,4 +133,6 @@ pub enum Subcommand {
     Start,
     /// Compact the database and exit
     CompactDb,
+    /// Generate an identity keypair if one does not exist and exit
+    GenerateIdentity,
 }

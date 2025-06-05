@@ -152,7 +152,7 @@ fn load_keypair<P: AsRef<Path>>(path: P) -> Result<RistrettoKeypair, IdentityErr
 ///
 /// ## Returns
 /// Result containing the node identity, string will indicate reason on error
-fn create_new_keypair<P: AsRef<Path>>(path: P) -> Result<RistrettoKeypair, IdentityError> {
+pub fn create_new_keypair<P: AsRef<Path>>(path: P) -> Result<RistrettoKeypair, IdentityError> {
     let node_identity = RistrettoKeypair::random(&mut OsRng);
     save_as_json(&path, &node_identity)?;
     Ok(node_identity)

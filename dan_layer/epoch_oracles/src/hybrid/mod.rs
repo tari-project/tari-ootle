@@ -2,4 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 mod oracle;
+mod watch_ticker;
+
 pub use oracle::*;
+pub use watch_ticker::*;

@@ -423,9 +423,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     .dispatch_hotstuff_message(epoch_state, current_height, from, msg)
                     .await
                 {
-                    self.on_failure("on_unvalidated_message -> dispatch_hotstuff_message", &e)
-                        .await;
-                    return Err(e);
+                    return self.handle_hotstuff_error(epoch_state, None, e).await;
                 }
                 Ok(())
             },
@@ -473,21 +471,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             },
             MessageValidationResult::Discard => Ok(()),
             // In these cases, we want to propagate the error back to the state machine, to allow sync
-            MessageValidationResult::Invalid {
-                err: err @ HotStuffError::FallenBehind { .. },
-                ..
-            } |
-            MessageValidationResult::Invalid {
-                err: err @ HotStuffError::ProposalValidationError(ProposalValidationError::FutureEpoch { .. }),
-                ..
-            } => {
-                self.hooks.on_error(&err);
-                Err(err)
-            },
-            MessageValidationResult::Invalid { err, from, message } => {
-                self.hooks.on_error(&err);
-                error!(target: LOG_TARGET, "🚨 Invalid message from {from}: {err} - {message}");
-                Ok(())
+            MessageValidationResult::Invalid { err, message, from } => {
+                if let HotStuffError::ProposalValidationError(_) = err {
+                    error!(target: LOG_TARGET, "🚨 Invalid message from {from}: {err} - {message}");
+                }
+
+                self.handle_hotstuff_error(epoch_state, None, err).await
             },
         }
     }
@@ -974,22 +963,75 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 // We decided NOVOTE, so we immediately send a NEWVIEW
                 self.on_leader_timeout(epoch_state, current_height).await
             },
-            Err(err @ HotStuffError::ProposalValidationError(ProposalValidationError::JustifyBlockNotFound { .. })) => {
-                let vn = self
-                    .epoch_manager
-                    .get_validator_node_by_public_key(epoch_state.epoch(), proposed_by)
-                    .await?;
+            Err(err) => self.handle_hotstuff_error(epoch_state, Some(proposed_by), err).await,
+        }
+    }
+
+    async fn handle_hotstuff_error(
+        &mut self,
+        local_epoch_state: &EpochState<TConsensusSpec::Addr>,
+        catch_up_from: Option<RistrettoPublicKeyBytes>,
+        err: HotStuffError,
+    ) -> Result<(), HotStuffError> {
+        self.hooks.on_error(&err);
+        let (remote_epoch, remote_height) = match &err {
+            HotStuffError::FallenBehind {
+                qc_epoch, qc_height, ..
+            } => (*qc_epoch, *qc_height),
+            HotStuffError::ProposalValidationError(ProposalValidationError::JustifyBlockNotFound {
+                justify_block,
+                ..
+            }) => (justify_block.epoch(), justify_block.height()),
+            HotStuffError::ProposalValidationError(err) => {
                 warn!(
                     target: LOG_TARGET,
-                    "⚠️This node has fallen behind due to a missing justified block: {err}"
+                    "⚠️ Proposal validation error: {err}."
                 );
-                self.on_catch_up_sync
-                    .request_sync(epoch_state.epoch(), vn.address)
-                    .await?;
-                Ok(())
+                // Failed validations should  not crash consensus
+                return Ok(());
             },
-            Err(err) => Err(err),
+            _ => {
+                // Other errors can pass though
+                return Err(err);
+            },
+        };
+
+        if remote_epoch > local_epoch_state.epoch() {
+            // We are in a future epoch, so we cannot justify this block
+            warn!(
+                target: LOG_TARGET,
+                "❌ Justify block {remote_epoch}/{remote_height} is in a future epoch > current epoch {}. State sync required.",
+                local_epoch_state.epoch()
+            );
+            // Sync
+            return Err(err);
         }
+        // Otherwise, catch up
+        let vn = match catch_up_from {
+            Some(pk) => {
+                self.epoch_manager
+                    .get_validator_node_by_public_key(local_epoch_state.epoch(), pk)
+                    .await?
+            },
+            None => {
+                self.epoch_manager
+                    .get_random_committee_member(
+                        local_epoch_state.epoch(),
+                        Some(local_epoch_state.local_committee_info.shard_group()),
+                        vec![self.local_validator_addr.clone()],
+                    )
+                    .await?
+            },
+        };
+
+        warn!(
+            target: LOG_TARGET,
+            "⚠️This node has fallen behind due to a missing justified block: {err}. Catching up"
+        );
+        self.on_catch_up_sync
+            .request_sync(local_epoch_state.epoch(), vn.address)
+            .await?;
+        Ok(())
     }
 
     fn create_genesis_block_if_required(

@@ -43,6 +43,11 @@ impl<V: Vote + Display> VoteCollector<V> {
         let key = vote.key();
         let vote_display = vote.to_string();
         if !access_mut.save_vote(sender_hash, vote) {
+            debug!(
+                target: LOG_TARGET,
+                "❓️ Received duplicate vote for {}. This could be malicious because a validator should only vote once for the same block.",
+                vote_display,
+            );
             // We already have a vote for this block from this sender
             return None;
         }

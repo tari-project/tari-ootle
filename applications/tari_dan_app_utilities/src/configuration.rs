@@ -96,13 +96,14 @@ pub fn load_configuration_with_overrides<P: AsRef<Path>, TOverride: ConfigOverri
 
 /// Returns the default configuration file template in parts from the embedded presets. If use_mining_config is true,
 /// the base node configuration that enables mining is returned, otherwise the non-mining configuration is returned.
-pub fn get_default_config() -> [&'static str; 5] {
+pub fn get_default_config() -> [&'static str; 6] {
     [
         include_str!("../config_presets/a_common.toml"),
         include_str!("../config_presets/b_peer_seeds.toml"),
         include_str!("../config_presets/c_validator_node.toml"),
         include_str!("../config_presets/d_indexer.toml"),
         include_str!("../config_presets/e_dan_wallet_daemon.toml"),
+        include_str!("../config_presets/f_epoch_oracle.toml"),
     ]
 }
 

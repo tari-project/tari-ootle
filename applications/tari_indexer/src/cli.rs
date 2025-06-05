@@ -20,13 +20,14 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Parser;
 use minotari_app_utilities::common_cli_args::CommonCliArgs;
 use tari_common::configuration::{ConfigOverrideProvider, Network};
 use tari_dan_app_utilities::p2p_config::ReachabilityMode;
 use tari_engine_types::substate::SubstateId;
+use url::Url;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -44,7 +45,10 @@ pub struct Cli {
     /// Bind address for JSON-rpc server
     #[clap(long, short = 'r', alias = "rpc-address")]
     pub json_rpc_address: Option<SocketAddr>,
-
+    #[clap(long, alias = "node-grpc", short = 'g', env = "TARI_INDEXER_MINOTARI_NODE_GRPC_URL")]
+    pub epoch_oracle_minotari_node_grpc_url: Option<Url>,
+    #[clap(long, alias = "oracle-config")]
+    pub epoch_oracle_config: Option<PathBuf>,
     // Networking
     #[clap(long, short = 's')]
     pub peer_seeds: Vec<String>,
@@ -107,6 +111,21 @@ impl ConfigOverrideProvider for Cli {
         }
         if self.disable_mdns {
             overrides.push(("indexer.p2p.enable_mdns".to_string(), "false".to_string()));
+        }
+        if let Some(url) = self.epoch_oracle_minotari_node_grpc_url.as_ref() {
+            overrides.push((
+                "epoch_oracle.base_layer.base_node_grpc_url".to_string(),
+                url.to_string(),
+            ));
+        }
+        if let Some(ref config_path) = self.epoch_oracle_config {
+            overrides.push((
+                "epoch_oracle.configured.config_file".to_string(),
+                config_path
+                    .to_str()
+                    .expect("epoch_oracle_config must be a UTF-8 string")
+                    .to_string(),
+            ));
         }
         overrides
     }

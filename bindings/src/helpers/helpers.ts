@@ -32,9 +32,6 @@ export function substateIdToString(substateId: SubstateId | string | null | unde
   if ("NonFungible" in substateId) {
     return substateId.NonFungible;
   }
-  if ("NonFungibleIndex" in substateId) {
-    return `${substateId.NonFungibleIndex.resource_address}:${substateId.NonFungibleIndex.index}`;
-  }
   if ("TransactionReceipt" in substateId) {
     return substateId.TransactionReceipt;
   }

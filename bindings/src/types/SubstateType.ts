@@ -7,6 +7,5 @@ export type SubstateType =
   | "UnclaimedConfidentialOutput"
   | "NonFungible"
   | "TransactionReceipt"
-  | "NonFungibleIndex"
   | "ValidatorFeePool"
   | "Template";

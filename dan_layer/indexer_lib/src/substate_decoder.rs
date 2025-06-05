@@ -63,11 +63,6 @@ pub fn find_related_substates(substate: &Substate) -> Result<Vec<SubstateId>, In
             }
             Ok(related_substates)
         },
-        SubstateValue::NonFungibleIndex(index) => {
-            // by definition a non fungible index always holds a reference to a non fungible substate
-            let substate_address = SubstateId::NonFungible(index.referenced_address().clone());
-            Ok(vec![substate_address])
-        },
         SubstateValue::Vault(vault) => Ok(vec![SubstateId::Resource(*vault.resource_address())]),
         SubstateValue::Resource(resource) => Ok(resource
             .auth_hook()

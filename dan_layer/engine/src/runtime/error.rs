@@ -343,9 +343,4 @@ pub enum TransactionCommitError {
     StateStoreError(#[from] StateStoreError),
     #[error(transparent)]
     IdProviderError(#[from] IdProviderError),
-    #[error("trying to mutate non fungible index of resource {resource_address} at index {index}")]
-    NonFungibleIndexMutation {
-        resource_address: ResourceAddress,
-        index: u64,
-    },
 }

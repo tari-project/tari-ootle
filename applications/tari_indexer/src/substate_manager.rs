@@ -173,24 +173,4 @@ impl SubstateManager {
         let count = tx.get_non_fungible_count(address_str)?;
         Ok(count as u64)
     }
-
-    pub async fn get_non_fungibles(
-        &self,
-        substate_id: &SubstateId,
-        start_index: u64,
-        end_index: u64,
-    ) -> Result<Vec<NonFungibleResponse>, anyhow::Error> {
-        let non_fungibles = if let SubstateId::Resource(addr) = substate_id {
-            self.substate_scanner
-                .get_non_fungibles(addr, start_index, Some(end_index))
-                .await?
-                .into_iter()
-                .map(Into::into)
-                .collect()
-        } else {
-            vec![]
-        };
-
-        Ok(non_fungibles)
-    }
 }

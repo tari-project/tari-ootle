@@ -141,7 +141,7 @@ pub async fn create_component(
 
 pub(crate) fn add_substate_ids(world: &mut TariWorld, outputs_name: String, diff: &SubstateDiff) {
     let outputs = world.outputs.entry(outputs_name).or_default();
-    let mut counters = [0usize, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut counters = [0usize; 8];
     for (addr, data) in diff.up_iter() {
         match addr {
             SubstateId::Component(_) => {
@@ -180,33 +180,26 @@ pub(crate) fn add_substate_ids(world: &mut TariWorld, outputs_name: String, diff
                 });
                 counters[4] += 1;
             },
-            SubstateId::NonFungibleIndex(_) => {
-                outputs.insert(format!("nft_indexes/{}", counters[5]), SubstateRequirement {
+            SubstateId::TransactionReceipt(_) => {
+                outputs.insert(format!("transaction_receipt/{}", counters[5]), SubstateRequirement {
                     substate_id: addr.clone(),
                     version: Some(data.version()),
                 });
                 counters[5] += 1;
             },
-            SubstateId::TransactionReceipt(_) => {
-                outputs.insert(format!("transaction_receipt/{}", counters[6]), SubstateRequirement {
+            SubstateId::Template(_) => {
+                outputs.insert(format!("published_template/{}", counters[6]), SubstateRequirement {
                     substate_id: addr.clone(),
                     version: Some(data.version()),
                 });
                 counters[6] += 1;
             },
-            SubstateId::Template(_) => {
-                outputs.insert(format!("published_template/{}", counters[8]), SubstateRequirement {
+            SubstateId::ValidatorFeePool(_) => {
+                outputs.insert(format!("validator_fee_pool/{}", counters[7]), SubstateRequirement {
                     substate_id: addr.clone(),
                     version: Some(data.version()),
                 });
                 counters[7] += 1;
-            },
-            SubstateId::ValidatorFeePool(_) => {
-                outputs.insert(format!("validator_fee_pool/{}", counters[8]), SubstateRequirement {
-                    substate_id: addr.clone(),
-                    version: Some(data.version()),
-                });
-                counters[8] += 1;
             },
         }
     }

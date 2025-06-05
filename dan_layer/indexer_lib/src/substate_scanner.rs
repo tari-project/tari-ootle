@@ -24,13 +24,11 @@ use log::*;
 use tari_dan_common_types::{displayable::Displayable, NodeAddressable, SubstateRequirementRef, ToSubstateAddress};
 use tari_engine_types::substate::SubstateId;
 use tari_epoch_manager::EpochManagerReader;
-use tari_template_lib::{models::NonFungibleIndexAddress, prelude::ResourceAddress};
 use tari_validator_node_rpc::client::{SubstateResult, ValidatorNodeClientFactory, ValidatorNodeRpcClient};
 
 use crate::{
     error::IndexerError,
     substate_cache::{SubstateCache, SubstateCacheEntry},
-    NonFungibleSubstate,
 };
 
 const LOG_TARGET: &str = "tari::indexer::dan_layer_scanner";
@@ -59,63 +57,6 @@ where
             validator_node_client_factory,
             substate_cache,
         }
-    }
-
-    pub async fn get_non_fungibles(
-        &self,
-        resource_address: &ResourceAddress,
-        start_index: u64,
-        end_index: Option<u64>,
-    ) -> Result<Vec<NonFungibleSubstate>, IndexerError> {
-        let mut nft_substates = vec![];
-        let mut index = start_index;
-
-        loop {
-            // build the address of the nft index substate
-            let index_address = NonFungibleIndexAddress::new(*resource_address, index);
-            let index_substate_address = SubstateId::NonFungibleIndex(index_address);
-
-            // get the nft index substate from the network
-            // nft index substates are immutable, so they are always on version 0
-            let index_substate_result = self
-                .get_specific_substate_from_committee(SubstateRequirementRef::versioned(&index_substate_address, 0))
-                .await?;
-            let index_substate = match index_substate_result {
-                SubstateResult::Up { substate, .. } => substate.into_substate_value(),
-                _ => break,
-            };
-
-            // now that we have the index substate, we need the latest substate of the referenced nft
-            let nft_address = match index_substate.into_non_fungible_index() {
-                Some(idx) => idx.referenced_address().clone(),
-                // the protocol should never produce this scenario, we stop querying for more indexes if it happens
-                None => {
-                    error!(target: LOG_TARGET, "NonFungibleIndex substate {} does not contain a referenced address", index_substate_address);
-                    break;
-                },
-            };
-            let nft_id = SubstateId::NonFungible(nft_address);
-            let SubstateResult::Up { substate, .. } = self.get_latest_substate_from_committee(&nft_id, None).await?
-            else {
-                break;
-            };
-
-            nft_substates.push(NonFungibleSubstate {
-                index,
-                address: nft_id,
-                substate: *substate,
-            });
-
-            if let Some(end_index) = end_index {
-                if index >= end_index {
-                    break;
-                }
-            }
-
-            index += 1;
-        }
-
-        Ok(nft_substates)
     }
 
     /// Attempts to find the latest substate for the given address. If the lowest possible version is known, it can be

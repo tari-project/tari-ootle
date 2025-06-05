@@ -21,10 +21,14 @@ pub struct Ownership<'a> {
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub enum OwnerRule {
+    /// The owner is the signer of the transaction that created the value
     #[default]
     OwnedBySigner,
+    /// There is no owner, only access rules apply
     None,
+    /// The owner is anyone who satisfies an access rule
     ByAccessRule(AccessRule),
+    /// The owner is a specific public key
     ByPublicKey(#[cfg_attr(feature = "ts", ts(type = "Array<number>"))] RistrettoPublicKeyBytes),
 }
 

@@ -47,7 +47,7 @@ fn with_context<R, F: FnOnce(&mut Option<SystemContext>) -> R>(_f: F) -> R {
     panic!("System context is not available on non-WASM targets");
 }
 
-/// TODO: YAGNI currently, it may come into play for cross-template requests
+/// TODO: YAGNI currently
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AbiContext {}
 

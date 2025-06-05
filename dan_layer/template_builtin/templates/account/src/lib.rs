@@ -45,9 +45,11 @@ mod account_template {
                 .to_public_key()
                 .unwrap_or_else(|| panic!("public_key_token is not a valid public key: {}", public_key_token));
 
+            // The owner of this account is either provided explicitly or defaults to the provided public key.
             let owner_rule = owner_rule.unwrap_or(OwnerRule::ByPublicKey(public_key));
 
             let access_rules = access_rules.unwrap_or(
+                // By default, allow deposits from anyone
                 AccessRules::new()
                     .add_method_rule("balance", rule!(allow_all))
                     .add_method_rule("get_balances", rule!(allow_all))
@@ -55,7 +57,7 @@ mod account_template {
                     .add_method_rule("deposit_all", rule!(allow_all))
                     .add_method_rule("get_non_fungible_ids", rule!(allow_all))
                     // By default, only the owner of the token will be able to withdraw funds from the account
-                    .default(rule!(non_fungible(public_key_token))),
+                    .default(rule!(deny_all)),
             );
 
             // add the funds from the (optional) bucket

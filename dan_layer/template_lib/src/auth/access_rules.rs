@@ -15,8 +15,11 @@ use crate::models::{ComponentAddress, NonFungibleAddress, ResourceAddress};
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub enum AccessRule {
+    /// AccessRule always passes
     AllowAll,
+    /// AccessRule always fails
     DenyAll,
+    /// AccessRule that requires a specific condition to be met
     Restricted(RestrictedAccessRule),
 }
 
@@ -50,8 +53,11 @@ impl AccessRule {
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub enum RestrictedAccessRule {
+    /// Requires a specific condition to be met
     Require(RequireRule),
+    /// Requires any of the specified conditions to be met (logical OR)
     AnyOf(Vec<RestrictedAccessRule>),
+    /// Requires all of the specified conditions to be met (logical AND)
     AllOf(Vec<RestrictedAccessRule>),
 }
 
@@ -107,7 +113,7 @@ impl From<TemplateAddress> for RuleRequirement {
     }
 }
 
-/// An enum that represents the possible ways to require access to components or resources
+/// A rule requiring specific condition(s) to be met
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(
     feature = "ts",
@@ -115,8 +121,11 @@ impl From<TemplateAddress> for RuleRequirement {
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub enum RequireRule {
+    /// Requires a specific condition to be met
     Require(RuleRequirement),
+    /// Requires any of the specified conditions to be met (logical OR)
     AnyOf(Vec<RuleRequirement>),
+    /// Requires all of the specified conditions to be met (logical AND)
     AllOf(Vec<RuleRequirement>),
 }
 
@@ -309,6 +318,43 @@ impl Default for ResourceAccessRules {
     }
 }
 
+/// A macro to build access rules for components and resources.
+///
+/// It allows for defining rules such as `allow_all`, `deny_all`, and more complex rules using `any_of` and `all_of`
+/// constructs.
+///
+/// # Examples:
+///
+/// ```rust
+/// use tari_template_lib::rule;
+/// // Allow all access
+/// let allow_all_rule = rule!(allow_all);
+/// // Deny all access
+/// let deny_all_rule = rule!(deny_all);
+/// // Restricted access to a specific resource
+/// let resource_address = tari_template_lib::models::ResourceAddress::new(
+///     tari_template_lib::types::ObjectKey::default(),
+/// );
+/// let resource_rule = rule!(resource(resource_address));
+/// // Restricted access to a component
+/// let component_address = tari_template_lib::models::ComponentAddress::new(
+///     tari_template_lib::types::ObjectKey::default(),
+/// );
+/// let component_rule = rule!(component(component_address));
+/// // Restricted access to a template
+/// let template_address = tari_template_lib::types::TemplateAddress::default();
+/// let template_rule = rule!(template(template_address));
+/// // Restricted access to a non-fungible token
+/// let non_fungible_address = tari_template_lib::models::NonFungibleAddress::from_public_key(
+///     tari_template_lib::types::crypto::RistrettoPublicKeyBytes::default(),
+/// );
+/// let non_fungible_rule = rule!(non_fungible(non_fungible_address));
+/// // Complex rules using `any_of` and `all_of`
+/// let complex_rule = rule!(any_of(
+///     component(component_address),
+///     resource(resource_address)
+/// ));
+/// ```
 #[macro_export]
 macro_rules! rule {
     (allow_all) => {

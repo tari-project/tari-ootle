@@ -1,29 +1,31 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use prometheus::{IntCounter, Registry};
+use prometheus_client::{metrics::counter::Counter, registry::Registry};
 use tari_transaction::{Transaction, TransactionId};
 
 use crate::metrics::CollectorRegister;
 
 #[derive(Debug, Clone)]
 pub struct PrometheusMempoolMetrics {
-    transactions_received: IntCounter,
-    transaction_validation_error: IntCounter,
+    transactions_received: Counter,
+    transaction_validation_error: Counter,
 }
 
 impl PrometheusMempoolMetrics {
-    pub fn new(registry: &Registry) -> Self {
+    pub fn new(registry: &mut Registry) -> Self {
+        let registry = registry.sub_registry_with_prefix("mempool");
         Self {
-            transactions_received: IntCounter::new("mempool_transactions_received", "Number of transactions received")
-                .unwrap()
-                .register_at(registry),
-            transaction_validation_error: IntCounter::new(
-                "mempool_transaction_validation_error",
+            transactions_received: Counter::default().register_at(
+                "transactions_received",
+                "Number of transactions received",
+                registry,
+            ),
+            transaction_validation_error: Counter::default().register_at(
+                "transaction_validation_error",
                 "Number of transaction validation errors",
-            )
-            .unwrap()
-            .register_at(registry),
+                registry,
+            ),
         }
     }
 

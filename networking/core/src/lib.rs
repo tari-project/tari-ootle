@@ -15,22 +15,24 @@ mod worker;
 mod error;
 pub use error::NetworkingError;
 
+mod builder;
 mod config;
 mod connection;
 mod event;
 mod global_ip;
 mod handle;
 mod message;
+mod message_mode;
 mod notify;
 mod peer;
 mod relay_state;
-mod spawn;
 
+pub use builder::Builder;
 pub use config::*;
 pub use connection::*;
 pub use handle::*;
 pub use message::*;
-pub use spawn::*;
+pub use message_mode::*;
 pub use tari_swarm::{
     config::{Config as SwarmConfig, LimitPerInterval, RelayCircuitLimits, RelayReservationLimits},
     identity::PeerId,

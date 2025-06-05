@@ -122,7 +122,7 @@ pub async fn spawn_services(
     keypair: RistrettoKeypair,
     global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     consensus_constants: ConsensusConstants,
-    #[cfg(feature = "metrics")] metrics_registry: &prometheus::Registry,
+    #[cfg(feature = "metrics")] metrics_registry: &mut prometheus_client::registry::Registry,
 ) -> Result<Services<ValidatorNodeStateStore>, anyhow::Error> {
     let mut handles = Vec::with_capacity(10);
 
@@ -157,13 +157,13 @@ pub async fn spawn_services(
             p.addresses.into_iter().map(move |a| (peer_id, a))
         })
         .collect();
-    let (mut networking, join_handle) = tari_networking::spawn(
-        identity,
-        MessagingMode::Enabled {
+    #[allow(unused_mut)]
+    let mut network_builder = tari_networking::Builder::<TariMessagingSpec>::new(identity)
+        .with_messaging_mode(MessagingMode::Enabled {
             tx_messages: tx_consensus_messages,
             tx_gossip_messages_by_topic,
-        },
-        tari_networking::Config {
+        })
+        .with_config(tari_networking::Config {
             listener_port: config.validator_node.p2p.listener_port,
             swarm: SwarmConfig {
                 protocol_version: format!("/tari/{}/0.0.1", config.network).parse().unwrap(),
@@ -178,10 +178,14 @@ pub async fn spawn_services(
             reachability_mode: config.validator_node.p2p.reachability_mode.into(),
             announce: true,
             ..Default::default()
-        },
-        seed_peers,
-        shutdown.clone(),
-    )?;
+        })
+        .with_seed_peers(seed_peers);
+
+    #[cfg(feature = "metrics")]
+    {
+        network_builder = network_builder.with_metrics_registry(metrics_registry);
+    }
+    let (mut networking, join_handle) = network_builder.spawn(shutdown.clone())?;
     handles.push(join_handle);
 
     info!(target: LOG_TARGET, "Message logging initializing");
@@ -300,7 +304,9 @@ pub async fn spawn_services(
     );
 
     #[cfg(feature = "metrics")]
-    let metrics = PrometheusConsensusMetrics::new(state_store.clone(), metrics_registry);
+    let tari_metrics_registry = metrics_registry.sub_registry_with_prefix("tari");
+    #[cfg(feature = "metrics")]
+    let metrics = PrometheusConsensusMetrics::register(tari_metrics_registry);
     #[cfg(not(feature = "metrics"))]
     let metrics = NoopHooks;
 
@@ -333,7 +339,7 @@ pub async fn spawn_services(
         networking.clone(),
         rx_transaction_gossip_messages,
         #[cfg(feature = "metrics")]
-        metrics_registry,
+        tari_metrics_registry,
     );
     handles.push(join_handle);
 

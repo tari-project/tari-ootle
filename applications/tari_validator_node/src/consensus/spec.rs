@@ -35,7 +35,7 @@ impl ConsensusSpec for TariConsensusSpec {
     #[cfg(not(feature = "metrics"))]
     type Hooks = NoopHooks;
     #[cfg(feature = "metrics")]
-    type Hooks = PrometheusConsensusMetrics<Self::StateStore>;
+    type Hooks = PrometheusConsensusMetrics;
     type InboundMessaging = ConsensusInboundMessaging<NopLogger>;
     type LeaderStrategy = RoundRobinLeaderStrategy;
     type OutboundMessaging = ConsensusOutboundMessaging<NopLogger>;

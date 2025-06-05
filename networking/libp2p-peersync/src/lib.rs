@@ -23,6 +23,8 @@ pub mod error;
 mod event;
 mod handler;
 mod inbound_task;
+#[cfg(feature = "metrics")]
+pub mod metrics;
 mod outbound_task;
 mod peer_record;
 pub mod proto;

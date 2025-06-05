@@ -112,7 +112,10 @@ pub async fn run_validator_node(
     );
 
     #[cfg(feature = "metrics")]
-    let metrics_registry = create_metrics_registry(keypair.public_key());
+    let mut base_registry = prometheus_client::registry::Registry::default();
+
+    #[cfg(feature = "metrics")]
+    let metrics_registry = create_metrics_registry(keypair.public_key(), &mut base_registry);
 
     let consensus_constants = ConsensusConstants::from(config.network);
     let services = spawn_services(
@@ -122,7 +125,7 @@ pub async fn run_validator_node(
         global_db,
         consensus_constants,
         #[cfg(feature = "metrics")]
-        &metrics_registry,
+        metrics_registry,
     )
     .await?;
     let info = services.networking.get_local_peer_info().await?;
@@ -137,7 +140,7 @@ pub async fn run_validator_node(
             *jrpc_address,
             handlers,
             #[cfg(feature = "metrics")]
-            metrics_registry,
+            base_registry,
         )?;
         // Run the web ui
         #[cfg(feature = "web_ui")]
@@ -170,11 +173,18 @@ pub async fn run_validator_node(
 }
 
 #[cfg(feature = "metrics")]
-fn create_metrics_registry(public_key: &tari_crypto::ristretto::RistrettoPublicKey) -> prometheus::Registry {
-    let mut labels = std::collections::HashMap::with_capacity(2);
-    labels.insert("app".to_string(), "ValidatorNode".to_string());
-    labels.insert("public_key".to_string(), public_key.to_string());
-    prometheus::Registry::new_custom(Some("tari".to_string()), Some(labels)).unwrap()
+fn create_metrics_registry<'a>(
+    public_key: &tari_crypto::ristretto::RistrettoPublicKey,
+    registry_mut: &'a mut prometheus_client::registry::Registry,
+) -> &'a mut prometheus_client::registry::Registry {
+    use std::borrow::Cow;
+    registry_mut.sub_registry_with_labels(
+        [
+            (Cow::Borrowed("app"), Cow::Borrowed("ValidatorNode")),
+            (Cow::Borrowed("public_key"), Cow::Owned(public_key.to_string())),
+        ]
+        .into_iter(),
+    )
 }
 
 pub struct ValidatorNodeEpochManagerSpec;

@@ -6,13 +6,15 @@ scrape_configs:
     scrape_interval: 5s
     metrics_path: "/_metrics"
     static_configs:
-      - targets: ['host.docker.internal:18200']
+      # Configure prometheus to scrape http://localhost:{my_json_rpc_port}/_metrics. By default the VN's JSON-RPC server listens on port 18200.
+      - targets: [ 'host.docker.internal:12005' ]
 
-  #- job_name: 'node'
-    #static_configs:
+      #- job_name: 'node'
+      #static_configs:
       #- targets: ['node-exporter:9100']
 
 remote_write:
+  #  - url: 'http://host.docker.internal:3000'
   - url: 'http://grafana:3000'
     basic_auth:
       username: 'admin'

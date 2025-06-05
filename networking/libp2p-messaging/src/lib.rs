@@ -8,6 +8,8 @@ pub mod error;
 mod event;
 mod handler;
 mod message;
+#[cfg(feature = "metrics")]
+pub mod metrics;
 mod stream;
 
 pub use behaviour::*;

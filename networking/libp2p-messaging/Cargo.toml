@@ -14,7 +14,9 @@ prost = { workspace = true, optional = true }
 smallvec = { workspace = true }
 futures-bounded = { workspace = true }
 tracing = { workspace = true }
+prometheus-client = { workspace = true, optional = true }
 
 [features]
 default = []
 prost = ["dep:prost"]
+metrics = ["prometheus-client"]

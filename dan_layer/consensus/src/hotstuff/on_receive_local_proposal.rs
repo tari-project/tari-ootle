@@ -410,8 +410,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             }
         }
 
-        self.hooks
-            .on_local_block_decide(&valid_block, block_decision.quorum_decision);
+        self.hooks.on_local_block_committed(&valid_block);
         let (num_committed, num_aborted) =
             block_decision
                 .finalized_transactions

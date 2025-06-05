@@ -124,6 +124,8 @@ pub struct InstanceConfig {
     pub num_instances: u32,
     #[serde(alias = "extra_args")]
     pub settings: HashMap<String, String>,
+    #[serde(default)]
+    pub envs: Vec<(String, String)>,
 }
 
 impl InstanceConfig {
@@ -135,6 +137,7 @@ impl InstanceConfig {
             instance_type,
             num_instances: 1,
             settings: HashMap::new(),
+            envs: Vec::new(),
         }
     }
 
@@ -230,7 +233,6 @@ pub struct ExecutableConfig {
     pub instance_type: InstanceType,
     pub execuable_path: Option<PathBuf>,
     pub compile: Option<CompileConfig>,
-    pub env: Vec<(String, String)>,
 }
 
 impl ExecutableConfig {
@@ -248,6 +250,8 @@ pub struct CompileConfig {
     pub target_dir: Option<PathBuf>,
     #[serde(default)]
     pub features: Vec<String>,
+    #[serde(default)]
+    pub envs: Vec<(String, String)>,
 }
 
 impl CompileConfig {

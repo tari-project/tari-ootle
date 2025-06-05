@@ -35,11 +35,11 @@ use crate::cli::Cli;
 
 const LOG_TARGET: &str = "tari::validator_node::app";
 
+#[cfg(feature = "tokio_debug")]
+const DEBUG_PORT: u16 = console_subscriber::Server::DEFAULT_PORT;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Uncomment to enable tokio tracing via tokio-console
-    // console_subscriber::init();
-
     // Setup a panic hook which prints the default rust panic message but also exits the process. This makes a panic in
     // any thread "crash" the system instead of silently continuing.
     let default_hook = panic::take_hook();
@@ -49,6 +49,15 @@ async fn main() -> anyhow::Result<()> {
     }));
 
     let cli = Cli::parse();
+    // enable tokio tracing via tokio-console
+    #[cfg(feature = "tokio_debug")]
+    console_subscriber::Builder::default()
+        .server_addr((
+            std::net::Ipv4Addr::LOCALHOST,
+            cli.tokio_console_port.unwrap_or(DEBUG_PORT),
+        ))
+        .init();
+
     let config_path = cli.common.config_path();
     let cfg = load_configuration(config_path, true, &cli, cli.common.network)?;
     let config = ApplicationConfig::load_from(&cfg)?;

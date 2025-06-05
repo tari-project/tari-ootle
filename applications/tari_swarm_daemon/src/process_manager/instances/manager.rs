@@ -97,6 +97,7 @@ impl InstanceManager {
                     instance.instance_type,
                     instance.instance_name(i),
                     instance.base_path_override().cloned(),
+                    instance.envs.clone(),
                     settings.clone(),
                 )
                 .await?;
@@ -111,6 +112,7 @@ impl InstanceManager {
         instance_type: InstanceType,
         instance_name: String,
         base_path_override: Option<PathBuf>,
+        envs: Vec<(String, String)>,
         settings: HashMap<String, String>,
     ) -> anyhow::Result<InstanceId> {
         let instance_id = self.next_instance_id();
@@ -120,6 +122,7 @@ impl InstanceManager {
             instance_type,
             instance_name,
             base_path_override,
+            envs,
             settings,
             None,
         )
@@ -134,6 +137,7 @@ impl InstanceManager {
         instance_type: InstanceType,
         instance_name: String,
         base_path_override: Option<PathBuf>,
+        instance_envs: Vec<(String, String)>,
         mut instance_settings: HashMap<String, String>,
         ports: Option<AllocatedPorts>,
     ) -> anyhow::Result<InstanceId> {
@@ -191,7 +195,7 @@ impl InstanceManager {
         let context = ProcessContext::new(
             instance_id,
             &executable.path,
-            &executable.env,
+            &instance_envs,
             base_path.clone(),
             processes_path,
             self.network,
@@ -238,6 +242,7 @@ impl InstanceManager {
             // This saves us from having to join the network string to the path all over the place, since everything we
             // want is under {base_dir}/{network}
             base_path.join(self.network.to_string()),
+            instance_envs,
             instance_settings,
         );
 
@@ -356,6 +361,7 @@ impl InstanceManager {
         let instance_name = instance.name().to_string();
         let settings = instance.settings().clone();
         let ports = instance.allocated_ports().clone();
+        let envs = instance.envs().to_vec();
 
         // This will just overwrite the previous instance
         self.fork(
@@ -364,6 +370,7 @@ impl InstanceManager {
             instance_type,
             instance_name,
             None,
+            envs,
             settings,
             Some(ports),
         )

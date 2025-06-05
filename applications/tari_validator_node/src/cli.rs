@@ -61,6 +61,8 @@ pub struct Cli {
     /// FOR DEBUGGING PURPOSES ONLY
     #[clap(long, short = 'd')]
     pub debug_templates: Vec<String>,
+    #[clap(long, env = "TARI_VN_TOKIO_CONSOLE_PORT")]
+    pub tokio_console_port: Option<u16>,
     #[clap(subcommand)]
     pub command: Option<Subcommand>,
 }

@@ -4,7 +4,7 @@
 use std::{cmp, fs::File, io::Write, time::Duration};
 
 use anyhow::bail;
-use tari_dan_common_types::optional::Optional;
+use tari_ootle_common_types::optional::Optional;
 use tari_transaction::TransactionId;
 use tari_validator_node_client::{
     types::{GetTransactionResultRequest, SubmitTransactionRequest, SubmitTransactionResponse},

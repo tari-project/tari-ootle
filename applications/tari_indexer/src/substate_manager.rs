@@ -24,12 +24,12 @@ use std::{convert::TryInto, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
-use tari_dan_app_utilities::substate_file_cache::SubstateFileCache;
-use tari_dan_common_types::{substate_type::SubstateType, PeerAddress, VersionedSubstateIdRef};
 use tari_engine_types::substate::{Substate, SubstateId, SubstateValue};
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_indexer_client::types::ListSubstateItem;
 use tari_indexer_lib::{substate_scanner::SubstateScanner, NonFungibleSubstate};
+use tari_ootle_app_utilities::substate_file_cache::SubstateFileCache;
+use tari_ootle_common_types::{substate_type::SubstateType, PeerAddress, VersionedSubstateIdRef};
 use tari_template_lib::{models::ResourceAddress, types::TemplateAddress};
 use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClientFactory};
 
@@ -77,13 +77,13 @@ pub struct SubstateManager {
 
 impl SubstateManager {
     pub fn new(
-        dan_layer_scanner: Arc<
+        substate_scanner: Arc<
             SubstateScanner<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SubstateFileCache>,
         >,
         substate_store: SqliteSubstateStore,
     ) -> Self {
         Self {
-            substate_scanner: dan_layer_scanner,
+            substate_scanner,
             substate_store,
         }
     }

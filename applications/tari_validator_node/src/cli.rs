@@ -26,7 +26,7 @@ use clap::Parser;
 use minotari_app_utilities::common_cli_args::CommonCliArgs;
 use reqwest::Url;
 use tari_common::configuration::{ConfigOverrideProvider, Network};
-use tari_dan_app_utilities::p2p_config::ReachabilityMode;
+use tari_ootle_app_utilities::p2p_config::ReachabilityMode;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]

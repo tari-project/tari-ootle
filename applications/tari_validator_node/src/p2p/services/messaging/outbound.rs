@@ -24,14 +24,14 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tari_consensus::{messages::HotstuffMessage, traits::OutboundMessagingError};
-use tari_dan_common_types::{PeerAddress, ShardGroup};
-use tari_dan_p2p::{proto, TariMessagingSpec};
 use tari_networking::{NetworkingHandle, NetworkingService};
+use tari_ootle_common_types::{PeerAddress, ShardGroup};
+use tari_ootle_p2p::{proto, TariMessagingSpec};
 use tokio::sync::mpsc;
 
 use crate::p2p::{logging::MessageLogger, services::consensus_gossip::ConsensusGossipHandle};
 
-const _LOG_TARGET: &str = "tari::dan::messages::outbound::validator_node";
+const _LOG_TARGET: &str = "tari::ootle::messages::outbound::validator_node";
 
 #[derive(Debug, Clone)]
 pub struct ConsensusOutboundMessaging<TMsgLogger> {

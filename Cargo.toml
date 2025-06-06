@@ -9,9 +9,9 @@ license = "BSD-3-Clause"
 
 [workspace]
 members = [
-    "applications/tari_dan_app_utilities",
-    "applications/tari_dan_wallet_cli",
-    "applications/tari_dan_wallet_daemon",
+    "applications/tari_app_utilities",
+    "applications/tari_wallet_cli",
+    "applications/tari_walletd",
     "applications/tari_generate",
     "applications/tari_indexer",
     "applications/tari_scaffolder",
@@ -24,33 +24,33 @@ members = [
     "clients/tari_indexer_client",
     "clients/validator_node_client",
     "clients/wallet_daemon_client",
-    "dan_layer/epoch_oracles",
-    "dan_layer/consensus",
-    "dan_layer/consensus_tests",
-    "dan_layer/consensus_types",
-    "dan_layer/epoch_manager",
-    "dan_layer/indexer_lib",
-    "dan_layer/p2p",
-    "dan_layer/rpc_state_sync",
-    "dan_layer/state_store_rocksdb",
-    "dan_layer/state_tree",
-    "dan_layer/storage_sqlite",
-    "dan_layer/storage",
-    "dan_layer/state_store_tests",
-    "dan_layer/tari_bor",
-    "dan_layer/template_abi",
-    "dan_layer/template_builtin",
-    "dan_layer/template_lib",
-    "dan_layer/template_lib_types",
-    "dan_layer/template_macros",
-    "dan_layer/template_manager",
-    "dan_layer/template_test_tooling",
-    "dan_layer/transaction_manifest",
-    "dan_layer/transaction",
-    "dan_layer/validator_node_rpc",
-    "dan_layer/wallet/crypto",
-    "dan_layer/wallet/sdk",
-    "dan_layer/wallet/storage_sqlite",
+    "crates/epoch_oracles",
+    "crates/consensus",
+    "crates/consensus_tests",
+    "crates/consensus_types",
+    "crates/epoch_manager",
+    "crates/indexer_lib",
+    "crates/p2p",
+    "crates/rpc_state_sync",
+    "crates/state_store_rocksdb",
+    "crates/state_tree",
+    "crates/storage_sqlite",
+    "crates/storage",
+    "crates/state_store_tests",
+    "crates/tari_bor",
+    "crates/template_abi",
+    "crates/template_builtin",
+    "crates/template_lib",
+    "crates/template_lib_types",
+    "crates/template_macros",
+    "crates/template_manager",
+    "crates/template_test_tooling",
+    "crates/transaction_manifest",
+    "crates/transaction",
+    "crates/validator_node_rpc",
+    "crates/wallet/crypto",
+    "crates/wallet/sdk",
+    "crates/wallet/storage_sqlite",
     "integration_tests",
     "networking/core",
     "networking/swarm",
@@ -72,10 +72,41 @@ resolver = "2"
 # specifying them in a single place and having them applied to all crates
 
 # apps
-tari_dan_wallet_daemon = { path = "applications/tari_dan_wallet_daemon", default-features = false }
+tari_ootle_walletd = { path = "applications/tari_walletd", default-features = false }
 tari_validator_node = { path = "applications/tari_validator_node", default-features = false }
 tari_validator_node_cli = { path = "applications/tari_validator_node_cli" }
 tari_indexer = { path = "applications/tari_indexer", default-features = false }
+tari_ootle_app_utilities = { path = "applications/tari_app_utilities" }
+
+# core crates
+tari_bor = { path = "crates/tari_bor", default-features = false }
+tari_consensus = { path = "crates/consensus" }
+tari_consensus_types = { path = "crates/consensus_types" }
+tari_ootle_common_types = { path = "crates/common_types" }
+tari_engine = { path = "crates/engine" }
+tari_ootle_p2p = { path = "crates/p2p" }
+tari_ootle_storage = { path = "crates/storage" }
+tari_ootle_storage_sqlite = { path = "crates/storage_sqlite" }
+tari_ootle_wallet_crypto = { path = "crates/wallet/crypto" }
+tari_ootle_wallet_sdk = { path = "crates/wallet/sdk" }
+tari_ootle_wallet_storage_sqlite = { path = "crates/wallet/storage_sqlite" }
+tari_engine_types = { path = "crates/engine_types" }
+tari_epoch_manager = { path = "crates/epoch_manager" }
+tari_epoch_oracles = { path = "crates/epoch_oracles" }
+tari_indexer_lib = { path = "crates/indexer_lib" }
+tari_rpc_state_sync = { path = "crates/rpc_state_sync" }
+tari_state_store_rocksdb = { path = "crates/state_store_rocksdb" }
+tari_state_tree = { path = "crates/state_tree" }
+tari_template_abi = { version = "0.10.0", path = "crates/template_abi", default-features = false }
+tari_template_builtin = { path = "crates/template_builtin" }
+tari_template_lib = { path = "crates/template_lib" }
+tari_template_lib_types = { path = "crates/template_lib_types" }
+tari_template_macros = { version = "0.10", path = "crates/template_macros" }
+tari_template_manager = { path = "crates/template_manager" }
+tari_template_test_tooling = { path = "crates/template_test_tooling" }
+tari_transaction = { path = "crates/transaction" }
+tari_transaction_manifest = { path = "crates/transaction_manifest" }
+tari_validator_node_rpc = { path = "crates/validator_node_rpc" }
 
 # internal dependencies among workspace crates
 libp2p-messaging = { path = "networking/libp2p-messaging" }
@@ -84,41 +115,12 @@ libp2p-substream = { path = "networking/libp2p-substream" }
 proto_builder = { path = "networking/proto_builder" }
 sqlite_message_logger = { path = "networking/sqlite_message_logger" }
 tari_base_node_client = { path = "clients/base_node_client" }
-tari_rpc_state_sync = { path = "dan_layer/rpc_state_sync" }
-tari_consensus = { path = "dan_layer/consensus" }
-tari_consensus_types = { path = "dan_layer/consensus_types" }
-tari_epoch_oracles = { path = "dan_layer/epoch_oracles" }
-tari_bor = { path = "dan_layer/tari_bor", default-features = false }           # avoid including default features so each crate can choose which ones to import
-tari_dan_app_utilities = { path = "applications/tari_dan_app_utilities" }
-tari_dan_common_types = { path = "dan_layer/common_types" }
-tari_dan_engine = { path = "dan_layer/engine" }
-tari_dan_storage = { path = "dan_layer/storage" }
-tari_dan_storage_sqlite = { path = "dan_layer/storage_sqlite" }
-tari_state_store_rocksdb = { path = "dan_layer/state_store_rocksdb" }
-tari_dan_wallet_sdk = { path = "dan_layer/wallet/sdk" }
-tari_dan_wallet_crypto = { path = "dan_layer/wallet/crypto" }
-tari_dan_wallet_storage_sqlite = { path = "dan_layer/wallet/storage_sqlite" }
-tari_dan_p2p = { path = "dan_layer/p2p" }
-tari_engine_types = { path = "dan_layer/engine_types" }
-tari_epoch_manager = { path = "dan_layer/epoch_manager" }
-tari_indexer_lib = { path = "dan_layer/indexer_lib" }
 tari_indexer_client = { path = "clients/tari_indexer_client" }
 tari_networking = { path = "networking/core" }
 tari_rpc_framework = { path = "networking/rpc_framework" }
 tari_rpc_macros = { path = "networking/rpc_macros" }
-tari_state_tree = { path = "dan_layer/state_tree" }
 tari_swarm = { path = "networking/swarm" }
-tari_template_abi = { version = "0.10.0", path = "dan_layer/template_abi", default-features = false }
-tari_template_builtin = { path = "dan_layer/template_builtin" }
-tari_template_lib = { path = "dan_layer/template_lib" }
-tari_template_lib_types = { path = "dan_layer/template_lib_types" }
-tari_template_macros = { version = "0.10", path = "dan_layer/template_macros" }
-tari_template_manager = { path = "dan_layer/template_manager" }
-tari_template_test_tooling = { path = "dan_layer/template_test_tooling" }
-tari_transaction = { path = "dan_layer/transaction" }
-tari_transaction_manifest = { path = "dan_layer/transaction_manifest" }
 tari_validator_node_client = { path = "clients/validator_node_client" }
-tari_validator_node_rpc = { path = "dan_layer/validator_node_rpc" }
 tari_wallet_daemon_client = { path = "clients/wallet_daemon_client" }
 transaction_generator = { path = "utilities/transaction_generator" }
 
@@ -274,7 +276,6 @@ overflow-checks = true
 #tari_mmr = { git = "https://github.com/account/tari.git", branch = "my-branch" }
 #tari_p2p = { git = "https://github.com/account/tari.git", branch = "my-branch" }
 #tari_shutdown = { git = "https://github.com/account/tari.git", branch = "my-branch" }
-#tari_storage = { git = "https://github.com/account/tari.git", branch = "my-branch" }
 #tari_script = { git = "https://github.com/account/tari.git", branch = "my-branch" }
 #minotari_wallet = { git = "https://github.com/account/tari.git", branch = "my-branch" }
 #minotari_console_wallet = { git = "https://github.com/account/tari.git", branch = "my-branch" }
@@ -302,7 +303,6 @@ overflow-checks = true
 #tari_mmr = { path = "../tari/base_layer/mmr" }
 #tari_p2p = { path = "../tari/base_layer/p2p" }
 #tari_shutdown = { path = "../tari/infrastructure/shutdown" }
-#tari_storage = { path = "../tari/infrastructure/storage" }
 #tari_script = { path = "../tari/infrastructure/tari_script" }
 #minotari_wallet = { path = "../tari/base_layer/wallet" }
 #minotari_console_wallet = { path = "../tari/applications/minotari_console_wallet" }

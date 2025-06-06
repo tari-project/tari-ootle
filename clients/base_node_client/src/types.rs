@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_core::transactions::{tari_amount::MicroMinotari, transaction_components::TransactionOutput};
-use tari_dan_common_types::{Epoch, SubstateAddress};
+use tari_ootle_common_types::{Epoch, SubstateAddress};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 #[cfg(feature = "ts")]
 use ts_rs::TS;

@@ -1,0 +1,41 @@
+[package]
+name = "tari_ootle_wallet_storage_sqlite"
+description = "The Tari wallet SQLite storage library"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+tari_bor = { workspace = true, features = ["json_encoding"] }
+tari_common_types = { workspace = true }
+tari_ootle_common_types = { workspace = true }
+tari_ootle_wallet_sdk = { workspace = true }
+tari_engine_types = { workspace = true }
+tari_template_lib = { workspace = true }
+tari_transaction = { workspace = true }
+tari_utilities = { workspace = true }
+tari_consensus_types = { workspace = true }
+
+bigdecimal = { workspace = true }
+diesel = { workspace = true, features = ["default", "sqlite", "time", "numeric"] }
+diesel_migrations = { workspace = true }
+log = { workspace = true }
+time = { workspace = true, features = ["serde", "serde-human-readable"] }
+hex = { workspace = true }
+serde = { workspace = true, default-features = true }
+serde_json = { workspace = true }
+webauthn-rs = { workspace = true }
+
+# Bundle libsqlite3
+libsqlite3-sys = { workspace = true, features = ["bundled"] }
+
+[dev-dependencies]
+tari_ootle_common_types = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = [
+    # We want to bundle this lib
+    "libsqlite3-sys",
+]

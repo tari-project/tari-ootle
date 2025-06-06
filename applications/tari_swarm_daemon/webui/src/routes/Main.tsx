@@ -10,11 +10,11 @@ import MinotariNodes from "../components/MinotariNodes.tsx";
 
 enum Executable {
   BaseNode = 1,
-  Wallet = 2,
+  BaseLayerWallet = 2,
   Miner = 3,
   ValidatorNode = 4,
   Indexer = 5,
-  DanWallet = 6,
+  Wallet = 6,
   Templates = 7,
 }
 
@@ -381,8 +381,8 @@ function ShowInfos(params: any) {
     case "vn":
       executable = Executable.ValidatorNode;
       break;
-    case "dan":
-      executable = Executable.DanWallet;
+    case "wallet":
+      executable = Executable.Wallet;
       break;
     case "indexer":
       executable = Executable.Indexer;
@@ -422,7 +422,7 @@ function ShowInfos(params: any) {
 
 export default function Main() {
   const [vns, setVns] = useState({});
-  const [danWallet, setDanWallets] = useState({});
+  const [danWallet, setTariWallets] = useState({});
   const [indexers, setIndexers] = useState({});
   const [logs, setLogs] = useState<any | null>({});
   const [stdoutLogs, setStdoutLogs] = useState<any | null>({});
@@ -456,7 +456,7 @@ export default function Main() {
       });
     jsonRpc("dan_wallets")
       .then((resp) => {
-        setDanWallets(resp.nodes);
+        setTariWallets(resp.nodes);
         Object.keys(resp.nodes).map((index) => {
           jsonRpc("get_logs", `dan ${index}`)
             .then((resp) => {
@@ -588,17 +588,17 @@ export default function Main() {
       </div>
       <div>
         <div className="label">Validator Nodes</div>
-        <ShowInfos nodes={vns} logs={logs} stdoutLogs={stdoutLogs} name={"vn"} showLogs={showLogs}
+        <ShowInfos nodes={vns} logs={logs} stdoutLogs={stdoutLogs} name="vn" showLogs={showLogs}
                    autoRefresh={autoRefresh} horizontal={horizontal} onReload={getInfo} />
       </div>
       <div>
         <div className="label">Dan Wallets</div>
-        <ShowInfos nodes={danWallet} logs={logs} stdoutLogs={stdoutLogs} name={"dan"} showLogs={showLogs}
+        <ShowInfos nodes={danWallet} logs={logs} stdoutLogs={stdoutLogs} name="wallet" showLogs={showLogs}
                    autoRefresh={autoRefresh} horizontal={horizontal} onReload={getInfo} />
       </div>
       <div>
         <div className="label">Indexers</div>
-        <ShowInfos nodes={indexers} logs={logs} stdoutLogs={stdoutLogs} name={"indexer"} showLogs={showLogs}
+        <ShowInfos nodes={indexers} logs={logs} stdoutLogs={stdoutLogs} name="indexer" showLogs={showLogs}
                    autoRefresh={autoRefresh} horizontal={horizontal} onReload={getInfo} />
       </div>
       <div className="label">Templates</div>

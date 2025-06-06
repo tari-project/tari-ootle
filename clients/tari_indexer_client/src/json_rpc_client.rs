@@ -24,7 +24,7 @@ use reqwest::{header, header::HeaderMap, IntoUrl, Url};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json as json;
 use serde_json::json;
-use tari_dan_common_types::substate_type::SubstateType;
+use tari_ootle_common_types::substate_type::SubstateType;
 
 use crate::{
     error::IndexerClientError,

@@ -3,13 +3,13 @@
 
 use std::{collections::HashMap, path::PathBuf, str::FromStr};
 
-use tari_dan_common_types::SubstateRequirement;
 use tari_engine_types::{
     commit_result::RejectReason,
     instruction::Instruction,
     substate::{SubstateDiff, SubstateId},
     ToByteType,
 };
+use tari_ootle_common_types::SubstateRequirement;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::instruction_args;
 use tari_transaction_manifest::{parse_manifest, ManifestValue};

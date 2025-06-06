@@ -23,9 +23,9 @@
 use libp2p::{gossipsub, PeerId};
 use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
-use tari_dan_p2p::{proto, TariMessagingSpec};
 use tari_epoch_manager::EpochManagerEvent;
 use tari_networking::NetworkingHandle;
+use tari_ootle_p2p::{proto, TariMessagingSpec};
 use tokio::{
     sync::{broadcast, mpsc},
     task,

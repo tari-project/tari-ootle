@@ -8,10 +8,10 @@ use tari_consensus::{
     hotstuff::{ConsensusWorker, ConsensusWorkerContext, HotstuffConfig, HotstuffWorker},
     traits::ConsensusSpec,
 };
-use tari_dan_app_utilities::transaction_executor::TariDanTransactionProcessor;
-use tari_dan_common_types::PeerAddress;
-use tari_dan_storage::consensus_models::TransactionPool;
 use tari_epoch_manager::service::EpochManagerHandle;
+use tari_ootle_app_utilities::transaction_executor::TariTransactionProcessor;
+use tari_ootle_common_types::PeerAddress;
+use tari_ootle_storage::consensus_models::TransactionPool;
 use tari_rpc_state_sync::RpcStateSyncClientProtocol;
 use tari_shutdown::ShutdownSignal;
 use tari_template_manager::implementation::TemplateManager;
@@ -61,8 +61,8 @@ pub async fn spawn(
     client_factory: TariValidatorNodeRpcClientFactory,
     hooks: <TariConsensusSpec as ConsensusSpec>::Hooks,
     shutdown_signal: ShutdownSignal,
-    transaction_executor: TariDanBlockTransactionExecutor<
-        TariDanTransactionProcessor<TemplateManager<PeerAddress>>,
+    transaction_executor: TarBlockTransactionExecutor<
+        TariTransactionProcessor<TemplateManager<PeerAddress>>,
         ConsensusTransactionValidator,
     >,
     tx_hotstuff_events: broadcast::Sender<HotstuffEvent>,

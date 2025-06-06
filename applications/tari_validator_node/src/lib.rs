@@ -23,7 +23,6 @@
 mod bootstrap;
 mod config;
 pub mod consensus;
-mod dan_node;
 mod dry_run_transaction_processor;
 mod event_subscription;
 #[cfg(feature = "web_ui")]
@@ -31,6 +30,7 @@ mod http_ui;
 mod json_rpc;
 #[cfg(feature = "metrics")]
 mod metrics;
+mod node;
 mod p2p;
 mod substate_resolver;
 
@@ -45,25 +45,25 @@ use log::*;
 use serde::{Deserialize, Serialize};
 use tari_common::exit_codes::{ExitCode, ExitError};
 use tari_consensus::consensus_constants::ConsensusConstants;
-use tari_dan_app_utilities::{
+use tari_epoch_manager::traits::EpochManagerSpec;
+use tari_epoch_oracles::EpochOracle;
+use tari_ootle_app_utilities::{
     keypair::RistrettoKeypair,
     template_download_queue::TemplateDownloadQueue,
     utxo_store::StateUtxoStore,
 };
-use tari_dan_common_types::{PeerAddress, SubstateAddress};
-use tari_dan_storage::global::{DbFactory, GlobalDb};
-use tari_dan_storage_sqlite::{global::SqliteGlobalDbAdapter, SqliteDbFactory};
-use tari_epoch_manager::traits::EpochManagerSpec;
-use tari_epoch_oracles::EpochOracle;
+use tari_ootle_common_types::{PeerAddress, SubstateAddress};
+use tari_ootle_storage::global::{DbFactory, GlobalDb};
+use tari_ootle_storage_sqlite::{global::SqliteGlobalDbAdapter, SqliteDbFactory};
 use tari_shutdown::Shutdown;
 
 pub use crate::config::{ApplicationConfig, ValidatorNodeConfig};
 use crate::{
     bootstrap::{spawn_services, Services},
     consensus::spec::ValidatorNodeStateStore,
-    dan_node::DanNode,
     file_l1_submitter::FileLayerOneSubmitter,
     json_rpc::{spawn_json_rpc, JsonRpcHandlers},
+    node::ValidatorNode,
 };
 
 const LOG_TARGET: &str = "tari::validator_node::app";
@@ -163,7 +163,7 @@ pub async fn run_validator_node(
 
     fs::write(config.common.base_path.join("pid"), process::id().to_string())
         .map_err(|e| ExitError::new(ExitCode::UnknownError, e))?;
-    let node = DanNode::new(services);
+    let node = ValidatorNode::new(services);
     info!(target: LOG_TARGET, "🚀 Validator node started!");
     node.start(shutdown)
         .await

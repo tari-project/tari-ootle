@@ -52,13 +52,13 @@ use tari_crypto::{
     keys::SecretKey,
     ristretto::{RistrettoComSig, RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_dan_common_types::SubstateRequirement;
+use tari_ootle_common_types::SubstateRequirement;
 use tari_sidechain::EvictionProof;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use template::RegisteredTemplate;
 use validator_node::ValidatorNodeProcess;
 use wallet::WalletProcess;
-use wallet_daemon::DanWalletDaemonProcess;
+use wallet_daemon::TariWalletDaemonProcess;
 
 use crate::logging::get_base_dir;
 
@@ -99,7 +99,7 @@ pub struct TariWorld {
     /// Key name -> key index
     pub wallet_keys: IndexMap<String, u64>,
     pub claim_public_keys: IndexMap<String, RistrettoPublicKey>,
-    pub wallet_daemons: IndexMap<String, DanWalletDaemonProcess>,
+    pub wallet_daemons: IndexMap<String, TariWalletDaemonProcess>,
     /// Used for all one-sided coinbase payments
     pub wallet_private_key: PrivateKey,
     /// A receiver wallet address that is used for default one-sided coinbase payments
@@ -130,7 +130,7 @@ impl TariWorld {
         }
 
         write_point("base_layer.log", point_name);
-        write_point("dan_layer.log", point_name);
+        write_point("ootle.log", point_name);
         write_point("wallet.log", point_name);
         write_point("network.log", point_name);
         write_point("wallet_daemon.log", point_name);
@@ -152,7 +152,7 @@ impl TariWorld {
             .unwrap_or_else(|| panic!("Wallet {} not found", name))
     }
 
-    pub fn get_wallet_daemon(&self, name: &str) -> &DanWalletDaemonProcess {
+    pub fn get_wallet_daemon(&self, name: &str) -> &TariWalletDaemonProcess {
         self.wallet_daemons
             .get(name)
             .unwrap_or_else(|| panic!("Wallet daemon {} not found", name))

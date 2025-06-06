@@ -6,7 +6,7 @@ use tari_transaction::Transaction;
 
 use crate::{transaction_validators::TransactionValidationError, validator::Validator};
 
-const LOG_TARGET: &str = "tari::dan::mempool::validators::fee";
+const LOG_TARGET: &str = "tari::ootle::mempool::validators::fee";
 
 #[derive(Debug)]
 pub struct FeeTransactionValidator;

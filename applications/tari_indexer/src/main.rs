@@ -27,8 +27,8 @@ use tari_common::{
     exit_codes::{ExitCode, ExitError},
     initialize_logging,
 };
-use tari_dan_app_utilities::configuration::load_configuration;
 use tari_indexer::{cli::Cli, config::ApplicationConfig, run_indexer};
+use tari_ootle_app_utilities::configuration::load_configuration;
 use tari_shutdown::Shutdown;
 
 const LOG_TARGET: &str = "tari::indexer::app";

@@ -2,9 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_dan_common_types::{optional::Optional, Epoch};
-use tari_dan_p2p::proto::rpc::SyncStateResponse;
-use tari_dan_storage::{
+use tari_ootle_common_types::{optional::Optional, Epoch};
+use tari_ootle_p2p::proto::rpc::SyncStateResponse;
+use tari_ootle_storage::{
     consensus_models::{StateTransition, StateTransitionId},
     StateStore,
     StorageError,
@@ -12,7 +12,7 @@ use tari_dan_storage::{
 use tari_rpc_framework::RpcStatus;
 use tokio::sync::mpsc;
 
-const LOG_TARGET: &str = "tari::dan::rpc::sync_task";
+const LOG_TARGET: &str = "tari::ootle::rpc::sync_task";
 
 const BATCH_SIZE: usize = 100;
 

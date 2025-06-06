@@ -6,7 +6,7 @@ mod snake_case;
 use std::fs;
 
 use convert_case::{Case, Casing};
-use tari_dan_engine::abi;
+use tari_engine::abi;
 
 use crate::generators::{CodeGenerator, GeneratorOpts, TemplateDefinition};
 

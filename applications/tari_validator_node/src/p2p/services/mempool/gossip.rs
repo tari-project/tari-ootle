@@ -6,10 +6,10 @@ use std::{collections::HashSet, iter};
 use either::Either;
 use libp2p::{gossipsub, PeerId};
 use log::*;
-use tari_dan_common_types::{Epoch, PeerAddress, ShardGroup, ToSubstateAddress};
-use tari_dan_p2p::{proto, DanMessage, NewTransactionMessage, TariMessagingSpec};
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_networking::{NetworkingHandle, NetworkingService};
+use tari_ootle_common_types::{Epoch, PeerAddress, ShardGroup, ToSubstateAddress};
+use tari_ootle_p2p::{proto, NewTransactionMessage, TariMessage, TariMessagingSpec};
 use tari_swarm::messaging::{prost::ProstCodec, Codec};
 use tokio::sync::mpsc;
 
@@ -21,7 +21,7 @@ pub const TOPIC_PREFIX: &str = "transactions";
 
 #[derive(Debug)]
 pub struct MempoolGossipCodec {
-    codec: ProstCodec<proto::network::DanMessage>,
+    codec: ProstCodec<proto::network::TariMessage>,
 }
 
 impl MempoolGossipCodec {
@@ -31,16 +31,16 @@ impl MempoolGossipCodec {
         }
     }
 
-    pub async fn encode(&self, message: DanMessage) -> std::io::Result<Vec<u8>> {
+    pub async fn encode(&self, message: TariMessage) -> std::io::Result<Vec<u8>> {
         let mut buf = Vec::with_capacity(1024);
-        let message = proto::network::DanMessage::from(&message);
+        let message = proto::network::TariMessage::from(&message);
         self.codec.encode_to(&mut buf, message).await?;
         Ok(buf)
     }
 
-    pub async fn decode(&self, message: gossipsub::Message) -> std::io::Result<(usize, DanMessage)> {
+    pub async fn decode(&self, message: gossipsub::Message) -> std::io::Result<(usize, TariMessage)> {
         let (length, message) = self.codec.decode_from(&mut message.data.as_slice()).await?;
-        let message = DanMessage::try_from(message).map_err(std::io::Error::other)?;
+        let message = TariMessage::try_from(message).map_err(std::io::Error::other)?;
 
         Ok((length, message))
     }
@@ -111,7 +111,7 @@ impl MempoolGossip<PeerAddress> {
         Ok(())
     }
 
-    pub async fn forward_to_local_replicas(&mut self, epoch: Epoch, msg: DanMessage) -> Result<(), MempoolError> {
+    pub async fn forward_to_local_replicas(&mut self, epoch: Epoch, msg: TariMessage) -> Result<(), MempoolError> {
         let committee = self.epoch_manager.get_local_committee_info(epoch).await?;
 
         let topic = shard_group_to_topic(committee.shard_group());
@@ -203,7 +203,7 @@ fn shard_group_to_topic(shard_group: ShardGroup) -> String {
 
 pub struct IncomingMessage {
     pub address: PeerAddress,
-    pub message: DanMessage,
+    pub message: TariMessage,
     pub num_pending: usize,
     pub message_size: usize,
 }

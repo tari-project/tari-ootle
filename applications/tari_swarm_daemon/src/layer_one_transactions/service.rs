@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use minotari_wallet_grpc_client::WalletGrpcClient;
 use serde::de::DeserializeOwned;
-use tari_dan_common_types::layer_one_transaction::LayerOneTransactionDef;
+use tari_ootle_common_types::layer_one_transaction::LayerOneTransactionDef;
 use tokio::fs;
 
 use super::submitter;

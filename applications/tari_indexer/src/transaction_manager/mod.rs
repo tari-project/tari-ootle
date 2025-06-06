@@ -24,17 +24,17 @@ pub(crate) mod error;
 
 use std::{iter, sync::Arc};
 
-use tari_dan_common_types::{
-    optional::{IsNotFoundError, Optional},
-    NodeAddressable,
-    SubstateRequirement,
-    ToSubstateAddress,
-};
 use tari_epoch_manager::EpochManagerReader;
 use tari_indexer_lib::{
     substate_cache::SubstateCache,
     substate_scanner::SubstateScanner,
     transaction_autofiller::TransactionAutofiller,
+};
+use tari_ootle_common_types::{
+    optional::{IsNotFoundError, Optional},
+    NodeAddressable,
+    SubstateRequirement,
+    ToSubstateAddress,
 };
 use tari_transaction::{Transaction, TransactionId};
 use tari_validator_node_rpc::client::{

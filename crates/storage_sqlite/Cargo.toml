@@ -1,0 +1,26 @@
+[package]
+name = "tari_ootle_storage_sqlite"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+tari_common_types = { workspace = true }
+tari_ootle_common_types = { workspace = true }
+tari_utilities = { workspace = true }
+tari_ootle_storage = { workspace = true }
+tari_engine_types = { workspace = true }
+tari_template_lib = { workspace = true }
+
+diesel = { workspace = true, default-features = false, features = ["sqlite", "time"] }
+diesel_migrations = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+serde_json = { workspace = true }
+serde = { workspace = true, default-features = true }
+
+[dev-dependencies]
+rand = { workspace = true }
+tari_crypto = { workspace = true }

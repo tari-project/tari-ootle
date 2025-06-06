@@ -31,7 +31,7 @@ use tower_http::{cors::CorsLayer, services::ServeDir};
 
 use crate::webserver::{context::HandlerContext, error::HandlerError, handler::JrpcHandler, rpc, templates};
 
-const LOG_TARGET: &str = "tari::dan::swarm::webserver";
+const LOG_TARGET: &str = "tari::ootle::swarm::webserver";
 
 pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
     let bind_address = context.config().webserver.bind_address;
@@ -128,7 +128,7 @@ async fn json_rpc_handler(Extension(context): Extension<Arc<HandlerContext>>, va
     match value.method.as_str() {
         "ping" => Ok(JsonRpcResponse::success(value.get_answer_id(), "pong")),
         "vns" => call_handler(context, value, rpc::validator_nodes::list).await,
-        "dan_wallets" => call_handler(context, value, rpc::dan_wallets::list).await,
+        "dan_wallets" => call_handler(context, value, rpc::tari_wallets::list).await,
         "indexers" => call_handler(context, value, rpc::indexers::list).await,
         "get_logs" => call_handler(context, value, rpc::logs::list_log_files).await,
         "get_stdout" => call_handler(context, value, rpc::logs::list_stdout_files).await,
@@ -139,7 +139,7 @@ async fn json_rpc_handler(Extension(context): Extension<Arc<HandlerContext>>, va
         "stop_mining" => call_handler(context, value, rpc::miners::stop_mining).await,
         "add_base_node" | "add_minotari_node" => call_handler(context, value, rpc::minotari_nodes::create).await,
         "add_base_wallet" | "add_minotari_wallet" => call_handler(context, value, rpc::minotari_wallets::create).await,
-        "add_asset_wallet" | "add_wallet_daemon" => call_handler(context, value, rpc::dan_wallets::create).await,
+        "add_asset_wallet" | "add_wallet_daemon" => call_handler(context, value, rpc::tari_wallets::create).await,
         "add_indexer" => call_handler(context, value, rpc::indexers::create).await,
         "add_validator_node" => call_handler(context, value, rpc::validator_nodes::create).await,
         "register_validator_node" => call_handler(context, value, rpc::validator_nodes::register).await,

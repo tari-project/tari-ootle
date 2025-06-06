@@ -6,7 +6,7 @@ use tari_transaction::Transaction;
 
 use crate::{transaction_validators::TransactionValidationError, validator::Validator};
 
-const LOG_TARGET: &str = "tari::dan::mempool::validators::has_involved_shards";
+const LOG_TARGET: &str = "tari::ootle::mempool::validators::has_involved_shards";
 
 /// Refuse to process the transaction if it does not have any inputs.
 /// We make an exception (for now) for CreateFreeTestCoins transactions, which have no inputs.

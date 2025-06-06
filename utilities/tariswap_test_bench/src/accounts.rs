@@ -5,13 +5,13 @@ use std::ops::RangeInclusive;
 
 use log::info;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
-use tari_dan_common_types::SubstateRequirement;
-use tari_dan_wallet_sdk::{apis::key_manager::TRANSACTION_BRANCH, models::Account};
 use tari_engine_types::{
     component::new_component_address_from_public_key,
     indexed_value::IndexedWellKnownTypes,
     ToByteType,
 };
+use tari_ootle_common_types::SubstateRequirement;
+use tari_ootle_wallet_sdk::{apis::key_manager::TRANSACTION_BRANCH, models::Account};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},

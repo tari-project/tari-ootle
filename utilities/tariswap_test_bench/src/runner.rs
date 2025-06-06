@@ -6,10 +6,10 @@ use std::{path::Path, str::FromStr, time::Duration};
 use log::info;
 use tari_common::configuration::Network;
 use tari_crypto::tari_utilities::SafePassword;
-use tari_dan_wallet_daemon::indexer_jrpc_impl::IndexerJsonRpcNetworkInterface;
-use tari_dan_wallet_sdk::{DanWalletSdk, WalletSdkConfig};
-use tari_dan_wallet_storage_sqlite::SqliteWalletStore;
 use tari_engine_types::commit_result::FinalizeResult;
+use tari_ootle_wallet_sdk::{WalletSdk as Sdk, WalletSdkConfig};
+use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
+use tari_ootle_walletd::indexer_jrpc_impl::IndexerJsonRpcNetworkInterface;
 use tari_transaction::{Transaction, TransactionBuilder, TransactionId};
 use tari_validator_node_client::types::TemplateMetadata;
 use tokio::time::sleep;
@@ -17,7 +17,7 @@ use url::Url;
 
 use crate::{cli::CommonArgs, stats::Stats, templates::get_templates};
 
-type WalletSdk = DanWalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>;
+type WalletSdk = Sdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>;
 pub struct Runner {
     pub(crate) sdk: WalletSdk,
     pub(crate) _cli: CommonArgs,
@@ -120,7 +120,7 @@ fn initialize_wallet_sdk<P: AsRef<Path>>(db_path: P, indexer_url: Url) -> Result
         override_keyring_password: Some(SafePassword::from_str("N3Va g0nn4 gu355").unwrap()),
     };
     let indexer = IndexerJsonRpcNetworkInterface::new(indexer_url);
-    let mut sdk = DanWalletSdk::initialize(store, indexer, sdk_config)?;
+    let mut sdk = WalletSdk::initialize(store, indexer, sdk_config)?;
     sdk.initialize_cipher_seed(None)?;
     Ok(sdk)
 }

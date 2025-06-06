@@ -1,9 +1,9 @@
 //    Copyright 2023 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use tari_dan_storage::StorageError;
 use tari_epoch_manager::EpochManagerError;
 use tari_networking::NetworkingError;
+use tari_ootle_storage::StorageError;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{

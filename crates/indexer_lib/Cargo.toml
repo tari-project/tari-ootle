@@ -1,0 +1,22 @@
+[package]
+name = "tari_indexer_lib"
+description = "Network scanning and indexing library"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+tari_ootle_common_types = { workspace = true }
+tari_epoch_manager = { workspace = true }
+tari_engine_types = { workspace = true }
+tari_transaction = { workspace = true }
+tari_validator_node_rpc = { workspace = true }
+
+async-trait = { workspace = true }
+futures = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true, default-features = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["default", "macros", "time", "sync", "rt-multi-thread"] }

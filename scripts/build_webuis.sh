@@ -94,7 +94,7 @@ echo "Building Validator Node Web UI..."
 build applications/tari_validator_node/web_ui
 
 echo "Building Wallet Web UI..."
-build applications/tari_dan_wallet_daemon/web_ui
+build applications/tari_walletd/web_ui
 
 
 echo "Building Indexer Web UI..."

@@ -62,8 +62,8 @@ impl ProcessDefinition for WalletDaemon {
             .arg(format!("--json-rpc-address={json_rpc_address}"))
             .arg(format!("--indexer-url={indexer_url}"))
             .arg(format!("--web-ui-public-json-rpc-url={json_rpc_public_url}"))
-            .arg(format!("-pdan_wallet_daemon.web_ui_address={web_ui_address}"))
-            .arg(format!("-pdan_wallet_daemon.authentication={auth}"));
+            .arg(format!("-pootle_wallet_daemon.web_ui_address={web_ui_address}"))
+            .arg(format!("-pootle_wallet_daemon.authentication={auth}"));
 
         if let Some(seed_words) = context.get_setting(WALLET_DAEMON_SEED_WORDS_SETTINGS_KEY) {
             command.arg(format!("--seed-words={seed_words}"));

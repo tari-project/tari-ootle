@@ -35,7 +35,7 @@ use tari_common::{
     SubConfigPath,
 };
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_dan_app_utilities::{
+use tari_ootle_app_utilities::{
     epoch_oracle_config::EpochOracleConfig,
     p2p_config::{P2pConfig, PeerSeedsConfig},
 };
@@ -91,7 +91,7 @@ pub struct IndexerConfig {
     pub web_ui_public_graphql_url: Option<String>,
     /// How often do we want to scan the second layer for new versions
     #[serde(with = "serializers::seconds")]
-    pub dan_layer_scanning_internal: Duration,
+    pub scanning_interval: Duration,
     /// Template config
     pub templates: TemplateConfig,
     /// The sidechain to listen on.
@@ -135,7 +135,7 @@ impl Default for IndexerConfig {
             web_ui_address: Some("127.0.0.1:15000".parse().unwrap()),
             web_ui_public_json_rpc_url: None,
             web_ui_public_graphql_url: None,
-            dan_layer_scanning_internal: Duration::from_secs(10),
+            scanning_interval: Duration::from_secs(10),
             templates: TemplateConfig::default(),
             sidechain_id: None,
             templates_sidechain_id: None,

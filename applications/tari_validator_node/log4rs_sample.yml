@@ -148,7 +148,7 @@ loggers:
       - stdout
     additive: false
 
-  tari::dan:
+  tari::ootle:
     level: debug
     appenders:
       - dan_layer
@@ -160,17 +160,17 @@ loggers:
     appenders:
       - consensus
 
-  tari::dan::consensus:
+  tari::ootle::consensus:
     level: debug
     appenders:
       - consensus
 
-  tari::dan::networking:
+  tari::ootle::networking:
     level: debug
     appenders:
       - network
 
-  tari::dan::engine:
+  tari::ootle::engine:
     level: debug
     appenders:
       - engine

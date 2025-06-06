@@ -24,11 +24,11 @@ use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 
 use log::*;
 use tari_crypto::tari_utilities::message_format::MessageFormat;
-use tari_dan_app_utilities::substate_file_cache::SubstateFileCache;
-use tari_dan_common_types::PeerAddress;
 use tari_engine_types::{events::Event, substate::SubstateId};
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_indexer_lib::substate_scanner::SubstateScanner;
+use tari_ootle_app_utilities::substate_file_cache::SubstateFileCache;
+use tari_ootle_common_types::PeerAddress;
 use tari_template_lib::{
     models::Metadata,
     types::{Hash, TemplateAddress},

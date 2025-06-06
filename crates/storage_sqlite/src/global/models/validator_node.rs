@@ -1,0 +1,71 @@
+//  Copyright 2022. The Tari Project
+//
+//  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
+//  following conditions are met:
+//
+//  1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following
+//  disclaimer.
+//
+//  2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the
+//  following disclaimer in the documentation and/or other materials provided with the distribution.
+//
+//  3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote
+//  products derived from this software without specific prior written permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+//  INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+//  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+//  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+//  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+//  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+use tari_ootle_common_types::{Epoch, NodeAddressable, SubstateAddress};
+use tari_ootle_storage::global::models::ValidatorNode;
+use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+
+use crate::{
+    error::SqliteStorageError,
+    global::{schema::*, serialization::deserialize_json},
+};
+
+#[derive(Queryable, Identifiable)]
+#[diesel(table_name = validator_nodes)]
+pub struct DbValidatorNode {
+    pub id: i32,
+    pub public_key: Vec<u8>,
+    pub address: String,
+    pub shard_key: Vec<u8>,
+    pub start_epoch: i64,
+    pub end_epoch: Option<i64>,
+    pub fee_claim_public_key: Vec<u8>,
+}
+impl<TAddr: NodeAddressable> TryFrom<DbValidatorNode> for ValidatorNode<TAddr> {
+    type Error = SqliteStorageError;
+
+    fn try_from(vn: DbValidatorNode) -> Result<Self, Self::Error> {
+        Ok(Self {
+            shard_key: SubstateAddress::try_from(vn.shard_key).map_err(|_| {
+                SqliteStorageError::MalformedDbData(format!("Invalid shard id in validator node record id={}", vn.id))
+            })?,
+            address: DbValidatorNode::try_parse_address(&vn.address)?,
+            public_key: RistrettoPublicKeyBytes::from_bytes(&vn.public_key).map_err(|_| {
+                SqliteStorageError::MalformedDbData(format!("Invalid public key in validator node record id={}", vn.id))
+            })?,
+            start_epoch: Epoch(vn.start_epoch as u64),
+            end_epoch: vn.end_epoch.map(|e| Epoch(e as u64)),
+            fee_claim_public_key: RistrettoPublicKeyBytes::from_bytes(&vn.fee_claim_public_key).map_err(|_| {
+                SqliteStorageError::MalformedDbData(format!(
+                    "Invalid fee claim public key in validator node record id={}",
+                    vn.id
+                ))
+            })?,
+        })
+    }
+}
+
+impl DbValidatorNode {
+    pub fn try_parse_address<T: serde::de::DeserializeOwned>(address: &str) -> Result<T, SqliteStorageError> {
+        deserialize_json(address)
+    }
+}

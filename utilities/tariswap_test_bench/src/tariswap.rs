@@ -5,9 +5,9 @@ use std::collections::HashMap;
 
 use log::info;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
-use tari_dan_common_types::{optional::Optional, SubstateRequirement};
-use tari_dan_wallet_sdk::{apis::key_manager::TRANSACTION_BRANCH, models::Account};
 use tari_engine_types::{indexed_value::decode_value_at_path, ToByteType};
+use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
+use tari_ootle_wallet_sdk::{apis::key_manager::TRANSACTION_BRANCH, models::Account};
 use tari_template_lib::{
     models::{Amount, ComponentAddress, VaultId},
     prelude::{ResourceAddress, ResourceType, XTR},

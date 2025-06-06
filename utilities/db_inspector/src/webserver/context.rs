@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_dan_common_types::PeerAddress;
+use tari_ootle_common_types::PeerAddress;
 use tari_state_store_rocksdb::RocksDbReadOnlyStateStore;
 
 use crate::{config::Config, helpers::open_db, webserver::error::WebError};

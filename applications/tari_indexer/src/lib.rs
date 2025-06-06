@@ -51,15 +51,7 @@ use serde::Serialize;
 use substate_manager::SubstateManager;
 use tari_common::exit_codes::{ExitCode, ExitError};
 use tari_consensus::consensus_constants::ConsensusConstants;
-use tari_dan_app_utilities::{
-    keypair::setup_keypair_prompt,
-    substate_file_cache::SubstateFileCache,
-    template_download_queue::TemplateDownloadQueue,
-};
-use tari_dan_common_types::{layer_one_transaction::LayerOneTransactionDef, Epoch, PeerAddress};
-use tari_dan_engine::transaction::TransactionProcessorConfig;
-use tari_dan_storage::global::{DbFactory, GlobalDb};
-use tari_dan_storage_sqlite::{global::SqliteGlobalDbAdapter, SqliteDbFactory};
+use tari_engine::transaction::TransactionProcessorConfig;
 use tari_engine_types::confidential::UnclaimedConfidentialOutput;
 use tari_epoch_manager::{
     traits::{EpochManagerSpec, EpochUtxoStore, LayerOneTransactionSubmitter},
@@ -69,6 +61,14 @@ use tari_epoch_manager::{
 use tari_epoch_oracles::EpochOracle;
 use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::NetworkingService;
+use tari_ootle_app_utilities::{
+    keypair::setup_keypair_prompt,
+    substate_file_cache::SubstateFileCache,
+    template_download_queue::TemplateDownloadQueue,
+};
+use tari_ootle_common_types::{layer_one_transaction::LayerOneTransactionDef, Epoch, PeerAddress};
+use tari_ootle_storage::global::{DbFactory, GlobalDb};
+use tari_ootle_storage_sqlite::{global::SqliteGlobalDbAdapter, SqliteDbFactory};
 use tari_shutdown::ShutdownSignal;
 use tokio::{task, time};
 
@@ -113,17 +113,17 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
     let substate_cache = SubstateFileCache::new(substate_cache_dir)
         .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Substate cache error: {}", e)))?;
 
-    let dan_layer_scanner = Arc::new(SubstateScanner::new(
+    let substate_scanner = Arc::new(SubstateScanner::new(
         services.epoch_manager.clone(),
         services.validator_node_client_factory.clone(),
         substate_cache,
     ));
 
     let substate_manager = Arc::new(SubstateManager::new(
-        dan_layer_scanner.clone(),
+        substate_scanner.clone(),
         services.substate_store.clone(),
     ));
-    let transaction_manager = TransactionManager::new(services.network_client.clone(), dan_layer_scanner.clone());
+    let transaction_manager = TransactionManager::new(services.network_client.clone(), substate_scanner.clone());
 
     // dry run
     let dry_run_transaction_processor = DryRunTransactionProcessor::new(
@@ -133,14 +133,14 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
             .build(),
         services.epoch_manager.clone(),
         services.validator_node_client_factory.clone(),
-        dan_layer_scanner.clone(),
+        substate_scanner.clone(),
         services.template_manager.clone(),
     );
 
     // Run the event manager
     let event_manager = Arc::new(EventManager::new(
         services.substate_store.clone(),
-        dan_layer_scanner.clone(),
+        substate_scanner.clone(),
     ));
 
     // Run the GraphQL API
@@ -228,7 +228,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
     loop {
         tokio::select! {
             // keep scanning the dan layer for new events
-            _ = time::sleep(config.indexer.dan_layer_scanning_internal) => {
+            _ = time::sleep(config.indexer.scanning_interval) => {
                 match event_scanner.scan_events().await {
                     Ok(0) => {},
                     Ok(cnt) => info!(target: LOG_TARGET, "Scanned {} events(s) successfully", cnt),

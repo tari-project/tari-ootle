@@ -4,9 +4,9 @@
 #[cfg(not(feature = "metrics"))]
 use tari_consensus::traits::hooks::NoopHooks;
 use tari_consensus::traits::ConsensusSpec;
-use tari_dan_app_utilities::transaction_executor::TariDanTransactionProcessor;
-use tari_dan_common_types::PeerAddress;
 use tari_epoch_manager::service::EpochManagerHandle;
+use tari_ootle_app_utilities::transaction_executor::TariTransactionProcessor;
+use tari_ootle_common_types::PeerAddress;
 use tari_rpc_state_sync::RpcStateSyncClientProtocol;
 use tari_template_manager::implementation::TemplateManager;
 
@@ -17,7 +17,7 @@ use crate::{
         leader_selection::RoundRobinLeaderStrategy,
         signer_service::TariSignatureService,
         ConsensusTransactionValidator,
-        TariDanBlockTransactionExecutor,
+        TarBlockTransactionExecutor,
     },
     p2p::{
         services::messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
@@ -42,8 +42,8 @@ impl ConsensusSpec for TariConsensusSpec {
     type SignerService = TariSignatureService;
     type StateStore = ValidatorNodeStateStore;
     type SyncManager = RpcStateSyncClientProtocol<Self>;
-    type TransactionExecutor = TariDanBlockTransactionExecutor<
-        TariDanTransactionProcessor<TemplateManager<PeerAddress>>,
+    type TransactionExecutor = TarBlockTransactionExecutor<
+        TariTransactionProcessor<TemplateManager<PeerAddress>>,
         ConsensusTransactionValidator,
     >;
 }

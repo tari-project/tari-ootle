@@ -34,8 +34,12 @@ use tari_common_types::types::CompressedPublicKey;
 use tari_consensus_types::{Decision, LeafBlock};
 use tari_core::transactions::transaction_components::ValidatorNodeSignature;
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
-use tari_dan_app_utilities::keypair::RistrettoKeypair;
-use tari_dan_common_types::{
+use tari_engine_types::{FromByteType, ToByteType};
+use tari_epoch_manager::{service::EpochManagerHandle, traits::LayerOneTransactionSubmitter, EpochManagerReader};
+use tari_epoch_oracles::store::StoreKey;
+use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
+use tari_ootle_app_utilities::keypair::RistrettoKeypair;
+use tari_ootle_common_types::{
     layer_one_transaction::{
         LayerOnePayloadType,
         LayerOneTransactionDef,
@@ -48,8 +52,8 @@ use tari_dan_common_types::{
     PeerAddress,
     SubstateAddress,
 };
-use tari_dan_p2p::TariMessagingSpec;
-use tari_dan_storage::{
+use tari_ootle_p2p::TariMessagingSpec;
+use tari_ootle_storage::{
     consensus_models::{Block, BookkeepingModel, SubstateRecord, TransactionExecution, TransactionRecord},
     global::GlobalDb,
     Ordering,
@@ -57,11 +61,7 @@ use tari_dan_storage::{
     StateStoreReadTransaction,
     StorageError,
 };
-use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
-use tari_engine_types::{FromByteType, ToByteType};
-use tari_epoch_manager::{service::EpochManagerHandle, traits::LayerOneTransactionSubmitter, EpochManagerReader};
-use tari_epoch_oracles::store::StoreKey;
-use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
+use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_sidechain::QuorumDecision;
 use tari_template_lib::prelude::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
 use tari_template_manager::interface::TemplateManagerHandle;

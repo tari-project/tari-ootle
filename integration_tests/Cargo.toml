@@ -13,7 +13,7 @@ minotari_console_wallet = { workspace = true, features = ["grpc"] }
 minotari_node = { workspace = true }
 tari_validator_node = { workspace = true, default-features = false }
 tari_indexer = { workspace = true, default-features = false }
-tari_dan_wallet_daemon = { workspace = true, default-features = false }
+tari_ootle_walletd = { workspace = true, default-features = false }
 
 tari_core = { workspace = true, default-features = true }
 minotari_app_grpc = { workspace = true }
@@ -28,9 +28,9 @@ tari_sidechain = { workspace = true }
 
 tari_crypto = { workspace = true }
 tari_validator_node_cli = { workspace = true }
-tari_dan_app_utilities = { workspace = true }
-tari_dan_common_types = { workspace = true }
-tari_dan_engine = { workspace = true }
+tari_ootle_app_utilities = { workspace = true }
+tari_ootle_common_types = { workspace = true }
+tari_engine = { workspace = true }
 tari_engine_types = { workspace = true }
 tari_indexer_client = { workspace = true }
 tari_template_builtin = { workspace = true }
@@ -40,7 +40,7 @@ tari_validator_node_client = { workspace = true }
 tari_wallet_daemon_client = { workspace = true }
 tari_base_node_client = { workspace = true }
 tari_transaction_manifest = { workspace = true }
-tari_dan_wallet_sdk = { workspace = true }
+tari_ootle_wallet_sdk = { workspace = true }
 
 tari_comms = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
 tari_comms_dht = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }

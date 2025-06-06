@@ -23,10 +23,10 @@
 use libp2p::{gossipsub, PeerId};
 use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
-use tari_dan_common_types::ShardGroup;
-use tari_dan_p2p::{proto, TariMessagingSpec};
 use tari_epoch_manager::EpochManagerEvent;
 use tari_networking::{NetworkingHandle, NetworkingService};
+use tari_ootle_common_types::ShardGroup;
+use tari_ootle_p2p::{proto, TariMessagingSpec};
 use tari_swarm::messaging::{prost::ProstCodec, Codec};
 use tokio::sync::{broadcast, mpsc};
 

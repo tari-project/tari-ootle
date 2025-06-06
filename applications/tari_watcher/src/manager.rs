@@ -3,7 +3,7 @@
 
 use log::*;
 use minotari_app_grpc::tari_rpc::{GetActiveValidatorNodesResponse, RegisterValidatorNodeResponse};
-use tari_dan_common_types::layer_one_transaction::LayerOneTransactionDef;
+use tari_ootle_common_types::layer_one_transaction::LayerOneTransactionDef;
 use tari_shutdown::ShutdownSignal;
 use tokio::{
     sync::{mpsc, oneshot},

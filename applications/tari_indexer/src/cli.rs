@@ -25,8 +25,8 @@ use std::{net::SocketAddr, path::PathBuf};
 use clap::Parser;
 use minotari_app_utilities::common_cli_args::CommonCliArgs;
 use tari_common::configuration::{ConfigOverrideProvider, Network};
-use tari_dan_app_utilities::p2p_config::ReachabilityMode;
 use tari_engine_types::substate::SubstateId;
+use tari_ootle_app_utilities::p2p_config::ReachabilityMode;
 use url::Url;
 
 #[derive(Parser, Debug)]
@@ -40,7 +40,7 @@ pub struct Cli {
     pub address: Vec<SubstateId>,
 
     #[clap(long, short = 'i')]
-    pub dan_layer_scanning_internal: Option<u64>,
+    pub scanning_interval: Option<u64>,
 
     /// Bind address for JSON-rpc server
     #[clap(long, short = 'r', alias = "rpc-address")]
@@ -94,8 +94,8 @@ impl ConfigOverrideProvider for Cli {
                 listener_port.to_string(),
             ));
         }
-        if let Some(seconds) = self.dan_layer_scanning_internal {
-            overrides.push(("indexer.dan_layer_scanning_interval".to_string(), seconds.to_string()));
+        if let Some(seconds) = self.scanning_interval {
+            overrides.push(("indexer.scanning_interval".to_string(), seconds.to_string()));
         }
         if let Some(ref json_rpc_url) = self.web_ui_public_json_rpc_url {
             overrides.push((

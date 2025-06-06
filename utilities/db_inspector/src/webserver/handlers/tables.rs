@@ -12,8 +12,8 @@ use axum::{
 };
 use serde::Serialize;
 use serde_json::json;
-use tari_dan_common_types::displayable::Displayable;
-use tari_dan_storage::{consensus_models::Evidence, Ordering};
+use tari_ootle_common_types::displayable::Displayable;
+use tari_ootle_storage::{consensus_models::Evidence, Ordering};
 use tari_state_store_rocksdb::{codecs::DbCodec, column_families, error::RocksDbStorageError, traits::Cf};
 
 use crate::webserver::{

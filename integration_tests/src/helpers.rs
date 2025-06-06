@@ -7,8 +7,8 @@ use std::{
     time::Duration,
 };
 
-use tari_dan_common_types::SubstateRequirement;
 use tari_engine_types::substate::SubstateId;
+use tari_ootle_common_types::SubstateRequirement;
 use tokio::{io::AsyncWriteExt, task::JoinHandle};
 
 use crate::TariWorld;

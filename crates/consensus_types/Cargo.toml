@@ -1,0 +1,23 @@
+[package]
+name = "tari_consensus_types"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+tari_common_types = { workspace = true }
+tari_ootle_common_types = { workspace = true }
+tari_sidechain = { workspace = true }
+tari_hashing = { workspace = true }
+tari_template_lib = { workspace = true }
+tari_engine_types = { workspace = true }
+tari_crypto = { workspace = true }
+
+borsh = { workspace = true }
+serde = { workspace = true }
+ts-rs = { workspace = true, optional = true }
+
+[features]
+ts = ["ts-rs"]

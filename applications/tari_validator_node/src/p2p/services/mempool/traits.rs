@@ -4,8 +4,8 @@
 use std::{collections::HashSet, future::Future};
 
 use indexmap::IndexMap;
-use tari_dan_common_types::SubstateRequirement;
 use tari_engine_types::substate::{Substate, SubstateId};
+use tari_ootle_common_types::SubstateRequirement;
 use tari_transaction::Transaction;
 
 pub struct ResolvedSubstates {

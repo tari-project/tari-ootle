@@ -44,7 +44,7 @@ use libp2p::{
 };
 use regex::Regex;
 use tari_common::initialize_logging;
-use tari_dan_engine::abi::Type;
+use tari_engine::abi::Type;
 use tari_shutdown::Shutdown;
 use tari_sidechain::QuorumDecision;
 use tari_validator_node_client::types::{AddPeerRequest, GetRecentTransactionsRequest, GetTransactionResultRequest};

@@ -3,13 +3,12 @@
 
 use tari_dan_common_types::NodeHeight;
 use tari_dan_storage::consensus_models::ValidBlock;
-use tari_sidechain::QuorumDecision;
 use tari_transaction::TransactionId;
 
 use crate::{hotstuff::HotStuffError, messages::HotstuffMessage};
 
 pub trait ConsensusHooks {
-    fn on_local_block_decide(&mut self, block: &ValidBlock, decision: Option<QuorumDecision>);
+    fn on_local_block_committed(&mut self, block: &ValidBlock);
 
     fn on_block_validation_failed<E: ToString>(&mut self, err: &E);
     fn on_message_received(&mut self, message: &HotstuffMessage);
@@ -39,9 +38,9 @@ impl<T> OptionalHooks<T> {
 }
 
 impl<T: ConsensusHooks> ConsensusHooks for OptionalHooks<T> {
-    fn on_local_block_decide(&mut self, block: &ValidBlock, decision: Option<QuorumDecision>) {
+    fn on_local_block_committed(&mut self, block: &ValidBlock) {
         if let Some(inner) = self.inner.as_mut() {
-            inner.on_local_block_decide(block, decision);
+            inner.on_local_block_committed(block);
         }
     }
 
@@ -104,7 +103,7 @@ impl<T> From<T> for OptionalHooks<T> {
 pub struct NoopHooks;
 
 impl ConsensusHooks for NoopHooks {
-    fn on_local_block_decide(&mut self, _block: &ValidBlock, _decision: Option<QuorumDecision>) {}
+    fn on_local_block_committed(&mut self, _block: &ValidBlock) {}
 
     fn on_block_validation_failed<E: ToString>(&mut self, _: &E) {}
 

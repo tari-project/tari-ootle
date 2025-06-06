@@ -6,9 +6,13 @@ authors.workspace = true
 repository.workspace = true
 license.workspace = true
 
+[features]
+metrics = ["prometheus-client"]
+
 [dependencies]
 libp2p = { workspace = true, features = ["identify"] }
 
 # smallvec 2.0.0 is not Send, so we use 1.11.2
 smallvec = "1.11.2"
 tracing = { workspace = true }
+prometheus-client = { workspace = true, optional = true }

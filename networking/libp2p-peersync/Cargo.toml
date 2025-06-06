@@ -14,9 +14,11 @@ tracing = { workspace = true }
 thiserror = { workspace = true }
 async-semaphore = { workspace = true }
 blake2 = { workspace = true }
+prometheus-client = { workspace = true, optional = true }
 
 [build-dependencies]
 pb-rs = "0.10.0"
 
 [features]
 default = []
+metrics = ["prometheus-client"]

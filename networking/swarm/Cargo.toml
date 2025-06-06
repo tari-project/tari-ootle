@@ -6,6 +6,9 @@ authors.workspace = true
 repository.workspace = true
 license.workspace = true
 
+[features]
+metrics = ["libp2p/metrics", "libp2p-substream/metrics", "libp2p-messaging/metrics", "libp2p-peersync/metrics"]
+
 [dependencies]
 libp2p = { workspace = true, features = ["tokio", "noise", "macros", "ping", "tcp", "identify", "yamux", "relay", "quic", "dcutr", "gossipsub", "mdns", "autonat"] }
 libp2p-messaging = { workspace = true, features = ["prost"] }

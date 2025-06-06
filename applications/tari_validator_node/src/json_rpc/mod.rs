@@ -27,3 +27,6 @@ mod jrpc_errors;
 mod server;
 
 pub use server::spawn_json_rpc;
+
+#[cfg(feature = "metrics")]
+mod metrics;

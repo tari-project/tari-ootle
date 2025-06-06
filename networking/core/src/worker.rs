@@ -89,6 +89,8 @@ where
     relays: RelayState,
     is_initial_bootstrap_complete: bool,
     has_sent_announce: bool,
+    #[cfg(feature = "metrics")]
+    metrics: Option<tari_swarm::metrics::Metrics>,
     shutdown_signal: ShutdownSignal,
 }
 
@@ -124,8 +126,16 @@ where
             config,
             is_initial_bootstrap_complete: false,
             has_sent_announce: false,
+            #[cfg(feature = "metrics")]
+            metrics: None,
             shutdown_signal,
         }
+    }
+
+    #[cfg(feature = "metrics")]
+    pub fn with_metrics(mut self, registry: &mut prometheus_client::registry::Registry) -> Self {
+        self.metrics = Some(tari_swarm::metrics::Metrics::new(registry));
+        self
     }
 
     pub fn add_protocol_notifier(
@@ -494,19 +504,21 @@ where
         event: TariNodeBehaviourEvent<ProstCodec<TMsg::Message>>,
     ) -> Result<(), NetworkingError> {
         use TariNodeBehaviourEvent::*;
+        #[cfg(feature = "metrics")]
+        self.record_metrics(&event);
         match event {
             Ping(ping::Event {
                 peer,
                 connection,
                 result,
-            }) => match result {
+            }) => match &result {
                 Ok(t) => {
                     if let Some(c) = self
                         .active_connections
                         .get_mut(&peer)
                         .and_then(|c| c.iter_mut().find(|c| c.connection_id == connection))
                     {
-                        c.ping_latency = Some(t);
+                        c.ping_latency = Some(*t);
                     }
                     debug!(target: LOG_TARGET, "🏓 Ping: peer={}, connection={}, t={:.2?}", peer, connection, t);
                 },
@@ -514,7 +526,7 @@ where
                     warn!(target: LOG_TARGET, "🏓 Ping failed: peer={}, connection={}, error={}", peer, connection, err);
                 },
             },
-            Dcutr(dcutr::Event { remote_peer_id, result }) => match result {
+            Dcutr(dcutr::Event { remote_peer_id, result }) => match &result {
                 Ok(_) => {
                     info!(target: LOG_TARGET, "📡 Dcutr successful: peer={}", remote_peer_id);
                 },
@@ -554,25 +566,28 @@ where
                 message_id,
                 message,
                 propagation_source,
-            }) => match message.source {
-                Some(source) => {
-                    info!(target: LOG_TARGET, "📢 Gossipsub message: [{topic}] {message_id} ({bytes} bytes) from {source}", topic = message.topic, bytes = message.data.len());
-                    self.on_gossipsub_message(message_id, propagation_source, source, message)
-                        .await?;
-                },
-                None => {
-                    // We accept all messages as we cannot validate them in this service.
-                    // We could allow users to report back the validation result e.g. if a proposal is valid, however a
-                    // naive implementation would likely incur a substantial cost for many messages.
-                    if !self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
-                        &message_id,
-                        &propagation_source,
-                        gossipsub::MessageAcceptance::Ignore,
-                    ) {
-                        warn!(target: LOG_TARGET, "Unable to report_message_validation_result reject for topic {}, {} bytes because message was not in cache", message.topic, message.data.len());
-                    }
-                    warn!(target: LOG_TARGET, "📢 Discarding Gossipsub message [{topic}] ({bytes} bytes) with no source propagated by {propagation_source}", topic=message.topic, bytes=message.data.len());
-                },
+            }) => {
+                match message.source {
+                    Some(source) => {
+                        info!(target: LOG_TARGET, "📢 Gossipsub message: [{topic}] {message_id} ({bytes} bytes) from {source}", topic = message.topic, bytes = message.data.len());
+                        self.on_gossipsub_message(message_id, propagation_source, source, message)
+                            .await?;
+                    },
+                    None => {
+                        // We accept all messages as we cannot validate them in this service.
+                        // We could allow users to report back the validation result e.g. if a proposal is valid,
+                        // however a naive implementation would likely incur a substantial cost
+                        // for many messages.
+                        if !self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
+                            &message_id,
+                            &propagation_source,
+                            gossipsub::MessageAcceptance::Ignore,
+                        ) {
+                            warn!(target: LOG_TARGET, "Unable to report_message_validation_result reject for topic {}, {} bytes because message was not in cache", message.topic, message.data.len());
+                        }
+                        warn!(target: LOG_TARGET, "📢 Discarding Gossipsub message [{topic}] ({bytes} bytes) with no source propagated by {propagation_source}", topic=message.topic, bytes=message.data.len());
+                    },
+                }
             },
             Gossipsub(event) => {
                 info!(target: LOG_TARGET, "ℹ️ Gossipsub event: {:?}", event);
@@ -691,6 +706,14 @@ where
             }
         }
         Ok(())
+    }
+
+    #[cfg(feature = "metrics")]
+    fn record_metrics(&mut self, event: &TariNodeBehaviourEvent<ProstCodec<TMsg::Message>>) {
+        use tari_swarm::metrics::Recorder;
+        if let Some(metrics) = self.metrics.as_ref() {
+            metrics.record(event);
+        }
     }
 
     fn on_mdns_event(&mut self, event: mdns::Event) -> Result<(), NetworkingError> {

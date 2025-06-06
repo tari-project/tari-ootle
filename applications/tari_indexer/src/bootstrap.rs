@@ -98,10 +98,9 @@ pub async fn spawn_services(
             p.addresses.into_iter().map(move |a| (peer_id, a))
         })
         .collect();
-    let (networking, _) = tari_networking::spawn::<TariMessagingSpec>(
-        identity,
-        MessagingMode::Disabled,
-        tari_networking::Config {
+    let (networking, _) = tari_networking::Builder::<TariMessagingSpec>::new(identity)
+        .with_messaging_mode(MessagingMode::Disabled)
+        .with_config(tari_networking::Config {
             listener_port: config.indexer.p2p.listener_port,
             swarm: SwarmConfig {
                 protocol_version: format!("/tari/{}/0.0.1", config.network).parse().unwrap(),
@@ -115,10 +114,9 @@ pub async fn spawn_services(
             reachability_mode: config.indexer.p2p.reachability_mode.into(),
             announce: false,
             ..Default::default()
-        },
-        seed_peers,
-        shutdown.clone(),
-    )?;
+        })
+        .with_seed_peers(seed_peers)
+        .spawn(shutdown.clone())?;
 
     // Connect to substate db
     let substate_store = SqliteSubstateStore::try_create(config.indexer.state_db_path())?;

@@ -48,7 +48,7 @@ pub fn spawn<TValidator, TStateStore>(
     consensus_handle: ConsensusHandle,
     networking: NetworkingHandle<TariMessagingSpec>,
     rx_gossip: mpsc::UnboundedReceiver<(PeerId, gossipsub::Message)>,
-    #[cfg(feature = "metrics")] metrics_registry: &prometheus::Registry,
+    #[cfg(feature = "metrics")] metrics_registry: &mut prometheus_client::registry::Registry,
 ) -> (MempoolHandle, JoinHandle<anyhow::Result<()>>)
 where
     TValidator: Validator<Transaction, Context = (), Error = TransactionValidationError> + Send + Sync + 'static,

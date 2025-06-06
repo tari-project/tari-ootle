@@ -9,7 +9,7 @@ license.workspace = true
 
 [features]
 default = ["metrics", "web_ui"]
-metrics = ["prometheus"]
+metrics = ["prometheus-client", "tari_networking/metrics"]
 # Note: must be compiled with RUSTFLAGS='--cfg rust_unstable' to use
 tokio_debug = ["console-subscriber"]
 web_ui = []
@@ -70,7 +70,7 @@ log4rs = { workspace = true, features = [
     "fixed_window_roller",
 ] }
 mime_guess = { workspace = true }
-prometheus = { workspace = true, optional = true }
+prometheus-client = { workspace = true, optional = true }
 rand = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true, features = ["default", "derive"] }

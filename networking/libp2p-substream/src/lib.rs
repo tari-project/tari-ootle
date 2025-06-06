@@ -5,6 +5,8 @@ mod config;
 pub mod error;
 mod event;
 mod handler;
+#[cfg(feature = "metrics")]
+pub mod metrics;
 mod notify;
 mod stream;
 

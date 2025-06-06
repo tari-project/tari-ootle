@@ -6,6 +6,9 @@ pub mod config;
 mod error;
 mod protocol_version;
 
+#[cfg(feature = "metrics")]
+pub mod metrics;
+
 pub use behaviour::*;
 pub use config::Config;
 pub use error::*;

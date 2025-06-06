@@ -1,146 +1,66 @@
-# Tari DAN implementation
+# Tari implementation
 
-This is where you can find the cutting edge development of the Tari smart contract layer - the Digital Assets
-Network, or DAN.
+This is where you can find the cutting edge development of the Tari smart contract layer.
 
-You can read about the technical specifications of the DAN in the [RFCs](https://rfc.tari.com).
+You can read about the technical specifications of the Ootle in the [RFCs](https://rfc.tari.com).
 
 If you're looking for the core Tari base layer code, it's an [this repository](https://github.com/tari-project/tari)
 
-## Tari DAN Validator node
+## Tari Validator node
 
 See the dedicated [README](./applications/tari_validator_node/README.md) for installation and running guides.
-
-## Tari DAN CLI
-
-A CLI tool to help manage accounts, templates, VNs and transactions on the DAN.
-
-## Tari DAN web-gui
-
-A very basic web-gui for interacting with VNS.
-
-See the dedicated [README](./applications/tari_validator_node_web_ui/README.md) for installation and running guides.
 
 ## Running and testing a validator
 
 NOTE: This repo is heavily under development, so these instructions may change without notice.
 
-First thing you need is to run a Tari base node, Tari console wallet and most likely `tor`. You will also need to run a
-Tari miner to mine some
-blocks. You should use the `feature-dan` branch and `igor` network for now.
+The easiest way to run a test network is to use `tari_swarm_daemon`.
 
-A validator node can be started using:
-
-```
-cargo run --bin tari_validator_node -- --network igor
-``` 
-
-You may find it useful to run multiple validator nodes, in which case, create a subfolder for each one and add the
-`-b <folder>` to run it in that folder
-
-Example
-
-```
-cd vn1 
-cargo run --bin tari_validator_node -- -b . --network igor
-
-// other terminal 
-cd vn2
-cargo run --bin tari_validator_node -- -b . --network igor
+```shell
+cargo run --bin tari_swarm_daemon --release -- -c data/swarm/config.toml init
+# Edit your config. You may need to point it to the path for the tari L1 repo. By default it assumed it's checked out at `../tari`.
+cargo run --bin tari_swarm_daemon --release -- -c data/swarm/config.toml start
 ```
 
-#### Registering the VN
+This will start a Minotari base node, a Minotari console wallet, an Ootle validator node, wallet and indexer.
+Additionally, it will automatically submit the validator node registration and mine blocks until the validator node is
+active.
 
-The validator node web ui can be found at `http://localhost:5000`. When you open it, you can click on `Register VN` to
-register it. Alternatively, register using the cli:
+Open `http://localhost:8080` where you can administer the running instances, get links to the various web UIs and
+JSON-RPC endpoints, view logs and more.
 
-```
-cargo run --bin tari_validator_node_cli -- vn register
-```
+NOTE: `tari_swarm_daemon` is specifically for development/debugging and runs a complete local test network. Instructions
+for running a wallet, indexer, or validator node are still in the works.
 
-You'll need to mine a number of blocks, but after that the vn should have a shard key and show up as registered on the
-web ui
+#### Creating a smart contract template
 
-#### Running the Tari Dan Wallet Daemon
-
-To be able to use the Tari Dan Wallet CLI communicate with the running validator node, one needs to set up a tari dan
-wallet daemon,
-as follows:
-
-```
-cargo run --bin tari_ootle_walletd -- -b .
-```
-
-The wallet daemon will listen to wallet requests and submit it to the running VN. Notice that, each VN running should
-have
-its own wallet daemon.
-
-#### Creating a template
-
-The easiest way to create a template is with the template at https://github.com/tari-project/wasm-template
-
-```
-cargo generate https://github.com/tari-project/wasm-template.git
-```
-
-Install the `wasm32-unknown-unknown` target with rustup
-
-```
-rustup target add wasm32-unknown-unknown
-```
-
-In the directory you created run:
-
-```
-cd package
-cargo wasm-build
-```
-
-Upload the WASM file created in `package/target/wasm32-unknown-unknown/release` to an HTTP server (or IPFS).
-
-After editing the project, you can deploy the project using the validator_node_cli:
-
-```
-cargo run --bin tari_validator_node_cli -- templates publish 
-```
-
-(See help on tari_validator_node_cli for more details)
-
-Once the template is registered on the base layer and sufficiently mined, you should see it in the `templates` table of
-the `global_storage.sqlite` file under `data/validator`. The `compiled_code` column should contain binary data and the
-`status` column should be `Active`.
+See the [tari-cli](https://github.com/tari-project/tari-cli) tool for details.
 
 ### Get airdropped base layer (Mino)Tari tokens to pay for fees
 
-Before the user can start submitting transactions to the network, it has to obtain base layer (Mino)Tari tokens to pay
-for fees. At the moment, the
-simplest way to do so is to request an airdrop of (free test) tokens from the network itself. In order to do so, the
-user should
-first create an account, using the tari wallet client, as follows:
+This is built into the testnet wallet and faucet tokens can be obtained from the wallet web UI.
 
-```
-    cargo run --bin tari_ootle_wallet_cli -- accounts create --account-name <USER_ACCOUNT_NAME>
-```
-
-After the user has created an account, it can request an airdrop via the command
-
-```
-    cargo run --bin tari_ootle_wallet_cli -- accounts faucet --account-name <USER_ACCOUNT_NAME> --amount <AMOUNT> --fee <FEE_AMOUNT>
-```
-
-Notice that for the DAN wallet cli to execute successfully, the user must have a wallet daemon connected to a validator
-node (see the
-above).
-
-### Claiming L1 burn Tari on the DAN
+### Claiming L1 burn Tari on the Ootle
 
 L1 Minotari coins are able to be burnt and claimed, the user may convert (1:1) these to Tari coins on the layer-2
-network. This process is
-fairly complex and manual at the time of writing, but is planned to improve in the future. The first step is to burn
-Minotari base layer
-funds making sure to include a claim public key. A private claim key must be known to claim the funds on the layer-2
-Tari network. Burning
-yields the following data:
+network.
+
+The easiest way to do this is in a test environment to click a button in the `tari_swarm_daemon` web UI.
+
+After creating an account in the Ootle wallet. Provide the account name and the amount of Tari to burn to the swarm
+daemon. This creates the burn transaction on the Minotari wallet and provides a "burn proof".
+You can then copy and paste that burn proof into the Ootle wallet web UI using the "Claim Burn" dialog.
+
+For other environments, the "manual" process is as follows:
+
+NOTE: these steps will likely be smoothed over in future apps.
+
+1. Run the Ootle wallet,
+2. Generate a key using the web ui or `tari_ootle_wallet_cli` tool.
+3. Run a L1 console wallet and navigate to the `burn` tab.
+4. Burn the desired amount of Tari, making sure to include the claim public key generated in step 2. WARNING: if you
+   lose the claim public key, you will not be able to claim the funds on the Tari network.
+5. Copy the claim proof JSON data from the L1 console wallet.
 
 ```
 {
@@ -153,63 +73,8 @@ yields the following data:
 }
 ```
 
-The user must create an account on the Tari network using the `accounts create` wallet CLI command prior to claiming.
-See the previous
-section for details on creating an account. The public key of this account should be used as the claim public key when
-burning funds.
-
-the user can then claim burn Tari on the second layer, as follows: create a new `.json` file, with path
-`<JSON_FILE_TO_RETRIEVE_BURN_TARI>`
-
-```
-{
-    "claim_public_key": <CLAIM_PUBLIC_KEY>,
-    "transaction_id": <TRANSACTION_ID>,
-    "commitment": <COMMITMENT>,
-    "ownership_proof": <OWNERSHIP_PROOF>,
-    "rangeproof": <RANGEPROOF>
-}
-```
-
-then run the command
-
-```
-cargo run --bin tari_ootle_wallet_cli -- accounts claim-burn --account <ACCOUNT_NAME> --json <JSON_FILE_TO_RETRIEVE_BURN_TARI> --fee <FEE>
-```
-
-### Calling a function
-
-With the templated registered we can invoke a function by using the `tari_ootle_wallet_cli`.
-
-Next we can get a list of templates
-
-```
-cargo run --bin tari_validator_node_cli -- templates list
-```
-
-To be entitled to pay for network fees, the user will have to claim burn Tari, see the previous section.
-Finally, call the function (In this case we'll be calling the `new` function on the example `Counter` template)
-
-```
-cargo run --bin tari_ootle_wallet_cli -- transactions submit --wait-for-result call-function <template_address> new 
-```
-
-### Debugging Hotstuff
-
-The first thing that you may want to check is the ingoing and outgoing messages from your node. These messages are
-logged to a sqlite database under `data/peer_db/message_log.sqlite` to confirm that messages are being sent and
-received.
-
-If messages are being received, the Hotstuff data can be viewed in the `state.db` under the `data/validator_node`
-folder.
-
-Each submitted transaction should create a `payload`, so the payload_id is useful to filter the other tables.
-
-If the transaction was successful, there should be some data in the `substates` table with the `created_by_payload_id`
-or the `deleted_by_payload_id` equal to the `payload_id`.
-
-
-
-
-
+6. Wait for the burn to be mined in. Validator nodes scan the L1 network for burnt UTXOs with special flags. Depending
+   on the network configuration, this may require 10-100s of blocks before the burn is picked up.
+7. Use the Ootle wallet web UI or the `tari_ootle_wallet_cli` tool to claim the burn using the burn proof using the "
+   Claim burn" dialog.
 

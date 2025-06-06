@@ -7,7 +7,7 @@ use chrono::Utc;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, TokenData, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json as json;
-use tari_dan_common_types::crypto::create_secret_password;
+use tari_ootle_common_types::crypto::create_secret_password;
 use tari_utilities::SafePassword;
 use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
 

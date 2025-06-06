@@ -97,7 +97,7 @@ RUN if [ "${TARGETARCH}" = "arm64" ] && [ "${BUILDARCH}" != "${TARGETARCH}" ] ; 
       echo "Tari Build Done"
 
 # rust source compile with cross platform build support
-FROM --platform=$BUILDPLATFORM rust:$RUST_VERSION-$RUST_DISTRO as builder-tari-dan
+FROM --platform=$BUILDPLATFORM rust:$RUST_VERSION-$RUST_DISTRO as builder-ootle
 
 # Declare to make available
 ARG BUILDPLATFORM
@@ -148,13 +148,13 @@ RUN if [ "${BUILDARCH}" != "${TARGETARCH}" ] && [ "${ARCH}" = "native" ] ; then 
       echo "!! Cross-compile and native ARCH not a good idea !! " ; \
       fi
 
-ADD sources/tari-dan /home/tari/sources/tari-dan
+ADD sources/ootle /home/tari/sources/ootle
 
-WORKDIR /home/tari/sources/tari-dan
+WORKDIR /home/tari/sources/ootle
 RUN ./scripts/install_ubuntu_dependencies.sh
 RUN if [ "${TARGETARCH}" = "arm64" ] && [ "${BUILDARCH}" != "${TARGETARCH}" ] ; then \
       # Hardcoded ARM64 envs for cross-compiling - FixMe soon
-      # source /tari-dan/cross-compile-aarch64.sh
+      # source /ootle/cross-compile-aarch64.sh
       . ../cross-compile-aarch64.sh ; \
       fi
 
@@ -179,16 +179,16 @@ RUN      rustup target add wasm32-unknown-unknown && \
       cargo build ${RUST_TARGET} \
       --release --locked \
       --bin tari_indexer \
-      --bin tari_dan_wallet_daemon \
-      --bin tari_dan_wallet_cli \
+      --bin tari_ootle_walletd \
+      --bin tari_ootle_wallet_cli \
       --bin tari_signaling_server \
       --bin tari_validator_node \
       --bin tari_validator_node_cli \
       --bin tari_swarm_daemon && \
       # Copy executable out of the cache so it is available in the runtime image.
       cp -v ./target/${BUILD_TARGET}release/tari_indexer /usr/local/bin/ && \
-      cp -v ./target/${BUILD_TARGET}release/tari_dan_wallet_daemon /usr/local/bin/ && \
-      cp -v ./target/${BUILD_TARGET}release/tari_dan_wallet_cli /usr/local/bin/ && \
+      cp -v ./target/${BUILD_TARGET}release/tari_ootle_walletd /usr/local/bin/ && \
+      cp -v ./target/${BUILD_TARGET}release/tari_ootle_wallet_cli /usr/local/bin/ && \
       cp -v ./target/${BUILD_TARGET}release/tari_signaling_server /usr/local/bin/ && \
       cp -v ./target/${BUILD_TARGET}release/tari_validator_node /usr/local/bin/ && \
       cp -v ./target/${BUILD_TARGET}release/tari_validator_node_cli /usr/local/bin/ && \
@@ -255,7 +255,7 @@ RUN groupadd --gid 1000 tari && \
 # Setup some folder structure
 RUN mkdir -p "/home/tari/sources/tari-connector" && \
       mkdir -p "/home/tari/sources/tari" && \
-      mkdir -p "/home/tari/sources/tari-dan" && \
+      mkdir -p "/home/tari/sources/ootle" && \
       mkdir -p "/home/tari/data" && \
       chown -R tari:tari "/home/tari/sources" && \
       ln -vsf "/home/tari/sources/tari-connector/" "/usr/lib/node_modules/tari-connector" && \
@@ -275,17 +275,17 @@ RUN rustup target list --installed && \
 
 WORKDIR /home/tari/sources
 #ADD --chown=tari:tari tari tari
-#ADD --chown=tari:tari tari-dan tari-dan
+#ADD --chown=tari:tari ootle ootle
 ADD --chown=tari:tari sources/tari-connector /home/tari/sources/tari-connector
 
 WORKDIR /home/tari/sources/tari-connector
 RUN npm link
 
-WORKDIR /home/tari/sources/tari-dan
+WORKDIR /home/tari/sources/ootle
 RUN npm link tari-connector
 
 COPY --from=builder-tari /usr/local/bin/minotari_* /usr/local/bin/
-COPY --from=builder-tari-dan /usr/local/bin/tari_* /usr/local/bin/
+COPY --from=builder-ootle /usr/local/bin/tari_* /usr/local/bin/
 
 ARG DAN_TESTING_WEBUI_PORT=18000
 

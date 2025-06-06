@@ -1,0 +1,41 @@
+[package]
+name = "consensus_tests"
+description = "Tari template runtime engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+tari_bor = { workspace = true }
+# Needed for network enum
+tari_common = { workspace = true }
+tari_common_types = { workspace = true }
+tari_consensus = { workspace = true }
+tari_crypto = { workspace = true }
+tari_ootle_common_types = { workspace = true }
+tari_engine = { workspace = true }
+tari_ootle_storage = { workspace = true }
+tari_engine_types = { workspace = true }
+tari_epoch_manager = { workspace = true }
+tari_shutdown = { workspace = true }
+tari_sidechain = { workspace = true }
+tari_state_store_rocksdb = { workspace = true }
+tari_state_tree = { workspace = true }
+tari_template_lib = { workspace = true, features = ["borsh"] }
+tari_transaction = { workspace = true }
+tari_consensus_types = { workspace = true }
+
+log = { workspace = true }
+serde = { workspace = true, default-features = true }
+tokio = { workspace = true, default-features = false, features = ["sync", "rt-multi-thread"] }
+rand = { workspace = true }
+futures = { workspace = true }
+fern = { workspace = true }
+humantime = { workspace = true }
+itertools = "0.13.0"
+serde_json = { workspace = true }
+tempfile = { workspace = true }

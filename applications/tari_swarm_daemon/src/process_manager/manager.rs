@@ -15,7 +15,7 @@ use futures::future::Either;
 use log::{debug, info};
 use minotari_wallet_grpc_client::grpc;
 use tari_common_types::types::FixedHash;
-use tari_dan_engine::wasm::WasmModule;
+use tari_engine::wasm::WasmModule;
 use tari_engine_types::calculate_template_binary_hash;
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib_types::TemplateAddress;
@@ -542,8 +542,7 @@ impl ProcessManager {
             .get_wallet_daemon_mut(wallet_instance_id)
             .ok_or_else(|| {
                 anyhow!(
-                    "No DanTariConsoleWallet instances {wallet_instance_id} found. Please start a wallet before \
-                     burning funds"
+                    "No wallet daemon instances {wallet_instance_id} found. Please start a wallet before burning funds"
                 )
             })?;
         let claim_public_key = wallet.get_account_public_key(account_name.clone(), None).await?;

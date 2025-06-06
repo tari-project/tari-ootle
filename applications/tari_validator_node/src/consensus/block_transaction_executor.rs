@@ -5,30 +5,30 @@ use std::{collections::HashMap, sync::Arc};
 
 use log::info;
 use tari_consensus::traits::{BlockTransactionExecutor, BlockTransactionExecutorError};
-use tari_dan_app_utilities::transaction_executor::TransactionExecutor;
-use tari_dan_common_types::{Epoch, SubstateRequirement, VersionedSubstateId};
-use tari_dan_engine::state_store::{memory::MemoryStateStore, new_memory_store, StateWriter};
-use tari_dan_storage::{
-    consensus_models::{TransactionExecution, VersionedSubstateIdLockIntent},
-    StateStore,
-};
+use tari_engine::state_store::{memory::MemoryStateStore, new_memory_store, StateWriter};
 use tari_engine_types::{
     substate::Substate,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
+};
+use tari_ootle_app_utilities::transaction_executor::TransactionExecutor;
+use tari_ootle_common_types::{Epoch, SubstateRequirement, VersionedSubstateId};
+use tari_ootle_storage::{
+    consensus_models::{TransactionExecution, VersionedSubstateIdLockIntent},
+    StateStore,
 };
 use tari_transaction::Transaction;
 
 use crate::{transaction_validators::TransactionValidationError, validator::Validator};
 
-const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::block_transaction_executor";
+const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::block_transaction_executor";
 
 #[derive(Debug)]
-pub struct TariDanBlockTransactionExecutor<TExecutor, TValidator> {
+pub struct TarBlockTransactionExecutor<TExecutor, TValidator> {
     executor: TExecutor,
     validator: Arc<TValidator>,
 }
 
-impl<TExecutor, TValidator> TariDanBlockTransactionExecutor<TExecutor, TValidator>
+impl<TExecutor, TValidator> TarBlockTransactionExecutor<TExecutor, TValidator>
 where TExecutor: TransactionExecutor
 {
     pub fn new(executor: TExecutor, validator: TValidator) -> Self {
@@ -53,7 +53,7 @@ where TExecutor: TransactionExecutor
 }
 
 impl<TExecutor, TStateStore, TValidator> BlockTransactionExecutor<TStateStore>
-    for TariDanBlockTransactionExecutor<TExecutor, TValidator>
+    for TarBlockTransactionExecutor<TExecutor, TValidator>
 where
     TStateStore: StateStore,
     TExecutor: TransactionExecutor,
@@ -125,7 +125,7 @@ where
     }
 }
 
-impl<TExecutor: Clone, TValidator> Clone for TariDanBlockTransactionExecutor<TExecutor, TValidator> {
+impl<TExecutor: Clone, TValidator> Clone for TarBlockTransactionExecutor<TExecutor, TValidator> {
     fn clone(&self) -> Self {
         Self {
             executor: self.executor.clone(),

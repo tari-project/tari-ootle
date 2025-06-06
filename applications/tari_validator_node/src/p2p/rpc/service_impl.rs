@@ -25,8 +25,9 @@ use std::convert::{TryFrom, TryInto};
 use log::*;
 use tari_bor::encode;
 use tari_consensus_types::BlockId;
-use tari_dan_common_types::{optional::Optional, shard::Shard, Epoch, NodeHeight, PeerAddress, SubstateRequirement};
-use tari_dan_p2p::{
+use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
+use tari_ootle_common_types::{optional::Optional, shard::Shard, Epoch, NodeHeight, PeerAddress, SubstateRequirement};
+use tari_ootle_p2p::{
     proto,
     proto::rpc::{
         GetCheckpointRequest,
@@ -45,11 +46,10 @@ use tari_dan_p2p::{
         SyncTemplatesResponse,
     },
 };
-use tari_dan_storage::{
+use tari_ootle_storage::{
     consensus_models::{Block, EpochCheckpoint, StateTransitionId, SubstateRecord, TransactionRecord},
     StateStore,
 };
-use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
 use tari_template_lib::types::{HashParseError, TemplateAddress};
 use tari_template_manager::interface::TemplateManagerHandle;
@@ -62,7 +62,7 @@ use crate::p2p::{
     services::mempool::MempoolHandle,
 };
 
-const LOG_TARGET: &str = "tari::dan::p2p::rpc";
+const LOG_TARGET: &str = "tari::ootle::p2p::rpc";
 
 pub struct ValidatorNodeRpcServiceImpl<TStateStore> {
     epoch_manager: EpochManagerHandle<PeerAddress>,

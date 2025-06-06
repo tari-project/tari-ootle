@@ -27,10 +27,10 @@ use std::{
 
 use reqwest::Url;
 use tari_common::configuration::{CommonConfig, Network};
-use tari_dan_wallet_daemon::{
+use tari_ootle_walletd::{
     cli::Cli,
     config::{ApplicationConfig, WalletDaemonConfig},
-    run_tari_dan_wallet_daemon,
+    run_tari_ootle_walletd,
 };
 use tari_shutdown::Shutdown;
 use tari_wallet_daemon_client::{
@@ -46,7 +46,7 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct DanWalletDaemonProcess {
+pub struct TariWalletDaemonProcess {
     pub name: String,
     pub json_rpc_port: u16,
     pub indexer_jrpc_port: u16,
@@ -72,26 +72,26 @@ pub async fn spawn_wallet_daemon(world: &mut TariWorld, wallet_daemon_name: Stri
 
     let mut config = ApplicationConfig {
         common: CommonConfig::default(),
-        dan_wallet_daemon: WalletDaemonConfig::default(),
+        ootle_wallet_daemon: WalletDaemonConfig::default(),
     };
 
     config.common.base_path.clone_from(&base_dir);
-    config.dan_wallet_daemon.json_rpc_address = Some(json_rpc_address);
-    config.dan_wallet_daemon.signaling_server_address = Some(signaling_server_addr);
-    config.dan_wallet_daemon.indexer_json_rpc_url = indexer_url.parse().unwrap();
-    config.dan_wallet_daemon.network = Network::LocalNet;
+    config.ootle_wallet_daemon.json_rpc_address = Some(json_rpc_address);
+    config.ootle_wallet_daemon.signaling_server_address = Some(signaling_server_addr);
+    config.ootle_wallet_daemon.indexer_json_rpc_url = indexer_url.parse().unwrap();
+    config.ootle_wallet_daemon.network = Network::LocalNet;
     let mut cli = Cli::init();
     // Avoid using keyring in cucumber tests
     cli.override_keyring_password = Some("secret".into());
 
-    let handle = task::spawn(run_tari_dan_wallet_daemon(cli, config, shutdown_signal));
+    let handle = task::spawn(run_tari_ootle_walletd(cli, config, shutdown_signal));
 
     // Wait for node to start up
     let handle = wait_listener_on_local_port(handle, json_rpc_port).await;
     // Check if the task errored/panicked
     let _handle = check_join_handle(&wallet_daemon_name, handle).await;
 
-    let wallet_daemon_process = DanWalletDaemonProcess {
+    let wallet_daemon_process = TariWalletDaemonProcess {
         name: wallet_daemon_name.clone(),
         json_rpc_port,
         indexer_jrpc_port,
@@ -102,7 +102,7 @@ pub async fn spawn_wallet_daemon(world: &mut TariWorld, wallet_daemon_name: Stri
     world.wallet_daemons.insert(wallet_daemon_name, wallet_daemon_process);
 }
 
-impl DanWalletDaemonProcess {
+impl TariWalletDaemonProcess {
     pub fn stop(&mut self) {
         self.shutdown.trigger();
     }

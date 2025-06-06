@@ -23,14 +23,21 @@
 use std::{collections::HashMap, time::Duration};
 
 use serde::{Deserialize, Serialize};
-use tari_dan_common_types::{
+use tari_engine_types::{
+    commit_result::{ExecuteResult, FinalizeResult},
+    instruction::Instruction,
+    serde_with,
+    substate::{SubstateId, SubstateValue},
+    ValidatorFeePoolAddress,
+};
+use tari_ootle_common_types::{
     shard::Shard,
     substate_type::SubstateType,
     ShardGroup,
     SubstateAddress,
     SubstateRequirement,
 };
-use tari_dan_wallet_sdk::{
+use tari_ootle_wallet_sdk::{
     apis::{confidential_transfer::ConfidentialTransferInputSelection, key_manager},
     models::{
         Account,
@@ -40,13 +47,6 @@ use tari_dan_wallet_sdk::{
         TransactionStatus,
         WalletTransaction,
     },
-};
-use tari_engine_types::{
-    commit_result::{ExecuteResult, FinalizeResult},
-    instruction::Instruction,
-    serde_with,
-    substate::{SubstateId, SubstateValue},
-    ValidatorFeePoolAddress,
 };
 use tari_template_abi::{FunctionDef, TemplateDef};
 use tari_template_lib::{

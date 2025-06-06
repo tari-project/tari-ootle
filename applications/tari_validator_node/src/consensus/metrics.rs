@@ -8,8 +8,8 @@ use prometheus_client::{
     registry::Registry,
 };
 use tari_consensus::{hotstuff::HotStuffError, messages::HotstuffMessage, traits::hooks::ConsensusHooks};
-use tari_dan_common_types::NodeHeight;
-use tari_dan_storage::consensus_models::ValidBlock;
+use tari_ootle_common_types::NodeHeight;
+use tari_ootle_storage::consensus_models::ValidBlock;
 use tari_transaction::TransactionId;
 
 use crate::metrics::CollectorRegister;

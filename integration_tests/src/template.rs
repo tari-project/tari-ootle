@@ -11,7 +11,7 @@ use minotari_app_grpc::tari_rpc::{
     TemplateType,
     WasmInfo,
 };
-use tari_dan_engine::wasm::compile::compile_template;
+use tari_engine::wasm::compile::compile_template;
 use tari_engine_types::hashing::hash_template_code;
 use tari_template_lib::types::{Hash, TemplateAddress};
 use tari_wallet_daemon_client::{

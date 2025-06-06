@@ -5,8 +5,8 @@ use rand::rngs::OsRng;
 use tari_consensus::traits::{ValidatorSignatureVerifierService, ValidatorSignerService};
 use tari_consensus_types::{SignedMessage, ToSignatureMessage, ValidatorSchnorrSignature};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_dan_app_utilities::keypair::RistrettoKeypair;
 use tari_engine_types::FromByteType;
+use tari_ootle_app_utilities::keypair::RistrettoKeypair;
 
 #[derive(Debug, Clone)]
 pub struct TariSignatureService {

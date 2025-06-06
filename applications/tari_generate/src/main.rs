@@ -14,7 +14,7 @@ use anyhow::anyhow;
 use clap::Parser;
 use generators::GeneratorType;
 use serde_json::{json, Value};
-use tari_dan_engine::{template::TemplateModuleLoader, wasm::WasmModule};
+use tari_engine::{template::TemplateModuleLoader, wasm::WasmModule};
 
 use crate::generators::{
     liquid::{LiquidGenerator, LiquidTemplate},
@@ -57,7 +57,7 @@ struct PublishArgs {
     #[clap(long)]
     profile: Option<String>,
     #[clap(long, short = 'j')]
-    dan_testing_jrpc_url: String,
+    testing_jrpc_url: String,
 }
 
 impl From<PublishArgs> for BuildArgs {
@@ -72,7 +72,7 @@ impl From<PublishArgs> for BuildArgs {
 #[derive(clap::Args, Debug)]
 struct ListRegisteredTemplatesArgs {
     #[clap(long, short = 'j')]
-    dan_testing_jrpc_url: String,
+    testing_jrpc_url: String,
 }
 
 #[derive(clap::Args, Debug)]
@@ -90,7 +90,7 @@ struct ScaffoldArgs {
     #[clap(long, short = 'a')]
     template_address: String,
     #[clap(long, short = 'j')]
-    dan_testing_jrpc_url: String,
+    testing_jrpc_url: String,
 }
 
 fn parse_hashmap(input: &str) -> anyhow::Result<HashMap<String, String>> {
@@ -200,7 +200,7 @@ async fn publish(args: PublishArgs) -> anyhow::Result<()> {
     let wasm_name = search_wasm_files(&directory).ok_or(anyhow!("No wasm file found in the directory"))?;
 
     let file_path = directory.join(wasm_name.clone());
-    let jrpc_url = ensure_prefix(args.dan_testing_jrpc_url.as_str());
+    let jrpc_url = ensure_prefix(args.testing_jrpc_url.as_str());
     let url = format!("{}/upload_template", jrpc_url);
 
     let file_fs = fs::read(file_path).expect("failed to read file");
@@ -241,7 +241,7 @@ async fn publish(args: PublishArgs) -> anyhow::Result<()> {
 }
 
 async fn list_registered_templates(args: ListRegisteredTemplatesArgs) -> anyhow::Result<()> {
-    let jrpc_url = ensure_prefix(args.dan_testing_jrpc_url.as_str());
+    let jrpc_url = ensure_prefix(args.testing_jrpc_url.as_str());
 
     let request = json!({
         "jsonrpc": "2.0",
@@ -306,7 +306,7 @@ async fn scaffold(args: ScaffoldArgs) -> anyhow::Result<()> {
         println!("Failed to clean output directory");
     }
 
-    let jrpc_url = ensure_prefix(args.dan_testing_jrpc_url.as_str());
+    let jrpc_url = ensure_prefix(args.testing_jrpc_url.as_str());
     let request = json!({
         "jsonrpc" : "2.0",
         "method": "get_template",

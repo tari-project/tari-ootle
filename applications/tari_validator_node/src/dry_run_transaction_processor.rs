@@ -21,18 +21,18 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use log::info;
-use tari_dan_app_utilities::{
-    substate_file_cache::SubstateFileCache,
-    transaction_executor::{TariDanTransactionProcessor, TransactionExecutor, TransactionProcessorError},
-};
-use tari_dan_common_types::PeerAddress;
-use tari_dan_engine::state_store::{new_memory_store, StateStoreError};
-use tari_dan_storage::{StateStore, StorageError};
+use tari_engine::state_store::{new_memory_store, StateStoreError};
 use tari_engine_types::{
     commit_result::ExecuteResult,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerError, EpochManagerReader};
+use tari_ootle_app_utilities::{
+    substate_file_cache::SubstateFileCache,
+    transaction_executor::{TariTransactionProcessor, TransactionExecutor, TransactionProcessorError},
+};
+use tari_ootle_common_types::PeerAddress;
+use tari_ootle_storage::{StateStore, StorageError};
 use tari_rpc_framework::RpcStatus;
 use tari_template_manager::implementation::TemplateManager;
 use tari_transaction::Transaction;
@@ -46,7 +46,7 @@ use crate::{
     substate_resolver::{SubstateResolverError, TariSubstateResolver},
 };
 
-const LOG_TARGET: &str = "tari::dan::validator_node::dry_run_transaction_processor";
+const LOG_TARGET: &str = "tari::ootle::validator_node::dry_run_transaction_processor";
 
 #[derive(Error, Debug)]
 pub enum DryRunTransactionProcessorError {
@@ -77,13 +77,13 @@ pub struct DryRunTransactionProcessor<TStateStore> {
         SubstateFileCache,
     >,
     epoch_manager: EpochManagerHandle<PeerAddress>,
-    payload_processor: TariDanTransactionProcessor<TemplateManager<PeerAddress>>,
+    payload_processor: TariTransactionProcessor<TemplateManager<PeerAddress>>,
 }
 
 impl<TStateStore: StateStore<Addr = PeerAddress> + Send + Sync> DryRunTransactionProcessor<TStateStore> {
     pub fn new(
         epoch_manager: EpochManagerHandle<PeerAddress>,
-        payload_processor: TariDanTransactionProcessor<TemplateManager<PeerAddress>>,
+        payload_processor: TariTransactionProcessor<TemplateManager<PeerAddress>>,
         substate_resolver: TariSubstateResolver<
             TStateStore,
             EpochManagerHandle<PeerAddress>,

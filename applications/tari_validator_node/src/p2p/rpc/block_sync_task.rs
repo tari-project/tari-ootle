@@ -6,12 +6,12 @@ use std::collections::HashSet;
 use log::*;
 use tari_consensus::traits::CertificateStore;
 use tari_consensus_types::{BlockId, ProposalCertificate};
-use tari_dan_common_types::{optional::Optional, Epoch, NumPreshards};
-use tari_dan_p2p::{
+use tari_ootle_common_types::{optional::Optional, Epoch, NumPreshards};
+use tari_ootle_p2p::{
     proto,
     proto::rpc::{sync_blocks_response::SyncData, QuorumCertificates, SyncBlocksResponse},
 };
-use tari_dan_storage::{
+use tari_ootle_storage::{
     consensus_models::{Block, SubstateCreatedProof, SubstateUpdate, TransactionRecord},
     StateStore,
     StateStoreReadTransaction,
@@ -20,7 +20,7 @@ use tari_dan_storage::{
 use tari_rpc_framework::RpcStatus;
 use tokio::sync::mpsc;
 
-const LOG_TARGET: &str = "tari::dan::rpc::sync_task";
+const LOG_TARGET: &str = "tari::ootle::rpc::sync_task";
 
 const BLOCK_BUFFER_SIZE: usize = 15;
 

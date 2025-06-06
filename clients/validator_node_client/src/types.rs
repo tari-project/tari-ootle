@@ -27,7 +27,13 @@ use serde::{Deserialize, Serialize};
 use tari_base_node_client::types::BaseLayerValidatorNode;
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, Decision};
-use tari_dan_common_types::{
+use tari_engine_types::{
+    commit_result::FinalizeResult,
+    fees::FeeCostBreakdown,
+    serde_with,
+    substate::{SubstateId, SubstateValue},
+};
+use tari_ootle_common_types::{
     committee::{Committee, CommitteeInfo},
     shard::Shard,
     Epoch,
@@ -35,17 +41,11 @@ use tari_dan_common_types::{
     PeerAddress,
     SubstateAddress,
 };
-use tari_dan_storage::{
+use tari_ootle_storage::{
     consensus_models::{Block, TransactionExecution, TransactionPoolRecord},
     global::models,
     time::PrimitiveDateTime,
     Ordering,
-};
-use tari_engine_types::{
-    commit_result::FinalizeResult,
-    fees::FeeCostBreakdown,
-    serde_with,
-    substate::{SubstateId, SubstateValue},
 };
 use tari_sidechain::QuorumDecision;
 use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};

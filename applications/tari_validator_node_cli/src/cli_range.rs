@@ -3,7 +3,7 @@
 
 use std::{ops::RangeInclusive, str::FromStr};
 
-use tari_dan_common_types::Epoch;
+use tari_ootle_common_types::Epoch;
 
 #[derive(Debug, Clone)]
 pub struct CliRange<T>(RangeInclusive<T>);

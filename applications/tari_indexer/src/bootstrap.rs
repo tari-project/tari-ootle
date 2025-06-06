@@ -32,17 +32,6 @@ use tari_common::{
 };
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_crypto::tari_utilities::ByteArray;
-use tari_dan_app_utilities::{
-    common::verify_correct_network,
-    epoch_oracle_config::EpochOracleType,
-    keypair::RistrettoKeypair,
-    seed_peer::SeedPeer,
-    template_download_queue::TemplateDownloadQueue,
-};
-use tari_dan_common_types::PeerAddress;
-use tari_dan_p2p::TariMessagingSpec;
-use tari_dan_storage::global::GlobalDb;
-use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_engine_types::ToByteType;
 use tari_epoch_manager::service::{EpochManagerConfig, EpochManagerHandle};
 use tari_epoch_oracles::{
@@ -53,6 +42,17 @@ use tari_epoch_oracles::{
     EpochOracle,
 };
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
+use tari_ootle_app_utilities::{
+    common::verify_correct_network,
+    epoch_oracle_config::EpochOracleType,
+    keypair::RistrettoKeypair,
+    seed_peer::SeedPeer,
+    template_download_queue::TemplateDownloadQueue,
+};
+use tari_ootle_common_types::PeerAddress;
+use tari_ootle_p2p::TariMessagingSpec;
+use tari_ootle_storage::global::GlobalDb;
+use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_template_manager::{implementation::TemplateManager, interface::TemplateManagerHandle};

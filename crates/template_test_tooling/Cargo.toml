@@ -1,0 +1,27 @@
+[package]
+name = "tari_template_test_tooling"
+description = "Test tooling for Tari template development"
+version = "0.9.0"
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+tari_engine = { workspace = true }
+tari_crypto = { workspace = true }
+tari_common = { workspace = true }
+tari_common_types = { workspace = true }
+tari_template_lib = { workspace = true }
+tari_engine_types = { workspace = true }
+tari_transaction_manifest = { workspace = true }
+tari_template_builtin = { workspace = true }
+tari_transaction = { workspace = true }
+tari_ootle_common_types = { workspace = true }
+tari_bor = { workspace = true, default-features = true }
+tari_ootle_wallet_crypto = { workspace = true }
+
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true, features = ["default", "derive"] }
+rand = { workspace = true }

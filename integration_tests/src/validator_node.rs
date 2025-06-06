@@ -29,13 +29,13 @@ use std::{
 use reqwest::Url;
 use tari_common::configuration::{CommonConfig, StringList};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_dan_app_utilities::{
+use tari_engine_types::FromByteType;
+use tari_ootle_app_utilities::{
     epoch_oracle_config::EpochOracleConfig,
     keypair::create_new_keypair,
     p2p_config::PeerSeedsConfig,
 };
-use tari_dan_common_types::layer_one_transaction::{LayerOneTransactionDef, ValidatorRegistrationParams};
-use tari_engine_types::FromByteType;
+use tari_ootle_common_types::layer_one_transaction::{LayerOneTransactionDef, ValidatorRegistrationParams};
 use tari_p2p::Network;
 use tari_shutdown::Shutdown;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;

@@ -12,12 +12,12 @@ interface Props {
 
 export default function MinotariWallet(props: Props) {
   const [wallets, setWallets] = React.useState<null | [any]>(null);
-  const [danWallets, setDanWallets] = React.useState<null | [any]>(null);
+  const [tariWallets, setTariWallets] = React.useState<null | [any]>(null);
   const [isLoading, setIsLoading] = React.useState(true);
 
   const reload = () =>
     jsonRpc("list_instances", { by_type: "MinoTariConsoleWallet" }).then((wallets: any) => setWallets(wallets.instances))
-      .then(() => jsonRpc("list_instances", { by_type: "TariWalletDaemon" }).then((wallets: any) => setDanWallets(wallets.instances)))
+      .then(() => jsonRpc("list_instances", { by_type: "TariWalletDaemon" }).then((wallets: any) => setTariWallets(wallets.instances)))
       .then(() => setIsLoading(false));
 
 
@@ -32,7 +32,7 @@ export default function MinotariWallet(props: Props) {
   return (
     <div>
       {wallets!.map((wallet: any, i: number) => (
-        <Wallet key={i} {...wallet} onReload={reload} showLogs={props.showLogs} danWallets={danWallets} />
+        <Wallet key={i} {...wallet} onReload={reload} showLogs={props.showLogs} tariWallets={tariWallets} />
       ))}
     </div>
   );
@@ -54,7 +54,7 @@ function Wallet(props: any) {
       .then(props.onReload);
   };
 
-  const wallet = props.danWallets[0];
+  const wallet = props.tariWallets[0];
 
   return (
     <div className="info">

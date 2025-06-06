@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use reqwest::StatusCode;
-use tari_dan_common_types::optional::IsNotFoundError;
+use tari_ootle_common_types::optional::IsNotFoundError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum IndexerClientError {

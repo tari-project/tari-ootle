@@ -7,7 +7,7 @@ mod generators;
 
 use std::fs;
 
-use tari_dan_engine::{
+use tari_engine::{
     template::TemplateModuleLoader,
     wasm::{compile::compile_template, WasmModule},
 };

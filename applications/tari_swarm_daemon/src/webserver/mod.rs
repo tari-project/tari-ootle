@@ -17,7 +17,7 @@ use tokio::task;
 
 use crate::{config::Config, process_manager::ProcessManagerHandle};
 
-const LOG_TARGET: &str = "tari::dan::swarm::webserver";
+const LOG_TARGET: &str = "tari::ootle::swarm::webserver";
 
 pub fn spawn<S>(config: Config, shutdown: S, pm_handle: ProcessManagerHandle) -> task::JoinHandle<anyhow::Result<()>>
 where S: Future<Output = ()> + Unpin + Send + 'static {

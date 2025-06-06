@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use anyhow::bail;
 use log::*;
-use tari_dan_common_types::layer_one_transaction::LayerOneTransactionDef;
+use tari_ootle_common_types::layer_one_transaction::LayerOneTransactionDef;
 use tokio::{
     fs,
     time::{self, Duration},

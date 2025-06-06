@@ -2,12 +2,12 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use log::warn;
-use tari_dan_common_types::Epoch;
+use tari_ootle_common_types::Epoch;
 use tari_transaction::Transaction;
 
 use crate::{transaction_validators::TransactionValidationError, validator::Validator};
 
-const LOG_TARGET: &str = "tari::dan::mempool::validators::epoch_range";
+const LOG_TARGET: &str = "tari::ootle::mempool::validators::epoch_range";
 
 #[derive(Debug, Default)]
 pub struct EpochRangeValidator;

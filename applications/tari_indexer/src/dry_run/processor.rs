@@ -23,9 +23,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use log::{debug, info};
-use tari_dan_app_utilities::transaction_executor::{TariDanTransactionProcessor, TransactionExecutor as _};
-use tari_dan_common_types::{Epoch, PeerAddress, SubstateRequirement};
-use tari_dan_engine::{fees::FeeTable, state_store::new_memory_store, transaction::TransactionProcessorConfig};
+use tari_engine::{fees::FeeTable, state_store::new_memory_store, transaction::TransactionProcessorConfig};
 use tari_engine_types::{
     commit_result::ExecuteResult,
     substate::{Substate, SubstateId},
@@ -37,6 +35,8 @@ use tari_indexer_lib::{
     substate_scanner::SubstateScanner,
     transaction_autofiller::TransactionAutofiller,
 };
+use tari_ootle_app_utilities::transaction_executor::{TariTransactionProcessor, TransactionExecutor as _};
+use tari_ootle_common_types::{Epoch, PeerAddress, SubstateRequirement};
 use tari_template_manager::implementation::TemplateManager;
 use tari_transaction::Transaction;
 use tari_validator_node_rpc::client::{
@@ -122,7 +122,7 @@ where TSubstateCache: SubstateCache + 'static
     fn build_payload_processor(
         &self,
         transaction: &Transaction,
-    ) -> TariDanTransactionProcessor<TemplateManager<PeerAddress>> {
+    ) -> TariTransactionProcessor<TemplateManager<PeerAddress>> {
         // simulate fees if the transaction requires it
         let fee_table = if Self::transaction_includes_fees(transaction) {
             // TODO: should match the VN fee table, should the fee table values be a consensus constant?
@@ -137,7 +137,7 @@ where TSubstateCache: SubstateCache + 'static
             FeeTable::zero_rated()
         };
 
-        TariDanTransactionProcessor::new(self.config.clone(), self.template_manager.clone(), fee_table)
+        TariTransactionProcessor::new(self.config.clone(), self.template_manager.clone(), fee_table)
     }
 
     fn transaction_includes_fees(transaction: &Transaction) -> bool {

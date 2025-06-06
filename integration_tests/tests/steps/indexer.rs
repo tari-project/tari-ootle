@@ -13,8 +13,8 @@ use integration_tests::{
 };
 use libp2p::Multiaddr;
 use tari_crypto::tari_utilities::hex::Hex;
-use tari_dan_common_types::displayable::Displayable;
 use tari_indexer_client::types::AddPeerRequest;
+use tari_ootle_common_types::displayable::Displayable;
 
 #[when(expr = "indexer {word} connects to all other validators")]
 async fn given_validator_connects_to_other_vns(world: &mut TariWorld, name: String) {

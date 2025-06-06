@@ -10,7 +10,7 @@ set -e
 
 TARI_BINS=(
     "tari_validator_node"
-    "tari_dan_wallet_daemon"
+    "tari_ootle_walletd"
     "tari_indexer"
     "tari_swarm_daemon"
 )

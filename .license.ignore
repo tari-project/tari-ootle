@@ -1,4 +1,4 @@
 ./applications/tari_indexer/src/substate_storage_sqlite/schema.rs
-./dan_layer/storage_sqlite/src/global/schema.rs
-./dan_layer/wallet/storage_sqlite/src/schema.rs
+./crates/storage_sqlite/src/global/schema.rs
+./crates/wallet/storage_sqlite/src/schema.rs
 ./networking/sqlite_message_logger/src/schema.rs

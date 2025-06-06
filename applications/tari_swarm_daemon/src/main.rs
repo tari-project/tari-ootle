@@ -75,9 +75,8 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
     let executables = vec![
         ExecutableConfig {
             instance_type: InstanceType::MinoTariNode,
-            // If None, Defaults to the target directory relative to the compile.working_dir for the package
-            // We provide this here so that it appears in the config file
-            execuable_path: Some("target/release/minotari_node".into()),
+            // If None, it defaults to the target directory relative to the compile.working_dir for the package
+            execuable_path: None,
             compile: Some(CompileConfig {
                 working_dir: Some("../tari".into()),
                 package_name: "minotari_node".to_string(),
@@ -89,7 +88,7 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
         },
         ExecutableConfig {
             instance_type: InstanceType::MinoTariConsoleWallet,
-            execuable_path: Some("target/release/minotari_console_wallet".into()),
+            execuable_path: None,
             compile: Some(CompileConfig {
                 working_dir: Some("../tari".into()),
                 package_name: "minotari_console_wallet".to_string(),
@@ -100,7 +99,7 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
         },
         ExecutableConfig {
             instance_type: InstanceType::MinoTariMiner,
-            execuable_path: Some("target/release/minotari_miner".into()),
+            execuable_path: None,
             compile: Some(CompileConfig {
                 working_dir: Some("../tari".into()),
                 package_name: "minotari_miner".to_string(),
@@ -111,7 +110,7 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
         },
         ExecutableConfig {
             instance_type: InstanceType::TariValidatorNode,
-            execuable_path: Some("target/release/tari_validator_node".into()),
+            execuable_path: None,
             compile: Some(CompileConfig {
                 working_dir: Some(".".into()),
                 package_name: "tari_validator_node".to_string(),
@@ -122,7 +121,7 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
         },
         ExecutableConfig {
             instance_type: InstanceType::TariIndexer,
-            execuable_path: Some("target/release/tari_indexer".into()),
+            execuable_path: None,
             compile: Some(CompileConfig {
                 working_dir: Some(".".into()),
                 package_name: "tari_indexer".to_string(),
@@ -133,7 +132,7 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
         },
         // ExecutableConfig {
         //     instance_type: InstanceType::TariSignalingServer,
-        //     execuable_path: Some("target/release/tari_signaling_server".into()),
+        //     execuable_path: None,
         //     compile: Some(CompileConfig {
         //         working_dir: Some(".".into()),
         //         package_name: "tari_signaling_server".to_string(),
@@ -143,10 +142,10 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
         // },
         ExecutableConfig {
             instance_type: InstanceType::TariWalletDaemon,
-            execuable_path: Some("target/release/tari_wallet_daemon".into()),
+            execuable_path: None,
             compile: Some(CompileConfig {
                 working_dir: Some(".".into()),
-                package_name: "tari_dan_wallet_daemon".to_string(),
+                package_name: "tari_ootle_walletd".to_string(),
                 target_dir: None,
                 features: vec!["web_ui".to_string()],
                 envs: vec![],

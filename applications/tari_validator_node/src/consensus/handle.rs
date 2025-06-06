@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_consensus::hotstuff::{ConsensusCurrentState, CurrentView, HotstuffEvent};
-use tari_dan_common_types::Epoch;
+use tari_ootle_common_types::Epoch;
 use tari_transaction::Transaction;
 use tokio::sync::{broadcast, mpsc, watch};
 

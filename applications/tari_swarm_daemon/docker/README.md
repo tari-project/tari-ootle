@@ -6,9 +6,9 @@ Create a folder ```sources``` and build a docker image.
 mkdir sources
 cd sources
 git clone https://github.com/tari-project/tari.git
-git clone https://github.com/tari-project/tari-dan.git
+git clone https://github.com/tari-project/tari-dan.git ootle
 git clone https://github.com/tari-project/tari-connector.git
-cp -v tari-dan/applications/tari_swarm_daemon/docker/cross-compile-aarch64.sh .
+cp -v ootle/applications/tari_swarm_daemon/docker/cross-compile-aarch64.sh .
 cd ..
 docker build -f sources/tari-dan/applications/tari_swarm_daemon/docker/tari_swarm.Dockerfile \ 
   -t local/tari-swarm .
@@ -17,15 +17,15 @@ docker build -f sources/tari-dan/applications/tari_swarm_daemon/docker/tari_swar
 # Targeted testing and cross platform builds
 
 ```bash
-docker build -f tari_swarm/docker_rig/tari_swarm.Dockerfile \
-  -t local/tari-swarm-tari-dan --target=builder-tari-dan .
+docker build -f tari_swarm/docker/tari_swarm.Dockerfile \
+  -t local/tari-ootle-swarm --target=builder-tari .
 ```
 
 or
 
 ```bash
-docker buildx build -f tari_swarm/docker_rig/tari_swarm.Dockerfile \
-  -t local/tari-swarm-tari-dan-arm64 --target=builder-tari-dan \
+docker build -f tari_swarm/docker/tari_swarm.Dockerfile \
+  -t local/tari-ootle-swarm-arm64 --target=builder-tari \
   --platform linux/arm64 .
 ```
 

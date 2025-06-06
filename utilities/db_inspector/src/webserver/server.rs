@@ -18,7 +18,7 @@ use tower_http::cors::CorsLayer;
 
 use crate::webserver::{context::HandlerContext, either_cf::EitherCf, handlers};
 
-const LOG_TARGET: &str = "tari::dan::swarm::webserver";
+const LOG_TARGET: &str = "tari::ootle::swarm::webserver";
 
 macro_rules! add_cf_route {
     ($api:expr, $cf:expr) => {

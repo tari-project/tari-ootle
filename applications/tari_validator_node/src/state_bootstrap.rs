@@ -8,19 +8,26 @@ use tari_bor::cbor;
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::BlockId;
-use tari_dan_common_types::{Epoch, NodeAddressable, NumPreshards, ShardGroup, ToSubstateAddress, VersionedSubstateId};
-use tari_dan_storage::{
-    consensus_models::{Block, SubstateRecord},
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
-    StorageError,
-};
 use tari_engine_types::{
     component::{ComponentBody, ComponentHeader},
     resource::Resource,
     resource_container::ResourceContainer,
     substate::{SubstateId, SubstateValue},
     vault::Vault,
+};
+use tari_ootle_common_types::{
+    Epoch,
+    NodeAddressable,
+    NumPreshards,
+    ShardGroup,
+    ToSubstateAddress,
+    VersionedSubstateId,
+};
+use tari_ootle_storage::{
+    consensus_models::{Block, SubstateRecord},
+    StateStoreReadTransaction,
+    StateStoreWriteTransaction,
+    StorageError,
 };
 use tari_template_lib::{
     auth::{ComponentAccessRules, OwnerRule, ResourceAccessRules},

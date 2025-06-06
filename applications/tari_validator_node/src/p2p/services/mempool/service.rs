@@ -25,11 +25,11 @@ use std::{collections::HashSet, fmt::Display};
 use libp2p::{gossipsub, PeerId};
 use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
-use tari_dan_common_types::{optional::Optional, PeerAddress, ShardGroup, ToSubstateAddress};
-use tari_dan_p2p::{DanMessage, NewTransactionMessage, TariMessagingSpec};
-use tari_dan_storage::{consensus_models::TransactionRecord, StateStore, StateStoreReadTransaction};
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_networking::NetworkingHandle;
+use tari_ootle_common_types::{optional::Optional, PeerAddress, ShardGroup, ToSubstateAddress};
+use tari_ootle_p2p::{NewTransactionMessage, TariMessage, TariMessagingSpec};
+use tari_ootle_storage::{consensus_models::TransactionRecord, StateStore, StateStoreReadTransaction};
 use tari_transaction::{Transaction, TransactionId};
 use tokio::sync::{mpsc, oneshot};
 
@@ -177,7 +177,7 @@ where
             num_pending,
             message_size,
         } = result?;
-        let DanMessage::NewTransaction(msg) = msg;
+        let TariMessage::NewTransaction(msg) = msg;
         let NewTransactionMessage { transaction } = *msg;
         let transaction_id = transaction.calculate_id();
 

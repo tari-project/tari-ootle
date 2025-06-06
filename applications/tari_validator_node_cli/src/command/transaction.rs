@@ -29,13 +29,7 @@ use std::{
 
 use anyhow::anyhow;
 use clap::{Args, Subcommand};
-use tari_dan_common_types::{
-    displayable::{DisplayContainer, Displayable},
-    optional::Optional,
-    SubstateAddress,
-    SubstateRequirement,
-};
-use tari_dan_engine::abi::Type;
+use tari_engine::abi::Type;
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
     instruction::Instruction,
@@ -43,6 +37,12 @@ use tari_engine_types::{
     parse_template_address,
     substate::{SubstateDiff, SubstateId, SubstateValue},
     ComponentCall,
+};
+use tari_ootle_common_types::{
+    displayable::{DisplayContainer, Displayable},
+    optional::Optional,
+    SubstateAddress,
+    SubstateRequirement,
 };
 use tari_sidechain::QuorumDecision;
 use tari_template_lib::{

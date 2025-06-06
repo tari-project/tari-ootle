@@ -35,7 +35,7 @@ use tari_crypto::{
     ristretto::RistrettoPublicKey,
     tari_utilities::{hex::Hex, ByteArray},
 };
-use tari_dan_common_types::crypto::create_key_pair;
+use tari_ootle_common_types::crypto::create_key_pair;
 use tari_template_lib::{models::NonFungibleAddress, types::crypto::RistrettoPublicKeyBytes};
 
 #[derive(Debug)]

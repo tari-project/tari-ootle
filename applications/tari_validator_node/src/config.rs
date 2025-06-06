@@ -34,7 +34,7 @@ use tari_common::{
     SubConfigPath,
 };
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_dan_app_utilities::{
+use tari_ootle_app_utilities::{
     epoch_oracle_config::EpochOracleConfig,
     p2p_config::{P2pConfig, PeerSeedsConfig, RpcConfig},
 };

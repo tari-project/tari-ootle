@@ -7,7 +7,7 @@ use tari_transaction::Transaction;
 
 use crate::{transaction_validators::TransactionValidationError, validator::Validator};
 
-const LOG_TARGET: &str = "tari::dan::mempool::validators::network";
+const LOG_TARGET: &str = "tari::ootle::mempool::validators::network";
 
 #[derive(Debug)]
 pub struct TransactionNetworkValidator {

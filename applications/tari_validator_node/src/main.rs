@@ -27,7 +27,7 @@ use std::{fs, panic, process};
 use clap::Parser;
 use log::*;
 use tari_common::initialize_logging;
-use tari_dan_app_utilities::{configuration::load_configuration, keypair::setup_keypair_prompt};
+use tari_ootle_app_utilities::{configuration::load_configuration, keypair::setup_keypair_prompt};
 use tari_shutdown::Shutdown;
 use tari_validator_node::{run_validator_node, ApplicationConfig};
 

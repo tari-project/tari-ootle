@@ -32,7 +32,6 @@ use tari_common::{
     exit_codes::ExitError,
 };
 use tari_crypto::tari_utilities::{hex::Hex, message_format::MessageFormat};
-use tari_dan_app_utilities::{epoch_oracle_config::EpochOracleConfig, p2p_config::PeerSeedsConfig};
 use tari_engine_types::substate::SubstateId;
 use tari_indexer::{
     config::{ApplicationConfig, EventFilterConfig, IndexerConfig},
@@ -43,6 +42,7 @@ use tari_indexer_client::{
     json_rpc_client::IndexerJsonRpcClient,
     types::{GetNonFungiblesRequest, GetSubstateRequest, GetSubstateResponse, NonFungibleSubstate},
 };
+use tari_ootle_app_utilities::{epoch_oracle_config::EpochOracleConfig, p2p_config::PeerSeedsConfig};
 use tari_p2p::Network;
 use tari_shutdown::Shutdown;
 use tari_template_lib::types::ObjectKey;
@@ -183,7 +183,7 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
         config.indexer.tor_identity_file = base_dir.join("indexer_tor_id.json");
         config.epoch_oracle.base_layer.base_node_grpc_url =
             Some(format!("http://127.0.0.1:{}", base_node_grpc_port).parse().unwrap());
-        config.indexer.dan_layer_scanning_internal = Duration::from_secs(5);
+        config.indexer.scanning_interval = Duration::from_secs(5);
         config.indexer.p2p.listener_port = port;
 
         config.indexer.p2p.enable_mdns = false;

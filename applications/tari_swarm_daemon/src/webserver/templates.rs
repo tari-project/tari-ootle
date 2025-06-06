@@ -13,7 +13,7 @@ use axum::{
 use log::{error, info};
 use serde::{Deserialize, Serialize};
 use tari_crypto::tari_utilities::hex;
-use tari_dan_engine::wasm::WasmModule;
+use tari_engine::wasm::WasmModule;
 use tari_engine_types::calculate_template_binary_hash;
 use tokio::{fs, io::AsyncWriteExt};
 use url::Url;

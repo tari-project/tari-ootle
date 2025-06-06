@@ -1,0 +1,87 @@
+[package]
+name = "tari_ootle_walletd"
+description = "The Tari wallet daemon"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+minotari_app_utilities = { workspace = true }
+tari_bor = { workspace = true }
+tari_common = { workspace = true }
+tari_crypto = { workspace = true }
+tari_ootle_app_utilities = { workspace = true }
+tari_shutdown = { workspace = true }
+tari_ootle_wallet_crypto = { workspace = true }
+tari_ootle_wallet_sdk = { workspace = true }
+tari_ootle_wallet_storage_sqlite = { workspace = true }
+tari_transaction = { workspace = true }
+tari_ootle_common_types = { workspace = true }
+tari_engine_types = { workspace = true }
+tari_wallet_daemon_client = { workspace = true }
+tari_template_builtin = { workspace = true }
+# TODO: Ideally we should not have to include the WASM template lib, we should perhaps extract the address types into a separate crate (e.g. template_types)
+tari_template_lib = { workspace = true }
+tari_template_abi = { workspace = true }
+tari_indexer_client = { workspace = true }
+tari_key_manager = { workspace = true }
+tari_transaction_manifest = { workspace = true }
+
+anyhow = { workspace = true }
+axum = { workspace = true, features = ["headers"] }
+axum-jrpc = { workspace = true, features = ["anyhow_error"] }
+base64 = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+config = { workspace = true }
+either = { workspace = true }
+humantime-serde = { workspace = true }
+futures = { workspace = true }
+include_dir = { workspace = true, optional = true }
+jsonwebtoken = { workspace = true }
+libsqlite3-sys = { workspace = true, features = ["bundled"] }
+log = { workspace = true }
+log4rs = { workspace = true, features = [
+    "rolling_file_appender",
+    "compound_policy",
+    "size_trigger",
+    "fixed_window_roller",
+    "console_appender",
+] }
+mime_guess = { workspace = true }
+rand = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true, default-features = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = [
+    "default",
+    "rt-multi-thread",
+    "macros",
+    "time",
+] }
+tower-http = { workspace = true, features = ["cors", "trace"] }
+url = { workspace = true }
+webrtc = { workspace = true }
+webauthn-rs = { workspace = true }
+uuid = { workspace = true }
+wasm-opt = "0.116.1"
+tempfile.workspace = true
+
+[dev-dependencies]
+tari_utilities = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = [
+    # We want to bundle this lib
+    "libsqlite3-sys",
+    # Want to enable some log4rs features
+    "log4rs",
+    # Added due to a limitation with machete - this is used in attributes without a `use` import.
+    "humantime-serde",
+]
+
+[features]
+default = ["web_ui"]
+web_ui = ["include_dir"]

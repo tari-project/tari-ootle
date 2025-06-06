@@ -1,0 +1,19 @@
+########################################################################################################################
+#                                                                                                                      #
+#                                     Wallet Daemon Configuration Options ()                                           #
+#                                                                                                                      #
+########################################################################################################################
+
+[ootle_wallet_daemon]
+# JSON-RPC listener address (default = "127.0.0.1:9000")
+# listen_addr = "127.0.0.1:9000"
+
+# Signaling server address (default = "127.0.0.1:9100")
+# signaling_server_addr = "127.0.0.1:9100"
+
+[localnet.ootle_wallet_daemon]
+# Indexer JSON-RPC url (default: http://127.0.0.1:18200/json_rpc)
+# indexer_json_rpc_url = "http://127.0.0.1:18200/json_rpc"
+[igor.ootle_wallet_daemon]
+# Indexer JSON-RPC url for Igor.
+indexer_json_rpc_url = "http://18.217.22.26:12008/json_rpc"

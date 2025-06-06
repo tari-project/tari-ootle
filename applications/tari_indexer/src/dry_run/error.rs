@@ -20,12 +20,12 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_dan_app_utilities::transaction_executor::TransactionProcessorError;
-use tari_dan_common_types::{Epoch, SubstateRequirement};
-use tari_dan_engine::state_store::StateStoreError;
+use tari_engine::state_store::StateStoreError;
 use tari_engine_types::substate::SubstateId;
 use tari_epoch_manager::EpochManagerError;
 use tari_indexer_lib::{error::IndexerError, transaction_autofiller::TransactionAutofillerError};
+use tari_ootle_app_utilities::transaction_executor::TransactionProcessorError;
+use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_rpc_framework::RpcStatus;
 use thiserror::Error;
 

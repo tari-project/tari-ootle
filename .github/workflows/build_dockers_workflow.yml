@@ -31,10 +31,10 @@ name: Build docker image - workflow_call/on-demand
         default: linux/amd64
 
 env:
-  IMAGE_NAME: tari-dan
+  IMAGE_NAME: ootle
   DAYS_to_EXPIRE: 30
 
-permissions: {}
+permissions: { }
 
 jobs:
   docker_build:
@@ -116,7 +116,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./docker_rig/${{ env.IMAGE_NAME }}.Dockerfile
+          file: ./docker/${{ env.IMAGE_NAME }}.Dockerfile
           platforms: ${{ inputs.platforms }}
           push: true
           provenance: false

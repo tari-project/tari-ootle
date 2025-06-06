@@ -4,14 +4,14 @@
 use std::{collections::HashSet, fmt::Display, future::Future};
 
 use log::{info, warn};
-use tari_dan_common_types::{
+use tari_epoch_manager::{EpochManagerError, EpochManagerReader};
+use tari_ootle_common_types::{
     optional::IsNotFoundError,
     NodeAddressable,
     ShardGroup,
     SubstateAddress,
     ToSubstateAddress,
 };
-use tari_epoch_manager::{EpochManagerError, EpochManagerReader};
 use tari_transaction::{Transaction, TransactionId};
 use tari_validator_node_rpc::client::{ValidatorNodeClientFactory, ValidatorNodeRpcClient};
 

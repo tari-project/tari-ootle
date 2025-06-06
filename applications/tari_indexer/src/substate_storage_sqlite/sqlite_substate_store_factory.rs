@@ -34,12 +34,12 @@ use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
 use log::*;
 use tari_consensus_types::BlockId;
 use tari_crypto::tari_utilities::hex::to_hex;
-use tari_dan_common_types::{substate_type::SubstateType, Epoch, ShardGroup};
-use tari_dan_storage::StorageError;
-use tari_dan_storage_sqlite::{error::SqliteStorageError, SqliteTransaction};
 use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_indexer_client::types::ListSubstateItem;
 use tari_indexer_lib::NonFungibleSubstate;
+use tari_ootle_common_types::{substate_type::SubstateType, Epoch, ShardGroup};
+use tari_ootle_storage::StorageError;
+use tari_ootle_storage_sqlite::{error::SqliteStorageError, SqliteTransaction};
 use tari_template_lib::{models::ResourceAddress, types::TemplateAddress};
 use thiserror::Error;
 

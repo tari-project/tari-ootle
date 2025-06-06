@@ -39,21 +39,7 @@ use tari_consensus::consensus_constants::ConsensusConstants;
 #[cfg(not(feature = "metrics"))]
 use tari_consensus::traits::hooks::NoopHooks;
 use tari_crypto::tari_utilities::ByteArray;
-use tari_dan_app_utilities::{
-    common::verify_correct_network,
-    epoch_oracle_config::{BaseLayerOracleConfig, EpochOracleType},
-    keypair::RistrettoKeypair,
-    seed_peer::SeedPeer,
-    substate_file_cache::SubstateFileCache,
-    template_download_queue::TemplateDownloadQueue,
-    transaction_executor::TariDanTransactionProcessor,
-    utxo_store::StateUtxoStore,
-};
-use tari_dan_common_types::PeerAddress;
-use tari_dan_engine::{fees::FeeTable, transaction::TransactionProcessorConfig};
-use tari_dan_p2p::TariMessagingSpec;
-use tari_dan_storage::{global::GlobalDb, StateStore};
-use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
+use tari_engine::{fees::FeeTable, transaction::TransactionProcessorConfig};
 use tari_engine_types::ToByteType;
 use tari_epoch_manager::{
     service::{EpochManagerConfig, EpochManagerHandle},
@@ -68,6 +54,20 @@ use tari_epoch_oracles::{
 };
 use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
+use tari_ootle_app_utilities::{
+    common::verify_correct_network,
+    epoch_oracle_config::{BaseLayerOracleConfig, EpochOracleType},
+    keypair::RistrettoKeypair,
+    seed_peer::SeedPeer,
+    substate_file_cache::SubstateFileCache,
+    template_download_queue::TemplateDownloadQueue,
+    transaction_executor::TariTransactionProcessor,
+    utxo_store::StateUtxoStore,
+};
+use tari_ootle_common_types::PeerAddress;
+use tari_ootle_p2p::TariMessagingSpec;
+use tari_ootle_storage::{global::GlobalDb, StateStore};
+use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_rpc_framework::RpcServer;
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_rocksdb::DatabaseOptions;
@@ -82,7 +82,7 @@ use tokio::{
 #[cfg(feature = "metrics")]
 use crate::consensus::metrics::PrometheusConsensusMetrics;
 use crate::{
-    consensus::{self, ConsensusHandle, TariDanBlockTransactionExecutor, ValidationContext},
+    consensus::{self, ConsensusHandle, TarBlockTransactionExecutor, ValidationContext},
     dry_run_transaction_processor::DryRunTransactionProcessor,
     file_l1_submitter::FileLayerOneSubmitter,
     p2p::{
@@ -290,7 +290,7 @@ pub async fn spawn_services(
     );
 
     // Consensus
-    let payload_processor = TariDanTransactionProcessor::new(
+    let payload_processor = TariTransactionProcessor::new(
         TransactionProcessorConfig::builder()
             .with_network(config.network)
             .with_template_binary_max_size_bytes(consensus_constants.template_binary_max_size_bytes)
@@ -298,7 +298,7 @@ pub async fn spawn_services(
         template_manager.clone(),
         fee_table,
     );
-    let transaction_executor = TariDanBlockTransactionExecutor::new(
+    let transaction_executor = TarBlockTransactionExecutor::new(
         payload_processor.clone(),
         create_consensus_transaction_validator(config.network, template_manager.clone()).boxed(),
     );

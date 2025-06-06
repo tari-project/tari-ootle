@@ -32,7 +32,7 @@ use tari_core::{
     blocks::BlockHeader,
     transactions::transaction_components::CodeTemplateRegistration,
 };
-use tari_dan_common_types::{Epoch, SubstateAddress};
+use tari_ootle_common_types::{Epoch, SubstateAddress};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 use tari_utilities::ByteArray;
 use url::Url;

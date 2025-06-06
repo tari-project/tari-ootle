@@ -4,7 +4,7 @@
 use std::{collections::HashMap, path::PathBuf, str::FromStr};
 
 use serde::Deserialize;
-use tari_dan_engine::{abi::TemplateDef, template::LoadedTemplate};
+use tari_engine::{abi::TemplateDef, template::LoadedTemplate};
 
 pub mod liquid;
 

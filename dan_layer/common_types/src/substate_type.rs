@@ -19,7 +19,6 @@ pub enum SubstateType {
     UnclaimedConfidentialOutput,
     NonFungible,
     TransactionReceipt,
-    NonFungibleIndex,
     ValidatorFeePool,
     Template,
 }
@@ -33,7 +32,6 @@ impl SubstateType {
             SubstateType::UnclaimedConfidentialOutput => "commitment",
             SubstateType::NonFungible => "nft",
             SubstateType::TransactionReceipt => "txreceipt",
-            SubstateType::NonFungibleIndex => "nftindex",
             SubstateType::ValidatorFeePool => "vnfp",
             SubstateType::Template => "template",
         }
@@ -46,7 +44,6 @@ impl SubstateType {
             (SubstateType::Resource, SubstateId::Resource(_)) => true,
             (SubstateType::Vault, SubstateId::Vault(_)) => true,
             (SubstateType::NonFungible, SubstateId::NonFungible(_)) => true,
-            (SubstateType::NonFungibleIndex, SubstateId::NonFungibleIndex(_)) => true,
             (SubstateType::UnclaimedConfidentialOutput, SubstateId::UnclaimedConfidentialOutput(_)) => true,
             (SubstateType::TransactionReceipt, SubstateId::TransactionReceipt(_)) => true,
             (SubstateType::ValidatorFeePool, SubstateId::ValidatorFeePool(_)) => true,
@@ -65,7 +62,6 @@ impl From<&SubstateValue> for SubstateType {
             SubstateValue::UnclaimedConfidentialOutput(_) => SubstateType::UnclaimedConfidentialOutput,
             SubstateValue::NonFungible(_) => SubstateType::NonFungible,
             SubstateValue::TransactionReceipt(_) => SubstateType::TransactionReceipt,
-            SubstateValue::NonFungibleIndex(_) => SubstateType::NonFungibleIndex,
             SubstateValue::Template(_) => SubstateType::Template,
             SubstateValue::ValidatorFeePool(_) => SubstateType::ValidatorFeePool,
         }
@@ -81,7 +77,6 @@ impl From<&SubstateId> for SubstateType {
             SubstateId::UnclaimedConfidentialOutput(_) => SubstateType::UnclaimedConfidentialOutput,
             SubstateId::NonFungible(_) => SubstateType::NonFungible,
             SubstateId::TransactionReceipt(_) => SubstateType::TransactionReceipt,
-            SubstateId::NonFungibleIndex(_) => SubstateType::NonFungibleIndex,
             SubstateId::ValidatorFeePool(_) => SubstateType::ValidatorFeePool,
             SubstateId::Template(_) => SubstateType::Template,
         }

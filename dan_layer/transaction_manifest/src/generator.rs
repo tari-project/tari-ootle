@@ -170,7 +170,6 @@ impl ManifestInstructionGenerator {
                                 SubstateId::Vault(addr) => Ok(instruction_arg!(*addr)),
                                 SubstateId::NonFungible(addr) => Ok(instruction_arg!(addr)),
                                 SubstateId::UnclaimedConfidentialOutput(addr) => Ok(instruction_arg!(*addr)),
-                                SubstateId::NonFungibleIndex(addr) => Ok(instruction_arg!(addr)),
                                 SubstateId::Template(addr) => Ok(instruction_arg!(*addr)),
                                 SubstateId::ValidatorFeePool(addr) => Ok(instruction_arg!(*addr)),
                             },

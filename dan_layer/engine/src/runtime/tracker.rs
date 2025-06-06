@@ -138,7 +138,7 @@ impl StateTracker {
         address: UnclaimedConfidentialOutputAddress,
     ) -> Result<UnclaimedConfidentialOutput, RuntimeError> {
         self.write_with(|state| {
-            let output_lock = state.lock_substate(&address.into(), LockFlag::Write)?;
+            let output_lock = state.write_lock_substate(&address.into())?;
             let output = state
                 .get_locked_substate(&output_lock)?
                 .as_unclaimed_confidential_output()
@@ -220,7 +220,10 @@ impl StateTracker {
     }
 
     pub fn lock_substate(&self, address: &SubstateId, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError> {
-        self.write_with(|state| state.lock_substate(address, lock_flag))
+        self.write_with(|state| match lock_flag {
+            LockFlag::Read => state.read_lock_substate(address),
+            LockFlag::Write => state.write_lock_substate(address),
+        })
     }
 
     pub fn unlock_substate(&self, locked: LockedSubstate) -> Result<(), RuntimeError> {

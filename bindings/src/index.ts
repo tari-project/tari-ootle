@@ -69,8 +69,6 @@ export * from "./types/NonFungibleAddressContents";
 export * from "./types/NonFungibleAddress";
 export * from "./types/NonFungibleContainer";
 export * from "./types/NonFungibleId";
-export * from "./types/NonFungibleIndexAddress";
-export * from "./types/NonFungibleIndex";
 export * from "./types/NonFungibleToken";
 export * from "./types/NonFungible";
 export * from "./types/NumPreshards";

@@ -43,10 +43,7 @@ use tari_indexer_lib::NonFungibleSubstate;
 use tari_template_lib::{models::ResourceAddress, types::TemplateAddress};
 use thiserror::Error;
 
-use super::models::{
-    events::{NewEvent, NewScannedBlockId},
-    non_fungible_index::NewNonFungibleIndex,
-};
+use super::models::events::{NewEvent, NewScannedBlockId};
 use crate::substate_storage_sqlite::models::{
     events::{Event, NewEventPayloadField, ScannedBlockId},
     substate::{NewSubstate, Substate},
@@ -475,8 +472,6 @@ pub trait SubstateStoreWriteTransaction {
     fn delete_substate(&mut self, address: String) -> Result<(), StorageError>;
     #[allow(dead_code)]
     fn clear_substates(&mut self) -> Result<(), StorageError>;
-    #[allow(dead_code)]
-    fn add_non_fungible_index(&mut self, new_nft_index: NewNonFungibleIndex) -> Result<(), StorageError>;
     fn save_event(&mut self, new_event: NewEvent) -> Result<(), StorageError>;
     fn save_scanned_block_id(&mut self, new_scanned_block_id: NewScannedBlockId) -> Result<(), StorageError>;
     fn delete_scanned_epochs_older_than(&mut self, epoch: Epoch) -> Result<(), StorageError>;
@@ -552,24 +547,6 @@ impl SubstateStoreWriteTransaction for SqliteSubstateStoreWriteTransaction<'_> {
             .map_err(|e| StorageError::QueryError {
                 reason: format!("clear_substates error: {}", e),
             })?;
-
-        Ok(())
-    }
-
-    fn add_non_fungible_index(&mut self, new_nft_index: NewNonFungibleIndex) -> Result<(), StorageError> {
-        use crate::substate_storage_sqlite::schema::non_fungible_indexes;
-
-        diesel::insert_or_ignore_into(non_fungible_indexes::table)
-            .values(&new_nft_index)
-            .execute(&mut *self.connection())
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("add_non_fungible_index error: {}", e),
-            })?;
-
-        info!(
-            target: LOG_TARGET,
-            "Added new NFT index for resource {} with index {}", new_nft_index.resource_address, new_nft_index.idx
-        );
 
         Ok(())
     }

@@ -6,12 +6,11 @@
 //! substate id is (de)serialized as a string.
 //! This allows SubstateId to be a key for a map when serializing as JSON (string key required)
 
-use std::{fmt, fmt::Formatter, marker::PhantomData, str::FromStr};
+use std::{borrow::Cow, fmt, fmt::Formatter, marker::PhantomData, str::FromStr};
 
 use tari_template_lib::models::{
     ComponentAddress,
     NonFungibleAddress,
-    NonFungibleIndexAddress,
     ResourceAddress,
     UnclaimedConfidentialOutputAddress,
     VaultId,
@@ -51,25 +50,18 @@ impl serde::Serialize for SubstateId {
             SubstateId::NonFungible(ref __field0) => {
                 serde::Serializer::serialize_newtype_variant(serializer, "SubstateId", 4u32, "NonFungible", __field0)
             },
-            SubstateId::NonFungibleIndex(ref __field0) => serde::Serializer::serialize_newtype_variant(
-                serializer,
-                "SubstateId",
-                5u32,
-                "NonFungibleIndex",
-                __field0,
-            ),
             SubstateId::TransactionReceipt(ref __field0) => serde::Serializer::serialize_newtype_variant(
                 serializer,
                 "SubstateId",
-                6u32,
+                5u32,
                 "TransactionReceipt",
                 __field0,
             ),
             SubstateId::Template(ref __field0) => {
-                serde::Serializer::serialize_newtype_variant(serializer, "SubstateId", 7u32, "Template", __field0)
+                serde::Serializer::serialize_newtype_variant(serializer, "SubstateId", 6u32, "Template", __field0)
             },
             SubstateId::ValidatorFeePool(ref addr) => {
-                serde::Serializer::serialize_newtype_variant(serializer, "SubstateId", 8u32, "ValidatorFeePool", addr)
+                serde::Serializer::serialize_newtype_variant(serializer, "SubstateId", 7u32, "ValidatorFeePool", addr)
             },
         }
     }
@@ -90,7 +82,6 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
             __field5,
             __field6,
             __field7,
-            __field8,
         }
         #[doc(hidden)]
         struct __FieldVisitor;
@@ -112,7 +103,6 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
                     5u64 => Ok(__Field::__field5),
                     6u64 => Ok(__Field::__field6),
                     7u64 => Ok(__Field::__field7),
-                    8u64 => Ok(__Field::__field8),
                     _ => Err(serde::de::Error::invalid_value(
                         serde::de::Unexpected::Unsigned(__value),
                         &"variant index 0 <= i < 9",
@@ -128,10 +118,9 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
                     "Vault" => Ok(__Field::__field2),
                     "UnclaimedConfidentialOutput" => Ok(__Field::__field3),
                     "NonFungible" => Ok(__Field::__field4),
-                    "NonFungibleIndex" => Ok(__Field::__field5),
-                    "TransactionReceipt" => Ok(__Field::__field6),
-                    "Template" => Ok(__Field::__field7),
-                    "ValidatorFeePool" => Ok(__Field::__field8),
+                    "TransactionReceipt" => Ok(__Field::__field5),
+                    "Template" => Ok(__Field::__field6),
+                    "ValidatorFeePool" => Ok(__Field::__field7),
                     _ => Err(serde::de::Error::unknown_variant(__value, VARIANTS)),
                 }
             }
@@ -144,10 +133,9 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
                     b"Vault" => Ok(__Field::__field2),
                     b"UnclaimedConfidentialOutput" => Ok(__Field::__field3),
                     b"NonFungible" => Ok(__Field::__field4),
-                    b"NonFungibleIndex" => Ok(__Field::__field5),
-                    b"TransactionReceipt" => Ok(__Field::__field6),
-                    b"Template" => Ok(__Field::__field7),
-                    b"ValidatorFeePool" => Ok(__Field::__field8),
+                    b"TransactionReceipt" => Ok(__Field::__field5),
+                    b"Template" => Ok(__Field::__field6),
+                    b"ValidatorFeePool" => Ok(__Field::__field7),
                     _ => {
                         let __value = &String::from_utf8_lossy(__value);
                         Err(serde::de::Error::unknown_variant(__value, VARIANTS))
@@ -198,18 +186,14 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
                         SubstateId::NonFungible,
                     ),
                     (__Field::__field5, __variant) => Result::map(
-                        serde::de::VariantAccess::newtype_variant::<NonFungibleIndexAddress>(__variant),
-                        SubstateId::NonFungibleIndex,
-                    ),
-                    (__Field::__field6, __variant) => Result::map(
                         serde::de::VariantAccess::newtype_variant::<TransactionReceiptAddress>(__variant),
                         SubstateId::TransactionReceipt,
                     ),
-                    (__Field::__field7, __variant) => Result::map(
+                    (__Field::__field6, __variant) => Result::map(
                         serde::de::VariantAccess::newtype_variant::<PublishedTemplateAddress>(__variant),
                         SubstateId::Template,
                     ),
-                    (__Field::__field8, __variant) => Result::map(
+                    (__Field::__field7, __variant) => Result::map(
                         serde::de::VariantAccess::newtype_variant::<ValidatorFeePoolAddress>(__variant),
                         SubstateId::ValidatorFeePool,
                     ),
@@ -223,13 +207,12 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
             "Vault",
             "UnclaimedConfidentialOutput",
             "NonFungible",
-            "NonFungibleIndex",
             "TransactionReceipt",
             "Template",
             "ValidatorFeePool",
         ];
         if deserializer.is_human_readable() {
-            let s = String::deserialize(deserializer)?;
+            let s = Cow::<str>::deserialize(deserializer)?;
             SubstateId::from_str(&s).map_err(serde::de::Error::custom)
         } else {
             serde::Deserializer::deserialize_enum(deserializer, "SubstateId", VARIANTS, __Visitor {
@@ -237,5 +220,31 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
                 lifetime: PhantomData,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_template_lib::types::ObjectKey;
+
+    use super::*;
+
+    #[test]
+    fn it_works() {
+        let component_id = SubstateId::Component(ComponentAddress::new(ObjectKey::from([0; ObjectKey::LENGTH])));
+        let serialized = serde_json::to_string(&component_id).unwrap();
+        assert_eq!(
+            serialized,
+            r#""component_0000000000000000000000000000000000000000000000000000000000000000""#
+        );
+
+        let deserialized: SubstateId = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, component_id);
+
+        // bincode
+        let bincode_serialized = bincode::serde::encode_to_vec(&component_id, bincode::config::standard()).unwrap();
+        let (bincode_deserialized, _): (SubstateId, _) =
+            bincode::serde::decode_from_slice(&bincode_serialized, bincode::config::standard()).unwrap();
+        assert_eq!(bincode_deserialized, component_id);
     }
 }

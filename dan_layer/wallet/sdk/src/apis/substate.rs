@@ -156,15 +156,6 @@ where
                                 self.scan_for_substate(&resx_addr, None).await?;
                             substate_ids.insert(id.into());
                         },
-                        SubstateValue::NonFungibleIndex(addr) => {
-                            let resx_addr = SubstateId::Resource(*addr.referenced_address().resource_address());
-                            if substate_ids.contains(&resx_addr) {
-                                continue;
-                            }
-                            let ValidatorScanResult { address: id, .. } =
-                                self.scan_for_substate(&resx_addr, None).await?;
-                            substate_ids.insert(id.into());
-                        },
                         SubstateValue::ValidatorFeePool(_) => {
                             let resx_addr = SubstateId::Resource(XTR);
                             if substate_ids.contains(&resx_addr) {

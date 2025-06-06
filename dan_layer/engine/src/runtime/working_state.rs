@@ -152,9 +152,17 @@ impl WorkingState {
         Ok(())
     }
 
-    pub fn lock_substate(&mut self, addr: &SubstateId, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError> {
+    fn lock_substate(&mut self, addr: &SubstateId, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError> {
         let lock_id = self.store.try_lock(addr, lock_flag)?;
         Ok(LockedSubstate::new(addr.clone(), lock_id, lock_flag))
+    }
+
+    pub fn read_lock_substate(&mut self, addr: &SubstateId) -> Result<LockedSubstate, RuntimeError> {
+        self.lock_substate(addr, LockFlag::Read)
+    }
+
+    pub fn write_lock_substate(&mut self, addr: &SubstateId) -> Result<LockedSubstate, RuntimeError> {
+        self.lock_substate(addr, LockFlag::Write)
     }
 
     pub fn unlock_substate(&mut self, lock: LockedSubstate) -> Result<(), RuntimeError> {
@@ -520,16 +528,6 @@ impl WorkingState {
                 );
                 let mut token_ids = BTreeSet::new();
 
-                // let resource = self.get_resource(locked_resource)?;
-                // TODO: This isn't correct (assumes tokens are never burnt), we'll need to rethink this
-                // let mut index = resource
-                //     .total_supply()
-                //     .as_u64_checked()
-                //     .ok_or(RuntimeError::InvalidAmount {
-                //         amount: resource.total_supply(),
-                //         reason: "Could not convert to u64".to_owned(),
-                //     })?;
-
                 for (id, (data, mut_data)) in tokens {
                     let nft_address = NonFungibleAddress::new(resource_address, id);
                     let token_id = nft_address.id().clone();
@@ -540,12 +538,6 @@ impl WorkingState {
                         token_ids.insert(token_id);
                         self.new_substate(addr.clone(), NonFungibleContainer::new(data, mut_data))?;
                     }
-
-                    // for each new nft we also create an index to be allow resource scanning
-                    // let index_address = NonFungibleIndexAddress::new(resource_address, index);
-                    // index += 1;
-                    // let nft_index = NonFungibleIndex::new(nft_address);
-                    // self.new_substate(index_address, nft_index)?;
                 }
 
                 ResourceContainer::non_fungible(resource_address, token_ids)

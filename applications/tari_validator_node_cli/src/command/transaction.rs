@@ -396,10 +396,6 @@ fn print_substate_diff(diff: &SubstateDiff) {
             SubstateValue::UnclaimedConfidentialOutput(_hash) => {
                 println!("     ! layer one commitment: Should never happen");
             },
-            SubstateValue::NonFungibleIndex(index) => {
-                let referenced_address = SubstateId::from(index.referenced_address().clone());
-                println!("      ▶ NFT index {} referencing {}", address, referenced_address);
-            },
             SubstateValue::ValidatorFeePool(fee_pool) => {
                 println!("      ▶ fee_pool: {}", address);
                 println!("        ▶ amount: {}", fee_pool.amount());
@@ -736,7 +732,6 @@ impl CliArg {
                 SubstateId::Vault(v) => arg!(v),
                 SubstateId::UnclaimedConfidentialOutput(v) => arg!(v),
                 SubstateId::NonFungible(v) => arg!(v),
-                SubstateId::NonFungibleIndex(v) => arg!(v),
                 SubstateId::TransactionReceipt(v) => arg!(v),
                 SubstateId::Template(v) => arg!(v),
                 SubstateId::ValidatorFeePool(v) => arg!(v),
@@ -826,28 +821,6 @@ impl FromStr for NewNonFungibleMintOutput {
         Ok(NewNonFungibleMintOutput {
             resource_address,
             count: count_str.parse()?,
-        })
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct NewNonFungibleIndexOutput {
-    pub parent_address: ResourceAddress,
-    pub index: u64,
-}
-
-impl FromStr for NewNonFungibleIndexOutput {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (parent_address, index_str) = s.split_once(',').unwrap_or((s, "0"));
-        let parent_address = SubstateId::from_str(parent_address)?;
-        let parent_address = parent_address
-            .as_resource_address()
-            .ok_or_else(|| anyhow!("Expected resource address but got {}", parent_address))?;
-        Ok(NewNonFungibleIndexOutput {
-            parent_address,
-            index: index_str.parse()?,
         })
     }
 }

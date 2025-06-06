@@ -657,7 +657,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                                 action: ComponentAction::GetState.into(),
                             })?
                     } else {
-                        state.lock_substate(&SubstateId::Component(component_address), LockFlag::Read)?
+                        state.read_lock_substate(&SubstateId::Component(component_address))?
                     };
 
                     // We only allow mutating of the current component.
@@ -875,8 +875,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     self.emit_std_event("resource", "create", resource_address.into(), payload, state_mut)?;
 
                     state_mut.new_substate(resource_address, resource)?;
-                    let resource_lock =
-                        state_mut.lock_substate(&SubstateId::Resource(resource_address), LockFlag::Write)?;
+                    let resource_lock = state_mut.write_lock_substate(&SubstateId::Resource(resource_address))?;
 
                     let mut output_bucket = None;
                     if let Some(mint_arg) = arg.mint_arg {
@@ -902,7 +901,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         })?;
                 args.assert_no_args("ResourceAction::GetTotalSupply")?;
                 self.tracker.write_with(|state| {
-                    let locked = state.lock_substate(&SubstateId::Resource(resource_address), LockFlag::Read)?;
+                    let locked = state.read_lock_substate(&SubstateId::Resource(resource_address))?;
                     let resource = state.get_resource(&locked)?;
                     let total_supply = resource.total_supply();
                     state.unlock_substate(locked)?;
@@ -921,7 +920,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 args.assert_no_args("ResourceAction::GetResourceType")?;
 
                 self.tracker.write_with(|state| {
-                    let locked = state.lock_substate(&SubstateId::Resource(resource_address), LockFlag::Read)?;
+                    let locked = state.read_lock_substate(&SubstateId::Resource(resource_address))?;
                     let resource = state.get_resource(&locked)?;
                     let resource_type = resource.resource_type();
                     state.unlock_substate(locked)?;
@@ -939,8 +938,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 let mint_resource: MintResourceArg = args.assert_one_arg()?;
 
                 let (resource_lock, maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
-                    let resource_lock =
-                        state_mut.lock_substate(&SubstateId::Resource(resource_address), LockFlag::Write)?;
+                    let resource_lock = state_mut.write_lock_substate(&SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -987,8 +985,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 let arg: RecallResourceArg = args.assert_one_arg()?;
 
                 let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
-                    let resource_lock =
-                        state_mut.lock_substate(&SubstateId::Resource(resource_address), LockFlag::Read)?;
+                    let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -1010,7 +1007,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 }
 
                 self.tracker.write_with(|state_mut| {
-                    let vault_lock = state_mut.lock_substate(&arg.vault_id.into(), LockFlag::Write)?;
+                    let vault_lock = state_mut.write_lock_substate(&arg.vault_id.into())?;
 
                     let resource = state_mut.recall_resource_from_vault(&vault_lock, &arg.resource)?;
 
@@ -1043,7 +1040,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                 self.tracker.write_with(|state| {
                     let addr = SubstateId::NonFungible(NonFungibleAddress::new(resource_address, arg.id.clone()));
-                    let nft_lock = state.lock_substate(&addr, LockFlag::Read)?;
+                    let nft_lock = state.read_lock_substate(&addr)?;
 
                     let nf_container = state.get_non_fungible(&nft_lock)?;
 
@@ -1071,8 +1068,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 let arg: ResourceUpdateNonFungibleDataArg = args.assert_one_arg()?;
 
                 let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
-                    let resource_lock =
-                        state_mut.lock_substate(&SubstateId::Resource(resource_address), LockFlag::Read)?;
+                    let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -1099,7 +1095,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                 self.tracker.write_with(|state_mut| {
                     let addr = NonFungibleAddress::new(resource_address, arg.id);
-                    let locked = state_mut.lock_substate(&SubstateId::NonFungible(addr.clone()), LockFlag::Write)?;
+                    let locked = state_mut.write_lock_substate(&SubstateId::NonFungible(addr.clone()))?;
 
                     let nft = state_mut.get_non_fungible_mut(&locked)?;
 
@@ -1137,8 +1133,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 let access_rules: ResourceAccessRules = args.assert_one_arg()?;
 
                 let (resource_lock, maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
-                    let resource_lock =
-                        state_mut.lock_substate(&SubstateId::Resource(resource_address), LockFlag::Write)?;
+                    let resource_lock = state_mut.write_lock_substate(&SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -1205,7 +1200,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                 self.tracker.write_with(|state| {
                     let resource_substate_id = SubstateId::Resource(*resource_address);
-                    let resource_lock = state.lock_substate(&resource_substate_id, LockFlag::Read)?;
+                    let resource_lock = state.read_lock_substate(&resource_substate_id)?;
                     let resource = state.get_resource(&resource_lock)?;
 
                     // Require deposit permissions on the resource to create the vault (even if empty)
@@ -1256,12 +1251,11 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
                     self.tracker.write_with(|state_mut| {
-                        let vault_lock = state_mut.lock_substate(&SubstateId::Vault(vault_id), LockFlag::Write)?;
+                        let vault_lock = state_mut.write_lock_substate(&SubstateId::Vault(vault_id))?;
 
                         let resource_address = state_mut.get_vault(&vault_lock)?.resource_address();
 
-                        let resource_lock =
-                            state_mut.lock_substate(&SubstateId::Resource(*resource_address), LockFlag::Read)?;
+                        let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(*resource_address))?;
 
                         let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -1316,12 +1310,11 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
                     self.tracker.write_with(|state_mut| {
-                        let vault_lock = state_mut.lock_substate(&SubstateId::Vault(vault_id), LockFlag::Write)?;
+                        let vault_lock = state_mut.write_lock_substate(&SubstateId::Vault(vault_id))?;
 
                         let resource_address = state_mut.get_vault(&vault_lock)?.resource_address();
 
-                        let resource_lock =
-                            state_mut.lock_substate(&SubstateId::Resource(*resource_address), LockFlag::Read)?;
+                        let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(*resource_address))?;
 
                         let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -1402,7 +1395,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 args.assert_no_args("Vault::GetBalance")?;
 
                 self.tracker.write_with(|state| {
-                    let vault_lock = state.lock_substate(&SubstateId::Vault(vault_id), LockFlag::Read)?;
+                    let vault_lock = state.read_lock_substate(&SubstateId::Vault(vault_id))?;
                     let balance = state.get_vault(&vault_lock)?.balance();
                     state.unlock_substate(vault_lock)?;
                     Ok(InvokeResult::encode(&balance)?)
@@ -1416,7 +1409,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 args.assert_no_args("Vault::GetBalance")?;
 
                 self.tracker.write_with(|state| {
-                    let vault_lock = state.lock_substate(&SubstateId::Vault(vault_id), LockFlag::Read)?;
+                    let vault_lock = state.read_lock_substate(&SubstateId::Vault(vault_id))?;
                     let balance = state.get_vault(&vault_lock)?.locked_balance();
                     state.unlock_substate(vault_lock)?;
                     Ok(InvokeResult::encode(&balance)?)
@@ -1430,7 +1423,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 args.assert_no_args("Vault::GetResourceAddress")?;
 
                 self.tracker.write_with(|state| {
-                    let vault_lock = state.lock_substate(&SubstateId::Vault(vault_id), LockFlag::Read)?;
+                    let vault_lock = state.read_lock_substate(&SubstateId::Vault(vault_id))?;
                     let resource_address = *state.get_vault(&vault_lock)?.resource_address();
                     state.unlock_substate(vault_lock)?;
                     Ok(InvokeResult::encode(&resource_address)?)
@@ -1444,7 +1437,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 args.assert_no_args("Vault::GetNonFungibleIds")?;
 
                 self.tracker.write_with(|state| {
-                    let vault_lock = state.lock_substate(&SubstateId::Vault(vault_id), LockFlag::Read)?;
+                    let vault_lock = state.read_lock_substate(&SubstateId::Vault(vault_id))?;
                     let non_fungible_ids = state.get_vault(&vault_lock)?.get_non_fungible_ids();
                     let result = InvokeResult::encode(&non_fungible_ids)?;
                     state.unlock_substate(vault_lock)?;
@@ -1460,7 +1453,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 args.assert_no_args("Vault::GetCommitmentCount")?;
 
                 self.tracker.write_with(|state| {
-                    let vault_lock = state.lock_substate(&SubstateId::Vault(vault_id), LockFlag::Read)?;
+                    let vault_lock = state.read_lock_substate(&SubstateId::Vault(vault_id))?;
                     let commitment_count = state.get_vault(&vault_lock)?.get_commitment_count();
                     state.unlock_substate(vault_lock)?;
                     Ok(InvokeResult::encode(&commitment_count)?)
@@ -1476,12 +1469,11 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
                     self.tracker.write_with(|state_mut| {
-                        let vault_lock = state_mut.lock_substate(&SubstateId::Vault(vault_id), LockFlag::Write)?;
+                        let vault_lock = state_mut.write_lock_substate(&SubstateId::Vault(vault_id))?;
 
                         let resource_address = state_mut.get_vault(&vault_lock)?.resource_address();
 
-                        let resource_lock =
-                            state_mut.lock_substate(&SubstateId::Resource(*resource_address), LockFlag::Read)?;
+                        let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(*resource_address))?;
 
                         let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -1541,7 +1533,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 }
 
                 self.tracker.write_with(|state| {
-                    let vault_lock = state.lock_substate(&SubstateId::Vault(vault_id), LockFlag::Write)?;
+                    let vault_lock = state.write_lock_substate(&SubstateId::Vault(vault_id))?;
                     let resource_address = *state.get_vault(&vault_lock)?.resource_address();
                     if resource_address != XTR {
                         return Err(RuntimeError::InvalidArgument {
@@ -1552,7 +1544,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                             ),
                         });
                     }
-                    let resource_lock = state.lock_substate(&SubstateId::Resource(XTR), LockFlag::Read)?;
+                    let resource_lock = state.read_lock_substate(&SubstateId::Resource(XTR))?;
                     let resource = state.get_resource(&resource_lock)?;
 
                     state.authorization().check_resource_access_rules(
@@ -1608,12 +1600,11 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
                     self.tracker.write_with(|state_mut| {
-                        let vault_lock = state_mut.lock_substate(&SubstateId::Vault(vault_id), LockFlag::Write)?;
+                        let vault_lock = state_mut.write_lock_substate(&SubstateId::Vault(vault_id))?;
 
                         let resource_address = state_mut.get_vault(&vault_lock)?.resource_address();
 
-                        let resource_lock =
-                            state_mut.lock_substate(&SubstateId::Resource(*resource_address), LockFlag::Read)?;
+                        let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(*resource_address))?;
 
                         let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -1652,12 +1643,11 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
                     self.tracker.write_with(|state_mut| {
-                        let vault_lock = state_mut.lock_substate(&SubstateId::Vault(vault_id), LockFlag::Write)?;
+                        let vault_lock = state_mut.write_lock_substate(&SubstateId::Vault(vault_id))?;
 
                         let resource_address = state_mut.get_vault(&vault_lock)?.resource_address();
 
-                        let resource_lock =
-                            state_mut.lock_substate(&SubstateId::Resource(*resource_address), LockFlag::Read)?;
+                        let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(*resource_address))?;
 
                         let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -1696,12 +1686,11 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                 let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
                     self.tracker.write_with(|state_mut| {
-                        let vault_lock = state_mut.lock_substate(&SubstateId::Vault(vault_id), LockFlag::Write)?;
+                        let vault_lock = state_mut.write_lock_substate(&SubstateId::Vault(vault_id))?;
 
                         let resource_address = state_mut.get_vault(&vault_lock)?.resource_address();
 
-                        let resource_lock =
-                            state_mut.lock_substate(&SubstateId::Resource(*resource_address), LockFlag::Read)?;
+                        let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(*resource_address))?;
 
                         let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -1740,7 +1729,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 args.assert_no_args("Vault::GetNonFungibles")?;
 
                 self.tracker.write_with(|state| {
-                    let vault_lock = state.lock_substate(&SubstateId::Vault(vault_id), LockFlag::Read)?;
+                    let vault_lock = state.read_lock_substate(&SubstateId::Vault(vault_id))?;
                     let resource_address = state.get_vault(&vault_lock)?.resource_address();
                     let nft_ids = state.get_vault(&vault_lock)?.get_non_fungible_ids();
                     let nfts: Vec<NonFungible> = nft_ids
@@ -1829,7 +1818,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                 self.tracker.write_with(|state| {
                     let bucket = state.get_bucket(bucket_id)?;
-                    let resource_lock = state.lock_substate(&(*bucket.resource_address()).into(), LockFlag::Read)?;
+                    let resource_lock = state.read_lock_substate(&(*bucket.resource_address()).into())?;
                     let resource = state.get_resource(&resource_lock)?;
                     let view_key =
                         resource
@@ -1873,7 +1862,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 let proof = args.assert_one_arg()?;
                 self.tracker.write_with(|state| {
                     let bucket = state.get_bucket(bucket_id)?;
-                    let resource_lock = state.lock_substate(&(*bucket.resource_address()).into(), LockFlag::Read)?;
+                    let resource_lock = state.read_lock_substate(&(*bucket.resource_address()).into())?;
                     let resource = state.get_resource(&resource_lock)?;
                     let view_key =
                         resource
@@ -1905,7 +1894,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let bucket = state_mut.get_bucket(bucket_id)?;
 
                     let resource_lock =
-                        state_mut.lock_substate(&SubstateId::Resource(*bucket.resource_address()), LockFlag::Write)?;
+                        state_mut.write_lock_substate(&SubstateId::Resource(*bucket.resource_address()))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -1948,7 +1937,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let bucket = state_mut.get_bucket(bucket_id)?;
 
                     let resource_lock =
-                        state_mut.lock_substate(&SubstateId::Resource(*bucket.resource_address()), LockFlag::Read)?;
+                        state_mut.read_lock_substate(&SubstateId::Resource(*bucket.resource_address()))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -2248,7 +2237,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             NonFungibleAction::GetData => {
                 args.assert_no_args("NonFungibleAction::GetData")?;
                 self.tracker.write_with(|state| {
-                    let nft_lock = state.lock_substate(&SubstateId::NonFungible(nf_addr.clone()), LockFlag::Read)?;
+                    let nft_lock = state.read_lock_substate(&SubstateId::NonFungible(nf_addr.clone()))?;
                     let nft = state.get_non_fungible(&nft_lock)?;
                     let contents = nft
                         .contents()
@@ -2267,7 +2256,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 args.assert_no_args("NonFungibleAction::GetMutableData")?;
 
                 self.tracker.write_with(|state| {
-                    let nft_lock = state.lock_substate(&SubstateId::NonFungible(nf_addr.clone()), LockFlag::Read)?;
+                    let nft_lock = state.read_lock_substate(&SubstateId::NonFungible(nf_addr.clone()))?;
                     let nft = state.get_non_fungible(&nft_lock)?;
                     let contents = nft
                         .contents()

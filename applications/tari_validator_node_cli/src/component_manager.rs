@@ -89,8 +89,7 @@ impl ComponentManager {
                 addr @ SubstateId::Resource(_) |
                 addr @ SubstateId::TransactionReceipt(_) |
                 addr @ SubstateId::Vault(_) |
-                addr @ SubstateId::NonFungible(_) |
-                addr @ SubstateId::NonFungibleIndex(_) => {
+                addr @ SubstateId::NonFungible(_) => {
                     children.push(SubstateRequirement {
                         substate_id: addr.clone(),
                         version: Some(substate.version()),

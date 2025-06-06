@@ -16,7 +16,6 @@ pub mod instruction_result;
 pub mod lock;
 pub mod logs;
 pub mod non_fungible;
-pub mod non_fungible_index;
 pub mod proof;
 pub mod resource;
 pub mod resource_container;

@@ -21,5 +21,4 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 pub mod events;
-pub mod non_fungible_index;
 pub mod substate;

@@ -31,14 +31,7 @@ use serde::{Deserialize, Serialize};
 use tari_bor::{decode, decode_exact, encode, BorError};
 use tari_common_types::types::FixedHash;
 use tari_template_lib::{
-    models::{
-        ComponentAddress,
-        NonFungibleAddress,
-        NonFungibleIndexAddress,
-        ResourceAddress,
-        UnclaimedConfidentialOutputAddress,
-        VaultId,
-    },
+    models::{ComponentAddress, NonFungibleAddress, ResourceAddress, UnclaimedConfidentialOutputAddress, VaultId},
     prelude::PUBLIC_IDENTITY_RESOURCE_ADDRESS,
     types::{Hash, ObjectKey},
 };
@@ -48,7 +41,6 @@ use crate::{
     confidential::UnclaimedConfidentialOutput,
     hashing::{hasher32, substate_value_hasher32, EngineHashDomainLabel},
     non_fungible::NonFungibleContainer,
-    non_fungible_index::NonFungibleIndex,
     published_template::{PublishedTemplate, PublishedTemplateAddress},
     resource::Resource,
     transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
@@ -133,7 +125,6 @@ pub enum SubstateId {
     Vault(VaultId),
     UnclaimedConfidentialOutput(UnclaimedConfidentialOutputAddress),
     NonFungible(NonFungibleAddress),
-    NonFungibleIndex(NonFungibleIndexAddress),
     TransactionReceipt(TransactionReceiptAddress),
     Template(PublishedTemplateAddress),
     ValidatorFeePool(ValidatorFeePoolAddress),
@@ -212,15 +203,6 @@ impl SubstateId {
 
                 ObjectKey::new(addr.resource_address().as_entity_id(), key)
             },
-            SubstateId::NonFungibleIndex(addr) => {
-                let key = hasher32(EngineHashDomainLabel::NonFungibleIndex)
-                    .chain(addr.resource_address())
-                    .chain(&addr.index())
-                    .result()
-                    .trailing_bytes()
-                    .into();
-                ObjectKey::new(addr.resource_address().as_entity_id(), key)
-            },
             SubstateId::UnclaimedConfidentialOutput(addr) => *addr.as_object_key(),
             SubstateId::TransactionReceipt(addr) => *addr.as_object_key(),
             SubstateId::Template(addr) => *addr.as_object_key(),
@@ -240,13 +222,6 @@ impl SubstateId {
         }
     }
 
-    pub fn as_non_fungible_index_address(&self) -> Option<&NonFungibleIndexAddress> {
-        match self {
-            SubstateId::NonFungibleIndex(addr) => Some(addr),
-            _ => None,
-        }
-    }
-
     pub fn is_resource(&self) -> bool {
         matches!(self, Self::Resource(_))
     }
@@ -258,7 +233,7 @@ impl SubstateId {
     pub fn is_root(&self) -> bool {
         // A component is a "root" substate i.e. it may not have a parent node. NOTE: this concept isn't well-defined
         // right now, this is simply used to prevent components being detected as dangling.
-        matches!(self, Self::Component(_) | Self::NonFungibleIndex(_))
+        matches!(self, Self::Component(_))
     }
 
     pub fn is_public_key_identity(&self) -> bool {
@@ -275,10 +250,6 @@ impl SubstateId {
 
     pub fn is_non_fungible(&self) -> bool {
         matches!(self, Self::NonFungible(_))
-    }
-
-    pub fn is_non_fungible_index(&self) -> bool {
-        matches!(self, Self::NonFungibleIndex(_))
     }
 
     pub fn is_layer1_commitment(&self) -> bool {
@@ -327,12 +298,6 @@ impl From<VaultId> for SubstateId {
 impl From<NonFungibleAddress> for SubstateId {
     fn from(address: NonFungibleAddress) -> Self {
         Self::NonFungible(address)
-    }
-}
-
-impl From<NonFungibleIndexAddress> for SubstateId {
-    fn from(address: NonFungibleIndexAddress) -> Self {
-        Self::NonFungibleIndex(address)
     }
 }
 
@@ -428,20 +393,6 @@ impl TryFrom<SubstateId> for NonFungibleAddress {
     }
 }
 
-impl TryFrom<SubstateId> for NonFungibleIndexAddress {
-    type Error = InvalidSubstateIdVariant;
-
-    fn try_from(value: SubstateId) -> Result<Self, Self::Error> {
-        match value {
-            SubstateId::NonFungibleIndex(addr) => Ok(addr),
-            _ => Err(InvalidSubstateIdVariant {
-                substate_id: value,
-                expected: any::type_name::<Self>(),
-            }),
-        }
-    }
-}
-
 impl TryFrom<SubstateId> for UnclaimedConfidentialOutputAddress {
     type Error = InvalidSubstateIdVariant;
 
@@ -491,7 +442,6 @@ impl Display for SubstateId {
             SubstateId::Resource(addr) => write!(f, "{}", addr),
             SubstateId::Vault(addr) => write!(f, "{}", addr),
             SubstateId::NonFungible(addr) => write!(f, "{}", addr),
-            SubstateId::NonFungibleIndex(addr) => write!(f, "{}", addr),
             SubstateId::UnclaimedConfidentialOutput(commitment_address) => write!(f, "{}", commitment_address),
             SubstateId::TransactionReceipt(addr) => write!(f, "{}", addr),
             SubstateId::Template(addr) => write!(f, "{}", addr),
@@ -522,12 +472,6 @@ impl FromStr for SubstateId {
                 // nft_{resource_hex}_{id_type}_{id}
                 let addr = NonFungibleAddress::from_str(rest).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::NonFungible(addr))
-            },
-            Some(("nftindex", rest)) => {
-                // nftindex_{resource_id}_{index}
-                let addr =
-                    NonFungibleIndexAddress::from_str(rest).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
-                Ok(SubstateId::NonFungibleIndex(addr))
             },
             Some(("vault", addr)) => {
                 let id = VaultId::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
@@ -594,7 +538,6 @@ pub enum SubstateValue {
     Resource(Box<Resource>),
     Vault(Vault),
     NonFungible(NonFungibleContainer),
-    NonFungibleIndex(NonFungibleIndex),
     UnclaimedConfidentialOutput(UnclaimedConfidentialOutput),
     TransactionReceipt(TransactionReceipt),
     Template(PublishedTemplate),
@@ -661,20 +604,6 @@ impl SubstateValue {
     pub fn into_non_fungible(self) -> Option<NonFungibleContainer> {
         match self {
             SubstateValue::NonFungible(nft) => Some(nft),
-            _ => None,
-        }
-    }
-
-    pub fn non_fungible_index(&self) -> Option<&NonFungibleIndex> {
-        match self {
-            SubstateValue::NonFungibleIndex(index) => Some(index),
-            _ => None,
-        }
-    }
-
-    pub fn into_non_fungible_index(self) -> Option<NonFungibleIndex> {
-        match self {
-            SubstateValue::NonFungibleIndex(index) => Some(index),
             _ => None,
         }
     }
@@ -824,12 +753,6 @@ impl From<NonFungibleContainer> for SubstateValue {
     }
 }
 
-impl From<NonFungibleIndex> for SubstateValue {
-    fn from(index: NonFungibleIndex) -> Self {
-        Self::NonFungibleIndex(index)
-    }
-}
-
 impl From<TransactionReceipt> for SubstateValue {
     fn from(tx_receipt: TransactionReceipt) -> Self {
         Self::TransactionReceipt(tx_receipt)
@@ -967,10 +890,6 @@ mod tests {
                 .unwrap()
                 .as_non_fungible_address()
                 .unwrap();
-            SubstateId::from_str("nftindex_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_0")
-                .unwrap()
-                .as_non_fungible_index_address()
-                .unwrap();
             SubstateId::from_str("template_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff")
                 .unwrap()
                 .as_template()
@@ -990,7 +909,6 @@ mod tests {
             check(
                 "nft_a7cf4fd18ada7f367b1c102a9c158abc3754491665033231c5eb907fffffffff_uuid_7f19c3fe5fa13ff66a0d379fe5f9e3508acbd338db6bedd7350d8d565b2c5d32",
             );
-            check("nftindex_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_0");
             check("vnfp_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
             check("txreceipt_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
             check("commitment_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");

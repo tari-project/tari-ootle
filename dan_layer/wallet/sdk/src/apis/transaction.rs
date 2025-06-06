@@ -475,10 +475,7 @@ where
                             .collect(),
                     )?;
                 },
-                SubstateId::NonFungibleIndex(_) |
-                SubstateId::TransactionReceipt(_) |
-                SubstateId::Template(_) |
-                SubstateId::ValidatorFeePool(_) => {
+                SubstateId::TransactionReceipt(_) | SubstateId::Template(_) | SubstateId::ValidatorFeePool(_) => {
                     tx.substates_upsert_root(
                         VersionedSubstateIdRef::new(id, substate.version()),
                         Default::default(),

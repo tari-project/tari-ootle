@@ -30,6 +30,9 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 
+[dev-dependencies]
+bincode = { workspace = true, features = ["serde"] }
+
 [features]
 default = []
 ts = ["ts-rs", "tari_template_lib/ts", "tari_template_abi/ts"]

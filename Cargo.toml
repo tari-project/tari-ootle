@@ -3,7 +3,7 @@
 version = "0.9.2"
 edition = "2021"
 authors = ["The Tari Development Community"]
-repository = "https://github.com/tari-project/tari-dan"
+repository = "https://github.com/tari-project/tari-ootle"
 license = "BSD-3-Clause"
 
 

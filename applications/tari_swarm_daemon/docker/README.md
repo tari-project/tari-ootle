@@ -6,11 +6,11 @@ Create a folder ```sources``` and build a docker image.
 mkdir sources
 cd sources
 git clone https://github.com/tari-project/tari.git
-git clone https://github.com/tari-project/tari-dan.git ootle
+git clone https://github.com/tari-project/tari-ootle.git ootle
 git clone https://github.com/tari-project/tari-connector.git
 cp -v ootle/applications/tari_swarm_daemon/docker/cross-compile-aarch64.sh .
 cd ..
-docker build -f sources/tari-dan/applications/tari_swarm_daemon/docker/tari_swarm.Dockerfile \ 
+docker build -f sources/tari-ootle/applications/tari_swarm_daemon/docker/tari_swarm.Dockerfile \ 
   -t local/tari-swarm .
 ```
 

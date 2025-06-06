@@ -8,7 +8,7 @@ ARG OS_BASE=bookworm
 ARG NODE_MAJOR=20
 
 # rust source compile with cross platform build support
-FROM --platform=$BUILDPLATFORM rust:${RUST_VERSION}-${OS_BASE} as builder-tari-dan
+FROM --platform=$BUILDPLATFORM rust:${RUST_VERSION}-${OS_BASE} as builder-tari-ootle
 
 # Declare to make available
 ARG BUILDPLATFORM
@@ -136,7 +136,7 @@ ENV rust_version=$RUST_VERSION
 RUN mkdir -p "/home/tari/data" && \
     chown -R tari:tari "/home/tari/"
 
-COPY --chown=tari:tari --from=builder-tari-dan /usr/local/bin/tari_* /usr/local/bin/
+COPY --chown=tari:tari --from=builder-tari-ootle /usr/local/bin/tari_* /usr/local/bin/
 
 WORKDIR /home/tari
 ENV USER=tari

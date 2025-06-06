@@ -44,7 +44,7 @@ jobs:
       packages: write
 
     steps:
-      - name: checkout tari-dan
+      - name: checkout repo
         uses: actions/checkout@v4
 
       - name: Setup expiration for none releases

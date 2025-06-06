@@ -15,13 +15,12 @@ TARI_BINS=(
     "tari_swarm_daemon"
 )
 
-# Temp dir for binaries
 TMP_DIR=$(mktemp -d)
 
 # Build the binaries
 for bin in "${TARI_BINS[@]}"; do
     echo "Building $bin"
-    cargo build --release --bin $bin --all-features
+    cargo build --release --bin $bin
     cp target/release/$bin $TMP_DIR
 done
 

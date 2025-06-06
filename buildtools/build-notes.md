@@ -15,7 +15,7 @@ Linux ARM64 can be built using Vagrant and VirtualBox or Docker and cross
 
 # Prep Ubuntu for development
 
-# From - https://github.com/tari-project/tari-dan/blob/development/scripts/install_ubuntu_dependencies.sh
+# From - https://github.com/tari-project/tari-ootle/blob/development/scripts/install_ubuntu_dependencies.sh
 
 ```bash
 sudo apt-get update
@@ -107,7 +107,7 @@ rustup toolchain list
 ```bash
 mkdir -p ~/src
 cd ~/src
-git clone git@github.com:tari-project/tari-dan.git ootle
+git clone git@github.com:tari-project/tari-ootle.git ootle
 cd ootle
 ```
 

@@ -52,9 +52,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tari_template_abi = { git="https://github.com/tari-project/tari-dan.git", package="tari_template_abi", default-features = false, branch="development" }
-tari_template_lib = { git="https://github.com/tari-project/tari-dan.git", package="tari_template_lib", branch = "development" }
-tari_template_macros = { git="https://github.com/tari-project/tari-dan.git", package="tari_template_macros", branch = "development" }
+tari_template_abi = { git="https://github.com/tari-project/tari-ootle.git", package="tari_template_abi", default-features = false, branch="development" }
+tari_template_lib = { git="https://github.com/tari-project/tari-ootle.git", package="tari_template_lib", branch = "development" }
+tari_template_macros = { git="https://github.com/tari-project/tari-ootle.git", package="tari_template_macros", branch = "development" }
 
 [profile.release]
 opt-level = 's'     # Optimize for size.

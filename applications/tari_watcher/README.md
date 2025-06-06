@@ -1,6 +1,7 @@
 # Tari Watcher
 
 **Features**:
+
 * Registers the validator node on L2 by sending a transaction on L1
 * Monitors the chain and warns when registration is near expiration
 * Automatically re-registers the node
@@ -8,13 +9,16 @@
 
 ### Quickstart
 
-Initialize the project with `tari_watcher init` and start it with `tari_watcher start`. Edit the newly generated `config.toml` to enable notifications on Mattermost and Telegram. Make sure to have started up `tari_validator_node` once previously to have a node directory set up, default is `tari_validator_node -- -b data/vn1`.
+Initialize the project with `tari_watcher init` and start it with `tari_watcher start`. Edit the newly generated
+`config.toml` to enable notifications on Mattermost and Telegram. Make sure to have started up `tari_validator_node`
+once previously to have a node directory set up, default is `tari_validator_node -- -b data/vn1`.
 
 ### Config and Setup
 
 The default values used (see `constants.rs`) when running the project without any flags:
+
 ```
-- DEFAULT_MAIN_PROJECT_PATH: base directory, the same level as the repository `tari-dan`
+- DEFAULT_MAIN_PROJECT_PATH: base directory, the same level as the repository `tari-ootle`
 - DEFAULT_WATCHER_CONFIG_PATH: relative to the base directory, main configuration file
 - DEFAULT_VALIDATOR_KEY_PATH: relative to the base directory, validator node registration file
 - DEFAULT_VALIDATOR_NODE_BINARY_PATH: relative to the base directory, default is Rust build directory `target/release`
@@ -25,6 +29,7 @@ The default values used (see `constants.rs`) when running the project without an
 ```
 
 The two main configuration settings for the watcher (default `true`):
+
 ```
 - auto_register: automatically re-register the node
 - auto_restart: automatically restart the node if it goes down

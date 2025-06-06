@@ -2,13 +2,13 @@
   "name": "@tari-project/typescript-bindings",
   "version": "1.9.0",
   "description": "TypeScript types synchronized to the Tari Ootle Rust codebase",
-  "homepage": "https://github.com/tari-project/tari-dan#readme",
+  "homepage": "https://github.com/tari-project/tari-ootle#readme",
   "bugs": {
-    "url": "https://github.com/tari-project/tari-dan/issues"
+    "url": "https://github.com/tari-project/tari-ootle/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tari-project/tari-dan.git"
+    "url": "git+https://github.com/tari-project/tari-ootle.git"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

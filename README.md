@@ -1,10 +1,10 @@
-# Tari implementation
+# Tari Ootle 
 
-This is where you can find the cutting edge development of the Tari smart contract layer.
+This is where you can find the cutting-edge development of the Tari smart contract layer.
 
 You can read about the technical specifications of the Ootle in the [RFCs](https://rfc.tari.com).
 
-If you're looking for the core Tari base layer code, it's an [this repository](https://github.com/tari-project/tari)
+If you're looking for the core Tari base layer code, it's in [this repository](https://github.com/tari-project/tari)
 
 ## Tari Validator node
 
@@ -22,7 +22,7 @@ cargo run --bin tari_swarm_daemon --release -- -c data/swarm/config.toml init
 cargo run --bin tari_swarm_daemon --release -- -c data/swarm/config.toml start
 ```
 
-This will start a Minotari base node, a Minotari console wallet, an Ootle validator node, wallet and indexer.
+This will start a Minotari base node, a Minotari console wallet, an Ootle validator node, a wallet and an indexer.
 Additionally, it will automatically submit the validator node registration and mine blocks until the validator node is
 active.
 
@@ -30,7 +30,7 @@ Open `http://localhost:8080` where you can administer the running instances, get
 JSON-RPC endpoints, view logs and more.
 
 NOTE: `tari_swarm_daemon` is specifically for development/debugging and runs a complete local test network. Instructions
-for running a wallet, indexer, or validator node are still in the works.
+for running a wallet, indexer, or validator node, the feature is still in development.
 
 #### Creating a smart contract template
 
@@ -38,7 +38,7 @@ See the [tari-cli](https://github.com/tari-project/tari-cli) tool for details.
 
 ### Get airdropped base layer (Mino)Tari tokens to pay for fees
 
-This is built into the testnet wallet and faucet tokens can be obtained from the wallet web UI.
+This is built into the testnet wallet, and faucet tokens can be obtained from the wallet web UI.
 
 ### Claiming L1 burn Tari on the Ootle
 
@@ -53,7 +53,7 @@ You can then copy and paste that burn proof into the Ootle wallet web UI using t
 
 For other environments, the "manual" process is as follows:
 
-NOTE: these steps will likely be smoothed over in future apps.
+NOTE: These steps will likely be smoothed over in future apps.
 
 1. Run the Ootle wallet,
 2. Generate a key using the web ui or `tari_ootle_wallet_cli` tool.

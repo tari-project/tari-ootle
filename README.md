@@ -42,17 +42,25 @@ This is built into the testnet wallet and faucet tokens can be obtained from the
 
 ### Claiming L1 burn Tari on the Ootle
 
-The easiest way to do this is to click a button in the `tari_swarm_daemon` web UI.
+L1 Minotari coins are able to be burnt and claimed, the user may convert (1:1) these to Tari coins on the layer-2
+network.
+
+The easiest way to do this is in a test environment to click a button in the `tari_swarm_daemon` web UI.
 
 After creating an account in the Ootle wallet. Provide the account name and the amount of Tari to burn to the swarm
-daemon.
-This creates the burn transaction on the Minotari wallet and provides a "burn proof".
-You can then copy and past that burn proof into the Ootle wallet web UI using the "Claim Burn" dialog.
+daemon. This creates the burn transaction on the Minotari wallet and provides a "burn proof".
+You can then copy and paste that burn proof into the Ootle wallet web UI using the "Claim Burn" dialog.
 
-L1 Minotari coins are able to be burnt and claimed, the user may convert (1:1) these to Tari coins on the layer-2
-network. The first step is to burn Minotari base layer funds making sure to include a claim public key.
-A private claim key must be known to claim the funds on the layer-2 Tari network. Burning
-yields the following data:
+For other environments, the "manual" process is as follows:
+
+NOTE: these steps will likely be smoothed over in future apps.
+
+1. Run the Ootle wallet,
+2. Generate a key using the web ui or `tari_ootle_wallet_cli` tool.
+3. Run a L1 console wallet and navigate to the `burn` tab.
+4. Burn the desired amount of Tari, making sure to include the claim public key generated in step 2. WARNING: if you
+   lose the claim public key, you will not be able to claim the funds on the Tari network.
+5. Copy the claim proof JSON data from the L1 console wallet.
 
 ```
 {
@@ -65,27 +73,8 @@ yields the following data:
 }
 ```
 
-The user must create an account on the Tari network in the web UI or by using the `accounts create` wallet CLI command
-prior to claiming.
-See the previous section for details on creating an account. The public key of this account should be used as the claim
-public key when
-burning funds.
+6. Wait for the burn to be mined in. Validator nodes scan the L1 network for burnt UTXOs with special flags. Depending
+   on the network configuration, this may require 10-100s of blocks before the burn is picked up.
+7. Use the Ootle wallet web UI or the `tari_ootle_wallet_cli` tool to claim the burn using the burn proof using the "
+   Claim burn" dialog.
 
-The user can then claim burn Tari on the second layer, as follows: create a new `.json` file, with path
-`<JSON_FILE_TO_RETRIEVE_BURN_TARI>`
-
-```
-{
-    "claim_public_key": <CLAIM_PUBLIC_KEY>,
-    "transaction_id": <TRANSACTION_ID>,
-    "commitment": <COMMITMENT>,
-    "ownership_proof": <OWNERSHIP_PROOF>,
-    "rangeproof": <RANGEPROOF>
-}
-```
-
-then run the command
-
-```
-cargo run --bin tari_ootle_wallet_cli -- accounts claim-burn --account <ACCOUNT_NAME> --json <JSON_FILE_TO_RETRIEVE_BURN_TARI> --fee <FEE>
-```

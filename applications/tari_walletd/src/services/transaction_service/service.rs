@@ -5,7 +5,7 @@ use std::{sync::Arc, time::Duration};
 
 use log::*;
 use tari_engine_types::commit_result::ExecuteResult;
-use tari_ootle_common_types::{optional::IsNotFoundError, SubstateRequirement};
+use tari_ootle_common_types::optional::IsNotFoundError;
 use tari_ootle_wallet_sdk::{
     models::{NewAccountInfo, TransactionStatus},
     network::WalletNetworkInterface,
@@ -108,28 +108,17 @@ where
         match request {
             TransactionServiceRequest::SubmitTransaction {
                 transaction,
-                required_substates,
                 new_account_info,
                 reply,
             } => {
                 reply
-                    .send(
-                        self.handle_submit_transaction(transaction, required_substates, new_account_info)
-                            .await,
-                    )
+                    .send(self.handle_submit_transaction(transaction, new_account_info).await)
                     .map_err(|_| TransactionServiceError::ServiceShutdown)?;
             },
-            TransactionServiceRequest::SubmitDryRunTransaction {
-                transaction,
-                required_substates,
-                reply,
-            } => {
+            TransactionServiceRequest::SubmitDryRunTransaction { transaction, reply } => {
                 let transaction_id = transaction.calculate_id();
                 let transaction_api = self.wallet_sdk.transaction_api();
-                match transaction_api
-                    .submit_dry_run_transaction(transaction, required_substates)
-                    .await
-                {
+                match transaction_api.submit_dry_run_transaction(transaction).await {
                     Ok(finalized_transaction) => {
                         // Unlock all proofs related to the transaction
                         transaction_api.release_all_outputs_for_transaction(transaction_id)?;
@@ -164,12 +153,11 @@ where
     async fn handle_submit_transaction(
         &self,
         transaction: Transaction,
-        required_substates: Vec<SubstateRequirement>,
         new_account_info: Option<NewAccountInfo>,
     ) -> Result<TransactionId, TransactionServiceError> {
         let transaction_api = self.wallet_sdk.transaction_api();
         let transaction_id = transaction_api
-            .insert_new_transaction(transaction, required_substates, new_account_info.clone(), false)
+            .insert_new_transaction(transaction, vec![], new_account_info.clone(), false)
             .await?;
         transaction_api.submit_transaction(transaction_id).await?;
         self.notify.notify(TransactionSubmittedEvent {

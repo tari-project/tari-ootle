@@ -12,13 +12,7 @@ use tari_engine_types::{
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
 };
-use tari_ootle_common_types::{
-    committee::CommitteeInfo,
-    Epoch,
-    SubstateRequirement,
-    SubstateRequirementRef,
-    VersionedSubstateId,
-};
+use tari_ootle_common_types::{committee::CommitteeInfo, Epoch, SubstateRequirement, SubstateRequirementRef};
 use tari_template_lib::models::ComponentAddress;
 
 use crate::{
@@ -48,12 +42,6 @@ impl Transaction {
 
     pub fn new(unsigned_transaction: UnsealedTransactionV1, seal_signature: TransactionSealSignature) -> Self {
         Self::V1(TransactionV1::new(unsigned_transaction, seal_signature))
-    }
-
-    pub fn with_filled_inputs(self, filled_inputs: IndexSet<VersionedSubstateId>) -> Self {
-        match self {
-            Self::V1(tx) => Self::V1(tx.with_filled_inputs(filled_inputs)),
-        }
     }
 
     pub fn calculate_id(&self) -> TransactionId {
@@ -131,9 +119,9 @@ impl Transaction {
     }
 
     /// Returns (fee instructions, instructions)
-    pub fn into_instructions(self) -> (Vec<Instruction>, Vec<Instruction>) {
+    pub fn into_instruction_parts(self) -> (Vec<Instruction>, Vec<Instruction>) {
         match self {
-            Self::V1(tx) => tx.into_unsealed_transaction().into_instructions(),
+            Self::V1(tx) => tx.into_unsealed_transaction().into_instruction_parts(),
         }
     }
 
@@ -143,13 +131,7 @@ impl Transaction {
         }
     }
 
-    pub fn into_parts(
-        self,
-    ) -> (
-        UnsealedTransactionV1,
-        TransactionSealSignature,
-        IndexSet<VersionedSubstateId>,
-    ) {
+    pub fn into_parts(self) -> (UnsealedTransactionV1, TransactionSealSignature) {
         match self {
             Self::V1(tx) => tx.into_parts(),
         }
@@ -162,12 +144,7 @@ impl Transaction {
     }
 
     pub fn all_inputs_substate_ids_iter(&self) -> impl Iterator<Item = &SubstateId> + '_ {
-        self.inputs()
-            .iter()
-            // Filled inputs override other inputs as they are likely filled with versions
-            .filter(|i| self.filled_inputs().iter().all(|fi| fi.substate_id() != i.substate_id()))
-            .map(|i| i.substate_id())
-            .chain(self.filled_inputs().iter().map(|fi| fi.substate_id()))
+        self.inputs().iter().map(|i| i.substate_id())
     }
 
     /// Returns true if the provided committee is involved in at least one input of this transaction.
@@ -196,18 +173,6 @@ impl Transaction {
 
     pub fn num_unique_inputs(&self) -> usize {
         self.all_inputs_substate_ids_iter().count()
-    }
-
-    pub fn filled_inputs(&self) -> &IndexSet<VersionedSubstateId> {
-        match self {
-            Self::V1(tx) => tx.filled_inputs(),
-        }
-    }
-
-    pub fn filled_inputs_mut(&mut self) -> &mut IndexSet<VersionedSubstateId> {
-        match self {
-            Self::V1(tx) => tx.filled_inputs_mut(),
-        }
     }
 
     pub fn min_epoch(&self) -> Option<Epoch> {

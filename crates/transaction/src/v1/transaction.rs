@@ -21,7 +21,6 @@ use tari_ootle_common_types::{
     SubstateAddress,
     SubstateRequirement,
     SubstateRequirementRef,
-    VersionedSubstateId,
 };
 use tari_template_lib::{args::InstructionArg, models::ComponentAddress};
 
@@ -43,8 +42,6 @@ const LOG_TARGET: &str = "tari::ootle::transaction::transaction";
 pub struct TransactionV1 {
     body: UnsealedTransactionV1,
     seal_signature: TransactionSealSignature,
-    /// Inputs filled by some authority. These are not part of the transaction hash nor the signature
-    filled_inputs: IndexSet<VersionedSubstateId>,
 }
 
 impl TransactionV1 {
@@ -52,16 +49,11 @@ impl TransactionV1 {
         Self {
             body: transaction,
             seal_signature,
-            filled_inputs: IndexSet::new(),
         }
     }
 
     pub const fn schema_version(&self) -> u64 {
         self.body.schema_version()
-    }
-
-    pub fn with_filled_inputs(self, filled_inputs: IndexSet<VersionedSubstateId>) -> Self {
-        Self { filled_inputs, ..self }
     }
 
     pub fn is_dry_run(&self) -> bool {
@@ -125,34 +117,19 @@ impl TransactionV1 {
         self.body
     }
 
-    pub fn into_parts(
-        self,
-    ) -> (
-        UnsealedTransactionV1,
-        TransactionSealSignature,
-        IndexSet<VersionedSubstateId>,
-    ) {
-        (self.body, self.seal_signature, self.filled_inputs)
+    pub fn into_parts(self) -> (UnsealedTransactionV1, TransactionSealSignature) {
+        (self.body, self.seal_signature)
     }
 
     pub fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateRequirementRef<'_>> + '_ {
-        self.inputs()
-            .iter()
-            // Filled inputs override other inputs as they are likely filled with versions
-            .filter(|i| self.filled_inputs().iter().all(|fi| fi.substate_id() != i.substate_id()))
-            .map(Into::into)
-            .chain(self.filled_inputs().iter().map(Into::into))
-    }
-
-    pub fn all_inputs_substate_ids_iter(&self) -> impl Iterator<Item = &SubstateId> + '_ {
-        self.all_inputs_iter().map(|i| i.substate_id)
+        self.inputs().iter().map(Into::into)
     }
 
     pub fn to_all_involved_shards(&self, num_shards: NumPreshards, num_committees: u32) -> HashSet<ShardGroup> {
-        self.all_inputs_substate_ids_iter()
+        self.all_inputs_iter()
             .map(|id| {
                 // version doesnt affect shard
-                let addr = SubstateAddress::from_substate_id(id, 0);
+                let addr = SubstateAddress::from_substate_id(id.substate_id(), 0);
                 addr.to_shard_group(num_shards, num_committees)
             })
             .collect()
@@ -174,14 +151,6 @@ impl TransactionV1 {
                     None
                 }
             })
-    }
-
-    pub fn filled_inputs(&self) -> &IndexSet<VersionedSubstateId> {
-        &self.filled_inputs
-    }
-
-    pub fn filled_inputs_mut(&mut self) -> &mut IndexSet<VersionedSubstateId> {
-        &mut self.filled_inputs
     }
 
     pub fn min_epoch(&self) -> Option<Epoch> {
@@ -210,12 +179,11 @@ impl Display for TransactionV1 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "TransactionV1[Inputs: {}, Fee Instructions: {}, Instructions: {}, Signatures: {}, Filled Inputs: {}]",
+            "TransactionV1[Inputs: {}, Fee Instructions: {}, Instructions: {}, Signatures: {}]",
             self.body.inputs().len(),
             self.body.fee_instructions().len(),
             self.body.instructions().len(),
             self.signatures().len(),
-            self.filled_inputs.len(),
         )
     }
 }

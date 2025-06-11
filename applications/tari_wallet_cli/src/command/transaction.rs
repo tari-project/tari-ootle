@@ -271,7 +271,6 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
             .submit_transaction_dry_run(TransactionSubmitDryRunRequest {
                 transaction,
                 signing_key_index: None,
-                autofill_inputs: vec![],
                 detect_inputs: common.detect_inputs.unwrap_or(true),
                 detect_inputs_use_unversioned: true,
                 proof_ids: vec![],
@@ -282,7 +281,6 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
         let request = TransactionSubmitRequest {
             transaction,
             signing_key_index: None,
-            autofill_inputs: vec![],
             detect_inputs: common.detect_inputs.unwrap_or(true),
             detect_inputs_use_unversioned: true,
             proof_ids: vec![],
@@ -336,7 +334,6 @@ async fn handle_submit_manifest(
             .submit_transaction_dry_run(TransactionSubmitDryRunRequest {
                 transaction,
                 signing_key_index: Some(fee_account.key_index),
-                autofill_inputs: vec![],
                 detect_inputs: common.detect_inputs.unwrap_or(true),
                 detect_inputs_use_unversioned: true,
                 proof_ids: vec![],
@@ -347,7 +344,6 @@ async fn handle_submit_manifest(
         let request = TransactionSubmitRequest {
             transaction,
             signing_key_index: Some(fee_account.key_index),
-            autofill_inputs: vec![],
             detect_inputs: common.detect_inputs.unwrap_or(true),
             detect_inputs_use_unversioned: true,
             proof_ids: vec![],

@@ -40,7 +40,7 @@ pub struct Transaction {
     pub max_epoch: Option<i64>,
     pub executed_time_ms: Option<i64>,
     pub finalized_time: Option<PrimitiveDateTime>,
-    pub required_substates: String,
+    pub _required_substates: String,
     pub new_account_info: Option<String>,
     pub updated_at: PrimitiveDateTime,
     pub created_at: PrimitiveDateTime,
@@ -82,7 +82,6 @@ impl Transaction {
             finalize: self.result.as_deref().map(deserialize_json).transpose()?,
             final_fee: self.final_fee.map(|f| f.into()),
             qcs: self.qcs.map(|q| deserialize_json(&q)).transpose()?.unwrap_or_default(),
-            required_substates: deserialize_json(&self.required_substates)?,
             new_account_info: self.new_account_info.as_deref().map(deserialize_json).transpose()?,
             is_dry_run: self.is_dry_run,
             execution_time: self

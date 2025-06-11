@@ -210,32 +210,46 @@ impl JsonRpcHandlers {
                         }),
                     };
 
-                    Ok(JsonRpcResponse::success(answer_id, response))
+                    return Ok(JsonRpcResponse::success(answer_id, response));
                 },
-                Err(e) => Err(JsonRpcResponse::error(
-                    answer_id,
-                    JsonRpcError::new(JsonRpcErrorReason::ApplicationError(1), e.to_string(), json!(null)),
-                )),
+                Err(e) => {
+                    return Err(JsonRpcResponse::error(
+                        answer_id,
+                        JsonRpcError::new(JsonRpcErrorReason::ApplicationError(1), e.to_string(), json!(null)),
+                    ));
+                },
             }
-        } else {
-            // Submit to mempool.
-            self.mempool.submit_transaction(transaction).await.map_err(|e| {
-                log::error!(target: LOG_TARGET, "🚨 Mempool error: {}", e);
+        }
+
+        // Submit to mempool.
+        self.mempool.submit_transaction(transaction).await.map_err(|e| {
+            if e.is_transaction_validator_error() {
+                warn!(target: LOG_TARGET, "❌ Mempool rejected the transaction: {}", e);
+                JsonRpcResponse::error(
+                    answer_id,
+                    JsonRpcError::new(
+                        JsonRpcErrorReason::InvalidRequest,
+                        format!("Mempool rejected the transaction: {}", e),
+                        json::Value::Null,
+                    ),
+                )
+            } else {
+                error!(target: LOG_TARGET, "🚨 Mempool error: {}", e);
                 JsonRpcResponse::error(
                     answer_id,
                     JsonRpcError::new(
                         JsonRpcErrorReason::InternalError,
-                        format!("Mempool rejected transaction: {}", e),
-                        serde_json::Value::Null,
+                        format!("Mempool error: {}", e),
+                        json::Value::Null,
                     ),
                 )
-            })?;
+            }
+        })?;
 
-            Ok(JsonRpcResponse::success(answer_id, SubmitTransactionResponse {
-                transaction_id: tx_id,
-                dry_run_result: None,
-            }))
-        }
+        Ok(JsonRpcResponse::success(answer_id, SubmitTransactionResponse {
+            transaction_id: tx_id,
+            dry_run_result: None,
+        }))
     }
 
     pub async fn get_state(&self, value: JsonRpcExtractor) -> JrpcResult {

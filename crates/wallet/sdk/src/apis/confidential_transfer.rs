@@ -529,7 +529,6 @@ where
 
         Ok(TransferOutput {
             transaction,
-            autofill_inputs: vec![],
             fee_transaction_proof_id: Some(fee_inputs_to_spend.proof_id),
             transaction_proof_id: Some(inputs_to_spend.proof_id),
         })
@@ -570,7 +569,6 @@ where
 
 pub struct TransferOutput {
     pub transaction: Transaction,
-    pub autofill_inputs: Vec<SubstateRequirement>,
     pub fee_transaction_proof_id: Option<ConfidentialProofId>,
     pub transaction_proof_id: Option<ConfidentialProofId>,
 }

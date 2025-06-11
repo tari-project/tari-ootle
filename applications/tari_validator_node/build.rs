@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     const NPM: &str = "pnpm";
 
     if let Err(error) = Command::new(NPM).arg("install").current_dir("./web_ui").status() {
-        println!("cargo:warning='npm install' error : {:?}", error);
+        println!("cargo:warning='{NPM} install' error : {:?}", error);
         return Ok(());
     }
     match Command::new(NPM)
@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .output()
     {
         Ok(output) if !output.status.success() => {
-            println!("cargo:warning='npm run build' exited with non-zero status code");
+            println!("cargo:warning='{NPM} run build' exited with non-zero status code");
             println!("cargo:warning=Output: {}", String::from_utf8_lossy(&output.stdout));
             println!("cargo:warning=Error: {}", String::from_utf8_lossy(&output.stderr));
         },

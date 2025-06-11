@@ -74,7 +74,7 @@ where
         }
 
         self.network_interface
-            .submit_transaction(transaction.transaction, transaction.required_substates)
+            .submit_transaction(transaction.transaction)
             .await
             .map_err(|e| TransactionApiError::NetworkInterfaceError(e.to_string()))?;
 
@@ -96,15 +96,14 @@ where
     pub async fn submit_dry_run_transaction(
         &self,
         transaction: Transaction,
-        required_substates: Vec<SubstateRequirement>,
     ) -> Result<WalletTransaction, TransactionApiError> {
         self.store
-            .with_write_tx(|tx| tx.transactions_insert(&transaction, &required_substates, None, true))?;
+            .with_write_tx(|tx| tx.transactions_insert(&transaction, &[], None, true))?;
 
         let tx_id = transaction.calculate_id();
         let result = self
             .network_interface
-            .submit_dry_run_transaction(transaction, required_substates)
+            .submit_dry_run_transaction(transaction)
             .await
             .map_err(|e| TransactionApiError::NetworkInterfaceError(e.to_string()));
 

@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use log::{debug, info};
 use tari_engine::{fees::FeeTable, state_store::new_memory_store, transaction::TransactionProcessorConfig};
@@ -30,11 +30,6 @@ use tari_engine_types::{
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
-use tari_indexer_lib::{
-    substate_cache::SubstateCache,
-    substate_scanner::SubstateScanner,
-    transaction_autofiller::TransactionAutofiller,
-};
 use tari_ootle_app_utilities::transaction_executor::{TariTransactionProcessor, TransactionExecutor as _};
 use tari_ootle_common_types::{Epoch, PeerAddress, SubstateRequirement};
 use tari_template_manager::implementation::TemplateManager;
@@ -51,34 +46,24 @@ use crate::dry_run::error::DryRunTransactionProcessorError;
 
 const LOG_TARGET: &str = "tari::indexer::dry_run_transaction_processor";
 
-pub struct DryRunTransactionProcessor<TSubstateCache> {
+pub struct DryRunTransactionProcessor {
     config: TransactionProcessorConfig,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     client_provider: TariValidatorNodeRpcClientFactory,
-    transaction_autofiller:
-        TransactionAutofiller<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, TSubstateCache>,
     template_manager: TemplateManager<PeerAddress>,
 }
 
-impl<TSubstateCache> DryRunTransactionProcessor<TSubstateCache>
-where TSubstateCache: SubstateCache + 'static
-{
+impl DryRunTransactionProcessor {
     pub fn new(
         config: TransactionProcessorConfig,
         epoch_manager: EpochManagerHandle<PeerAddress>,
         client_provider: TariValidatorNodeRpcClientFactory,
-        substate_scanner: Arc<
-            SubstateScanner<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, TSubstateCache>,
-        >,
         template_manager: TemplateManager<PeerAddress>,
     ) -> Self {
-        let transaction_autofiller = TransactionAutofiller::new(substate_scanner);
-
         Self {
             config,
             epoch_manager,
             client_provider,
-            transaction_autofiller,
             template_manager,
         }
     }
@@ -86,7 +71,6 @@ where TSubstateCache: SubstateCache + 'static
     pub async fn process_transaction(
         &self,
         transaction: Transaction,
-        substate_requirements: Vec<SubstateRequirement>,
     ) -> Result<ExecuteResult, DryRunTransactionProcessorError> {
         if !transaction.is_dry_run() {
             return Err(DryRunTransactionProcessorError::NonDryRunTransaction);
@@ -94,15 +78,8 @@ where TSubstateCache: SubstateCache + 'static
 
         info!(target: LOG_TARGET, "process_transaction: {}", transaction.calculate_id());
 
-        // automatically scan the inputs and add all related involved objects
-        // note that this operation does not alter the transaction hash
-        let (transaction, mut found_substates) = self
-            .transaction_autofiller
-            .autofill_transaction(transaction, substate_requirements)
-            .await?;
-
         let epoch = self.epoch_manager.current_epoch().await?;
-        found_substates.extend(self.fetch_input_substates(&transaction, epoch).await?);
+        let found_substates = self.fetch_input_substates(&transaction, epoch).await?;
 
         let payload_processor = self.build_payload_processor(&transaction);
 
@@ -153,12 +130,6 @@ where TSubstateCache: SubstateCache + 'static
 
         // Fetch explicit inputs that may not have been resolved by the autofiller
         for requirement in transaction.inputs() {
-            // If the input has been filled, we've already fetched the substate
-            // Note: this works because VersionedSubstateId hashes the same as SubstateId internally.
-            if transaction.filled_inputs().contains(&requirement.substate_id) {
-                continue;
-            }
-
             let (id, substate) = self.fetch_substate(requirement, epoch).await?;
             substates.insert(id, substate);
         }

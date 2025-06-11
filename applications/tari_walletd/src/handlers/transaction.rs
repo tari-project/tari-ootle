@@ -83,7 +83,6 @@ pub async fn handle_submit_instruction(
     let request = TransactionSubmitRequest {
         transaction,
         signing_key_index: Some(fee_account.key_index),
-        autofill_inputs: vec![],
         detect_inputs: req.override_inputs.unwrap_or_default(),
         detect_inputs_use_unversioned: true,
         proof_ids: vec![],
@@ -104,7 +103,6 @@ pub async fn handle_submit(
     // TODO: Ideally the SDK should take care of signing the transaction internally
     let (_, key) = key_api.get_key_or_active(key_manager::TRANSACTION_BRANCH, req.signing_key_index)?;
 
-    let autofill_inputs = req.autofill_inputs;
     let detected_inputs = if req.detect_inputs {
         // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
         let substates = req.transaction.to_referenced_substates()?;
@@ -164,10 +162,7 @@ pub async fn handle_submit(
         transaction.calculate_id()
     );
 
-    let transaction_id = context
-        .transaction_service()
-        .submit_transaction(transaction, autofill_inputs)
-        .await?;
+    let transaction_id = context.transaction_service().submit_transaction(transaction).await?;
 
     Ok(TransactionSubmitResponse { transaction_id })
 }
@@ -185,7 +180,6 @@ pub async fn handle_submit_dry_run(
     // TODO: Ideally the SDK should take care of signing the transaction internally
     let (_, key) = key_api.get_key_or_active(key_manager::TRANSACTION_BRANCH, req.signing_key_index)?;
 
-    let autofill_inputs = req.autofill_inputs;
     let detected_inputs = if req.detect_inputs {
         // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
         let substates = req.transaction.to_referenced_substates()?;
@@ -224,7 +218,7 @@ pub async fn handle_submit_dry_run(
     );
     let exec_result = context
         .transaction_service()
-        .submit_dry_run_transaction(transaction, autofill_inputs)
+        .submit_dry_run_transaction(transaction)
         .await?;
 
     Ok(TransactionSubmitDryRunResponse {
@@ -315,7 +309,7 @@ pub async fn handle_submit_manifest(
     if req.dry_run {
         let exec_result = context
             .transaction_service()
-            .submit_dry_run_transaction(transaction, vec![])
+            .submit_dry_run_transaction(transaction)
             .await?;
 
         if let Some(reject) = exec_result.finalize.any_reject() {
@@ -332,10 +326,7 @@ pub async fn handle_submit_manifest(
         });
     }
 
-    let transaction_id = context
-        .transaction_service()
-        .submit_transaction(transaction, vec![])
-        .await?;
+    let transaction_id = context.transaction_service().submit_transaction(transaction).await?;
 
     Ok(TransactionSubmitManifestResponse {
         transaction_id,
@@ -505,7 +496,6 @@ pub async fn handle_publish_template(
         let request = TransactionSubmitDryRunRequest {
             transaction,
             signing_key_index: Some(fee_account.key_index),
-            autofill_inputs: vec![],
             detect_inputs: req.detect_inputs,
             detect_inputs_use_unversioned: true,
             proof_ids: vec![],
@@ -527,7 +517,6 @@ pub async fn handle_publish_template(
     let request = TransactionSubmitRequest {
         transaction,
         signing_key_index: Some(fee_account.key_index),
-        autofill_inputs: vec![],
         detect_inputs: req.detect_inputs,
         detect_inputs_use_unversioned: true,
         proof_ids: vec![],

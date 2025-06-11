@@ -32,6 +32,12 @@ pub enum MempoolError {
     NetworkingError(#[from] NetworkingError),
 }
 
+impl MempoolError {
+    pub fn is_transaction_validator_error(&self) -> bool {
+        matches!(self, MempoolError::TransactionValidationError(_))
+    }
+}
+
 impl From<mpsc::error::SendError<MempoolRequest>> for MempoolError {
     fn from(_: mpsc::error::SendError<MempoolRequest>) -> Self {
         Self::RequestCancelled

@@ -2,7 +2,6 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::commit_result::ExecuteResult;
-use tari_ootle_common_types::SubstateRequirement;
 use tari_ootle_wallet_sdk::models::NewAccountInfo;
 use tari_transaction::{Transaction, TransactionId};
 use tokio::sync::{mpsc, oneshot};
@@ -14,14 +13,12 @@ use crate::services::Reply;
 pub(super) enum TransactionServiceRequest {
     SubmitTransaction {
         transaction: Transaction,
-        required_substates: Vec<SubstateRequirement>,
         new_account_info: Option<NewAccountInfo>,
         reply: Reply<Result<TransactionId, TransactionServiceError>>,
     },
 
     SubmitDryRunTransaction {
         transaction: Transaction,
-        required_substates: Vec<SubstateRequirement>,
         reply: Reply<Result<ExecuteResult, TransactionServiceError>>,
     },
 }
@@ -38,35 +35,27 @@ impl TransactionServiceHandle {
 }
 
 impl TransactionServiceHandle {
-    pub async fn submit_transaction(
-        &self,
-        transaction: Transaction,
-        required_substates: Vec<SubstateRequirement>,
-    ) -> Result<TransactionId, TransactionServiceError> {
-        self.submit_transaction_with_opts(transaction, required_substates, None)
-            .await
+    pub async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, TransactionServiceError> {
+        self.submit_transaction_with_opts(transaction, None).await
     }
 
     pub async fn submit_transaction_with_new_account(
         &self,
         transaction: Transaction,
-        required_substates: Vec<SubstateRequirement>,
         new_account_info: NewAccountInfo,
     ) -> Result<TransactionId, TransactionServiceError> {
-        self.submit_transaction_with_opts(transaction, required_substates, Some(new_account_info))
+        self.submit_transaction_with_opts(transaction, Some(new_account_info))
             .await
     }
 
     pub async fn submit_dry_run_transaction(
         &self,
         transaction: Transaction,
-        required_substates: Vec<SubstateRequirement>,
     ) -> Result<ExecuteResult, TransactionServiceError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.sender
             .send(TransactionServiceRequest::SubmitDryRunTransaction {
                 transaction,
-                required_substates,
                 reply: reply_tx,
             })
             .await
@@ -77,14 +66,12 @@ impl TransactionServiceHandle {
     pub async fn submit_transaction_with_opts(
         &self,
         transaction: Transaction,
-        required_substates: Vec<SubstateRequirement>,
         new_account_info: Option<NewAccountInfo>,
     ) -> Result<TransactionId, TransactionServiceError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.sender
             .send(TransactionServiceRequest::SubmitTransaction {
                 transaction,
-                required_substates,
                 new_account_info,
                 reply: reply_tx,
             })

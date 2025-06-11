@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_indexer_lib::{error::IndexerError, transaction_autofiller::TransactionAutofillerError};
+use tari_indexer_lib::error::IndexerError;
 use tari_ootle_common_types::optional::IsNotFoundError;
 
 use crate::network_client::NetworkClientError;
@@ -14,8 +14,6 @@ pub enum TransactionManagerError {
     NotFound { entity: &'static str, key: String },
     #[error(transparent)]
     SubstateScanningError(#[from] IndexerError),
-    #[error(transparent)]
-    TransactionAutofillerError(#[from] TransactionAutofillerError),
     #[error(transparent)]
     UnexpectedError(#[from] anyhow::Error),
 }

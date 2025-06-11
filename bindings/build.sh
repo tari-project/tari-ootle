@@ -20,8 +20,8 @@ if [ -f "$SOURCE_PATH/$DIST_DIR" ]; then
 fi
 
 cargo test --workspace --exclude integration_tests export_bindings --features ts
-npx shx mv ../dan_layer/bindings/src/types/* ./src/types/
-npx shx rm -rf ../dan_layer/bindings/
+npx shx mv ../crates/bindings/src/types/* ./src/types/
+npx shx rm -rf ../crates/bindings/
 
 # Add the license header
 echo "//   Copyright $(date +%Y) The Tari Project" >> $SOURCE_PATH/$MAIN_INDEX_FILE

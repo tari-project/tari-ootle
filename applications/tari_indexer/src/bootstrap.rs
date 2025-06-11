@@ -150,7 +150,11 @@ pub async fn spawn_services(
 
     // Client factory
     let validator_node_client_factory = TariValidatorNodeRpcClientFactory::new(networking.clone());
-    let network_client = TariNetworkClient::new(epoch_manager.clone(), validator_node_client_factory.clone());
+    let network_client = TariNetworkClient::new(
+        epoch_manager.clone(),
+        validator_node_client_factory.clone(),
+        consensus_constants.num_preshards,
+    );
 
     // Template manager
     let template_manager = TemplateManager::initialize(global_db.clone(), config.indexer.templates.clone())?;

@@ -9,8 +9,6 @@ use std::{
 
 use tari_transaction::Transaction;
 
-use crate::FixBincodeTransaction;
-
 pub fn read_transactions<R: Read + Seek + Send + 'static>(
     mut reader: R,
     skip: u64,
@@ -32,9 +30,9 @@ pub fn read_transactions<R: Read + Seek + Send + 'static>(
             }
 
             let mut limited_reader = (&mut reader).take(len);
-            let transaction: FixBincodeTransaction =
+            let transaction: Transaction =
                 bincode::serde::decode_from_std_read(&mut limited_reader, bincode::config::standard()).unwrap();
-            if sender.send(transaction.into_transaction()).is_err() {
+            if sender.send(transaction).is_err() {
                 // Receiver has closed the channel, so we're done
                 break;
             }

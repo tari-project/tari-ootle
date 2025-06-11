@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use tari_common::configuration::Network;
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, tari_utilities::SafePassword};
 use tari_engine_types::{confidential::get_commitment_factory, substate::SubstateId, ToByteType};
-use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
+use tari_ootle_common_types::optional::Optional;
 use tari_ootle_wallet_sdk::{
     models::{ConfidentialOutputModel, ConfidentialProofId, OutputStatus},
     network::{SubstateQueryResult, TransactionQueryResult, WalletNetworkInterface},
@@ -249,11 +249,7 @@ impl WalletNetworkInterface for PanicIndexer {
     }
 
     #[allow(clippy::diverging_sub_expression)]
-    async fn submit_transaction(
-        &self,
-        _transaction: Transaction,
-        _required_substates: Vec<SubstateRequirement>,
-    ) -> Result<TransactionId, Self::Error> {
+    async fn submit_transaction(&self, _transaction: Transaction) -> Result<TransactionId, Self::Error> {
         panic!("PanicIndexer called")
     }
 
@@ -261,7 +257,6 @@ impl WalletNetworkInterface for PanicIndexer {
     async fn submit_dry_run_transaction(
         &self,
         _transaction: Transaction,
-        _required_substates: Vec<SubstateRequirement>,
     ) -> Result<TransactionQueryResult, Self::Error> {
         panic!("PanicIndexer called")
     }

@@ -23,7 +23,7 @@
 use tari_engine::state_store::StateStoreError;
 use tari_engine_types::substate::SubstateId;
 use tari_epoch_manager::EpochManagerError;
-use tari_indexer_lib::{error::IndexerError, transaction_autofiller::TransactionAutofillerError};
+use tari_indexer_lib::error::IndexerError;
 use tari_ootle_app_utilities::transaction_executor::TransactionProcessorError;
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_rpc_framework::RpcStatus;
@@ -31,8 +31,6 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum DryRunTransactionProcessorError {
-    #[error(transparent)]
-    TransactionAutofillerError(#[from] TransactionAutofillerError),
     #[error("Substate {id} v{version} is DOWN")]
     SubstateDowned { id: SubstateId, version: u32 },
     #[error("EpochManager error: {0}")]

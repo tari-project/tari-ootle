@@ -19,6 +19,7 @@ use tari_crypto::{
     tari_utilities::{hex::Hex, ByteArray},
 };
 use tari_engine::{
+    executables::Executable,
     fees::{FeeModule, FeeTable},
     runtime::{AuthParams, RuntimeModule},
     state_store::{memory::MemoryStateStore, new_memory_store, StateWriter},
@@ -37,7 +38,7 @@ use tari_engine_types::{
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
     ToByteType,
 };
-use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::SubstateType, VersionedSubstateId};
+use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::SubstateType, SubstateRequirement};
 use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     args::InstructionArg,
@@ -49,7 +50,12 @@ use tari_template_lib::{
 use tari_transaction::{args, builder::named_args::BuilderWorkspaceKey, Transaction, TransactionBuilder};
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 
-use crate::{read_only_state_store::ReadOnlyStateStore, track_calls::TrackCallsModule, Package};
+use crate::{
+    read_only_state_store::ReadOnlyStateStore,
+    track_calls::TrackCallsModule,
+    wrapped_transaction::WrappedTransaction,
+    Package,
+};
 
 pub fn test_faucet_component() -> ComponentAddress {
     ComponentAddress::new(ObjectKey::from_array([0xfau8; ObjectKey::LENGTH]))
@@ -500,7 +506,7 @@ impl TemplateTest {
 
     pub fn try_execute(
         &mut self,
-        mut transaction: Transaction,
+        transaction: Transaction,
         proofs: Vec<NonFungibleAddress>,
     ) -> Result<ExecuteResult, TransactionError> {
         let mut modules: Vec<Arc<dyn RuntimeModule>> = vec![Arc::new(self.track_calls.clone())];
@@ -523,18 +529,18 @@ impl TemplateTest {
             modules,
         );
 
-        {
-            transaction.filled_inputs_mut().extend(
-                self.state_store
-                    .iter()
-                    .map(|(id, s)| VersionedSubstateId::new(id.clone(), s.version())),
-            );
-        }
+        let mut wrapped_transaction = WrappedTransaction::new(transaction);
+        // Add all the substates as inputs - this avoids the need for tests to explicitly include inputs
+        wrapped_transaction.extend_inputs(
+            self.state_store
+                .iter()
+                .map(|(id, s)| SubstateRequirement::versioned(id.clone(), s.version())),
+        );
 
-        let tx_id = transaction.calculate_id();
+        let tx_id = wrapped_transaction.to_id();
         eprintln!("START Transaction id = \"{}\"", tx_id);
 
-        let result = processor.execute(transaction)?;
+        let result = processor.execute(wrapped_transaction)?;
 
         if self.enable_fees {
             let fee = &result.finalize.fee_receipt;

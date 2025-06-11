@@ -4,11 +4,7 @@
 use std::{io::Write, sync::mpsc, thread};
 
 use bytes::{BufMut, Bytes, BytesMut};
-use indexmap::IndexSet;
 use rayon::iter::{ParallelBridge, ParallelIterator};
-use serde::{Deserialize, Serialize};
-use tari_ootle_common_types::VersionedSubstateId;
-use tari_transaction::{Transaction, TransactionSealSignature, UnsealedTransactionV1};
 
 use crate::BoxedTransactionBuilder;
 
@@ -23,7 +19,6 @@ pub fn write_transactions<W: Write>(
     thread::spawn(move || {
         (0..num_transactions).par_bridge().for_each_with(sender, |sender, i| {
             let transaction = builder(i);
-            let transaction = FixBincodeTransaction::from(transaction);
             let buf = bincode::serde::encode_to_vec(&transaction, bincode::config::standard()).unwrap();
             let buf = Bytes::from(buf);
             let output = BytesMut::with_capacity(buf.len() + 2);
@@ -47,35 +42,4 @@ pub fn write_transactions<W: Write>(
     }
 
     Ok(())
-}
-
-// TODO: This hack can be removed if/when we remove #[serde(flatten)] from Transaction
-#[derive(Serialize, Deserialize)]
-pub struct FixBincodeTransaction {
-    transaction: UnsealedTransactionV1,
-    seal_signature: TransactionSealSignature,
-    filled_inputs: IndexSet<VersionedSubstateId>,
-}
-
-impl FixBincodeTransaction {
-    #[allow(dead_code)]
-    pub fn into_transaction(self) -> Transaction {
-        let FixBincodeTransaction {
-            transaction,
-            seal_signature,
-            filled_inputs,
-        } = self;
-        Transaction::new(transaction, seal_signature).with_filled_inputs(filled_inputs)
-    }
-}
-
-impl From<Transaction> for FixBincodeTransaction {
-    fn from(value: Transaction) -> Self {
-        let (transaction, seal_signature, filled_inputs) = value.into_parts();
-        Self {
-            transaction,
-            seal_signature,
-            filled_inputs,
-        }
-    }
 }

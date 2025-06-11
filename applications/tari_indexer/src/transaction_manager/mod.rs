@@ -22,14 +22,7 @@
 
 pub(crate) mod error;
 
-use std::{iter, sync::Arc};
-
 use tari_epoch_manager::EpochManagerReader;
-use tari_indexer_lib::{
-    substate_cache::SubstateCache,
-    substate_scanner::SubstateScanner,
-    transaction_autofiller::TransactionAutofiller,
-};
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
     NodeAddressable,
@@ -46,45 +39,24 @@ use tari_validator_node_rpc::client::{
 
 use crate::{network_client::TariNetworkClient, transaction_manager::error::TransactionManagerError};
 
-pub struct TransactionManager<TEpochManager, TClientFactory, TSubstateCache> {
+pub struct TransactionManager<TEpochManager, TClientFactory> {
     network_client: TariNetworkClient<TEpochManager, TClientFactory>,
-    transaction_autofiller: TransactionAutofiller<TEpochManager, TClientFactory, TSubstateCache>,
 }
 
-impl<TEpochManager, TClientFactory, TAddr, TSubstateCache>
-    TransactionManager<TEpochManager, TClientFactory, TSubstateCache>
+impl<TEpochManager, TClientFactory, TAddr> TransactionManager<TEpochManager, TClientFactory>
 where
     TAddr: NodeAddressable + 'static,
     TEpochManager: EpochManagerReader<Addr = TAddr> + 'static,
     TClientFactory: ValidatorNodeClientFactory<TAddr> + 'static,
     <TClientFactory::Client as ValidatorNodeRpcClient<TAddr>>::Error: IsNotFoundError + 'static,
-    TSubstateCache: SubstateCache + 'static,
 {
-    pub fn new(
-        network_client: TariNetworkClient<TEpochManager, TClientFactory>,
-        substate_scanner: Arc<SubstateScanner<TEpochManager, TClientFactory, TSubstateCache>>,
-    ) -> Self {
-        Self {
-            network_client,
-            transaction_autofiller: TransactionAutofiller::new(substate_scanner),
-        }
+    pub fn new(network_client: TariNetworkClient<TEpochManager, TClientFactory>) -> Self {
+        Self { network_client }
     }
 
     pub async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, TransactionManagerError> {
         let id = self.network_client.submit_transaction(transaction).await?;
         Ok(id)
-    }
-
-    pub async fn autofill_transaction(
-        &self,
-        transaction: Transaction,
-        required_substates: Vec<SubstateRequirement>,
-    ) -> Result<Transaction, TransactionManagerError> {
-        let (transaction, _) = self
-            .transaction_autofiller
-            .autofill_transaction(transaction, required_substates)
-            .await?;
-        Ok(transaction)
     }
 
     pub async fn get_transaction_result(
@@ -93,7 +65,7 @@ where
     ) -> Result<TransactionResultStatus, TransactionManagerError> {
         let transaction_substate_address = transaction_id.to_substate_address();
         self.network_client
-            .try_with_committee(iter::once(transaction_substate_address), 1, |mut client| async move {
+            .try_single_with_committee(transaction_substate_address, |mut client| async move {
                 client.get_finalized_transaction_result(transaction_id).await.optional()
             })
             .await?
@@ -110,7 +82,7 @@ where
         let address = substate_requirement.to_substate_address_zero_version();
         let result = self
             .network_client
-            .try_with_committee(iter::once(address), 1, |mut client| async move {
+            .try_single_with_committee(address, |mut client| async move {
                 client.get_substate(substate_requirement.as_ref()).await
             })
             .await?;

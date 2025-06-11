@@ -55,9 +55,9 @@ use tari_template_lib::{
     models::{Bucket, NonFungibleAddress},
     types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
 };
-use tari_transaction::Transaction;
 
 use crate::{
+    executables::{Executable, WeightedExecutable},
     runtime::{
         scope::{CallScope, PushCallFrame},
         AuthParams,
@@ -149,8 +149,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
     }
 
     #[allow(clippy::too_many_lines)]
-    pub fn execute(self, transaction: Transaction) -> Result<ExecuteResult, TransactionError> {
-        let id = transaction.calculate_id();
+    pub fn execute<E: Executable + WeightedExecutable>(self, executable: E) -> Result<ExecuteResult, TransactionError> {
+        let id = executable.to_id();
         let timer = Instant::now();
         let entity_id_provider = EntityIdProvider::new(id.as_hash(), 1000);
         let Self {
@@ -165,7 +165,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         let initial_auth_scope = AuthorizationScope::new(auth_params.initial_ownership_proofs);
         let mut initial_call_scope = CallScope::new();
         initial_call_scope.set_auth_scope(initial_auth_scope);
-        for input in transaction.all_inputs_iter() {
+        for input in executable.all_inputs_iter() {
             debug!(
                 target: LOG_TARGET,
                 "Adding substate to initial call scope: {}",
@@ -174,7 +174,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             initial_call_scope.add_substate_to_owned(input.substate_id.clone());
         }
 
-        let transaction_weight = transaction.calculate_transaction_weight();
+        let transaction_weight = executable.calculate_weight();
         let tracker = StateTracker::new(
             state_db,
             virtual_substates,
@@ -183,17 +183,12 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             transaction_weight,
         );
 
-        // TODO: If the seal signer is authorized we use this as the signer public key, if not we use the first
-        // signature as the "default" owner. This is due to limitations of the current transaction model.
-        // We could remove the idea of a default owner (OwnedBySigner) entirely.
-        let transaction_signer_public_key = Some(transaction.seal_signature())
-            .filter(|_| transaction.is_seal_signer_authorized())
-            .map(|s| s.public_key())
-            .or(transaction.signatures().first().map(|s| s.public_key()))
-            .copied()
-            .ok_or_else(|| TransactionError::InvariantError {
-                details: "Transaction must have at least one authorized signature".to_string(),
-            })?;
+        let transaction_signer_public_key =
+            executable
+                .main_signer()
+                .ok_or_else(|| TransactionError::InvariantError {
+                    details: "Transaction must have at least one authorized signature".to_string(),
+                })?;
 
         let runtime_interface = RuntimeInterfaceImpl::initialize(
             tracker,
@@ -208,9 +203,9 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         let runtime = Runtime::new(Arc::new(runtime_interface));
         let transaction_hash = id.as_hash();
 
-        let (fee_instructions, instructions) = transaction.into_instructions();
+        let instructions = executable.into_instructions();
 
-        let fee_exec_results = Self::process_instructions(&config, &template_provider, &runtime, fee_instructions);
+        let fee_exec_results = Self::process_instructions(&config, &template_provider, &runtime, instructions.fee);
 
         let fee_exec_result = match fee_exec_results {
             Ok(execution_results) => {
@@ -237,7 +232,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             },
         };
 
-        let instruction_result = Self::process_instructions(&config, &*template_provider, &runtime, instructions);
+        let instruction_result = Self::process_instructions(&config, &*template_provider, &runtime, instructions.main);
 
         match instruction_result {
             Ok(execution_results) => {

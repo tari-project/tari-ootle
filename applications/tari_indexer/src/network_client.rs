@@ -1,13 +1,18 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashSet, fmt::Display, future::Future};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+    future::Future,
+};
 
 use log::{info, warn};
 use tari_epoch_manager::{EpochManagerError, EpochManagerReader};
 use tari_ootle_common_types::{
     optional::IsNotFoundError,
     NodeAddressable,
+    NumPreshards,
     ShardGroup,
     SubstateAddress,
     ToSubstateAddress,
@@ -21,6 +26,7 @@ const LOG_TARGET: &str = "tari::indexer::network_client";
 pub struct TariNetworkClient<TEpochManager, TClientFactory> {
     epoch_manager: TEpochManager,
     client_provider: TClientFactory,
+    num_preshards: NumPreshards,
 }
 
 impl<TAddr, TEpochManager, TClientFactory> TariNetworkClient<TEpochManager, TClientFactory>
@@ -30,10 +36,11 @@ where
     TClientFactory: ValidatorNodeClientFactory<TAddr> + 'static,
     <TClientFactory::Client as ValidatorNodeRpcClient<TAddr>>::Error: IsNotFoundError + 'static,
 {
-    pub fn new(epoch_manager: TEpochManager, client_provider: TClientFactory) -> Self {
+    pub fn new(epoch_manager: TEpochManager, client_provider: TClientFactory, num_preshards: NumPreshards) -> Self {
         Self {
             epoch_manager,
             client_provider,
+            num_preshards,
         }
     }
 
@@ -56,14 +63,44 @@ where
             .all_inputs_iter()
             // The version does not affect the shard group
             .map(|i| i.or_zero_version().to_substate_address())
-            // NOTE: if I don't collect here, we get lifetime issues in the JSON-RPC handlers (Send impl not general enough).
-            // For uniqueness, it seems like a good idea to collect to a HashSet anyway.
             .collect::<HashSet<_>>();
-        self.try_with_committee(involved, 2, |mut client| {
-            let transaction = transaction.clone();
-            async move { client.submit_transaction(transaction).await }
-        })
-        .await
+
+        let results = self
+            .try_with_committee(involved, |mut client| {
+                let transaction = transaction.clone();
+                async move { client.submit_transaction(transaction).await }
+            })
+            .await?;
+
+        let success_count = results.values().filter(|r| r.is_ok()).count();
+
+        info!(
+            target: LOG_TARGET,
+            "Submitted transaction {} succeeded for {}/{} shard groups",
+            tx_id,
+            success_count,
+            results.len()
+        );
+        if success_count != results.len() {
+            warn!(
+                target: LOG_TARGET,
+                "Transaction {} was not submitted to some shard groups. {}",
+                tx_id,
+                results
+                    .iter()
+                    .filter_map(|(shard_group, result)| {
+                        if let Err(err) = result {
+                            Some(format!("Failed for {}: {}", shard_group, err))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+
+        Ok(tx_id)
     }
 
     #[allow(dead_code)]
@@ -113,15 +150,40 @@ where
         })
     }
 
+    pub async fn try_single_with_committee<'a, F, T, E, TFut>(
+        &self,
+        substate_address: SubstateAddress,
+        callback: F,
+    ) -> Result<T, NetworkClientError>
+    where
+        F: FnMut(TClientFactory::Client) -> TFut,
+        TFut: Future<Output = Result<T, E>> + 'a,
+        TClientFactory::Client: 'a,
+        T: 'static,
+        E: Display,
+    {
+        let results = self
+            .try_with_committee(std::iter::once(substate_address), callback)
+            .await?;
+
+        results
+            .into_values()
+            .next()
+            .expect("Expected exactly one result for single substate address")
+            .map_err(|e| NetworkClientError::AllValidatorsFailed {
+                committee_size: 1,
+                last_error: Some(e.to_string()),
+            })
+    }
+
     /// Fetches the committee members for the given shard and calls the given callback with each member until
-    /// the callback returns a `Ok` result. If the callback returns an `Err` result, the next committee member is
-    /// called.
+    /// the callback returns a `Ok` with results for each shard group. If an Ok is returned, the hashmap is guaranteed
+    /// to be the same size as the number of unique shard groups queried.
     pub async fn try_with_committee<'a, F, T, E, TFut, ISubstateAddr>(
         &self,
         substate_addresses: ISubstateAddr,
-        mut num_to_query: usize,
         mut callback: F,
-    ) -> Result<T, NetworkClientError>
+    ) -> Result<HashMap<ShardGroup, Result<T, E>>, NetworkClientError>
     where
         F: FnMut(TClientFactory::Client) -> TFut,
         TFut: Future<Output = Result<T, E>> + 'a,
@@ -131,17 +193,21 @@ where
         ISubstateAddr: IntoIterator<Item = SubstateAddress>,
     {
         let epoch = self.epoch_manager.current_epoch().await?;
-        // Get all unique members. The hashset already "shuffles" items owing to the random hash function.
-        let mut all_members = HashSet::new();
-        // TODO: suggest passing in the shard groups to try_with_committee. We need the NumPreshards and
-        // num_committees from the epoch manager to do so but this will also prevent us loading the same committees
-        // multiple times.
+        let num_committees = self.epoch_manager.get_num_committees(epoch).await?;
+
+        let mut all_members = HashMap::new();
         for substate_address in substate_addresses {
+            let shard_group = substate_address.to_shard_group(self.num_preshards, num_committees);
+
+            if all_members.contains_key(&shard_group) {
+                continue; // Already processed this shard group
+            }
+
             let committee = self
                 .epoch_manager
-                .get_committee_for_substate(epoch, substate_address)
+                .get_committee_by_shard_group(epoch, shard_group, Some(100))
                 .await?;
-            all_members.extend(committee.into_addresses());
+            all_members.insert(shard_group, committee);
         }
 
         let committee_size = all_members.len();
@@ -150,26 +216,26 @@ where
         }
 
         let mut num_succeeded = 0;
+        let mut results = HashMap::with_capacity(committee_size);
         let mut last_error = None;
-        let mut last_return = None;
-        for validator in all_members {
-            let client = self.client_provider.create_client(&validator);
-            match callback(client).await {
-                Ok(ret) => {
-                    num_to_query = num_to_query.saturating_sub(1);
-                    num_succeeded += 1;
-                    last_return = Some(ret);
-                    if num_to_query == 0 {
-                        break;
-                    }
-                },
-                Err(err) => {
-                    warn!(
-                        target: LOG_TARGET,
-                        "Request failed for validator '{}': {}", validator, err
-                    );
-                    last_error = Some(err.to_string());
-                },
+        for (shard_group, committee) in all_members {
+            for member in committee.shuffled().map(|(addr, _)| addr) {
+                let client = self.client_provider.create_client(member);
+                match callback(client).await {
+                    Ok(ret) => {
+                        num_succeeded += 1;
+                        results.insert(shard_group, Ok(ret));
+                        break; // Move onto the next shard group
+                    },
+                    Err(err) => {
+                        warn!(
+                            target: LOG_TARGET,
+                            "Request failed for validator '{}': {}", member, err
+                        );
+                        last_error = Some(err.to_string());
+                        results.insert(shard_group, Err(err));
+                    },
+                }
             }
         }
 
@@ -180,7 +246,7 @@ where
             });
         }
 
-        Ok(last_return.expect("last_return must be Some if num_succeeded > 0"))
+        Ok(results)
     }
 }
 

@@ -68,7 +68,7 @@ use tari_indexer_client::types::{
     TemplateMetadata,
 };
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
-use tari_ootle_app_utilities::{keypair::RistrettoKeypair, substate_file_cache::SubstateFileCache};
+use tari_ootle_app_utilities::keypair::RistrettoKeypair;
 use tari_ootle_common_types::{optional::Optional, public_key_to_peer_id, PeerAddress, SubstateRequirement};
 use tari_ootle_p2p::TariMessagingSpec;
 use tari_ootle_storage::{
@@ -95,25 +95,20 @@ pub struct JsonRpcHandlers {
     networking: NetworkingHandle<TariMessagingSpec>,
     substate_manager: Arc<SubstateManager>,
     epoch_manager: EpochManagerHandle<PeerAddress>,
-    transaction_manager:
-        TransactionManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SubstateFileCache>,
+    transaction_manager: TransactionManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory>,
     template_manager: TemplateManager<PeerAddress>,
     global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
-    dry_run_transaction_processor: DryRunTransactionProcessor<SubstateFileCache>,
+    dry_run_transaction_processor: DryRunTransactionProcessor,
 }
 
 impl JsonRpcHandlers {
     pub fn new(
         services: &Services,
         substate_manager: Arc<SubstateManager>,
-        transaction_manager: TransactionManager<
-            EpochManagerHandle<PeerAddress>,
-            TariValidatorNodeRpcClientFactory,
-            SubstateFileCache,
-        >,
+        transaction_manager: TransactionManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory>,
         global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
         template_manager: TemplateManager<PeerAddress>,
-        dry_run_transaction_processor: DryRunTransactionProcessor<SubstateFileCache>,
+        dry_run_transaction_processor: DryRunTransactionProcessor,
     ) -> Self {
         Self {
             keypair: services.keypair.clone(),
@@ -444,7 +439,7 @@ impl JsonRpcHandlers {
             let transaction_id = request.transaction.calculate_id();
             let exec_result = self
                 .dry_run_transaction_processor
-                .process_transaction(request.transaction, request.required_substates)
+                .process_transaction(request.transaction)
                 .await
                 .map_err(|e| Self::internal_error(answer_id, e))?;
 
@@ -460,29 +455,7 @@ impl JsonRpcHandlers {
             }));
         }
 
-        // If there are no requested substates, we skip auto-filling altogether
-        let transaction = if request.required_substates.is_empty() {
-            request.transaction
-        } else {
-            // automatically scan the inputs and add all related involved objects
-            // note that this operation does not alter the transaction hash
-            self.transaction_manager
-                .autofill_transaction(request.transaction, request.required_substates)
-                .await
-                .map_err(|e| match e {
-                    TransactionManagerError::NetworkClientError(NetworkClientError::AllValidatorsFailed { .. }) => {
-                        JsonRpcResponse::error(
-                            answer_id,
-                            JsonRpcError::new(
-                                JsonRpcErrorReason::ApplicationError(400),
-                                format!("All validators failed: {}", e),
-                                json::Value::Null,
-                            ),
-                        )
-                    },
-                    e => Self::internal_error(answer_id, e),
-                })?
-        };
+        let transaction = request.transaction;
         let transaction_id = self
             .transaction_manager
             .submit_transaction(transaction)

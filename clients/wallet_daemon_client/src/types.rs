@@ -112,7 +112,6 @@ pub struct TransactionSubmitRequest {
     pub transaction: UnsignedTransaction,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub signing_key_index: Option<u64>,
-    pub autofill_inputs: Vec<SubstateRequirement>,
     /// Attempt to infer inputs and their dependencies from instructions. If false, the provided transaction must
     /// contain the required inputs.
     pub detect_inputs: bool,
@@ -150,7 +149,6 @@ pub struct TransactionSubmitDryRunRequest {
     pub transaction: UnsignedTransaction,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub signing_key_index: Option<u64>,
-    pub autofill_inputs: Vec<SubstateRequirement>,
     pub detect_inputs: bool,
     pub detect_inputs_use_unversioned: bool,
     #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]

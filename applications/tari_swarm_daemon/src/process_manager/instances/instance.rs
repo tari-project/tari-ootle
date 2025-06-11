@@ -101,8 +101,9 @@ impl Instance {
             return Ok(());
         }
 
+        // Base layer node does not support clean shutdown, so we use SIGTERM
         #[cfg(target_family = "unix")]
-        self.terminate_nix().await?;
+        self.terminate_nix(self.instance_type.is_tari_node()).await?;
         #[cfg(target_family = "windows")]
         self.terminate_win().await?;
 
@@ -110,7 +111,7 @@ impl Instance {
     }
 
     #[cfg(target_family = "unix")]
-    async fn terminate_nix(&mut self) -> anyhow::Result<()> {
+    async fn terminate_nix(&mut self, use_sig_int: bool) -> anyhow::Result<()> {
         use nix::{
             sys::signal::{kill, Signal},
             unistd::Pid,
@@ -120,7 +121,8 @@ impl Instance {
         };
 
         let pid = Pid::from_raw(pid as i32);
-        kill(pid, Signal::SIGINT)?;
+        let sig = if use_sig_int { Signal::SIGINT } else { Signal::SIGTERM };
+        kill(pid, sig)?;
         let status = self.child_mut().wait().await?;
         self.exit_status = Some(status);
         Ok(())

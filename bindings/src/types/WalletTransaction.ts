@@ -3,7 +3,6 @@ import type { Amount } from "./Amount";
 import type { FinalizeResult } from "./FinalizeResult";
 import type { NewAccountInfo } from "./NewAccountInfo";
 import type { ProposalCertificate } from "./ProposalCertificate";
-import type { SubstateRequirement } from "./SubstateRequirement";
 import type { Transaction } from "./Transaction";
 import type { TransactionStatus } from "./TransactionStatus";
 
@@ -16,7 +15,6 @@ export interface WalletTransaction {
   qcs: Array<ProposalCertificate>;
   execution_time: { secs: number; nanos: number } | null;
   finalized_time: { secs: number; nanos: number } | null;
-  required_substates: Array<SubstateRequirement>;
   new_account_info: NewAccountInfo | null;
   is_dry_run: boolean;
   last_update_time: string;

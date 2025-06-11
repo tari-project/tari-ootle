@@ -259,7 +259,6 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
         rx.await.map_err(|_| EpochManagerError::ReceiveError)?
     }
 
-    // TODO: not async and infallible
     async fn current_epoch(&self) -> Result<Epoch, EpochManagerError> {
         Ok(Epoch(self.current_epoch.load(std::sync::atomic::Ordering::SeqCst)))
     }

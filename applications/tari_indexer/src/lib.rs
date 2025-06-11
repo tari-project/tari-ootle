@@ -123,7 +123,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         substate_scanner.clone(),
         services.substate_store.clone(),
     ));
-    let transaction_manager = TransactionManager::new(services.network_client.clone(), substate_scanner.clone());
+    let transaction_manager = TransactionManager::new(services.network_client.clone());
 
     // dry run
     let dry_run_transaction_processor = DryRunTransactionProcessor::new(
@@ -133,7 +133,6 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
             .build(),
         services.epoch_manager.clone(),
         services.validator_node_client_factory.clone(),
-        substate_scanner.clone(),
         services.template_manager.clone(),
     );
 

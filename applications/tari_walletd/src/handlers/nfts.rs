@@ -209,10 +209,7 @@ async fn mint_account_nft(
         .build_and_seal(owner_sk);
 
     let mut events = context.notifier().subscribe();
-    let tx_id = context
-        .transaction_service()
-        .submit_transaction(transaction, vec![])
-        .await?;
+    let tx_id = context.transaction_service().submit_transaction(transaction).await?;
 
     let event = wait_for_result(&mut events, tx_id).await?;
     if let Some(reject) = event.finalize.any_reject() {
@@ -427,7 +424,7 @@ pub async fn handle_transfer_nft(
     if req.dry_run {
         let execute_result = context
             .transaction_service()
-            .submit_dry_run_transaction(transaction, vec![])
+            .submit_dry_run_transaction(transaction)
             .await?;
         let transaction_id = execute_result.finalize.transaction_hash.into();
         let finalize = execute_result.finalize;
@@ -441,10 +438,7 @@ pub async fn handle_transfer_nft(
 
     // execute transaction
     let mut events = context.notifier().subscribe();
-    let tx_id = context
-        .transaction_service()
-        .submit_transaction(transaction, vec![])
-        .await?;
+    let tx_id = context.transaction_service().submit_transaction(transaction).await?;
 
     let finalized = crate::handlers::helpers::wait_for_result(&mut events, tx_id).await?;
 

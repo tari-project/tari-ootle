@@ -92,7 +92,7 @@ impl UnsealedTransactionV1 {
     }
 
     /// Returns (fee instructions, instructions)
-    pub fn into_instructions(self) -> (Vec<Instruction>, Vec<Instruction>) {
+    pub fn into_instruction_parts(self) -> (Vec<Instruction>, Vec<Instruction>) {
         (self.transaction.fee_instructions, self.transaction.instructions)
     }
 

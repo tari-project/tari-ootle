@@ -227,7 +227,6 @@ pub async fn transfer_confidential(
         proof_ids: vec![proof_id],
         detect_inputs: true,
         detect_inputs_use_unversioned: true,
-        autofill_inputs: vec![],
     };
 
     let submit_resp = client.submit_transaction(submit_req).await.unwrap();
@@ -480,7 +479,6 @@ pub async fn submit_manifest_with_signing_keys(
         detect_inputs: true,
         detect_inputs_use_unversioned: true,
         proof_ids: vec![],
-        autofill_inputs: vec![],
     };
 
     let resp = client.submit_transaction(transaction_submit_req).await.unwrap();
@@ -566,7 +564,6 @@ pub async fn submit_manifest(
         detect_inputs: true,
         detect_inputs_use_unversioned: true,
         proof_ids: vec![],
-        autofill_inputs: vec![],
     };
 
     let resp = client.submit_transaction(transaction_submit_req).await.unwrap();
@@ -682,7 +679,6 @@ pub async fn create_component(
         detect_inputs: true,
         detect_inputs_use_unversioned: true,
         proof_ids: vec![],
-        autofill_inputs: vec![],
     };
 
     let resp = client.submit_transaction(transaction_submit_req).await.unwrap();
@@ -954,7 +950,6 @@ async fn submit_unsigned_tx_and_wait_for_response(
     let submit_req = TransactionSubmitRequest {
         transaction,
         signing_key_index: Some(account.key_index),
-        autofill_inputs: vec![],
         detect_inputs: true,
         detect_inputs_use_unversioned: use_unversioned_inputs,
         proof_ids: vec![],

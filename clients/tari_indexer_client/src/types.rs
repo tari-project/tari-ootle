@@ -13,7 +13,7 @@ use tari_engine_types::{
     substate::{Substate, SubstateId, SubstateValue},
     template_lib_models::ResourceAddress,
 };
-use tari_ootle_common_types::{substate_type::SubstateType, Epoch, SubstateRequirement};
+use tari_ootle_common_types::{substate_type::SubstateType, Epoch};
 use tari_ootle_storage::time::PrimitiveDateTime;
 use tari_template_abi::TemplateDef;
 use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
@@ -131,8 +131,6 @@ pub struct InspectSubstateResponse {
 )]
 pub struct SubmitTransactionRequest {
     pub transaction: Transaction,
-    #[serde(default)]
-    pub required_substates: Vec<SubstateRequirement>,
     pub is_dry_run: bool,
 }
 

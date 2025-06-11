@@ -177,10 +177,7 @@ pub async fn handle_claim_validator_fees(
 
     // send the transaction
     if req.dry_run {
-        let transaction = sdk
-            .transaction_api()
-            .submit_dry_run_transaction(transaction, vec![])
-            .await?;
+        let transaction = sdk.transaction_api().submit_dry_run_transaction(transaction).await?;
         return Ok(ClaimValidatorFeesResponse {
             transaction_id: transaction.id,
             fee: transaction
@@ -195,10 +192,7 @@ pub async fn handle_claim_validator_fees(
     }
 
     let mut events = context.notifier().subscribe();
-    let tx_id = context
-        .transaction_service()
-        .submit_transaction(transaction, vec![])
-        .await?;
+    let tx_id = context.transaction_service().submit_transaction(transaction).await?;
 
     let finalized = wait_for_result(&mut events, tx_id).await?;
 

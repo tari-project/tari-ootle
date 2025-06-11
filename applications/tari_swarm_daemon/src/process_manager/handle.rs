@@ -392,10 +392,13 @@ impl ProcessManagerHandle {
 
     pub(crate) async fn stop_all(&self) -> anyhow::Result<usize> {
         let instances = self.list_instances(None).await?;
+        log::info!("Stopping {} instances", instances.len());
         let num_instances = instances.len();
         for instance in instances {
+            log::info!("Stopping instance: {}", instance.name);
             self.stop_instance(instance.id).await?;
         }
+        log::info!("Stopped {} instances", num_instances);
         Ok(num_instances)
     }
 }

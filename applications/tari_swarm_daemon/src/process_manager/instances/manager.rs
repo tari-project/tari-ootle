@@ -483,12 +483,27 @@ impl InstanceManager {
 fn forward_logs<R: AsyncRead + Unpin + Send + 'static>(path: PathBuf, reader: R, target: String) {
     let mut lines = BufReader::new(reader).lines();
     task::spawn(async move {
-        let mut log_file = File::create(path).await.unwrap();
+        let mut log_file = match File::create(path).await {
+            Ok(file) => file,
+            Err(err) => {
+                log::error!("Failed to create log file for {target}: {err}");
+                return;
+            },
+        };
         while let Some(output) = lines.next_line().await.unwrap() {
             log::debug!(target: "swarm", "[{target}] {output}");
-            let _ignore = log_file.write_all(output.as_bytes()).await;
-            let _ignore = log_file.write_all(b"\n").await;
-            let _ignore = log_file.flush().await;
+            if let Err(err) = log_file.write_all(output.as_bytes()).await {
+                log::error!("forward_logs: {err}");
+                return;
+            }
+            if let Err(err) = log_file.write_all(b"\n").await {
+                log::error!("forward_logs: {err}");
+                return;
+            }
+            if let Err(err) = log_file.flush().await {
+                log::error!("forward_logs: {err}");
+                return;
+            }
         }
         log::debug!(target: "swarm", "Process exited ({target})");
     });

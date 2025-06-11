@@ -18,7 +18,7 @@ use tari_indexer_client::{
         SubmitTransactionRequest,
     },
 };
-use tari_ootle_common_types::{optional::IsNotFoundError, substate_type::SubstateType, SubstateRequirement};
+use tari_ootle_common_types::{optional::IsNotFoundError, substate_type::SubstateType};
 use tari_ootle_wallet_sdk::network::{
     SubstateListItem,
     SubstateListResult,
@@ -126,16 +126,11 @@ impl WalletNetworkInterface for IndexerJsonRpcNetworkInterface {
         Ok(SubstateListResult { substates })
     }
 
-    async fn submit_transaction(
-        &self,
-        transaction: Transaction,
-        required_substates: Vec<SubstateRequirement>,
-    ) -> Result<TransactionId, Self::Error> {
+    async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, Self::Error> {
         let mut client = self.get_client()?;
         let result = client
             .submit_transaction(SubmitTransactionRequest {
                 transaction,
-                required_substates,
                 is_dry_run: false,
             })
             .await?;
@@ -145,13 +140,11 @@ impl WalletNetworkInterface for IndexerJsonRpcNetworkInterface {
     async fn submit_dry_run_transaction(
         &self,
         transaction: Transaction,
-        required_substates: Vec<SubstateRequirement>,
     ) -> Result<TransactionQueryResult, Self::Error> {
         let mut client = self.get_client()?;
         let resp = client
             .submit_transaction(SubmitTransactionRequest {
                 transaction,
-                required_substates,
                 is_dry_run: true,
             })
             .await?;

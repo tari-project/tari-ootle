@@ -129,7 +129,7 @@ pub async fn handle_create(
     let mut events = context.notifier().subscribe();
     let tx_id = context
         .transaction_service()
-        .submit_transaction_with_new_account(transaction, vec![], NewAccountInfo {
+        .submit_transaction_with_new_account(transaction, NewAccountInfo {
             name: req.account_name,
             key_index: owner_key.key_index,
             is_default: req.is_default,
@@ -378,7 +378,7 @@ pub async fn handle_reveal_funds(
             .proofs_set_transaction_hash(proof_id, transaction.calculate_id())?;
 
         let mut events = notifier.subscribe();
-        let tx_id = transaction_service.submit_transaction(transaction, vec![]).await?;
+        let tx_id = transaction_service.submit_transaction(transaction).await?;
 
         let finalized = wait_for_result(&mut events, tx_id).await?;
         if let Some(reason) = finalized.finalize.fee_reject() {
@@ -638,7 +638,6 @@ async fn finish_claiming<T: WalletStore>(
         .transaction_service()
         .submit_transaction_with_opts(
             transaction,
-            vec![],
             new_account_name.map(|name| NewAccountInfo {
                 name: Some(name),
                 key_index: account_secret_key.key_index,
@@ -913,7 +912,7 @@ pub async fn handle_transfer(
         let transaction_id = transaction.calculate_id();
         let execute_result = context
             .transaction_service()
-            .submit_dry_run_transaction(transaction, vec![])
+            .submit_dry_run_transaction(transaction)
             .await?;
         let finalize = execute_result.finalize;
         return Ok(AccountsTransferResponse {
@@ -926,10 +925,7 @@ pub async fn handle_transfer(
 
     // Otherwise submit and wait for a result
     let mut events = context.notifier().subscribe();
-    let tx_id = context
-        .transaction_service()
-        .submit_transaction(transaction, vec![])
-        .await?;
+    let tx_id = context.transaction_service().submit_transaction(transaction).await?;
 
     let finalized = wait_for_result(&mut events, tx_id).await?;
 
@@ -994,7 +990,7 @@ pub async fn handle_confidential_transfer(
         if req.dry_run {
             let transaction_id = transfer.transaction.calculate_id();
             let exec_result = transaction_service
-                .submit_dry_run_transaction(transfer.transaction, transfer.autofill_inputs)
+                .submit_dry_run_transaction(transfer.transaction)
                 .await?;
             let finalize = exec_result.finalize;
             return Ok(ConfidentialTransferResponse {
@@ -1005,9 +1001,7 @@ pub async fn handle_confidential_transfer(
         }
 
         let mut events = notifier.subscribe();
-        let tx_id = transaction_service
-            .submit_transaction(transfer.transaction, transfer.autofill_inputs)
-            .await?;
+        let tx_id = transaction_service.submit_transaction(transfer.transaction).await?;
 
         notifier.notify(TransactionSubmittedEvent {
             transaction_id: tx_id,

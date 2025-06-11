@@ -34,7 +34,6 @@ wasmer = { workspace = true, features = ["cranelift"] }
 wasmer-middlewares = { workspace = true }
 
 [dev-dependencies]
-env_logger = { workspace = true }
 tari_template_test_tooling = { workspace = true }
 tari_transaction_manifest = { workspace = true }
 tari_transaction = { workspace = true }

@@ -5,7 +5,7 @@ use tari_engine::runtime::RuntimeError;
 use tari_engine_types::instruction::Instruction;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    instruction_args,
+    call_args,
     models::{Amount, ComponentAddress},
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
@@ -21,7 +21,7 @@ fn basic_emit_event() {
             vec![Instruction::CallFunction {
                 address: event_emitter_template,
                 function: "test_function".to_string(),
-                args: instruction_args![topic],
+                args: call_args![topic],
             }],
             vec![],
         )
@@ -67,7 +67,7 @@ fn builtin_vault_events() {
             vec![Instruction::CallFunction {
                 address: faucet_template,
                 function: "mint".to_string(),
-                args: instruction_args![initial_supply],
+                args: call_args![initial_supply],
             }],
             vec![template_test.get_test_proof()],
         )

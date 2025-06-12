@@ -252,7 +252,7 @@ mod tests {
                 2,
                 3,
                 "string",
-                tari_template_lib::instruction_args![1, 2]
+                tari_template_lib::call_args![1, 2]
             ])
             .call_function(TemplateAddress::from_array([1; 32]), "function", args![
                 1,

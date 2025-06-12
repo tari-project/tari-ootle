@@ -42,7 +42,7 @@ macro_rules! __expr_counter {
 
 /// Utility macro for building a single instruction argument
 #[macro_export]
-macro_rules! instruction_arg {
+macro_rules! call_arg {
     // Deprecated
     (Variable($id:expr)) => {
         $crate::args::InstructionArg::workspace($id, None)
@@ -61,7 +61,7 @@ macro_rules! instruction_arg {
     };
 
     ($arg:expr) => {
-        $crate::instruction_arg!(Literal($arg))
+        $crate::call_arg!(Literal($arg))
     };
 }
 
@@ -70,39 +70,39 @@ macro_rules! instruction_arg {
 #[macro_export]
 macro_rules! __args_inner {
     (@ { $this:ident } Variable($e:expr), $($tail:tt)*) => {
-        $crate::args::__push(&mut $this, $crate:instruction_arg!(Workspace($e)));
+        $crate::args::__push(&mut $this, $crate::call_arg!(Workspace($e)));
         $crate::__args_inner!(@ { $this } $($tail)*);
     };
 
     (@ { $this:ident } Variable($e:expr) $(,)?) => {
-        $crate::args::__push(&mut $this, $crate::arg!(Workspace($e)));
+        $crate::args::__push(&mut $this, $crate::call_arg!(Workspace($e)));
     };
 
     (@ { $this:ident } Workspace($e:expr), $($tail:tt)*) => {
-        $crate::args::__push(&mut $this, $crate::instruction_arg!(Workspace($e)));
+        $crate::args::__push(&mut $this, $crate::call_arg!(Workspace($e)));
         $crate::__args_inner!(@ { $this } $($tail)*);
     };
 
     (@ { $this:ident } Workspace($e:expr) $(,)?) => {
-        $crate::args::__push(&mut $this, $crate::arg!(Workspace($e)));
+        $crate::args::__push(&mut $this, $crate::call_arg!(Workspace($e)));
     };
 
     (@ { $this:ident } Literal($e:expr), $($tail:tt)*) => {
-        $crate::args::__push(&mut $this, $crate::instruction_arg!(Literal($e)));
+        $crate::args::__push(&mut $this, $crate::call_arg!(Literal($e)));
         $crate::__args_inner!(@ { $this } $($tail)*);
     };
 
     (@ { $this:ident } Literal($e:expr) $(,)?) => {
-        $crate::args::__push(&mut $this, $crate::arg!(Literal($e)));
+        $crate::args::__push(&mut $this, $crate::all_arg!(Literal($e)));
     };
 
     (@ { $this:ident } $e:expr, $($tail:tt)*) => {
-        $crate::args::__push(&mut $this, $crate::instruction_arg!(Literal($e)));
+        $crate::args::__push(&mut $this, $crate::call_arg!(Literal($e)));
         $crate::__args_inner!(@ { $this } $($tail)*);
     };
 
     (@ { $this:ident } $e:expr $(,)*) => {
-        $crate::args::__push(&mut $this, $crate::instruction_arg!(Literal($e)));
+        $crate::args::__push(&mut $this, $crate::call_arg!(Literal($e)));
     };
 
     (@ { $this:ident } $(,)?) => { };
@@ -124,7 +124,7 @@ macro_rules! invoke_args {
 
 /// Utility macro for building multiple instruction arguments
 #[macro_export]
-macro_rules! instruction_args {
+macro_rules! call_args {
     () => (Vec::new());
 
     ($token:ident($args:expr), $($tail:tt)*) => {{
@@ -167,24 +167,24 @@ mod tests {
 
     #[test]
     fn args_macro() {
-        let args = instruction_args![Workspace(1)];
+        let args = call_args![Workspace(1)];
         assert_eq!(args[0], InstructionArg::workspace(1, None));
 
-        let args = instruction_args!["foo".to_string()];
+        let args = call_args!["foo".to_string()];
         assert!(matches!(args[0], InstructionArg::Literal(_)));
 
-        let args = instruction_args!["foo".to_string(), "bar".to_string(),];
+        let args = call_args!["foo".to_string(), "bar".to_string(),];
         assert!(matches!(args[0], InstructionArg::Literal(_)));
         assert!(matches!(args[1], InstructionArg::Literal(_)));
 
-        let args = instruction_args![Workspace(2), "bar".to_string()];
+        let args = call_args![Workspace(2), "bar".to_string()];
         assert_eq!(args[0], InstructionArg::workspace(2, None));
         assert_eq!(
             args[1],
             InstructionArg::literal(tari_bor::to_value(&"bar".to_string()).unwrap()).unwrap()
         );
 
-        let args = instruction_args!["foo".to_string(), Workspace(3), 123u64];
+        let args = call_args!["foo".to_string(), Workspace(3), 123u64];
         assert_eq!(
             args[0],
             InstructionArg::literal(tari_bor::to_value(&"foo".to_string()).unwrap()).unwrap()

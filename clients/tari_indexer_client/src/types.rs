@@ -28,7 +28,7 @@ use ts_rs::TS;
     ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
 )]
 pub struct ListSubstatesRequest {
-    #[serde(default, deserialize_with = "serde_tools::string::option::deserialize")]
+    #[serde(default, with = "serde_tools::string::option")]
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     pub filter_by_template: Option<TemplateAddress>,
     pub filter_by_type: Option<SubstateType>,

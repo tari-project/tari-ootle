@@ -7,7 +7,7 @@ use tari_engine_types::{
     instruction::Instruction,
 };
 use tari_template_lib::{
-    instruction_args,
+    call_args,
     models::{Amount, ComponentAddress, ResourceAddress},
     types::TemplateAddress,
 };
@@ -46,7 +46,7 @@ fn initialize_composability(test: &mut ComposabilityTest) -> ComposabilityCompon
             vec![Instruction::CallFunction {
                 address: test.composability_template,
                 function: "new".to_string(),
-                args: instruction_args![test.state_template],
+                args: call_args![test.state_template],
             }],
             vec![],
         )
@@ -82,7 +82,7 @@ fn create_resource_and_fund_account(test: &mut TemplateTest, account: ComponentA
             vec![Instruction::CallFunction {
                 address: faucet_template,
                 function: "mint".to_string(),
-                args: instruction_args![initial_supply],
+                args: call_args![initial_supply],
             }],
             vec![],
         )
@@ -144,7 +144,7 @@ fn it_allows_function_to_method_calls() {
             vec![Instruction::CallFunction {
                 address: test.composability_template,
                 function: "new_from_component".to_string(),
-                args: instruction_args![composability_component_0],
+                args: call_args![composability_component_0],
             }],
             vec![],
         )
@@ -209,7 +209,7 @@ fn it_allows_method_to_function_calls() {
     test.template_test.call_method::<()>(
         components.composability_component,
         "replace_state_component",
-        instruction_args![test.state_template],
+        call_args![test.state_template],
         vec![],
     );
 
@@ -304,7 +304,7 @@ fn it_allows_multiple_recursion_levels() {
     test.template_test.call_method::<()>(
         composability_1,
         "set_nested_composability",
-        instruction_args![composability_0],
+        call_args![composability_0],
         vec![],
     );
 
@@ -331,7 +331,7 @@ fn it_fails_when_surpassing_recursion_limit() {
         test.template_test.call_method::<()>(
             components.composability_component,
             "set_nested_composability",
-            instruction_args![last_composability_component],
+            call_args![last_composability_component],
             vec![],
         );
         last_composability_component = components.composability_component;

@@ -218,7 +218,7 @@ mod access_rules_template {
             debug!("malicious_auth_hook_call_mut: action = {:?}", action);
             let caller = caller.component().unwrap();
             // Try to cross template call to a component - this should fail.
-            let bucket = ComponentManager::get(*caller).call("withdraw", args![self.tokens.resource_address()]);
+            let bucket = ComponentManager::get(*caller).call("withdraw", call_args![self.tokens.resource_address()]);
             self.tokens.deposit(bucket);
         }
 
@@ -235,7 +235,7 @@ mod access_rules_template {
             // the method, otherwise it will fail. Since the auth hook does not allow foreign proofs, there is no way to
             // authorize a restricted cross template call. We're really checking the semantics of cross-template calls,
             // not the auth hook.
-            ComponentManager::get(self.attack_component.unwrap()).invoke("set", args![123]);
+            ComponentManager::get(self.attack_component.unwrap()).invoke("set", call_args![123]);
         }
 
         pub fn invalid_auth_hook1(&mut self, _action: ResourceAuthAction, _caller: AuthHookCaller) {}

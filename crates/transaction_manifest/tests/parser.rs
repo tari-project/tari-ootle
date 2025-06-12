@@ -24,7 +24,7 @@ use std::{collections::HashMap, fs};
 
 use tari_engine_types::{instruction::Instruction, substate::SubstateId};
 use tari_template_lib::{
-    instruction_args,
+    call_args,
     models::{Amount, ComponentAddress, ResourceAddress},
     types::{ObjectKey, TemplateAddress},
 };
@@ -62,36 +62,36 @@ fn manifest_smoke_test() {
         Instruction::CallFunction {
             address: picture_seller_template,
             function: "new".to_string(),
-            args: instruction_args![1_000u64],
+            args: call_args![1_000u64],
         },
         Instruction::PutLastInstructionOutputOnWorkspace { key: 0 },
         Instruction::CallMethod {
             call: test_faucet_component.into(),
             method: "take_free_coins".to_string(),
-            args: instruction_args![Amount(1_000)],
+            args: call_args![Amount(1_000)],
         },
         Instruction::PutLastInstructionOutputOnWorkspace { key: 1 },
         Instruction::CallMethod {
             call: account_component.into(),
             method: "deposit".to_string(),
-            args: instruction_args![Workspace(1)],
+            args: call_args![Workspace(1)],
         },
         Instruction::CallMethod {
             call: account_component.into(),
             method: "withdraw".to_string(),
-            args: instruction_args![xtr_resource, Amount(1_000)],
+            args: call_args![xtr_resource, Amount(1_000)],
         },
         Instruction::PutLastInstructionOutputOnWorkspace { key: 2 },
         Instruction::CallMethod {
             call: picture_seller_component.into(),
             method: "buy".to_string(),
-            args: instruction_args![Workspace(2)],
+            args: call_args![Workspace(2)],
         },
         Instruction::PutLastInstructionOutputOnWorkspace { key: 3 },
         Instruction::CallMethod {
             call: account_component.into(),
             method: "deposit".to_string(),
-            args: instruction_args![Workspace(3)],
+            args: call_args![Workspace(3)],
         },
     ];
 

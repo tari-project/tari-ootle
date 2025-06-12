@@ -8,7 +8,7 @@ use serde_json as json;
 use tari_bor::{cbor, encode, to_value};
 use tari_template_lib::{
     args::{InstructionArg, WorkspaceId},
-    instruction_arg,
+    call_arg,
     models::{Amount, Metadata},
     types::TemplateAddress,
 };
@@ -174,26 +174,26 @@ pub enum ParsedArg<'a> {
 impl From<ParsedArg<'_>> for InstructionArg {
     fn from(value: ParsedArg<'_>) -> Self {
         match value {
-            ParsedArg::Amount(v) => instruction_arg!(v),
-            ParsedArg::String(v) => instruction_arg!(v),
+            ParsedArg::Amount(v) => call_arg!(v),
+            ParsedArg::String(v) => call_arg!(v),
             ParsedArg::SubstateId(v) => match v {
-                SubstateId::Component(v) => instruction_arg!(v),
-                SubstateId::Resource(v) => instruction_arg!(v),
-                SubstateId::Vault(v) => instruction_arg!(v),
-                SubstateId::UnclaimedConfidentialOutput(v) => instruction_arg!(v),
-                SubstateId::NonFungible(v) => instruction_arg!(v),
-                SubstateId::TransactionReceipt(v) => instruction_arg!(v),
-                SubstateId::Template(v) => instruction_arg!(v),
-                SubstateId::ValidatorFeePool(v) => instruction_arg!(v),
+                SubstateId::Component(v) => call_arg!(v),
+                SubstateId::Resource(v) => call_arg!(v),
+                SubstateId::Vault(v) => call_arg!(v),
+                SubstateId::UnclaimedConfidentialOutput(v) => call_arg!(v),
+                SubstateId::NonFungible(v) => call_arg!(v),
+                SubstateId::TransactionReceipt(v) => call_arg!(v),
+                SubstateId::Template(v) => call_arg!(v),
+                SubstateId::ValidatorFeePool(v) => call_arg!(v),
             },
-            ParsedArg::TemplateAddress(v) => instruction_arg!(v),
-            ParsedArg::UnsignedInteger(v) => instruction_arg!(v),
-            ParsedArg::SignedInteger(v) => instruction_arg!(v),
-            ParsedArg::Bool(v) => instruction_arg!(v),
+            ParsedArg::TemplateAddress(v) => call_arg!(v),
+            ParsedArg::UnsignedInteger(v) => call_arg!(v),
+            ParsedArg::SignedInteger(v) => call_arg!(v),
+            ParsedArg::Bool(v) => call_arg!(v),
             // Ensure bytes are encoded as Cbor Bytes, not Array<u8>
             ParsedArg::Bytes(v) => InstructionArg::Literal(encode(&tari_bor::Value::Bytes(v)).unwrap()),
-            ParsedArg::Workspace(s) => instruction_arg!(Workspace(s)),
-            ParsedArg::Metadata(m) => instruction_arg!(m),
+            ParsedArg::Workspace(s) => call_arg!(Workspace(s)),
+            ParsedArg::Metadata(m) => call_arg!(m),
             ParsedArg::Cbor(cbor) => InstructionArg::from_type(&cbor).unwrap(),
         }
     }
@@ -262,7 +262,7 @@ mod tests {
     use tari_bor::decode_exact;
     use tari_template_lib::{
         args::WorkspaceOffsetId,
-        instruction_args,
+        call_args,
         models::{ComponentAddress, ResourceAddress},
     };
 
@@ -278,7 +278,7 @@ mod tests {
         }
 
         let args = SomeArgs {
-            args: instruction_args!(ResourceAddress::new(Default::default())),
+            args: call_args!(ResourceAddress::new(Default::default())),
         };
         // Serialize and deserialize from JSON representation
         let s = json::to_string(&args).unwrap();
@@ -341,7 +341,7 @@ mod tests {
         };
 
         let args = SomeArgs {
-            args: instruction_args!(struct_sample),
+            args: call_args!(struct_sample),
         };
         // Serialize and deserialize from JSON representation
         let s = json::to_string(&args).unwrap();
@@ -362,10 +362,10 @@ mod tests {
     #[test]
     fn it_parses_amounts() {
         let a = parse_arg("Amount(123)").unwrap();
-        assert_eq!(a, instruction_arg!(Amount(123)));
+        assert_eq!(a, call_arg!(Amount(123)));
 
         let a = parse_arg("Amount(-123)").unwrap();
-        assert_eq!(a, instruction_arg!(Amount(-123)));
+        assert_eq!(a, call_arg!(Amount(-123)));
     }
 
     #[test]
@@ -380,11 +380,11 @@ mod tests {
         let i64_min = i64::MIN.to_string();
 
         let cases = &[
-            ("123", instruction_arg!(123u64)),
-            ("-123", instruction_arg!(-123i64)),
-            ("0", instruction_arg!(0u64)),
-            (u64_max.as_str(), instruction_arg!(u64::MAX)),
-            (i64_min.as_str(), instruction_arg!(i64::MIN)),
+            ("123", call_arg!(123u64)),
+            ("-123", call_arg!(-123i64)),
+            ("0", call_arg!(0u64)),
+            (u64_max.as_str(), call_arg!(u64::MAX)),
+            (i64_min.as_str(), call_arg!(i64::MIN)),
         ];
 
         for (case, expected) in cases {
@@ -406,13 +406,13 @@ mod tests {
 
             match SubstateId::from_str(case).unwrap() {
                 SubstateId::Component(c) => {
-                    assert_eq!(a, instruction_arg!(c), "Unexpected value for case '{}'", case);
+                    assert_eq!(a, call_arg!(c), "Unexpected value for case '{}'", case);
                 },
                 SubstateId::Resource(r) => {
-                    assert_eq!(a, instruction_arg!(r), "Unexpected value for case '{}'", case);
+                    assert_eq!(a, call_arg!(r), "Unexpected value for case '{}'", case);
                 },
                 SubstateId::Vault(v) => {
-                    assert_eq!(a, instruction_arg!(v), "Unexpected value for case '{}'", case);
+                    assert_eq!(a, call_arg!(v), "Unexpected value for case '{}'", case);
                 },
                 _ => unreachable!(),
             }
@@ -426,16 +426,15 @@ mod tests {
         let a = parse_arg(valid_template_address).unwrap();
         assert_eq!(
             a,
-            instruction_arg!(TemplateAddress::from_str(
-                "d7e6f5cd2b717c83c86d3b3abf046a4caa0947e04b4e88de97a94a63ad19e382"
+            call_arg!(
+                TemplateAddress::from_str("d7e6f5cd2b717c83c86d3b3abf046a4caa0947e04b4e88de97a94a63ad19e382").unwrap()
             )
-            .unwrap())
         );
 
         // invalid template addresses are ignored
         let invalid_template_address = "template_xxxxxx";
         let a = parse_arg(invalid_template_address).unwrap();
-        assert_eq!(a, instruction_arg!(invalid_template_address));
+        assert_eq!(a, call_arg!(invalid_template_address));
     }
 
     #[test]
@@ -444,14 +443,14 @@ mod tests {
 
         for case in cases {
             let a = parse_arg(case).unwrap();
-            assert_eq!(a, instruction_arg!(case));
+            assert_eq!(a, call_arg!(case));
         }
     }
 
     #[test]
     fn it_parses_workspace_references() {
         let a = parse_arg("Workspace(123)").unwrap();
-        assert_eq!(a, instruction_arg!(Workspace(123)));
+        assert_eq!(a, call_arg!(Workspace(123)));
     }
 
     mod convert_json_to_arg {

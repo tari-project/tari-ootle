@@ -95,8 +95,8 @@ use tari_template_lib::{
         WorkspaceOffsetId,
     },
     auth::{AuthHook, AuthHookCaller, ComponentAccessRules, OwnerRule, ResourceAccessRules, ResourceAuthAction},
+    call_args,
     constants::{CONFIDENTIAL_TARI_RESOURCE_ADDRESS, XTR},
-    instruction_args,
     models::{
         Amount,
         BucketId,
@@ -291,7 +291,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
         // The signature of a call back is (action: ResourceAuthAction, auth_caller: AuthCaller)
         let ret = self
-            .invoke_component_method(auth_hook.component_address, &auth_hook.method, instruction_args![
+            .invoke_component_method(auth_hook.component_address, &auth_hook.method, call_args![
                 action,
                 auth_caller
             ])

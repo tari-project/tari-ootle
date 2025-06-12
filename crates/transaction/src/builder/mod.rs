@@ -19,7 +19,7 @@ use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib::{
     args::{AllocatableAddressType, InstructionArg, WorkspaceOffsetId},
     auth::OwnerRule,
-    instruction_args,
+    call_args,
     models::{Amount, ConfidentialWithdrawProof, ResourceAddress},
     prelude::AccessRules,
     types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
@@ -88,7 +88,7 @@ impl TransactionBuilder {
         self.add_fee_instruction(Instruction::CallMethod {
             call: call.into(),
             method: "pay_fee".to_string(),
-            args: instruction_args![max_fee],
+            args: call_args![max_fee],
         })
     }
 
@@ -103,7 +103,7 @@ impl TransactionBuilder {
         self.add_fee_instruction(Instruction::CallMethod {
             call: call.into(),
             method: "pay_fee_confidential".to_string(),
-            args: instruction_args![proof],
+            args: call_args![proof],
         })
     }
 
@@ -216,7 +216,7 @@ impl TransactionBuilder {
         self.add_instruction(Instruction::CallMethod {
             call: account.into(),
             method: "create_proof_for_resource".to_string(),
-            args: instruction_args![resource_addr],
+            args: call_args![resource_addr],
         })
     }
 

@@ -179,7 +179,7 @@ impl Display for Instruction {
 
 #[cfg(test)]
 mod tests {
-    use tari_template_lib::instruction_args;
+    use tari_template_lib::call_args;
 
     use super::*;
 
@@ -188,7 +188,7 @@ mod tests {
         let instruction = Instruction::CallFunction {
             address: Default::default(),
             function: "test".to_string(),
-            args: instruction_args![("A", "B"), 123u64, true, vec![1, 2, 3]],
+            args: call_args![("A", "B"), 123u64, true, vec![1, 2, 3]],
         };
         let json = serde_json::to_string(&instruction).unwrap();
         let decoded: Instruction = serde_json::from_str(&json).unwrap();

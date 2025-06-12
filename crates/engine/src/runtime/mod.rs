@@ -204,10 +204,10 @@ pub struct Runtime {
 
 impl Runtime {
     pub(crate) fn resolve_args(&self, args: &[InstructionArg]) -> Result<Vec<tari_bor::Value>, RuntimeError> {
-        if args.len() > limits::ENGINE_LIMITS.max_instruction_args {
+        if args.len() > limits::ENGINE_LIMITS.max_call_args {
             return Err(RuntimeError::TooManyArguments {
                 got: args.len(),
-                max: limits::ENGINE_LIMITS.max_instruction_args,
+                max: limits::ENGINE_LIMITS.max_call_args,
             });
         }
         let mut resolved = Vec::with_capacity(args.len());

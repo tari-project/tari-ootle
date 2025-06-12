@@ -61,6 +61,16 @@ impl ProcessDefinition for Indexer {
             .arg(format!("-pindexer.web_ui_public_graphql_url={graphql_public_url}"))
             .arg("-pepoch_oracle.base_layer.scanning_interval=1");
 
+        // mDNS is not guaranteed to work, so we'll explicitly set the seed peers for the indexer.
+        let seed_peers = context.validator_nodes().filter_map(|vn| {
+            let port = vn.instance().allocated_ports().get("p2p")?;
+            Some(format!("/ip4/127.0.0.1/tcp/{port}"))
+        });
+
+        for seed in seed_peers {
+            command.arg(format!("--peer-seeds={seed}"));
+        }
+
         Ok(command)
     }
 

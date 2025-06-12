@@ -18,7 +18,7 @@ pub struct Builder<'a, TMsg: MessageSpec> {
     identity: Keypair,
     messaging_mode: MessagingMode<TMsg>,
     config: crate::Config,
-    seed_peers: Vec<(PeerId, Multiaddr)>,
+    seed_peers: Vec<(Option<PeerId>, Multiaddr)>,
     #[cfg(feature = "metrics")]
     registry: Option<&'a mut libp2p::metrics::Registry>,
     #[cfg(not(feature = "metrics"))]
@@ -70,7 +70,7 @@ where
         self
     }
 
-    pub fn with_seed_peers(mut self, seed_peers: Vec<(PeerId, Multiaddr)>) -> Self {
+    pub fn with_seed_peers(mut self, seed_peers: Vec<(Option<PeerId>, Multiaddr)>) -> Self {
         self.seed_peers = seed_peers;
         self
     }
@@ -106,6 +106,7 @@ where
         let local_peer_id = *swarm.local_peer_id();
         let (tx, rx) = mpsc::channel(1);
         let (tx_events, _) = broadcast::channel(100);
+
         #[allow(unused_mut)]
         let mut worker = NetworkingWorker::<TMsg>::new(
             identity,
@@ -114,6 +115,10 @@ where
             messaging_mode,
             swarm,
             config,
+            seed_peers
+                .iter()
+                .filter_map(|(peer_id, addr)| Some(((*peer_id)?, addr.clone())))
+                .collect(),
             seed_peers,
             shutdown_signal,
         );

@@ -152,9 +152,9 @@ pub async fn spawn_services(
         .collect::<anyhow::Result<Vec<_>>>()?;
     let seed_peers = seed_peers
         .into_iter()
-        .flat_map(|p| {
+        .map(|p| {
             let peer_id = p.to_peer_id();
-            p.addresses.into_iter().map(move |a| (peer_id, a))
+            (peer_id, p.into_address())
         })
         .collect();
     #[allow(unused_mut)]

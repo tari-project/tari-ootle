@@ -102,7 +102,7 @@ function Connections() {
               />
               <TextField
                 name="address"
-                label="CopyAddress"
+                label="Multiaddr"
                 value={formState.address}
                 onChange={onChange}
                 style={{ flexGrow: 1 }}

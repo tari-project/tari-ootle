@@ -89,10 +89,7 @@ impl ConfigOverrideProvider for Cli {
             overrides.push(("p2p.seeds.peer_seeds".to_string(), self.peer_seeds.join(",")));
         }
         if let Some(listener_port) = self.listener_port {
-            overrides.push((
-                "validator_node.p2p.listener_port".to_string(),
-                listener_port.to_string(),
-            ));
+            overrides.push(("indexer.p2p.listener_port".to_string(), listener_port.to_string()));
         }
         if let Some(seconds) = self.scanning_interval {
             overrides.push(("indexer.scanning_interval".to_string(), seconds.to_string()));

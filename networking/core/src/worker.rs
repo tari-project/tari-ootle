@@ -87,6 +87,7 @@ where
     swarm: TariSwarm<ProstCodec<TMsg::Message>>,
     config: crate::Config,
     relays: RelayState,
+    seed_peers: Vec<(Option<PeerId>, Multiaddr)>,
     is_initial_bootstrap_complete: bool,
     has_sent_announce: bool,
     #[cfg(feature = "metrics")]
@@ -109,6 +110,7 @@ where
         swarm: TariSwarm<ProstCodec<TMsg::Message>>,
         config: crate::Config,
         known_relay_nodes: Vec<(PeerId, Multiaddr)>,
+        seed_peers: Vec<(Option<PeerId>, Multiaddr)>,
         shutdown_signal: ShutdownSignal,
     ) -> Self {
         Self {
@@ -122,6 +124,7 @@ where
             pending_dial_requests: HashMap::new(),
             relays: RelayState::new(known_relay_nodes),
             topic_peers: HashMap::new(),
+            seed_peers,
             swarm,
             config,
             is_initial_bootstrap_complete: false,
@@ -383,6 +386,27 @@ where
                 .add_known_local_public_addresses(self.config.known_local_public_address.clone());
         }
 
+        info!(target: LOG_TARGET, "🥾 Bootstrapping with {} seed peers", self.seed_peers.len());
+        for (peer, addr) in self.seed_peers.drain(..) {
+            let opts = match peer {
+                Some(peer) => DialOpts::peer_id(peer)
+                    .addresses(vec![addr])
+                    .condition(PeerCondition::DisconnectedAndNotDialing)
+                    .extend_addresses_through_behaviour()
+                    .build(),
+                None => DialOpts::unknown_peer_id().address(addr).build(),
+            };
+
+            self.swarm.dial(opts).or_else(|err| {
+                // Peer already has pending dial or established connection - OK
+                if matches!(&err, DialError::DialPeerConditionFalse(_)) {
+                    Ok(())
+                } else {
+                    Err(err)
+                }
+            })?;
+        }
+
         if self.active_connections.len() < self.relays.num_possible_relays() {
             info!(target: LOG_TARGET, "🥾 Bootstrapping with {} known relay peers", self.relays.num_possible_relays());
             for (peer, addrs) in self.relays.possible_relays() {
@@ -402,6 +426,7 @@ where
                         }
                     })?;
             }
+
             self.is_initial_bootstrap_complete = true;
         }
 

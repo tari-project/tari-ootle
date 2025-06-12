@@ -14,6 +14,7 @@ use crate::process_manager::{
     MinoTariNodeProcess,
     MinoTariWalletProcess,
     SignalingServerProcess,
+    ValidatorNodeProcess,
 };
 
 pub struct ProcessContext<'a> {
@@ -139,6 +140,10 @@ impl<'a> ProcessContext<'a> {
 
     pub fn minotari_nodes(&self) -> impl Iterator<Item = &MinoTariNodeProcess> {
         self.instances.minotari_nodes()
+    }
+
+    pub fn validator_nodes(&self) -> impl Iterator<Item = &ValidatorNodeProcess> {
+        self.instances.validator_nodes()
     }
 
     pub fn minotari_wallets(&self) -> impl Iterator<Item = &MinoTariWalletProcess> {

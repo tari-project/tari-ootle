@@ -93,9 +93,9 @@ pub async fn spawn_services(
         .collect::<anyhow::Result<Vec<SeedPeer>>>()?;
     let seed_peers = seed_peers
         .into_iter()
-        .flat_map(|p| {
+        .map(|p| {
             let peer_id = p.to_peer_id();
-            p.addresses.into_iter().map(move |a| (peer_id, a))
+            (peer_id, p.into_address())
         })
         .collect();
     let (networking, _) = tari_networking::Builder::<TariMessagingSpec>::new(identity)

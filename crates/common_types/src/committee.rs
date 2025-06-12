@@ -1,14 +1,14 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{cmp, ops::RangeInclusive};
+use std::{cmp, fmt::Display, ops::RangeInclusive};
 
 use rand::{rngs::OsRng, seq::SliceRandom};
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
-use crate::{Epoch, NumPreshards, ShardGroup, SubstateAddress};
+use crate::{Epoch, NumPreshards, ShardGroup, SubstateAddress, VotePower};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default, Hash)]
 #[cfg_attr(
@@ -17,8 +17,30 @@ use crate::{Epoch, NumPreshards, ShardGroup, SubstateAddress};
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct Committee<TAddr> {
-    #[cfg_attr(feature = "ts", ts(type = "Array<[string, string]>"))]
-    members: Vec<(TAddr, RistrettoPublicKeyBytes)>,
+    members: Vec<CommitteeMember<TAddr>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, Hash)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
+pub struct CommitteeMember<TAddr> {
+    pub address: TAddr,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub public_key: RistrettoPublicKeyBytes,
+    pub vote_power: VotePower,
+}
+
+impl<TAddr: Display> Display for CommitteeMember<TAddr> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "CommitteeMember(addr={}, pk={}, {})",
+            self.address, self.public_key, self.vote_power
+        )
+    }
 }
 
 impl<TAddr: PartialEq> Committee<TAddr> {
@@ -30,25 +52,40 @@ impl<TAddr: PartialEq> Committee<TAddr> {
         Self::new(Vec::with_capacity(cap))
     }
 
-    pub fn new(members: Vec<(TAddr, RistrettoPublicKeyBytes)>) -> Self {
+    pub fn new(members: Vec<CommitteeMember<TAddr>>) -> Self {
         Self { members }
     }
 
-    pub fn members_mut(&mut self) -> &mut Vec<(TAddr, RistrettoPublicKeyBytes)> {
+    // TODO: remove this - rather create committees from iterators than mutating directly
+    pub fn members_mut(&mut self) -> &mut Vec<CommitteeMember<TAddr>> {
         &mut self.members
     }
 
-    pub fn max_failures(&self) -> usize {
-        let len = self.members.len();
-        if len == 0 {
-            return 0;
+    pub fn max_failures(&self) -> VotePower {
+        let power = self.total_power();
+        if power.is_zero() {
+            return VotePower::of(0);
         }
-        (len - 1) / 3
+        (power - VotePower::of(1)) / VotePower::of(3)
     }
 
-    /// Returns $n - f$ (i.e $2f + 1$) where n is the number of committee members and f is the tolerated failure nodes.
-    pub fn quorum_threshold(&self) -> usize {
-        self.members.len() - self.max_failures()
+    /// Returns $n - f$ (i.e. $2f + 1$) where n is the number of committee members and f is the tolerated failure nodes.
+    pub fn quorum_threshold(&self) -> VotePower {
+        self.total_power() - self.max_failures()
+    }
+
+    pub fn total_power(&self) -> VotePower {
+        self.members
+            .iter()
+            .fold(VotePower::default(), |acc, member| acc + member.vote_power)
+    }
+
+    pub fn max_node_failures(&self) -> usize {
+        // max failures is < 1/3 of the total members
+        if self.is_empty() {
+            return 0;
+        }
+        (self.len() + 1) / 3
     }
 
     pub fn is_empty(&self) -> bool {
@@ -59,17 +96,25 @@ impl<TAddr: PartialEq> Committee<TAddr> {
         self.members.len()
     }
 
-    pub fn contains(&self, member: &TAddr) -> bool {
+    pub fn contains(&self, addr: &TAddr) -> bool {
         // TODO(perf); O(n) lookup
-        self.members.iter().any(|(addr, _)| addr == member)
+        self.members.iter().any(|member| member.address == *addr)
     }
 
     pub fn contains_public_key(&self, public_key: &RistrettoPublicKeyBytes) -> bool {
         // TODO(perf); O(n) lookup
-        self.members.iter().any(|(_, pk)| pk == public_key)
+        self.members.iter().any(|member| *public_key == member.public_key)
     }
 
-    pub fn get(&self, index: usize) -> Option<&(TAddr, RistrettoPublicKeyBytes)> {
+    pub fn get_power_by_public_key(&self, public_key: &RistrettoPublicKeyBytes) -> Option<VotePower> {
+        // TODO(perf); O(n) lookup
+        self.members
+            .iter()
+            .find(|m| m.public_key == *public_key)
+            .map(|m| m.vote_power)
+    }
+
+    pub fn get(&self, index: usize) -> Option<&CommitteeMember<TAddr>> {
         self.members.get(index)
     }
 
@@ -77,16 +122,18 @@ impl<TAddr: PartialEq> Committee<TAddr> {
         self.members.shuffle(&mut OsRng);
     }
 
-    pub fn shuffled(&self) -> impl Iterator<Item = &(TAddr, RistrettoPublicKeyBytes)> + '_ {
+    pub fn shuffled(&self) -> impl Iterator<Item = &CommitteeMember<TAddr>> + '_ {
         self.members.choose_multiple(&mut OsRng, self.len())
     }
 
     pub fn select_n_random(&self, n: usize) -> impl Iterator<Item = &TAddr> + '_ {
-        self.members.choose_multiple(&mut OsRng, n).map(|(addr, _)| addr)
+        self.members
+            .choose_multiple(&mut OsRng, n)
+            .map(|member| &member.address)
     }
 
     pub fn index_of(&self, member: &TAddr) -> Option<usize> {
-        self.members.iter().position(|(addr, _)| addr == member)
+        self.members.iter().position(|m| m.address == *member)
     }
 
     /// Returns the n next members from start_index_inclusive, wrapping around if necessary.
@@ -99,7 +146,7 @@ impl<TAddr: PartialEq> Committee<TAddr> {
         };
         self.members
             .iter()
-            .map(|(addr, _)| addr)
+            .map(|m| &m.address)
             .cycle()
             .skip(start_index_inclusive)
             .take(n)
@@ -116,30 +163,30 @@ impl<TAddr: PartialEq> Committee<TAddr> {
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &(TAddr, RistrettoPublicKeyBytes)> {
+    pub fn iter(&self) -> impl Iterator<Item = &CommitteeMember<TAddr>> {
         self.members.iter()
     }
 
     pub fn address_iter(&self) -> impl Iterator<Item = &TAddr> + '_ {
-        self.members.iter().map(|(addr, _)| addr)
+        self.members.iter().map(|m| &m.address)
     }
 
     pub fn into_addresses(self) -> impl Iterator<Item = TAddr> {
-        self.members.into_iter().map(|(addr, _)| addr)
+        self.members.into_iter().map(|m| m.address)
     }
 
     pub fn public_keys(&self) -> impl Iterator<Item = &RistrettoPublicKeyBytes> {
-        self.members.iter().map(|(_, pk)| pk)
+        self.members.iter().map(|m| &m.public_key)
     }
 
     pub fn into_public_keys(self) -> impl Iterator<Item = RistrettoPublicKeyBytes> {
-        self.members.into_iter().map(|(_, pk)| pk)
+        self.members.into_iter().map(|m| m.public_key)
     }
 }
 
 impl<TAddr> IntoIterator for Committee<TAddr> {
     type IntoIter = std::vec::IntoIter<Self::Item>;
-    type Item = (TAddr, RistrettoPublicKeyBytes);
+    type Item = CommitteeMember<TAddr>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.members.into_iter()
@@ -147,16 +194,16 @@ impl<TAddr> IntoIterator for Committee<TAddr> {
 }
 
 impl<'a, TAddr> IntoIterator for &'a Committee<TAddr> {
-    type IntoIter = std::slice::Iter<'a, (TAddr, RistrettoPublicKeyBytes)>;
-    type Item = &'a (TAddr, RistrettoPublicKeyBytes);
+    type IntoIter = std::slice::Iter<'a, CommitteeMember<TAddr>>;
+    type Item = &'a CommitteeMember<TAddr>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.members.iter()
     }
 }
 
-impl<TAddr: PartialEq> FromIterator<(TAddr, RistrettoPublicKeyBytes)> for Committee<TAddr> {
-    fn from_iter<T: IntoIterator<Item = (TAddr, RistrettoPublicKeyBytes)>>(iter: T) -> Self {
+impl<TAddr: PartialEq> FromIterator<CommitteeMember<TAddr>> for Committee<TAddr> {
+    fn from_iter<T: IntoIterator<Item = CommitteeMember<TAddr>>>(iter: T) -> Self {
         Self::new(iter.into_iter().collect())
     }
 }
@@ -186,6 +233,7 @@ pub struct CommitteeInfo {
     num_committees: u32,
     shard_group: ShardGroup,
     epoch: Epoch,
+    total_power: VotePower,
 }
 
 impl CommitteeInfo {
@@ -195,6 +243,7 @@ impl CommitteeInfo {
         num_committees: u32,
         shard_group: ShardGroup,
         epoch: Epoch,
+        total_power: VotePower,
     ) -> Self {
         Self {
             num_shards,
@@ -202,6 +251,7 @@ impl CommitteeInfo {
             num_committees,
             shard_group,
             epoch,
+            total_power,
         }
     }
 
@@ -210,22 +260,33 @@ impl CommitteeInfo {
         self.epoch
     }
 
-    /// Returns $n - f$ (i.e $2f + 1$) where n is the number of committee members and f is the tolerated failure nodes.
-    pub fn quorum_threshold(&self) -> u32 {
-        self.num_shard_group_members - self.max_failures()
+    /// Returns $n - f$ (i.e $2f + 1$) where n is the total power of committee members and f is the tolerated failure
+    /// nodes.
+    pub fn quorum_threshold(&self) -> VotePower {
+        self.total_power() - self.max_failures()
     }
 
     /// Returns the maximum number of failures $f$ that can be tolerated by this committee.
-    pub fn max_failures(&self) -> u32 {
-        let len = self.num_shard_group_members;
-        if len == 0 {
-            return 0;
+    pub fn max_failures(&self) -> VotePower {
+        if self.total_power().is_zero() {
+            return VotePower::zero();
         }
-        (len - 1) / 3
+        (self.total_power() - VotePower::of(1)) / VotePower::of(3)
+    }
+
+    /// Returns the total voting power of the committee.
+    pub fn total_power(&self) -> VotePower {
+        self.total_power
     }
 
     pub fn num_shard_group_members(&self) -> u32 {
         self.num_shard_group_members
+    }
+
+    pub fn max_failure_shard_group_members(&self) -> u32 {
+        // max failures is < 1/3 of the total members
+        // NOTE: this is not to be used as a threshold for quorum.
+        (self.num_shard_group_members + 1) / 3
     }
 
     pub fn num_preshards(&self) -> NumPreshards {
@@ -281,7 +342,11 @@ mod tests {
     fn create_committee(size: usize) -> Committee<u32> {
         Committee::new(
             (0..size as u32)
-                .map(|c| (c, RistrettoPublicKeyBytes::default()))
+                .map(|c| CommitteeMember {
+                    address: c,
+                    public_key: RistrettoPublicKeyBytes::default(),
+                    vote_power: VotePower::of(1),
+                })
                 .collect(),
         )
     }

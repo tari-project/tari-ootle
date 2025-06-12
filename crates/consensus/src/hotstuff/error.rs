@@ -4,7 +4,7 @@
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, LeafBlock, QcId};
 use tari_epoch_manager::EpochManagerError;
-use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup, VersionedSubstateIdError};
+use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup, VersionedSubstateIdError, VotePower};
 use tari_ootle_storage::{
     consensus_models::{BlockError, ForeignProposalCommitProofError, TransactionPoolError},
     StorageError,
@@ -195,8 +195,12 @@ pub enum ProposalValidationError {
         qc: QcId,
         validator: RistrettoPublicKeyBytes,
     },
-    #[error("Quorum was not reached on QC {qc}. {got} out of {required} signatures")]
-    QuorumWasNotReached { qc: QcId, got: usize, required: usize },
+    #[error("Quorum was not reached on QC {qc}. {got} out of {required}")]
+    QuorumWasNotReached {
+        qc: QcId,
+        got: VotePower,
+        required: VotePower,
+    },
     #[error("Invalid network in block {block_id}: expected {expected_network}, given {block_network}")]
     InvalidNetwork {
         expected_network: String,

@@ -15,6 +15,7 @@ use tari_ootle_common_types::{
     SubstateAddress,
     ToSubstateAddress,
     VersionedSubstateId,
+    VotePower,
 };
 use tari_ootle_storage::{global::models::ValidatorNode, StorageError};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
@@ -80,6 +81,7 @@ impl TestEpochManager {
                 start_epoch: our_validator_node.start_epoch,
                 end_epoch: None,
                 fee_claim_public_key: fee_claim_pk,
+                vote_power: our_validator_node.vote_power,
             });
         } else {
             copy.our_validator_node = Some(ValidatorNode {
@@ -89,6 +91,7 @@ impl TestEpochManager {
                 start_epoch: Epoch(0),
                 end_epoch: None,
                 fee_claim_public_key: fee_claim_pk,
+                vote_power: VotePower::of(1),
             });
         }
         copy
@@ -97,24 +100,25 @@ impl TestEpochManager {
     pub async fn add_committees(&self, committees: HashMap<ShardGroup, Committee<TestAddress>>) -> &Self {
         let mut state = self.state_lock().await;
         for (shard_group, committee) in committees {
-            for (address, pk) in committee.iter() {
+            for member in committee.iter() {
                 let substate_id = random_substate_in_shard_group(shard_group, TEST_NUM_PRESHARDS);
                 let substate_id = VersionedSubstateId::new(substate_id, 0);
                 state.validator_nodes.insert(
-                    address.clone(),
+                    member.address.clone(),
                     (
                         ValidatorNode {
-                            address: address.clone(),
-                            public_key: *pk,
+                            address: member.address.clone(),
+                            public_key: member.public_key,
                             shard_key: substate_id.to_substate_address(),
                             start_epoch: Epoch(0),
                             end_epoch: None,
-                            fee_claim_public_key: *pk,
+                            fee_claim_public_key: member.public_key,
+                            vote_power: member.vote_power,
                         },
                         shard_group,
                     ),
                 );
-                state.address_shard.insert(address.clone(), shard_group);
+                state.address_shard.insert(member.address.clone(), shard_group);
             }
 
             state.committees.insert(shard_group, committee);
@@ -186,6 +190,14 @@ impl EpochManagerReader for TestEpochManager {
             .get(&sg)
             .map(|c| c.len())
             .unwrap_or(0);
+        let total_power = self
+            .inner
+            .lock()
+            .await
+            .committees
+            .get(&sg)
+            .map(|c| c.total_power())
+            .unwrap_or_else(VotePower::zero);
 
         Ok(CommitteeInfo::new(
             TEST_NUM_PRESHARDS,
@@ -193,6 +205,7 @@ impl EpochManagerReader for TestEpochManager {
             num_committees,
             sg,
             epoch,
+            total_power,
         ))
     }
 
@@ -224,16 +237,22 @@ impl EpochManagerReader for TestEpochManager {
         let (sg, committee) = state
             .committees
             .iter()
-            .find(|(_, committee)| committee.iter().any(|(addr, _)| addr == address))
+            .find(|(_, committee)| committee.contains(address))
             .unwrap_or_else(|| panic!("Validator {address} not found in any committee"));
         let num_committees = state.committees.len() as u32;
         let num_members = committee.len();
+        let total_power = state
+            .committees
+            .get(sg)
+            .map(|c| c.total_power())
+            .unwrap_or_else(VotePower::zero);
         Ok(CommitteeInfo::new(
             TEST_NUM_PRESHARDS,
             num_members as u32,
             num_committees,
             *sg,
             epoch,
+            total_power,
         ))
     }
 
@@ -285,6 +304,14 @@ impl EpochManagerReader for TestEpochManager {
             .get(&sg)
             .map(|c| c.len())
             .unwrap_or(0);
+        let total_power = self
+            .inner
+            .lock()
+            .await
+            .committees
+            .get(&sg)
+            .map(|c| c.total_power())
+            .unwrap_or_else(VotePower::zero);
 
         Ok(CommitteeInfo::new(
             TEST_NUM_PRESHARDS,
@@ -292,6 +319,7 @@ impl EpochManagerReader for TestEpochManager {
             num_committees,
             sg,
             epoch,
+            total_power,
         ))
     }
 
@@ -314,6 +342,7 @@ impl EpochManagerReader for TestEpochManager {
             start_epoch: vn.start_epoch,
             end_epoch: vn.end_epoch,
             fee_claim_public_key: vn.fee_claim_public_key,
+            vote_power: vn.vote_power,
         })
     }
 

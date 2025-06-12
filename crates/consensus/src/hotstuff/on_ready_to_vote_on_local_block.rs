@@ -390,7 +390,9 @@ where TConsensusSpec: ConsensusSpec
                     }
 
                     let num_evicted = ValidatorConsensusStats::count_number_evicted_nodes(tx, block.epoch())?;
-                    let max_allowed_to_evict = u64::from(local_committee_info.quorum_threshold())
+                    // TODO: technically, we should not evict more than 1/3 of the voting power, not the number of nodes
+                    // (but this is currently the same thing)
+                    let max_allowed_to_evict = u64::from(local_committee_info.max_failure_shard_group_members())
                         .saturating_sub(num_evicted)
                         .saturating_sub(proposed_block_change_set.num_evicted_nodes_this_block() as u64);
                     if max_allowed_to_evict == 0 {

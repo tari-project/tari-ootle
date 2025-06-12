@@ -166,13 +166,18 @@ where TConsensusSpec: ConsensusSpec
             return Ok(());
         }
 
-        let f = local_committee_info.max_failures() as usize;
         let committee = self
             .epoch_manager
-            .get_committee_by_shard_group(current_epoch, foreign_committee_info.shard_group(), Some(f + 1))
+            .get_committee_by_shard_group(
+                current_epoch,
+                foreign_committee_info.shard_group(),
+                // We only request from one - note that we happen to know that get_committee_by_shard_group shuffles
+                // the committee.
+                Some(1),
+            )
             .await?;
 
-        let Some((selected, _)) = committee.shuffled().next() else {
+        let Some(selected) = committee.iter().next() else {
             warn!(
                 target: LOG_TARGET,
                 "FOREIGN PROPOSAL: No validator selected for the shard group {}",
@@ -190,7 +195,7 @@ where TConsensusSpec: ConsensusSpec
         );
         self.outbound_messaging
             .send(
-                selected.clone(),
+                selected.address.clone(),
                 HotstuffMessage::ForeignProposalRequest(ForeignProposalRequestMessage::ByBlockId {
                     block_id: message.block_id,
                     for_shard_group: local_committee_info.shard_group(),

@@ -33,7 +33,7 @@ use tari_common_types::types::FixedHash;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::FromByteType;
 use tari_ootle_common_types::{
-    committee::{Committee, CommitteeInfo},
+    committee::{Committee, CommitteeInfo, CommitteeMember},
     layer_one_transaction::{LayerOnePayloadType, LayerOneTransactionDef},
     optional::Optional,
     DerivableFromPublicKey,
@@ -41,6 +41,7 @@ use tari_ootle_common_types::{
     NodeAddressable,
     ShardGroup,
     SubstateAddress,
+    VotePower,
 };
 use tari_ootle_storage::global::{models::ValidatorNode, DbEpoch, GlobalDb, MetadataKey};
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
@@ -159,8 +160,7 @@ where TSpec: EpochManagerSpec
         validator_public_key: RistrettoPublicKeyBytes,
         claim_public_key: RistrettoPublicKeyBytes,
         shard_key: SubstateAddress,
-        // TODO: use the value of the registration
-        _registration_value: u64,
+        power: VotePower,
     ) -> Result<(), EpochManagerError> {
         info!(target: LOG_TARGET, "Registering validator node for epoch {}", activation_epoch);
 
@@ -177,6 +177,7 @@ where TSpec: EpochManagerSpec
             shard_key,
             activation_epoch,
             claim_public_key,
+            power,
         )?;
 
         if validator_public_key == self.node_public_key {
@@ -335,17 +336,17 @@ where TSpec: EpochManagerSpec
         let committees = self.get_committee_for_shard_group(epoch, shard_group, false, None)?;
 
         let mut res = vec![];
-        for (_, pub_key) in committees {
-            let vn = self.get_validator_node_by_public_key(epoch, &pub_key)?.ok_or_else(|| {
-                EpochManagerError::ValidatorNodeNotRegistered {
-                    address: RistrettoPublicKey::try_from_byte_type(&pub_key)
+        for member in committees {
+            let vn = self
+                .get_validator_node_by_public_key(epoch, &member.public_key)?
+                .ok_or_else(|| EpochManagerError::ValidatorNodeNotRegistered {
+                    address: RistrettoPublicKey::try_from_byte_type(&member.public_key)
                         .ok()
                         .and_then(|pk| TSpec::Addr::try_from_public_key(&pk))
                         .map(|a| a.to_string())
-                        .unwrap_or_else(|| format!("PARSE FAIL for pk bytes {pub_key}")),
+                        .unwrap_or_else(|| format!("PARSE FAIL for pk bytes {}", member.public_key)),
                     epoch,
-                }
-            })?;
+                })?;
             res.push(vn);
         }
         res.sort_by(|a, b| a.shard_key.cmp(&b.shard_key));
@@ -359,7 +360,14 @@ where TSpec: EpochManagerSpec
     ) -> Result<Committee<TSpec::Addr>, EpochManagerError> {
         let result = self.get_committee_vns_from_shard_key(epoch, substate_address)?;
         Ok(Committee::new(
-            result.into_iter().map(|v| (v.address, v.public_key)).collect(),
+            result
+                .into_iter()
+                .map(|v| CommitteeMember {
+                    public_key: v.public_key,
+                    address: v.address,
+                    vote_power: v.vote_power,
+                })
+                .collect(),
         ))
     }
 
@@ -455,6 +463,9 @@ where TSpec: EpochManagerSpec
         let mut tx = self.global_db.create_transaction()?;
         let mut validator_node_db = self.global_db.validator_nodes(&mut tx);
         let num_validators = validator_node_db.count_in_shard_group(epoch, shard_group)?;
+        // NOTE: currently each validator has a vote power of 1, so the total vote power is equal to the number of
+        // validators. This may change in the future if e.g. we introduce staking.
+        let total_vote_power = VotePower::of(num_validators);
         let num_validators = u32::try_from(num_validators).map_err(|_| EpochManagerError::IntegerOverflow {
             func: "get_committee_shard",
         })?;
@@ -464,6 +475,7 @@ where TSpec: EpochManagerSpec
             num_committees,
             shard_group,
             epoch,
+            total_vote_power,
         ))
     }
 

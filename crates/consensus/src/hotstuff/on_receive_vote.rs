@@ -52,13 +52,7 @@ where TConsensusSpec: ConsensusSpec
         }
         match self
             .vote_collector
-            .check_and_collect_vote(
-                from,
-                current_height,
-                epoch_state.epoch(),
-                message.vote,
-                epoch_state.local_committee_info(),
-            )
+            .check_and_collect_vote(from, current_height, epoch_state, message.vote)
             .await
         {
             Ok(Some((_, high_qc))) => {

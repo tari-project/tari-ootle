@@ -9,6 +9,7 @@ use tari_ootle_common_types::{
     Epoch,
     ShardGroup,
     SubstateAddress,
+    VotePower,
 };
 use tari_ootle_storage::global::models::ValidatorNode;
 use tari_sidechain::EvictionProof;
@@ -36,7 +37,7 @@ pub enum EpochManagerRequest<TAddr> {
         activation_epoch: Epoch,
         validator_public_key: RistrettoPublicKeyBytes,
         claim_public_key: RistrettoPublicKeyBytes,
-        value_of_registration: u64,
+        power: VotePower,
         shard_key: SubstateAddress,
         reply: Reply<()>,
     },

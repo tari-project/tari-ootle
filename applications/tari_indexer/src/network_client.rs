@@ -219,8 +219,8 @@ where
         let mut results = HashMap::with_capacity(committee_size);
         let mut last_error = None;
         for (shard_group, committee) in all_members {
-            for member in committee.shuffled().map(|(addr, _)| addr) {
-                let client = self.client_provider.create_client(member);
+            for member in committee.shuffled() {
+                let client = self.client_provider.create_client(&member.address);
                 match callback(client).await {
                     Ok(ret) => {
                         num_succeeded += 1;

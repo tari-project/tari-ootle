@@ -4,13 +4,13 @@
 use log::*;
 use tari_common::configuration::Network;
 use tari_consensus_types::{HighPc, ProposalCertificate, ProposalVote, ValidatorSignatureBytes};
-use tari_ootle_common_types::{committee::CommitteeInfo, optional::Optional, Epoch, NodeHeight};
+use tari_ootle_common_types::{optional::Optional, Epoch, NodeHeight};
 use tari_ootle_storage::{consensus_models::Block, StateStore};
 use tari_sidechain::QuorumDecision;
 
 use super::collector::VoteCollector;
 use crate::{
-    hotstuff::{error::HotStuffError, vote_collector::helpers::check_eligibility},
+    hotstuff::{epoch_state::EpochState, error::HotStuffError, vote_collector::helpers::check_eligibility},
     tracing::TraceTimer,
     traits::{CertificateStore, ConsensusSpec, ValidatorSignatureVerifierService},
 };
@@ -53,9 +53,8 @@ where TConsensusSpec: ConsensusSpec
         &self,
         from: TConsensusSpec::Addr,
         current_height: NodeHeight,
-        current_epoch: Epoch,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
         vote: ProposalVote,
-        local_committee_info: &CommitteeInfo,
     ) -> Result<Option<(ProposalCertificate, HighPc)>, HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "check_and_collect_vote");
         debug!(
@@ -63,15 +62,23 @@ where TConsensusSpec: ConsensusSpec
             "Validating vote message from {from}: {vote}"
         );
 
+        let local_committee_info = epoch_state.local_committee_info();
+        let current_epoch = epoch_state.epoch();
+
         let block_id = vote.block_id;
         let sender_vn =
             check_eligibility::<TConsensusSpec, _>(&self.epoch_manager, from, &vote, local_committee_info).await?;
         self.validate_vote(current_epoch, &vote)?;
-        let quorum_threshold = local_committee_info.quorum_threshold() as usize;
         let sender_leaf_hash = sender_vn.get_node_hash(self.network);
         let Some((quorum_votes, quorum_decision)) = self
             .vote_collector
-            .collect_vote(current_epoch, current_height, sender_leaf_hash, vote, quorum_threshold)
+            .collect_vote(
+                current_epoch,
+                current_height,
+                sender_leaf_hash,
+                vote,
+                epoch_state.local_committee(),
+            )
             .await
         else {
             return Ok(None);
@@ -85,11 +92,7 @@ where TConsensusSpec: ConsensusSpec
             );
             return Ok(None);
         };
-        let signatures = quorum_votes
-            .into_iter()
-            .take(quorum_threshold)
-            .map(|vote| vote.signature)
-            .collect();
+        let signatures = quorum_votes.into_iter().map(|vote| vote.signature).collect();
         let new_qc = create_proposal_certificate(signatures, quorum_decision, block);
         let high_qc = self.store.with_write_tx(|tx| new_qc.update_highest(tx))?;
         if new_qc.calculate_id() == *high_qc.id() {

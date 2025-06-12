@@ -10,7 +10,7 @@ use std::{
 use log::*;
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::Vote;
-use tari_ootle_common_types::{Epoch, NodeHeight};
+use tari_ootle_common_types::{committee::Committee, Epoch, NodeAddressable, NodeHeight, VotePower};
 use tari_sidechain::QuorumDecision;
 use tokio::sync::RwLock;
 
@@ -28,13 +28,13 @@ impl<V: Vote + Display> VoteCollector<V> {
         }
     }
 
-    pub async fn collect_vote(
+    pub async fn collect_vote<TAddr: NodeAddressable>(
         &self,
         current_epoch: Epoch,
         current_height: NodeHeight,
         sender_hash: FixedHash,
         vote: V,
-        quorum_threshold: usize,
+        committee: &Committee<TAddr>,
     ) -> Option<(Vec<V>, QuorumDecision)> {
         let mut access_mut = self.store.write().await;
         access_mut.clear_votes_before(current_epoch, current_height);
@@ -52,7 +52,8 @@ impl<V: Vote + Display> VoteCollector<V> {
             return None;
         }
 
-        let threshold_decision = access_mut.calculate_threshold_decision(epoch, height, &key, quorum_threshold);
+        let quorum_threshold = committee.quorum_threshold();
+        let threshold_decision = access_mut.calculate_threshold_decision(epoch, height, &key, committee);
 
         let Some(quorum_decision) = threshold_decision.decision else {
             info!(
@@ -60,7 +61,7 @@ impl<V: Vote + Display> VoteCollector<V> {
                 "🔥 Received {} from {} ({} of {}).",
                 vote_display,
                 sender_hash,
-                threshold_decision.count,
+                threshold_decision.total_power,
                 quorum_threshold
             );
             return None;
@@ -68,13 +69,13 @@ impl<V: Vote + Display> VoteCollector<V> {
 
         // We only generate the next qc once when we have a quorum of votes. Any votes received after this
         // are not included in the QC.
-        if threshold_decision.count < quorum_threshold {
+        if threshold_decision.total_power < quorum_threshold {
             info!(
                 target: LOG_TARGET,
                 "🔥 Received {} from {} ({} of {}).",
                 vote_display,
                 sender_hash,
-                threshold_decision.count,
+                threshold_decision.total_power,
                 quorum_threshold
             );
             return None;
@@ -85,7 +86,7 @@ impl<V: Vote + Display> VoteCollector<V> {
             "🔥 Received {} from {} ({} of {}). QUORUM!",
             vote_display,
             sender_hash,
-            threshold_decision.count,
+            threshold_decision.total_power,
             quorum_threshold
         );
 
@@ -165,12 +166,12 @@ impl<V: Vote + Display> VoteStoreInner<V> {
         Some(votes.values())
     }
 
-    pub fn calculate_threshold_decision(
+    pub fn calculate_threshold_decision<TAddr: NodeAddressable>(
         &self,
         epoch: Epoch,
         height: NodeHeight,
         key: &V::Key,
-        quorum_threshold: usize,
+        committee: &Committee<TAddr>,
     ) -> ThresholdDecision {
         let Some(votes_iter) = self.votes_for_key_iter(epoch, height, key) else {
             // Soft invariant protection - technically, this should not happen but the correct ThresholdDecision is
@@ -182,34 +183,36 @@ impl<V: Vote + Display> VoteStoreInner<V> {
             );
 
             return ThresholdDecision {
-                count: 0,
+                total_power: VotePower::zero(),
                 decision: None,
             };
         };
-        let mut count_accept = 0;
-        let mut count_reject = 0;
+        let mut count_accept = VotePower::zero();
+        let mut count_reject = VotePower::zero();
         for vote in votes_iter {
+            let power = committee.get_power_by_public_key(vote.public_key()).unwrap_or_default();
             match vote.decision() {
-                QuorumDecision::Accept => count_accept += 1,
-                QuorumDecision::Reject => count_reject += 1,
+                QuorumDecision::Accept => count_accept += power,
+                QuorumDecision::Reject => count_reject += power,
             }
         }
 
+        let quorum_threshold = committee.quorum_threshold();
         if count_accept >= quorum_threshold {
             return ThresholdDecision {
-                count: count_accept,
+                total_power: count_accept,
                 decision: Some(QuorumDecision::Accept),
             };
         }
         if count_reject >= quorum_threshold {
             return ThresholdDecision {
-                count: count_reject,
+                total_power: count_reject,
                 decision: Some(QuorumDecision::Reject),
             };
         }
 
         ThresholdDecision {
-            count: count_accept + count_reject,
+            total_power: count_accept + count_reject,
             decision: None,
         }
     }
@@ -230,5 +233,5 @@ impl<V: Vote + Display> VoteStoreInner<V> {
 #[derive(Debug, Clone, Copy)]
 pub struct ThresholdDecision {
     pub decision: Option<QuorumDecision>,
-    pub count: usize,
+    pub total_power: VotePower,
 }

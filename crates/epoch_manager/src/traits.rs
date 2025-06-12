@@ -32,6 +32,7 @@ use tari_ootle_common_types::{
     NodeAddressable,
     ShardGroup,
     SubstateAddress,
+    VotePower,
 };
 use tari_ootle_storage::global::models::ValidatorNode;
 use tari_sidechain::EvictionProof;
@@ -56,7 +57,7 @@ pub trait EpochManagerWriter: Send + Sync {
         validator_public_key: RistrettoPublicKeyBytes,
         claim_public_key: RistrettoPublicKeyBytes,
         shard_key: SubstateAddress,
-        value_of_registration: u64,
+        power: VotePower,
     ) -> impl Future<Output = Result<(), EpochManagerError>> + Send;
 
     fn deactivate_validator_node(

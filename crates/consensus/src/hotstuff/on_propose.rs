@@ -578,7 +578,9 @@ where TConsensusSpec: ConsensusSpec
             .map(|max| {
                 let num_evicted =
                     ValidatorConsensusStats::count_number_evicted_nodes(tx, start_of_chain_block.epoch())?;
-                let max_allowed_to_evict = u64::from(local_committee_info.max_failures())
+                // TODO: technically, we should not evict more than 1/3 of the voting power, not the number of nodes
+                // (but this is currently the same thing)
+                let max_allowed_to_evict = u64::from(local_committee_info.max_failure_shard_group_members())
                     .saturating_sub(num_evicted)
                     .min(max as u64);
                 ValidatorConsensusStats::get_nodes_to_evict(

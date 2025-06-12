@@ -22,7 +22,7 @@
 
 use std::collections::HashMap;
 
-use tari_ootle_common_types::{committee::Committee, Epoch, ShardGroup, SubstateAddress};
+use tari_ootle_common_types::{committee::Committee, Epoch, ShardGroup, SubstateAddress, VotePower};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 use crate::global::{models::ValidatorNode, GlobalDbAdapter};
@@ -44,6 +44,7 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
         shard_key: SubstateAddress,
         start_epoch: Epoch,
         fee_claim_public_key: RistrettoPublicKeyBytes,
+        power: VotePower,
     ) -> Result<(), TGlobalDbAdapter::Error> {
         self.backend.insert_validator_node(
             self.tx,
@@ -52,6 +53,7 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
             shard_key,
             start_epoch,
             fee_claim_public_key,
+            power,
         )
     }
 

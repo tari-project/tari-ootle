@@ -30,6 +30,7 @@ use tari_ootle_common_types::{
     NodeAddressable,
     ShardGroup,
     SubstateAddress,
+    VotePower,
 };
 use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 
@@ -101,6 +102,7 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         shard_key: SubstateAddress,
         start_epoch: Epoch,
         fee_claim_public_key: RistrettoPublicKeyBytes,
+        power: VotePower,
     ) -> Result<(), Self::Error>;
 
     fn deactivate_validator_node(

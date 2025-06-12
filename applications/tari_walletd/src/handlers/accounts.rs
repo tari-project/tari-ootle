@@ -27,8 +27,8 @@ use tari_ootle_wallet_sdk::{
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
+    call_args,
     constants::{XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
-    instruction_args,
     models::{Amount, UnclaimedConfidentialOutputAddress},
     prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, CONFIDENTIAL_TARI_RESOURCE_ADDRESS},
     types::crypto::CommitmentSignatureBytes,
@@ -696,7 +696,7 @@ pub async fn handle_create_free_test_coins(
     let instructions = vec![Instruction::CallMethod {
         call: XTR_FAUCET_COMPONENT_ADDRESS.into(),
         method: "take".to_string(),
-        args: instruction_args![amount],
+        args: call_args![amount],
     }];
 
     // ------------------------------

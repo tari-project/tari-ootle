@@ -5,8 +5,8 @@ use std::iter;
 
 use tari_engine_types::commit_result::RejectReason;
 use tari_template_lib::{
+    call_args,
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-    instruction_args,
     models::{Amount, ComponentAddress},
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, test_faucet_component, TemplateTest};
@@ -20,7 +20,7 @@ fn deducts_fees_from_payments_and_refunds_the_rest() {
     let orig_balance: Amount = test.call_method(
         account,
         "balance",
-        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
 
@@ -41,7 +41,7 @@ fn deducts_fees_from_payments_and_refunds_the_rest() {
     let new_balance: Amount = test.call_method(
         account,
         "balance",
-        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
     assert_eq!(new_balance, orig_balance - payment.total_fees_charged());
@@ -57,7 +57,7 @@ fn deducts_fees_when_transaction_fails() {
     let orig_balance: Amount = test.call_method(
         account,
         "balance",
-        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
 
@@ -81,7 +81,7 @@ fn deducts_fees_when_transaction_fails() {
     let new_balance: Amount = test.call_method(
         account,
         "balance",
-        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
     assert!(!payment.total_fees_paid().is_zero());
@@ -116,7 +116,7 @@ fn deposit_from_faucet_then_pay() {
     let new_balance: Amount = test.call_method(
         account,
         "balance",
-        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
     assert_eq!(
@@ -134,7 +134,7 @@ fn another_account_pays_partially_for_fees() {
     let orig_balance: Amount = test.call_method(
         account_fee,
         "balance",
-        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
 
@@ -160,7 +160,7 @@ fn another_account_pays_partially_for_fees() {
     let new_balance: Amount = test.call_method(
         account_fee,
         "balance",
-        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
     assert_eq!(new_balance, orig_balance + Amount(200) - payment.total_fees_charged());
@@ -171,7 +171,7 @@ fn another_account_pays_partially_for_fees() {
     let balance: Amount = test.call_method(
         account,
         "balance",
-        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
     assert_eq!(balance, Amount(1000));
@@ -185,7 +185,7 @@ fn failed_fee_transaction() {
     let initial_balance: Amount = test.call_method(
         account,
         "balance",
-        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
 
@@ -213,7 +213,7 @@ fn failed_fee_transaction() {
     let new_balance: Amount = test.call_method(
         account,
         "balance",
-        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
     assert_eq!(new_balance, initial_balance);
@@ -228,7 +228,7 @@ fn fail_partial_paid_fees() {
     let orig_balance: Amount = test.call_method(
         account,
         "balance",
-        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
     test.enable_fees();
@@ -262,7 +262,7 @@ fn fail_partial_paid_fees() {
     let new_balance: Amount = test.call_method(
         account,
         "balance",
-        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
     assert_eq!(new_balance, orig_balance - Amount(50));
@@ -277,7 +277,7 @@ fn fail_pay_less_fees_than_fee_transaction() {
     let orig_balance: Amount = test.call_method(
         account,
         "balance",
-        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
     let state: ComponentAddress = test.call_function("State", "new", args![], vec![]);
@@ -326,7 +326,7 @@ fn fail_pay_less_fees_than_fee_transaction() {
     let new_balance: Amount = test.call_method(
         account,
         "balance",
-        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
     assert_eq!(new_balance, orig_balance);
@@ -345,7 +345,7 @@ fn fail_pay_too_little_no_fee_instruction() {
     let orig_balance: Amount = test.call_method(
         account,
         "balance",
-        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
 
@@ -379,7 +379,7 @@ fn fail_pay_too_little_no_fee_instruction() {
     let new_balance: Amount = test.call_method(
         account,
         "balance",
-        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
     assert_eq!(new_balance, orig_balance);
@@ -394,7 +394,7 @@ fn success_pay_fee_in_main_instructions() {
     let orig_balance: Amount = test.call_method(
         account,
         "balance",
-        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
 
@@ -424,7 +424,7 @@ fn success_pay_fee_in_main_instructions() {
     let new_balance: Amount = test.call_method(
         account,
         "balance",
-        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
     assert_eq!(new_balance, orig_balance + Amount(500) - fees.total_fees_charged());
@@ -438,7 +438,7 @@ fn dangling_bucket_pay_fees() {
     let orig_balance: Amount = test.call_method(
         account,
         "balance",
-        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
 
@@ -471,7 +471,7 @@ fn dangling_bucket_pay_fees() {
     let new_balance: Amount = test.call_method(
         account,
         "balance",
-        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
     assert!(!payment.total_fees_paid().is_zero());

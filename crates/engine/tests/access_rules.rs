@@ -14,7 +14,7 @@ use tari_template_lib::{
         ResourceAuthAction,
         RestrictedAccessRule,
     },
-    instruction_args,
+    call_args,
     models::{Amount, ComponentAddress, Metadata, NonFungibleId, ResourceAddress, VaultId},
     rule,
 };
@@ -666,7 +666,7 @@ mod resource_access_rules {
                 .call_function(cross_call_template, "call_component_with_args", args![
                     component_address,
                     "take_tokens",
-                    instruction_args![Amount(10)],
+                    call_args![Amount(10)],
                 ])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
@@ -699,7 +699,7 @@ mod resource_access_rules {
                         "take_tokens_using_proof",
                         Workspace("proof"),
                         // "proof" == 1 - transaction builder does not recursively resolve the args
-                        instruction_args![Workspace(1), Amount(10)],
+                        call_args![Workspace(1), Amount(10)],
                     ],
                 )
                 .put_last_instruction_output_on_workspace("tokens")

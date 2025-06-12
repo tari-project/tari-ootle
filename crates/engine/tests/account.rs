@@ -5,8 +5,8 @@ use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine::runtime::{ActionIdent, RuntimeError};
 use tari_engine_types::{instruction::Instruction, ToByteType};
 use tari_template_lib::{
+    call_args,
     constants::XTR,
-    instruction_args,
     models::{Amount, ComponentAddress, ResourceAddress},
     prelude::AccessRules,
     rule,
@@ -30,7 +30,7 @@ fn basic_faucet_transfer() {
             vec![Instruction::CallFunction {
                 address: faucet_template,
                 function: "mint".to_string(),
-                args: instruction_args![initial_supply],
+                args: call_args![initial_supply],
             }],
             vec![template_test.get_test_proof()],
         )
@@ -87,7 +87,7 @@ fn withdraw_from_account_prevented() {
             vec![Instruction::CallFunction {
                 address: faucet_template,
                 function: "mint".to_string(),
-                args: instruction_args![initial_supply],
+                args: call_args![initial_supply],
             }],
             vec![template_test.get_test_proof()],
         )
@@ -183,7 +183,7 @@ fn attempt_to_overwrite_account() {
 
     let result = template_test.execute_expect_success(
         Transaction::builder()
-            .call_method(source_account, "get_balances", instruction_args![])
+            .call_method(source_account, "get_balances", call_args![])
             .build_and_seal(&source_account_sk),
         vec![],
     );

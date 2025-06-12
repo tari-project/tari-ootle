@@ -13,7 +13,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_template_lib::{
-    instruction_args,
+    call_args,
     models::{Amount, ComponentAddress},
     prelude::ConfidentialOutputStatement,
     types::crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
@@ -51,12 +51,12 @@ fn setup(
             template_test.call_function(
                 "ConfidentialFaucet",
                 "mint_with_view_key",
-                instruction_args![initial_supply, vk],
+                call_args![initial_supply, vk],
                 vec![],
             )
         })
         .unwrap_or_else(|| {
-            template_test.call_function("ConfidentialFaucet", "mint", instruction_args![initial_supply], vec![])
+            template_test.call_function("ConfidentialFaucet", "mint", call_args![initial_supply], vec![])
         });
 
     let resx = template_test.get_previous_output_address(SubstateType::Resource);
@@ -69,7 +69,7 @@ fn mint_initial_commitment() {
     let (confidential_proof, _mask, _change) = generate_confidential_proof(Amount(100), None);
     let (mut template_test, faucet, _faucet_resx) = setup(confidential_proof, None);
 
-    let total_supply: Amount = template_test.call_method(faucet, "total_supply", instruction_args![], vec![]);
+    let total_supply: Amount = template_test.call_method(faucet, "total_supply", call_args![], vec![]);
     // The number of commitments
     // TODO: the total supply should be corrected for confidential resources. When minting, we could use the
     //       minimum_value_promise and an excess sig.
@@ -82,7 +82,7 @@ fn mint_more_later() {
     let (mut template_test, faucet, _faucet_resx) = setup(confidential_proof, None);
 
     let (confidential_proof, mask, _change) = generate_confidential_proof(Amount(100), None);
-    template_test.call_method::<()>(faucet, "mint_more", instruction_args![confidential_proof], vec![]);
+    template_test.call_method::<()>(faucet, "mint_more", call_args![confidential_proof], vec![]);
 
     let (user_account, user_proof, user_key) = template_test.create_empty_account();
 
@@ -428,8 +428,8 @@ fn mint_and_transfer_revealed() {
 
     let (user_account, _, _) = test.create_empty_account();
 
-    test.call_method::<()>(faucet, "mint_revealed", instruction_args![Amount(123)], vec![]);
-    let balance: Amount = test.call_method(faucet, "vault_balance", instruction_args![], vec![]);
+    test.call_method::<()>(faucet, "mint_revealed", call_args![Amount(123)], vec![]);
+    let balance: Amount = test.call_method(faucet, "vault_balance", call_args![], vec![]);
     assert_eq!(balance, Amount(123));
 
     // Convert 100 revealed funds to confidential and the remaining 23 to revealed
@@ -501,7 +501,7 @@ fn mint_with_view_key() {
     let faucet_entity_id = faucet.entity_id();
 
     let (confidential_proof, mask, _change) = generate_confidential_proof_with_view_key(Amount(100), None, view_key);
-    test.call_method::<()>(faucet, "mint_more", instruction_args![confidential_proof], vec![]);
+    test.call_method::<()>(faucet, "mint_more", call_args![confidential_proof], vec![]);
 
     let (user_account, user_proof, user_key) = test.create_empty_account();
     let user_account_entity_id = user_account.entity_id();

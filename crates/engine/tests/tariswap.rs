@@ -4,7 +4,7 @@
 use tari_engine_types::instruction::Instruction;
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_template_lib::{
-    instruction_args,
+    call_args,
     models::{Amount, ComponentAddress},
     prelude::{NonFungibleAddress, ResourceAddress},
 };
@@ -50,7 +50,7 @@ fn create_faucet_component(template_test: &mut TemplateTest, symbol: String) -> 
     let component_address: ComponentAddress = template_test.call_function(
         "TestFaucet",
         "mint_with_symbol",
-        instruction_args![initial_supply, symbol],
+        call_args![initial_supply, symbol],
         vec![],
     );
 
@@ -76,7 +76,7 @@ fn create_tariswap_component(
             vec![Instruction::CallFunction {
                 address: tariswap_template,
                 function: "new".to_string(),
-                args: instruction_args![a_resource, b_resource, fee],
+                args: call_args![a_resource, b_resource, fee],
             }],
             vec![],
         )
@@ -173,21 +173,13 @@ fn remove_liquidity(test: &mut TariSwapTest, lp_amount: Amount) {
 }
 
 fn get_pool_balance(test: &mut TariSwapTest, resource_address: ResourceAddress) -> Amount {
-    test.template_test.call_method(
-        test.tariswap,
-        "get_pool_balance",
-        instruction_args![resource_address],
-        vec![],
-    )
+    test.template_test
+        .call_method(test.tariswap, "get_pool_balance", call_args![resource_address], vec![])
 }
 
 fn get_account_balance(test: &mut TariSwapTest, resource_address: ResourceAddress) -> Amount {
-    test.template_test.call_method(
-        test.account_address,
-        "balance",
-        instruction_args![resource_address],
-        vec![],
-    )
+    test.template_test
+        .call_method(test.account_address, "balance", call_args![resource_address], vec![])
 }
 
 fn assert_swap(

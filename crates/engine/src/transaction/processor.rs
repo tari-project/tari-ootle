@@ -49,8 +49,8 @@ use tari_template_lib::{
         WorkspaceOffsetId,
     },
     auth::{ComponentAccessRules, OwnerRule},
-    instruction_arg,
-    instruction_args,
+    call_arg,
+    call_args,
     invoke_args,
     models::{Bucket, NonFungibleAddress},
     types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
@@ -452,7 +452,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         let account_address = new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, public_key_address);
 
         // the public key is the first argument of the Account template constructor
-        let mut args = instruction_args![
+        let mut args = call_args![
             NonFungibleAddress::from_public_key(*public_key_address),
             owner_rule,
             access_rules
@@ -460,10 +460,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
 
         // add the optional workspace bucket with the initial funds of the account
         if let Some(workspace_id) = workspace_id {
-            args.push(instruction_arg![WorkspaceOffset(workspace_id)]);
+            args.push(call_arg![WorkspaceOffset(workspace_id)]);
         } else {
             let none: Option<Bucket> = None;
-            args.push(instruction_arg![Literal(none)]);
+            args.push(call_arg![Literal(none)]);
         }
 
         let resolved_args = runtime.resolve_args(&args)?;

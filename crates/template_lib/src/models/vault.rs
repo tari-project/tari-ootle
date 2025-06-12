@@ -186,7 +186,7 @@ impl Vault {
                 address: resource_address,
             },
             action: VaultAction::Create,
-            args: instruction_args![],
+            args: call_args![],
         });
 
         Self {

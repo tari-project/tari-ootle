@@ -3,7 +3,7 @@
 
 use tari_engine_types::{commit_result::ExecuteResult, instruction::Instruction};
 use tari_template_lib::{
-    instruction_args,
+    call_args,
     models::{ComponentAddress, NonFungibleAddress, NonFungibleId},
     prelude::Metadata,
     resource::TOKEN_SYMBOL,
@@ -114,7 +114,7 @@ fn create_nft_component(
         vec![Instruction::CallFunction {
             address: nft_template,
             function: "create".to_string(),
-            args: instruction_args![owner_token],
+            args: call_args![owner_token],
         }],
         vec![],
     )

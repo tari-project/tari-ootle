@@ -3,7 +3,7 @@ publishBranch: development
 packages:
   - bindings
   - clients/javascript/*
-  - applications/tari_ootle_walletd/web_ui
+  - applications/tari_walletd/web_ui
   - applications/tari_indexer/web_ui
   - applications/tari_validator_node/web_ui
   - utilities/db_inspector/web_ui

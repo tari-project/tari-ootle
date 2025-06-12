@@ -66,16 +66,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 println!("cargo:warning=Status: {}", output.status);
                 if !output.stdout.is_empty() {
-                    println!(
-                        "cargo:warning=Output: {}",
-                        String::from_utf8_lossy(&output.stdout).trim()
-                    );
+                    for (i, line) in String::from_utf8_lossy(&output.stdout).lines().enumerate() {
+                        println!("cargo:warning=Output {i}: {line}");
+                    }
                 }
                 if !output.stderr.is_empty() {
-                    println!(
-                        "cargo:warning=Error: {}",
-                        String::from_utf8_lossy(&output.stderr).trim()
-                    );
+                    for (i, line) in String::from_utf8_lossy(&output.stderr).lines().enumerate() {
+                        println!("cargo:warning=Error {i}: {line}");
+                    }
                 }
                 // Ignore it unless on CI
                 continue;

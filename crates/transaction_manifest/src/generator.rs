@@ -8,7 +8,7 @@ use syn::Lit;
 use tari_engine_types::{instruction::Instruction, substate::SubstateId};
 use tari_template_lib::{
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
-    instruction_arg,
+    call_arg,
     models::{Amount, NonFungibleId},
     types::TemplateAddress,
 };
@@ -163,18 +163,18 @@ impl ManifestInstructionGenerator {
                         .or_else(|| self.global_aliases.get(&ident.to_string()))
                         .map(|v| match v {
                             ManifestValue::SubstateId(addr) => match addr {
-                                SubstateId::Component(addr) => Ok(instruction_arg!(*addr)),
-                                SubstateId::Resource(addr) => Ok(instruction_arg!(*addr)),
+                                SubstateId::Component(addr) => Ok(call_arg!(*addr)),
+                                SubstateId::Resource(addr) => Ok(call_arg!(*addr)),
                                 // TODO: should tx receipt addresses be allowed to be reference ?
-                                SubstateId::TransactionReceipt(addr) => Ok(instruction_arg!(*addr)),
-                                SubstateId::Vault(addr) => Ok(instruction_arg!(*addr)),
-                                SubstateId::NonFungible(addr) => Ok(instruction_arg!(addr)),
-                                SubstateId::UnclaimedConfidentialOutput(addr) => Ok(instruction_arg!(*addr)),
-                                SubstateId::Template(addr) => Ok(instruction_arg!(*addr)),
-                                SubstateId::ValidatorFeePool(addr) => Ok(instruction_arg!(*addr)),
+                                SubstateId::TransactionReceipt(addr) => Ok(call_arg!(*addr)),
+                                SubstateId::Vault(addr) => Ok(call_arg!(*addr)),
+                                SubstateId::NonFungible(addr) => Ok(call_arg!(addr)),
+                                SubstateId::UnclaimedConfidentialOutput(addr) => Ok(call_arg!(*addr)),
+                                SubstateId::Template(addr) => Ok(call_arg!(*addr)),
+                                SubstateId::ValidatorFeePool(addr) => Ok(call_arg!(*addr)),
                             },
                             ManifestValue::Literal(lit) => lit_to_arg(lit),
-                            ManifestValue::NonFungibleId(id) => Ok(instruction_arg!(id.clone())),
+                            ManifestValue::NonFungibleId(id) => Ok(call_arg!(id.clone())),
                             ManifestValue::Value(blob) => Ok(InstructionArg::literal(blob.clone()).unwrap()),
                         })
                         .or_else(|| {
@@ -191,10 +191,10 @@ impl ManifestInstructionGenerator {
                             }
                         })?
                 },
-                ManifestLiteral::Special(SpecialLiteral::Amount(amount)) => Ok(instruction_arg!(Amount(amount))),
+                ManifestLiteral::Special(SpecialLiteral::Amount(amount)) => Ok(call_arg!(Amount(amount))),
                 ManifestLiteral::Special(SpecialLiteral::NonFungibleId(lit)) => {
                     let id = lit_to_nonfungible_id(&lit)?;
-                    Ok(instruction_arg!(id))
+                    Ok(call_arg!(id))
                 },
             })
             .collect()
@@ -222,27 +222,27 @@ impl ManifestInstructionGenerator {
 
 fn lit_to_arg(lit: &Lit) -> Result<InstructionArg, ManifestError> {
     match lit {
-        Lit::Str(s) => Ok(instruction_arg!(s.value())),
+        Lit::Str(s) => Ok(call_arg!(s.value())),
         Lit::Int(i) => match i.suffix() {
-            "u8" => Ok(instruction_arg!(i.base10_parse::<u8>()?)),
-            "u16" => Ok(instruction_arg!(i.base10_parse::<u16>()?)),
-            "u32" => Ok(instruction_arg!(i.base10_parse::<u32>()?)),
-            "u64" => Ok(instruction_arg!(i.base10_parse::<u64>()?)),
-            "u128" => Ok(instruction_arg!(i.base10_parse::<u128>()?)),
-            "i8" => Ok(instruction_arg!(i.base10_parse::<i8>()?)),
-            "i16" => Ok(instruction_arg!(i.base10_parse::<i16>()?)),
-            "" | "i32" => Ok(instruction_arg!(i.base10_parse::<i32>()?)),
-            "i64" => Ok(instruction_arg!(i.base10_parse::<i64>()?)),
-            "i128" => Ok(instruction_arg!(i.base10_parse::<i128>()?)),
+            "u8" => Ok(call_arg!(i.base10_parse::<u8>()?)),
+            "u16" => Ok(call_arg!(i.base10_parse::<u16>()?)),
+            "u32" => Ok(call_arg!(i.base10_parse::<u32>()?)),
+            "u64" => Ok(call_arg!(i.base10_parse::<u64>()?)),
+            "u128" => Ok(call_arg!(i.base10_parse::<u128>()?)),
+            "i8" => Ok(call_arg!(i.base10_parse::<i8>()?)),
+            "i16" => Ok(call_arg!(i.base10_parse::<i16>()?)),
+            "" | "i32" => Ok(call_arg!(i.base10_parse::<i32>()?)),
+            "i64" => Ok(call_arg!(i.base10_parse::<i64>()?)),
+            "i128" => Ok(call_arg!(i.base10_parse::<i128>()?)),
             _ => Err(ManifestError::UnsupportedExpr(format!(
                 r#"Unsupported integer suffix "{}""#,
                 i.suffix()
             ))),
         },
-        Lit::Bool(b) => Ok(instruction_arg!(b.value())),
-        Lit::ByteStr(v) => Ok(instruction_arg!(v.value())),
-        Lit::Byte(v) => Ok(instruction_arg!(v.value())),
-        Lit::Char(v) => Ok(instruction_arg!(v.value().to_string())),
+        Lit::Bool(b) => Ok(call_arg!(b.value())),
+        Lit::ByteStr(v) => Ok(call_arg!(v.value())),
+        Lit::Byte(v) => Ok(call_arg!(v.value())),
+        Lit::Char(v) => Ok(call_arg!(v.value().to_string())),
         Lit::Float(v) => Err(ManifestError::UnsupportedExpr(format!(
             "Float literals not supported ({})",
             v

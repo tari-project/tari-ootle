@@ -7,7 +7,7 @@ use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine::runtime::{AssertError, RuntimeError};
 use tari_template_lib::{
     args::WorkspaceOffsetId,
-    instruction_args,
+    call_args,
     models::{Amount, ComponentAddress, NonFungibleAddress, ResourceAddress},
     prelude::XTR,
 };
@@ -36,7 +36,7 @@ fn setup() -> AssertTest {
             vec![Instruction::CallFunction {
                 address: faucet_template,
                 function: "mint".to_string(),
-                args: instruction_args![initial_supply],
+                args: call_args![initial_supply],
             }],
             vec![template_test.get_test_proof()],
         )

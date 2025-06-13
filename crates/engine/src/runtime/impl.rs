@@ -2394,7 +2394,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         let mut resource = ResourceContainer::confidential(
             CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
             Some((unclaimed_output.commitment, ConfidentialOutput {
-                commitment: unclaimed_output.commitment,
                 stealth_public_nonce: diffie_hellman_public_key,
                 encrypted_data: unclaimed_output.encrypted_data,
                 minimum_value_promise: 0,

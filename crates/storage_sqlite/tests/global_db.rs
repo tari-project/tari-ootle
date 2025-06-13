@@ -6,7 +6,7 @@ use rand::rngs::OsRng;
 use tari_common_types::types::FixedHash;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine_types::ToByteType;
-use tari_ootle_common_types::{Epoch, NumPreshards, PeerAddress, ShardGroup, SubstateAddress};
+use tari_ootle_common_types::{Epoch, NumPreshards, PeerAddress, ShardGroup, SubstateAddress, VotePower};
 use tari_ootle_storage::global::{GlobalDb, ValidatorNodeDb};
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_utilities::ByteArray;
@@ -53,6 +53,7 @@ fn insert_vn_with_public_key(
             derived_substate_address(&public_key),
             start_epoch,
             public_key.to_byte_type(),
+            VotePower::of(1),
         )
         .unwrap()
 }

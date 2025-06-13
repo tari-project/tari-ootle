@@ -34,7 +34,8 @@ create table validator_nodes
     shard_key            blob                              not null,
     start_epoch          bigint                            not null,
     end_epoch            bigint                            null,
-    fee_claim_public_key blob                              not null
+    fee_claim_public_key blob                              not null,
+    power                bigint                            not null
 );
 
 CREATE TABLE committees

@@ -22,6 +22,7 @@ use tari_ootle_common_types::{
     PeerAddress,
     ShardGroup,
     VersionedSubstateId,
+    VotePower,
 };
 use tari_ootle_p2p::proto::rpc::{GetCheckpointRequest, GetCheckpointResponse, SyncStateRequest};
 use tari_ootle_storage::{
@@ -400,7 +401,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         current_epoch: Epoch,
     ) -> Result<HashMap<ShardGroup, Committee<PeerAddress>>, RpcStateSyncError> {
         // We are behind at least one epoch.
-        // We get the current substate range, and we asks committees from previous epoch in this range to give us
+        // We get the current substate range, and we ask committees from previous epoch in this range to give us
         // data.
         let prev_epoch = current_epoch
             .checked_sub(Epoch(1))
@@ -429,7 +430,9 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
     ) -> Result<(), RpcStateSyncError> {
         let quorum_threshold = committee.quorum_threshold();
         checkpoint
-            .validate(epoch, quorum_threshold, |pk| Ok(committee.contains_public_key(pk)))
+            .validate(epoch, quorum_threshold, |pk| {
+                Ok(committee.get_power_by_public_key(pk).unwrap_or_else(VotePower::zero))
+            })
             .map_err(|err| RpcStateSyncError::InvalidResponse(anyhow!("Checkpoint is not valid: {err}",)))?;
 
         info!(
@@ -453,17 +456,17 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         let mut remaining_members = prev_committee.len();
 
         info!(target: LOG_TARGET, "🛜 Syncing state for shard {shard} and epoch {}", epoch.saturating_sub(Epoch(1)));
-        for (addr, _) in prev_committee.shuffled() {
+        for member in prev_committee.shuffled() {
             remaining_members = remaining_members.saturating_sub(1);
-            if our_vn_addr == addr {
+            if *our_vn_addr == member.address {
                 continue;
             }
-            let mut client = match self.establish_rpc_session(addr).await {
+            let mut client = match self.establish_rpc_session(&member.address).await {
                 Ok(c) => c,
                 Err(err) => {
                     warn!(
                         target: LOG_TARGET,
-                        "Failed to establish RPC session with vn {addr}: {err}. Attempting another VN if available"
+                        "Failed to establish RPC session with vn {member}: {err}. Attempting another VN if available"
                     );
                     if remaining_members == 0 {
                         return Err(err);
@@ -497,7 +500,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                 Err(err) => {
                     warn!(
                         target: LOG_TARGET,
-                        "⚠️Failed to fetch checkpoint from {addr}: {err}. Attempting another peer if available"
+                        "⚠️Failed to fetch checkpoint from {member}: {err}. Attempting another peer if available"
                     );
                     if remaining_members == 0 {
                         return Err(err);
@@ -522,7 +525,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                 Err(err) => {
                     warn!(
                         target: LOG_TARGET,
-                        "⚠️Failed to sync state from {addr}: {err}. Attempting another peer if available"
+                        "⚠️Failed to sync state from {member}: {err}. Attempting another peer if available"
                     );
 
                     if remaining_members == 0 {

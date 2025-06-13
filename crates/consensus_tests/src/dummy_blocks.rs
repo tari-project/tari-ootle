@@ -10,16 +10,16 @@ use tari_consensus::hotstuff::{
 };
 use tari_engine_types::ToByteType;
 use tari_ootle_common_types::{
-    committee::Committee,
+    committee::{Committee, CommitteeMember},
     crypto::create_key_pair_from_seed,
     DerivableFromPublicKey,
     Epoch,
     NodeHeight,
     PeerAddress,
     ShardGroup,
+    VotePower,
 };
 use tari_ootle_storage::consensus_models::Block;
-use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 use crate::support::{load_json_fixture, RoundRobinLeaderStrategy};
 
@@ -35,7 +35,11 @@ fn dummy_blocks() {
     );
     let committee = (0u8..2)
         .map(|i| create_key_pair_from_seed(i).1)
-        .map(|pk| (PeerAddress::derive_from_public_key(&pk), pk.to_byte_type()))
+        .map(|pk| CommitteeMember {
+            address: PeerAddress::derive_from_public_key(&pk),
+            public_key: pk.to_byte_type(),
+            vote_power: VotePower::of(1),
+        })
         .collect();
 
     let dummy = calculate_dummy_blocks(
@@ -81,8 +85,7 @@ fn last_matches_generated_using_real_data() {
     let candidate = load_json_fixture::<Block>("block_with_dummies.json");
 
     let committee = load_json_fixture::<serde_json::Value>("committee.json");
-    let committee: Vec<(PeerAddress, RistrettoPublicKeyBytes)> =
-        serde_json::from_value(committee["members"].clone()).unwrap();
+    let committee: Vec<CommitteeMember<PeerAddress>> = serde_json::from_value(committee["members"].clone()).unwrap();
     let committee = Committee::new(committee);
 
     let justify = Block::genesis(

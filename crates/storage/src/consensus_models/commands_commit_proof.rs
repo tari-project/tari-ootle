@@ -5,13 +5,14 @@ use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::{CompressedPublicKey, FixedHash};
 use tari_crypto::tari_utilities::ByteArray;
+use tari_ootle_common_types::VotePower;
 use tari_sidechain::{CommitProofElement, SidechainBlockCommitProof, SidechainProofValidationError};
 use tari_state_tree::{compute_merkle_root_for_hashes, StateTreeError, TreeHash};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 
 use crate::consensus_models::Command;
 
-pub type CheckVnFunc<'a> = dyn Fn(&RistrettoPublicKeyBytes) -> Result<bool, SidechainProofValidationError> + 'a;
+pub type CheckVnFunc<'a> = dyn Fn(&RistrettoPublicKeyBytes) -> Result<VotePower, SidechainProofValidationError> + 'a;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub enum CommandsCommitProof {
@@ -57,7 +58,7 @@ impl CommandsCommitProof {
 
     pub fn validate_committed(
         &self,
-        quorum_threshold: usize,
+        quorum_threshold: VotePower,
         check_vn: &CheckVnFunc<'_>,
     ) -> Result<(), ForeignProposalCommitProofError> {
         match self {
@@ -83,13 +84,16 @@ impl CommandsCommitProofV1 {
 
     pub fn validate_committed(
         &self,
-        quorum_threshold: usize,
+        quorum_threshold: VotePower,
         check_vn: &CheckVnFunc<'_>,
     ) -> Result<(), ForeignProposalCommitProofError> {
         self.validate_command_merkle_root()?;
         self.commit_proof
-            .validate_committed(quorum_threshold, &|pk: &CompressedPublicKey| {
+            // TODO: Currently 1 Vn = 1 vote power. But this may change in the future. Update the library.
+            .validate_committed(quorum_threshold.value() as usize, &|pk: &CompressedPublicKey| {
+                // TODO: commit proof should validate vote power not just pk existence
                 check_vn(&RistrettoPublicKeyBytes::from_bytes(pk.as_bytes()).expect("already checked"))
+                    .map(|v| !v.is_zero())
             })?;
         Ok(())
     }

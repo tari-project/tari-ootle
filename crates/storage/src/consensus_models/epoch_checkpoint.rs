@@ -9,7 +9,7 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::{CompressedPublicKey, FixedHash};
 use tari_crypto::tari_utilities::ByteArray;
-use tari_ootle_common_types::{shard::Shard, Epoch, ShardGroup};
+use tari_ootle_common_types::{shard::Shard, Epoch, ShardGroup, VotePower};
 use tari_sidechain::{CommandCommitProof, SidechainBlockHeader, SidechainProofValidationError, ToCommand};
 use tari_state_tree::{compute_merkle_root_for_hashes, StateTreeError, TreeHash, SPARSE_MERKLE_PLACEHOLDER_HASH};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
@@ -74,8 +74,8 @@ impl EpochCheckpoint {
     pub fn validate(
         &self,
         epoch: Epoch,
-        quorum_threshold: usize,
-        check_vn: impl Fn(&RistrettoPublicKeyBytes) -> Result<bool, SidechainProofValidationError>,
+        quorum_threshold: VotePower,
+        check_vn: impl Fn(&RistrettoPublicKeyBytes) -> Result<VotePower, SidechainProofValidationError>,
     ) -> Result<(), EpochCheckpointValidationError> {
         if self.epoch() != epoch {
             return Err(EpochCheckpointValidationError::InvalidEpochCheckpoint(anyhow!(
@@ -89,12 +89,14 @@ impl EpochCheckpoint {
 
         // Validate the proof
         self.proof
-            .validate_committed(quorum_threshold, &|pk: &CompressedPublicKey| {
+            .validate_committed(quorum_threshold.value() as usize, &|pk: &CompressedPublicKey| {
                 let pk_bytes = RistrettoPublicKeyBytes::from_bytes(pk.as_bytes())
                     // Should not be possible - however, since CompressedPublicKey currently represented using a Vec<u8>
                     // it is possible, in theory, to have a CompressedPublicKey that is any size.
                     .map_err(SidechainProofValidationError::internal_error)?;
-                check_vn(&pk_bytes)
+                // TODO: change this to return and check the actual voting power of the VN. Even if it is always 1 for
+                // now.
+                check_vn(&pk_bytes).map(|power| !power.is_zero())
             })?;
 
         Ok(())

@@ -21,7 +21,7 @@ use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::{substate::SubstateId, ToByteType};
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
-    committee::Committee,
+    committee::{Committee, CommitteeMember},
     displayable::Displayable,
     optional::Optional,
     shard::Shard,
@@ -31,6 +31,7 @@ use tari_ootle_common_types::{
     ShardGroup,
     SubstateLockType,
     VersionedSubstateId,
+    VotePower,
 };
 use tari_ootle_storage::{
     consensus_models::{SubstateRecord, TransactionExecution, TransactionRecord},
@@ -685,7 +686,11 @@ impl TestBuilder {
         for addr in addresses {
             let addr = TestAddress::new(addr);
             let (_, pk) = helpers::derive_keypair_from_address(&addr);
-            entry.members_mut().push((addr, pk.to_byte_type()));
+            entry.members_mut().push(CommitteeMember {
+                address: addr,
+                public_key: pk.to_byte_type(),
+                vote_power: VotePower::of(1),
+            });
         }
         self
     }

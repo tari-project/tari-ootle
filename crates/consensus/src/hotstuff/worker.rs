@@ -444,15 +444,16 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     local_committee.shuffle();
                     match local_committee
                         .into_iter()
-                        .find(|(addr, _)| *addr != self.local_validator_addr)
+                        .find(|m| m.address != self.local_validator_addr)
                     {
-                        Some((addr, _)) => {
+                        Some(m) => {
                             warn!(
                                 target: LOG_TARGET,
-                                "⚠️Requesting missing transactions from another validator {addr} because we are (presumably) catching up (local_peer_id = {})",
+                                "⚠️Requesting missing transactions from another validator {} because we are (presumably) catching up (local_peer_id = {})",
+                                m,
                                 self.local_validator_addr,
                             );
-                            request_from_address = addr;
+                            request_from_address = m.address;
                         },
                         None => {
                             warn!(

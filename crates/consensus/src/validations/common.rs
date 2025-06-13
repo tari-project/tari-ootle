@@ -14,6 +14,7 @@ use tari_ootle_common_types::{
     NodeHeight,
     NumPreshards,
     ShardGroup,
+    VotePower,
 };
 use tari_ootle_storage::consensus_models::{Block, BlockHeader};
 use tari_sidechain::ProposalCertificateSignatureFields;
@@ -231,17 +232,10 @@ pub fn check_quorum_certificate_signatures<TConsensusSpec: ConsensusSpec>(
         return Ok(());
     }
 
-    if qc.signatures().len() < committee.quorum_threshold() {
-        return Err(ProposalValidationError::QuorumWasNotReached {
-            qc: qc.calculate_id(),
-            got: qc.signatures().len(),
-            required: committee.quorum_threshold(),
-        });
-    }
-
     let mut check_dups = HashSet::with_capacity(qc.signatures().len());
+    let mut total_vote_power = VotePower::zero();
     for signature in qc.signatures() {
-        if !committee.contains_public_key(signature.public_key()) {
+        let Some(power) = committee.get_power_by_public_key(signature.public_key()) else {
             return Err(ProposalValidationError::ValidatorNotInCommittee {
                 validator: signature.public_key().to_string(),
                 details: format!(
@@ -250,7 +244,8 @@ pub fn check_quorum_certificate_signatures<TConsensusSpec: ConsensusSpec>(
                     qc.shard_group(),
                 ),
             });
-        }
+        };
+        total_vote_power += power;
         if !check_dups.insert(signature.public_key()) {
             return Err(ProposalValidationError::QcDuplicateSignature {
                 qc: qc.calculate_id(),
@@ -269,6 +264,14 @@ pub fn check_quorum_certificate_signatures<TConsensusSpec: ConsensusSpec>(
         if !is_valid {
             return Err(ProposalValidationError::QcInvalidSignature { qc: qc.calculate_id() });
         }
+    }
+
+    if total_vote_power < committee.quorum_threshold() {
+        return Err(ProposalValidationError::QuorumWasNotReached {
+            qc: qc.calculate_id(),
+            got: total_vote_power,
+            required: committee.quorum_threshold(),
+        });
     }
 
     Ok(())

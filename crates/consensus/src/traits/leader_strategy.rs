@@ -28,8 +28,8 @@ pub trait LeaderStrategy<TAddr: PartialEq> {
 
     fn is_leader(&self, validator_addr: &TAddr, committee: &Committee<TAddr>, height: NodeHeight) -> bool {
         let position = self.calculate_leader(committee, height);
-        if let Some((addr, _)) = committee.get(position as usize) {
-            addr == validator_addr
+        if let Some(m) = committee.get(position as usize) {
+            m.address == *validator_addr
         } else {
             false
         }
@@ -50,8 +50,8 @@ pub trait LeaderStrategy<TAddr: PartialEq> {
         height: NodeHeight,
     ) -> (&'b TAddr, &'b RistrettoPublicKeyBytes) {
         let index = self.calculate_leader(committee, height);
-        let (addr, pk) = committee.get(index as usize).unwrap();
-        (addr, pk)
+        let m = committee.get(index as usize).unwrap();
+        (&m.address, &m.public_key)
     }
 
     fn get_leader_for_next_height<'b>(

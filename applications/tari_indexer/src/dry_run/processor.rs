@@ -146,7 +146,7 @@ impl DryRunTransactionProcessor {
         let mut committee = self.epoch_manager.get_committee_for_substate(epoch, address).await?;
         committee.shuffle();
 
-        let max_failures = committee.max_failures() + 1;
+        let max_failures = committee.max_node_failures() + 1;
 
         let mut nexist_count = 0;
         let mut err_count = 0;

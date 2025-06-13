@@ -138,13 +138,7 @@ where TConsensusSpec: ConsensusSpec
             // HighPc is updated if a quorum is reached in the collector, and will be used if we propose
             if let Err(err) = self
                 .proposal_vote_collector
-                .check_and_collect_vote(
-                    from.clone(),
-                    current_height,
-                    epoch_state.epoch(),
-                    vote,
-                    epoch_state.local_committee_info(),
-                )
+                .check_and_collect_vote(from.clone(), current_height, epoch_state, vote)
                 .await
             {
                 warn!(target: LOG_TARGET, "❌ Error handling vote: {}", err);
@@ -154,22 +148,16 @@ where TConsensusSpec: ConsensusSpec
         // Take note of unique NEWVIEWs so that we can count them
         let Some((timeout_certificate, high_tc)) = self
             .timeout_vote_collector
-            .check_and_collect_vote(
-                from,
-                current_height,
-                epoch_state.epoch(),
-                timeout,
-                epoch_state.local_committee_info(),
-            )
+            .check_and_collect_vote(from, current_height, epoch_state, timeout)
             .await?
         else {
             debug!(target: LOG_TARGET, "🌟 Received NEWVIEW but quorum is not yet reached.");
             return Ok(());
         };
 
-        let threshold = epoch_state.local_committee_info().quorum_threshold() as usize;
+        let threshold = epoch_state.local_committee_info().quorum_threshold();
 
-        info!(target: LOG_TARGET, "🌟✅ NEWVIEW height {} (high_tc: {}) has reached quorum ({}/{})", timeout_height, high_tc, timeout_certificate.signatures().len(), threshold);
+        info!(target: LOG_TARGET, "🌟✅ NEWVIEW height {} (high_tc: {}) has reached quorum ({}/{})", timeout_height, high_tc, timeout_certificate.signatures().len(), threshold.value());
         if timeout_certificate.calculate_id() == *high_tc.id() {
             info!(target: LOG_TARGET, "🕒️ New HIGH TC {}", timeout_certificate);
             // Clear the last sent new view since we have a new certificate

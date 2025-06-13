@@ -23,7 +23,7 @@
 use std::sync::{atomic::AtomicU64, Arc};
 
 use log::*;
-use tari_ootle_common_types::optional::IsNotFoundError;
+use tari_ootle_common_types::{optional::IsNotFoundError, VotePower};
 use tari_ootle_storage::global::GlobalDb;
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_shutdown::ShutdownSignal;
@@ -151,7 +151,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                             claim_public_key,
                             validator_node_public_key,
                             activation_epoch,
-                            minimum_value_promise,
+                            minimum_value_promise: _minimum_value_promise,
                             shard_key,
                         } => {
                             info!(
@@ -166,7 +166,9 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                                 validator_node_public_key,
                                 claim_public_key,
                                 shard_key,
-                                minimum_value_promise,
+                                // minimum_value_promise,
+                                // All validators currently get a vote power of 1
+                                VotePower::of(1),
                             )?;
                         },
                         ValidatorNodeChange::Remove { public_key } => {
@@ -300,7 +302,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                 validator_public_key,
                 claim_public_key,
                 shard_key,
-                value_of_registration,
+                power,
                 reply,
             } => handle(
                 reply,
@@ -309,7 +311,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     validator_public_key,
                     claim_public_key,
                     shard_key,
-                    value_of_registration,
+                    power,
                 ),
                 context,
             ),

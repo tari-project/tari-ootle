@@ -13,6 +13,7 @@ use tari_ootle_common_types::{
     NodeAddressable,
     ShardGroup,
     SubstateAddress,
+    VotePower,
 };
 use tari_ootle_storage::global::models::ValidatorNode;
 use tari_sidechain::EvictionProof;
@@ -79,7 +80,7 @@ impl<TAddr: NodeAddressable> EpochManagerWriter for EpochManagerHandle<TAddr> {
         validator_public_key: RistrettoPublicKeyBytes,
         claim_public_key: RistrettoPublicKeyBytes,
         shard_key: SubstateAddress,
-        value_of_registration: u64,
+        power: VotePower,
     ) -> Result<(), EpochManagerError> {
         let (tx, rx) = oneshot::channel();
         self.tx_request
@@ -87,7 +88,7 @@ impl<TAddr: NodeAddressable> EpochManagerWriter for EpochManagerHandle<TAddr> {
                 activation_epoch,
                 validator_public_key,
                 claim_public_key,
-                value_of_registration,
+                power,
                 shard_key,
                 reply: tx,
             })

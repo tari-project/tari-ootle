@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_ootle_common_types::{Epoch, NodeAddressable, SubstateAddress};
+use tari_ootle_common_types::{Epoch, NodeAddressable, SubstateAddress, VotePower};
 use tari_ootle_storage::global::models::ValidatorNode;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 
@@ -39,6 +39,7 @@ pub struct DbValidatorNode {
     pub start_epoch: i64,
     pub end_epoch: Option<i64>,
     pub fee_claim_public_key: Vec<u8>,
+    pub power: i64,
 }
 impl<TAddr: NodeAddressable> TryFrom<DbValidatorNode> for ValidatorNode<TAddr> {
     type Error = SqliteStorageError;
@@ -60,6 +61,7 @@ impl<TAddr: NodeAddressable> TryFrom<DbValidatorNode> for ValidatorNode<TAddr> {
                     vn.id
                 ))
             })?,
+            vote_power: VotePower::of(vn.power as u64),
         })
     }
 }

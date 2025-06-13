@@ -1,13 +1,6 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
-    base_layer_block_info (hash) {
-        hash -> Binary,
-        height -> BigInt,
-    }
-}
-
-diesel::table! {
     bmt_cache (epoch) {
         epoch -> BigInt,
         bmt -> Binary,
@@ -74,13 +67,13 @@ diesel::table! {
         start_epoch -> BigInt,
         end_epoch -> Nullable<BigInt>,
         fee_claim_public_key -> Binary,
+        power -> BigInt,
     }
 }
 
 diesel::joinable!(committees -> validator_nodes (validator_node_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
-    base_layer_block_info,
     bmt_cache,
     committees,
     epochs,

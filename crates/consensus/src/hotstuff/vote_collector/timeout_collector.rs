@@ -4,12 +4,12 @@
 use log::*;
 use tari_common::configuration::Network;
 use tari_consensus_types::{HighTc, SignedMessage, TimeoutCertificate, TimeoutVote, Vote};
-use tari_ootle_common_types::{committee::CommitteeInfo, Epoch, NodeHeight};
+use tari_ootle_common_types::{Epoch, NodeHeight};
 use tari_ootle_storage::StateStore;
 
 use super::collector::VoteCollector;
 use crate::{
-    hotstuff::{error::HotStuffError, vote_collector::helpers::check_eligibility},
+    hotstuff::{epoch_state::EpochState, error::HotStuffError, vote_collector::helpers::check_eligibility},
     tracing::TraceTimer,
     traits::{CertificateStore, ConsensusSpec, ValidatorSignatureVerifierService},
 };
@@ -48,9 +48,8 @@ where TConsensusSpec: ConsensusSpec
         &self,
         from: TConsensusSpec::Addr,
         current_height: NodeHeight,
-        current_epoch: Epoch,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
         vote: TimeoutVote,
-        local_committee_info: &CommitteeInfo,
     ) -> Result<Option<(TimeoutCertificate, HighTc)>, HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "check_and_collect_vote (TimeoutVote)");
         debug!(
@@ -58,16 +57,23 @@ where TConsensusSpec: ConsensusSpec
             "📬 Validating timeout vote message from {from}: {vote}"
         );
 
+        let current_epoch = epoch_state.epoch();
+        let local_committee_info = epoch_state.local_committee_info();
         let sender_vn =
             check_eligibility::<TConsensusSpec, _>(&self.epoch_manager, from, &vote, local_committee_info).await?;
         self.validate_vote(current_epoch, &vote)?;
-        let quorum_threshold = local_committee_info.quorum_threshold() as usize;
         let sender_leaf_hash = sender_vn.get_node_hash(self.network);
         let height = vote.height;
 
         let Some((quorum_votes, _)) = self
             .vote_collector
-            .collect_vote(current_epoch, current_height, sender_leaf_hash, vote, quorum_threshold)
+            .collect_vote(
+                current_epoch,
+                current_height,
+                sender_leaf_hash,
+                vote,
+                epoch_state.local_committee(),
+            )
             .await
         else {
             return Ok(None);

@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_common::configuration::Network;
-use tari_ootle_common_types::committee::Committee;
+use tari_ootle_common_types::{committee::Committee, VotePower};
 use tari_ootle_storage::consensus_models::{CommandsCommitProof, ForeignProposal};
 
 use crate::{
@@ -44,6 +44,10 @@ pub fn check_commit_proof<TConsensusSpec: ConsensusSpec>(
     foreign_committee: &Committee<TConsensusSpec::Addr>,
 ) -> Result<(), ProposalValidationError> {
     let quorum_threshold = foreign_committee.quorum_threshold();
-    proof.validate_committed(quorum_threshold, &|pk| Ok(foreign_committee.contains_public_key(pk)))?;
+    proof.validate_committed(quorum_threshold, &|pk| {
+        Ok(foreign_committee
+            .get_power_by_public_key(pk)
+            .unwrap_or_else(VotePower::zero))
+    })?;
     Ok(())
 }

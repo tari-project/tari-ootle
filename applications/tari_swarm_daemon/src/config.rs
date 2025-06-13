@@ -20,6 +20,7 @@ use crate::cli::{Cli, Commands};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Config {
     pub base_dir: PathBuf,
     pub start_port: u16,
@@ -33,6 +34,8 @@ pub struct Config {
     pub skip_registration: bool,
     #[serde(default = "default_as_true")]
     pub auto_register_previous_templates: bool,
+    #[serde(default, skip_serializing_if = "Clone::clone")]
+    pub enable_manual_validator_connect: bool,
     pub public_ip: Option<IpAddr>,
     #[serde(default)]
     pub log_to_file: bool,

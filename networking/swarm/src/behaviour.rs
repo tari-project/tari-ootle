@@ -16,8 +16,11 @@ use libp2p::{
     identity::Keypair,
     mdns,
     noise,
+    peer_store,
+    peer_store::memory_store::MemoryStore,
     ping,
     relay,
+    rendezvous,
     swarm::{behaviour::toggle::Toggle, NetworkBehaviour},
     tcp,
     yamux,
@@ -26,14 +29,14 @@ use libp2p::{
     SwarmBuilder,
 };
 use libp2p_messaging as messaging;
-use libp2p_peersync as peer_sync;
-use libp2p_peersync::store::MemoryPeerStore;
 use libp2p_substream as substream;
 
 use crate::{
     config::{Config, RelayCircuitLimits, RelayReservationLimits},
     error::TariSwarmError,
 };
+
+pub type PeerData = ();
 
 #[derive(NetworkBehaviour)]
 pub struct TariNodeBehaviour<TCodec>
@@ -49,7 +52,9 @@ where TCodec: messaging::Codec + Send + Clone + 'static
 
     pub identify: identify::Behaviour,
     pub mdns: Toggle<mdns::tokio::Behaviour>,
-    pub peer_sync: peer_sync::Behaviour<MemoryPeerStore>,
+    pub rendezvous_server: Toggle<rendezvous::server::Behaviour>,
+    pub rendezvous_client: rendezvous::client::Behaviour,
+    pub peer_store: peer_store::Behaviour<MemoryStore<PeerData>>,
 
     pub substream: substream::Behaviour,
     pub messaging: Toggle<messaging::Behaviour<TCodec>>,
@@ -149,9 +154,18 @@ where
             // autonat
             let autonat = autonat::Behaviour::new(local_peer_id, autonat::Config::default());
 
-            // Peer sync
-            let peer_sync =
-                peer_sync::Behaviour::new(keypair.clone(), MemoryPeerStore::new(), peer_sync::Config::default());
+            // Rendezvous server
+            let rendezvous_server = if config.rendezvous_server_enabled {
+                Some(rendezvous::server::Behaviour::new(rendezvous::server::Config::default()))
+            } else {
+                None
+            };
+
+            // Rendezvous client
+            let rendezvous_client = rendezvous::client::Behaviour::new(keypair.clone());
+
+            // Peer store
+            let peer_store = peer_store::Behaviour::new(MemoryStore::new(peer_store::memory_store::Config::default()));
 
             Ok(TariNodeBehaviour {
                 ping,
@@ -165,7 +179,9 @@ where
                 messaging: Toggle::from(messaging),
                 connection_limits,
                 mdns: Toggle::from(maybe_mdns),
-                peer_sync,
+                peer_store,
+                rendezvous_server: Toggle::from(rendezvous_server),
+                rendezvous_client,
             })
         })
         .map_err(|e| TariSwarmError::BehaviourError(e.to_string()))?

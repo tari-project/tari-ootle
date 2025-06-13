@@ -11,6 +11,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Context};
+use indexmap::IndexMap;
 use log::info;
 use slug::slugify;
 use tari_common::configuration::Network;
@@ -43,13 +44,13 @@ pub struct InstanceManager {
     config: Vec<InstanceConfig>,
     global_settings: HashMap<String, String>,
     network: Network,
-    minotari_nodes: HashMap<InstanceId, MinoTariNodeProcess>,
-    minotari_wallets: HashMap<InstanceId, MinoTariWalletProcess>,
-    minotari_miners: HashMap<InstanceId, MinoTariMinerProcess>,
-    validator_nodes: HashMap<InstanceId, ValidatorNodeProcess>,
-    indexers: HashMap<InstanceId, IndexerProcess>,
-    wallet_daemons: HashMap<InstanceId, WalletDaemonProcess>,
-    signaling_servers: HashMap<InstanceId, SignalingServerProcess>,
+    minotari_nodes: IndexMap<InstanceId, MinoTariNodeProcess>,
+    minotari_wallets: IndexMap<InstanceId, MinoTariWalletProcess>,
+    minotari_miners: IndexMap<InstanceId, MinoTariMinerProcess>,
+    validator_nodes: IndexMap<InstanceId, ValidatorNodeProcess>,
+    indexers: IndexMap<InstanceId, IndexerProcess>,
+    wallet_daemons: IndexMap<InstanceId, WalletDaemonProcess>,
+    signaling_servers: IndexMap<InstanceId, SignalingServerProcess>,
     port_allocator: PortAllocator,
     instance_id: InstanceId,
 }
@@ -67,13 +68,13 @@ impl InstanceManager {
             config,
             network,
             global_settings,
-            minotari_nodes: HashMap::new(),
-            minotari_wallets: HashMap::new(),
-            minotari_miners: HashMap::new(),
-            validator_nodes: HashMap::new(),
-            indexers: HashMap::new(),
-            wallet_daemons: HashMap::new(),
-            signaling_servers: HashMap::new(),
+            minotari_nodes: IndexMap::new(),
+            minotari_wallets: IndexMap::new(),
+            minotari_miners: IndexMap::new(),
+            validator_nodes: IndexMap::new(),
+            indexers: IndexMap::new(),
+            wallet_daemons: IndexMap::new(),
+            signaling_servers: IndexMap::new(),
             port_allocator: PortAllocator::new(start_port),
             instance_id: 0,
         }
@@ -263,34 +264,34 @@ impl InstanceManager {
         match instance_type {
             InstanceType::MinoTariNode => {
                 self.minotari_nodes
-                    .insert(instance_id, MinoTariNodeProcess::new(instance));
+                    .insert_sorted(instance_id, MinoTariNodeProcess::new(instance));
             },
             InstanceType::MinoTariConsoleWallet => {
                 self.minotari_wallets
-                    .insert(instance_id, MinoTariWalletProcess::new(instance));
+                    .insert_sorted(instance_id, MinoTariWalletProcess::new(instance));
             },
             InstanceType::MinoTariMiner => {
                 self.minotari_miners
-                    .insert(instance_id, MinoTariMinerProcess::new(instance));
+                    .insert_sorted(instance_id, MinoTariMinerProcess::new(instance));
             },
             InstanceType::TariValidatorNode => {
                 self.validator_nodes
-                    .insert(instance_id, ValidatorNodeProcess::new(instance));
+                    .insert_sorted(instance_id, ValidatorNodeProcess::new(instance));
             },
             InstanceType::TariIndexer => {
-                self.indexers.insert(instance_id, IndexerProcess::new(instance));
+                self.indexers.insert_sorted(instance_id, IndexerProcess::new(instance));
             },
             InstanceType::TariSignalingServer => {
                 self.signaling_servers
-                    .insert(instance_id, SignalingServerProcess::new(instance));
+                    .insert_sorted(instance_id, SignalingServerProcess::new(instance));
             },
             InstanceType::TariWalletDaemon => {
                 self.wallet_daemons
-                    .insert(instance_id, WalletDaemonProcess::new(instance));
+                    .insert_sorted(instance_id, WalletDaemonProcess::new(instance));
             },
             InstanceType::TariWalletDaemonCreateKey => {
                 self.wallet_daemons
-                    .insert(instance_id, WalletDaemonProcess::new(instance));
+                    .insert_sorted(instance_id, WalletDaemonProcess::new(instance));
             },
         }
 
@@ -418,28 +419,28 @@ impl InstanceManager {
 
         match instance.instance_type() {
             InstanceType::MinoTariNode => {
-                self.minotari_nodes.remove(&id);
+                self.minotari_nodes.shift_remove(&id);
             },
             InstanceType::MinoTariConsoleWallet => {
-                self.minotari_wallets.remove(&id);
+                self.minotari_wallets.shift_remove(&id);
             },
             InstanceType::MinoTariMiner => {
-                self.minotari_miners.remove(&id);
+                self.minotari_miners.shift_remove(&id);
             },
             InstanceType::TariValidatorNode => {
-                self.validator_nodes.remove(&id);
+                self.validator_nodes.shift_remove(&id);
             },
             InstanceType::TariIndexer => {
-                self.indexers.remove(&id);
+                self.indexers.shift_remove(&id);
             },
             InstanceType::TariSignalingServer => {
-                self.signaling_servers.remove(&id);
+                self.signaling_servers.shift_remove(&id);
             },
             InstanceType::TariWalletDaemon => {
-                self.wallet_daemons.remove(&id);
+                self.wallet_daemons.shift_remove(&id);
             },
             InstanceType::TariWalletDaemonCreateKey => {
-                self.wallet_daemons.remove(&id);
+                self.wallet_daemons.shift_remove(&id);
             },
         }
 

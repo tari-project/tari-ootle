@@ -8,6 +8,7 @@ mod protocol_version;
 
 #[cfg(feature = "metrics")]
 pub mod metrics;
+pub mod protocol_ids;
 
 pub use behaviour::*;
 pub use config::Config;
@@ -16,7 +17,6 @@ pub use protocol_version::*;
 
 pub type TariSwarm<TMsg> = libp2p::Swarm<TariNodeBehaviour<TMsg>>;
 
-pub use libp2p::{identity, swarm};
+pub use libp2p::{identity, rendezvous, swarm};
 pub use libp2p_messaging as messaging;
-pub use libp2p_peersync as peersync;
 pub use libp2p_substream as substream;

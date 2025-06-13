@@ -29,13 +29,15 @@ impl<TCodec: libp2p_messaging::Codec + Send + Clone + 'static> Recorder<TariNode
             TariNodeBehaviourEvent::Identify(identify_event) => self.libp2p_metrics.record(identify_event),
             TariNodeBehaviourEvent::RelayClient(_) => {}, // Metrics not implemented for RelayClient
             TariNodeBehaviourEvent::Relay(relay_event) => self.libp2p_metrics.record(relay_event),
+            TariNodeBehaviourEvent::RendezvousServer(_) => {}, // Metrics not implemented
+            TariNodeBehaviourEvent::RendezvousClient(_) => {}, // Metrics not implemented
+            TariNodeBehaviourEvent::PeerStore(_) => {},        // No metrics for PeerStore events
             TariNodeBehaviourEvent::Gossipsub(gossipsub_event) => self.libp2p_metrics.record(gossipsub_event),
             TariNodeBehaviourEvent::Messaging(messaging_event) => self.extended_metrics.record(messaging_event),
             TariNodeBehaviourEvent::Substream(substream_event) => self.extended_metrics.record(substream_event),
             TariNodeBehaviourEvent::ConnectionLimits(_) => {}, // No events for connection limits
             TariNodeBehaviourEvent::Mdns(_) => {},             // No metrics for mDNS events
             TariNodeBehaviourEvent::Autonat(_) => {},          // No metrics for Autonat events
-            TariNodeBehaviourEvent::PeerSync(peer_sync_event) => self.extended_metrics.record(peer_sync_event),
         }
     }
 }
@@ -43,7 +45,6 @@ impl<TCodec: libp2p_messaging::Codec + Send + Clone + 'static> Recorder<TariNode
 pub struct ExtendedMetrics {
     substream: libp2p_substream::metrics::Metrics,
     messaging: libp2p_messaging::metrics::Metrics,
-    peer_sync: libp2p_peersync::metrics::Metrics,
 }
 
 impl ExtendedMetrics {
@@ -52,7 +53,6 @@ impl ExtendedMetrics {
         Self {
             substream: libp2p_substream::metrics::Metrics::new(registry),
             messaging: libp2p_messaging::metrics::Metrics::new(registry),
-            peer_sync: libp2p_peersync::metrics::Metrics::new(registry),
         }
     }
 }
@@ -66,11 +66,5 @@ impl Recorder<libp2p_substream::Event> for ExtendedMetrics {
 impl<TMsg> Recorder<libp2p_messaging::Event<TMsg>> for ExtendedMetrics {
     fn record(&self, event: &libp2p_messaging::Event<TMsg>) {
         self.messaging.record(event);
-    }
-}
-
-impl Recorder<libp2p_peersync::Event> for ExtendedMetrics {
-    fn record(&self, event: &libp2p_peersync::Event) {
-        self.peer_sync.record(event);
     }
 }

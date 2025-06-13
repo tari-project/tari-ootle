@@ -36,6 +36,7 @@ humantime = { workspace = true }
 include_dir = { workspace = true }
 json5 = { workspace = true }
 lockfile = "0.4.0"
+indexmap = { workspace = true }
 slug = "0.1.6"
 log = { workspace = true }
 mime_guess = { workspace = true }

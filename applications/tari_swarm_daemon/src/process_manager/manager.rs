@@ -19,7 +19,7 @@ use tari_engine::wasm::WasmModule;
 use tari_engine_types::calculate_template_binary_hash;
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib_types::TemplateAddress;
-use tari_validator_node_client::types::GetTemplatesRequest;
+use tari_validator_node_client::types::{AddPeerRequest, GetTemplatesRequest};
 use tokio::{sync::mpsc, time, time::sleep};
 use url::Url;
 
@@ -43,6 +43,7 @@ pub struct ProcessManager {
     shutdown_signal: ShutdownSignal,
     skip_registration: bool,
     disable_template_auto_register: bool,
+    enable_manual_connect: bool,
     base_dir: PathBuf,
     web_server_port: u16,
 }
@@ -71,6 +72,7 @@ impl ProcessManager {
             rx_request,
             shutdown_signal,
             disable_template_auto_register: !config.auto_register_previous_templates,
+            enable_manual_connect: config.enable_manual_validator_connect,
             base_dir: config.base_dir.clone(),
             web_server_port: match config.webserver.bind_address {
                 SocketAddr::V4(addr) => addr.port(),
@@ -89,6 +91,41 @@ impl ProcessManager {
         sleep(Duration::from_secs(self.instance_manager.num_instances() as u64)).await;
         self.check_instances_running()?;
 
+        Ok(())
+    }
+
+    async fn connect_all_validators(&mut self) -> anyhow::Result<()> {
+        info!("Connecting all nodes");
+        let mut clients = vec![];
+        let mut ids = vec![];
+        for vn in self.instance_manager.validator_nodes_mut() {
+            match vn.connect_client() {
+                Ok(mut client) => {
+                    info!("🟢 Validator node {} connected", vn.instance().name());
+                    let id = client.get_identity().await?;
+                    clients.push(client);
+                    ids.push(id);
+                },
+                Err(err) => {
+                    log::error!("Failed to connect to validator node {}: {}", vn.instance().name(), err);
+                },
+            }
+        }
+
+        for (i, client) in clients.iter_mut().enumerate() {
+            for (j, id) in ids.iter().enumerate() {
+                if i == j {
+                    continue; // Skip self
+                }
+                client
+                    .add_peer(AddPeerRequest {
+                        public_key: id.public_key,
+                        addresses: id.public_addresses.clone(),
+                        wait_for_dial: false,
+                    })
+                    .await?;
+            }
+        }
         Ok(())
     }
 
@@ -308,6 +345,22 @@ impl ProcessManager {
         }
 
         let mut layer_one_transaction_service = self.create_layer_one_transaction_service().await?;
+
+        if self.enable_manual_connect {
+            {
+                info!("Connecting all validator nodes manually");
+                let fut = pin!(self.connect_all_validators());
+                match shutdown_signal.clone().select(fut).await {
+                    Either::Left(_) => {
+                        info!("Shutting down process manager during validator connection");
+                        return Ok(());
+                    },
+                    Either::Right((result, _)) => {
+                        result?;
+                    },
+                }
+            }
+        }
 
         {
             let fut = pin!(self.register_nodes_and_templates_as_required(&mut layer_one_transaction_service));

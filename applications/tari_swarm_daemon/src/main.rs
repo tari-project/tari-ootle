@@ -204,6 +204,7 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
             executables,
         },
         auto_register_previous_templates: true,
+        enable_manual_validator_connect: false,
         public_ip: None,
         log_to_file: false,
     })

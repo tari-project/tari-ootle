@@ -15,7 +15,7 @@ use libp2p::{
     dcutr,
     futures::StreamExt,
     gossipsub,
-    gossipsub::{IdentTopic, MessageId, PublishError, TopicHash},
+    gossipsub::{MessageId, PublishError, TopicHash},
     identify,
     identity,
     mdns,
@@ -39,7 +39,9 @@ use tari_swarm::{
     is_supported_multiaddr,
     messaging,
     messaging::{prost, prost::ProstCodec},
-    peersync,
+    protocol_ids,
+    rendezvous,
+    rendezvous::Namespace,
     substream,
     substream::{NegotiatedSubstream, ProtocolNotification, StreamId},
     TariNodeBehaviourEvent,
@@ -57,16 +59,18 @@ use crate::{
     handle::NetworkingRequest,
     notify::Notifiers,
     relay_state::RelayState,
+    rendezvous_state::RendezvousState,
     MessageSpec,
     MessagingMode,
     NetworkingError,
+    ReachabilityMode,
 };
 
 const LOG_TARGET: &str = "tari::ootle::networking::service::worker";
 
 type ReplyTx<T> = oneshot::Sender<Result<T, NetworkingError>>;
 
-const PEER_ANNOUNCE_TOPIC: &str = "peer-announce";
+// const PEER_ANNOUNCE_TOPIC: &str = "peer-announce";
 
 pub struct NetworkingWorker<TMsg>
 where
@@ -86,10 +90,10 @@ where
     topic_peers: HashMap<TopicHash, Vec<PeerId>>,
     swarm: TariSwarm<ProstCodec<TMsg::Message>>,
     config: crate::Config,
+    rendezvous_state: RendezvousState,
     relays: RelayState,
     seed_peers: Vec<(Option<PeerId>, Multiaddr)>,
     is_initial_bootstrap_complete: bool,
-    has_sent_announce: bool,
     #[cfg(feature = "metrics")]
     metrics: Option<tari_swarm::metrics::Metrics>,
     shutdown_signal: ShutdownSignal,
@@ -111,6 +115,7 @@ where
         config: crate::Config,
         known_relay_nodes: Vec<(PeerId, Multiaddr)>,
         seed_peers: Vec<(Option<PeerId>, Multiaddr)>,
+        rendezvous_server: Option<(PeerId, Multiaddr)>,
         shutdown_signal: ShutdownSignal,
     ) -> Self {
         Self {
@@ -124,11 +129,11 @@ where
             pending_dial_requests: HashMap::new(),
             relays: RelayState::new(known_relay_nodes),
             topic_peers: HashMap::new(),
+            rendezvous_state: RendezvousState::new(rendezvous_server),
             seed_peers,
             swarm,
             config,
             is_initial_bootstrap_complete: false,
-            has_sent_announce: false,
             #[cfg(feature = "metrics")]
             metrics: None,
             shutdown_signal,
@@ -151,17 +156,18 @@ where
 
     pub async fn run(mut self) -> anyhow::Result<()> {
         info!(target: LOG_TARGET, "🌐 Starting networking service {:?}", self.config);
-        // Listen on all interfaces TODO: Configure
-        self.swarm.listen_on(
-            format!("/ip4/0.0.0.0/tcp/{}", self.config.listener_port)
-                .parse()
-                .unwrap(),
-        )?;
-        self.swarm.listen_on(
-            format!("/ip4/0.0.0.0/udp/{}/quic-v1", self.config.listener_port)
-                .parse()
-                .unwrap(),
-        )?;
+        if self.config.listeners.is_empty() {
+            self.config.reachability_mode = ReachabilityMode::Private;
+            info!(target: LOG_TARGET, "No listeners configured, this node will not accept incoming connections");
+        }
+        // Setup listeners
+        for listener in &self.config.listeners {
+            if !is_supported_multiaddr(listener) {
+                warn!(target: LOG_TARGET, "Unsupported listener multiaddr {}", listener);
+                continue;
+            }
+            self.swarm.listen_on(listener.clone())?;
+        }
 
         if self.config.reachability_mode.is_private() {
             self.attempt_relay_reservation();
@@ -169,10 +175,10 @@ where
 
         let mut check_connections_interval = time::interval(self.config.check_connections_interval);
 
-        self.swarm
-            .behaviour_mut()
-            .gossipsub
-            .subscribe(&IdentTopic::new(PEER_ANNOUNCE_TOPIC))?;
+        // self.swarm
+        //     .behaviour_mut()
+        //     .gossipsub
+        //     .subscribe(&IdentTopic::new(PEER_ANNOUNCE_TOPIC))?;
 
         loop {
             tokio::select! {
@@ -370,8 +376,7 @@ where
                 let _ignore = reply_tx.send(Ok(peer));
             },
             NetworkingRequest::SetWantPeers(peers) => {
-                info!(target: LOG_TARGET, "🧭 Setting want peers to {:?}", peers);
-                self.swarm.behaviour_mut().peer_sync.want_peers(peers).await?;
+                info!(target: LOG_TARGET, "🧭 (CURRENTLY NO-OP) Setting want peers to {:?} ", peers);
             },
         }
 
@@ -380,40 +385,54 @@ where
 
     async fn bootstrap(&mut self) -> Result<(), NetworkingError> {
         if !self.is_initial_bootstrap_complete {
-            self.swarm
-                .behaviour_mut()
-                .peer_sync
-                .add_known_local_public_addresses(self.config.known_local_public_address.clone());
-        }
-
-        info!(target: LOG_TARGET, "🥾 Bootstrapping with {} seed peers", self.seed_peers.len());
-        for (peer, addr) in self.seed_peers.drain(..) {
-            let opts = match peer {
-                Some(peer) => DialOpts::peer_id(peer)
-                    .addresses(vec![addr])
+            if let Some((peer_id, addr)) = self.rendezvous_state.get_peer_and_address() {
+                info!(target: LOG_TARGET, "🥾BOOTSTRAP: dialing rendezvous peer {peer_id} at address {addr}");
+                let opts = DialOpts::peer_id(peer_id)
+                    .addresses(vec![addr.clone()])
                     .condition(PeerCondition::DisconnectedAndNotDialing)
                     .extend_addresses_through_behaviour()
-                    .build(),
-                None => DialOpts::unknown_peer_id().address(addr).build(),
-            };
+                    .build();
 
-            self.swarm.dial(opts).or_else(|err| {
-                // Peer already has pending dial or established connection - OK
-                if matches!(&err, DialError::DialPeerConditionFalse(_)) {
-                    Ok(())
-                } else {
-                    Err(err)
-                }
-            })?;
+                self.swarm.dial(opts).or_else(|err| {
+                    // Peer already has pending dial or established connection - OK
+                    if matches!(&err, DialError::DialPeerConditionFalse(_)) {
+                        Ok(())
+                    } else {
+                        Err(err)
+                    }
+                })?;
+            }
+
+            info!(target: LOG_TARGET, "🥾 BOOTSTRAP: dialing {} seed peers", self.seed_peers.len());
+            for (peer, addr) in self.seed_peers.drain(..) {
+                let opts = match peer {
+                    Some(peer) => DialOpts::peer_id(peer)
+                        .addresses(vec![addr])
+                        .condition(PeerCondition::DisconnectedAndNotDialing)
+                        .extend_addresses_through_behaviour()
+                        .build(),
+                    None => DialOpts::unknown_peer_id().address(addr).build(),
+                };
+
+                self.swarm.dial(opts).or_else(|err| {
+                    // Peer already has pending dial or established connection - OK
+                    if matches!(&err, DialError::DialPeerConditionFalse(_)) {
+                        Ok(())
+                    } else {
+                        Err(err)
+                    }
+                })?;
+            }
         }
 
         if self.active_connections.len() < self.relays.num_possible_relays() {
-            info!(target: LOG_TARGET, "🥾 Bootstrapping with {} known relay peers", self.relays.num_possible_relays());
+            info!(target: LOG_TARGET, "🥾 BOOTSTRAP: dialing {} known relay peers", self.relays.num_possible_relays());
             for (peer, addrs) in self.relays.possible_relays() {
                 self.swarm
                     .dial(
                         DialOpts::peer_id(*peer)
                             .addresses(addrs.iter().cloned().collect())
+                            .condition(PeerCondition::DisconnectedAndNotDialing)
                             .extend_addresses_through_behaviour()
                             .build(),
                     )
@@ -498,11 +517,15 @@ where
                 }
 
                 if matches!(error, DialError::NoAddresses) {
-                    self.swarm
-                        .behaviour_mut()
-                        .peer_sync
-                        .add_want_peers(Some(peer_id))
-                        .await?;
+                    if let Some((peer_id, cookie)) = self.rendezvous_state.get_peer_and_cookie() {
+                        let ns = self.get_rendezvous_namespace();
+                        self.swarm.behaviour_mut().rendezvous_client.discover(
+                            Some(ns),
+                            cookie,
+                            self.config.rendezvous_peer_limit,
+                            peer_id,
+                        );
+                    }
                 }
             },
             SwarmEvent::ExternalAddrConfirmed { address } => {
@@ -641,23 +664,28 @@ where
             Autonat(event) => {
                 self.on_autonat_event(event)?;
             },
-            PeerSync(peersync::Event::LocalPeerRecordUpdated) => {
-                if self.config.announce && !self.has_sent_announce {
-                    let record = self.swarm.behaviour().peer_sync.local_peer_record();
-                    info!(target: LOG_TARGET, "📣 Sending local peer announce with {} address(es)", record.addresses().len());
-                    let proto_rec = record.encode_to_proto()?;
-                    self.swarm
-                        .behaviour_mut()
-                        .gossipsub
-                        .publish(IdentTopic::new(PEER_ANNOUNCE_TOPIC), proto_rec)?;
-                    self.has_sent_announce = true;
-                }
+            RendezvousServer(event) => {
+                info!(target: LOG_TARGET, "ℹ️ RendezvousServer event: {:?}", event);
             },
-            PeerSync(peersync::Event::PeerBatchReceived { new_peers, from_peer }) => {
-                info!(target: LOG_TARGET, "🧑‍🧑‍🧒‍🧒 Peer batch received: from_peer={}, new_peers={}", from_peer, new_peers);
+            RendezvousClient(rendezvous::client::Event::Discovered {
+                rendezvous_node,
+                registrations,
+                cookie,
+            }) => {
+                info!(
+                    target: LOG_TARGET,
+                    "🌐 RendezvousClient {} discovered {} node(s) on namespace {}",
+                    rendezvous_node,
+                    registrations.len(),
+                    cookie.namespace().map(|s| format!("'{s}'")).unwrap_or_else(|| "''".to_string()),
+                );
+                self.rendezvous_state.set_cookie(cookie);
             },
-            PeerSync(event) => {
-                info!(target: LOG_TARGET, "ℹ️ PeerSync event: {:?}", event);
+            RendezvousClient(event) => {
+                info!(target: LOG_TARGET, "ℹ️ RendezvousClient event: {:?}", event);
+            },
+            PeerStore(event) => {
+                info!(target: LOG_TARGET, "🧑‍🧑‍🧒‍🧒 PeerStore event: {:?}", event);
             },
         }
 
@@ -671,64 +699,18 @@ where
         source: PeerId,
         message: gossipsub::Message,
     ) -> Result<(), NetworkingError> {
-        if message.topic == IdentTopic::new(PEER_ANNOUNCE_TOPIC).into() {
-            info!(target: LOG_TARGET, "📢 Peer announce message: ({bytes} bytes) from {source:?}", bytes = message.data.len(), source = message.source);
-            let rec = peersync::SignedPeerRecord::decode_from_proto(message.data.as_slice())?;
-            if let Some(addr) = rec.addresses.iter().find(|a| !is_supported_multiaddr(a)) {
-                warn!(target: LOG_TARGET, "📢 Discarding peer announce message with unsupported address {addr}");
-                return Ok(());
-            }
-            let behaviour_mut = self.swarm.behaviour_mut();
-            match behaviour_mut.peer_sync.validate_and_add_peer_record(rec).await {
-                Ok(_) => {
-                    info!(target: LOG_TARGET, "📢 Peer announce message added to peer store");
-                    if !behaviour_mut.gossipsub.report_message_validation_result(
-                        &message_id,
-                        &propagation_source,
-                        gossipsub::MessageAcceptance::Accept,
-                    ) {
-                        warn!(target: LOG_TARGET, "Unable to report_message_validation_result accept for topic {}, {} bytes because message was not in cache", message.topic, message.data.len());
-                    }
-                },
-                // Invalid message
-                Err(err @ peersync::Error::InvalidMessage { .. }) |
-                Err(err @ peersync::Error::DecodeMultiaddr { .. }) |
-                Err(err @ peersync::Error::InvalidSignedPeer { .. }) => {
-                    if !behaviour_mut.gossipsub.report_message_validation_result(
-                        &message_id,
-                        &propagation_source,
-                        gossipsub::MessageAcceptance::Reject,
-                    ) {
-                        warn!(target: LOG_TARGET, "Unable to report_message_validation_result reject for topic {}, {} bytes because message was not in cache", message.topic, message.data.len());
-                    }
-                    return Err(err.into());
-                },
-                // Some other internal error
-                Err(err) => {
-                    warn!(target: LOG_TARGET, "📢 Peer announce message failed to add to peer store: {}", err);
-                    if !behaviour_mut.gossipsub.report_message_validation_result(
-                        &message_id,
-                        &propagation_source,
-                        gossipsub::MessageAcceptance::Accept,
-                    ) {
-                        warn!(target: LOG_TARGET, "Unable to report_message_validation_result accept for topic {}, {} bytes because message was not in cache", message.topic, message.data.len());
-                    }
-                },
-            }
-        } else {
-            // We accept all messages as we cannot validate them in this service.
-            // We could allow users to report back the validation result e.g. if a proposal is valid, however a naive
-            // implementation would likely incur a substantial cost for many messages.
-            if !self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
-                &message_id,
-                &propagation_source,
-                gossipsub::MessageAcceptance::Accept,
-            ) {
-                warn!(target: LOG_TARGET, "Unable to report_message_validation_result accept for topic {}, {} bytes because message was not in cache", message.topic, message.data.len());
-            }
-            if let Err(e) = self.messaging_mode.send_gossip_message(source, message) {
-                warn!(target: LOG_TARGET, "📢 Gossipsub message failed to be handled: {}", e);
-            }
+        // We accept all messages as we cannot validate them in this service.
+        // We could allow users to report back the validation result e.g. if a proposal is valid, however a naive
+        // implementation would likely incur a substantial cost for many messages.
+        if !self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
+            &message_id,
+            &propagation_source,
+            gossipsub::MessageAcceptance::Accept,
+        ) {
+            warn!(target: LOG_TARGET, "Unable to report_message_validation_result accept for topic {}, {} bytes because message was not in cache", message.topic, message.data.len());
+        }
+        if let Err(e) = self.messaging_mode.send_gossip_message(source, message) {
+            warn!(target: LOG_TARGET, "📢 Gossipsub message failed to be handled: {}", e);
         }
         Ok(())
     }
@@ -747,7 +729,12 @@ where
                 for (peer, addr) in peers_and_addrs {
                     debug!(target: LOG_TARGET, "📡 mDNS discovered peer {} at {}", peer, addr);
                     self.swarm
-                        .dial(DialOpts::peer_id(peer).addresses(vec![addr]).build())
+                        .dial(
+                            DialOpts::peer_id(peer)
+                                .addresses(vec![addr])
+                                .extend_addresses_through_behaviour()
+                                .build(),
+                        )
                         .or_else(|err| {
                             // Peer already has pending dial or established connection - OK
                             if matches!(&err, DialError::DialPeerConditionFalse(_)) {
@@ -771,14 +758,6 @@ where
         use autonat::Event::*;
         match event {
             StatusChanged { old, new } => {
-                if let Some(public_address) = self.swarm.behaviour().autonat.public_address().cloned() {
-                    info!(target: LOG_TARGET, "🌍️ Autonat: Our public address is {public_address}");
-                    self.swarm
-                        .behaviour_mut()
-                        .peer_sync
-                        .add_known_local_public_addresses(vec![public_address]);
-                }
-
                 // If we are/were "Private", let's establish a relay reservation with a known relay
                 if (self.config.reachability_mode.is_private() ||
                     new == NatStatus::Private ||
@@ -806,6 +785,7 @@ where
                 DialOpts::peer_id(relay.peer_id)
                     .addresses(relay.addresses.clone())
                     .condition(PeerCondition::NotDialing)
+                    .extend_addresses_through_behaviour()
                     .build(),
             ) {
                 if is_dial_error_caused_by_remote(&err) {
@@ -887,9 +867,27 @@ where
             return Ok(());
         }
 
+        if self
+            .rendezvous_state
+            .peer_and_address()
+            .is_some_and(|(p, _)| *p == peer_id)
+        {
+            info!(target: LOG_TARGET, "Connected to rendezvous server {}. Registering", peer_id);
+            let ns = self.get_rendezvous_namespace();
+            if let Err(err) = self
+                .swarm
+                .behaviour_mut()
+                .rendezvous_client
+                // Default Ttl of 10 hours
+                .register(ns, peer_id, Some(10 * 60 * 20))
+            {
+                warn!(target: LOG_TARGET, "Failed to register with rendezvous server {}: {}", peer_id, err);
+            }
+        }
+
         self.update_connected_peers(&peer_id, &info);
 
-        let is_relay = info.protocols.contains(&relay::HOP_PROTOCOL_NAME);
+        let is_relay = info.protocols.contains(&protocol_ids::RELAY_HOP_PROTOCOL);
 
         let is_connected_through_relay = self
             .active_connections
@@ -976,11 +974,6 @@ where
 
         match self.swarm.listen_on(circuit_addr.clone()) {
             Ok(id) => {
-                let local_peer_id = *self.swarm.local_peer_id();
-                self.swarm
-                    .behaviour_mut()
-                    .peer_sync
-                    .add_known_local_public_addresses(vec![circuit_addr.with(Protocol::P2p(local_peer_id))]);
                 info!(target: LOG_TARGET, "🌍️ Peer {peer_id} is a relay. Listening (id={id:?}) for circuit connections");
                 let Some(relay_mut) = self.relays.selected_relay_mut() else {
                     // unreachable
@@ -1046,6 +1039,11 @@ where
         if let Ok(num) = self.tx_events.send(event) {
             debug!(target: LOG_TARGET, "📢 Published networking event to {num} subscribers");
         }
+    }
+
+    fn get_rendezvous_namespace(&self) -> Namespace {
+        // Panic: namespace MUST be less than 255 characters
+        Namespace::new(self.config.rendezvous_namespace.clone()).expect("configuration error")
     }
 }
 

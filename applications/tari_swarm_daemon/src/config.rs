@@ -129,6 +129,9 @@ pub struct InstanceConfig {
     pub settings: HashMap<String, String>,
     #[serde(default)]
     pub envs: Vec<(String, String)>,
+    /// Override the initial port-allocation port for this instance.
+    #[serde(default, rename = "start_port")]
+    pub start_port_override: Option<u16>,
 }
 
 impl InstanceConfig {
@@ -140,6 +143,7 @@ impl InstanceConfig {
             instance_type,
             num_instances: 1,
             settings: HashMap::new(),
+            start_port_override: None,
             envs: Vec::new(),
         }
     }
@@ -183,7 +187,7 @@ impl InstanceConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum InstanceType {
     MinoTariNode,
     MinoTariConsoleWallet,

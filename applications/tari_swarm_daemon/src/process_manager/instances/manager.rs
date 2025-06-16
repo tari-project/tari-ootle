@@ -65,6 +65,7 @@ impl InstanceManager {
     ) -> Self {
         Self {
             base_path,
+            port_allocator: PortAllocator::new(start_port, &config),
             config,
             network,
             global_settings,
@@ -75,7 +76,6 @@ impl InstanceManager {
             indexers: IndexMap::new(),
             wallet_daemons: IndexMap::new(),
             signaling_servers: IndexMap::new(),
-            port_allocator: PortAllocator::new(start_port),
             instance_id: 0,
         }
     }
@@ -158,7 +158,7 @@ impl InstanceManager {
             listen_ip
         );
 
-        let mut allocated_ports = ports.unwrap_or_else(|| self.port_allocator.create());
+        let mut allocated_ports = ports.unwrap_or_else(|| self.port_allocator.create(instance_type));
 
         let processes_path = self.base_path.join("processes");
         let base_path = match base_path_override {

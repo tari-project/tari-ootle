@@ -7,7 +7,10 @@ use tari_engine_types::{confidential::ConfidentialOutput, substate::SubstateId, 
 use tari_key_manager::key_manager::DerivedKey;
 use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 use tari_ootle_wallet_crypto::{kdfs, ConfidentialOutputMaskAndValue};
-use tari_template_lib::models::{Amount, VaultId};
+use tari_template_lib::{
+    models::{Amount, VaultId},
+    prelude::PedersenCommitmentBytes,
+};
 use tari_transaction::TransactionId;
 
 use crate::{
@@ -225,7 +228,10 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
         Ok(balance)
     }
 
-    pub fn verify_and_update_confidential_outputs<'i, I: IntoIterator<Item = &'i ConfidentialOutput>>(
+    pub fn verify_and_update_confidential_outputs<
+        'i,
+        I: IntoIterator<Item = (&'i PedersenCommitmentBytes, &'i ConfidentialOutput)>,
+    >(
         &self,
         account_addr: &SubstateId,
         vault_addr: &SubstateId,
@@ -238,19 +244,19 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
             .derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
         let mut tx = self.store.create_write_tx()?;
 
-        for output in outputs {
-            match tx.outputs_get_by_commitment(&output.commitment).optional()? {
+        for (commitment, output) in outputs {
+            match tx.outputs_get_by_commitment(commitment).optional()? {
                 Some(_) => {
                     info!(
                         target: LOG_TARGET,
                         "Output already exists in the wallet. Skipping. (commitment: {})",
-                        output.commitment,
+                        commitment
                     );
                     // Output exists. We should never have the case this is marked as spent. Should we check that?
                 },
                 None => {
                     // Output does not exist. Add it to the store
-                    match self.validate_output(&account, &key, vault_addr, output) {
+                    match self.validate_output(&account, &key, vault_addr, *commitment, output) {
                         Ok(output) => {
                             tx.outputs_insert(output)?;
                         },
@@ -258,7 +264,7 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
                             warn!(
                                 target: LOG_TARGET,
                                 "Output validation failed. Skipping. (commitment: {}, error: {})",
-                                output.commitment,
+                                commitment,
                                 e
                             );
                         },
@@ -276,10 +282,11 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
         account: &Account,
         key: &DerivedKey<RistrettoPublicKey>,
         vault_address: &SubstateId,
+        commitment: PedersenCommitmentBytes,
         output: &ConfidentialOutput,
     ) -> Result<ConfidentialOutputModel, ConfidentialOutputsApiError> {
         // Validate the commitment is well-formed.
-        let _output_commitment = PedersenCommitment::try_from_byte_type(&output.commitment).map_err(|e| {
+        let _output_commitment = PedersenCommitment::try_from_byte_type(&commitment).map_err(|e| {
             ConfidentialOutputsApiError::InvalidParameter {
                 param: "commitment",
                 reason: format!("Invalid output commitment bytes: {}", e),
@@ -293,7 +300,7 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
             })?;
 
         let unblinded_result = self.crypto_api.unblind_output(
-            &output.commitment,
+            &commitment,
             &output.encrypted_data,
             &key.key,
             &output_stealth_public_nonce,
@@ -304,7 +311,7 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
                 warn!(
                     target: LOG_TARGET,
                     "Failed to unblind output. (commitment: {}, error: {})",
-                    output.commitment,
+                    commitment,
                     e
                 );
                 (0, OutputStatus::Invalid)
@@ -314,7 +321,7 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
         Ok(ConfidentialOutputModel {
             account_address: account.address.clone(),
             vault_address: vault_address.clone(),
-            commitment: output.commitment,
+            commitment,
             value,
             sender_public_nonce: Some(output_stealth_public_nonce.to_byte_type()),
             encryption_secret_key_index: account.key_index,

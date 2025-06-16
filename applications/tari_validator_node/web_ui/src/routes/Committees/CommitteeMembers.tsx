@@ -28,6 +28,7 @@ import { StyledPaper } from "../../Components/StyledComponents";
 import PageHeading from "../../Components/PageHeading";
 import Committee from "./CommitteeSingle";
 import { VNContext } from "../../App";
+import { CommitteeMember } from "@tari-project/typescript-bindings";
 
 async function getMembers(currentEpoch: number, shardKey: string, publicKey: string) {
   const committee = await getCommittee({ epoch: currentEpoch, substate_address: shardKey });
@@ -39,7 +40,7 @@ async function getMembers(currentEpoch: number, shardKey: string, publicKey: str
 }
 
 export default function CommitteeMembers() {
-  const [members, setMembers] = useState<[string, string][]>([]);
+  const [members, setMembers] = useState<CommitteeMember<string>[]>([]);
   const { epoch, identity, shardKey } = useContext(VNContext);
   const { address } = useParams();
   const addresses = address && address.split(",");

@@ -2,6 +2,7 @@
 import type { Epoch } from "./Epoch";
 import type { NumPreshards } from "./NumPreshards";
 import type { ShardGroup } from "./ShardGroup";
+import type { VotePower } from "./VotePower";
 
 export interface CommitteeInfo {
   num_shards: NumPreshards;
@@ -9,4 +10,5 @@ export interface CommitteeInfo {
   num_committees: number;
   shard_group: ShardGroup;
   epoch: Epoch;
+  total_power: VotePower;
 }

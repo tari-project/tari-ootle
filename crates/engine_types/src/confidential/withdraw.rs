@@ -10,7 +10,7 @@ use tari_crypto::{
 };
 use tari_template_lib::{
     models::{Amount, ConfidentialWithdrawProof, EncryptedData},
-    types::crypto::{BalanceProofSignature, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    types::crypto::{BalanceProofSignature, RistrettoPublicKeyBytes},
 };
 
 use super::{get_commitment_factory, messages, validate_confidential_proof, CompressedElgamalVerifiableBalance};
@@ -45,8 +45,6 @@ pub struct ValidatedConfidentialWithdrawProof {
 )]
 pub struct ConfidentialOutput {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub commitment: PedersenCommitmentBytes,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub stealth_public_nonce: RistrettoPublicKeyBytes,
     #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
     pub encrypted_data: EncryptedData,
@@ -58,7 +56,6 @@ pub struct ConfidentialOutput {
 impl From<ValidatedConfidentialOutput> for ConfidentialOutput {
     fn from(output: ValidatedConfidentialOutput) -> Self {
         Self {
-            commitment: output.commitment.to_byte_type(),
             stealth_public_nonce: output.stealth_public_nonce.to_byte_type(),
             encrypted_data: output.encrypted_data,
             minimum_value_promise: output.minimum_value_promise,

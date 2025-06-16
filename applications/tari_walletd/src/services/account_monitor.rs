@@ -318,7 +318,7 @@ where
             );
             self.wallet_sdk
                 .confidential_outputs_api()
-                .verify_and_update_confidential_outputs(account_address, &vault_addr, commitments.values())?;
+                .verify_and_update_confidential_outputs(account_address, &vault_addr, commitments)?;
             has_changed = true;
         }
 

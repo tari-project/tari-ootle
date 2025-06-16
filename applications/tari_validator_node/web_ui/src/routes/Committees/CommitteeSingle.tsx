@@ -30,16 +30,17 @@ import TableContainer from "@mui/material/TableContainer";
 import TablePagination from "@mui/material/TablePagination";
 import "./Committees.css";
 import { emptyRows } from "../../utils/helpers";
+import { CommitteeMember } from "@tari-project/typescript-bindings";
 
 function Committee({
-  begin,
-  end,
-  members,
-  publicKey,
-}: {
+                     begin,
+                     end,
+                     members,
+                     publicKey,
+                   }: {
   begin: string;
   end: string;
-  members: Array<[string, string]>;
+  members: Array<CommitteeMember<string>>;
   publicKey: string;
 }) {
   const [page, setPage] = useState(0);
@@ -86,8 +87,9 @@ function Committee({
           <Table>
             <TableBody>
               {members.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((member) => (
-                <TableRow key={member[1]}>
-                  <DataTableCell className={`member ${member[1] === publicKey ? "me" : ""}`}>{member[1]}</DataTableCell>
+                <TableRow key={member.address}>
+                  <DataTableCell
+                    className={`member ${member.public_key === publicKey ? "me" : ""}`}>{member.public_key} (power: {member.vote_power.toString()})</DataTableCell>
                 </TableRow>
               ))}
               {emptyRowsCnt > 0 && (

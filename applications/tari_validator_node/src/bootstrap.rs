@@ -164,7 +164,15 @@ pub async fn spawn_services(
             tx_gossip_messages_by_topic,
         })
         .with_config(tari_networking::Config {
-            listener_port: config.validator_node.p2p.listener_port,
+            // TODO: configurable
+            listeners: vec![
+                format!("/ip4/0.0.0.0/tcp/{}", config.validator_node.p2p.listener_port)
+                    .parse()
+                    .expect("Failed to parse listener address"),
+                format!("/ip4/0.0.0.0/udp/{}/quic-v1", config.validator_node.p2p.listener_port)
+                    .parse()
+                    .expect("Failed to parse listener address"),
+            ],
             swarm: SwarmConfig {
                 protocol_version: format!("/tari/{}/0.0.1", config.network).parse().unwrap(),
                 user_agent: "/tari/validator/0.0.1".to_string(),
@@ -173,13 +181,34 @@ pub async fn spawn_services(
                 // TODO: allow node operator to configure
                 relay_circuit_limits: RelayCircuitLimits::high(),
                 relay_reservation_limits: RelayReservationLimits::high(),
+                rendezvous_server_enabled: config.validator_node.p2p.enable_rendezvous,
                 ..Default::default()
             },
             reachability_mode: config.validator_node.p2p.reachability_mode.into(),
             announce: true,
+            rendezvous_namespace: format!(
+                "tari-{}",
+                config.network.to_string().to_lowercase()
+            ),
             ..Default::default()
         })
-        .with_seed_peers(seed_peers);
+        .with_seed_peers(seed_peers)
+        .then(|builder| {
+            match config.peer_seeds.rendezvous_server.as_ref() {
+                Some(server) => {
+                    let server = SeedPeer::from_str(server)
+                        .expect("Failed to parse rendezvous server seed peer");
+                    if let Some(peer_id) = server.to_peer_id() {
+                        let addr = server.address().clone();
+                        builder.with_rendezvous_server(peer_id, addr)
+                    } else{
+                        warn!(target: LOG_TARGET, "Rendezvous server peer ID is not set, skipping rendezvous server configuration");
+                        builder
+                    }
+                },
+                None => builder,
+            }
+        });
 
     #[cfg(feature = "metrics")]
     {

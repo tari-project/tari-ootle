@@ -49,56 +49,58 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::networking::handle";
 
+pub type Reply<T> = oneshot::Sender<Result<T, NetworkingError>>;
+
 pub enum NetworkingRequest<TMsg: MessageSpec> {
     DialPeer {
         dial_opts: DialOpts,
-        reply_tx: oneshot::Sender<Result<Waiter<()>, NetworkingError>>,
+        reply_tx: Reply<Waiter<()>>,
     },
     GetConnectedPeers {
-        reply_tx: oneshot::Sender<Result<Vec<PeerId>, NetworkingError>>,
+        reply_tx: Reply<Vec<PeerId>>,
     },
     SendMessage {
         peer: PeerId,
         message: TMsg::Message,
-        reply_tx: oneshot::Sender<Result<(), NetworkingError>>,
+        reply_tx: Reply<()>,
     },
     SendMulticast {
         destination: MulticastDestination,
         message: TMsg::Message,
-        reply_tx: oneshot::Sender<Result<usize, NetworkingError>>,
+        reply_tx: Reply<usize>,
     },
     PublishGossip {
         topic: IdentTopic,
         message: Vec<u8>,
-        reply_tx: oneshot::Sender<Result<(), NetworkingError>>,
+        reply_tx: Reply<()>,
     },
     SubscribeTopic {
         topic: IdentTopic,
         explicit_topic_peers: Vec<PeerId>,
-        reply_tx: oneshot::Sender<Result<(), NetworkingError>>,
+        reply_tx: Reply<()>,
     },
     UnsubscribeTopic {
         topic: IdentTopic,
-        reply_tx: oneshot::Sender<Result<(), NetworkingError>>,
+        reply_tx: Reply<()>,
     },
     IsSubscribedTopic {
         topic: IdentTopic,
-        reply_tx: oneshot::Sender<Result<bool, NetworkingError>>,
+        reply_tx: Reply<bool>,
     },
     OpenSubstream {
         peer_id: PeerId,
         protocol_id: StreamProtocol,
-        reply_tx: oneshot::Sender<Result<NegotiatedSubstream<Substream>, NetworkingError>>,
+        reply_tx: Reply<NegotiatedSubstream<Substream>>,
     },
     AddProtocolNotifier {
         protocols: HashSet<StreamProtocol>,
         tx_notifier: mpsc::UnboundedSender<ProtocolNotification<Substream>>,
     },
     GetActiveConnections {
-        reply_tx: oneshot::Sender<Result<Vec<Connection>, NetworkingError>>,
+        reply_tx: Reply<Vec<Connection>>,
     },
     GetLocalPeerInfo {
-        reply_tx: oneshot::Sender<Result<PeerInfo, NetworkingError>>,
+        reply_tx: Reply<PeerInfo>,
     },
     SetWantPeers(HashSet<PeerId>),
 }

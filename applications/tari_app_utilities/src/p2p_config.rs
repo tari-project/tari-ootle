@@ -11,6 +11,7 @@ use tari_common::{configuration::StringList, SubConfigPath};
 #[serde(deny_unknown_fields)]
 pub struct P2pConfig {
     pub enable_mdns: bool,
+    pub enable_rendezvous: bool,
     pub listener_port: u16,
     pub reachability_mode: ReachabilityMode,
 }
@@ -19,6 +20,7 @@ impl Default for P2pConfig {
     fn default() -> Self {
         Self {
             enable_mdns: true,
+            enable_rendezvous: false,
             listener_port: 0,
             reachability_mode: ReachabilityMode::default(),
         }
@@ -67,11 +69,13 @@ impl Display for ReachabilityMode {
 #[serde(deny_unknown_fields)]
 pub struct PeerSeedsConfig {
     pub override_from: Option<String>,
-    /// Custom specified peer seed nodes
+    /// Peer seed nodes
     pub peer_seeds: StringList,
     /// DNS seeds hosts. The DNS TXT records are queried from these hosts and the resulting peers added to the comms
     /// peer list.
     pub dns_seeds: StringList,
+    /// Specify a rendezvous server used for peer discovery.
+    pub rendezvous_server: Option<String>,
     // TODO
     // #[serde(
     //     deserialize_with = "deserialize_string_or_struct",

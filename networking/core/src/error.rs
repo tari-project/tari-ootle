@@ -51,8 +51,8 @@ pub enum NetworkingError {
     RpcError(#[from] RpcError),
     #[error("Transport error: {0}")]
     TransportError(#[from] TransportError<io::Error>),
-    #[error("Peer sync error: {0}")]
-    PeerSyncError(#[from] tari_swarm::peersync::Error),
+    #[error("Rendezvous client register error: {0}")]
+    RendezvousRegisterError(#[from] tari_swarm::rendezvous::client::RegisterError),
     #[error("Messaging is disabled")]
     MessagingDisabled,
 }

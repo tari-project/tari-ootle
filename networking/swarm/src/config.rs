@@ -8,6 +8,7 @@ use libp2p::ping;
 use crate::protocol_version::ProtocolVersion;
 
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Config {
     pub protocol_version: ProtocolVersion,
     pub user_agent: String,
@@ -22,6 +23,7 @@ pub struct Config {
     pub relay_reservation_limits: RelayReservationLimits,
     pub identify_interval: Duration,
     pub gossip_sub_max_message_size: usize,
+    pub rendezvous_server_enabled: bool,
 }
 
 impl Default for Config {
@@ -42,6 +44,7 @@ impl Default for Config {
             identify_interval: Duration::from_secs(5 * 60),
             // 128KiB, 2 times the libp2p default
             gossip_sub_max_message_size: 124 * 1024,
+            rendezvous_server_enabled: false,
         }
     }
 }

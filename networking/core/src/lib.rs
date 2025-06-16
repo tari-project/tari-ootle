@@ -26,6 +26,7 @@ mod message_mode;
 mod notify;
 mod peer;
 mod relay_state;
+mod rendezvous_state;
 
 pub use builder::Builder;
 pub use config::*;

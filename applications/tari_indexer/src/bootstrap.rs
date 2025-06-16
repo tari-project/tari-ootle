@@ -24,6 +24,7 @@ use std::{fs, io, str::FromStr};
 
 use anyhow::Context;
 use libp2p::identity;
+use log::warn;
 use minotari_app_utilities::identity_management;
 use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common::{
@@ -66,7 +67,7 @@ use crate::{
     Noop,
 };
 
-const _LOG_TARGET: &str = "tari_indexer::bootstrap";
+const LOG_TARGET: &str = "tari_indexer::bootstrap";
 
 #[allow(clippy::too_many_lines)]
 pub async fn spawn_services(
@@ -101,7 +102,15 @@ pub async fn spawn_services(
     let (networking, _) = tari_networking::Builder::<TariMessagingSpec>::new(identity)
         .with_messaging_mode(MessagingMode::Disabled)
         .with_config(tari_networking::Config {
-            listener_port: config.indexer.p2p.listener_port,
+            // TODO: configurable
+            listeners: vec![
+                format!("/ip4/0.0.0.0/tcp/{}", config.indexer.p2p.listener_port)
+                    .parse()
+                    .expect("Failed to parse listener address"),
+                format!("/ip4/0.0.0.0/udp/{}/quic-v1", config.indexer.p2p.listener_port)
+                    .parse()
+                    .expect("Failed to parse listener address"),
+            ],
             swarm: SwarmConfig {
                 protocol_version: format!("/tari/{}/0.0.1", config.network).parse().unwrap(),
                 user_agent: "/tari/indexer/0.0.1".to_string(),
@@ -109,13 +118,34 @@ pub async fn spawn_services(
                 enable_relay: true,
                 relay_circuit_limits: RelayCircuitLimits::high(),
                 relay_reservation_limits: RelayReservationLimits::high(),
+                rendezvous_server_enabled: config.indexer.p2p.enable_rendezvous,
                 ..Default::default()
             },
             reachability_mode: config.indexer.p2p.reachability_mode.into(),
             announce: false,
+            rendezvous_namespace: format!(
+                "tari-{}",
+                config.network.to_string().to_lowercase()
+            ),
             ..Default::default()
         })
         .with_seed_peers(seed_peers)
+        .then(|builder| {
+            match config.peer_seeds.rendezvous_server.as_ref() {
+                Some(server) => {
+                    let server = SeedPeer::from_str(server)
+                        .expect("Failed to parse rendezvous server seed peer");
+                    if let Some(peer_id) = server.to_peer_id() {
+                        let addr = server.address().clone();
+                        builder.with_rendezvous_server(peer_id, addr)
+                    } else{
+                        warn!(target: LOG_TARGET, "Rendezvous server peer ID is not set, skipping rendezvous server configuration");
+                        builder
+                    }
+                },
+                None => builder,
+            }
+        })
         .spawn(shutdown.clone())?;
 
     // Connect to substate db

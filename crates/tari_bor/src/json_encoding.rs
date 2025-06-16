@@ -3,7 +3,7 @@
 
 //! This module provides a wrapper for serializing and deserializing `Value`. This is "generated" from the serde derive
 //! macros and copied here. This allows the enum to be encoded as JSON representation of the ciborium::Value enum
-//! as if the derive macros were used, instead of the de/serializers implemented with CBOT in mind.
+//! as if the derive macros were used, instead of the de/serializers implemented with CBOR in mind.
 
 use core::{fmt, fmt::Formatter, marker::PhantomData};
 

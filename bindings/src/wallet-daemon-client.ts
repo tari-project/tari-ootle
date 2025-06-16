@@ -62,6 +62,7 @@ export * from "./types/wallet-daemon-client/ConfidentialCreateOutputProofRequest
 export * from "./types/wallet-daemon-client/KeysCreateResponse";
 export * from "./types/wallet-daemon-client/WebauthnFinishAuthRequest";
 export * from "./types/wallet-daemon-client/AuthLoginDenyRequest";
+export * from "./types/wallet-daemon-client/MintFaucetNftResponse";
 export * from "./types/wallet-daemon-client/ProofsFinalizeRequest";
 export * from "./types/wallet-daemon-client/AccountOrKeyIndex";
 export * from "./types/wallet-daemon-client/ProofsCancelRequest";
@@ -99,6 +100,7 @@ export * from "./types/wallet-daemon-client/SettingsSetResponse";
 export * from "./types/wallet-daemon-client/WebauthnAlreadyRegisteredRequest";
 export * from "./types/wallet-daemon-client/WebauthnStartRegisterResponse";
 export * from "./types/wallet-daemon-client/PublishTemplateRequest";
+export * from "./types/wallet-daemon-client/MintFaucetNftRequest";
 export * from "./types/wallet-daemon-client/AuthMethod";
 export * from "./types/wallet-daemon-client/AccountsCreateFreeTestCoinsResponse";
 export * from "./types/wallet-daemon-client/TransferNftResponse";

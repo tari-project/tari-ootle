@@ -11,7 +11,6 @@ use std::{
 
 use anyhow::anyhow;
 use serde::de::DeserializeOwned;
-use tari_bor::to_value;
 use tari_common::configuration::Network;
 use tari_crypto::{
     keys::PublicKey as _,
@@ -29,28 +28,25 @@ use tari_engine::{
 };
 use tari_engine_types::{
     commit_result::{ExecuteResult, RejectReason},
-    component::{ComponentBody, ComponentHeader},
-    id_provider::{IdProvider, ObjectIds},
     instruction::Instruction,
-    resource_container::ResourceContainer,
-    substate::{Substate, SubstateDiff, SubstateId},
-    vault::Vault,
+    substate::{SubstateDiff, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
     ToByteType,
 };
 use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::SubstateType, SubstateRequirement};
-use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRESS};
+use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     args::InstructionArg,
-    auth::OwnerRule,
+    constants::{NFT_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS},
     models::{Amount, ComponentAddress, NonFungibleAddress},
-    prelude::{ComponentAccessRules, RistrettoPublicKeyBytes, CONFIDENTIAL_TARI_RESOURCE_ADDRESS},
-    types::{EntityId, Hash, ObjectKey, TemplateAddress},
+    prelude::RistrettoPublicKeyBytes,
+    types::TemplateAddress,
 };
 use tari_transaction::{args, builder::named_args::BuilderWorkspaceKey, Transaction, TransactionBuilder};
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 
 use crate::{
+    builtin_component_state::{initialize_builtin_faucet_state, initialize_builtin_nft_faucet_state},
     read_only_state_store::ReadOnlyStateStore,
     track_calls::TrackCallsModule,
     wrapped_transaction::WrappedTransaction,
@@ -58,7 +54,11 @@ use crate::{
 };
 
 pub fn test_faucet_component() -> ComponentAddress {
-    ComponentAddress::new(ObjectKey::from_array([0xfau8; ObjectKey::LENGTH]))
+    XTR_FAUCET_COMPONENT_ADDRESS
+}
+
+pub fn test_nft_faucet_component() -> ComponentAddress {
+    NFT_FAUCET_COMPONENT_ADDRESS
 }
 
 pub struct TemplateTest {
@@ -105,7 +105,7 @@ impl TemplateTest {
 
         // Add builtin templates
         builder.add_builtin_template(&ACCOUNT_TEMPLATE_ADDRESS);
-        builder.add_builtin_template(&ACCOUNT_NFT_TEMPLATE_ADDRESS);
+        builder.add_builtin_template(&NFT_FAUCET_TEMPLATE_ADDRESS);
 
         // Add the faucet template for fungible tokens
         builder.add_template(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/faucet"));
@@ -119,7 +119,7 @@ impl TemplateTest {
         let package = builder.build();
 
         let mut test = Self::from_package(package);
-        test.bootstrap_state(1_000_000.into());
+        test.bootstrap_state();
         test
     }
 
@@ -164,53 +164,10 @@ impl TemplateTest {
         }
     }
 
-    pub fn bootstrap_state(&mut self, amount: Amount) {
+    pub fn bootstrap_state(&mut self) {
         let template_addr = self.get_template_address("TestFaucet");
-        Self::initial_tari_faucet_supply(&mut self.state_store, &self.public_key, amount, template_addr);
-    }
-
-    fn initial_tari_faucet_supply(
-        store: &mut MemoryStateStore,
-        signer_public_key: &RistrettoPublicKey,
-        initial_supply: Amount,
-        test_faucet_template_address: TemplateAddress,
-    ) {
-        let entity_id = EntityId::default();
-        let object_ids = ObjectIds::new(10);
-        let id_provider = IdProvider::new(entity_id, Hash::default(), &object_ids);
-        let vault_id = id_provider.new_vault_id().unwrap();
-        let vault = Vault::new(ResourceContainer::confidential(
-            CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-            vec![],
-            initial_supply,
-        ));
-        store
-            .set_state(SubstateId::Vault(vault_id), Substate::new(0, vault))
-            .unwrap();
-
-        // This must mirror the test faucet component
-        #[derive(serde::Serialize)]
-        struct Faucet {
-            vault: tari_template_lib::models::Vault,
-        }
-        let state = to_value(&Faucet {
-            vault: tari_template_lib::models::Vault::for_test(vault_id),
-        })
-        .unwrap();
-        store
-            .set_state(
-                SubstateId::Component(test_faucet_component()),
-                Substate::new(0, ComponentHeader {
-                    template_address: test_faucet_template_address,
-                    module_name: "TestFaucet".to_string(),
-                    owner_key: Some(RistrettoPublicKeyBytes::from_bytes(signer_public_key.as_bytes()).unwrap()),
-                    owner_rule: OwnerRule::None,
-                    access_rules: ComponentAccessRules::allow_all(),
-                    entity_id,
-                    body: ComponentBody { state },
-                }),
-            )
-            .unwrap();
+        initialize_builtin_faucet_state(&mut self.state_store, &self.public_key, template_addr);
+        initialize_builtin_nft_faucet_state(&mut self.state_store)
     }
 
     pub fn compile_new_template<T, P, TEnvs, K, V>(

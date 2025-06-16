@@ -55,7 +55,7 @@ pub fn generate_dispatcher(ast: &TemplateAst) -> Result<TokenStream> {
             let call_info: CallInfo = decode_exact(&call_data).expect("Failed to decode CallArgs");
 
             init_context(&call_info);
-            engine().emit_log(LogLevel::Info, format!("Dispatcher called with function {}", call_info.func_name));
+            engine().emit_log(LogLevel::Debug, format!("Call {}", call_info.func_name));
 
             let result;
             match call_info.func_name.as_str() {

@@ -53,7 +53,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::services::template_provider::TemplateProvider;
 use tari_template_abi::{TemplateDef, Type};
-use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRESS};
+use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     args::{
         AddressAllocationInvokeArg,
@@ -2506,7 +2506,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         let address = match action {
             BuiltinTemplateAction::GetTemplateAddress { bultin } => match bultin {
                 BuiltinTemplate::Account => ACCOUNT_TEMPLATE_ADDRESS,
-                BuiltinTemplate::AccountNft => ACCOUNT_NFT_TEMPLATE_ADDRESS,
+                BuiltinTemplate::AccountNft => NFT_FAUCET_TEMPLATE_ADDRESS,
             },
         };
 

@@ -11603,7 +11603,11 @@ dependencies = [
 name = "tari_template_builtin"
 version = "0.9.2"
 dependencies = [
+ "tari_engine_types",
+ "tari_template_lib",
  "tari_template_lib_types",
+ "tari_template_test_tooling",
+ "tari_transaction",
 ]
 
 [[package]]

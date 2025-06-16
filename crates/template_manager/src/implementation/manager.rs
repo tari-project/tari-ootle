@@ -48,9 +48,9 @@ use tari_ootle_storage::{
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_template_builtin::{
     get_template_builtin,
-    ACCOUNT_NFT_TEMPLATE_ADDRESS,
     ACCOUNT_TEMPLATE_ADDRESS,
-    FAUCET_TEMPLATE_ADDRESS,
+    NFT_FAUCET_TEMPLATE_ADDRESS,
+    XTR_FAUCET_TEMPLATE_ADDRESS,
 };
 use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 
@@ -109,15 +109,15 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
         builtin_templates.insert(ACCOUNT_TEMPLATE_ADDRESS, template);
 
         // get the builtin WASM code of the account nft template
-        let compiled_code = get_template_builtin(&ACCOUNT_NFT_TEMPLATE_ADDRESS);
+        let compiled_code = get_template_builtin(&NFT_FAUCET_TEMPLATE_ADDRESS);
         let template =
-            Self::convert_code_to_template("AccountNft", ACCOUNT_NFT_TEMPLATE_ADDRESS, compiled_code.to_vec());
-        builtin_templates.insert(ACCOUNT_NFT_TEMPLATE_ADDRESS, template);
+            Self::convert_code_to_template("AccountNft", NFT_FAUCET_TEMPLATE_ADDRESS, compiled_code.to_vec());
+        builtin_templates.insert(NFT_FAUCET_TEMPLATE_ADDRESS, template);
 
         // get the builtin WASM code of the account nft template
-        let compiled_code = get_template_builtin(&FAUCET_TEMPLATE_ADDRESS);
-        let template = Self::convert_code_to_template("XtrFaucet", FAUCET_TEMPLATE_ADDRESS, compiled_code.to_vec());
-        builtin_templates.insert(FAUCET_TEMPLATE_ADDRESS, template);
+        let compiled_code = get_template_builtin(&XTR_FAUCET_TEMPLATE_ADDRESS);
+        let template = Self::convert_code_to_template("XtrFaucet", XTR_FAUCET_TEMPLATE_ADDRESS, compiled_code.to_vec());
+        builtin_templates.insert(XTR_FAUCET_TEMPLATE_ADDRESS, template);
 
         builtin_templates
     }

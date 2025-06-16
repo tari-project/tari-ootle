@@ -42,7 +42,7 @@ import type {
   KeysSetActiveRequest,
   KeysSetActiveResponse,
   ListAccountNftRequest,
-  ListAccountNftResponse,
+  ListAccountNftResponse, MintFaucetNftRequest, MintFaucetNftResponse,
   PublishTemplateRequest,
   PublishTemplateResponse,
   rejectReasonToString,
@@ -274,6 +274,10 @@ export class WalletDaemonClient {
 
   public nftTransfer(params: TransferNftRequest): Promise<TransferNftResponse> {
     return this.__invokeRpc("nfts.transfer", params);
+  }
+
+  public mintFaucetNfts(params: MintFaucetNftRequest): Promise<MintFaucetNftResponse> {
+    return this.__invokeRpc("nfts.mint_faucet_nft", params);
   }
 
   public validatorsClaimFees(params: ClaimValidatorFeesRequest): Promise<ClaimValidatorFeesResponse> {

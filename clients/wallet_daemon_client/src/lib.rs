@@ -54,8 +54,8 @@ use types::{
     GetAccountNftResponse,
     ListAccountNftRequest,
     ListAccountNftResponse,
-    MintAccountNftRequest,
-    MintAccountNftResponse,
+    MintFaucetNftRequest,
+    MintFaucetNftResponse,
     ProofsCancelRequest,
     ProofsCancelResponse,
     ProofsFinalizeRequest,
@@ -351,11 +351,11 @@ impl WalletDaemonClient {
         self.send_request("accounts.create_free_test_coins", req.borrow()).await
     }
 
-    pub async fn mint_account_nft<T: Borrow<MintAccountNftRequest>>(
+    pub async fn mint_faucet_nft<T: Borrow<MintFaucetNftRequest>>(
         &mut self,
         req: T,
-    ) -> Result<MintAccountNftResponse, WalletDaemonClientError> {
-        self.send_request("nfts.mint_account_nft", req.borrow()).await
+    ) -> Result<MintFaucetNftResponse, WalletDaemonClientError> {
+        self.send_request("nfts.mint_faucet_nft", req.borrow()).await
     }
 
     pub async fn get_account_nft<T: Borrow<GetAccountNftRequest>>(

@@ -191,7 +191,7 @@ function Accounts() {
       >
         <div className="flex-container">
           <Button variant="outlined" startIcon={<AddIcon />} onClick={() => onClaimFreeCoins()}>
-            Claim Free Testnet Coins
+            Claim Testnet Coins
           </Button>
         </div>
         {showAccountDialog && (
@@ -237,10 +237,7 @@ function Accounts() {
                 >
                   {dataAccountsList?.accounts.map((account: AccountInfo, index: number) => {
                     return (
-                      <MenuItem
-                        key={substateIdToString(account.account.address)}
-                        value={substateIdToString(account.account.address)}
-                      >
+                      <MenuItem key={index} value={substateIdToString(account.account.address)}>
                         {account.account.name}
                       </MenuItem>
                     );

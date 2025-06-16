@@ -1,5 +1,3 @@
-publishBranch: development
-
 packages:
   - bindings
   - clients/javascript/*
@@ -19,3 +17,6 @@ ignoredBuiltDependencies:
 
 overrides:
   '@tari-project/typescript-bindings': link:bindings
+  '@tari-project/wallet_jrpc_client': link:clients/javascript/wallet_daemon_client
+
+publishBranch: development

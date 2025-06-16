@@ -1,29 +1,24 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    collections::{BTreeMap, HashSet},
-    str::FromStr,
-};
+use std::{collections::HashSet, str::FromStr};
 
 use anyhow::anyhow;
 use axum::headers::authorization::Bearer;
 use log::{info, warn};
-use tari_crypto::{
-    keys::PublicKey as PK,
-    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
-    tari_utilities::ByteArray,
+use tari_crypto::{keys::PublicKey as PK, ristretto::RistrettoPublicKey};
+use tari_engine_types::{
+    component::new_component_address_from_public_key,
+    json_cbor::convert_json_to_cbor,
+    substate::SubstateId,
+    ToByteType,
 };
-use tari_engine_types::{component::new_component_address_from_public_key, substate::SubstateId, ToByteType};
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
-use tari_ootle_wallet_sdk::{
-    apis::{key_manager, substate::ValidatorScanResult},
-    models::Account,
-};
-use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRESS};
+use tari_ootle_wallet_sdk::apis::{key_manager, substate::ValidatorScanResult};
+use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    models::{Amount, ComponentAddress, Metadata, NonFungibleAddress, NonFungibleId, ResourceAddress},
-    types::crypto::RistrettoPublicKeyBytes,
+    constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS},
+    models::{Amount, ComponentAddress, NonFungibleAddress, ResourceAddress},
 };
 use tari_transaction::{args, TransactionId};
 use tari_wallet_daemon_client::{
@@ -33,8 +28,8 @@ use tari_wallet_daemon_client::{
         GetAccountNftResponse,
         ListAccountNftRequest,
         ListAccountNftResponse,
-        MintAccountNftRequest,
-        MintAccountNftResponse,
+        MintFaucetNftRequest,
+        MintFaucetNftResponse,
         TransferNftRequest,
         TransferNftResponse,
     },
@@ -43,7 +38,7 @@ use tokio::sync::broadcast;
 
 use super::{context::HandlerContext, helpers::get_account_or_default};
 use crate::{
-    handlers::helpers::{application_error, get_account, get_account_with_inputs, transaction_builder},
+    handlers::helpers::{application_error, get_account, get_account_with_inputs, invalid_params, transaction_builder},
     jrpc_server::ApplicationErrorCode,
     services::{TransactionFinalizedEvent, WalletEvent},
     DEFAULT_FEE,
@@ -87,11 +82,11 @@ pub async fn handle_list_nfts(
     Ok(ListAccountNftResponse { nfts: non_fungibles })
 }
 
-pub async fn handle_mint_account_nft(
+pub async fn handle_mint_faucet_nft(
     context: &HandlerContext,
     token: Option<&Bearer>,
-    req: MintAccountNftRequest,
-) -> Result<MintAccountNftResponse, anyhow::Error> {
+    req: MintFaucetNftRequest,
+) -> Result<MintFaucetNftResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     let key_manager_api = sdk.key_manager_api();
     context.check_auth(token, &[JrpcPermission::Admin])?;
@@ -101,169 +96,52 @@ pub async fn handle_mint_account_nft(
     let signing_key_index = account.key_index;
     let signing_key = key_manager_api.derive_key(key_manager::TRANSACTION_BRANCH, signing_key_index)?;
 
-    let owner_pk = RistrettoPublicKey::from_secret_key(&signing_key.key);
-    let owner_token =
-        NonFungibleAddress::from_public_key(RistrettoPublicKeyBytes::from_bytes(owner_pk.as_bytes()).unwrap());
+    info!(target: LOG_TARGET, "🎮 Minting new NFT with metadata {}", req.mutable_data);
 
-    info!(target: LOG_TARGET, "Minting new NFT with metadata {}", req.metadata);
+    let mutable_data = convert_json_to_cbor(req.mutable_data).map_err(|e| invalid_params("mutable_data", Some(e)))?;
 
-    let mut total_fee = Amount::new(0);
-    let component_address = match req.existing_nft_component {
-        Some(existing_nft_component) => existing_nft_component,
-        None => {
-            let resp = create_account_nft(
-                context,
-                &account,
-                &signing_key.key,
-                owner_token,
-                req.create_account_nft_fee.unwrap_or(DEFAULT_FEE),
-                token,
-            )
-            .await?;
-
-            total_fee += resp.final_fee;
-            if let Some(reason) = resp.finalize.result.any_reject() {
-                return Err(anyhow!("Failed to create account NFT: {}", reason));
-            }
-            let component_address = resp
-                .finalize
-                .result
-                .accept()
-                .unwrap()
-                .up_iter()
-                .filter(|(id, _)| id.is_component())
-                .find(|(_, s)| s.substate_value().component().unwrap().template_address == ACCOUNT_NFT_TEMPLATE_ADDRESS)
-                .map(|(id, _)| id.as_component_address().unwrap())
-                .ok_or_else(|| anyhow!("Failed to find account NFT component address"))?;
-
-            // Strange issue with current rust version, if return the _OWNED_ value directly, it will not compile.
-            #[allow(clippy::let_and_return)]
-            component_address
-        },
-    };
-
-    let metadata = Metadata::from(serde_json::from_value::<BTreeMap<String, String>>(req.metadata)?);
-
-    let resp = mint_account_nft(
-        context,
-        token,
-        account,
-        component_address,
-        &signing_key.key,
-        req.mint_fee.unwrap_or(DEFAULT_FEE),
-        metadata,
-    )
-    .await?;
-    // TODO: is there a more direct way to extract nft_id and resource address ??
-    let (resource_address, nft_id) = resp
-        .finalize
-        .events
-        .iter()
-        .find(|e| e.topic().as_str() == "mint")
-        .map(|e| {
-            (
-                e.get_payload("resource_address").expect("Resource address not found"),
-                e.get_payload("id").expect("NFTID not found"),
-            )
-        })
-        .expect("NFT ID event payload not found");
-    let resource_address = ResourceAddress::from_str(&resource_address)?;
-    let nft_id = NonFungibleId::try_from_canonical_string(nft_id.as_str())
-        .map_err(|e| anyhow!("Failed to parse non fungible id, with error: {:?}", e))?;
-
-    total_fee += resp.final_fee;
-
-    Ok(MintAccountNftResponse {
-        result: resp.finalize,
-        resource_address,
-        nft_id,
-        fee: total_fee,
-    })
-}
-
-async fn mint_account_nft(
-    context: &HandlerContext,
-    token: Option<&Bearer>,
-    account: Account,
-    component_address: ComponentAddress,
-    owner_sk: &RistrettoSecretKey,
-    fee: Amount,
-    metadata: Metadata,
-) -> Result<TransactionFinalizedEvent, anyhow::Error> {
-    let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    let number_to_mint = Amount::try_from(req.number_to_mint)
+        .map_err(|e| invalid_params("number_to_mint", Some(format!("number_to_mint out of range: {}", e))))?;
+    if number_to_mint.is_zero() {
+        return Err(invalid_params("number_to_mint", Some("number_to_mint is zero")));
+    }
 
     let inputs = sdk
         .substate_api()
-        .locate_dependent_substates(&[account.address.clone(), component_address.into()])
+        .locate_dependent_substates(&[account.address.clone()])
         .await?;
-
+    let fee = req.max_fee.unwrap_or(DEFAULT_FEE);
     let transaction = transaction_builder(context)
         .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), fee)
-        .call_method(component_address, "mint", args![metadata])
-        .put_last_instruction_output_on_workspace("bucket")
+        .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![
+            number_to_mint,
+            mutable_data
+        ])
+        .put_last_instruction_output_on_workspace("tokens")
         .call_method(account.address.as_component_address().unwrap(), "deposit", args![
-            Workspace("bucket")
+            Workspace("tokens")
         ])
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
-        .build_and_seal(owner_sk);
+        .add_input(NFT_FAUCET_COMPONENT_ADDRESS)
+        .add_input(NFT_FAUCET_RESOURCE_ADDRESS)
+        .build_and_seal(&signing_key.key);
 
     let mut events = context.notifier().subscribe();
     let tx_id = context.transaction_service().submit_transaction(transaction).await?;
 
-    let event = wait_for_result(&mut events, tx_id).await?;
-    if let Some(reject) = event.finalize.any_reject() {
+    let finalize_event = wait_for_result(&mut events, tx_id).await?;
+    if let Some(reject) = finalize_event.finalize.any_reject() {
         return Err(application_error(
             ApplicationErrorCode::TransactionRejected,
             format!("Mint new NFT using account {} was rejected: {}", account, reject),
         ));
     }
 
-    Ok(event)
-}
-
-async fn create_account_nft(
-    context: &HandlerContext,
-    account: &Account,
-    owner_sk: &RistrettoSecretKey,
-    owner_token: NonFungibleAddress,
-    fee: Amount,
-    token: Option<&Bearer>,
-) -> Result<TransactionFinalizedEvent, anyhow::Error> {
-    let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::Admin])?;
-
-    let inputs = sdk
-        .substate_api()
-        .locate_dependent_substates(&[account.address.clone()])
-        .await?;
-
-    let transaction = transaction_builder(context)
-        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), fee)
-        .call_function(ACCOUNT_NFT_TEMPLATE_ADDRESS, "create", args![owner_token,])
-        .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
-        .build_and_seal(owner_sk);
-
-    let tx_id = sdk
-        .transaction_api()
-        .insert_new_transaction(transaction, vec![], None, false)
-        .await?;
-    let mut events = context.notifier().subscribe();
-    sdk.transaction_api().submit_transaction(tx_id).await?;
-
-    let event = wait_for_result(&mut events, tx_id).await?;
-
-    if let Some(reason) = event.finalize.fee_reject() {
-        return Err(application_error(
-            ApplicationErrorCode::TransactionRejected,
-            format!(
-                "Create NFT resource address transaction, from account {}, failed: {}",
-                account, reason
-            ),
-        ));
-    }
-
-    Ok(event)
+    Ok(MintFaucetNftResponse {
+        transaction_id: tx_id,
+        finalize: finalize_event.finalize,
+        fee: finalize_event.final_fee,
+    })
 }
 
 async fn try_find_target_account(

@@ -39,7 +39,7 @@ use tari_ootle_wallet_sdk::{
 use tari_template_lib::{
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
     models::Amount,
-    prelude::{ComponentAddress, ResourceAddress, RistrettoPublicKeyBytes},
+    prelude::{ResourceAddress, RistrettoPublicKeyBytes},
     resource::TOKEN_SYMBOL,
 };
 use tari_transaction::{args, UnsignedTransaction};
@@ -59,7 +59,7 @@ use tari_wallet_daemon_client::{
         ClaimValidatorFeesResponse,
         ConfidentialTransferRequest,
         ListAccountNftRequest,
-        MintAccountNftRequest,
+        MintFaucetNftRequest,
         ProofsGenerateRequest,
         RevealFundsRequest,
         TransactionSubmitRequest,
@@ -323,7 +323,6 @@ pub async fn mint_new_nft_on_account(
     nft_name: String,
     account_name: String,
     wallet_daemon_name: String,
-    existing_nft_component: Option<ComponentAddress>,
     metadata: Option<serde_json::Value>,
 ) {
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
@@ -337,20 +336,19 @@ pub async fn mint_new_nft_on_account(
         })
     });
 
-    let request = MintAccountNftRequest {
+    let request = MintFaucetNftRequest {
         account: ComponentAddressOrName::Name(account_name.clone()),
-        metadata,
-        mint_fee: Some(Amount::new(1_000)),
-        create_account_nft_fee: None,
-        existing_nft_component,
+        mutable_data: metadata,
+        number_to_mint: 1,
+        max_fee: None,
     };
     let resp = client
-        .mint_account_nft(request)
+        .mint_faucet_nft(request)
         .await
         .expect("Failed to mint new account NFT");
 
     let wait_req = TransactionWaitResultRequest {
-        transaction_id: resp.result.transaction_hash.into_array().into(),
+        transaction_id: resp.transaction_id,
         timeout_secs: Some(120),
     };
     let _wait_resp = client
@@ -361,7 +359,7 @@ pub async fn mint_new_nft_on_account(
     add_substate_ids(
         world,
         account_name,
-        &resp.result.result.expect("Failed to obtain substate diffs"),
+        &resp.finalize.result.expect("Failed to obtain substate diffs"),
     );
 }
 

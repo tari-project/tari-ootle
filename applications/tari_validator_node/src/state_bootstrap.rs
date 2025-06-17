@@ -33,6 +33,8 @@ use tari_template_lib::{
     auth::{ComponentAccessRules, OwnerRule, ResourceAccessRules},
     constants::{
         CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
+        NFT_FAUCET_COMPONENT_ADDRESS,
+        NFT_FAUCET_RESOURCE_ADDRESS,
         PUBLIC_IDENTITY_RESOURCE_ADDRESS,
         XTR_FAUCET_COMPONENT_ADDRESS,
         XTR_FAUCET_VAULT_ADDRESS,
@@ -40,6 +42,7 @@ use tari_template_lib::{
     models::{Amount, Metadata},
     prelude::{ResourceType, RistrettoPublicKeyBytes},
     resource::TOKEN_SYMBOL,
+    rule,
     types::EntityId,
 };
 
@@ -84,55 +87,23 @@ where
         value,
     )?;
 
+    let is_testnet = !matches!(network, Network::MainNet);
+    let symbol = if is_testnet { "tXTR" } else { "XTR" };
     let mut xtr_resource = Resource::new(
         ResourceType::Confidential,
         None,
         OwnerRule::None,
         ResourceAccessRules::new(),
-        Metadata::from([(TOKEN_SYMBOL, "XTR".to_string())]),
+        Metadata::from([(TOKEN_SYMBOL, symbol)]),
         None,
         None,
     );
 
-    // Create faucet component
-    if !matches!(network, Network::MainNet) {
-        let value = ComponentHeader {
-            template_address: tari_template_builtin::FAUCET_TEMPLATE_ADDRESS,
-            module_name: "XtrFaucet".to_string(),
-            owner_key: None,
-            owner_rule: OwnerRule::None,
-            access_rules: ComponentAccessRules::allow_all(),
-            entity_id: EntityId::default(),
-            body: ComponentBody {
-                state: cbor!({"vault" => XTR_FAUCET_VAULT_ADDRESS}).unwrap(),
-            },
-        };
-        create_substate(
-            tx,
-            network,
-            num_preshards,
-            sidechain_id,
-            XTR_FAUCET_COMPONENT_ADDRESS,
-            value,
-        )?;
-
-        xtr_resource.increase_total_supply(Amount::MAX);
-        let value = Vault::new(ResourceContainer::Confidential {
-            address: CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-            commitments: Default::default(),
-            revealed_amount: Amount::MAX,
-            locked_commitments: Default::default(),
-            locked_revealed_amount: Default::default(),
-        });
-
-        create_substate(
-            tx,
-            network,
-            num_preshards,
-            sidechain_id,
-            XTR_FAUCET_VAULT_ADDRESS,
-            value,
-        )?;
+    if is_testnet {
+        // Create tXTR faucet
+        create_xtr_faucet(tx, network, num_preshards, sidechain_id, &mut xtr_resource)?;
+        // Create NFT faucet
+        create_nft_faucet(tx, network, num_preshards, sidechain_id)?;
     }
 
     create_substate(
@@ -144,6 +115,113 @@ where
         xtr_resource,
     )?;
 
+    Ok(())
+}
+
+fn create_xtr_faucet<TTx>(
+    tx: &mut TTx,
+    network: Network,
+    num_preshards: NumPreshards,
+    sidechain_id: Option<RistrettoPublicKeyBytes>,
+    xtr_resource: &mut Resource,
+) -> Result<(), StorageError>
+where
+    TTx: StateStoreWriteTransaction + Deref,
+    TTx::Target: StateStoreReadTransaction,
+    TTx::Addr: NodeAddressable + Serialize,
+{
+    let value = ComponentHeader {
+        template_address: tari_template_builtin::XTR_FAUCET_TEMPLATE_ADDRESS,
+        module_name: "XtrFaucet".to_string(),
+        owner_key: None,
+        owner_rule: OwnerRule::None,
+        access_rules: ComponentAccessRules::allow_all(),
+        entity_id: EntityId::default(),
+        body: ComponentBody {
+            state: cbor!({"vault" => XTR_FAUCET_VAULT_ADDRESS}).unwrap(),
+        },
+    };
+    create_substate(
+        tx,
+        network,
+        num_preshards,
+        sidechain_id,
+        XTR_FAUCET_COMPONENT_ADDRESS,
+        value,
+    )?;
+
+    xtr_resource.increase_total_supply(Amount::MAX);
+    let value = Vault::new(ResourceContainer::Confidential {
+        address: CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
+        commitments: Default::default(),
+        revealed_amount: Amount::MAX,
+        locked_commitments: Default::default(),
+        locked_revealed_amount: Default::default(),
+    });
+
+    create_substate(
+        tx,
+        network,
+        num_preshards,
+        sidechain_id,
+        XTR_FAUCET_VAULT_ADDRESS,
+        value,
+    )?;
+    Ok(())
+}
+
+fn create_nft_faucet<TTx>(
+    tx: &mut TTx,
+    network: Network,
+    num_preshards: NumPreshards,
+    sidechain_id: Option<RistrettoPublicKeyBytes>,
+) -> Result<(), StorageError>
+where
+    TTx: StateStoreWriteTransaction + Deref,
+    TTx::Target: StateStoreReadTransaction,
+    TTx::Addr: NodeAddressable + Serialize,
+{
+    let value = ComponentHeader {
+        template_address: tari_template_builtin::NFT_FAUCET_TEMPLATE_ADDRESS,
+        module_name: "NftFaucet".to_string(),
+        owner_key: None,
+        owner_rule: OwnerRule::None,
+        access_rules: ComponentAccessRules::allow_all(),
+        entity_id: EntityId::default(),
+        body: ComponentBody {
+            state: cbor!({"serial_number" => 0u64}).unwrap(),
+        },
+    };
+    create_substate(
+        tx,
+        network,
+        num_preshards,
+        sidechain_id,
+        NFT_FAUCET_COMPONENT_ADDRESS,
+        value,
+    )?;
+
+    let metadata = Metadata::from([("name", "NFT Faucet"), (TOKEN_SYMBOL, "TNFT")]);
+
+    let access_rules = ResourceAccessRules::new().mintable(rule!(component(NFT_FAUCET_COMPONENT_ADDRESS)));
+    let value = Resource::new(
+        ResourceType::NonFungible,
+        None,
+        OwnerRule::None,
+        access_rules,
+        metadata,
+        None,
+        None,
+    );
+
+    create_substate(
+        tx,
+        network,
+        num_preshards,
+        sidechain_id,
+        NFT_FAUCET_RESOURCE_ADDRESS,
+        value,
+    )?;
     Ok(())
 }
 

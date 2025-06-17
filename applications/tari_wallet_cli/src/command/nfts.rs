@@ -32,7 +32,7 @@ use clap::{Args, Subcommand};
 use tari_ootle_wallet_sdk::models::NonFungibleToken;
 use tari_template_lib::prelude::{Amount, NonFungibleId};
 use tari_wallet_daemon_client::{
-    types::{GetAccountNftRequest, ListAccountNftRequest, MintAccountNftRequest},
+    types::{GetAccountNftRequest, ListAccountNftRequest, MintFaucetNftRequest},
     ComponentAddressOrName,
     WalletDaemonClient,
 };
@@ -57,10 +57,8 @@ pub struct MintAccountNftArgs {
     pub metadata_file: Option<PathBuf>,
     #[clap(long, short = 'm', alias = "metadata")]
     pub metadata: Option<serde_json::Value>,
-    #[clap(long, short = 'f', alias = "mint-fee")]
-    pub mint_fee: Option<u32>,
-    #[clap(long, short = 'c', alias = "create-account-nft-fee")]
-    pub create_account_nft_fee: Option<u32>,
+    #[clap(long, short = 'c', alias = "fee")]
+    pub max_fee: Option<u32>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -83,7 +81,7 @@ impl AccountNftSubcommand {
     pub async fn handle(self, mut client: WalletDaemonClient) -> Result<(), anyhow::Error> {
         match self {
             Self::Mint(args) => {
-                handle_mint_account_nft(args, &mut client).await?;
+                handle_mint_faucet_nft(args, &mut client).await?;
             },
             Self::Get(args) => handle_get_account_nft(args, &mut client).await?,
             Self::List(args) => handle_list_account_nfts(args, &mut client).await?,
@@ -92,7 +90,7 @@ impl AccountNftSubcommand {
     }
 }
 
-pub async fn handle_mint_account_nft(
+pub async fn handle_mint_faucet_nft(
     args: MintAccountNftArgs,
     client: &mut WalletDaemonClient,
 ) -> Result<(), anyhow::Error> {
@@ -100,15 +98,14 @@ pub async fn handle_mint_account_nft(
         account,
         metadata_file,
         metadata,
-        mint_fee,
-        create_account_nft_fee,
+        max_fee,
     } = args;
 
     let account = if let Some(account) = account {
         account
     } else {
         println!(
-            "Please paste console wallet account name or respective component address from mint_account_nft call in \
+            "Please paste console wallet account name or respective component address from mint_faucet_nft call in \
              the terminal: Press <Ctrl/Cmd + d> once done"
         );
 
@@ -126,7 +123,7 @@ pub async fn handle_mint_account_nft(
             .map_err(|e| anyhow!("Failed to parse metadata JSON: {}", e))?
     } else {
         println!(
-            "Please paste console wallet JSON metadata from mint_account_nft call in the terminal: Press <Ctrl/Cmd + \
+            "Please paste console wallet JSON metadata from mint_faucet_nft call in the terminal: Press <Ctrl/Cmd + \
              d> once done"
         );
 
@@ -138,23 +135,22 @@ pub async fn handle_mint_account_nft(
 
     println!("✅ Mint account NFT submitted");
 
-    let req = MintAccountNftRequest {
+    let req = MintFaucetNftRequest {
         account,
-        metadata,
-        mint_fee: mint_fee.map(|f| Amount::new(i64::from(f))),
-        create_account_nft_fee: create_account_nft_fee.map(|f| Amount::new(i64::from(f))),
-        existing_nft_component: None,
+        mutable_data: metadata,
+        number_to_mint: 1,
+        max_fee: max_fee.map(|f| Amount::new(i64::from(f))),
     };
 
     let resp = client
-        .mint_account_nft(req)
+        .mint_faucet_nft(req)
         .await
         .map_err(|e| anyhow!("Failed to mint account NFT with error = {}", e.to_string()))?;
 
     println!("Total transaction fee: {}", resp.fee);
     println!();
 
-    summarize_finalize_result(&resp.result);
+    summarize_finalize_result(&resp.finalize);
     Ok(())
 }
 

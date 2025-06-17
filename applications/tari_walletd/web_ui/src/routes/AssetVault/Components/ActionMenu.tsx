@@ -23,7 +23,7 @@
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import { useTheme } from "@mui/material/styles";
-import { useAccountsCreateFreeTestCoins } from "../../../api/hooks/useAccounts";
+import { useMintTestnetFaucetNfts, useAccountsCreateFreeTestCoins } from "../../../api/hooks/useAccounts";
 import ClaimBurn from "./ClaimBurn";
 import useAccountStore from "../../../store/accountStore";
 import SendMoney from "./SendMoney";
@@ -31,9 +31,11 @@ import ClaimFees from "./ClaimFees";
 import PublishTemplate from "./PublishTemplate";
 import { substateIdToString } from "@tari-project/typescript-bindings";
 import TransferNft from "./TransferNft";
+import AddIcon from "@mui/icons-material/Add";
 
 function ActionMenu() {
-  const { mutate } = useAccountsCreateFreeTestCoins();
+  const { mutate: claimTestnetFaucetFunds } = useAccountsCreateFreeTestCoins();
+  const { mutate: claimTestnetFaucetNfts } = useMintTestnetFaucetNfts();
   const { account, setAccount, setPublicKey } = useAccountStore();
   const theme = useTheme();
   if (!account) {
@@ -41,7 +43,7 @@ function ActionMenu() {
   }
 
   const onClaimFreeCoins = () => {
-    mutate(
+    claimTestnetFaucetFunds(
       {
         account: { ComponentAddress: substateIdToString(account.address) },
         amount: 1_000_000_000,
@@ -51,6 +53,23 @@ function ActionMenu() {
         onSuccess: (resp) => {
           setAccount(resp.account);
           setPublicKey(resp.public_key);
+        },
+      },
+    );
+  };
+  const onClaimTestnetNfts = () => {
+    claimTestnetFaucetNfts(
+      {
+        account: { ComponentAddress: substateIdToString(account.address) },
+        numberToMint: 5,
+        mutableData: {
+          image_url: "https://img.freepik.com/free-vector/gradient-isometric-nft-concept_52683-62009.jpg?w=740",
+        },
+        maxFee: 2000,
+      },
+      {
+        onSuccess: (resp) => {
+          console.log(resp);
         },
       },
     );
@@ -68,10 +87,13 @@ function ActionMenu() {
       <TransferNft />
       <ClaimFees />
       <Button variant="outlined" onClick={onClaimFreeCoins}>
-        Claim Free Testnet Coins
+        Claim Testnet Coins
       </Button>
       <ClaimBurn />
       <PublishTemplate />
+      <Button variant="outlined" onClick={() => onClaimTestnetNfts()}>
+        Claim Testnet NFTs
+      </Button>
     </Box>
   );
 }

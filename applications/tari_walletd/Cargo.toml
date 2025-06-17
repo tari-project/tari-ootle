@@ -53,7 +53,7 @@ mime_guess = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true, default-features = true }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["arbitrary_precision"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = [
     "default",

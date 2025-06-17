@@ -23,10 +23,10 @@
 use tari_template_lib_types::TemplateAddress;
 
 pub const ACCOUNT_TEMPLATE_ADDRESS: TemplateAddress = TemplateAddress::from_array([0; 32]);
-pub const ACCOUNT_NFT_TEMPLATE_ADDRESS: TemplateAddress = TemplateAddress::from_array([
+pub const NFT_FAUCET_TEMPLATE_ADDRESS: TemplateAddress = TemplateAddress::from_array([
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
 ]);
-pub const FAUCET_TEMPLATE_ADDRESS: TemplateAddress = TemplateAddress::from_array([
+pub const XTR_FAUCET_TEMPLATE_ADDRESS: TemplateAddress = TemplateAddress::from_array([
     1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ]);
 
@@ -45,11 +45,11 @@ pub fn all_builtin_templates() -> impl Iterator<Item = (TemplateAddress, &'stati
             include_bytes!("../templates/account/account.wasm").as_slice(),
         ),
         (
-            ACCOUNT_NFT_TEMPLATE_ADDRESS,
-            include_bytes!("../templates/account_nfts/account_nfts.wasm").as_slice(),
+            NFT_FAUCET_TEMPLATE_ADDRESS,
+            include_bytes!("../templates/nft_faucet/nft_faucet.wasm").as_slice(),
         ),
         (
-            FAUCET_TEMPLATE_ADDRESS,
+            XTR_FAUCET_TEMPLATE_ADDRESS,
             include_bytes!("../templates/faucet/faucet.wasm").as_slice(),
         ),
     ]

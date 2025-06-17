@@ -199,10 +199,42 @@ impl ResourceManager {
         mutable_data: &U,
         supply: usize,
     ) -> Bucket {
-        let mut tokens = BTreeMap::new();
+        let mut counter = 0;
+        self.mint_many_non_fungible_with(metadata, mutable_data, || {
+            counter += 1;
+            if counter > supply {
+                return None;
+            }
+            Some(NonFungibleId::random())
+        })
+    }
+
+    /// Mints multiple new non-fungible tokens of the resource being managed.
+    /// The producer function will be called until it returns None. Returns a `Bucket` with the newly created tokens.
+    ///
+    /// It will panic if:
+    /// * The resource is not a non-fungible
+    /// * The caller doesn't have permissions (via access rules) for minting
+    /// * The producer function returns duplicate IDs
+    ///
+    /// # Arguments
+    ///
+    /// * `metadata` - Immutable information used to describe each new token
+    /// * `mutable_data` - Initial data that each token will hold and that can potentially be updated in future
+    ///   instructions
+    /// * `producer` - A function that produces a new `NonFungibleId` for each token to be minted.
+    pub fn mint_many_non_fungible_with<T, U, F>(&self, metadata: &T, mutable_data: &U, mut producer: F) -> Bucket
+    where
+        T: Serialize + ?Sized,
+        U: Serialize + ?Sized,
+        F: FnMut() -> Option<NonFungibleId>,
+    {
         let token_data = (to_value(metadata).unwrap(), to_value(mutable_data).unwrap());
-        for _ in 0..supply {
-            let id = NonFungibleId::random();
+        let mut tokens = BTreeMap::new();
+        while let Some(id) = producer() {
+            if tokens.contains_key(&id) {
+                panic!("Non-fungible token with ID {id} already exists in the resource");
+            }
             tokens.insert(id, token_data.clone());
         }
         self.mint_internal(MintResourceArg {

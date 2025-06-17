@@ -31,6 +31,7 @@ import {
   accountsGetDefault,
   accountsList,
   accountsTransfer,
+  mintFaucetNfts,
   nftList,
   validatorsGetFees,
 } from "../../utils/json_rpc";
@@ -145,17 +146,45 @@ export const useAccountsCreateFreeTestCoins = () => {
     account: ComponentAddressOrName;
     amount: number;
     fee: number | null;
-  }) => {
-    const result = await accountsCreateFreeTestCoins({
+  }) =>
+    accountsCreateFreeTestCoins({
       account,
       amount,
       max_fee: fee,
       key_id: null,
     });
-    return result;
-  };
 
   return useMutation(createFreeTestCoins, {
+    onError: (error: ApiError) => {
+      console.error(error);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries(["transactions"]);
+      queryClient.invalidateQueries(["accounts_balances"]);
+    },
+  });
+};
+
+export const useMintTestnetFaucetNfts = () => {
+  const callApi = async ({
+    account,
+    numberToMint,
+    mutableData,
+    maxFee,
+  }: {
+    account: ComponentAddressOrName;
+    numberToMint: number;
+    mutableData: object;
+    maxFee: number | null;
+  }) =>
+    mintFaucetNfts({
+      account,
+      mutable_data: mutableData,
+      number_to_mint: BigInt(numberToMint),
+      max_fee: maxFee,
+    });
+
+  return useMutation(callApi, {
     onError: (error: ApiError) => {
       console.error(error);
     },

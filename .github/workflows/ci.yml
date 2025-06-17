@@ -68,11 +68,11 @@ jobs:
 
       - name: install
         run: |
-          npm install prettier@3.2.4
+          npm install -g prettier@3.2.4
 
       - name: prettier
         run: |
-          npx prettier --check "./applications/{tari_validator_node/web_ui,tari_indexer/web_ui,tari_ootle_walletd/web_ui}/src/*.{ts,tsx,json}"
+          prettier --check "./applications/{tari_validator_node/web_ui,tari_indexer/web_ui,tari_ootle_walletd/web_ui}/src/*.{ts,tsx,json}"
 
   clippy:
     name: clippy

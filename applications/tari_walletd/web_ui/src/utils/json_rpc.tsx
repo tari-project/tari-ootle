@@ -59,6 +59,8 @@ import type {
   KeysSetActiveResponse,
   ListAccountNftRequest,
   ListAccountNftResponse,
+  MintFaucetNftRequest,
+  MintFaucetNftResponse,
   PublishTemplateRequest,
   PublishTemplateResponse,
   RevealFundsRequest,
@@ -282,6 +284,8 @@ export const accountsSetDefault = (request: AccountSetDefaultRequest): Promise<A
 export const accountsCreateFreeTestCoins = (
   request: AccountsCreateFreeTestCoinsRequest,
 ): Promise<AccountsCreateFreeTestCoinsResponse> => client().then((c) => c.createFreeTestCoins(request));
+export const mintFaucetNfts = (request: MintFaucetNftRequest): Promise<MintFaucetNftResponse> =>
+  client().then((c) => c.mintFaucetNfts(request));
 export const accountsGetDefault = (request: AccountGetDefaultRequest): Promise<AccountGetResponse> =>
   client().then((c) => c.accountsGetDefault(request));
 

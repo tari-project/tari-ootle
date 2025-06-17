@@ -33,7 +33,7 @@ use tari_engine_types::{
     virtual_substate::{VirtualSubstate, VirtualSubstateId},
 };
 use tari_ootle_common_types::substate_type::SubstateType;
-use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRESS};
+use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     call_args,
     models::{Amount, ComponentAddress, NonFungible, NonFungibleAddress, NonFungibleId, ResourceAddress},
@@ -1014,7 +1014,10 @@ mod emoji_id {
 }
 
 mod tickets {
-    use tari_template_lib::call_args;
+    use tari_template_lib::{
+        call_args,
+        constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS},
+    };
 
     use super::*;
 
@@ -1031,38 +1034,14 @@ mod tickets {
         // create an account
         let (account_address, owner_proof, secret) = template_test.create_funded_account();
 
-        // create a fungible token faucet, we are going to use those tokens as payments
-        // TODO: use Thaums instead when they're implemented
-        let faucet_template = template_test.get_template_address("TestFaucet");
-        let initial_supply = Amount(1_000_000_000_000);
-        let result = template_test.execute_expect_success(
-            Transaction::builder()
-                .call_function(faucet_template, "mint", args![initial_supply])
-                .build_and_seal(&secret),
-            vec![],
-        );
-        let faucet_component: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
-        let faucet_resource = result
-            .finalize
-            .result
-            .expect("Faucet mint failed")
-            .up_iter()
-            .find_map(|(addr, _)| addr.as_resource_address())
-            .unwrap();
-
         // initialize the ticket seller
         let ticket_template = template_test.get_template_address("TicketSeller");
-        let initial_supply: usize = 10;
+        let initial_supply = 10;
         let price = Amount(20);
         let event_description = "My music festival".to_string();
         let result = template_test.execute_expect_success(
             Transaction::builder()
-                .call_function(ticket_template, "new", args![
-                    faucet_resource,
-                    initial_supply,
-                    price,
-                    event_description
-                ])
+                .call_function(ticket_template, "new", args![initial_supply, price, event_description])
                 .build_and_seal(&secret),
             vec![owner_proof.clone()],
         );
@@ -1077,12 +1056,12 @@ mod tickets {
 
         // at the beggining we have the initial supply of tickeds
         let total_supply: Amount = template_test.call_method(ticket_seller, "total_supply", args![], vec![]);
-        assert_eq!(total_supply, Amount(initial_supply as i64));
+        assert_eq!(total_supply, Amount(initial_supply));
 
         // get some funds into the account
         template_test.execute_expect_success(
             Transaction::builder()
-                .call_method(faucet_component, "take_free_coins", args![])
+                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take_free_coins", args![])
                 .put_last_instruction_output_on_workspace("coins")
                 .call_method(account_address, "deposit", args![Workspace("coins")])
                 .build_and_seal(&secret),
@@ -1092,7 +1071,7 @@ mod tickets {
         // buy a ticket
         template_test.execute_expect_success(
             Transaction::builder()
-                .call_method(account_address, "withdraw", args![faucet_resource, Amount(20)])
+                .call_method(account_address, "withdraw", args![XTR, Amount(20)])
                 .put_last_instruction_output_on_workspace("payment")
                 .call_method(ticket_seller, "buy_ticket", args![Workspace("payment")])
                 .put_last_instruction_output_on_workspace("nft_bucket")
@@ -1275,5 +1254,5 @@ fn test_builtin_templates() {
 
     let account_nft_template_address: TemplateAddress =
         template_test.call_function("BuiltinTest", "get_account_nft_template_address", args![], vec![]);
-    assert_eq!(account_nft_template_address, ACCOUNT_NFT_TEMPLATE_ADDRESS);
+    assert_eq!(account_nft_template_address, NFT_FAUCET_TEMPLATE_ADDRESS);
 }

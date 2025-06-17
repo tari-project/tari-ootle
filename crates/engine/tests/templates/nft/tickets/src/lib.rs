@@ -41,13 +41,7 @@ mod tickets {
     }
 
     impl TicketSeller {
-        // TODO: in this example we need to specify the payment resource, but there should be native support for Thaums
-        pub fn new(
-            payment_resource_address: ResourceAddress,
-            initial_supply: usize,
-            price: Amount,
-            event_description: String,
-        ) -> Component<Self> {
+        pub fn new(initial_supply: usize, price: Amount, event_description: String) -> Component<Self> {
             let owner = CallerContext::transaction_signer_public_key().into();
             // Create the non-fungible resource
             let resource_address = ResourceBuilder::non_fungible().with_token_symbol("tix")
@@ -64,7 +58,7 @@ mod tickets {
             );
             let tickets = Vault::from_bucket(ticket_bucket);
 
-            let earnings = Vault::new_empty(payment_resource_address);
+            let earnings = Vault::new_empty(XTR);
 
             Component::new(Self {
                 resource_address,

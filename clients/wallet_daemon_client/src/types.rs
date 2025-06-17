@@ -1006,13 +1006,12 @@ pub struct AuthRevokeTokenResponse {}
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
-pub struct MintAccountNftRequest {
+pub struct MintFaucetNftRequest {
     pub account: ComponentAddressOrName,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub metadata: serde_json::Value,
-    pub mint_fee: Option<Amount>,
-    pub create_account_nft_fee: Option<Amount>,
-    pub existing_nft_component: Option<ComponentAddress>,
+    #[cfg_attr(feature = "ts", ts(type = "object"))]
+    pub mutable_data: serde_json::Value,
+    pub number_to_mint: u64,
+    pub max_fee: Option<Amount>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1021,10 +1020,10 @@ pub struct MintAccountNftRequest {
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
-pub struct MintAccountNftResponse {
-    pub nft_id: NonFungibleId,
-    pub resource_address: ResourceAddress,
-    pub result: FinalizeResult,
+pub struct MintFaucetNftResponse {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub transaction_id: TransactionId,
+    pub finalize: FinalizeResult,
     pub fee: Amount,
 }
 

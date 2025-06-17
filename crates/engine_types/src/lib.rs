@@ -33,6 +33,7 @@ pub mod id_provider;
 
 mod argument_parser;
 mod instruction_call;
+pub mod json_cbor;
 pub mod published_template;
 mod substate_serde;
 mod validator_fee;

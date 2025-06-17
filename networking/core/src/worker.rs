@@ -685,7 +685,7 @@ where
                 info!(target: LOG_TARGET, "ℹ️ RendezvousClient event: {:?}", event);
             },
             PeerStore(event) => {
-                info!(target: LOG_TARGET, "🧑‍🧑‍🧒‍🧒 PeerStore event: {:?}", event);
+                debug!(target: LOG_TARGET, "🧑‍🧑‍🧒‍🧒 PeerStore event: {:?}", event);
             },
         }
 

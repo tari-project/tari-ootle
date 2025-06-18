@@ -37,9 +37,10 @@ use minotari_app_utilities::common_cli_args::CommonCliArgs;
 use minotari_console_wallet::{run_wallet_with_cli, ApplicationConfig};
 use minotari_wallet::WalletConfig;
 use tari_common::{configuration::CommonConfig, exit_codes::ExitError};
+use tari_common_sqlite::connection::DbConnectionUrl;
 use tari_common_types::grpc_authentication::GrpcAuthentication;
 use tari_comms::multiaddr::Multiaddr;
-use tari_comms_dht::{DbConnectionUrl, DhtConfig};
+use tari_comms_dht::DhtConfig;
 use tari_p2p::{auto_update::AutoUpdateConfig, Network, PeerSeedsConfig, TransportType};
 use tari_shutdown::Shutdown;
 use tokio::{runtime, runtime::Runtime};
@@ -269,6 +270,7 @@ pub fn run_wallet(runtime: Runtime, config: &mut ApplicationConfig, shutdown: &m
         command2: None,
         profile_with_tokio_console: false,
         libtor_data_dir: None,
+        birthday: None,
     };
 
     run_wallet_with_cli(shutdown, runtime, config, cli)

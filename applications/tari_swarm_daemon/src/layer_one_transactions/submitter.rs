@@ -5,7 +5,7 @@ use anyhow::bail;
 use log::info;
 use minotari_node_grpc_client::grpc;
 use minotari_wallet_grpc_client::WalletGrpcClient;
-use tari_core::transactions::transaction_components::encrypted_data::{PaymentId, TxType};
+use tari_core::transactions::transaction_components::payment_id::{PaymentId, TxType};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_ootle_common_types::layer_one_transaction::{
     LayerOnePayloadType,

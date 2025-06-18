@@ -61,7 +61,7 @@ where TSpec: ConsensusSpec
                 event = epoch_events.recv() => {
                     match event {
                         Ok(event) => {
-                            if let Some(event) = self.on_epoch_event( event).await? {
+                            if let Some(event) = self.on_epoch_event(event).await? {
                                 return Ok(event);
                             }
                         },

@@ -288,7 +288,8 @@ impl Default for TariWorld {
             CompressedPublicKey::from_secret_key(&wallet_private_key),
             Network::LocalNet,
             TariAddressFeatures::create_interactive_and_one_sided(),
-        );
+        )
+        .unwrap();
         Self {
             base_nodes: IndexMap::new(),
             wallets: IndexMap::new(),

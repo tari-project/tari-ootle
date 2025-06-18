@@ -8,7 +8,7 @@ use minotari_wallet_grpc_client::WalletGrpcClient;
 use serde::Serialize;
 use serde_json::json;
 use tari_common_types::types::PrivateKey;
-use tari_core::transactions::transaction_components::encrypted_data::{PaymentId, TxType};
+use tari_core::transactions::transaction_components::payment_id::{PaymentId, TxType};
 use tari_crypto::{
     ristretto::{pedersen::PedersenCommitment, RistrettoComSig, RistrettoPublicKey},
     tari_utilities::ByteArray,
@@ -104,7 +104,10 @@ impl MinoTariWalletProcess {
 
     pub async fn get_balance(&self) -> anyhow::Result<grpc::GetBalanceResponse> {
         let mut client = self.connect_client().await?;
-        let balance = client.get_balance(grpc::GetBalanceRequest {}).await?.into_inner();
+        let balance = client
+            .get_balance(grpc::GetBalanceRequest { payment_id: None })
+            .await?
+            .into_inner();
         Ok(balance)
     }
 

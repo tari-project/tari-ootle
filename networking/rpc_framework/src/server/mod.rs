@@ -569,6 +569,7 @@ where TSvc: Service<Request<Bytes>, Response = Response<Body>, Error = RpcStatus
     }
 
     #[instrument(name = "rpc::server::handle_req", skip(self, request), err, fields(request_size = request.len()))]
+    #[allow(clippy::too_many_lines)]
     async fn handle_request(&mut self, mut request: Bytes) -> Result<(), RpcServerError> {
         let decoded_msg = proto::RpcRequest::decode(&mut request)?;
 

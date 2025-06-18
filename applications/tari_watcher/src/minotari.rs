@@ -8,7 +8,7 @@ use log::*;
 use minotari_app_grpc::tari_rpc::{self as grpc, GetActiveValidatorNodesResponse, RegisterValidatorNodeResponse};
 use minotari_node_grpc_client::BaseNodeGrpcClient;
 use minotari_wallet_grpc_client::WalletGrpcClient;
-use tari_core::transactions::transaction_components::encrypted_data::{PaymentId, TxType};
+use tari_core::transactions::transaction_components::payment_id::{PaymentId, TxType};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_ootle_common_types::layer_one_transaction::{
     LayerOnePayloadType,
@@ -203,7 +203,6 @@ impl MinotariNodes {
                             tx_type: TxType::ValidatorNodeRegistration,
                         }
                         .to_bytes(),
-                        // TODO: This will not work as the deployment key is a secret key.
                         sidechain_deployment_key: registration
                             .sidechain_public_key
                             .map(|key| key.to_vec())

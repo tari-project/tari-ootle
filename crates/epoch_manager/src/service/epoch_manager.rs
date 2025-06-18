@@ -34,6 +34,7 @@ use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::FromByteType;
 use tari_ootle_common_types::{
     committee::{Committee, CommitteeInfo, CommitteeMember},
+    displayable::Displayable,
     layer_one_transaction::{LayerOnePayloadType, LayerOneTransactionDef},
     optional::Optional,
     DerivableFromPublicKey,
@@ -119,11 +120,7 @@ where TSpec: EpochManagerSpec
             return Ok(());
         }
 
-        if self.is_initial_epoch_sync_complete {
-            info!(target: LOG_TARGET, "🌟 A new epoch {} is upon us", epoch);
-        } else {
-            debug!(target: LOG_TARGET, "🌟 A new epoch {} is upon us", epoch);
-        }
+        self.has_epoch_changed = true;
 
         // In the base layer case, the epoch_hash is the first block of the epoch
         // persist the epoch data including the validator node set
@@ -232,7 +229,6 @@ where TSpec: EpochManagerSpec
 
         tx.commit()?;
         self.set_current_epoch(epoch);
-        self.has_epoch_changed = true;
         self.current_epoch_hash = epoch_hash;
         Ok(())
     }
@@ -403,10 +399,17 @@ where TSpec: EpochManagerSpec
 
         if self.has_epoch_changed {
             let num_committees = self.get_number_of_committees(self.current_epoch())?;
+            let epoch = self.current_epoch();
             let shard_group = self
-                .get_our_validator_node(self.current_epoch())
+                .get_our_validator_node(epoch)
                 .optional()?
                 .map(|vn| vn.shard_key.to_shard_group(self.config.num_preshards, num_committees));
+            let level = if self.is_initial_epoch_sync_complete {
+                Level::Info
+            } else {
+                Level::Debug
+            };
+            log!(target: LOG_TARGET, level, "🌟 A new epoch {} is upon us. Shard group: {}", epoch, shard_group.display());
 
             self.publish_event(EpochManagerEvent::EpochChanged {
                 epoch: self.current_epoch(),

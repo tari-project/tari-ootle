@@ -16,7 +16,7 @@ use crate::{
 };
 
 pub fn create_rocksdb(cf_names: impl IntoIterator<Item = &'static str>) -> (TransactionDB<SingleThreaded>, TempDir) {
-    let temp_dir = tempfile::Builder::new().keep(false).tempdir().unwrap();
+    let temp_dir = tempfile::Builder::new().disable_cleanup(false).tempdir().unwrap();
     let path = temp_dir.path().join("rocksdb");
     let mut db_opts = rocksdb::Options::default();
     db_opts.set_error_if_exists(false);

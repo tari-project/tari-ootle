@@ -21,7 +21,7 @@ use log::warn;
 use minotari_app_grpc::tari_rpc::{RegisterValidatorNodeRequest, Signature};
 use notify::Watcher;
 use tari_base_node_client::{grpc::GrpcBaseNodeClient, BaseNodeClient};
-use tari_core::transactions::transaction_components::encrypted_data::{PaymentId, TxType};
+use tari_core::transactions::transaction_components::payment_id::{PaymentId, TxType};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{layer_one_transaction::LayerOneTransactionDef, Epoch, SubstateAddress};

@@ -6,7 +6,7 @@ use std::time::Duration;
 use cucumber::{given, then, when};
 use minotari_app_grpc::tari_rpc::{GetBalanceRequest, SubmitValidatorEvictionProofRequest, ValidateRequest};
 use tari_common_types::types::PrivateKey;
-use tari_core::transactions::transaction_components::encrypted_data::{PaymentId, TxType};
+use tari_core::transactions::transaction_components::payment_id::{PaymentId, TxType};
 use tari_crypto::{
     ristretto::{pedersen::PedersenCommitment, RistrettoComSig, RistrettoPublicKey},
     tari_utilities::ByteArray,
@@ -99,7 +99,11 @@ pub async fn check_balance(world: &mut TariWorld, wallet_name: String, balance: 
 
     loop {
         let _result = client.validate_all_transactions(ValidateRequest {}).await.unwrap();
-        let resp = client.get_balance(GetBalanceRequest {}).await.unwrap().into_inner();
+        let resp = client
+            .get_balance(GetBalanceRequest { payment_id: None })
+            .await
+            .unwrap()
+            .into_inner();
         if resp.available_balance >= balance {
             break;
         }

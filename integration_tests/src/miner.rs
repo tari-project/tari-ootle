@@ -23,6 +23,7 @@
 use std::time::Duration;
 
 use minotari_app_grpc::{
+    conversions::transaction_output::grpc_output_with_payref,
     tari_rpc,
     tari_rpc::{pow_algo::PowAlgos, NewBlockTemplate, NewBlockTemplateRequest, PowAlgo},
 };
@@ -33,7 +34,7 @@ use tari_core::{
     transactions::{
         generate_coinbase_with_wallet_output,
         tari_amount::MicroMinotari,
-        transaction_components::{encrypted_data::PaymentId, RangeProofType, WalletOutput},
+        transaction_components::{payment_id::PaymentId, RangeProofType, WalletOutput},
         transaction_key_manager::{MemoryDbKeyManager, TariKeyId},
     },
 };
@@ -166,7 +167,7 @@ async fn create_block_template_with_coinbase(
     .unwrap();
     let body = block_template.body.as_mut().unwrap();
 
-    let grpc_output = tari_rpc::TransactionOutput::try_from(coinbase_output).unwrap();
+    let grpc_output = grpc_output_with_payref(coinbase_output, None).unwrap();
     body.outputs.push(grpc_output);
     body.kernels.push(coinbase_kernel.into());
 

@@ -67,7 +67,7 @@ pub const fn num_preshards() -> NumPreshards {
 /// Create a RocksDbStateStore and a temporary directory
 /// NOTE: this takes around 1.5 s on my machine (AMD Ryzen 9 5950X, SSD)
 pub fn create_rocksdb() -> (RocksDbStateStore<String>, TempDir) {
-    let temp_dir = tempfile::Builder::new().keep(false).tempdir().unwrap();
+    let temp_dir = tempfile::Builder::new().disable_cleanup(false).tempdir().unwrap();
     let db_file = temp_dir.path().join("rocksdb");
     (
         RocksDbStateStore::open(db_file, DatabaseOptions::default()).unwrap(),

@@ -16,6 +16,7 @@ use crate::{displayable::Displayable, shard::Shard, NumPreshards, ShardGroup, Su
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct SubstateRequirement {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub substate_id: SubstateId,
     pub version: Option<u32>,
 }

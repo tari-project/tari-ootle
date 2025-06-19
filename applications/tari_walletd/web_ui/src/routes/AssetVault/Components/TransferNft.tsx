@@ -47,6 +47,7 @@ import { SelectChangeEvent } from "@mui/material/Select/Select";
 import { useListNfts, useNftsTransfer } from "../../../api/hooks/useNfts";
 import { substateIdToString } from "../../../utils/helpers";
 import { useAccountsList } from "../../../api/hooks/useAccounts";
+import { convertCborValue } from "../../../utils/cbor";
 
 export default function TransferNft() {
   const [open, setOpen] = useState(false);
@@ -279,23 +280,20 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
         accountNfts.map((nft) => {
           let nftName = "";
 
-          const nftData: { Text: string }[][] = nft.data.Tag[1].Map;
-          nftData.forEach((data) => {
-            const key = data[0].Text;
-            const value = data[1].Text;
-            if (key === "name") {
-              nftName = value;
-              return;
-            }
-          });
+          const nftData = convertCborValue(nft.data);
+          if (nftData) {
+            Object.keys(nftData).forEach((key) => {
+              const value = nftData[key];
+              if (key === "name") {
+                nftName = value;
+                return;
+              }
+            });
+          }
 
           let nft_address = getNftAddress(nft);
 
-          if (nftName !== "") {
-            return { address: nft_address, name: nftName };
-          }
-
-          return { address: nft_address, name: nft_address };
+          return { address: nft_address, name: nftName || nft_address };
         }),
       );
     }

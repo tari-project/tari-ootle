@@ -219,12 +219,7 @@ jobs:
           choco upgrade protoc -y
           rustup target add ${{ matrix.builds.target }}
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: lts/*
-          node-version-file: applications/tari_walletd/web_ui/package.json
-          cache: 'npm'
+      - uses: pnpm/action-setup@v4
 
       - name: Set environment variables - Nix
         if: ${{ ! startsWith(runner.os,'Windows') }}

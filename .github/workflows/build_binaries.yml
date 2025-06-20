@@ -223,6 +223,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: lts/*
+          node-version-file: applications/tari_walletd/web_ui/package.json
           cache: 'npm'
 
       - name: Set environment variables - Nix

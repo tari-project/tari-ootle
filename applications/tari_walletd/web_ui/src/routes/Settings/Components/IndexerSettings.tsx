@@ -31,7 +31,7 @@ import { useEffect } from "react";
 import { settingsGet, settingsSet } from "../../../utils/json_rpc";
 
 function IndexerSettings() {
-  // Keep the form and settings in the same format as the real settings in the dan wallet.
+  // Keep the form and settings in the same format as the real settings in the wallet.
   const [accountFormState, setAccountFormState] = useState({
     indexer_url: "",
   });

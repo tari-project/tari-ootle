@@ -220,6 +220,8 @@ jobs:
           rustup target add ${{ matrix.builds.target }}
 
       - uses: pnpm/action-setup@v4
+        with:
+          version: 10
 
       - name: Set environment variables - Nix
         if: ${{ ! startsWith(runner.os,'Windows') }}

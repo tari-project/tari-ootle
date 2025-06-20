@@ -4,6 +4,7 @@
     "runs-on": "ubuntu-22.04",
     "rust": "1.77",
     "target": "x86_64-unknown-linux-gnu",
+    "target_bins": "tari_ootle_walletd, tari_indexer, tari_validator_node, tari_swarm_daemon",
     "cross": false,
     "features": ""
   },
@@ -13,7 +14,7 @@
     "rust": "1.77",
     "target": "aarch64-unknown-linux-gnu",
     "cross": false,
-    "flags": "--workspace --exclude tari_integration_tests",
+    "target_bins": "tari_ootle_walletd, tari_indexer, tari_validator_node, tari_swarm_daemon",
     "build_enabled": true,
     "best_effort": true
   },
@@ -23,7 +24,7 @@
     "rust": "stable",
     "target": "riscv64gc-unknown-linux-gnu",
     "cross": true,
-    "flags": "--workspace --exclude tari_integration_tests",
+    "target_bins": "tari_ootle_walletd, tari_indexer, tari_validator_node, tari_swarm_daemon",
     "build_enabled": true,
     "best_effort": true
   },
@@ -32,6 +33,7 @@
     "runs-on": "macos-13",
     "rust": "1.77",
     "target": "x86_64-apple-darwin",
+    "target_bins": "tari_ootle_walletd, tari_indexer, tari_validator_node, tari_swarm_daemon",
     "cross": false,
     "features": ""
   },
@@ -40,6 +42,7 @@
     "runs-on": "macos-14",
     "rust": "1.77",
     "target": "aarch64-apple-darwin",
+    "target_bins": "tari_ootle_walletd, tari_indexer, tari_validator_node, tari_swarm_daemon",
     "cross": false,
     "features": "",
     "build_enabled": true,
@@ -50,6 +53,7 @@
     "runs-on": "windows-2019",
     "rust": "1.77",
     "target": "x86_64-pc-windows-msvc",
+    "target_bins": "tari_ootle_walletd, tari_indexer, tari_validator_node, tari_swarm_daemon",
     "cross": false,
     "features": ""
   },
@@ -59,7 +63,7 @@
     "rust": "1.77",
     "target": "aarch64-pc-windows-msvc",
     "cross": false,
-    "target_bins": "tari_ootle_wallet_cli, tari_ootle_walletd, tari_indexer, tari_validator_node, tari_signaling_server",
+    "target_bins": "tari_ootle_walletd, tari_indexer, tari_validator_node, tari_swarm_daemon",
     "features": "",
     "build_enabled": true,
     "best_effort": true

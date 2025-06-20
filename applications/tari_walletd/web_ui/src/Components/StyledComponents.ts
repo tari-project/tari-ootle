@@ -20,14 +20,14 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import Paper from "@mui/material/Paper";
-import TableCell from "@mui/material/TableCell";
+import Paper, { PaperProps } from "@mui/material/Paper";
+import TableCell, { TableCellProps } from "@mui/material/TableCell";
 import { styled } from "@mui/material/styles";
-import Box from "@mui/material/Box";
-import IconButton from "@mui/material/IconButton";
-import Typography from "@mui/material/Typography";
+import Box, { BoxProps } from "@mui/material/Box";
+import IconButton, { IconButtonProps } from "@mui/material/IconButton";
+import Typography, { TypographyProps } from "@mui/material/Typography";
 
-export const AccordionIconButton = styled(IconButton)(({ theme }) => ({
+export const AccordionIconButton: React.FC<IconButtonProps> = styled(IconButton)(({ theme }) => ({
   "backgroundColor": theme.palette.divider,
   "color": theme.palette.primary.main,
   "&:hover": {
@@ -36,13 +36,13 @@ export const AccordionIconButton = styled(IconButton)(({ theme }) => ({
   },
 }));
 
-export const StyledPaper = styled(Paper)(({ theme }) => ({
+export const StyledPaper: React.FC<PaperProps> = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(3),
   boxShadow: "10px 14px 28px rgba(35, 11, 73, 0.05)",
   border: "1px solid rgba(255,255,255,0.04)",
 }));
 
-export const InnerHeading = styled(Typography)(({ theme }) => ({
+export const InnerHeading: React.FC<TypographyProps> = styled(Typography)(({ theme }) => ({
   fontSize: theme.typography.h6.fontSize,
   textTransform: "uppercase",
   borderBottom: `1px solid ${theme.palette.divider}`,
@@ -51,11 +51,11 @@ export const InnerHeading = styled(Typography)(({ theme }) => ({
   letterSpacing: "1.5px",
 }));
 
-export const DataTableCell = styled(TableCell)(({ theme }) => ({
+export const DataTableCell: React.FC<TableCellProps> = styled(TableCell)(({ theme }) => ({
   fontFamily: "'Courier New', Courier, monospace",
 }));
 
-export const CodeBlock = styled(Box)(({ theme }) => ({
+export const CodeBlock: React.FC<BoxProps> = styled(Box)(({ theme }) => ({
   backgroundColor: theme.palette.divider,
   borderRadius: theme.shape.borderRadius,
   padding: theme.spacing(3),
@@ -63,7 +63,7 @@ export const CodeBlock = styled(Box)(({ theme }) => ({
   overflowY: "scroll",
 }));
 
-export const BoxHeading = styled(Box)(({ theme }) => ({
+export const BoxHeading: React.FC<BoxProps> = styled(Box)(({ theme }) => ({
   backgroundColor: "#fafafa",
   borderRadius: theme.shape.borderRadius,
   padding: theme.spacing(3),
@@ -72,18 +72,18 @@ export const BoxHeading = styled(Box)(({ theme }) => ({
   margin: "10px 5px",
 }));
 
-export const BoxHeading2 = styled(Box)(({ theme }) => ({
+export const BoxHeading2: React.FC<BoxProps> = styled(Box)(({ theme }) => ({
   padding: theme.spacing(2),
   borderBottom: `1px solid ${theme.palette.divider}`,
 }));
 
-export const SubHeading = styled(Typography)(() => ({
+export const SubHeading: React.FC<TypographyProps> = styled(Typography)(() => ({
   marginTop: "20px",
   marginBottom: "20px",
   textAlign: "center",
 }));
 
-export const DialogContainer = styled(Box)(({ theme }) => ({
+export const DialogContainer: React.FC<BoxProps> = styled(Box)(({ theme }) => ({
   display: "flex",
   flexDirection: "column",
   alignItems: "center",
@@ -91,7 +91,7 @@ export const DialogContainer = styled(Box)(({ theme }) => ({
   width: "100%",
 }));
 
-export const GridHeadCell = styled(Box)(({ theme, className }) => ({
+export const GridHeadCell: React.FC<BoxProps> = styled(Box)(({ theme, className }) => ({
   padding: theme.spacing(2),
   fontSize: "0.875rem",
   color: theme.palette.text.primary,
@@ -99,7 +99,7 @@ export const GridHeadCell = styled(Box)(({ theme, className }) => ({
   gridArea: `${className}`,
 }));
 
-export const GridDataCell = styled(Box)(({ theme, className }) => ({
+export const GridDataCell: React.FC<BoxProps> = styled(Box)(({ theme, className }) => ({
   padding: theme.spacing(2),
   fontSize: "0.875rem",
   color: theme.palette.text.primary,

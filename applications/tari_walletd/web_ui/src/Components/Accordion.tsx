@@ -24,9 +24,9 @@ import { styled } from "@mui/material/styles";
 import KeyboardArrowRightRoundedIcon from "@mui/icons-material/KeyboardArrowRightRounded";
 import MuiAccordion, { AccordionProps } from "@mui/material/Accordion";
 import MuiAccordionSummary, { AccordionSummaryProps } from "@mui/material/AccordionSummary";
-import MuiAccordionDetails from "@mui/material/AccordionDetails";
+import MuiAccordionDetails, { AccordionDetailsProps } from "@mui/material/AccordionDetails";
 
-export const Accordion = styled((props: AccordionProps) => (
+export const Accordion: React.FC<AccordionProps> = styled((props: AccordionProps) => (
   <MuiAccordion disableGutters elevation={0} square {...props} />
 ))(({ theme }) => ({
   "border": `2px solid ${theme.palette.background.paper}`,
@@ -38,7 +38,7 @@ export const Accordion = styled((props: AccordionProps) => (
   },
 }));
 
-export const AccordionSummary = styled((props: AccordionSummaryProps) => (
+export const AccordionSummary: React.FC<AccordionSummaryProps> = styled((props: AccordionSummaryProps) => (
   <MuiAccordionSummary expandIcon={<KeyboardArrowRightRoundedIcon />} {...props} />
 ))(({ theme }) => ({
   "backgroundColor": theme.palette.divider,
@@ -51,6 +51,6 @@ export const AccordionSummary = styled((props: AccordionSummaryProps) => (
   },
 }));
 
-export const AccordionDetails = styled(MuiAccordionDetails)(({ theme }) => ({
+export const AccordionDetails: React.FC<AccordionDetailsProps> = styled(MuiAccordionDetails)(({ theme }) => ({
   padding: theme.spacing(2),
 }));

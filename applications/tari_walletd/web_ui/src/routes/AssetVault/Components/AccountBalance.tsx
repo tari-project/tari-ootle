@@ -33,6 +33,7 @@ import useAccountStore from "../../../store/accountStore";
 import { substateIdToString } from "@tari-project/typescript-bindings";
 import { useEffect } from "react";
 
+const XTR_RESOURCE = "resource_0101010101010101010101010101010101010101010101010101010101010101";
 export default function AccountBalance() {
   const theme = useTheme();
   const { showBalance, setShowBalance, account } = useAccountStore();
@@ -52,7 +53,7 @@ export default function AccountBalance() {
     refetch();
   }, [account]);
 
-  const balanceObj = balancesData?.balances.find((b) => b.token_symbol === "XTR") || balancesData?.balances[0];
+  const balanceObj = balancesData?.balances.find((b) => b.resource_address === XTR_RESOURCE);
   const balance = balanceObj?.balance || 0 + (balanceObj?.confidential_balance || 0);
 
   let formattedBalance = "";

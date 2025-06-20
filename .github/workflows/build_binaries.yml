@@ -18,14 +18,14 @@ name: Build Matrix of Binaries
         default: "development-tag"
 
 env:
-  TS_FILENAME: "tari_network_suite"
-  TS_BUNDLE_ID_BASE: "com.tari.network.pkg"
+  TS_FILENAME: "tari_ootle"
+  TS_BUNDLE_ID_BASE: "com.tari.ootle.pkg"
   TS_SIG_FN: "sha256-unsigned.txt"
-  ## Must be a JSon string
-  TS_FILES: '["tari_ootle_wallet_cli","tari_ootle_walletd","tari_indexer","tari_validator_node","tari_generate","tari_swarm_daemon"]'
+  ## Must be a JSON string
+  TS_FILES: '["tari_ootle_walletd","tari_indexer","tari_validator_node","tari_swarm_daemon"]'
   TS_FEATURES: "default"
   TS_LIBRARIES: ""
-  TS_DESCRIPTION: "Tari Suite"
+  TS_DESCRIPTION: "Tari Ootle"
   TS_URL: "https://tari.com"
   # For debug builds
   # TS_BUILD: "debug"

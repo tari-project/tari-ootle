@@ -1207,7 +1207,9 @@ pub struct SubstatesListRequest {
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     pub filter_by_template: Option<TemplateAddress>,
     pub filter_by_type: Option<SubstateType>,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub limit: Option<u64>,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub offset: Option<u64>,
 }
 

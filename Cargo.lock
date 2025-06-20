@@ -3780,6 +3780,7 @@ version = "0.10.1"
 dependencies = [
  "clap 3.2.25",
  "human_bytes",
+ "humantime 2.2.0",
  "tari_crypto",
 ]
 

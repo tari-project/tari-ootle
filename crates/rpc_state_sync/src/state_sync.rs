@@ -325,7 +325,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     if !tree_changes.is_empty() {
                         let mut state_tree = SpreadPrefixStateTree::new(&mut store);
                         info!(target: LOG_TARGET, "🛜 Committing {} state tree changes batch v{}", tree_changes.len(), state_version);
-                        state_tree.batch_put_substate_changes(maybe_persisted_state_version, state_version, tree_changes.drain(..))?;
+                        state_tree.batch_put_substate_changes(state_version, tree_changes.drain(..))?;
                         maybe_persisted_state_version = Some(state_version);
                         store.set_version(state_version)?;
                     }

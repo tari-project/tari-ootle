@@ -69,7 +69,7 @@ async fn check_state_transitions() {
                 let mut store = MemoryTreeStore::new();
                 let mut tree = tari_state_tree::StateTree::<_, SpreadPrefixKeyMapper>::new(&mut store);
                 let values = transitions.iter().map(|transition| transition.to_tree_change());
-                let root = tree.put_substate_changes(None, 1, values).unwrap();
+                let root = tree.put_substate_changes(1, values).unwrap();
                 assert_eq!(root, shard_root, "Shard {} root hash mismatch", shard);
             }
 

@@ -87,7 +87,7 @@ use tari_ootle_storage::{
     StateStoreWriteTransaction,
     StorageError,
 };
-use tari_state_tree::{Child, Nibble, Node, NodeKey, NodeType, StaleTreeNode, Version};
+use tari_state_tree::{Child, Nibble, Node, NodeKey, NodeType, StaleTreeNode, StateTreeStaleNodeIndex, Version};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 
@@ -1430,7 +1430,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         &mut self,
         shard: Shard,
         version: Version,
-        nodes: Vec<StaleTreeNode>,
+        nodes: Vec<StateTreeStaleNodeIndex>,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "state_tree_nodes_record_stale_tree_nodes";
 

@@ -1,11 +1,22 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use jmt::{
+    storage::{TreeReader, TreeWriter},
+    KeyHash,
+    RootHash,
+    Version,
+};
 use tari_common_types::types::FixedHash;
 use tari_engine_types::{hashing::substate_value_hasher32, substate::SubstateId};
-use tari_jellyfish::{LeafKey, TreeHash, TreeStore, Version};
 use tari_ootle_common_types::VersionedSubstateId;
-use tari_state_tree::{key_mapper::DbKeyMapper, memory_store::MemoryTreeStore, StateTree, SubstateTreeChange};
+use tari_state_tree::{
+    key_mapper::DbKeyMapper,
+    memory_store::MemoryTreeStore,
+    StateTree,
+    SubstateTreeChange,
+    TreeStoreBatchWriter,
+};
 use tari_template_lib::{models::ComponentAddress, types::ObjectKey};
 
 pub fn make_value(seed: u8) -> VersionedSubstateId {
@@ -19,11 +30,11 @@ pub fn change(substate_id_seed: u8, value_seed: Option<u8>) -> SubstateTreeChang
     change_exact(make_value(substate_id_seed), value_seed.map(from_seed))
 }
 
-fn hash_value(value: &[u8]) -> TreeHash {
+fn hash_value(value: &[u8]) -> [u8; 32] {
     substate_value_hasher32().chain(value).result().into_array().into()
 }
 
-pub fn hash_value_from_seed(seed: u8) -> TreeHash {
+pub fn hash_value_from_seed(seed: u8) -> [u8; 32] {
     hash_value(&from_seed(seed))
 }
 
@@ -31,7 +42,7 @@ pub fn change_exact(substate_id: VersionedSubstateId, value: Option<Vec<u8>>) ->
     value
         .map(|value| SubstateTreeChange::Up {
             id: substate_id.clone(),
-            value_hash: FixedHash::new(hash_value(&value).into_array()),
+            value_hash: FixedHash::new(hash_value(&value)),
         })
         .unwrap_or_else(|| SubstateTreeChange::Down { id: substate_id })
 }
@@ -45,7 +56,7 @@ pub struct HashTreeTester<S> {
     pub current_version: Option<Version>,
 }
 
-impl<S: TreeStore<Version>> HashTreeTester<S> {
+impl<S: TreeReader + TreeStoreBatchWriter> HashTreeTester<S> {
     pub fn new(tree_store: S, current_version: Option<Version>) -> Self {
         Self {
             tree_store,
@@ -53,33 +64,34 @@ impl<S: TreeStore<Version>> HashTreeTester<S> {
         }
     }
 
-    pub fn put_substate_changes(&mut self, changes: impl IntoIterator<Item = SubstateTreeChange>) -> TreeHash {
+    pub fn put_substate_changes(&mut self, changes: impl IntoIterator<Item = SubstateTreeChange>) -> RootHash {
         self.apply_database_updates(changes)
     }
 
-    fn apply_database_updates(&mut self, changes: impl IntoIterator<Item = SubstateTreeChange>) -> TreeHash {
+    fn apply_database_updates(&mut self, changes: impl IntoIterator<Item = SubstateTreeChange>) -> RootHash {
         let next_version = self.current_version.unwrap_or(0) + 1;
-        let current_version = self.current_version.replace(next_version);
-        self.put_changes_at_version(current_version, next_version, changes)
+        self.current_version = Some(next_version);
+        self.put_changes_at_version(next_version, changes)
     }
 
     pub fn create_state_tree(&mut self) -> StateTree<'_, S, TestMapper> {
         StateTree::<_, TestMapper>::new(&mut self.tree_store)
     }
+}
 
+impl<S: TreeReader + TreeStoreBatchWriter> HashTreeTester<S> {
     pub fn put_changes_at_version(
         &mut self,
-        current_version: Option<Version>,
         next_version: Version,
         changes: impl IntoIterator<Item = SubstateTreeChange>,
-    ) -> TreeHash {
+    ) -> RootHash {
         self.create_state_tree()
-            .put_substate_changes(current_version, next_version, changes)
+            .put_substate_changes(next_version, changes)
             .unwrap()
     }
 }
 
-impl HashTreeTester<MemoryTreeStore<Version>> {
+impl HashTreeTester<MemoryTreeStore> {
     pub fn new_empty() -> Self {
         Self::new(MemoryTreeStore::new(), None)
     }
@@ -88,8 +100,8 @@ impl HashTreeTester<MemoryTreeStore<Version>> {
 pub struct TestMapper;
 
 impl DbKeyMapper<VersionedSubstateId> for TestMapper {
-    fn map_to_leaf_key(id: &VersionedSubstateId) -> LeafKey {
-        LeafKey::new(test_hasher32().chain(&id).result().into_array().into())
+    fn map_to_leaf_key(id: &VersionedSubstateId) -> KeyHash {
+        KeyHash(test_hasher32().chain(&id).result().into_array())
     }
 }
 

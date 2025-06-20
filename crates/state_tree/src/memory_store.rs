@@ -1,65 +1,112 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, fmt, fmt::Debug};
+use std::{collections::BTreeMap, fmt, fmt::Debug};
 
-use tari_jellyfish::{JmtStorageError, Node, NodeKey, StaleTreeNode, TreeNode, TreeStoreReader, TreeStoreWriter};
+use jmt::{
+    storage::{LeafNode, Node, NodeKey, TreeReader},
+    KeyHash,
+    OwnedValue,
+    Version,
+};
+
+use crate::{
+    diff::StateTreeStaleNodeIndex,
+    helpers::write_node_key,
+    StateTreeError,
+    StateTreeNodeBatch,
+    StateTreeStaleNodeIndexBatch,
+    TreeStoreBatchWriter,
+    TreeStoreWriter,
+};
 
 #[derive(Debug, Default)]
-pub struct MemoryTreeStore<P> {
-    pub nodes: HashMap<NodeKey, TreeNode<P>>,
-    pub stale_nodes: Vec<StaleTreeNode>,
+pub struct MemoryTreeStore {
+    pub nodes: BTreeMap<NodeKey, Node>,
+    pub values: BTreeMap<(Version, KeyHash), Option<OwnedValue>>,
+    pub stale_nodes: BTreeMap<Version, StateTreeStaleNodeIndexBatch>,
 }
 
-impl<P> MemoryTreeStore<P> {
+impl MemoryTreeStore {
     pub fn new() -> Self {
         Self {
-            nodes: HashMap::new(),
-            stale_nodes: Vec::new(),
-        }
-    }
-
-    pub fn clear_stale_nodes(&mut self) {
-        for stale in self.stale_nodes.drain(..) {
-            self.nodes.remove(stale.as_node_key());
+            nodes: BTreeMap::new(),
+            values: BTreeMap::new(),
+            stale_nodes: BTreeMap::new(),
         }
     }
 }
 
-impl<P: Clone> TreeStoreReader<P> for MemoryTreeStore<P> {
-    fn get_node(&self, key: &NodeKey) -> Result<Node<P>, JmtStorageError> {
-        self.nodes
-            .get(key)
-            .map(|node| node.clone().into_node())
-            .ok_or_else(|| JmtStorageError::NotFound(key.clone()))
+impl TreeReader for MemoryTreeStore {
+    fn get_node_option(&self, node_key: &NodeKey) -> anyhow::Result<Option<Node>> {
+        Ok(self.nodes.get(node_key).cloned())
+    }
+
+    fn get_value_option(&self, max_version: Version, key_hash: KeyHash) -> anyhow::Result<Option<OwnedValue>> {
+        for ((version, hash), value) in self.values.range(..=(max_version, key_hash)) {
+            if *version <= max_version && *hash == key_hash {
+                return Ok(value.clone());
+            }
+        }
+        Ok(None)
+    }
+
+    fn get_rightmost_leaf(&self) -> anyhow::Result<Option<(NodeKey, LeafNode)>> {
+        for (hash, value) in self.nodes.iter().rev() {
+            if let Node::Leaf(leaf) = value {
+                return Ok(Some((hash.clone(), leaf.clone())));
+            }
+        }
+        Ok(None)
     }
 }
+impl TreeStoreBatchWriter for MemoryTreeStore {
+    fn batch_insert_nodes(&mut self, nodes: StateTreeNodeBatch) -> Result<(), StateTreeError> {
+        self.nodes.extend(nodes.nodes);
+        self.values.extend(nodes.values);
 
-impl<P> TreeStoreWriter<P> for MemoryTreeStore<P> {
-    fn insert_node(&mut self, key: NodeKey, node: Node<P>) -> Result<(), JmtStorageError> {
-        let node = TreeNode::new_latest(node);
-        self.nodes.insert(key, node);
         Ok(())
     }
 
-    fn record_stale_tree_node(&mut self, stale: StaleTreeNode) -> Result<(), JmtStorageError> {
-        self.stale_nodes.push(stale);
+    fn record_stale_tree_nodes(
+        &mut self,
+        version: Version,
+        stale_nodes: StateTreeStaleNodeIndexBatch,
+    ) -> Result<(), StateTreeError> {
+        self.stale_nodes.insert(version, stale_nodes);
         Ok(())
     }
 }
 
-impl<P: Debug> fmt::Display for MemoryTreeStore<P> {
+// impl TreeStoreWriter for MemoryTreeStore {
+//     fn insert_node(&mut self, key: NodeKey, node: Node) -> Result<(), StateTreeError> {
+//         self.nodes.insert(key, node);
+//         Ok(())
+//     }
+//
+//     fn record_stale_tree_node(&mut self, stale: StateTreeStaleNodeIndex) -> Result<(), StateTreeError> {
+//         self.stale_nodes.push(stale);
+//         Ok(())
+//     }
+// }
+
+impl fmt::Display for MemoryTreeStore {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "MemoryTreeStore")?;
         writeln!(f, "  Nodes:")?;
-        let mut store = self.nodes.iter().collect::<Vec<_>>();
-        store.sort_by_key(|(key, _)| *key);
-        for (key, node) in store {
-            writeln!(f, "    {}: {:?}", key, node)?;
+        for (key, node) in &self.nodes {
+            write!(f, "    ")?;
+            write_node_key(f, &key)?;
+            writeln!(f, ": {:?}", node)?;
         }
         writeln!(f, "  Stale Nodes:")?;
-        for stale in &self.stale_nodes {
-            writeln!(f, "    {}", stale.as_node_key())?;
+        for (version, stale_batch) in &self.stale_nodes {
+            writeln!(f, "v{version}:")?;
+            write!(f, "    ")?;
+            for stale in stale_batch {
+                write_node_key(f, &stale.node_key)?;
+                write!(f, ", ")?;
+            }
         }
         Ok(())
     }

@@ -14,6 +14,7 @@ use tari_ootle_storage::{
 use tari_state_tree::{
     compute_merkle_root_for_hashes,
     JmtStorageError,
+    KeyHash,
     SpreadPrefixStateTree,
     StagedTreeStore,
     StateHashTreeDiff,
@@ -70,7 +71,7 @@ impl<TTx: StateStoreReadTransaction> ShardedStateTree<&TTx> {
         let maybe_version = self
             .tx
             .state_tree_versions_get_latest(shard)
-            .map_err(|e| StateTreeError::JmtStorageError(JmtStorageError::UnexpectedError(e.to_string())))?;
+            .map_err(|e| StateTreeError::JmtError(JmtStorageError::UnexpectedError(e.to_string())))?;
         Ok(maybe_version)
     }
 
@@ -82,7 +83,7 @@ impl<TTx: StateStoreReadTransaction> ShardedStateTree<&TTx> {
         &mut self,
         shard_group: ShardGroup,
         changes: IndexMap<Shard, Vec<SubstateTreeChange>>,
-    ) -> Result<TreeHash, StateTreeError> {
+    ) -> Result<KeyHash, StateTreeError> {
         let mut shard_state_roots = HashMap::with_capacity(changes.len());
         for (shard, changes) in changes {
             let current_version = self.get_current_version(shard)?;
@@ -110,7 +111,7 @@ impl<TTx: StateStoreReadTransaction> ShardedStateTree<&TTx> {
             // Apply state updates to the state tree that is backed by the staged shard-scoped store
             let mut state_tree = SpreadPrefixStateTree::new(&mut store);
             debug!(target: LOG_TARGET, "v{next_version} contains {} new tree change(s) for shard {shard}", changes.len());
-            let shard_state_hash = state_tree.put_substate_changes(current_version, next_version, changes)?;
+            let shard_state_hash = state_tree.put_substate_changes(next_version, changes)?;
             shard_state_roots.insert(shard, shard_state_hash);
             self.shard_tree_diffs
                 .insert(shard, PendingShardStateTreeDiff::new(next_version, store.into_diff()));

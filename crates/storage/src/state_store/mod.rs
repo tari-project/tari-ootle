@@ -36,7 +36,14 @@ use tari_ootle_common_types::{
     VersionedSubstateId,
     VersionedSubstateIdRef,
 };
-use tari_state_tree::{Node, NodeKey, StaleTreeNode, Version};
+use tari_state_tree::{
+    storage::{Node, NodeKey},
+    Node,
+    NodeKey,
+    StaleTreeNode,
+    StateTreeStaleNodeIndex,
+    Version,
+};
 use tari_template_lib::{models::UnclaimedConfidentialOutputAddress, types::crypto::RistrettoPublicKeyBytes};
 use tari_transaction::TransactionId;
 use time::PrimitiveDateTime;
@@ -285,7 +292,7 @@ pub trait StateStoreReadTransaction: Sized {
 
     fn state_transitions_get_last_id(&self, shard: Shard) -> Result<StateTransitionId, StorageError>;
 
-    fn state_tree_nodes_get(&self, shard: Shard, key: &NodeKey) -> Result<Node<Version>, StorageError>;
+    fn state_tree_nodes_get(&self, shard: Shard, key: &NodeKey) -> Result<Node, StorageError>;
     fn state_tree_versions_get_latest(&self, shard: Shard) -> Result<Option<Version>, StorageError>;
 
     // -------------------------------- Epoch checkpoint -------------------------------- //
@@ -530,7 +537,7 @@ pub trait StateStoreWriteTransaction {
         &mut self,
         shard: Shard,
         version: Version,
-        nodes: Vec<StaleTreeNode>,
+        nodes: Vec<StateTreeStaleNodeIndex>,
     ) -> Result<(), StorageError>;
 
     fn state_tree_nodes_clear_stale(&mut self, num_preshards: NumPreshards) -> Result<(), StorageError>;

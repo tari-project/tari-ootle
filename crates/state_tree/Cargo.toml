@@ -10,12 +10,17 @@ license.workspace = true
 tari_common_types = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 tari_engine_types = { workspace = true }
-tari_jellyfish = { workspace = true }
 tari_template_lib = { workspace = true }
+tari_sidechain = { workspace = true }
+tari_hashing = { workspace = true }
 
+anyhow = { workspace = true }
+digest = { workspace = true }
 thiserror = { workspace = true }
+jmt = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 log = { workspace = true }
+tari_crypto = { workspace = true }
 
 [dev-dependencies]
 indexmap = { workspace = true }

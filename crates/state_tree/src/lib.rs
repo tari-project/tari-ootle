@@ -1,8 +1,6 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-pub use tari_jellyfish::*;
-
 mod error;
 pub use error::*;
 
@@ -15,6 +13,13 @@ pub use staged_store::*;
 mod traits;
 pub use traits::*;
 
+mod diff;
+pub use diff::*;
+pub mod empty_store;
+mod helpers;
 mod tree;
 
+pub use jmt::{storage, KeyHash, OwnedValue, RootHash, Version};
 pub use tree::*;
+
+pub type SparseMerkleProof = jmt::proof::SparseMerkleProof<SidechainJmtHasher>;

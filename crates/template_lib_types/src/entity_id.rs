@@ -8,7 +8,7 @@ use tari_template_abi::rust::{
     str::FromStr,
 };
 
-use crate::serde_helpers;
+use crate::{hex::fixed_bytes_from_hex, serde_helpers};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(
@@ -42,7 +42,7 @@ impl EntityId {
     }
 
     pub fn from_hex(s: &str) -> Result<Self, KeyParseError> {
-        from_hex(s).map(Self::from_array)
+        fixed_bytes_from_hex(s).map(Self::from_array).map_err(|_| KeyParseError)
     }
 
     pub fn write_hex_fmt<W: fmt::Write>(&self, writer: &mut W) -> fmt::Result {
@@ -172,7 +172,7 @@ impl ObjectKey {
     }
 
     pub fn from_hex(s: &str) -> Result<Self, KeyParseError> {
-        from_hex(s).map(Self::from_array)
+        fixed_bytes_from_hex(s).map(Self::from_array).map_err(|_| KeyParseError)
     }
 
     pub fn write_hex_fmt<W: fmt::Write>(&self, writer: &mut W) -> fmt::Result {
@@ -271,19 +271,7 @@ pub struct KeyParseError;
 impl std::error::Error for KeyParseError {}
 
 impl Display for KeyParseError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Failed to parse substate key")
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "Failed to parse byte key")
     }
-}
-
-pub fn from_hex<const N: usize>(s: &str) -> Result<[u8; N], KeyParseError> {
-    if s.len() != N * 2 {
-        return Err(KeyParseError);
-    }
-
-    let mut arr = [0u8; N];
-    for (i, h) in arr.iter_mut().enumerate() {
-        *h = u8::from_str_radix(&s[2 * i..2 * (i + 1)], 16).map_err(|_| KeyParseError)?;
-    }
-    Ok(arr)
 }

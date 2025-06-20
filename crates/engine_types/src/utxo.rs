@@ -11,8 +11,12 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use tari_bor::{BorTag, Deserialize, Serialize};
 use tari_template_lib::{
     models::{BinaryTag, ResourceAddress},
-    prelude::{from_hex, serde_helpers, KeyParseError, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
-    types::{crypto::UtxoTagByte, hex::write_hex_fmt},
+    types::{
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTagByte},
+        hex::{fixed_bytes_from_hex, write_hex_fmt},
+        serde_helpers,
+        KeyParseError,
+    },
 };
 
 use crate::crypto::PrivateOutput;
@@ -152,7 +156,9 @@ impl UtxoId {
     }
 
     pub fn from_hex(hex: &str) -> Result<Self, KeyParseError> {
-        from_hex(hex).map(Self::from_array)
+        fixed_bytes_from_hex(hex)
+            .map(Self::from_array)
+            .map_err(|_| KeyParseError)
     }
 
     pub fn into_commitment_bytes(self) -> PedersenCommitmentBytes {

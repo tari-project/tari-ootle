@@ -61,6 +61,13 @@ pub struct Cli {
     /// NOTE: Once this is set, it must always be set to access the wallet.
     #[clap(long)]
     pub override_keyring_password: Option<SafePassword>,
+    /// The path to the value lookup table binary file used for brute force value lookups. This setting
+    /// is only used when attempting to view confidential balances in confidential resources that use a view key
+    /// controlled by this wallet. The binary file can be generated using the generate_ristretto_value_lookup
+    /// utility. If this is not set, the value lookup table will be generated on the fly which will have a large
+    /// performance cost when brute forcing high-value outputs.
+    #[clap(long, alias = "lookup-file")]
+    pub value_lookup_table_file: Option<PathBuf>,
     #[clap(subcommand)]
     pub command: Option<Subcommand>,
 }
@@ -97,6 +104,12 @@ impl ConfigOverrideProvider for Cli {
             overrides.push((
                 "ootle_wallet_daemon.indexer_json_rpc_url".to_string(),
                 indexer_json_rpc_url.to_string(),
+            ));
+        }
+        if let Some(ref file) = self.value_lookup_table_file {
+            overrides.push((
+                "ootle_wallet_daemon.value_lookup_table_file".to_string(),
+                file.display().to_string(),
             ));
         }
         overrides

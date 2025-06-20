@@ -2,6 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use axum::headers::authorization::Bearer;
+use tari_engine_types::substate::Substate;
+use tari_ootle_common_types::optional::Optional;
 use tari_ootle_wallet_sdk::network::WalletNetworkInterface;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
@@ -14,7 +16,7 @@ use tari_wallet_daemon_client::{
     },
 };
 
-use crate::handlers::HandlerContext;
+use crate::handlers::{helpers::not_found, HandlerContext};
 
 pub async fn handle_get(
     context: &HandlerContext,
@@ -24,26 +26,31 @@ pub async fn handle_get(
     let sdk = context.wallet_sdk().clone();
     context.check_auth(token, &[JrpcPermission::SubstatesRead])?;
 
-    let record = sdk.substate_api().get_substate(&req.substate_id)?;
+    let record = sdk.substate_api().get_substate(&req.substate_id).optional()?;
 
     let substate = sdk
         .get_network_interface()
         .query_substate(
-            record.substate_id.substate_id(),
-            Some(record.substate_id.version()),
+            &req.substate_id,
+            record.as_ref().map(|r| r.substate_id.version()),
             false,
         )
-        .await?;
+        .await
+        .optional()?;
+
+    if record.is_none() && substate.is_none() {
+        return Err(not_found(format!("Substate with ID {} not found", req.substate_id)));
+    }
 
     Ok(SubstatesGetResponse {
-        record: WalletSubstateRecord {
+        record: record.map(|record| WalletSubstateRecord {
             version: record.substate_id.version(),
             substate_id: record.substate_id.into_substate_id(),
             parent_id: record.parent_address,
             module_name: record.module_name,
             template_address: record.template_address,
-        },
-        value: substate.substate,
+        }),
+        substate: substate.map(|s| Substate::new(s.version, s.substate)),
     })
 }
 

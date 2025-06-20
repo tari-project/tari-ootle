@@ -27,7 +27,7 @@ use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult},
     instruction::Instruction,
     serde_with,
-    substate::{SubstateId, SubstateValue},
+    substate::{Substate, SubstateId},
     ValidatorFeePoolAddress,
 };
 use tari_ootle_common_types::{
@@ -1230,6 +1230,7 @@ pub struct SubstatesListResponse {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct SubstatesGetRequest {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub substate_id: SubstateId,
 }
 
@@ -1240,8 +1241,8 @@ pub struct SubstatesGetRequest {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct SubstatesGetResponse {
-    pub record: WalletSubstateRecord,
-    pub value: SubstateValue,
+    pub record: Option<WalletSubstateRecord>,
+    pub substate: Option<Substate>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

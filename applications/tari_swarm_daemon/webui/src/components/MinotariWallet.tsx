@@ -69,7 +69,7 @@ function Wallet(props: any) {
       </div>
       <NodeControls isRunning={props.is_running} onStart={onStart} onStop={onStop} onDeleteData={onDeleteData} />
       {(wallet) ?
-        <BurnFunds instanceId={props.id} danWallet={wallet} /> : <></>}
+        <BurnFunds instanceId={props.id} wallet={wallet} /> : <></>}
       {props.showLogs && <div>TODO</div>}
     </div>
   );
@@ -82,7 +82,7 @@ function BurnFunds(props: any) {
 
   const onBurnFunds = () => {
     jsonRpc("burn_funds", {
-      wallet_instance_id: props.danWallet.id,
+      wallet_instance_id: props.wallet.id,
       account_name: accountName,
       amount,
     }).then((res: any) => setClaimUrl(res.url));
@@ -90,7 +90,7 @@ function BurnFunds(props: any) {
 
   return (
     <div>
-      <pre>Burn to <b>{props.danWallet.name}</b>. This will mine 10 blocks.</pre>
+      <pre>Burn to <b>{props.wallet.name}</b>. This will mine 10 blocks.</pre>
       <input type="number" value={amount} placeholder="amount"
              onChange={(e) => setAmount(parseInt(e.target.value, 10))} />
       <input type="text" value={accountName || ""} placeholder="account name"

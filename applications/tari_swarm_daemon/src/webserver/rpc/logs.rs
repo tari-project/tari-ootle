@@ -8,13 +8,17 @@ use std::{
 };
 
 use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
+use serde::Deserialize;
 use tokio::fs;
 
 use crate::{config::InstanceType, webserver::context::HandlerContext};
 
-// TODO: this is to preserve the existing API, but it should be changed to a struct
-/// String  representing the type of node
-pub type ListLogFilesRequest = String;
+#[derive(Debug, Clone, Deserialize)]
+pub struct ListLogFilesRequest {
+    pub instance_type: InstanceType,
+    #[serde(default)]
+    pub index: Option<usize>,
+}
 
 /// (full path, name, path without extension)
 pub type ListValidatorNodesResponse = Vec<(String, String, String)>;
@@ -23,33 +27,13 @@ pub async fn list_log_files(
     context: &HandlerContext,
     req: ListLogFilesRequest,
 ) -> Result<ListValidatorNodesResponse, anyhow::Error> {
-    let mut args = req.split(' ');
-    let process_type_str = args.next().ok_or_else(|| {
-        JsonRpcError::new(
-            JsonRpcErrorReason::InvalidParams,
-            "Invalid process type".to_string(),
-            serde_json::Value::Null,
-        )
-    })?;
-
-    let maybe_index = args
-        .next()
-        .map(|index| {
-            index.parse::<usize>().map_err(|_| {
-                JsonRpcError::new(
-                    JsonRpcErrorReason::InvalidParams,
-                    "Invalid index".to_string(),
-                    serde_json::Value::Null,
-                )
-            })
-        })
-        .transpose()?;
-
-    let instance_type = process_type_str_to_instance_type(process_type_str)?;
-    let instances = context.process_manager().list_instances(Some(instance_type)).await?;
+    let instances = context
+        .process_manager()
+        .list_instances(Some(req.instance_type))
+        .await?;
 
     let mut log_files = Vec::new();
-    if let Some(index) = maybe_index {
+    if let Some(index) = req.index {
         let instance = instances.get(index).ok_or_else(|| {
             JsonRpcError::new(
                 JsonRpcErrorReason::InvalidParams,
@@ -102,8 +86,7 @@ fn visit_dirs<F: FnMut(&DirEntry)>(dir: &Path, cb: &mut F) -> io::Result<()> {
     Ok(())
 }
 
-// TODO: this is to preserve the existing API, but it should be changed to a struct
-pub type ListStdoutLogsRequest = String;
+pub type ListStdoutLogsRequest = ListLogFilesRequest;
 
 /// (full path, name)
 pub type ListStdoutLogsResponse = Vec<(String, &'static str)>;
@@ -111,33 +94,13 @@ pub async fn list_stdout_files(
     context: &HandlerContext,
     req: ListStdoutLogsRequest,
 ) -> Result<ListStdoutLogsResponse, anyhow::Error> {
-    let mut args = req.split(' ');
-    let process_type_str = args.next().ok_or_else(|| {
-        JsonRpcError::new(
-            JsonRpcErrorReason::InvalidParams,
-            "Invalid process type".to_string(),
-            serde_json::Value::Null,
-        )
-    })?;
-
-    let maybe_index = args
-        .next()
-        .map(|index| {
-            index.parse::<usize>().map_err(|_| {
-                JsonRpcError::new(
-                    JsonRpcErrorReason::InvalidParams,
-                    "Invalid index".to_string(),
-                    serde_json::Value::Null,
-                )
-            })
-        })
-        .transpose()?;
-
-    let instance_type = process_type_str_to_instance_type(process_type_str)?;
-    let instances = context.process_manager().list_instances(Some(instance_type)).await?;
+    let instances = context
+        .process_manager()
+        .list_instances(Some(req.instance_type))
+        .await?;
 
     let mut log_files = Vec::new();
-    if let Some(index) = maybe_index {
+    if let Some(index) = req.index {
         let instance = instances.get(index).ok_or_else(|| {
             JsonRpcError::new(
                 JsonRpcErrorReason::InvalidParams,
@@ -201,20 +164,4 @@ pub async fn get_log_file(
     let contents = fs::read_to_string(file_path).await?;
 
     Ok(contents)
-}
-
-fn process_type_str_to_instance_type(process_type_str: &str) -> Result<InstanceType, JsonRpcError> {
-    match process_type_str {
-        "node" => Ok(InstanceType::MinoTariNode),
-        "wallet" => Ok(InstanceType::MinoTariConsoleWallet),
-        "miner" => Ok(InstanceType::MinoTariMiner),
-        "vn" => Ok(InstanceType::TariValidatorNode),
-        "indexer" => Ok(InstanceType::TariIndexer),
-        "dan" => Ok(InstanceType::TariWalletDaemon),
-        _ => Err(JsonRpcError::new(
-            JsonRpcErrorReason::InvalidParams,
-            format!("Invalid process type {process_type_str}"),
-            serde_json::Value::Null,
-        )),
-    }
 }

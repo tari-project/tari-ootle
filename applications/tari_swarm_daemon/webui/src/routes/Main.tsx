@@ -422,7 +422,7 @@ function ShowInfos(params: any) {
 
 export default function Main() {
   const [vns, setVns] = useState({});
-  const [danWallet, setTariWallets] = useState({});
+  const [wallet, setTariWallets] = useState({});
   const [indexers, setIndexers] = useState({});
   const [logs, setLogs] = useState<any | null>({});
   const [stdoutLogs, setStdoutLogs] = useState<any | null>({});
@@ -439,7 +439,7 @@ export default function Main() {
       .then((resp) => {
         setVns(resp.nodes);
         Object.keys(resp.nodes).map((index) => {
-          jsonRpc("get_logs", `vn ${index}`)
+          jsonRpc("get_logs", { instance_type: "TariValidatorNode", index: Number(index) })
             .then((resp) => {
               setLogs((state: any) => ({ ...state, [`vn ${index}`]: resp }));
             })
@@ -454,11 +454,11 @@ export default function Main() {
       .catch((error) => {
         console.log(error);
       });
-    jsonRpc("dan_wallets")
+    jsonRpc("list_wallet_daemons")
       .then((resp) => {
         setTariWallets(resp.nodes);
         Object.keys(resp.nodes).map((index) => {
-          jsonRpc("get_logs", `dan ${index}`)
+          jsonRpc("get_logs", { instance_type: "TariWalletDaemon", index: Number(index) })
             .then((resp) => {
               setLogs((state: any) => ({ ...state, [`dan ${index}`]: resp }));
             })
@@ -477,7 +477,7 @@ export default function Main() {
       .then((resp) => {
         setIndexers(resp.nodes);
         Object.keys(resp.nodes).map((index) => {
-          jsonRpc("get_logs", `indexer ${index}`)
+          jsonRpc("get_logs", { instance_type: "TariIndexer", index: Number(index) })
             .then((resp) => {
               setLogs((state: any) => ({ ...state, [`indexer ${index}`]: resp }));
             })
@@ -492,22 +492,22 @@ export default function Main() {
       .catch((error) => {
         console.log(error);
       });
-    jsonRpc("get_logs", "node").then((resp) => {
+    jsonRpc("get_logs", { instance_type: "MinoTariNode" }).then((resp) => {
       setLogs((state: any) => ({ ...state, node: resp }));
     });
-    jsonRpc("get_logs", "wallet").then((resp) => {
+    jsonRpc("get_logs", { instance_type: "MinoTariConsoleWallet" }).then((resp) => {
       setLogs((state: any) => ({ ...state, wallet: resp }));
     });
-    jsonRpc("get_logs", "miner").then((resp) => {
+    jsonRpc("get_logs", { instance_type: "MinoTariMiner" }).then((resp) => {
       setLogs((state: any) => ({ ...state, miner: resp }));
     });
-    jsonRpc("get_stdout", "node").then((resp) => {
+    jsonRpc("get_stdout", { instance_type: "MinoTariNode" }).then((resp) => {
       setStdoutLogs((state: any) => ({ ...state, node: resp }));
     });
-    jsonRpc("get_stdout", "wallet").then((resp) => {
+    jsonRpc("get_stdout", { instance_type: "MinoTariConsoleWallet" }).then((resp) => {
       setStdoutLogs((state: any) => ({ ...state, wallet: resp }));
     });
-    jsonRpc("get_stdout", "miner").then((resp) => {
+    jsonRpc("get_stdout", { instance_type: "MinoTariMiner" }).then((resp) => {
       setStdoutLogs((state: any) => ({ ...state, miner: resp }));
     });
     jsonRpc("list_instances", { by_type: null }).then(({ instances }) => setInstances(instances));
@@ -592,8 +592,8 @@ export default function Main() {
                    autoRefresh={autoRefresh} horizontal={horizontal} onReload={getInfo} />
       </div>
       <div>
-        <div className="label">Dan Wallets</div>
-        <ShowInfos nodes={danWallet} logs={logs} stdoutLogs={stdoutLogs} name="wallet" showLogs={showLogs}
+        <div className="label">Ootle Wallets</div>
+        <ShowInfos nodes={wallet} logs={logs} stdoutLogs={stdoutLogs} name="wallet" showLogs={showLogs}
                    autoRefresh={autoRefresh} horizontal={horizontal} onReload={getInfo} />
       </div>
       <div>

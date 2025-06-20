@@ -128,7 +128,7 @@ async fn json_rpc_handler(Extension(context): Extension<Arc<HandlerContext>>, va
     match value.method.as_str() {
         "ping" => Ok(JsonRpcResponse::success(value.get_answer_id(), "pong")),
         "vns" => call_handler(context, value, rpc::validator_nodes::list).await,
-        "dan_wallets" => call_handler(context, value, rpc::tari_wallets::list).await,
+        "list_wallet_daemons" => call_handler(context, value, rpc::tari_wallets::list).await,
         "indexers" => call_handler(context, value, rpc::indexers::list).await,
         "get_logs" => call_handler(context, value, rpc::logs::list_log_files).await,
         "get_stdout" => call_handler(context, value, rpc::logs::list_stdout_files).await,

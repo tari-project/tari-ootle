@@ -11,3 +11,4 @@ tari_crypto = { workspace = true }
 
 clap = { workspace = true, features = ["derive"] }
 human_bytes = { version = "0.4.3", default-features = false }
+humantime = { workspace = true }

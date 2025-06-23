@@ -5,7 +5,7 @@ use std::{
     fs,
     io,
     io::{stdout, Write},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use human_bytes::human_bytes;
@@ -23,12 +23,16 @@ fn main() -> io::Result<()> {
     let dest_file = cli.output_file;
 
     let file_size = (cli.max - cli.min + 1) * 32 + 20;
+    // Rough estimate: 200ms per 10,000 values on a "typical" cpu
+    let est_time = Duration::from_millis((cli.max - cli.min + 1) / 10000 * 200);
     println!(
-        "Generating Ristretto value lookup table from {} to {} and writing to {} ({})",
+        "Generating Ristretto value lookup table from {} to {} and writing to {} ({}). This will take roughly {} to \
+         complete.",
         cli.min,
         cli.max,
         dest_file.display(),
-        human_bytes(file_size as f64)
+        human_bytes(file_size as f64),
+        humantime::format_duration(est_time)
     );
 
     println!();
@@ -44,10 +48,10 @@ fn main() -> io::Result<()> {
     let metadata = fs::metadata(&dest_file)?;
 
     println!(
-        "Output written to {} ({}) in {:.2?}",
+        "Output written to {} ({}) in {}",
         dest_file.display(),
         human_bytes(metadata.len() as f64),
-        elapsed
+        humantime::format_duration(elapsed)
     );
 
     Ok(())

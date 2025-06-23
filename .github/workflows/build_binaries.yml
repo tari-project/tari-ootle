@@ -514,6 +514,14 @@ jobs:
           description: ${{ env.TS_DESCRIPTION }}
           description-url: ${{ env.TS_URL }}
 
+      - name: Verify Windows signing for archive pack
+        if: ${{ ( startsWith(runner.os,'Windows') ) && ( env.AZURE_TENANT_ID != '' ) }}
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        shell: powershell
+        run: |
+          .\buildtools\check_signatures.ps1 -ScanDir ".\${{ env.TS_DIST }}"
+
       - name: Build the Windows installer
         # Disabled
         if: ${{ false }}
@@ -559,38 +567,9 @@ jobs:
         env:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         shell: powershell
+        working-directory: ${{ github.workspace }}/buildtools/Output
         run: |
-          # Get the Program Files (x86) directory dynamically
-          $programFilesX86 = [System.Environment]::GetFolderPath("ProgramFilesX86")
-          $sdkBasePath = Join-Path $programFilesX86 "Windows Kits"
-
-          # Check if Windows Kits exists
-          if (-Not (Test-Path $sdkBasePath)) {
-            Write-Error "Windows Kits folder not found at $sdkBasePath!"
-            exit 1
-          }
-
-          Write-Output "Searching for signtool.exe in: $sdkBasePath"
-
-          # Search for signtool.exe within Windows Kits fold with x64 in the path
-          $signtoolPath = Get-ChildItem -Path $sdkBasePath -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
-                          Where-Object { $_.FullName -match '\\x64\\' } |
-                          Select-Object -ExpandProperty FullName -First 1
-
-          if (-not $signtoolPath) {
-            Write-Error "signtool.exe not found in Windows Kits folder!"
-            exit 1
-          }
-
-          Write-Output "Found signtool.exe at: $signtoolPath"
-
-          cd buildtools\Output
-
-          & $signtoolPath verify /pa "${{ env.TS_FILENAME }}-${{ env.TARI_VERSION }}-${{ env.VSHA_SHORT }}-${{ matrix.builds.name }}-installer.exe"
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "!! Signature verification failed for ${{ env.TS_FILENAME }}-${{ env.TARI_VERSION }}-${{ env.VSHA_SHORT }}-${{ matrix.builds.name }}-installer.exe !!"
-            exit 1
-          }
+          ..\check_signatures.ps1 -ScanDir "."
 
       - name: Artifact upload for Windows installer
         # Disabled

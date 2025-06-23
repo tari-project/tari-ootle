@@ -13,6 +13,7 @@
 
 ## Release checklist
 
+- [ ] Ensure development branch is up to date
 - [ ] Create the tag for the release
     - Use `git tag -s vX.Y.Z -m "vX.Y.Z"`. This ensures the tag is signed.
 - [ ] Push the tag to the remote repository

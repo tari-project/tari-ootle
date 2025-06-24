@@ -477,8 +477,8 @@ jobs:
           cat "${{ env.BINFILE }}.sha256"
           echo "Checksum verification for files is "
           ${SHARUN} --check "${{ env.BINFILE }}.sha256"
-          #7z a "${{ env.BINFILE }}.zip" *
-          ditto -c -k --keepParent "*" "${{ env.BINFILE }}.zip"
+          7z a "${{ env.BINFILE }}.zip" *
+          #ditto -c -k --keepParent * "${{ env.BINFILE }}.zip"
 
           echo -e "Submitting to Apple...\n\n"
           xcrun notarytool submit \

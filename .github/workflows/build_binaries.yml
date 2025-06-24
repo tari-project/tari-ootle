@@ -383,7 +383,7 @@ jobs:
           path: "${{ env.MTS_SOURCE }}/*"
 
       - name: Build the macOS pkg
-        if: ${{ ( startsWith(runner.os,'macOS') ) && ( env.MACOS_APPLICATION_CERT != '' ) }}
+        if: ${{ ( startsWith(runner.os,'macOS') ) && ( env.MACOS_NOTARIZE_USERNAME != '' ) }}
         continue-on-error: true
         env:
           MACOS_KEYCHAIN_PASS: ${{ secrets.MACOS_KEYCHAIN_PASS }}
@@ -622,7 +622,9 @@ jobs:
           cargo audit bin *tari*
 
       - name: Archive and Checksum Binaries
-        if: ${{ ! (( startsWith(runner.os,'macOS') ) && ( env.MACOS_APPLICATION_CERT != '' )) }}
+        if: ${{ ! ( ( startsWith(runner.os, 'macOS') && ( env.MACOS_NOTARIZE_USERNAME != '' ) ) ) }}
+        env:
+          MACOS_NOTARIZE_USERNAME: ${{ secrets.MACOS_NOTARIZE_USERNAME }}
         shell: bash
         run: |
           echo "Archive ${{ env.BINFILE }} too ${{ env.BINFILE }}.zip"

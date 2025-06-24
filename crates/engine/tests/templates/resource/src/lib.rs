@@ -68,12 +68,8 @@ mod template {
 
         pub fn confidential_join(&self, output: ConfidentialOutputStatement) {
             let commitments = ResourceManager::get(self.confidential.resource_address()).mint_confidential(output);
-            let b1 = self
-                .confidential
-                .withdraw_confidential(ConfidentialWithdrawProof::revealed_withdraw(10));
-            let b2 = self
-                .confidential
-                .withdraw_confidential(ConfidentialWithdrawProof::revealed_withdraw(900));
+            let b1 = self.confidential.withdraw(10);
+            let b2 = self.confidential.withdraw(900);
             let joined = b1.join(b2);
             let joined = joined.join(commitments);
             assert_eq!(joined.amount(), 910);

@@ -12,6 +12,7 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::substate_type::SubstateType;
+use tari_template_builtin::account::Account;
 use tari_template_lib::{
     call_args,
     models::{Amount, ComponentAddress},
@@ -163,7 +164,7 @@ fn transfer_confidential_amounts_between_accounts() {
         let coins1 = account1.withdraw_confidential(faucet_resx, withdraw_proof);
 
         let split_proof = var!["split_proof"];
-        let coins2 = ConfidentialUtilities::split(coins1, split_proof);
+        let coins2 = ConfidentialUtilities::take_from_bucket(coins1, split_proof);
 
         account1.deposit(coins1);
         account2.deposit(coins2);
@@ -216,11 +217,11 @@ fn transfer_confidential_fails_with_invalid_balance() {
 #[test]
 fn reveal_confidential_and_transfer() {
     let (confidential_proof, faucet_mask, _change) = generate_confidential_proof(Amount(100_000), None);
-    let (mut template_test, faucet, faucet_resx) = setup(confidential_proof, None);
+    let (mut test, faucet, faucet_resx) = setup(confidential_proof, None);
 
     // Create an account
-    let (account1, owner1, _k) = template_test.create_funded_account();
-    let (account2, owner2, _k) = template_test.create_funded_account();
+    let (account1, owner1, _k) = test.create_funded_account();
+    let (account2, owner2, _k) = test.create_funded_account();
 
     // Create proof for transfer
 
@@ -230,6 +231,7 @@ fn reveal_confidential_and_transfer() {
     // Then reveal the rest
     let reveal_bucket_proof = generate_withdraw_proof(&reveal_proof.output_mask, Amount(0), None, Amount(10));
 
+    let faucet_resx = faucet_resx.as_resource_address().unwrap();
     // Transfer faucet funds into account 1
     let vars = [
         ("faucet", faucet.into()),
@@ -243,7 +245,7 @@ fn reveal_confidential_and_transfer() {
             ManifestValue::new_value(&reveal_bucket_proof.proof).unwrap(),
         ),
     ];
-    let result = template_test
+    let _result = test
         .execute_and_commit_manifest(
             r#"
         let faucet = var!["faucet"];
@@ -259,10 +261,10 @@ fn reveal_confidential_and_transfer() {
         account1.deposit(coins);
 
         // Reveal 90 tokens and 10 confidentially and deposit both funds into account 2
-        let revealed_funds = account1.reveal_confidential(resource, reveal_proof);
-        let revealed_rest_funds = ConfidentialUtilities::reveal(revealed_funds, reveal_bucket_proof);
-        account2.deposit(revealed_funds);
-        account2.deposit(revealed_rest_funds);
+        let revealed_funds = account1.withdraw_confidential(resource, reveal_proof);
+        let revealed_rest_funds = ConfidentialUtilities::take_from_bucket(revealed_funds, reveal_bucket_proof);
+        let joined = ConfidentialUtilities::join_buckets(revealed_funds, revealed_rest_funds);
+        account2.deposit(joined);
 
         // Account2 can withdraw revealed funds by amount
         let small_amt = account2.withdraw(resource, Amount(10));
@@ -276,14 +278,17 @@ fn reveal_confidential_and_transfer() {
         )
         .unwrap();
 
-    assert_eq!(
-        result.finalize.execution_results[12].decode::<Amount>().unwrap(),
-        Amount(10)
-    );
-    assert_eq!(
-        result.finalize.execution_results[13].decode::<Amount>().unwrap(),
-        Amount(90)
-    );
+    let acc1 = test.read_only_state_store().get_component(account1).unwrap();
+    let acc1 = Account::from_value(acc1.state()).unwrap();
+    let vault1 = acc1.get_vault_by_resource(&faucet_resx).unwrap();
+    let vault1 = test.read_only_state_store().get_vault(&vault1).unwrap();
+    assert_eq!(vault1.balance(), Amount(10));
+
+    let acc2 = test.read_only_state_store().get_component(account2).unwrap();
+    let acc2 = Account::from_value(acc2.state()).unwrap();
+    let vault2 = acc2.get_vault_by_resource(&faucet_resx).unwrap();
+    let vault2 = test.read_only_state_store().get_vault(&vault2).unwrap();
+    assert_eq!(vault2.balance(), Amount(90));
 }
 
 #[test]
@@ -327,7 +332,7 @@ fn attempt_to_reveal_with_unbalanced_proof() {
         account1.deposit(coins);
 
         // Reveal 100 tokens and deposit revealed funds into account 2
-        let revealed_funds = account1.reveal_confidential(resource, reveal_proof);
+        let revealed_funds = account1.withdraw_confidential(resource, reveal_proof);
         account2.deposit(revealed_funds);
 
         account1.balance(resource);

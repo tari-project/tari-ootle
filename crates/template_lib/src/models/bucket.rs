@@ -35,7 +35,7 @@ use crate::{
 
 const TAG: u64 = BinaryTag::BucketId.as_u64();
 
-/// A bucket's unique identification during the transaction execution
+/// A bucket identifier. This identifier is assigned at runtime.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Ord, PartialOrd, Hash)]
 #[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
 pub struct BucketId(#[cfg_attr(feature = "ts", ts(type = "number"))] BorTag<u32, TAG>);
@@ -52,8 +52,8 @@ impl fmt::Display for BucketId {
     }
 }
 
-/// A temporary container of resources. Buckets only live during a transaction execution and must be empty at the end of
-/// the transaction.
+/// A temporary container of resources. Buckets exist during a transaction execution. All buckets must be
+/// consumed (deposited into a vault, burned etc) before the end of the transaction or the entire transaction will fail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Bucket {
@@ -61,15 +61,12 @@ pub struct Bucket {
 }
 
 impl Bucket {
-    pub const fn from_id(id: BucketId) -> Self {
-        Self { id }
-    }
-
-    pub fn id(&self) -> BucketId {
+    /// Returns the BucketId of this bucket
+    pub(crate) fn id(&self) -> BucketId {
         self.id
     }
 
-    /// Returns the resource address of the tokens that this bucket holds
+    /// Returns the resource address of the tokens held in this bucket
     pub fn resource_address(&self) -> ResourceAddress {
         let resp: InvokeResult = call_engine(EngineOp::BucketInvoke, &BucketInvokeArg {
             bucket_ref: BucketRef::Ref(self.id),
@@ -81,7 +78,7 @@ impl Bucket {
             .expect("Bucket GetResourceAddress returned invalid resource address")
     }
 
-    /// Returns the the type of resource that this bucket holds
+    /// Returns the type of resource held in this bucket
     pub fn resource_type(&self) -> ResourceType {
         let resp: InvokeResult = call_engine(EngineOp::BucketInvoke, &BucketInvokeArg {
             bucket_ref: BucketRef::Ref(self.id),
@@ -95,6 +92,12 @@ impl Bucket {
 
     /// Withdraws `amount` tokens from the bucket into a new bucket.
     /// It will panic if there are not enough tokens in the bucket
+    ///
+    /// * for fungible resources, the `amount` is the number of tokens to withdraw
+    /// * for non-fungible resources, the `amount` is the number of _non-specific_ non-fungible tokens to withdraw.
+    ///   Prefer take_non_fungible if you want to withdraw specific non-fungible tokens.
+    /// * for confidential resources, the `amount` is the number of revealed tokens to withdraw. Use `take_confidential`
+    ///   to withdraw confidential tokens with a proof.
     pub fn take(&mut self, amount: Amount) -> Self {
         assert!(!amount.is_zero() && amount.is_positive());
         let resp: InvokeResult = call_engine(EngineOp::BucketInvoke, &BucketInvokeArg {
@@ -106,8 +109,9 @@ impl Bucket {
         resp.decode().expect("Bucket Take returned invalid bucket")
     }
 
-    /// Withdraws an amount (specified in the `proof`) of confidential tokens from the bucket into a new bucket.
-    /// It will panic if the proof is invalid or there are not enough tokens in the bucket
+    /// Takes (withdraws) confidential resources from the bucket into a new bucket.
+    /// It will panic if the withdraw fails for any reason, including if the proof withdraws from unknown inputs,
+    /// withdraws more funds than are available or is otherwise invalid.
     pub fn take_confidential(&mut self, proof: ConfidentialWithdrawProof) -> Self {
         let resp: InvokeResult = call_engine(EngineOp::BucketInvoke, &BucketInvokeArg {
             bucket_ref: BucketRef::Ref(self.id),
@@ -119,7 +123,7 @@ impl Bucket {
     }
 
     /// Destroy all the tokens that this bucket holds.
-    /// It will panic if the caller does not have the appropriate permissions
+    /// It will panic if the caller does not have the appropriate permission to burn the resource.
     pub fn burn(&self) {
         let resp: InvokeResult = call_engine(EngineOp::BucketInvoke, &BucketInvokeArg {
             bucket_ref: BucketRef::Ref(self.id),
@@ -130,23 +134,8 @@ impl Bucket {
         resp.decode().expect("Bucket Burn returned invalid result")
     }
 
-    /// Split the current bucket, returning two new buckets, one with `amount` tokens and the other with the rest.
-    /// It will panic if there are not enough tokens in the bucket
-    pub fn split(mut self, amount: Amount) -> (Self, Self) {
-        let new_bucket = self.take(amount);
-        (new_bucket, self)
-    }
-
-    /// Split the current bucket, returning two new buckets, one with an amount (specified in the `proof`) of
-    /// confidential tokens and the other with the rest. It will panic if the proof is invalid or there are not
-    /// enough tokens in the bucket
-    pub fn split_confidential(mut self, proof: ConfidentialWithdrawProof) -> (Self, Self) {
-        let new_bucket = self.take_confidential(proof);
-        (new_bucket, self)
-    }
-
-    /// Joins the bucket with another of the same resource type, returning a new joined bucket with the value of both.
-    /// Will panic if the other bucket is not of the same resource type.
+    /// Joins the bucket with another of the same resource, returning a new joined bucket with the value of both.
+    /// Will panic if the other bucket does not contain the same resource.
     pub fn join(self, other: Bucket) -> Self {
         let resp: InvokeResult = call_engine(EngineOp::BucketInvoke, &BucketInvokeArg {
             bucket_ref: BucketRef::Ref(self.id),
@@ -157,7 +146,9 @@ impl Bucket {
         resp.decode().expect("Bucket join returned invalid result")
     }
 
-    /// Returns how many tokens this bucket holds
+    /// Returns the amount of tokens held in this bucket.
+    ///
+    /// Note that if the resource is confidential, only the revealed amount is returned.
     pub fn amount(&self) -> Amount {
         let resp: InvokeResult = call_engine(EngineOp::BucketInvoke, &BucketInvokeArg {
             bucket_ref: BucketRef::Ref(self.id),
@@ -168,20 +159,8 @@ impl Bucket {
         resp.decode().expect("Bucket GetAmount returned invalid amount")
     }
 
-    /// Returns a new bucket with revealed funds, specified by the `proof`.
-    /// The amount of tokens will not change, only how many of those tokens will be known by everyone
-    pub fn reveal_confidential(&mut self, proof: ConfidentialWithdrawProof) -> Bucket {
-        let resp: InvokeResult = call_engine(EngineOp::BucketInvoke, &BucketInvokeArg {
-            bucket_ref: BucketRef::Ref(self.id),
-            action: BucketAction::RevealConfidential,
-            args: invoke_args![proof],
-        });
-
-        resp.decode()
-            .expect("Bucket RevealConfidential returned invalid result")
-    }
-
-    /// Create a proof of token balances in the bucket, used mainly for cross-template calls
+    /// Create a proof of ownership for all tokens in the bucket, used mainly for cross-template calls.
+    /// Note that until the proof is dropped, the contained tokens are locked and cannot be used/deposited.
     pub fn create_proof(&self) -> Proof {
         let resp: InvokeResult = call_engine(EngineOp::BucketInvoke, &BucketInvokeArg {
             bucket_ref: BucketRef::Ref(self.id),
@@ -193,6 +172,7 @@ impl Bucket {
     }
 
     /// Returns the IDs of all the non-fungibles in this bucket
+    /// If the resource is not a non-fungible resource, an empty vector is returned.
     pub fn get_non_fungible_ids(&self) -> Vec<NonFungibleId> {
         let resp: InvokeResult = call_engine(EngineOp::BucketInvoke, &BucketInvokeArg {
             bucket_ref: BucketRef::Ref(self.id),
@@ -204,7 +184,8 @@ impl Bucket {
             .expect("get_non_fungible_ids returned invalid non fungible ids")
     }
 
-    /// Returns all the non-fungibles in this bucket
+    /// Returns all the non-fungibles in this bucket.
+    /// If the resource is not a non-fungible resource, an empty vector is returned.
     pub fn get_non_fungibles(&self) -> Vec<NonFungible> {
         let resp: InvokeResult = call_engine(EngineOp::BucketInvoke, &BucketInvokeArg {
             bucket_ref: BucketRef::Ref(self.id),
@@ -215,6 +196,8 @@ impl Bucket {
         resp.decode().expect("get_non_fungibles returned invalid non fungibles")
     }
 
+    /// Returns the number of confidential commitments in this bucket.
+    /// Note that this is not indicative of the number of tokens in the bucket, as these are blinded.
     pub fn count_confidential_commitments(&self) -> u32 {
         let resp: InvokeResult = call_engine(EngineOp::BucketInvoke, &BucketInvokeArg {
             bucket_ref: BucketRef::Ref(self.id),
@@ -226,11 +209,21 @@ impl Bucket {
             .expect("count_confidential_commitments returned invalid u32")
     }
 
+    /// Asserts that the bucket does not contain any confidential commitments.
+    /// This is useful to ensure that a bucket is not holding any confidential commitments before performing
+    /// an operation e.g. depositing it into a vault that expects only revealed funds.
     pub fn assert_contains_no_confidential_funds(&self) {
         let count = self.count_confidential_commitments();
         assert_eq!(
             count, 0,
             "Expected bucket to have no confidential commitments, but found {count}",
         );
+    }
+
+    /// Creates a new bucket from a bucket ID. This is used internally. Performing any operations on this bucket will
+    /// fail if the bucket is not in scope or does not exist. Rather use methods like `Vault::withdraw` to obtain a
+    /// bucket.
+    pub const fn from_id(id: BucketId) -> Self {
+        Self { id }
     }
 }

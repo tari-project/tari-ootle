@@ -56,7 +56,14 @@ use crate::{
     types::crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
 };
 
-/// Utility for managing resources inside templates
+/// Provides an interface for various resource operations e.g. Minting, recalling, creating, etc.
+///
+/// # Example
+/// ```rust,ignore
+/// use tari_template_lib::resource::manager::ResourceManager;
+/// let resource_manager = ResourceManager::get(my_resource_address);
+/// resource_manager.mint_fungible(Amount(1000));
+/// ```
 #[derive(Debug)]
 pub struct ResourceManager {
     resource_address: Option<ResourceAddress>,
@@ -105,7 +112,7 @@ impl ResourceManager {
     /// * `access_rules` - Rules that will govern access to the resource
     /// * `metadata` - Collection of information used to describe the resource
     /// * `mint_arg` - Specification of the initial tokens that will be minted on resource creation
-    pub fn create(
+    pub(crate) fn create(
         &self,
         resource_type: ResourceType,
         owner_rule: OwnerRule,

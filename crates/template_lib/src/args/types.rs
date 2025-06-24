@@ -452,7 +452,6 @@ pub enum BucketAction {
     Take,
     TakeConfidential,
     Join,
-    RevealConfidential,
     Burn,
     CreateProof,
     GetNonFungibleIds,

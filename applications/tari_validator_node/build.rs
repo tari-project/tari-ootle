@@ -31,16 +31,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all("./web_ui/dist")?;
 
     if env::var("CARGO_FEATURE_TS").is_ok() {
-        println!("cargo:warning=The web ui is not being built because the tx feature is enabled.");
+        println!("cargo:warning=The web ui will not be built because the tx feature is enabled.");
         return Ok(());
     }
     if env::var("CARGO_FEATURE_WEB_UI").is_err() {
-        println!("cargo:warning=The web ui is not being built because the web_ui feature is not enabled.");
+        println!("cargo:warning=The web ui will not be built because the web_ui feature is not enabled.");
         return Ok(());
     }
 
     if cfg!(debug_assertions) {
-        println!("cargo:warning=The web ui is not being compiled in debug mode.");
+        println!("cargo:warning=The web ui will not be compiled in debug mode.");
         return Ok(());
     }
 

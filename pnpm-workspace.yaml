@@ -1,6 +1,6 @@
 packages:
   - bindings
-  - clients/javascript/wallet_jrpc_client
+  - clients/javascript/*
   - applications/tari_walletd/web_ui
   - applications/tari_indexer/web_ui
   - applications/tari_validator_node/web_ui
@@ -14,9 +14,5 @@ catalog:
 ignoredBuiltDependencies:
   - '@swc/core'
   - esbuild
-
-overrides:
-  '@tari-project/typescript-bindings': link:bindings
-  '@tari-project/wallet_jrpc_client': link:clients/javascript/wallet_daemon_client
 
 publishBranch: development

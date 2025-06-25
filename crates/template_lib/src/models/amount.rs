@@ -30,7 +30,7 @@ use tari_template_abi::rust::{
     num::TryFromIntError,
 };
 
-/// Represents an integer quantity of any fungible or non-fungible resource
+/// Represents an signed integer quantity
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[serde(transparent)]
@@ -44,55 +44,68 @@ pub struct Amount(#[cfg_attr(feature = "ts", ts(type = "number"))] pub i64);
 impl Amount {
     pub const MAX: Amount = Amount(i64::MAX);
 
+    /// Creates a new `Amount` from an `i64` value.
     pub const fn new(amount: i64) -> Self {
         Amount(amount)
     }
 
+    /// Creates a new `Amount` with a value of zero.
     pub const fn zero() -> Self {
         Amount(0)
     }
 
+    /// Returns true if the amount is zero.
     pub fn is_zero(&self) -> bool {
         self.0 == 0
     }
 
+    /// Returns true if the amount is positive (greater than or equal to zero).
     pub fn is_positive(&self) -> bool {
         self.0 >= 0
     }
 
+    /// Returns true if the amount is negative (less than zero).
     pub fn is_negative(&self) -> bool {
         !self.is_positive()
     }
 
+    /// Returns the value of the amount as an `i64`.
     pub fn value(&self) -> i64 {
         self.0
     }
 
+    /// Returns the value of the amount as a `u64` if it is non-negative, otherwise returns `None`.
     pub fn checked_add(&self, other: Self) -> Option<Self> {
         self.0.checked_add(other.0).map(Amount)
     }
 
+    /// Returns the sum of two amounts, saturating at `i64::MAX` if the result exceeds it.
     pub fn saturating_add(&self, other: Self) -> Self {
         Amount(self.0.saturating_add(other.0))
     }
 
+    /// Returns the difference of two amounts, saturating at `0` if the result is negative.
     pub fn checked_sub(&self, other: Self) -> Option<Self> {
         self.0.checked_sub(other.0).map(Amount)
     }
 
+    /// Returns the difference of two amounts, saturating at `0` if the result is negative.
     pub fn saturating_sub(&self, other: Self) -> Self {
         Amount(self.0.saturating_sub(other.0))
     }
 
-    pub fn saturating_sub_positive(&self, other: Self) -> Self {
+    /// Returns the difference of two amounts, returning `None` if the result is negative.
+    pub fn saturating_sub_positive(&self, other: Self) -> Option<Self> {
         let amount = Amount(self.0 - other.0);
         if amount.is_negative() {
-            Amount(0)
+            None
         } else {
-            amount
+            Some(amount)
         }
     }
 
+    /// Returns the difference of two amounts, returning `None` if the result is negative or if either amount is
+    /// negative.
     pub fn checked_sub_positive(&self, other: Self) -> Option<Self> {
         if self.is_negative() || other.is_negative() {
             return None;
@@ -104,18 +117,22 @@ impl Amount {
         Some(Amount(self.0 - other.0))
     }
 
+    /// Returns the product of two amounts, returning `None` if the result overflows.
     pub fn checked_mul(&self, other: &Self) -> Option<Self> {
         self.0.checked_mul(other.0).map(Amount)
     }
 
+    /// Returns the product of two amounts, saturating at `i64::MAX` if the result exceeds it.
     pub fn saturating_mul(&self, other: &Self) -> Self {
         Amount(self.0.saturating_mul(other.0))
     }
 
+    /// Returns the quotient of two amounts, returning `None` if the divisor is zero or if the result overflows.
     pub fn checked_div(&self, other: &Self) -> Option<Self> {
         self.0.checked_div(other.0).map(Amount)
     }
 
+    /// Returns the quotient of two amounts, saturating at `i64::MAX` if the result exceeds it.
     pub fn saturating_div(&self, other: &Self) -> Self {
         Amount(self.0.saturating_div(other.0))
     }

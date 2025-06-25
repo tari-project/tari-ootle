@@ -96,14 +96,6 @@ impl Bucket {
         self.resource_container.deposit(other.resource_container)
     }
 
-    pub fn reveal_confidential(
-        &mut self,
-        proof: ConfidentialWithdrawProof,
-        view_key: Option<&RistrettoPublicKey>,
-    ) -> Result<ResourceContainer, ResourceError> {
-        self.resource_container.reveal_confidential(proof, view_key)
-    }
-
     pub fn lock_all(&mut self) -> Result<LockedResource, ResourceError> {
         let locked_resource = self.resource_container.lock_all()?;
         Ok(LockedResource::new(

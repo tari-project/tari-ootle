@@ -142,7 +142,16 @@ pub struct ViewableBalanceProofChallengeFields<'a> {
     pub r_prime: &'a RistrettoPublicKeyBytes,
 }
 
-/// A zero-knowledge proof that a transfer of confidential resources is valid
+/// A confidential proof that defines a confidential and/or revealed withdrawal, e.g. from a vault containing
+/// confidential resources. This proof contains:
+/// - Inputs: The confidential inputs that are being withdrawn identified by their Pedersen commitments.
+/// - Input revealed amount: The amount of revealed funds to withdraw.
+/// - Output proof: The confidential output statement that contains the output and change statements, range proof, and
+///   revealed amounts.
+/// - Balance proof: The balance proof signature that proves knowledge of the excess. inputs - output - change = (0)
+///   where (0) is the excess. Knowledge of the excess is not possible unless the inputs and outputs balance.
+///
+/// Withdrawals can be revealed only, confidential only, or a mix of both.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(
     feature = "ts",
@@ -162,10 +171,12 @@ pub struct ConfidentialWithdrawProof {
 }
 
 impl ConfidentialWithdrawProof {
-    /// Creates a withdrawal proof for revealed funds of a specific amount
+    /// Creates a valid withdrawal proof for revealed funds of a specific amount.
     pub fn revealed_withdraw<T: Into<Amount>>(amount: T) -> Self {
         // There are no confidential inputs or outputs (this amounts to the same thing as a Fungible resource transfer)
-        // So signature s = 0 + e.x where x is a 0 excess, is valid.
+        // So signature s = 0 + e.x where x is a 0 excess, is technically valid. Note that signature verification
+        // explicitly disallows the zero key. However, we explicitly check for this case in the
+        // `is_revealed_only` method and consider the signature valid.
         let balance_proof = BalanceProofSignature::zero();
 
         let amount = amount.into();
@@ -177,6 +188,7 @@ impl ConfidentialWithdrawProof {
         }
     }
 
+    /// Creates a withdrawal proof for a confidential transfer that transfers revealed funds to confidential outputs.
     pub fn revealed_to_confidential<T: Into<Amount>>(
         input_revealed_amount: T,
         output_proof: ConfidentialOutputStatement,

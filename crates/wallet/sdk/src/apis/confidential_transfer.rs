@@ -192,13 +192,14 @@ where
                     self.outputs_api
                         .lock_outputs_until_partial_amount(&src_vault.address, spend_amount, proof_id)?;
 
-                let revealed_to_spend =
-                    spend_amount.saturating_sub_positive(amount_locked.try_into().map_err(|_| {
+                let revealed_to_spend = spend_amount
+                    .saturating_sub_positive(amount_locked.try_into().map_err(|_| {
                         ConfidentialTransferApiError::InvalidParameter {
                             param: "transfer_param",
                             reason: "Attempt to spend more than Amount::MAX".to_string(),
                         }
-                    })?);
+                    })?)
+                    .unwrap_or_else(Amount::zero);
 
                 if src_vault.revealed_balance < revealed_to_spend {
                     return Err(ConfidentialTransferApiError::InsufficientFunds);

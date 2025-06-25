@@ -174,21 +174,17 @@ mod account_template {
             self.vaults.iter().map(|(k, v)| (*k, v.balance())).collect()
         }
 
-        pub fn reveal_confidential(&mut self, resource: ResourceAddress, proof: ConfidentialWithdrawProof) -> Bucket {
-            emit_event("reveal_confidential", [
-                ("num_inputs", proof.inputs.len().to_string()),
-                ("resource", resource.to_string()),
-            ]);
-            let v = self.get_vault_mut(resource);
-            v.reveal_confidential(proof)
-        }
-
+        /// Withdraws funds using the ConfidentialWithdrawProof, and immediately deposits the withdraw back into the
+        /// vault. It will panic if the proof is invalid or the resource type contained in the vault is not
+        /// confidential. This is useful for converting confidential tokens into revealed tokens and vice versa.
         pub fn join_confidential(&mut self, resource: ResourceAddress, proof: ConfidentialWithdrawProof) {
             emit_event("join_confidential", [
                 ("num_inputs", proof.inputs.len().to_string()),
                 ("resource", resource.to_string()),
             ]);
-            self.get_vault_mut(resource).join_confidential(proof);
+            let vault_mut = self.get_vault_mut(resource);
+            let bucket = vault_mut.withdraw_confidential(proof);
+            vault_mut.deposit(bucket);
         }
 
         // Fee methods. These are used to pay fees and satisfy a "duck-typed" interface.

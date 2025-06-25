@@ -1,6 +1,6 @@
 # NOTE: When editing this version, also edit the versions in template_built_in/templates/account and account_nft
 [workspace.package]
-version = "0.10.3"
+version = "0.10.4"
 edition = "2021"
 authors = ["The Tari Development Community"]
 repository = "https://github.com/tari-project/tari-ootle"
@@ -79,7 +79,7 @@ tari_indexer = { path = "applications/tari_indexer", default-features = false }
 tari_ootle_app_utilities = { path = "applications/tari_app_utilities" }
 
 # core crates
-tari_bor = { version = "0.10.3", path = "crates/tari_bor", default-features = false }
+tari_bor = { version = "0.10.4", path = "crates/tari_bor", default-features = false }
 tari_consensus = { path = "crates/consensus" }
 tari_consensus_types = { path = "crates/consensus_types" }
 tari_ootle_common_types = { path = "crates/common_types" }
@@ -100,7 +100,7 @@ tari_state_tree = { path = "crates/state_tree" }
 tari_template_abi = { version = "0.10.0", path = "crates/template_abi", default-features = false }
 tari_template_builtin = { path = "crates/template_builtin" }
 tari_template_lib = { path = "crates/template_lib" }
-tari_template_lib_types = { version = "0.10.3", path = "crates/template_lib_types" }
+tari_template_lib_types = { version = "0.10.4", path = "crates/template_lib_types" }
 tari_template_macros = { version = "0.10.0", path = "crates/template_macros" }
 tari_template_manager = { path = "crates/template_manager" }
 tari_template_test_tooling = { path = "crates/template_test_tooling" }
@@ -110,7 +110,6 @@ tari_validator_node_rpc = { path = "crates/validator_node_rpc" }
 
 # internal dependencies among workspace crates
 libp2p-messaging = { path = "networking/libp2p-messaging" }
-libp2p-peersync = { path = "networking/libp2p-peersync" }
 libp2p-substream = { path = "networking/libp2p-substream" }
 proto_builder = { path = "networking/proto_builder" }
 sqlite_message_logger = { path = "networking/sqlite_message_logger" }

@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useRouteError } from "react-router-dom";
+import { isRouteErrorResponse, useRouteError } from "react-router-dom";
 import { StyledPaper } from "../Components/StyledComponents";
 import Typography from "@mui/material/Typography";
 import Grid from "@mui/material/Grid";
@@ -28,8 +28,7 @@ import Container from "@mui/material/Container";
 
 export default function ErrorPage() {
   const error: any = useRouteError();
-  // remove any declaration
-  console.error(error);
+  console.error("Error", error);
 
   return (
     <div
@@ -47,7 +46,9 @@ export default function ErrorPage() {
               <Typography variant="h3">Oops!</Typography>
               <Typography>Sorry, an unexpected error has occurred.</Typography>
               <Typography>
-                <i>{error.statusText || error.message}</i>
+                {isRouteErrorResponse(error) ? "Invalid page" : "Unexpected Error:"}
+                <br />
+                <i>{error?.statusText || error?.message || error}</i>
               </Typography>{" "}
             </StyledPaper>
           </Grid>

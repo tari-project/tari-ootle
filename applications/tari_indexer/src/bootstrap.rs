@@ -61,7 +61,7 @@ use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
 use crate::{
     network_client::TariNetworkClient,
-    substate_storage_sqlite::sqlite_substate_store_factory::SqliteSubstateStore,
+    storage_sqlite::store_factory::SqliteIndexerStore,
     ApplicationConfig,
     IndexerEpochManagerSpec,
     Noop,
@@ -149,7 +149,7 @@ pub async fn spawn_services(
         .spawn(shutdown.clone())?;
 
     // Connect to substate db
-    let substate_store = SqliteSubstateStore::try_create(config.indexer.state_db_path())?;
+    let store = SqliteIndexerStore::try_create(config.indexer.state_db_path())?;
 
     // Epoch event oracle
     let epoch_event_oracle = create_epoch_oracle(config, global_db.clone(), &consensus_constants).await?;
@@ -205,7 +205,7 @@ pub async fn spawn_services(
         epoch_manager,
         validator_node_client_factory,
         network_client,
-        substate_store,
+        store,
         global_db,
         template_manager,
         template_manager_service,
@@ -217,7 +217,7 @@ pub struct Services {
     pub networking: NetworkingHandle<TariMessagingSpec>,
     pub epoch_manager: EpochManagerHandle<PeerAddress>,
     pub validator_node_client_factory: TariValidatorNodeRpcClientFactory,
-    pub substate_store: SqliteSubstateStore,
+    pub store: SqliteIndexerStore,
     pub network_client: TariNetworkClient<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory>,
     pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     pub template_manager: TemplateManager<PeerAddress>,

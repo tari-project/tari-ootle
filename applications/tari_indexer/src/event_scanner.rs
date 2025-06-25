@@ -41,17 +41,12 @@ use tari_validator_node_rpc::client::{TariValidatorNodeRpcClientFactory, Validat
 use crate::{
     block_data::BlockData,
     config::EventFilterConfig,
-    substate_storage_sqlite::{
+    storage_sqlite::{
         models::{
             events::{NewEvent, NewScannedBlockId},
             substate::NewSubstate,
         },
-        sqlite_substate_store_factory::{
-            SqliteSubstateStore,
-            SubstateStore,
-            SubstateStoreReadTransaction,
-            SubstateStoreWriteTransaction,
-        },
+        store_factory::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreWriteTransaction, SqliteIndexerStore},
     },
 };
 
@@ -89,7 +84,7 @@ impl TryFrom<EventFilterConfig> for EventFilter {
 pub struct EventScanner {
     epoch_manager: EpochManagerHandle<PeerAddress>,
     client_factory: TariValidatorNodeRpcClientFactory,
-    substate_store: SqliteSubstateStore,
+    substate_store: SqliteIndexerStore,
     template_manager: TemplateManagerHandle,
     event_filters: Vec<EventFilter>,
 }
@@ -98,7 +93,7 @@ impl EventScanner {
     pub fn new(
         epoch_manager: EpochManagerHandle<PeerAddress>,
         client_factory: TariValidatorNodeRpcClientFactory,
-        substate_store: SqliteSubstateStore,
+        substate_store: SqliteIndexerStore,
         template_manager: TemplateManagerHandle,
         event_filters: Vec<EventFilter>,
     ) -> Self {
@@ -181,10 +176,10 @@ impl EventScanner {
                     .filter_map(|r| r.as_create())
                     .filter_map(|create| create.substate.value.value().and_then(|v| v.as_transaction_receipt()))
                     .flat_map(|receipt| receipt.events.as_slice());
-                event_count += events.clone().count();
 
                 // only keep the events specified by the indexer filter
                 let filtered_events: Vec<_> = events.filter(|ev| self.should_persist_event(ev)).collect();
+                event_count += filtered_events.len();
                 debug!(
                     target: LOG_TARGET,
                     "Filtered events in epoch {}: {}",
@@ -344,7 +339,7 @@ impl EventScanner {
                 "Saving substate: {:?}",
                 substate_row
             );
-            tx.set_substate(substate_row)?;
+            tx.insert_substate(substate_row)?;
         }
         tx.commit()?;
         Ok(())

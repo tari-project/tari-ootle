@@ -58,6 +58,8 @@ use tari_indexer_client::types::{
     IndexerTransactionFinalizedResult,
     InspectSubstateRequest,
     InspectSubstateResponse,
+    ListRecentTransactionsRequest,
+    ListRecentTransactionsResponse,
     ListSubstatesRequest,
     ListSubstatesResponse,
     ListTemplatesRequest,
@@ -66,6 +68,7 @@ use tari_indexer_client::types::{
     SubmitTransactionRequest,
     SubmitTransactionResponse,
     TemplateMetadata,
+    TransactionEntry,
 };
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
 use tari_ootle_app_utilities::keypair::RistrettoKeypair;
@@ -84,6 +87,7 @@ use crate::{
     dry_run::processor::DryRunTransactionProcessor,
     json_rpc::error::internal_error,
     network_client::NetworkClientError,
+    storage_sqlite::store_factory::SqliteIndexerStore,
     substate_manager::SubstateManager,
     transaction_manager::{error::TransactionManagerError, TransactionManager},
 };
@@ -95,7 +99,8 @@ pub struct JsonRpcHandlers {
     networking: NetworkingHandle<TariMessagingSpec>,
     substate_manager: Arc<SubstateManager>,
     epoch_manager: EpochManagerHandle<PeerAddress>,
-    transaction_manager: TransactionManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory>,
+    transaction_manager:
+        TransactionManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SqliteIndexerStore>,
     template_manager: TemplateManager<PeerAddress>,
     global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     dry_run_transaction_processor: DryRunTransactionProcessor,
@@ -105,7 +110,11 @@ impl JsonRpcHandlers {
     pub fn new(
         services: &Services,
         substate_manager: Arc<SubstateManager>,
-        transaction_manager: TransactionManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory>,
+        transaction_manager: TransactionManager<
+            EpochManagerHandle<PeerAddress>,
+            TariValidatorNodeRpcClientFactory,
+            SqliteIndexerStore,
+        >,
         global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
         template_manager: TemplateManager<PeerAddress>,
         dry_run_transaction_processor: DryRunTransactionProcessor,
@@ -603,6 +612,39 @@ impl JsonRpcHandlers {
             },
         };
 
+        Ok(JsonRpcResponse::success(answer_id, resp))
+    }
+
+    pub async fn list_recent_transactions(&self, value: JsonRpcExtractor) -> JrpcResult {
+        let answer_id = value.get_answer_id();
+        let req: ListRecentTransactionsRequest = value.parse_params()?;
+        if req.limit.is_some_and(|l| l > 1000) {
+            return Err(JsonRpcResponse::error(
+                answer_id,
+                JsonRpcError::new(
+                    JsonRpcErrorReason::InvalidParams,
+                    "Limit cannot be greater than 1000".to_string(),
+                    json::Value::Null,
+                ),
+            ));
+        }
+
+        let limit = req.limit.unwrap_or(100);
+
+        let transactions = self
+            .transaction_manager
+            .list_recent_transactions(req.last_id, limit as usize)
+            .map_err(|e| Self::internal_error(answer_id, e))?;
+
+        let resp = ListRecentTransactionsResponse {
+            transactions: transactions
+                .into_iter()
+                .map(|t| TransactionEntry {
+                    transaction_id: t.calculate_id(),
+                    transaction: t,
+                })
+                .collect(),
+        };
         Ok(JsonRpcResponse::success(answer_id, resp))
     }
 

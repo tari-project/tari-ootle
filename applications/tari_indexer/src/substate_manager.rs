@@ -33,11 +33,7 @@ use tari_ootle_common_types::{substate_type::SubstateType, PeerAddress, Versione
 use tari_template_lib::{models::ResourceAddress, types::TemplateAddress};
 use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClientFactory};
 
-use crate::substate_storage_sqlite::sqlite_substate_store_factory::{
-    SqliteSubstateStore,
-    SubstateStore,
-    SubstateStoreReadTransaction,
-};
+use crate::storage_sqlite::store_factory::{IndexerStore, IndexerStoreReadTransaction, SqliteIndexerStore};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SubstateResponse {
@@ -72,7 +68,7 @@ pub struct EventResponse {
 pub struct SubstateManager {
     substate_scanner:
         Arc<SubstateScanner<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SubstateFileCache>>,
-    substate_store: SqliteSubstateStore,
+    substate_store: SqliteIndexerStore,
 }
 
 impl SubstateManager {
@@ -80,7 +76,7 @@ impl SubstateManager {
         substate_scanner: Arc<
             SubstateScanner<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SubstateFileCache>,
         >,
-        substate_store: SqliteSubstateStore,
+        substate_store: SqliteIndexerStore,
     ) -> Self {
         Self {
             substate_scanner,

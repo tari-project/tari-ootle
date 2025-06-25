@@ -3,6 +3,7 @@ name = "tari_template_lib_types"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
+description = "Tari template library types"
 repository.workspace = true
 license.workspace = true
 

@@ -8,7 +8,7 @@ fn main() {
     }
 
     if cfg!(debug_assertions) {
-        println!("cargo:warning=The web ui is not being compiled in debug mode.");
+        println!("cargo:warning=The web ui will not be compiled in debug mode.");
         return;
     }
 

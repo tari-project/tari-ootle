@@ -19,12 +19,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     fs::File::create("./webui/dist/.gitkeep")?;
 
     if env::var("CARGO_FEATURE_TS").is_ok() {
-        println!("cargo:warning=The web ui is not being compiled when we are generating typescript types/interfaces.");
+        println!("cargo:warning=The web ui will not be compiled when we are generating typescript types/interfaces.");
         return Ok(());
     }
 
     if cfg!(debug_assertions) {
-        println!("cargo:warning=The web ui is not being compiled in debug mode.");
+        println!("cargo:warning=The web ui will not be compiled in debug mode.");
         return Ok(());
     }
 

@@ -326,7 +326,7 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
                     address: row.address.parse().map_err(|e| StorageError::DataInconsistency {
                         details: format!("Failed to parse address: {}", e),
                     })?,
-                    // TODO: improve the indexer api. The index is not being used.
+                    // TODO: improve the indexer api. The index is not used.
                     index: row.version.try_into().map_err(|e| StorageError::DataInconsistency {
                         details: format!("Version overflow {}", e),
                     })?,

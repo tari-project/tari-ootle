@@ -289,19 +289,6 @@ importers:
         specifier: 'catalog:'
         version: 5.8.3
 
-  clients/javascript/wallet_daemon_client:
-    dependencies:
-      '@tari-project/typescript-bindings':
-        specifier: link:../../../bindings
-        version: link:../../../bindings
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 22.14.0
-      typescript:
-        specifier: 'catalog:'
-        version: 5.8.3
-
   utilities/db_inspector/web_ui:
     dependencies:
       '@emotion/react':

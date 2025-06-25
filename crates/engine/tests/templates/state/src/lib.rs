@@ -26,27 +26,31 @@ use tari_template_lib::prelude::*;
 mod state_template {
     use super::*;
 
-    pub struct State {
-        value: u32,
+    #[derive(Default)]
+    pub enum State {
+        #[default]
+        Zero,
+        One,
+        Other(u32),
     }
 
     impl State {
         pub fn new() -> Component<Self> {
-            Component::new(Self { value: 0 })
+            Component::new(Self::default())
                 .with_access_rules(AccessRules::new().default(rule!(allow_all)))
                 .create()
         }
 
         pub fn create_multiple(n: u32) {
             (0..n).for_each(|i| {
-                Component::new(Self { value: i })
+                Component::new(Self::from(i))
                     .with_access_rules(AccessRules::new().default(rule!(allow_all)))
                     .create();
             });
         }
 
         pub fn restricted() -> Component<Self> {
-            Component::new(Self { value: 0 })
+            Component::new(Self::default())
                 .with_access_rules(
                     AccessRules::new()
                         .add_method_rule("get", rule!(allow_all))
@@ -56,12 +60,26 @@ mod state_template {
         }
 
         pub fn set(&mut self, value: u32) {
-            debug!("Changing value from {} to {}", self.value, value);
-            self.value = value;
+            debug!("Changing value from {:?} to {}", self, value);
+            *self = value.into();
         }
 
         pub fn get(&self) -> u32 {
-            self.value
+            match self {
+                State::Zero => 0,
+                State::One => 1,
+                State::Other(value) => *value,
+            }
+        }
+    }
+
+    impl From<u32> for State {
+        fn from(value: u32) -> Self {
+            match value {
+                0 => State::Zero,
+                1 => State::One,
+                _ => State::Other(value),
+            }
         }
     }
 }

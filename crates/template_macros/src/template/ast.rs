@@ -77,6 +77,14 @@ impl Parse for TemplateAst {
                         template_name = Some(item.ident.clone());
                     }
                 },
+                Item::Enum(ref mut item) => {
+                    item.attrs
+                        .push(syn::parse_quote!(#[derive(Debug, serde::Serialize, serde::Deserialize)]));
+                    item.attrs.push(syn::parse_quote!(#[serde(crate = "self::serde")]));
+                    if template_name.is_none() {
+                        template_name = Some(item.ident.clone());
+                    }
+                },
                 // TODO: check name matches template name
                 Item::Impl(_) => {
                     has_impl = true;

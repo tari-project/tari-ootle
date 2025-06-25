@@ -678,6 +678,7 @@ jobs:
         run: |
           BINFN="${TS_FILENAME}-${TARI_VERSION}-${VSHA_SHORT}"
           echo "BINFN=${BINFN}" >> $GITHUB_ENV
+          echo "BINFILE=${BINFN}-macos-universal" >> $GITHUB_ENV
 
       - name: Install macOS dependencies
         shell: bash
@@ -725,7 +726,6 @@ jobs:
         if: ${{ ( startsWith(runner.os,'macOS') ) && ( env.MACOS_NOTARIZE_USERNAME != '' ) }}
         continue-on-error: true
         env:
-          BINFILE: "${{ env.BINFN }}-macos-universal"
           MACOS_KEYCHAIN_PASS: ${{ secrets.MACOS_KEYCHAIN_PASS }}
           MACOS_APPLICATION_ID: ${{ secrets.MACOS_APPLICATION_ID }}
           MACOS_APPLICATION_CERT: ${{ secrets.MACOS_APPLICATION_CERT }}

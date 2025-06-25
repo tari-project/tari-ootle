@@ -227,3 +227,9 @@ impl Bucket {
         Self { id }
     }
 }
+
+impl fmt::Display for Bucket {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Bucket({})", self.id.0.inner())
+    }
+}

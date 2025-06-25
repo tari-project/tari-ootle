@@ -16,10 +16,6 @@ catalogs:
       specifier: ^6.2.5
       version: 6.2.5
 
-overrides:
-  '@tari-project/typescript-bindings': link:bindings
-  '@tari-project/wallet_jrpc_client': link:clients/javascript/wallet_daemon_client
-
 importers:
 
   .:
@@ -207,7 +203,7 @@ importers:
         specifier: link:../../../bindings
         version: link:../../../bindings
       '@tari-project/wallet_jrpc_client':
-        specifier: link:../../../clients/javascript/wallet_daemon_client
+        specifier: workspace:*
         version: link:../../../clients/javascript/wallet_daemon_client
       '@walletconnect/core':
         specifier: ^2.13.3
@@ -292,7 +288,7 @@ importers:
   clients/javascript/wallet_daemon_client:
     dependencies:
       '@tari-project/typescript-bindings':
-        specifier: link:../../../bindings
+        specifier: workspace:^
         version: link:../../../bindings
     devDependencies:
       '@types/node':

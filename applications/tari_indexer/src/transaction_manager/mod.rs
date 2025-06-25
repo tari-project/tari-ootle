@@ -37,24 +37,31 @@ use tari_validator_node_rpc::client::{
     ValidatorNodeRpcClient,
 };
 
-use crate::{network_client::TariNetworkClient, transaction_manager::error::TransactionManagerError};
+use crate::{
+    network_client::TariNetworkClient,
+    storage_sqlite::store_factory::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreWriteTransaction},
+    transaction_manager::error::TransactionManagerError,
+};
 
-pub struct TransactionManager<TEpochManager, TClientFactory> {
+pub struct TransactionManager<TEpochManager, TClientFactory, TStore> {
     network_client: TariNetworkClient<TEpochManager, TClientFactory>,
+    store: TStore,
 }
 
-impl<TEpochManager, TClientFactory, TAddr> TransactionManager<TEpochManager, TClientFactory>
+impl<TEpochManager, TClientFactory, TAddr, TStore> TransactionManager<TEpochManager, TClientFactory, TStore>
 where
     TAddr: NodeAddressable + 'static,
     TEpochManager: EpochManagerReader<Addr = TAddr> + 'static,
     TClientFactory: ValidatorNodeClientFactory<TAddr> + 'static,
     <TClientFactory::Client as ValidatorNodeRpcClient<TAddr>>::Error: IsNotFoundError + 'static,
+    TStore: IndexerStore,
 {
-    pub fn new(network_client: TariNetworkClient<TEpochManager, TClientFactory>) -> Self {
-        Self { network_client }
+    pub fn new(network_client: TariNetworkClient<TEpochManager, TClientFactory>, store: TStore) -> Self {
+        Self { network_client, store }
     }
 
     pub async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, TransactionManagerError> {
+        self.store.with_write_tx(|tx| tx.insert_transaction(&transaction))?;
         let id = self.network_client.submit_transaction(transaction).await?;
         Ok(id)
     }
@@ -87,5 +94,16 @@ where
             })
             .await?;
         Ok(result)
+    }
+
+    pub fn list_recent_transactions(
+        &self,
+        last_id: Option<TransactionId>,
+        limit: usize,
+    ) -> Result<Vec<Transaction>, TransactionManagerError> {
+        let transactions = self
+            .store
+            .with_read_tx(|tx| tx.list_recent_transactions(last_id, limit))?;
+        Ok(transactions)
     }
 }

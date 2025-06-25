@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
 use tari_template_lib::types::Hash;
 
-use crate::substate_storage_sqlite::schema::*;
+use crate::storage_sqlite::schema::*;
 
 #[derive(Debug, Identifiable, Queryable)]
 #[diesel(table_name = events)]

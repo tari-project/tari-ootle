@@ -33,41 +33,26 @@ import { DataTableCell, CodeBlock, AccordionIconButton } from "../../../Componen
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import Collapse from "@mui/material/Collapse";
-import TablePagination from "@mui/material/TablePagination";
 import Typography from "@mui/material/Typography";
+import { listRecentTransactions } from "../../../utils/json_rpc";
+import { TransactionEntry } from "@tari-project/typescript-bindings";
 
-interface ITableRecentTransaction {
-  id: string;
-  payload_id: string;
-  timestamp: string;
-  instructions: string;
-  meta: string;
-}
-
-type ColumnKey = keyof ITableRecentTransaction;
-
-function RowData({ id, payload_id, timestamp, instructions, meta }: ITableRecentTransaction) {
+function RowData(props: { data: TransactionEntry }) {
   const [open1, setOpen1] = useState(false);
   const [open2, setOpen2] = useState(false);
 
+  const { transaction_id, transaction: tx } = props.data;
+  const transaction = tx.V1.body.transaction;
+
   return (
     <>
-      <TableRow key={id} sx={{ borderBottom: "none" }}>
+      <TableRow sx={{ borderBottom: "none" }}>
         <DataTableCell
           sx={{
             borderBottom: "none",
           }}
         >
-          <Link style={{ textDecoration: "none" }} to={`/transaction/${payload_id}`}>
-            {payload_id}
-          </Link>
-        </DataTableCell>
-        <DataTableCell
-          sx={{
-            borderBottom: "none",
-          }}
-        >
-          {timestamp.replace("T", " ")}
+          {transaction_id}
         </DataTableCell>
         <DataTableCell sx={{ borderBottom: "none", textAlign: "center" }}>
           <AccordionIconButton
@@ -96,7 +81,7 @@ function RowData({ id, payload_id, timestamp, instructions, meta }: ITableRecent
           </AccordionIconButton>
         </DataTableCell>
       </TableRow>
-      <TableRow key={`${id}-2`}>
+      <TableRow>
         <DataTableCell
           style={{
             paddingBottom: 0,
@@ -106,14 +91,14 @@ function RowData({ id, payload_id, timestamp, instructions, meta }: ITableRecent
           colSpan={4}
         >
           <Collapse in={open1} timeout="auto" unmountOnExit>
-            <CodeBlock style={{ marginBottom: "10px" }}>{renderJson(JSON.parse(meta))}</CodeBlock>
+            <CodeBlock style={{ marginBottom: "10px" }}>{renderJson(transaction.fee_instructions)}</CodeBlock>
           </Collapse>
         </DataTableCell>
       </TableRow>
-      <TableRow key={`${id}-3`}>
+      <TableRow>
         <DataTableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={4}>
           <Collapse in={open2} timeout="auto" unmountOnExit>
-            <CodeBlock style={{ marginBottom: "10px" }}>{renderJson(JSON.parse(instructions))}</CodeBlock>
+            <CodeBlock style={{ marginBottom: "10px" }}>{renderJson(transaction.instructions)}</CodeBlock>
           </Collapse>
         </DataTableCell>
       </TableRow>
@@ -122,55 +107,21 @@ function RowData({ id, payload_id, timestamp, instructions, meta }: ITableRecent
 }
 
 function RecentTransactions() {
-  const [recentTransactions, setRecentTransactions] = useState<ITableRecentTransaction[]>([]);
-  const [lastSort, setLastSort] = useState({ column: "", order: -1 });
-
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
-
-  // Avoid a layout jump when reaching the last page with empty rows.
-  const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - recentTransactions.length) : 0;
-
-  const handleChangePage = (event: unknown, newPage: number) => {
-    setPage(newPage);
-  };
-
-  const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(0);
-  };
+  const [recentTransactions, setRecentTransactions] = useState<TransactionEntry[]>([]);
 
   useEffect(() => {
-    // TODO: Was this ever working? We have this on VN but not in indexer
-    // getRecentTransactions().then((resp) => {
-    //   console.log("Response: ", resp);
-    //   setRecentTransactions(
-    //     // Display from newest to oldest by reversing
-    //     resp.transactions
-    //       .slice()
-    //       .reverse()
-    //       .map(({ instructions, meta, payload_id, timestamp }: IRecentTransaction) => ({
-    //         id: toHexString(payload_id),
-    //         payload_id: toHexString(payload_id),
-    //         timestamp: timestamp,
-    //         meta: meta,
-    //         instructions: instructions,
-    //       })),
-    //   );
-    // });
+    listRecentTransactions({
+      last_id: null,
+      limit: 50,
+    }).then((resp) => {
+      console.log("Response: ", resp);
+      setRecentTransactions(
+        // Display from newest to oldest by reversing
+        resp.transactions,
+      );
+    });
   }, []);
-  const sort = (column: ColumnKey) => {
-    let order = 1;
-    if (lastSort.column === column) {
-      order = -lastSort.order;
-    }
-    setRecentTransactions(
-      [...recentTransactions].sort((r0, r1) =>
-        r0[column] > r1[column] ? order : r0[column] < r1[column] ? -order : 0,
-      ),
-    );
-    setLastSort({ column, order });
-  };
+
   if (recentTransactions === undefined) {
     return <Typography variant="h4">Recent transactions ... loading</Typography>;
   }
@@ -180,7 +131,7 @@ function RecentTransactions() {
       <Table>
         <TableHead>
           <TableRow>
-            <TableCell onClick={() => sort("payload_id")}>
+            <TableCell>
               <div
                 style={{
                   display: "flex",
@@ -189,76 +140,19 @@ function RecentTransactions() {
                   gap: "5px",
                 }}
               >
-                Payload id
-                {lastSort.column === "payload_id" ? (
-                  lastSort.order === 1 ? (
-                    <KeyboardArrowUpIcon />
-                  ) : (
-                    <KeyboardArrowDownIcon />
-                  )
-                ) : (
-                  ""
-                )}
+                Id
               </div>
             </TableCell>
-            <TableCell onClick={() => sort("timestamp")}>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "flex-start",
-                  alignItems: "center",
-                  gap: "5px",
-                }}
-              >
-                Timestamp
-                {lastSort.column === "timestamp" ? (
-                  lastSort.order === 1 ? (
-                    <KeyboardArrowUpIcon />
-                  ) : (
-                    <KeyboardArrowDownIcon />
-                  )
-                ) : (
-                  ""
-                )}
-              </div>
-            </TableCell>
-            <TableCell style={{ textAlign: "center" }}>Meta</TableCell>
+            <TableCell style={{ textAlign: "center" }}>Fee Instructions</TableCell>
             <TableCell style={{ textAlign: "center" }}>Instructions</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
-          {recentTransactions
-            .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-            .map(({ id, payload_id, timestamp, instructions, meta }) => (
-              <RowData
-                key={id}
-                id={id}
-                payload_id={payload_id}
-                timestamp={timestamp}
-                instructions={instructions}
-                meta={meta}
-              />
-            ))}
-          {emptyRows > 0 && (
-            <TableRow
-              style={{
-                height: 67 * emptyRows,
-              }}
-            >
-              <TableCell colSpan={4} />
-            </TableRow>
-          )}
+          {recentTransactions.map((data, i) => (
+            <RowData key={i} data={data} />
+          ))}
         </TableBody>
       </Table>
-      <TablePagination
-        rowsPerPageOptions={[10, 25, 50]}
-        component="div"
-        count={recentTransactions.length}
-        rowsPerPage={rowsPerPage}
-        page={page}
-        onPageChange={handleChangePage}
-        onRowsPerPageChange={handleChangeRowsPerPage}
-      />
     </TableContainer>
   );
 }

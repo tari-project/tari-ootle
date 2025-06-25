@@ -41,29 +41,33 @@ use tari_ootle_common_types::{substate_type::SubstateType, Epoch, ShardGroup};
 use tari_ootle_storage::StorageError;
 use tari_ootle_storage_sqlite::{error::SqliteStorageError, SqliteTransaction};
 use tari_template_lib::{models::ResourceAddress, types::TemplateAddress};
+use tari_transaction::{Transaction, TransactionId};
 use thiserror::Error;
 
 use super::models::events::{NewEvent, NewScannedBlockId};
-use crate::substate_storage_sqlite::models::{
-    events::{Event, NewEventPayloadField, ScannedBlockId},
-    substate::{NewSubstate, Substate},
+use crate::storage_sqlite::{
+    models::{
+        events::{Event, NewEventPayloadField, ScannedBlockId},
+        substate::{NewSubstate, Substate},
+    },
+    serialization::{deserialize_json, serialize_hex, serialize_json},
 };
 
-const LOG_TARGET: &str = "tari::indexer::substate_storage_sqlite";
+const LOG_TARGET: &str = "tari::indexer::storage_sqlite";
 
 #[derive(Clone)]
-pub struct SqliteSubstateStore {
+pub struct SqliteIndexerStore {
     connection: Arc<Mutex<SqliteConnection>>,
 }
 
-impl SqliteSubstateStore {
+impl SqliteIndexerStore {
     pub fn try_create(path: PathBuf) -> Result<Self, StorageError> {
         create_dir_all(path.parent().unwrap()).map_err(|_| StorageError::FileSystemPathDoesNotExist)?;
 
         let database_url = path.to_str().expect("database_url utf-8 error").to_string();
         let mut connection = SqliteConnection::establish(&database_url).map_err(SqliteStorageError::from)?;
 
-        pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./src/substate_storage_sqlite/migrations");
+        pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./src/storage_sqlite/migrations");
         if let Err(err) = connection.run_pending_migrations(MIGRATIONS) {
             log::error!(target: LOG_TARGET, "Error running migrations: {}", err);
         }
@@ -80,7 +84,7 @@ impl SqliteSubstateStore {
     }
 
     pub fn find_by_address(address: String, conn: &mut SqliteConnection) -> Result<Option<Substate>, StorageError> {
-        use crate::substate_storage_sqlite::schema::substates;
+        use crate::storage_sqlite::schema::substates;
 
         let substate_option = substates::table
             .filter(substates::address.eq(address))
@@ -93,10 +97,10 @@ impl SqliteSubstateStore {
         Ok(substate_option)
     }
 }
-pub trait SubstateStore {
-    type ReadTransaction<'a>: SubstateStoreReadTransaction
+pub trait IndexerStore {
+    type ReadTransaction<'a>: IndexerStoreReadTransaction
     where Self: 'a;
-    type WriteTransaction<'a>: SubstateStoreWriteTransaction + Deref<Target = Self::ReadTransaction<'a>>
+    type WriteTransaction<'a>: IndexerStoreWriteTransaction + Deref<Target = Self::ReadTransaction<'a>>
     where Self: 'a;
 
     fn create_read_tx(&self) -> Result<Self::ReadTransaction<'_>, StorageError>;
@@ -141,26 +145,26 @@ impl From<StorageError> for StoreError {
     }
 }
 
-impl SubstateStore for SqliteSubstateStore {
-    type ReadTransaction<'a> = SqliteSubstateStoreReadTransaction<'a>;
-    type WriteTransaction<'a> = SqliteSubstateStoreWriteTransaction<'a>;
+impl IndexerStore for SqliteIndexerStore {
+    type ReadTransaction<'a> = SqliteStoreReadTransaction<'a>;
+    type WriteTransaction<'a> = SqliteStoreWriteTransaction<'a>;
 
     fn create_read_tx(&self) -> Result<Self::ReadTransaction<'_>, StorageError> {
         let tx = SqliteTransaction::begin(self.connection.lock().unwrap())?;
-        Ok(SqliteSubstateStoreReadTransaction::new(tx))
+        Ok(SqliteStoreReadTransaction::new(tx))
     }
 
     fn create_write_tx(&self) -> Result<Self::WriteTransaction<'_>, StorageError> {
         let tx = SqliteTransaction::begin(self.connection.lock().unwrap())?;
-        Ok(SqliteSubstateStoreWriteTransaction::new(tx))
+        Ok(SqliteStoreWriteTransaction::new(tx))
     }
 }
 
-pub struct SqliteSubstateStoreReadTransaction<'a> {
+pub struct SqliteStoreReadTransaction<'a> {
     transaction: SqliteTransaction<'a>,
 }
 
-impl<'a> SqliteSubstateStoreReadTransaction<'a> {
+impl<'a> SqliteStoreReadTransaction<'a> {
     fn new(transaction: SqliteTransaction<'a>) -> Self {
         Self { transaction }
     }
@@ -170,7 +174,7 @@ impl<'a> SqliteSubstateStoreReadTransaction<'a> {
     }
 }
 
-pub trait SubstateStoreReadTransaction {
+pub trait IndexerStoreReadTransaction {
     fn list_substates(
         &mut self,
         filter_by_type: Option<SubstateType>,
@@ -201,9 +205,14 @@ pub trait SubstateStoreReadTransaction {
         epoch: Epoch,
         shard_group: ShardGroup,
     ) -> Result<Option<BlockId>, StorageError>;
+    fn list_recent_transactions(
+        &mut self,
+        last_transaction_id: Option<TransactionId>,
+        limit: usize,
+    ) -> Result<Vec<Transaction>, StorageError>;
 }
 
-impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
+impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
     fn list_substates(
         &mut self,
         by_type: Option<SubstateType>,
@@ -211,7 +220,7 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
         limit: Option<u64>,
         offset: Option<u64>,
     ) -> Result<Vec<ListSubstateItem>, StorageError> {
-        use crate::substate_storage_sqlite::schema::substates;
+        use crate::storage_sqlite::schema::substates;
 
         let mut query = substates::table.into_boxed();
 
@@ -262,7 +271,7 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
     }
 
     fn get_substate(&mut self, address: &SubstateId, version: Option<u32>) -> Result<Option<Substate>, StorageError> {
-        use crate::substate_storage_sqlite::schema::substates;
+        use crate::storage_sqlite::schema::substates;
 
         let mut substate_query = substates::table
             .into_boxed()
@@ -283,7 +292,7 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
     }
 
     fn get_non_fungible_count(&mut self, resource_address: String) -> Result<i64, StorageError> {
-        use crate::substate_storage_sqlite::schema::non_fungible_indexes;
+        use crate::storage_sqlite::schema::non_fungible_indexes;
 
         let count = non_fungible_indexes::table
             .filter(non_fungible_indexes::resource_address.eq(resource_address))
@@ -302,7 +311,7 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<NonFungibleSubstate>, StorageError> {
-        use crate::substate_storage_sqlite::schema::substates;
+        use crate::storage_sqlite::schema::substates;
 
         let res = substates::table
             .filter(substates::address.like(format!("nft_{}_%", resource_address.as_object_key())))
@@ -351,7 +360,7 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
             substate_id_filter,
             topic_filter
         );
-        use crate::substate_storage_sqlite::schema::events;
+        use crate::storage_sqlite::schema::events;
 
         let mut query = events::table.into_boxed();
 
@@ -379,7 +388,7 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
     }
 
     fn event_exists(&mut self, value: &NewEvent) -> Result<bool, StorageError> {
-        use crate::substate_storage_sqlite::schema::events;
+        use crate::storage_sqlite::schema::events;
 
         let count = events::table
             .filter(
@@ -402,7 +411,7 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
     }
 
     fn get_oldest_scanned_epoch(&mut self) -> Result<Option<Epoch>, StorageError> {
-        use crate::substate_storage_sqlite::schema::scanned_block_ids;
+        use crate::storage_sqlite::schema::scanned_block_ids;
 
         let res: Option<i64> = scanned_block_ids::table
             .select(diesel::dsl::min(scanned_block_ids::epoch))
@@ -426,7 +435,7 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
         epoch: Epoch,
         shard_group: ShardGroup,
     ) -> Result<Option<BlockId>, StorageError> {
-        use crate::substate_storage_sqlite::schema::scanned_block_ids;
+        use crate::storage_sqlite::schema::scanned_block_ids;
 
         let row: Option<ScannedBlockId> = scanned_block_ids::table
             .filter(
@@ -444,17 +453,55 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
 
         Ok(block_id_option)
     }
+
+    fn list_recent_transactions(
+        &mut self,
+        last_transaction_id: Option<TransactionId>,
+        limit: usize,
+    ) -> Result<Vec<Transaction>, StorageError> {
+        use crate::storage_sqlite::schema::transactions;
+
+        let start_id = if let Some(last_id) = last_transaction_id {
+            transactions::table
+                .select(transactions::id)
+                .filter(transactions::transaction_id.eq(serialize_hex(last_id)))
+                .first::<i32>(self.connection())
+                .map_err(|e| StorageError::QueryError {
+                    reason: format!("list_recent_transactions: {e}"),
+                })?
+        } else {
+            i32::MAX
+        };
+
+        let rows = transactions::table
+            .select(transactions::body)
+            .filter(transactions::id.lt(start_id))
+            .order_by(transactions::id.desc())
+            .limit(limit as i64)
+            .load_iter(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("get_last_scanned_block_id: {}", e),
+            })?;
+
+        rows.map(|r| {
+            r.map_err(|e| StorageError::QueryError {
+                reason: format!("get_last_scanned_block_id: {}", e),
+            })
+            .and_then(|s: String| deserialize_json(&s))
+        })
+        .collect()
+    }
 }
 
-pub struct SqliteSubstateStoreWriteTransaction<'a> {
+pub struct SqliteStoreWriteTransaction<'a> {
     /// None indicates if the transaction has been explicitly committed/rolled back
-    transaction: Option<SqliteSubstateStoreReadTransaction<'a>>,
+    transaction: Option<SqliteStoreReadTransaction<'a>>,
 }
 
-impl<'a> SqliteSubstateStoreWriteTransaction<'a> {
+impl<'a> SqliteStoreWriteTransaction<'a> {
     pub fn new(transaction: SqliteTransaction<'a>) -> Self {
         Self {
-            transaction: Some(SqliteSubstateStoreReadTransaction::new(transaction)),
+            transaction: Some(SqliteStoreReadTransaction::new(transaction)),
         }
     }
 
@@ -464,10 +511,10 @@ impl<'a> SqliteSubstateStoreWriteTransaction<'a> {
 }
 
 // TODO: remove the allow dead_code attributes as these become used.
-pub trait SubstateStoreWriteTransaction {
+pub trait IndexerStoreWriteTransaction {
     fn commit(self) -> Result<(), StorageError>;
     fn rollback(self) -> Result<(), StorageError>;
-    fn set_substate(&mut self, new_substate: NewSubstate) -> Result<(), StorageError>;
+    fn insert_substate(&mut self, new_substate: NewSubstate) -> Result<(), StorageError>;
     #[allow(dead_code)]
     fn delete_substate(&mut self, address: String) -> Result<(), StorageError>;
     #[allow(dead_code)]
@@ -475,9 +522,10 @@ pub trait SubstateStoreWriteTransaction {
     fn save_event(&mut self, new_event: NewEvent) -> Result<(), StorageError>;
     fn save_scanned_block_id(&mut self, new_scanned_block_id: NewScannedBlockId) -> Result<(), StorageError>;
     fn delete_scanned_epochs_older_than(&mut self, epoch: Epoch) -> Result<(), StorageError>;
+    fn insert_transaction(&mut self, transaction: &Transaction) -> Result<(), StorageError>;
 }
 
-impl SubstateStoreWriteTransaction for SqliteSubstateStoreWriteTransaction<'_> {
+impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
     fn commit(mut self) -> Result<(), StorageError> {
         self.transaction.take().unwrap().transaction.commit()?;
         Ok(())
@@ -488,12 +536,12 @@ impl SubstateStoreWriteTransaction for SqliteSubstateStoreWriteTransaction<'_> {
         Ok(())
     }
 
-    fn set_substate(&mut self, new_substate: NewSubstate) -> Result<(), StorageError> {
-        use crate::substate_storage_sqlite::schema::substates;
+    fn insert_substate(&mut self, new_substate: NewSubstate) -> Result<(), StorageError> {
+        use crate::storage_sqlite::schema::substates;
 
         let address = &new_substate.address;
         let conn = self.connection();
-        let current_substate = SqliteSubstateStore::find_by_address(address.clone(), conn)?;
+        let current_substate = SqliteIndexerStore::find_by_address(address.clone(), conn)?;
 
         match current_substate {
             Some(_) => {
@@ -527,7 +575,7 @@ impl SubstateStoreWriteTransaction for SqliteSubstateStoreWriteTransaction<'_> {
     }
 
     fn delete_substate(&mut self, address: String) -> Result<(), StorageError> {
-        use crate::substate_storage_sqlite::schema::substates;
+        use crate::storage_sqlite::schema::substates;
 
         diesel::delete(substates::table)
             .filter(substates::address.eq(address))
@@ -540,7 +588,7 @@ impl SubstateStoreWriteTransaction for SqliteSubstateStoreWriteTransaction<'_> {
     }
 
     fn clear_substates(&mut self) -> Result<(), StorageError> {
-        use crate::substate_storage_sqlite::schema::substates;
+        use crate::storage_sqlite::schema::substates;
 
         diesel::delete(substates::table)
             .execute(&mut *self.connection())
@@ -552,7 +600,7 @@ impl SubstateStoreWriteTransaction for SqliteSubstateStoreWriteTransaction<'_> {
     }
 
     fn save_event(&mut self, new_event: NewEvent) -> Result<(), StorageError> {
-        use crate::substate_storage_sqlite::schema::{event_payloads, events};
+        use crate::storage_sqlite::schema::{event_payloads, events};
 
         // Save the event into the database
         let event_row: Event = diesel::insert_into(events::table)
@@ -600,7 +648,7 @@ impl SubstateStoreWriteTransaction for SqliteSubstateStoreWriteTransaction<'_> {
     }
 
     fn save_scanned_block_id(&mut self, new: NewScannedBlockId) -> Result<(), StorageError> {
-        use crate::substate_storage_sqlite::schema::scanned_block_ids;
+        use crate::storage_sqlite::schema::scanned_block_ids;
 
         diesel::insert_into(scanned_block_ids::table)
             .values(&new)
@@ -621,7 +669,7 @@ impl SubstateStoreWriteTransaction for SqliteSubstateStoreWriteTransaction<'_> {
     }
 
     fn delete_scanned_epochs_older_than(&mut self, epoch: Epoch) -> Result<(), StorageError> {
-        use crate::substate_storage_sqlite::schema::scanned_block_ids;
+        use crate::storage_sqlite::schema::scanned_block_ids;
 
         diesel::delete(scanned_block_ids::table)
             .filter(scanned_block_ids::epoch.lt(epoch.as_u64() as i64))
@@ -632,23 +680,39 @@ impl SubstateStoreWriteTransaction for SqliteSubstateStoreWriteTransaction<'_> {
 
         Ok(())
     }
+
+    fn insert_transaction(&mut self, transaction: &Transaction) -> Result<(), StorageError> {
+        use crate::storage_sqlite::schema::transactions;
+
+        diesel::insert_into(transactions::table)
+            .values((
+                transactions::transaction_id.eq(serialize_hex(transaction.calculate_id())),
+                transactions::body.eq(serialize_json(transaction).unwrap()),
+            ))
+            .execute(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("insert_transaction: {e}"),
+            })?;
+
+        Ok(())
+    }
 }
 
-impl<'a> Deref for SqliteSubstateStoreWriteTransaction<'a> {
-    type Target = SqliteSubstateStoreReadTransaction<'a>;
+impl<'a> Deref for SqliteStoreWriteTransaction<'a> {
+    type Target = SqliteStoreReadTransaction<'a>;
 
     fn deref(&self) -> &Self::Target {
         self.transaction.as_ref().unwrap()
     }
 }
 
-impl DerefMut for SqliteSubstateStoreWriteTransaction<'_> {
+impl DerefMut for SqliteStoreWriteTransaction<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.transaction.as_mut().unwrap()
     }
 }
 
-impl Drop for SqliteSubstateStoreWriteTransaction<'_> {
+impl Drop for SqliteStoreWriteTransaction<'_> {
     fn drop(&mut self) {
         if self.transaction.is_some() {
             warn!(

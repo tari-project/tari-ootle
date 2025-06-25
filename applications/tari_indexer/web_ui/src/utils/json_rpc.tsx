@@ -39,6 +39,8 @@ import type {
   IndexerGetSubstateResponse,
   IndexerGetTransactionResultRequest,
   IndexerGetTransactionResultResponse,
+  ListRecentTransactionsRequest,
+  ListRecentTransactionsResponse,
   InspectSubstateRequest,
   InspectSubstateResponse,
   IndexerSubmitTransactionResponse,
@@ -49,9 +51,9 @@ import type {
 
 const DEFAULT_WALLET_ADDRESS = new URL(
   import.meta.env.VITE_INDEXER_JRPC_ADDRESS ||
-  import.meta.env.VITE_JSON_RPC_ADDRESS ||
-  import.meta.env.VITE_JRPC_ADDRESS ||
-  "http://localhost:9000",
+    import.meta.env.VITE_JSON_RPC_ADDRESS ||
+    import.meta.env.VITE_JRPC_ADDRESS ||
+    "http://localhost:9000",
 );
 
 export async function getClientAddress(): Promise<URL> {
@@ -97,7 +99,8 @@ async function jsonRpc(method: string, params: any = null) {
 
 export const getOpenRpcSchema = (): Promise<string> => jsonRpc("rpc.discover");
 export const getIdentity = (): Promise<IndexerGetIdentityResponse> => jsonRpc("get_identity");
-export const addPeer = (request: IndexerAddPeerRequest): Promise<IndexerAddPeerResponse> => jsonRpc("add_peer", request);
+export const addPeer = (request: IndexerAddPeerRequest): Promise<IndexerAddPeerResponse> =>
+  jsonRpc("add_peer", request);
 export const getCommsStats = (): Promise<IndexerGetCommsStatsResponse> => jsonRpc("get_comms_stats");
 export const getSubstate = (request: IndexerGetSubstateRequest): Promise<IndexerGetSubstateResponse> =>
   jsonRpc("get_substate", request);
@@ -112,7 +115,11 @@ export const getNonFungibles = (request: GetNonFungiblesRequest): Promise<GetNon
   jsonRpc("get_non_fungibles", request);
 export const submitTransaction = (request: GetNonFungiblesRequest): Promise<IndexerSubmitTransactionResponse> =>
   jsonRpc("submit_transaction", request);
-export const getTransactionResult = (request: IndexerGetTransactionResultRequest): Promise<IndexerGetTransactionResultResponse> =>
-  jsonRpc("get_transaction_result", request);
+export const getTransactionResult = (
+  request: IndexerGetTransactionResultRequest,
+): Promise<IndexerGetTransactionResultResponse> => jsonRpc("get_transaction_result", request);
 
 export const getEpochManagerStats = (): Promise<GetEpochManagerStatsResponse> => jsonRpc("get_epoch_manager_stats");
+export const listRecentTransactions = (
+  request: ListRecentTransactionsRequest,
+): Promise<ListRecentTransactionsResponse> => jsonRpc("list_recent_transactions", request);

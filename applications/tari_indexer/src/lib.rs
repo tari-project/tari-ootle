@@ -39,8 +39,8 @@ mod event_manager;
 mod event_scanner;
 mod json_rpc;
 mod network_client;
+mod storage_sqlite;
 mod substate_manager;
-mod substate_storage_sqlite;
 mod transaction_manager;
 
 use std::{convert::Infallible, fs, future, future::Future, sync::Arc};
@@ -119,11 +119,8 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         substate_cache,
     ));
 
-    let substate_manager = Arc::new(SubstateManager::new(
-        substate_scanner.clone(),
-        services.substate_store.clone(),
-    ));
-    let transaction_manager = TransactionManager::new(services.network_client.clone());
+    let substate_manager = Arc::new(SubstateManager::new(substate_scanner.clone(), services.store.clone()));
+    let transaction_manager = TransactionManager::new(services.network_client.clone(), services.store.clone());
 
     // dry run
     let dry_run_transaction_processor = DryRunTransactionProcessor::new(
@@ -137,10 +134,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
     );
 
     // Run the event manager
-    let event_manager = Arc::new(EventManager::new(
-        services.substate_store.clone(),
-        substate_scanner.clone(),
-    ));
+    let event_manager = Arc::new(EventManager::new(services.store.clone(), substate_scanner.clone()));
 
     // Run the GraphQL API
     let graphql_address = config.indexer.graphql_address;
@@ -215,7 +209,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
     let event_scanner = EventScanner::new(
         services.epoch_manager.clone(),
         services.validator_node_client_factory.clone(),
-        services.substate_store.clone(),
+        services.store.clone(),
         services.template_manager_service.clone(),
         event_filters,
     );

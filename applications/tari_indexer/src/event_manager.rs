@@ -36,27 +36,22 @@ use tari_template_lib::{
 use tari_transaction::TransactionId;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
-use crate::substate_storage_sqlite::{
+use crate::storage_sqlite::{
     models::events::NewEvent,
-    sqlite_substate_store_factory::{
-        SqliteSubstateStore,
-        SubstateStore,
-        SubstateStoreReadTransaction,
-        SubstateStoreWriteTransaction,
-    },
+    store_factory::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreWriteTransaction, SqliteIndexerStore},
 };
 
 const LOG_TARGET: &str = "tari::indexer::event_manager";
 
 pub struct EventManager {
-    substate_store: SqliteSubstateStore,
+    substate_store: SqliteIndexerStore,
     _substate_scanner:
         Arc<SubstateScanner<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SubstateFileCache>>,
 }
 
 impl EventManager {
     pub fn new(
-        substate_store: SqliteSubstateStore,
+        substate_store: SqliteIndexerStore,
         substate_scanner: Arc<
             SubstateScanner<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SubstateFileCache>,
         >,

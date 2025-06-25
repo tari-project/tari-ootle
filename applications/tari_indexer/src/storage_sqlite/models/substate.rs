@@ -24,8 +24,8 @@
 use std::convert::TryFrom;
 
 use crate::{
+    storage_sqlite::{models::substate::Substate as SubstateRow, schema::*},
     substate_manager::SubstateResponse,
-    substate_storage_sqlite::{models::substate::Substate as SubstateRow, schema::*},
 };
 
 #[derive(Debug, Identifiable, Queryable)]

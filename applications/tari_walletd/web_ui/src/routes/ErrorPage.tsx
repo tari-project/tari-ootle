@@ -24,7 +24,6 @@ import { useRouteError, isRouteErrorResponse } from "react-router-dom";
 import { StyledPaper } from "../Components/StyledComponents";
 import Typography from "@mui/material/Typography";
 import Grid from "@mui/material/Grid";
-import Container from "@mui/material/Container";
 
 export default function ErrorPage() {
   let error: any = useRouteError();

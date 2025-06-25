@@ -51,6 +51,7 @@ futures = { workspace = true }
 include_dir = { workspace = true, optional = true }
 libp2p = { workspace = true }
 log = { workspace = true, features = ["std"] }
+hex = { workspace = true }
 log4rs = { workspace = true, features = [
     "rolling_file_appender",
     "compound_policy",

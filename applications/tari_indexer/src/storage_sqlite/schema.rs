@@ -53,6 +53,15 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    transactions (id) {
+        id -> Integer,
+        transaction_id -> Text,
+        body -> Text,
+        created_at -> Timestamp,
+    }
+}
+
 diesel::joinable!(event_payloads -> events (event_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
@@ -61,4 +70,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     non_fungible_indexes,
     scanned_block_ids,
     substates,
+    transactions,
 );

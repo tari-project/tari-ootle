@@ -3,6 +3,7 @@
 
 use tari_indexer_lib::error::IndexerError;
 use tari_ootle_common_types::optional::IsNotFoundError;
+use tari_ootle_storage::StorageError;
 
 use crate::network_client::NetworkClientError;
 
@@ -14,6 +15,8 @@ pub enum TransactionManagerError {
     NotFound { entity: &'static str, key: String },
     #[error(transparent)]
     SubstateScanningError(#[from] IndexerError),
+    #[error("Store error: {0}")]
+    StoreError(#[from] StorageError),
     #[error(transparent)]
     UnexpectedError(#[from] anyhow::Error),
 }

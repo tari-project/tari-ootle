@@ -1337,7 +1337,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let maybe_view_key =
                         resource
                             .to_view_key_public_key()
-                            .transpose()
                             .map_err(|e| RuntimeError::InvariantError {
                                 function: "VaultAction::Withdraw",
                                 details: format!(
@@ -1496,7 +1495,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let maybe_view_key =
                         resource
                             .to_view_key_public_key()
-                            .transpose()
                             .map_err(|e| RuntimeError::InvariantError {
                                 function: "VaultAction::ConfidentialReveal",
                                 details: format!(
@@ -1507,7 +1505,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                             })?;
 
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
-                    let resource_container = vault_mut.reveal_confidential(arg.proof, maybe_view_key.as_ref())?;
+                    let resource_container = vault_mut.withdraw_confidential(arg.proof, maybe_view_key.as_ref())?;
                     let bucket_id = state.id_provider()?.new_bucket_id();
                     state.new_bucket(bucket_id, resource_container)?;
 
@@ -1552,18 +1550,12 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         resource.as_ownership(),
                         resource.access_rules(),
                     )?;
-                    let view_key =
-                        resource
-                            .to_view_key_public_key()
-                            .transpose()
-                            .map_err(|e| RuntimeError::InvariantError {
-                                function: "VaultAction::PayFee",
-                                details: format!(
-                                    "Resource {} has a malformed view key: {}",
-                                    resource_lock.address(),
-                                    e
-                                ),
-                            })?;
+                    let view_key = resource
+                        .to_view_key_public_key()
+                        .map_err(|e| RuntimeError::InvariantError {
+                            function: "VaultAction::PayFee",
+                            details: format!("Resource {} has a malformed view key: {}", resource_lock.address(), e),
+                        })?;
 
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
 
@@ -1573,7 +1565,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         container.deposit(withdrawn)?;
                     }
                     if let Some(proof) = arg.proof {
-                        let revealed = vault_mut.reveal_confidential(proof, view_key.as_ref())?;
+                        let revealed = vault_mut.withdraw_confidential(proof, view_key.as_ref())?;
                         container.deposit(revealed)?;
                     }
                     if container.amount().is_zero() {
@@ -1820,18 +1812,12 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let bucket = state.get_bucket(bucket_id)?;
                     let resource_lock = state.read_lock_substate(&(*bucket.resource_address()).into())?;
                     let resource = state.get_resource(&resource_lock)?;
-                    let view_key =
-                        resource
-                            .to_view_key_public_key()
-                            .transpose()
-                            .map_err(|e| RuntimeError::InvariantError {
-                                function: "BucketAction::TakeConfidential",
-                                details: format!(
-                                    "Resource {} has a malformed view key: {}",
-                                    resource_lock.address(),
-                                    e
-                                ),
-                            })?;
+                    let view_key = resource
+                        .to_view_key_public_key()
+                        .map_err(|e| RuntimeError::InvariantError {
+                            function: "BucketAction::TakeConfidential",
+                            details: format!("Resource {} has a malformed view key: {}", resource_lock.address(), e),
+                        })?;
                     let bucket_mut = state.get_bucket_mut(bucket_id)?;
                     let resource = bucket_mut.take_confidential(proof, view_key.as_ref())?;
                     let bucket_id = state.id_provider()?.new_bucket_id();
@@ -1851,36 +1837,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let other_bucket = state.take_bucket(other_bucket_id)?;
                     let bucket = state.get_bucket_mut(bucket_id)?;
                     bucket.join(other_bucket)?;
-                    Ok(InvokeResult::encode(&bucket_id)?)
-                })
-            },
-            BucketAction::RevealConfidential => {
-                let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
-                    argument: "bucket_ref",
-                    reason: "RevealConfidential bucket action requires a bucket id".to_string(),
-                })?;
-                let proof = args.assert_one_arg()?;
-                self.tracker.write_with(|state| {
-                    let bucket = state.get_bucket(bucket_id)?;
-                    let resource_lock = state.read_lock_substate(&(*bucket.resource_address()).into())?;
-                    let resource = state.get_resource(&resource_lock)?;
-                    let view_key =
-                        resource
-                            .to_view_key_public_key()
-                            .transpose()
-                            .map_err(|e| RuntimeError::InvariantError {
-                                function: "BucketAction::RevealConfidential",
-                                details: format!(
-                                    "Resource {} has a malformed view key: {}",
-                                    resource_lock.address(),
-                                    e
-                                ),
-                            })?;
-                    let bucket = state.get_bucket_mut(bucket_id)?;
-                    let resource = bucket.reveal_confidential(proof, view_key.as_ref())?;
-                    let bucket_id = state.id_provider()?.new_bucket_id();
-                    state.new_bucket(bucket_id, resource)?;
-                    state.unlock_substate(resource_lock)?;
                     Ok(InvokeResult::encode(&bucket_id)?)
                 })
             },

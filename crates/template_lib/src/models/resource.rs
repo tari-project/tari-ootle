@@ -33,7 +33,7 @@ use crate::{newtype_struct_serde_impl, prelude::CONFIDENTIAL_TARI_RESOURCE_ADDRE
 
 const TAG: u64 = BinaryTag::ResourceAddress.as_u64();
 
-/// The unique identification of a resource in the Tari network
+/// The globally-unique identifier of a resource.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(
     feature = "ts",

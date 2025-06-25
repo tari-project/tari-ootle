@@ -32,7 +32,7 @@ use crate::{models::BinaryTag, newtype_struct_serde_impl};
 
 const TAG: u64 = BinaryTag::ComponentAddress.as_u64();
 
-/// A component's unique identification in the Tari network
+/// A component's unique global identifier.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(
     feature = "ts",
@@ -42,27 +42,33 @@ const TAG: u64 = BinaryTag::ComponentAddress.as_u64();
 pub struct ComponentAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl ComponentAddress {
+    /// Creates a new `ComponentAddress` from an `ObjectKey`. For internal use only.
     pub const fn new(substate_key: ObjectKey) -> Self {
         Self(BorTag::new(substate_key))
     }
 
+    /// Returns the underlying `ObjectKey` of this `ComponentAddress`.
     pub fn as_object_key(&self) -> &ObjectKey {
         &self.0
     }
 
+    /// Returns the underlying byte slice.
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_ref()
     }
 
+    /// Creates a new `ComponentAddress` from a hex string.
     pub fn from_hex(hex: &str) -> Result<Self, KeyParseError> {
         let key = ObjectKey::from_hex(hex)?;
         Ok(Self::new(key))
     }
 
+    /// Creates a new `ComponentAddress` from a byte array.
     pub fn from_array(arr: [u8; ObjectKey::LENGTH]) -> Self {
         Self::new(ObjectKey::from_array(arr))
     }
 
+    /// Returns the `EntityId` associated with this component address.
     pub fn entity_id(&self) -> EntityId {
         self.0.inner().as_entity_id()
     }

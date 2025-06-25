@@ -20,7 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_template_lib_types::TemplateAddress;
+pub mod account;
+
+use tari_template_lib::types::TemplateAddress;
 
 pub const ACCOUNT_TEMPLATE_ADDRESS: TemplateAddress = TemplateAddress::from_array([0; 32]);
 pub const NFT_FAUCET_TEMPLATE_ADDRESS: TemplateAddress = TemplateAddress::from_array([

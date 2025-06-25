@@ -19,6 +19,13 @@ impl EngineArgs {
     }
 
     pub fn get<T: DeserializeOwned>(&self, index: usize) -> Result<T, RuntimeError> {
+        self.get_opt(index)?.ok_or_else(|| RuntimeError::InvalidArgument {
+            argument: type_name::<T>(),
+            reason: "Argument not provided".to_string(),
+        })
+    }
+
+    pub fn get_opt<T: DeserializeOwned>(&self, index: usize) -> Result<Option<T>, RuntimeError> {
         self.args
             .get(index)
             .map(|arg| decode_exact(arg))
@@ -26,10 +33,6 @@ impl EngineArgs {
             .map_err(|e| RuntimeError::InvalidArgument {
                 argument: type_name::<T>(),
                 reason: format!("Argument failed to decode. Err: {:?}", e),
-            })?
-            .ok_or_else(|| RuntimeError::InvalidArgument {
-                argument: type_name::<T>(),
-                reason: "Argument not provided".to_string(),
             })
     }
 

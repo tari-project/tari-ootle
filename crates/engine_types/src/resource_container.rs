@@ -505,14 +505,6 @@ impl ResourceContainer {
         }
     }
 
-    pub fn reveal_confidential(
-        &mut self,
-        proof: ConfidentialWithdrawProof,
-        view_key: Option<&RistrettoPublicKey>,
-    ) -> Result<ResourceContainer, ResourceError> {
-        self.withdraw_confidential(proof, view_key)
-    }
-
     /// Returns all confidential commitments. If the resource is not confidential, None is returned.
     pub fn get_confidential_commitments(&self) -> Option<&BTreeMap<PedersenCommitmentBytes, ConfidentialOutput>> {
         match self {

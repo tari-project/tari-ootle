@@ -179,7 +179,8 @@ impl Drop for ProofAccess {
     }
 }
 
-/// A convenience wrapper for managing proofs in templates
+/// A RAII type that holds a reference to a proof that is authorized for use.
+/// Once this is dropped the proof goes out of scope and can no longer be used.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProofAuth {
     pub id: ProofId,

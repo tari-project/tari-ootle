@@ -11,7 +11,7 @@ use crate::{
     types::crypto::RistrettoPublicKeyBytes,
 };
 
-/// Utility for building confidential resources inside templates
+/// Implements the builder pattern for Confidential resources.
 pub struct ConfidentialResourceBuilder {
     metadata: Metadata,
     access_rules: ResourceAccessRules,

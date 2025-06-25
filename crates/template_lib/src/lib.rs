@@ -20,13 +20,27 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-//! This crate contains an interface for WASM templates to interact with the state of the Tari Network, as well as
-//! some utilities for executing functions that may be slow in the WASM environment.
+//! This crate provides ergonomic abstractions that allow WASM templates to interact with the Tari Ootle engine.
+//! Most if not all Ootle templates written in rust should depend on this crate.
 //!
 //! In most cases, you will only require the `prelude` which can be included with:
 //! ```
 //! use tari_template_lib::prelude::*;
 //! ```
+//!
+//! Typically, a template author will use structs exported from the [models] module, the
+//! [ResourceBuilder](resource::ResourceBuilder) and the [ComponentBuilder](component::ComponentBuilder). This crate
+//! re-exports low-level ABI functions in `tari_template_abi` and the `tari_template_macros` proc macro.
+//!
+//! ## Template Examples
+//!
+//! - <https://github.com/tari-project/wasm-template>
+//! - <https://github.com/tari-project/wasm-examples>
+//! - <https://github.com/tari-project/tari-ootle/tree/development/crates/engine/tests/templates>
+//!
+//! ## no_std
+//!
+//! no_std can be enabled using the `no_std` feature flag.
 
 pub mod auth;
 

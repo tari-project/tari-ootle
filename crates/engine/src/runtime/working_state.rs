@@ -548,12 +548,12 @@ impl WorkingState {
                     target: LOG_TARGET,
                     "Minting confidential tokens on resource: {}", resource_address
                 );
-                let maybe_view_key = resource.to_view_key_public_key().transpose().map_err(|e| {
-                    RuntimeError::InvariantError {
+                let maybe_view_key = resource
+                    .to_view_key_public_key()
+                    .map_err(|e| RuntimeError::InvariantError {
                         function: "MintArg::Confidential",
                         details: format!("Resource contained a malformed view key: {e}. This should never happen!",),
-                    }
-                })?;
+                    })?;
                 ResourceContainer::mint_confidential(resource_address, *proof, maybe_view_key.as_ref())?
             },
         };

@@ -119,14 +119,6 @@ impl Vault {
         self.resource_container.non_fungible_token_ids()
     }
 
-    pub fn reveal_confidential(
-        &mut self,
-        proof: ConfidentialWithdrawProof,
-        view_key: Option<&RistrettoPublicKey>,
-    ) -> Result<ResourceContainer, ResourceError> {
-        self.resource_container.reveal_confidential(proof, view_key)
-    }
-
     pub fn resource_container_mut(&mut self) -> &mut ResourceContainer {
         &mut self.resource_container
     }

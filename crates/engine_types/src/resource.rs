@@ -97,9 +97,11 @@ impl Resource {
         self.view_key.as_ref()
     }
 
-    pub fn to_view_key_public_key(&self) -> Option<Result<RistrettoPublicKey, ByteArrayError>> {
-        let view_key = self.view_key.as_ref()?;
-        Some(RistrettoPublicKey::try_from_byte_type(view_key))
+    pub fn to_view_key_public_key(&self) -> Result<Option<RistrettoPublicKey>, ByteArrayError> {
+        match self.view_key.as_ref() {
+            Some(view_key) => RistrettoPublicKey::try_from_byte_type(view_key).map(Some),
+            None => Ok(None),
+        }
     }
 
     pub fn auth_hook(&self) -> Option<&AuthHook> {

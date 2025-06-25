@@ -11793,16 +11793,17 @@ dependencies = [
 name = "tari_template_builtin"
 version = "0.10.3"
 dependencies = [
+ "serde",
+ "tari_bor",
  "tari_engine_types",
  "tari_template_lib",
- "tari_template_lib_types",
  "tari_template_test_tooling",
  "tari_transaction",
 ]
 
 [[package]]
 name = "tari_template_lib"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "borsh",
  "newtype-ops",

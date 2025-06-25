@@ -14,8 +14,9 @@ use crate::models::BinaryTag;
 
 const TAG: u64 = BinaryTag::UnclaimedConfidentialOutputAddress.as_u64();
 
-/// The unique identification of a unclaimed confidential output in the Tari network.
-/// Used when a user wants to claim burned funds from the Minotari network into the Tari network
+/// The global identifier of a unclaimed confidential output in the Tari network.
+/// This substate is created when a L1 UTXO is detected as burnt, and consumed when a user submits a valid claim burn
+/// transaction.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",

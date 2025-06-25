@@ -29,16 +29,14 @@ mod faucet_template {
     pub struct ConfidentialUtilities;
 
     impl ConfidentialUtilities {
-        /// Split a bucket into two buckets, one containing the output commitment and one containing the change
-        /// commitment
-        pub fn split(mut bucket: Bucket, proof: ConfidentialWithdrawProof) -> Bucket {
+        /// Withdraws from a bucket and returns a new bucket containing the withdrawn funds.
+        pub fn take_from_bucket(mut bucket: Bucket, proof: ConfidentialWithdrawProof) -> Bucket {
             bucket.take_confidential(proof)
         }
 
-        /// Split a bucket into two buckets, one containing the output commitment and one containing the change
-        /// commitment
-        pub fn reveal(mut bucket: Bucket, proof: ConfidentialWithdrawProof) -> Bucket {
-            bucket.reveal_confidential(proof)
+        /// Joins two buckets into one, returning a new bucket containing the combined value of the same resource..
+        pub fn join_buckets(mut bucket1: Bucket, bucket2: Bucket) -> Bucket {
+            bucket1.join(bucket2)
         }
     }
 }

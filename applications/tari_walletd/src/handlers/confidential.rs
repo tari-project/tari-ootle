@@ -107,7 +107,6 @@ pub async fn handle_create_transfer_proof(
             anyhow::anyhow!("Indexer returned a non-resource substate when scanning for a resource address")
         })?
         .to_view_key_public_key()
-        .transpose()
         .map_err(|_| {
             JsonRpcError::new(
                 JsonRpcErrorReason::InvalidRequest,

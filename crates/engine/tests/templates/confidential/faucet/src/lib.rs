@@ -91,8 +91,9 @@ mod faucet_template {
         }
 
         /// Utility function for tests
-        pub fn split_coins(bucket: Bucket, proof: ConfidentialWithdrawProof) -> (Bucket, Bucket) {
-            bucket.split_confidential(proof)
+        pub fn split_coins(mut bucket: Bucket, proof: ConfidentialWithdrawProof) -> (Bucket, Bucket) {
+            let new_bucket = bucket.take_confidential(proof);
+            (new_bucket, bucket)
         }
 
         pub fn vault_balance(&self) -> Amount {

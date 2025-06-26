@@ -10,8 +10,8 @@ use tari_consensus_types::Decision;
 use tari_engine_types::{
     commit_result::ExecuteResult,
     serde_with as serde_tools,
-    substate::{Substate, SubstateId, SubstateValue},
-    template_lib_models::ResourceAddress,
+    substate::{SubstateId, SubstateValue},
+    template_lib_models::{NonFungibleAddress, ResourceAddress},
 };
 use tari_ootle_common_types::{substate_type::SubstateType, Epoch};
 use tari_ootle_storage::time::PrimitiveDateTime;
@@ -315,10 +315,10 @@ pub struct GetNonFungiblesResponse {
     ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
 )]
 pub struct NonFungibleSubstate {
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub index: u64,
-    pub address: SubstateId,
-    pub substate: Substate,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub address: NonFungibleAddress,
+    pub version: u32,
+    pub substate: SubstateValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

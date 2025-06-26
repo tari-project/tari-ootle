@@ -29,7 +29,7 @@ import Switch from "@mui/material/Switch";
 import Divider from "@mui/material/Divider";
 import Typography from "@mui/material/Typography";
 import "./Permissions.css";
-import { TariPermission } from "../../utils/tari_permissions";
+import { TariPermission } from "@tari-project/tari-permissions";
 
 export default function Permissions(props: {
   requiredPermissions: TariPermission[];

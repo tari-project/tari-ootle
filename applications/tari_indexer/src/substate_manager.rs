@@ -24,7 +24,7 @@ use std::{convert::TryInto, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
-use tari_engine_types::substate::{Substate, SubstateId, SubstateValue};
+use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_indexer_client::types::ListSubstateItem;
 use tari_indexer_lib::{substate_scanner::SubstateScanner, NonFungibleSubstate};
@@ -40,23 +40,6 @@ pub struct SubstateResponse {
     pub address: SubstateId,
     pub version: u32,
     pub substate: SubstateValue,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct NonFungibleResponse {
-    pub index: u64,
-    pub address: SubstateId,
-    pub substate: Substate,
-}
-
-impl From<NonFungibleSubstate> for NonFungibleResponse {
-    fn from(nf: NonFungibleSubstate) -> Self {
-        Self {
-            index: nf.index,
-            address: nf.address,
-            substate: nf.substate,
-        }
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

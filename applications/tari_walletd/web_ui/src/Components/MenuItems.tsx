@@ -24,7 +24,15 @@ import { NavLink } from "react-router-dom";
 import ListItemButton from "@mui/material/ListItemButton";
 import ListItemIcon from "@mui/material/ListItemIcon";
 import ListItemText from "@mui/material/ListItemText";
-import { IoHome, IoHomeOutline, IoSettings, IoSettingsOutline, IoTerminal, IoTerminalOutline } from "react-icons/io5";
+import {
+  IoHome,
+  IoHomeOutline,
+  IoSettings,
+  IoSettingsOutline,
+  IoTerminal,
+  IoTerminalOutline,
+  IoGitMerge,
+} from "react-icons/io5";
 import Tooltip from "@mui/material/Tooltip";
 import Fade from "@mui/material/Fade";
 import ThemeSwitcher from "./ThemeSwitcher";
@@ -88,6 +96,12 @@ function MainListItems() {
       icon: <IoTerminalOutline style={iconStyle} />,
       activeIcon: <IoTerminal style={activeIconStyle} />,
       link: "manifest",
+    },
+    {
+      title: "Flow Editor",
+      icon: <IoGitMerge style={iconStyle} />,
+      activeIcon: <IoGitMerge style={activeIconStyle} />,
+      link: "flow-editor",
     },
     {
       title: "Settings",

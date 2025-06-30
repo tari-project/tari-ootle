@@ -438,14 +438,14 @@ impl TryFrom<SubstateId> for PublishedTemplateAddress {
 impl Display for SubstateId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            SubstateId::Component(addr) => write!(f, "{}", addr),
-            SubstateId::Resource(addr) => write!(f, "{}", addr),
-            SubstateId::Vault(addr) => write!(f, "{}", addr),
-            SubstateId::NonFungible(addr) => write!(f, "{}", addr),
-            SubstateId::UnclaimedConfidentialOutput(commitment_address) => write!(f, "{}", commitment_address),
-            SubstateId::TransactionReceipt(addr) => write!(f, "{}", addr),
-            SubstateId::Template(addr) => write!(f, "{}", addr),
-            SubstateId::ValidatorFeePool(addr) => write!(f, "{}", addr),
+            SubstateId::Component(addr) => write!(f, "{addr}"),
+            SubstateId::Resource(addr) => write!(f, "{addr}"),
+            SubstateId::Vault(addr) => write!(f, "{addr}"),
+            SubstateId::NonFungible(addr) => write!(f, "{addr}"),
+            SubstateId::UnclaimedConfidentialOutput(commitment_address) => write!(f, "{commitment_address}"),
+            SubstateId::TransactionReceipt(addr) => write!(f, "{addr}"),
+            SubstateId::Template(addr) => write!(f, "{addr}"),
+            SubstateId::ValidatorFeePool(addr) => write!(f, "{addr}"),
         }
     }
 }

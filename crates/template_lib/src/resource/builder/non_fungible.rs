@@ -20,6 +20,7 @@ pub struct NonFungibleResourceBuilder {
     token_symbol: Option<String>,
     authorize_hook: Option<AuthHook>,
     address_allocation: Option<ResourceAddressAllocation>,
+    is_total_supply_tracking_enabled: bool,
 }
 
 impl NonFungibleResourceBuilder {
@@ -32,6 +33,7 @@ impl NonFungibleResourceBuilder {
             token_symbol: None,
             authorize_hook: None,
             address_allocation: None,
+            is_total_supply_tracking_enabled: true,
         }
     }
 
@@ -91,6 +93,12 @@ impl NonFungibleResourceBuilder {
         self
     }
 
+    /// Sets up who (apart from the owner) can update the access rules of the resource.
+    pub fn update_access_rules(mut self, rule: AccessRule) -> Self {
+        self.access_rules = self.access_rules.update_access_rules(rule);
+        self
+    }
+
     /// Sets up the specified `symbol` as the token symbol in the metadata of the resource
     pub fn with_token_symbol<S: Into<String>>(mut self, symbol: S) -> Self {
         self.token_symbol = Some(symbol.into());
@@ -141,6 +149,15 @@ impl NonFungibleResourceBuilder {
     /// ```
     pub fn with_authorization_hook<T: Into<String>>(mut self, address: ComponentAddress, auth_callback: T) -> Self {
         self.authorize_hook = Some(AuthHook::new(address, auth_callback.into()));
+        self
+    }
+
+    /// Disables the tracking of total supply for the resource.
+    ///
+    /// This is useful for resources that do not need to track the total supply.
+    /// Disabling total supply tracking can save on fees when minting/burning.
+    pub fn disable_total_supply_tracking(mut self) -> Self {
+        self.is_total_supply_tracking_enabled = false;
         self
     }
 
@@ -201,6 +218,7 @@ impl NonFungibleResourceBuilder {
             None,
             self.authorize_hook,
             self.address_allocation,
+            self.is_total_supply_tracking_enabled,
         )
     }
 }

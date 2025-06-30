@@ -54,11 +54,14 @@ impl<const COL: u32> DbCodec<Column<COL>> for ColumnCodec {
                 source: anyhow!("Invalid bytes len={} for ColumnCodec", bytes.len()),
             });
         }
-        if bytes[..SZ_OF_U32] != COL.to_be_bytes() {
+        let col_bytes = bytes.get(..SZ_OF_U32).ok_or_else(|| RocksDbStorageError::DecodeError {
+            source: anyhow!("Invalid bytes len={} for ColumnCodec", bytes.len()),
+        })?;
+        if col_bytes != COL.to_be_bytes() {
             return Err(RocksDbStorageError::DecodeError {
                 source: anyhow!(
                     "Invalid column bytes '{}', ColumnCodec expected big-endian bytes for '{}'",
-                    bytes[..SZ_OF_U32].display(),
+                    col_bytes.display(),
                     COL
                 ),
             });
@@ -73,16 +76,16 @@ impl<const COL: u8> DbCodec<ByteColumn<COL>> for ColumnCodec {
     }
 
     fn decode(&self, bytes: &[u8]) -> Result<ByteColumn<COL>, RocksDbStorageError> {
-        if bytes.is_empty() {
+        let Some(first_byte) = bytes.first() else {
             return Err(RocksDbStorageError::DecodeError {
                 source: anyhow!("Invalid bytes len={} for ColumnCodec", bytes.len()),
             });
-        }
-        if bytes[0] != COL {
+        };
+        if *first_byte != COL {
             return Err(RocksDbStorageError::DecodeError {
                 source: anyhow!(
                     "Invalid byte column bytes '{}', ColumnCodec expected byte '{}'",
-                    bytes[0],
+                    first_byte,
                     COL
                 ),
             });

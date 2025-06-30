@@ -298,7 +298,13 @@ impl TemplateTest {
                 proofs,
             )
             .unwrap_success();
-        result.finalize.execution_results[0].decode().unwrap()
+        result
+            .finalize
+            .execution_results
+            .first()
+            .expect("single instruction without execution result")
+            .decode()
+            .unwrap()
     }
 
     pub fn call_function<T>(
@@ -321,7 +327,13 @@ impl TemplateTest {
                 proofs,
             )
             .unwrap();
-        result.finalize.execution_results[0].decode().unwrap()
+        result
+            .finalize
+            .execution_results
+            .first()
+            .expect("single instruction without execution result")
+            .decode()
+            .unwrap()
     }
 
     pub fn call_method<T>(
@@ -345,7 +357,13 @@ impl TemplateTest {
             )
             .unwrap();
 
-        result.finalize.execution_results[0].decode().unwrap()
+        result
+            .finalize
+            .execution_results
+            .first()
+            .expect("single instruction without execution result")
+            .decode()
+            .unwrap()
     }
 
     pub fn get_test_proof_and_secret_key(&self) -> (NonFungibleAddress, RistrettoSecretKey) {
@@ -398,7 +416,11 @@ impl TemplateTest {
             vec![owner_proof.clone()],
         );
 
-        let component = result.finalize.execution_results[2]
+        let component = result
+            .finalize
+            .execution_results
+            .get(2)
+            .expect("instruction at 2 no execution result")
             .decode::<ComponentAddress>()
             .unwrap();
 
@@ -427,7 +449,11 @@ impl TemplateTest {
             vec![owner_proof.clone()],
         );
 
-        let component = result.finalize.execution_results[2]
+        let component = result
+            .finalize
+            .execution_results
+            .get(2)
+            .expect("instruction at 2 no execution result")
             .decode::<ComponentAddress>()
             .unwrap();
 

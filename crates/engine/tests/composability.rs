@@ -87,7 +87,7 @@ fn create_resource_and_fund_account(test: &mut TemplateTest, account: ComponentA
             vec![],
         )
         .unwrap();
-    let faucet_component: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
+    let faucet_component: ComponentAddress = result.finalize.execution_results.first().unwrap().decode().unwrap();
     let faucet_resource = result
         .finalize
         .result

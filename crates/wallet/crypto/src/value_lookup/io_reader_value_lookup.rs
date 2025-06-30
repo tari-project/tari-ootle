@@ -55,7 +55,11 @@ impl<'a, R: Read + Seek> IoReaderValueLookup<'a, R> {
             return Ok(None);
         }
         let mut buf = [0u8; 32];
-        buf.copy_from_slice(&self.buffer[self.pos * 32..(self.pos + 1) * 32]);
+        let data = self
+            .buffer
+            .get(self.pos * 32..(self.pos + 1) * 32)
+            .ok_or(io::ErrorKind::UnexpectedEof)?;
+        buf.copy_from_slice(data);
         self.pos += 1;
         if self.remaining_buffer() == 0 {
             self.buffer_next()?;

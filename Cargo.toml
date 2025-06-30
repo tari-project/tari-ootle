@@ -12,7 +12,6 @@ members = [
     "applications/tari_app_utilities",
     "applications/tari_wallet_cli",
     "applications/tari_walletd",
-    "applications/tari_generate",
     "applications/tari_indexer",
     "applications/tari_scaffolder",
     "applications/tari_signaling_server",

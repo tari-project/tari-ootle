@@ -477,16 +477,16 @@ impl<T: Copy, const SZ: usize> SimpleFixedArray<T, SZ> {
 
     pub fn insert(&mut self, elem: T) {
         // We dont care about overwriting "old" elements
-        self.elems[self.ptr] = Some(elem);
+        *self.elems.get_mut(self.ptr).expect("ptr out of range") = Some(elem);
         self.ptr = (self.ptr + 1) % SZ;
     }
 
     pub fn remove_element(&mut self, elem: &T) -> bool
     where T: PartialEq {
-        for (i, e) in self.elems.iter().enumerate() {
+        for e in &mut self.elems {
             if e.as_ref() == Some(elem) {
                 // We dont care about "holes" in the collection
-                self.elems[i] = None;
+                *e = None;
                 return true;
             }
         }

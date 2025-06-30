@@ -1,11 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    fmt,
-    fmt::Display,
-    ops::{Deref, Index},
-};
+use std::{fmt, fmt::Display, ops::Deref};
 
 use smallvec::SmallVec;
 
@@ -112,14 +108,6 @@ impl<const L: usize> From<Vec<u8>> for SmallBytes<L> {
 impl<const L: usize> From<SmallBytes<L>> for Vec<u8> {
     fn from(value: SmallBytes<L>) -> Self {
         value.into_vec()
-    }
-}
-
-impl<const L: usize> Index<usize> for SmallBytes<L> {
-    type Output = u8;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.as_slice()[index]
     }
 }
 

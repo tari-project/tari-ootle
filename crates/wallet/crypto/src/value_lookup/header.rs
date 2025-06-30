@@ -22,12 +22,20 @@ impl LookupHeader {
                 "Invalid lookup table header leading bytes",
             ));
         }
-        let body = &buf[LOOKUP_HEADER_LEADING_BYTES.len()..];
+        let body = buf
+            .get(LOOKUP_HEADER_LEADING_BYTES.len()..)
+            .expect("len is at least LOOKUP_HEADER_LEADING_BYTES");
+        if body.len() < size_of::<u64>() * 2 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Invalid lookup table header body length, no min/max",
+            ));
+        }
         let mut u64_buf = [0u8; 8];
-        u64_buf.copy_from_slice(&body[..8]);
+        u64_buf.copy_from_slice(body.get(..8).expect("slice length checked before"));
         let min = u64::from_le_bytes(u64_buf);
         let mut u64_buf = [0u8; 8];
-        u64_buf.copy_from_slice(&body[8..16]);
+        u64_buf.copy_from_slice(body.get(8..16).expect("slice length checked before"));
         let max = u64::from_le_bytes(u64_buf);
         Ok(Self { min, max })
     }

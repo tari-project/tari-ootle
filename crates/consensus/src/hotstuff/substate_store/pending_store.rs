@@ -306,7 +306,11 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingS
 
 impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store, 'tx, TStore> {
     pub fn get_latest_version(&self, id: &SubstateId) -> Result<LatestSubstateVersion, SubstateStoreError> {
-        if let Some(ch) = self.head.get(id).map(|&pos| &self.diff[pos]) {
+        if let Some(ch) = self
+            .head
+            .get(id)
+            .map(|&pos| self.diff.get(pos).expect("diff and head are not in sync"))
+        {
             return Ok(LatestSubstateVersion {
                 version: ch.versioned_substate_id().version(),
                 is_up: ch.is_up(),
@@ -347,11 +351,15 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
     }
 
     fn get_head_change(&self, id: &SubstateId) -> Option<&SubstateChange> {
-        self.head.get(id).map(|&pos| &self.diff[pos])
+        self.head
+            .get(id)
+            .map(|&pos| self.diff.get(pos).expect("diff and head are not in sync"))
     }
 
     fn get_head_change_mut(&mut self, id: &SubstateId) -> Option<&mut SubstateChange> {
-        self.head.get(id).map(|&pos| &mut self.diff[pos])
+        self.head
+            .get(id)
+            .map(|&pos| self.diff.get_mut(pos).expect("diff and head are not in sync"))
     }
 
     pub fn get_latest_change(&self, id: &SubstateId) -> Result<SubstateChange, SubstateStoreError> {
@@ -901,7 +909,11 @@ impl LockStatus {
     /// Returns the error message if there is a hard conflict. A hard conflict occurs when a VERSIONED substate lock is
     /// requested and fails leading to the transaction to be ABORTED.
     pub fn hard_conflict(&self) -> Option<&LockFailedError> {
-        self.hard_conflict_idx.map(|idx| &self.lock_failures[idx])
+        self.hard_conflict_idx.map(|idx| {
+            self.lock_failures
+                .get(idx)
+                .expect("hard conflict index is out of bounds")
+        })
     }
 
     pub fn failures(&self) -> &[LockFailedError] {

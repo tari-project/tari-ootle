@@ -254,7 +254,7 @@ impl TraitInfoCollector {
     }
 
     fn parse_request_type(&self, node: &TraitItemFn, info: &mut RpcMethodInfo) -> syn::Result<()> {
-        let request_arg = &node.sig.inputs[1];
+        let request_arg = node.sig.inputs.get(1).expect("Missing request argument");
         match request_arg {
             FnArg::Typed(syn::PatType { ty, .. }) => match &**ty {
                 Type::Path(syn::TypePath { path, .. }) => {

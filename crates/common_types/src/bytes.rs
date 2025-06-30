@@ -48,7 +48,7 @@ impl<const MAX: usize> MaxSizeBytes<MAX> {
         let b = bytes.as_ref();
         let len = cmp::min(b.len(), MAX);
         Self {
-            inner: b[..len].to_vec(),
+            inner: b.get(..len).expect("len <= bytes.len()").to_vec(),
         }
     }
 }

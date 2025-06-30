@@ -26,7 +26,7 @@ import { StyledPaper } from "../../Components/StyledComponents";
 import { QueryBuilder, TemplateReader, useStore } from "@tari-project/tari-extension-query-builder";
 import "@tari-project/tari-extension-query-builder/dist/tari-extension-query-builder.css";
 import useThemeStore from "../../store/themeStore";
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import {
   Button,
   TextField,
@@ -76,6 +76,9 @@ function FlowEditor() {
   const theme = useTheme();
   const { account } = useAccountStore();
   const addNodeAt = useStore((store) => store.addNodeAt);
+  const saveStateToString = useStore((store) => store.saveStateToString);
+  const loadStateFromString = useStore((store) => store.loadStateFromString);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data, isLoading, error, refetch } = useTemplateGet(
     { template_address: componentId },
@@ -112,6 +115,31 @@ function FlowEditor() {
   };
 
   const executeTransaction = async (transaction: Transaction, dryRun: boolean): Promise<void> => {};
+
+  const handleSaveFlow = () => {
+    const json = saveStateToString();
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "flow-editor.tari";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleLoadFlow = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        loadStateFromString(event.target?.result as string);
+      } catch (err) {
+        alert("Failed to load flow: " + err);
+      }
+    };
+    reader.readAsText(file);
+  };
 
   return (
     <Grid container spacing={2}>
@@ -153,6 +181,21 @@ function FlowEditor() {
           </IconButton>
         </Box>
         <Divider />
+        <Box mt={2} mb={2} display="flex" gap={1}>
+          <Button variant="outlined" onClick={handleSaveFlow} size="small">
+            Save Flow
+          </Button>
+          <Button variant="outlined" onClick={() => fileInputRef.current?.click()} size="small">
+            Load Flow
+          </Button>
+          <input
+            type="file"
+            accept=".tari,application/json"
+            ref={fileInputRef}
+            style={{ display: "none" }}
+            onChange={handleLoadFlow}
+          />
+        </Box>
         <Box mt={2} mb={2}>
           <Typography variant="subtitle2" gutterBottom>
             Component ID

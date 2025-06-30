@@ -24,8 +24,9 @@ use tari_ootle_common_types::Epoch;
 use tari_ootle_storage::consensus_models::EpochCheckpoint;
 
 use crate::{
-    codecs::{DefaultCodec, EpochCodec},
+    codecs::{DefaultVersionedCodec, EpochCodec},
     traits::Cf,
+    versioned_types::VersionedEpochCheckpoint,
 };
 
 pub struct EpochCheckpointCf;
@@ -34,7 +35,7 @@ impl Cf for EpochCheckpointCf {
     type Key = Epoch;
     type KeyCodec = EpochCodec;
     type Value = EpochCheckpoint;
-    type ValueCodec = DefaultCodec<Self::Value>;
+    type ValueCodec = DefaultVersionedCodec<VersionedEpochCheckpoint>;
 
     fn name() -> &'static str {
         "epoch_checkpoints"

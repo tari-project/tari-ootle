@@ -7,8 +7,9 @@ use tari_ootle_storage::consensus_models::BlockTransactionExecution;
 use tari_transaction::TransactionId;
 
 use crate::{
-    codecs::{BlockIdCodec, DefaultCodec, NumberCodec, TransactionIdCodec, UnitCodec},
+    codecs::{BlockIdCodec, DefaultVersionedCodec, NumberCodec, TransactionIdCodec, UnitCodec},
     traits::{Cf, QueryCf},
+    versioned_types::VersionedBlockTransactionExecution,
 };
 
 pub struct BlockTransactionExecutionCf;
@@ -19,7 +20,7 @@ impl Cf for BlockTransactionExecutionCf {
     type Key = (TransactionId, BlockId, NodeHeight);
     type KeyCodec = (TransactionIdCodec, BlockIdCodec, NumberCodec<NodeHeight>);
     type Value = BlockTransactionExecution;
-    type ValueCodec = DefaultCodec<Self::Value>;
+    type ValueCodec = DefaultVersionedCodec<VersionedBlockTransactionExecution>;
 
     fn name() -> &'static str {
         "block_transaction_exec"

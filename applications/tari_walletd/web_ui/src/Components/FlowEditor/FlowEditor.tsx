@@ -26,7 +26,7 @@ import { StyledPaper } from "../../Components/StyledComponents";
 import { QueryBuilder, TemplateReader, useStore } from "@tari-project/tari-extension-query-builder";
 import "@tari-project/tari-extension-query-builder/dist/tari-extension-query-builder.css";
 import useThemeStore from "../../store/themeStore";
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import {
   Button,
   TextField,
@@ -56,14 +56,23 @@ import { GeneratedCodeType, TransactionProps } from "@tari-project/tari-extensio
 import { substateIdToString } from "../../utils/helpers";
 import CloseIcon from "@mui/icons-material/Close";
 import { Highlight } from "prism-react-renderer";
+import { Transaction } from "@tari-project/tarijs-all";
+import useFlowEditorStore from "../../store/flowEditorStore";
 
 function FlowEditor() {
   const { themeMode } = useThemeStore();
-  const [panelOpen, setPanelOpen] = useState(true);
-  const [componentId, setComponentId] = useState("");
-  const [codeDialogOpen, setCodeDialogOpen] = useState(false);
-  const [generatedCode, setGeneratedCode] = useState("");
-  const [generatedCodeType, setGeneratedCodeType] = useState<GeneratedCodeType | null>(null);
+  const {
+    panelOpen,
+    setPanelOpen,
+    componentId,
+    setComponentId,
+    codeDialogOpen,
+    setCodeDialogOpen,
+    generatedCode,
+    setGeneratedCode,
+    generatedCodeType,
+    setGeneratedCodeType,
+  } = useFlowEditorStore();
   const theme = useTheme();
   const { account } = useAccountStore();
   const addNodeAt = useStore((store) => store.addNodeAt);
@@ -102,7 +111,7 @@ function FlowEditor() {
     setCodeDialogOpen(true);
   };
 
-  const executeTransaction = async (): Promise<void> => {};
+  const executeTransaction = async (transaction: Transaction, dryRun: boolean): Promise<void> => {};
 
   return (
     <Grid container spacing={2}>

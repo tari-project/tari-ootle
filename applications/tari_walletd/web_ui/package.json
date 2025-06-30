@@ -18,6 +18,7 @@
     "@tanstack/react-query-devtools": "^4.33.0",
     "@tari-project/tari-extension-common": "^0.0.8",
     "@tari-project/tari-extension-query-builder": "^0.0.8",
+    "@tari-project/tarijs-all": "^0.6.0",
     "@tari-project/typescript-bindings": "link:../../../bindings",
     "@tari-project/wallet_jrpc_client": "workspace:*",
     "@walletconnect/core": "^2.13.3",

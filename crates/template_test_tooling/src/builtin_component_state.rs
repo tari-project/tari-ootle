@@ -73,6 +73,7 @@ pub fn initialize_builtin_nft_faucet_state<TStore: StateWriter>(store: &mut TSto
         Default::default(),
         None,
         None,
+        true,
     );
 
     store

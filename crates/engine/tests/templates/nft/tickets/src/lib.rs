@@ -38,16 +38,20 @@ mod tickets {
         tickets: Vault,
         price: Amount,
         earnings: Vault,
+        total_supply: Amount,
     }
 
     impl TicketSeller {
-        pub fn new(initial_supply: usize, price: Amount, event_description: String) -> Component<Self> {
-            let owner = CallerContext::transaction_signer_public_key().into();
+        pub fn new(initial_supply: u32, price: Amount, event_description: String) -> Component<Self> {
+            let owner = CallerContext::transaction_signer_public_key();
+            let component = CallerContext::allocate_component_address(Some(owner));
             // Create the non-fungible resource
             let resource_address = ResourceBuilder::non_fungible().with_token_symbol("tix")
                 // The event description is common for all tickets
                 .add_metadata("event", event_description)
-                .mintable(rule!(non_fungible(owner)))
+                .mintable(rule!(all_of(component(component.get_address()), non_fungible(owner.into()))))
+                // We'll track it from inside the component
+                .disable_total_supply_tracking()
                 .build();
 
             // Mint the initial tickets
@@ -65,13 +69,19 @@ mod tickets {
                 tickets,
                 price,
                 earnings,
+                total_supply: Amount::try_from(initial_supply).expect("initial supply overflowed"),
             })
+            .with_address_allocation(component)
             .with_access_rules(AccessRules::allow_all())
             .create()
         }
 
         // TODO: this method should only be allowed for the owner, when they want to increase attendance of the event
-        pub fn mint_more_tickets(&mut self, supply: usize) {
+        pub fn mint_more_tickets(&mut self, supply: u32) {
+            self.total_supply = self
+                .total_supply
+                .checked_add(Amount::try_from(supply).unwrap())
+                .expect("Total supply overflowed");
             let ticket_bucket = ResourceManager::get(self.resource_address).mint_many_non_fungible(
                 &Metadata::new(),
                 &Ticket::default(),
@@ -81,7 +91,6 @@ mod tickets {
         }
 
         // This method should be accesible to everyone
-        // TODO: how do we ensure that the payment is in Thaums? On vault creation we specify the type of token?
         pub fn buy_ticket(&mut self, payment: Bucket) -> Bucket {
             assert_eq!(payment.amount(), self.price, "Invalid payment amount");
 
@@ -105,7 +114,7 @@ mod tickets {
         }
 
         pub fn total_supply(&self) -> Amount {
-            ResourceManager::get(self.resource_address).total_supply()
+            self.total_supply
         }
     }
 }

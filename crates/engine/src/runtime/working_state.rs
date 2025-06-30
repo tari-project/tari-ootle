@@ -558,7 +558,7 @@ impl WorkingState {
             },
         };
 
-        // Increase the total supply, this also validates that the resource already exists.
+        // Validate the resource type in the mint args resource type matches the resource
         {
             let resource_mut = self.get_resource_mut(locked_resource)?;
             if resource_mut.resource_type() != resource_container.resource_type() {
@@ -569,6 +569,7 @@ impl WorkingState {
                 }
                 .into());
             }
+            // Increase the total supply of the resource if enabled
             resource_mut.increase_total_supply(resource_container.amount());
         }
 

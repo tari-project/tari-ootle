@@ -227,6 +227,7 @@ pub struct ResourceAccessRules {
     withdrawable: AccessRule,
     depositable: AccessRule,
     update_non_fungible_data: AccessRule,
+    update_access_rules: AccessRule,
 }
 
 impl ResourceAccessRules {
@@ -241,6 +242,7 @@ impl ResourceAccessRules {
             mintable: AccessRule::DenyAll,
             burnable: AccessRule::DenyAll,
             recallable: AccessRule::DenyAll,
+            update_access_rules: AccessRule::DenyAll,
             // But explicitly disable withdrawing, updating and/or depositing
             withdrawable: AccessRule::AllowAll,
             depositable: AccessRule::AllowAll,
@@ -254,6 +256,7 @@ impl ResourceAccessRules {
             mintable: AccessRule::DenyAll,
             burnable: AccessRule::DenyAll,
             recallable: AccessRule::DenyAll,
+            update_access_rules: AccessRule::DenyAll,
             withdrawable: AccessRule::DenyAll,
             depositable: AccessRule::DenyAll,
             update_non_fungible_data: AccessRule::DenyAll,
@@ -291,6 +294,12 @@ impl ResourceAccessRules {
         self
     }
 
+    /// Sets up who can update the access rules of the resource
+    pub fn update_access_rules(mut self, rule: AccessRule) -> Self {
+        self.update_access_rules = rule;
+        self
+    }
+
     /// Sets up who can update the mutable data of the tokens in the resource
     pub fn update_non_fungible_data(mut self, rule: AccessRule) -> Self {
         self.update_non_fungible_data = rule;
@@ -306,8 +315,7 @@ impl ResourceAccessRules {
             ResourceAuthAction::Withdraw => &self.withdrawable,
             ResourceAuthAction::Deposit => &self.depositable,
             ResourceAuthAction::UpdateNonFungibleData => &self.update_non_fungible_data,
-            // Only owner can do this
-            ResourceAuthAction::UpdateAccessRules => &AccessRule::DenyAll,
+            ResourceAuthAction::UpdateAccessRules => &self.update_access_rules,
         }
     }
 }

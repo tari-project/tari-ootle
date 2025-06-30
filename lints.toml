@@ -28,7 +28,7 @@ deny = [
     'clippy::inline_always',
     'let_underscore_drop',
     'clippy::let_unit_value',
-    'clippy::match_on_vec_items',
+    #    'clippy::indexing_slicing',
     'clippy::match_wild_err_arm',
     # In crypto code, it is fairly common to have similar names e.g. `owner_pk` and `owner_k`
     # 'clippy::similar_names',
@@ -69,6 +69,8 @@ allow = [
     # RistrettoPublicKey triggers this but the concern of the lint does not apply. Unfortunately
     # ignore-interior-mutability does not allow us to selectively disable the lint all usages of this type.
     'clippy::mutable_key_type',
+    # Using `format!("hello {}", x)` vs `format!("hello {x}")` is not a big deal/will cause code churn to fix, so we'll allow it.
+    'clippy::uninlined_format_args',
 ]
 
 warn = [

@@ -390,14 +390,20 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             });
         }
 
-        if !matches!(func.arguments[1].arg_type.other(), Some("ResourceAuthAction")) {
+        if !matches!(
+            func.arguments.get(1).expect("length checked").arg_type.other(),
+            Some("ResourceAuthAction")
+        ) {
             return Err(RuntimeError::InvalidArgument {
                 argument: "CreateResourceArg",
                 reason: format!("Authorize hook '{}' must take a ResourceAuthAction as argument 1", hook),
             });
         }
 
-        if !matches!(func.arguments[2].arg_type.other(), Some("AuthHookCaller")) {
+        if !matches!(
+            func.arguments.get(2).expect("length checked").arg_type.other(),
+            Some("AuthHookCaller")
+        ) {
             return Err(RuntimeError::InvalidArgument {
                 argument: "CreateResourceArg",
                 reason: format!("Authorize hook '{}' must take an AuthHookCaller as argument 2", hook),

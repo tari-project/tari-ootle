@@ -201,15 +201,21 @@ pub(crate) fn encrypt_data(
     mask: &RistrettoSecretKey,
 ) -> Result<EncryptedData, aead::Error> {
     fn payload_slice_mut(bytes: &mut [u8]) -> &mut [u8] {
-        &mut bytes[EncryptedData::payload_offset()..]
+        bytes
+            .get_mut(EncryptedData::payload_offset()..)
+            .expect("invariant violation: bytes length is less than payload_offset")
     }
 
     fn tag_slice_mut(bytes: &mut [u8]) -> &mut [u8] {
-        &mut bytes[..EncryptedData::SIZE_TAG]
+        bytes
+            .get_mut(..EncryptedData::SIZE_TAG)
+            .expect("invariant violation: tag length is less than payload_offset")
     }
 
     fn nonce_slice_mut(bytes: &mut [u8]) -> &mut [u8] {
-        &mut bytes[EncryptedData::SIZE_TAG..EncryptedData::SIZE_TAG + EncryptedData::SIZE_NONCE]
+        bytes
+            .get_mut(EncryptedData::SIZE_TAG..EncryptedData::SIZE_TAG + EncryptedData::SIZE_NONCE)
+            .expect("invariant violation: nonce length is less than payload_offset")
     }
 
     // Produce a secure random nonce and the AEAD
@@ -220,8 +226,13 @@ pub(crate) fn encrypt_data(
     // Encode the value and mask
     let mut bytes = vec![0; EncryptedData::min_size()];
     let payload_mut = payload_slice_mut(&mut bytes);
-    payload_mut[..EncryptedData::SIZE_VALUE].copy_from_slice(value.to_le_bytes().as_ref());
-    payload_mut[EncryptedData::SIZE_VALUE..EncryptedData::SIZE_VALUE + EncryptedData::SIZE_MASK]
+    payload_mut
+        .get_mut(..EncryptedData::SIZE_VALUE)
+        .unwrap()
+        .copy_from_slice(value.to_le_bytes().as_ref());
+    payload_mut
+        .get_mut(EncryptedData::SIZE_VALUE..EncryptedData::SIZE_VALUE + EncryptedData::SIZE_MASK)
+        .unwrap()
         .copy_from_slice(mask.as_bytes());
     // Encrypt in place
     match cipher.encrypt_in_place_detached(&nonce, ENCRYPTED_DATA_TAG, payload_mut) {
@@ -244,9 +255,9 @@ pub fn decrypt_data_and_mask(
     encrypted_data: &EncryptedData,
 ) -> Result<(u64, RistrettoSecretKey), aead::Error> {
     // Extract the tag, nonce, and ciphertext
-    let tag = Tag::from_slice(encrypted_data.tag_slice());
-    let nonce = XNonce::from_slice(encrypted_data.nonce_slice());
-    let mut bytes = Zeroizing::new(encrypted_data.payload_slice().to_vec());
+    let tag = Tag::from_slice(encrypted_data.tag_slice().ok_or(aead::Error)?);
+    let nonce = XNonce::from_slice(encrypted_data.nonce_slice().ok_or(aead::Error)?);
+    let mut bytes = Zeroizing::new(encrypted_data.payload_slice().ok_or(aead::Error)?.to_vec());
 
     // Set up the AEAD
     let aead_key = inner_encrypted_data_kdf_aead(encryption_key, commitment);
@@ -257,11 +268,13 @@ pub fn decrypt_data_and_mask(
 
     // Decode the value and mask
     let mut value_bytes = [0u8; EncryptedData::SIZE_VALUE];
-    value_bytes.copy_from_slice(&bytes[..EncryptedData::SIZE_VALUE]);
+    value_bytes.copy_from_slice(bytes.get(..EncryptedData::SIZE_VALUE).ok_or(aead::Error)?);
     Ok((
         u64::from_le_bytes(value_bytes),
         RistrettoSecretKey::from_canonical_bytes(
-            &bytes[EncryptedData::SIZE_VALUE..EncryptedData::SIZE_VALUE + EncryptedData::SIZE_MASK],
+            bytes
+                .get(EncryptedData::SIZE_VALUE..EncryptedData::SIZE_VALUE + EncryptedData::SIZE_MASK)
+                .ok_or(aead::Error)?,
         )
         .expect("The length of bytes is exactly SIZE_MASK"),
     ))

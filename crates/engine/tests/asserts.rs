@@ -42,7 +42,7 @@ fn setup() -> AssertTest {
         )
         .unwrap();
 
-    let faucet_component: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
+    let faucet_component: ComponentAddress = result.finalize.execution_results.first().unwrap().decode().unwrap();
 
     let faucet_resource = result
         .finalize

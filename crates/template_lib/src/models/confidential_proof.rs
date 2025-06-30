@@ -269,16 +269,16 @@ impl EncryptedData {
         &self.0
     }
 
-    pub fn tag_slice(&self) -> &[u8] {
-        &self.0[..Self::SIZE_TAG]
+    pub fn tag_slice(&self) -> Option<&[u8]> {
+        self.0.get(..Self::SIZE_TAG)
     }
 
-    pub fn nonce_slice(&self) -> &[u8] {
-        &self.0[Self::SIZE_TAG..Self::SIZE_NONCE + Self::SIZE_TAG]
+    pub fn nonce_slice(&self) -> Option<&[u8]> {
+        self.0.get(Self::SIZE_TAG..Self::SIZE_NONCE + Self::SIZE_TAG)
     }
 
-    pub fn payload_slice(&self) -> &[u8] {
-        &self.0[Self::payload_offset()..]
+    pub fn payload_slice(&self) -> Option<&[u8]> {
+        self.0.get(Self::payload_offset()..)
     }
 
     pub const fn payload_offset() -> usize {

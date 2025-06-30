@@ -66,9 +66,10 @@ impl SubstateAddress {
         if bytes.len() != SubstateAddress::LENGTH {
             return Err(FixedHashSizeError);
         }
-        let key = ObjectKey::try_from(&bytes[..ObjectKey::LENGTH]).map_err(|_| FixedHashSizeError)?;
+        let key = ObjectKey::try_from(bytes.get(..ObjectKey::LENGTH).expect("length checked"))
+            .map_err(|_| FixedHashSizeError)?;
         let mut v_buf = [0u8; size_of::<u32>()];
-        v_buf.copy_from_slice(&bytes[ObjectKey::LENGTH..]);
+        v_buf.copy_from_slice(bytes.get(ObjectKey::LENGTH..).expect("length checked"));
         let version = u32::from_be_bytes(v_buf);
         Ok(Self::from_object_key(&key, version))
     }
@@ -99,7 +100,7 @@ impl SubstateAddress {
 
     pub fn from_hash_and_version<T: Into<FixedHash>>(hash: T, version: u32) -> Self {
         // This will cause an error at compile-time if ObjectKey::LENGTH != FixedHash::byte_size()
-        // If ObjectKey should differ in length, then this function should likely be removed.
+        // If ObjectKey should differ in length, then this function should ideally be removed.
         const _: () = [()][1 - (FixedHash::byte_size() == ObjectKey::LENGTH) as usize];
         let mut buf = [0u8; SubstateAddress::LENGTH];
         buf[..ObjectKey::LENGTH].copy_from_slice(hash.into().as_bytes());

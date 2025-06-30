@@ -11,7 +11,7 @@ use axum::{
     Json,
 };
 use serde::Serialize;
-use serde_json::json;
+use serde_json::{json, value::Index};
 use tari_ootle_common_types::displayable::Displayable;
 use tari_ootle_storage::{consensus_models::Evidence, Ordering};
 use tari_state_store_rocksdb::{codecs::DbCodec, column_families, error::RocksDbStorageError, traits::Cf};
@@ -88,7 +88,7 @@ where
                             "value": value,
                         });
                     }
-                    value["id"] = serde_json::Value::String(hex::encode(key));
+                    value.set_value("id", serde_json::Value::String(hex::encode(key)));
                     table.add_row(value);
                 }
                 let total = cf.count(OPERATION)?;
@@ -213,8 +213,9 @@ fn create_table_for_cf(cf_name: &str) -> TableResponse {
 fn create_transformer<CF: Cf>() -> Box<dyn Fn(serde_json::Value) -> anyhow::Result<serde_json::Value>> {
     match CF::name() {
         n if n == column_families::transaction_pool::TransactionPoolCf::name() => Box::new(|mut v| {
-            let stage = v["pending_stage"].as_str().unwrap_or_else(|| {
-                v["stage"]
+            let stage = v.get("pending_stage").unwrap().as_str().unwrap_or_else(|| {
+                v.get("stage")
+                    .unwrap()
                     .as_str()
                     .unwrap_or_else(|| panic!("{} Stage should be a string", CF::name()))
             });
@@ -283,5 +284,17 @@ fn create_transformer<CF: Cf>() -> Box<dyn Fn(serde_json::Value) -> anyhow::Resu
             Ok(v)
         }),
         _ => Box::new(Ok),
+    }
+}
+
+/// If serde_json doesnt provide a way to set a value without using IndexMut, we can implement our own. This is to keep
+/// clippy happy (indexing_slicing)
+trait SetJsonValue {
+    fn set_value(&mut self, key: &str, value: serde_json::Value);
+}
+
+impl SetJsonValue for serde_json::Value {
+    fn set_value(&mut self, key: &str, value: serde_json::Value) {
+        *key.index_or_insert(self) = value;
     }
 }

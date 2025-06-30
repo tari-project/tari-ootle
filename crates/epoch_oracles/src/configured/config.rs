@@ -52,7 +52,10 @@ impl Validator {
         let len = start.object_key_bytes().len();
         let hash_size = size_of_val(&hash);
         let mut start = start.into_array();
-        start[len - hash_size..len].copy_from_slice(&hash.to_be_bytes());
+        start
+            .get_mut(len - hash_size..len)
+            .expect("bounds checked")
+            .copy_from_slice(&hash.to_be_bytes());
         SubstateAddress::from_array(start)
     }
 }

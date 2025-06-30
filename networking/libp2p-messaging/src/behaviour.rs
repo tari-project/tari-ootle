@@ -104,7 +104,10 @@ where TCodec: Codec + Send + Clone + 'static
                 // Otherwise, create a new stream
                 let (sink, stream) = stream::channel(stream_id, peer_id);
                 let ix = (stream_id as usize) % connections.connections.len();
-                let conn_mut = &mut connections.connections[ix];
+                let conn_mut = connections
+                    .connections
+                    .get_mut(ix)
+                    .expect("mod operator ensures the index is in range");
                 conn_mut.stream_id = Some(stream_id);
                 assert!(conn_mut.pending_sink.is_none());
                 assert!(conn_mut.message_sink.is_none());
@@ -392,7 +395,10 @@ impl<TMsg> Connections<TMsg> {
     pub(self) fn next_active_sink(&mut self) -> Option<&MessageSink<TMsg>> {
         let initial_last_selected = cmp::min(self.last_selected_index, self.connections.len() - 1);
         let (last_index, sink) = cycle_once(self.connections.len(), initial_last_selected, |i| {
-            let conn = &self.connections[i];
+            let conn = self
+                .connections
+                .get(i)
+                .expect("cycle_once ensures the index is in range");
             conn.message_sink.as_ref()
         })?;
 
@@ -403,7 +409,10 @@ impl<TMsg> Connections<TMsg> {
     pub(self) fn next_pending_sink(&mut self) -> Option<&MessageSink<TMsg>> {
         let initial_last_selected = cmp::min(self.last_selected_index, self.connections.len() - 1);
         let (last_index, sink) = cycle_once(self.connections.len(), initial_last_selected, |i| {
-            let conn = &self.connections[i];
+            let conn = self
+                .connections
+                .get(i)
+                .expect("cycle_once ensures the index is in range");
             conn.pending_sink.as_ref()
         })?;
 

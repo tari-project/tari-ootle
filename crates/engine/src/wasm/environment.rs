@@ -231,8 +231,8 @@ fn copy_range_to_vec(view: &MemoryView, range: Range<u32>) -> Result<Vec<u8>, Me
     while offset < end {
         let remaining = end - offset;
         let sublen = remaining.min(chunk.len() as u32) as usize;
-        view.read(u64::from(offset), &mut chunk[..sublen])?;
-        new_memory.extend_from_slice(&chunk[..sublen]);
+        view.read(u64::from(offset), chunk.get_mut(..sublen).expect("length checked"))?;
+        new_memory.extend_from_slice(chunk.get(..sublen).expect("length checked"));
         offset += sublen as u32;
     }
     Ok(new_memory)

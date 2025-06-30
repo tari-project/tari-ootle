@@ -122,6 +122,7 @@ impl ResourceManager {
         view_key: Option<RistrettoPublicKeyBytes>,
         authorize_hook: Option<AuthHook>,
         address_allocation: Option<ResourceAddressAllocation>,
+        is_total_supply_tracking_enabled: bool,
     ) -> (ResourceAddress, Option<Bucket>) {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
             resource_ref: ResourceRef::Resource,
@@ -135,6 +136,7 @@ impl ResourceManager {
                 view_key,
                 authorize_hook,
                 address_allocation,
+                is_total_supply_tracking_enabled,
             }],
         });
 
@@ -204,7 +206,7 @@ impl ResourceManager {
         &self,
         metadata: &T,
         mutable_data: &U,
-        supply: usize,
+        supply: u32,
     ) -> Bucket {
         let mut counter = 0;
         self.mint_many_non_fungible_with(metadata, mutable_data, || {

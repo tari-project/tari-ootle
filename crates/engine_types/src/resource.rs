@@ -46,7 +46,8 @@ pub struct Resource {
     owner_key: Option<RistrettoPublicKeyBytes>,
     access_rules: ResourceAccessRules,
     metadata: Metadata,
-    total_supply: Amount,
+    /// The total supply of the resource. None means total_supply tracking is disabled.
+    total_supply: Option<Amount>,
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     view_key: Option<RistrettoPublicKeyBytes>,
     auth_hook: Option<AuthHook>,
@@ -61,6 +62,7 @@ impl Resource {
         metadata: Metadata,
         view_key: Option<RistrettoPublicKeyBytes>,
         auth_hook: Option<AuthHook>,
+        is_total_supply_tracking_enabled: bool,
     ) -> Self {
         Self {
             resource_type,
@@ -68,7 +70,7 @@ impl Resource {
             owner_key,
             access_rules,
             metadata,
-            total_supply: 0.into(),
+            total_supply: Some(0.into()).filter(|_| is_total_supply_tracking_enabled),
             view_key,
             auth_hook,
         }
@@ -116,18 +118,23 @@ impl Resource {
         self.access_rules = access_rules;
     }
 
-    pub fn increase_total_supply(&mut self, amount: Amount) -> bool {
+    /// Increases the total supply. This is a no-op if total supply tracking is disabled.
+    ///
+    /// ## Panics
+    /// Panics if the amount is not positive or if the amount causes an overflow when added to the current total supply.
+    pub fn increase_total_supply(&mut self, amount: Amount) {
         assert!(
             amount.is_positive(),
             "Invariant violation in increase_total_supply: amount must be positive"
         );
-        self.total_supply.checked_add(amount).is_some_and(|new_total| {
-            self.total_supply = new_total;
-            true
-        })
+        if let Some(supply_mut) = self.total_supply.as_mut() {
+            *supply_mut = supply_mut
+                .checked_add(amount)
+                .expect("Invariant violation in increase_total_supply: overflow when increasing total supply");
+        }
     }
 
-    /// Decreases the total supply.
+    /// Decreases the total supply. This is a no-op if total supply tracking is disabled.
     ///
     /// ## Panics
     /// Panics if the amount is not positive or if the amount is greater than the total supply.
@@ -136,14 +143,15 @@ impl Resource {
             amount.is_positive(),
             "Invariant violation in decrease_total_supply: amount must be positive"
         );
-        assert!(
-            self.total_supply >= amount,
-            "Invariant violation in decrease_total_supply: decrease total supply by more than total supply"
-        );
-        self.total_supply -= amount;
+        if let Some(supply_mut) = self.total_supply.as_mut() {
+            *supply_mut = supply_mut.checked_sub_positive(amount).expect(
+                "Invariant violation in decrease_total_supply: decrease total supply by more than total supply",
+            );
+        }
     }
 
-    pub fn total_supply(&self) -> Amount {
+    /// Returns the total supply of the resource, or `None` if total supply tracking is disabled.
+    pub fn total_supply(&self) -> Option<Amount> {
         self.total_supply
     }
 

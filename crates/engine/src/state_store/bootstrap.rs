@@ -40,6 +40,7 @@ fn add_global_resources<T: StateWriter>(state_db: &mut T) -> Result<(), StateSto
                 metadata,
                 None,
                 None,
+                false,
             ),
         ),
     )?;
@@ -60,6 +61,7 @@ fn add_global_resources<T: StateWriter>(state_db: &mut T) -> Result<(), StateSto
                 metadata,
                 None,
                 None,
+                false,
             ),
         ),
     )?;

@@ -67,7 +67,7 @@ async fn ensure_registered(handle: &ManagerHandle, vn_registration_file: &PathBu
     let active_keys = to_vn_public_keys(vn_status);
     info!("Amount of active validator node keys: {}", active_keys.len());
     for key in &active_keys {
-        info!("{}", key);
+        info!("{key}");
     }
 
     // if the node is already registered
@@ -117,7 +117,7 @@ async fn check_and_submit_layer_one_transactions(
         let f = match fs::File::open(file.path()).await {
             Ok(f) => f.into_std().await,
             Err(e) => {
-                warn!("Failed to open file: {}", e);
+                warn!("Failed to open file: {e}");
                 continue;
             },
         };

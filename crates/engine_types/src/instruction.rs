@@ -117,21 +117,27 @@ impl Display for Instruction {
                 address,
                 function,
                 args,
-            } => write!(
-                f,
-                "CallFunction {{ address: {}, function: {}, args: {:?} }}",
-                address, function, args
-            ),
+            } => {
+                write!(
+                    f,
+                    "CallFunction {{ address: {}, function: {}, num args: {} }}",
+                    address,
+                    function,
+                    args.len()
+                )
+            },
             Self::CallMethod { call, method, args } => write!(
                 f,
-                "CallMethod {{ call: {}, method: {}, args: {:?} }}",
-                call, method, args
+                "CallMethod {{ call: {}, method: {}, num args: {} }}",
+                call,
+                method,
+                args.len()
             ),
             Self::PutLastInstructionOutputOnWorkspace { key } => {
-                write!(f, "PutLastInstructionOutputOnWorkspace {{ key: {:?} }}", key)
+                write!(f, "PutLastInstructionOutputOnWorkspace {{ key: {key} }}")
             },
             Self::EmitLog { level, message } => {
-                write!(f, "EmitLog {{ level: {:?}, message: {:?} }}", level, message)
+                write!(f, "EmitLog {{ level: {level}, message: {message} }}")
             },
             Self::ClaimBurn { claim } => {
                 write!(

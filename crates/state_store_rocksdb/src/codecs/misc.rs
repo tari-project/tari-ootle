@@ -31,13 +31,13 @@ impl DbCodec<bool> for BoolCodec {
     }
 
     fn decode(&self, bytes: &[u8]) -> Result<bool, RocksDbStorageError> {
-        if bytes.is_empty() {
+        let Some(first_byte) = bytes.first() else {
             return Err(RocksDbStorageError::MalformedData {
                 operation: "decode bool",
                 details: "Empty bytes".to_string(),
             });
-        }
-        Ok(bytes[0] != 0)
+        };
+        Ok(*first_byte != 0)
     }
 }
 
@@ -56,13 +56,13 @@ impl DbCodec<u8> for NumberCodec<u8> {
     }
 
     fn decode(&self, bytes: &[u8]) -> Result<u8, RocksDbStorageError> {
-        if bytes.is_empty() {
+        let Some(first_byte) = bytes.first() else {
             return Err(RocksDbStorageError::MalformedData {
                 operation: "decode u8",
                 details: "Empty bytes".to_string(),
             });
-        }
-        Ok(bytes[0])
+        };
+        Ok(*first_byte)
     }
 }
 

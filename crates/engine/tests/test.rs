@@ -1054,7 +1054,7 @@ mod tickets {
             .find_map(|(addr, _)| addr.as_resource_address())
             .unwrap();
 
-        // at the beggining we have the initial supply of tickeds
+        // at the beginning we have the initial supply of tickets
         let total_supply: Amount = template_test.call_method(ticket_seller, "total_supply", args![], vec![]);
         assert_eq!(total_supply, Amount(initial_supply));
 

@@ -17,6 +17,7 @@ pub struct FungibleResourceBuilder {
     metadata: Metadata,
     authorize_hook: Option<AuthHook>,
     address_allocation: Option<ResourceAddressAllocation>,
+    is_total_supply_tracking_enabled: bool,
 }
 
 impl FungibleResourceBuilder {
@@ -29,6 +30,7 @@ impl FungibleResourceBuilder {
             metadata: Metadata::new(),
             authorize_hook: None,
             address_allocation: None,
+            is_total_supply_tracking_enabled: true,
         }
     }
 
@@ -79,6 +81,12 @@ impl FungibleResourceBuilder {
     /// Sets up who can deposit tokens of the resource into any vault
     pub fn depositable(mut self, rule: AccessRule) -> Self {
         self.access_rules = self.access_rules.depositable(rule);
+        self
+    }
+
+    /// Sets up who (apart from the owner) can update the access rules of the resource.
+    pub fn update_access_rules(mut self, rule: AccessRule) -> Self {
+        self.access_rules = self.access_rules.update_access_rules(rule);
         self
     }
 
@@ -135,6 +143,15 @@ impl FungibleResourceBuilder {
         self
     }
 
+    /// Disables the tracking of total supply for the resource.
+    ///
+    /// This is useful for resources that do not need to track the total supply.
+    /// Disabling total supply tracking can save on fees.
+    pub fn disable_total_supply_tracking(mut self) -> Self {
+        self.is_total_supply_tracking_enabled = false;
+        self
+    }
+
     /// Build the resource, returning the address
     pub fn build(self) -> ResourceAddress {
         let (address, _) = self.build_internal(None);
@@ -165,6 +182,7 @@ impl FungibleResourceBuilder {
             None,
             self.authorize_hook,
             self.address_allocation,
+            self.is_total_supply_tracking_enabled,
         )
     }
 }

@@ -47,8 +47,12 @@ impl SchnorrSignatureBytes {
         }
 
         Self::try_from_parts(
-            &bytes[..RistrettoPublicKeyBytes::length()],
-            &bytes[RistrettoPublicKeyBytes::length()..],
+            bytes
+                .get(..RistrettoPublicKeyBytes::length())
+                .expect("Slice length checked before"),
+            bytes
+                .get(RistrettoPublicKeyBytes::length()..)
+                .expect("Slice length checked before"),
         )
     }
 

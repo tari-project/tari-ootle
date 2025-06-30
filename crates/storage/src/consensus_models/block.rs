@@ -482,7 +482,7 @@ impl Block {
             });
         }
 
-        Self::get(tx, &ids[0])
+        Self::get(tx, ids.first().expect("length checked"))
     }
 
     /// Returns all blocks from and excluding the start block (lower height) to the end block (inclusive)

@@ -36,14 +36,9 @@ import CheckMark from "./CheckMark";
 import ConnectorLogo from "./ConnectorLogo";
 import ConfirmTransaction from "./ConfirmTransaction";
 import { useTheme } from "@mui/material/styles";
-import {
-  TariPermission,
-  TariPermissionKeyList,
-  TariPermissionTransactionGet,
-  TariPermissionTransactionSend,
-} from "../../utils/tari_permissions";
+import { TariPermission } from "@tari-project/tari-permissions";
 import { Core } from "@walletconnect/core";
-import { Web3Wallet } from "@walletconnect/web3wallet";
+import { WalletKit } from "@reown/walletkit";
 import {
   accountsCreateFreeTestCoins,
   accountsGetBalances,
@@ -57,36 +52,41 @@ import {
   transactionsGetResult,
   transactionsSubmit,
 } from "../../utils/json_rpc";
+import useAccountStore from "../../store/accountStore";
+import { buildApprovedNamespaces, getSdkError } from "@walletconnect/utils";
+import { Error as ErrorIcon } from "@mui/icons-material";
+import CircularProgress from "@mui/material/CircularProgress";
 
 const projectId: string = import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID || "78f3485d08b9640a087cbcea000e1f8b";
 
+interface RequestedPermissions {
+  requiredPermissions: TariPermission[];
+  optionalPermissions?: TariPermission[];
+}
+
 const ConnectorDialog = () => {
   const [page, setPage] = useState(1);
+  const [error, setError] = useState<any | undefined>(undefined);
   const [isOpen, setIsOpen] = useState(false);
   const [linkDetected, setLinkDetected] = useState(false);
   const [link, setLink] = useState("");
+  const [proposal, setProposal] = useState<any | undefined>(undefined);
+  const [isLoading, setIsLoading] = useState(false);
   const linkRef = useRef<HTMLInputElement>(null);
+  const accountStore = useAccountStore();
   const theme = useTheme();
   const [_chosenOptionalPermissions, setChosenOptionalPermissions] = useState<boolean[]>([]);
 
   const [web3wallet, setWeb3wallet] = useState<any | undefined>();
 
-  // TODO: send permissions on WC request
-  const permissions: TariPermission[] = [
-    new TariPermissionKeyList(),
-    new TariPermissionTransactionGet(),
-    new TariPermissionTransactionSend(),
-  ];
-  const optionalPermissions: TariPermission[] = [];
-
   async function createWallet(): Promise<any | null> {
     const core = new Core({ projectId });
-    const wallet = await Web3Wallet.init({
-      core: core,
+    const wallet = await WalletKit.init({
+      core,
       metadata: {
-        name: "Example WalletConnect Wallet",
-        description: "Example WalletConnect Integration",
-        url: "myexamplewallet.com",
+        name: "Tari Ootle Wallet",
+        description: "Tari Ootle Wallet Daemon Web",
+        url: "tari.com",
         icons: [],
       },
     });
@@ -94,35 +94,17 @@ const ConnectorDialog = () => {
     wallet.on("session_proposal", async (proposal) => {
       console.log({ proposal });
 
-      const session = await wallet.approveSession({
-        id: proposal.id,
-        namespaces: {
-          tari: {
-            methods: [
-              "tari_getSubstate",
-              "tari_getDefaultAccount",
-              "tari_getAccountBalances",
-              "tari_submitTransaction",
-              "tari_getTransactionResult",
-              "tari_getTemplate",
-              "tari_createKey",
-              "tari_viewConfidentialVaultBalance",
-              "tari_createFreeTestCoins",
-              "tari_listSubstates",
-              "tari_getNftsList",
-            ],
-            chains: ["tari:devnet"],
-            events: ['chainChanged", "accountsChanged'],
-            accounts: ["tari:devnet:component_d43f1d674a0df0579354659d1b0c8dd4a397b072afa9dd027e41c8bc"],
-          },
-        },
-      });
+      const nsRequest = proposal.params.optionalNamespaces.tari || proposal.params.requiredNamespaces.tari;
+      if (!nsRequest) {
+        await wallet.rejectSession({
+          id: proposal.id,
+          reason: getSdkError("UNSUPPORTED_NAMESPACE_KEY", "No 'tari' namespace found in proposal"),
+        });
+        throw new Error("No Tari namespace found in proposal");
+      }
 
-      // create response object
-      const response = { id: proposal.id, result: "session approved", jsonrpc: "2.0" };
-
-      // respond to the dapp request with the approved session's topic and response
-      await wallet.respondSessionRequest({ topic: session.topic, response });
+      setIsLoading(false);
+      setProposal(proposal);
     });
 
     wallet.on("session_request", async (requestEvent) => {
@@ -164,7 +146,7 @@ const ConnectorDialog = () => {
       case "tari_getNftsList":
         return nftList(params);
       default:
-        throw new Error("Invalid method");
+        setError(`Unsupported method ${method}`);
     }
   }
 
@@ -188,12 +170,13 @@ const ConnectorDialog = () => {
     }
   }
 
-  const handleOpen = () => {
-    getClipboardContent();
+  const handleOpen = async () => {
+    await getClipboardContent();
     setIsOpen(true);
   };
 
   const handleClose = () => {
+    setError(undefined);
     setIsOpen(false);
     setTimeout(() => {
       setPage(1);
@@ -205,27 +188,96 @@ const ConnectorDialog = () => {
     setPage(page + 1);
   };
 
-  const handleConnectWithLink = () => {
+  const handleConnectWithLink = async () => {
+    let wallet = web3wallet;
+    if (!wallet) {
+      try {
+        wallet = await createWallet();
+      } catch (error) {
+        if (typeof error === "string") {
+          setError(error);
+          return;
+        }
+
+        const err = error as Error;
+        setError(err.message || err);
+      }
+      console.log({ wallet });
+      setWeb3wallet(wallet);
+
+      setIsLoading(true);
+      try {
+        const result = await wallet.pair({ uri: link });
+        console.log({ result });
+      } catch (error) {
+        setIsLoading(false);
+        if (typeof error === "string") {
+          setError(error);
+          return;
+        }
+
+        const err = error as Error;
+        setError(err.message || err);
+        return;
+      }
+    }
     setPage(page + 1);
   };
 
-  const handleAuth = async () => {
-    let wallet = web3wallet;
-    if (!wallet) {
-      wallet = await createWallet();
-      setWeb3wallet(wallet);
-    }
-
+  const handleApprove = async () => {
     if (!link) {
       console.error("No WalletConnect link found");
       return;
     }
+    if (!web3wallet) {
+      console.error("Web3Wallet not initialized");
+      return;
+    }
 
-    console.log({ wallet });
-    console.log({ link });
+    const accounts = accountStore.account ? [`tari:devnet:${accountStore.account.address}`] : [];
 
-    const result = await wallet.pair({ uri: link });
-    console.log({ result });
+    try {
+      const approvedNamespaces = buildApprovedNamespaces({
+        proposal: proposal.params,
+        supportedNamespaces: {
+          tari: {
+            methods: [
+              "tari_getSubstate",
+              "tari_getDefaultAccount",
+              "tari_getAccountBalances",
+              "tari_submitTransaction",
+              "tari_getTransactionResult",
+              "tari_getTemplate",
+              "tari_createKey",
+              "tari_viewConfidentialVaultBalance",
+              "tari_createFreeTestCoins",
+              "tari_listSubstates",
+              "tari_getNftsList",
+            ],
+            chains: ["tari:devnet"],
+            events: ['chainChanged", "accountsChanged'],
+            accounts,
+          },
+        },
+      });
+
+      const session = await web3wallet.approveSession({
+        id: proposal.id,
+        namespaces: approvedNamespaces,
+      });
+
+      // create response object
+      const response = { id: proposal.id, result: { approved: true }, jsonrpc: "2.0" };
+
+      // respond to the dapp request with the approved session's topic and response
+      await web3wallet.respondSessionRequest({ topic: session.topic, response });
+    } catch (error) {
+      console.error("USER_REJECTED:", error);
+      await web3wallet.rejectSession({
+        id: proposal.id,
+        reason: getSdkError("USER_REJECTED"),
+      });
+    }
 
     setPage(page + 1);
   };
@@ -233,6 +285,23 @@ const ConnectorDialog = () => {
   useEffect(() => {
     getClipboardContent();
   }, []);
+
+  let permissions: any[] = [];
+  let optionalPermissions: any[] = [];
+  if (proposal) {
+    try {
+      permissions = JSON.parse(proposal.params.sessionProperties["required_permissions"]);
+    } catch (e) {
+      console.error("Error parsing required permissions:", e);
+      console.error("Proposal params:", proposal.params);
+    }
+    try {
+      optionalPermissions = JSON.parse(proposal.params.sessionProperties["optional_permissions"]);
+    } catch (e) {
+      console.error("Error parsing optional permissions:", e);
+      console.error("Proposal params:", proposal.params);
+    }
+  }
 
   const renderPage = () => {
     switch (page) {
@@ -275,16 +344,20 @@ const ConnectorDialog = () => {
       case 2:
         return (
           <div className="dialog-inner">
-            <Permissions
-              requiredPermissions={permissions}
-              optionalPermissions={optionalPermissions}
-              setOptionalPermissions={setChosenOptionalPermissions}
-            />
+            {isLoading ? (
+              <CircularProgress />
+            ) : (
+              <Permissions
+                requiredPermissions={permissions}
+                optionalPermissions={optionalPermissions}
+                setOptionalPermissions={setChosenOptionalPermissions}
+              />
+            )}
             <DialogActions>
               <Button onClick={handleClose} variant="outlined">
                 Cancel
               </Button>
-              <Button onClick={async () => await handleAuth()} variant="contained">
+              <Button onClick={handleApprove} variant="contained">
                 Authorize
               </Button>
             </DialogActions>
@@ -328,6 +401,12 @@ const ConnectorDialog = () => {
               <CloseIcon />
             </IconButton>
           </div>
+          {error && (
+            <div>
+              <ErrorIcon />
+              {error}
+            </div>
+          )}
           <DialogContent>{renderPage()}</DialogContent>
         </Dialog>
         <ConfirmTransaction />

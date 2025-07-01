@@ -432,8 +432,8 @@ impl JsonRpcHandlers {
             non_fungibles: res
                 .into_iter()
                 .map(|v| NonFungibleSubstate {
-                    index: v.index,
                     address: v.address,
+                    version: v.version,
                     substate: v.substate,
                 })
                 .collect(),

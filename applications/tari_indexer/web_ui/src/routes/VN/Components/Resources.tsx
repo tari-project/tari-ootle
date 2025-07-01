@@ -32,6 +32,7 @@ interface NftData {
   img: string | null;
   title: string;
   address: string;
+  version: number;
 }
 
 function Resources() {
@@ -41,7 +42,6 @@ function Resources() {
   let { resourceAddress } = useParams();
 
   async function update(resourceAddress: ResourceAddress) {
-
     const substate = await getSubstate({
       address: resourceAddress,
       version: null,
@@ -60,13 +60,13 @@ function Resources() {
       let nfts: NftData[] = [];
       resp.non_fungibles.forEach((nft: NonFungibleSubstate) => {
         console.log(nft);
-        if (!("NonFungible" in nft.substate.substate)) {
+        if (!("NonFungible" in nft.substate)) {
           console.error("NonFungible not found in substate");
           return;
         }
         let nftData;
         try {
-          nftData = convertCborValue(nft.substate.substate.NonFungible?.data);
+          nftData = convertCborValue(nft.substate.NonFungible?.data);
         } catch (e) {
           console.error("Error converting CBOR value:", e);
           return;
@@ -75,7 +75,7 @@ function Resources() {
           console.log(nftData);
           let { image_url, name } = nftData;
           let address = substateIdToString(nft.address).split("_", 4);
-          nfts.push({ img: image_url, title: name, address: `${address[2]}_${address[3]}` });
+          nfts.push({ img: image_url, title: name, address: `${address[2]}_${address[3]}`, version: nft.version });
         }
 
         setNfts(nfts);
@@ -88,23 +88,25 @@ function Resources() {
       return;
     }
 
-    update(resourceAddress)
-      .catch((error) => {
-        console.error("Error fetching resource data:", error);
-      });
+    update(resourceAddress).catch((error) => {
+      console.error("Error fetching resource data:", error);
+    });
   }, [resourceAddress]);
 
   return (
     <Grid container spacing={2} direction="column" alignItems="left">
       <Grid item>
-        <p>{resourceAddress} Token Symbol: {resource?.metadata?.SYMBOL || "<none>"}</p>
+        <p>
+          {resourceAddress} Token Symbol: {resource?.metadata?.SYMBOL || "<none>"}
+        </p>
         <p>Resource Type: {resource?.resource_type}</p>
         <p>Total Supply: {resource?.total_supply}</p>
       </Grid>
 
       {nfts.length > 0 && (
         <ImageList cols={4} gap={8}>
-          {nfts.map((item) => item.img ? (
+          {nfts.map((item) =>
+            item.img ? (
               <ImageListItem key={item.address}>
                 <img
                   src={`${item.img}?size=248&fit=fill&auto=format`}
@@ -112,11 +114,27 @@ function Resources() {
                   alt={item.title || "NFT image"}
                   loading="lazy"
                 />
-                <ImageListItemBar title={item.title} subtitle={<span>{item.address}</span>} position="below" />
+                <ImageListItemBar
+                  title={item.title}
+                  subtitle={
+                    <span>
+                      {item.address} v{item.version}
+                    </span>
+                  }
+                  position="below"
+                />
               </ImageListItem>
             ) : (
               <ImageListItem key={item.address}>
-                <ImageListItemBar title={item.title} subtitle={<span>{item.address}</span>} position="below" />
+                <ImageListItemBar
+                  title={item.title}
+                  subtitle={
+                    <span>
+                      {item.address} v{item.version}
+                    </span>
+                  }
+                  position="below"
+                />
               </ImageListItem>
             ),
           )}

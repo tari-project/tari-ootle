@@ -2,11 +2,11 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Serialize};
-use tari_engine_types::substate::{Substate, SubstateId};
+use tari_engine_types::{substate::SubstateValue, template_lib_models::NonFungibleAddress};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct NonFungibleSubstate {
-    pub index: u64,
-    pub address: SubstateId,
-    pub substate: Substate,
+    pub version: u32,
+    pub address: NonFungibleAddress,
+    pub substate: SubstateValue,
 }

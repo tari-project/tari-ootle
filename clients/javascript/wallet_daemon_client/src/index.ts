@@ -42,7 +42,9 @@ import type {
   KeysSetActiveRequest,
   KeysSetActiveResponse,
   ListAccountNftRequest,
-  ListAccountNftResponse, MintFaucetNftRequest, MintFaucetNftResponse,
+  ListAccountNftResponse,
+  MintFaucetNftRequest,
+  MintFaucetNftResponse,
   PublishTemplateRequest,
   PublishTemplateResponse,
   rejectReasonToString,
@@ -77,6 +79,8 @@ import type {
   TransactionWaitResultResponse,
   TransferNftRequest,
   TransferNftResponse,
+  WalletGetInfoRequest,
+  WalletGetInfoResponse,
   WebauthnAlreadyRegisteredRequest,
   WebauthnAlreadyRegisteredResponse,
   WebauthnFinishAuthRequest,
@@ -134,7 +138,10 @@ export class WalletDaemonClient {
     return this.__invokeRpc("auth.get_all_jwt", params);
   }
 
-  public async authRequest(permissions: string[], webauthnFinishAuthRequest?: WebauthnFinishAuthRequest): Promise<string> {
+  public async authRequest(
+    permissions: string[],
+    webauthnFinishAuthRequest?: WebauthnFinishAuthRequest,
+  ): Promise<string> {
     // TODO: Exchange some secret credentials for a JWT
     let request: AuthLoginRequest = {
       permissions: permissions,
@@ -153,6 +160,10 @@ export class WalletDaemonClient {
 
   public authRevoke(params: AuthRevokeTokenRequest): Promise<AuthRevokeTokenResponse> {
     return this.__invokeRpc("auth.revoke", params);
+  }
+
+  public walletGetInfo(): Promise<WalletGetInfoResponse> {
+    return this.__invokeRpc("wallet.get_info", {} as WalletGetInfoRequest);
   }
 
   public accountsCreate(params: AccountsCreateRequest): Promise<AccountsCreateResponse> {
@@ -195,7 +206,6 @@ export class WalletDaemonClient {
     return this.__invokeRpc("accounts.set_default", params);
   }
 
-
   public submitTransaction(params: TransactionSubmitRequest): Promise<TransactionSubmitResponse> {
     return this.__invokeRpc("transactions.submit", params);
   }
@@ -204,14 +214,15 @@ export class WalletDaemonClient {
     return this.__invokeRpc("transactions.submit_dry_run", params);
   }
 
-  public submitTransactionManifest(params: TransactionSubmitManifestRequest): Promise<TransactionSubmitManifestResponse> {
+  public submitTransactionManifest(
+    params: TransactionSubmitManifestRequest,
+  ): Promise<TransactionSubmitManifestResponse> {
     return this.__invokeRpc("transactions.submit_manifest", params);
   }
 
   public publishTemplate(params: PublishTemplateRequest): Promise<PublishTemplateResponse> {
     return this.__invokeRpc("transactions.publish_template", params);
   }
-
 
   public substatesGet(params: SubstatesGetRequest): Promise<SubstatesGetResponse> {
     // TODO: fix error if param type is `substate_id: Substate_id`
@@ -304,7 +315,9 @@ export class WalletDaemonClient {
     return this.__invokeRpc("settings.set", params);
   }
 
-  public webauthnAlreadyRegistered(params: WebauthnAlreadyRegisteredRequest): Promise<WebauthnAlreadyRegisteredResponse> {
+  public webauthnAlreadyRegistered(
+    params: WebauthnAlreadyRegisteredRequest,
+  ): Promise<WebauthnAlreadyRegisteredResponse> {
     return this.__invokeRpc("webauthn.already_registered", params);
   }
 

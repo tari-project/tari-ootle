@@ -14,7 +14,7 @@ use anyhow::{anyhow, Context};
 use indexmap::IndexMap;
 use log::info;
 use slug::slugify;
-use tari_common::configuration::Network;
+use tari_ootle_common_types::Network;
 use tokio::{
     fs,
     fs::File,

@@ -4,9 +4,9 @@
 use std::{path::Path, str::FromStr, time::Duration};
 
 use log::info;
-use tari_common::configuration::Network;
 use tari_crypto::tari_utilities::SafePassword;
 use tari_engine_types::commit_result::FinalizeResult;
+use tari_ootle_common_types::Network;
 use tari_ootle_wallet_sdk::{WalletSdk as Sdk, WalletSdkConfig};
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_ootle_walletd::indexer_jrpc_impl::IndexerJsonRpcNetworkInterface;

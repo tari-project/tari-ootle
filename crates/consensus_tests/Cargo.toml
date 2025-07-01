@@ -11,8 +11,6 @@ license.workspace = true
 
 [dev-dependencies]
 tari_bor = { workspace = true }
-# Needed for network enum
-tari_common = { workspace = true }
 tari_common_types = { workspace = true }
 tari_consensus = { workspace = true }
 tari_crypto = { workspace = true }

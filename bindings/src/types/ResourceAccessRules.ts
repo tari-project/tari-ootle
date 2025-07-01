@@ -8,4 +8,5 @@ export interface ResourceAccessRules {
   withdrawable: AccessRule;
   depositable: AccessRule;
   update_non_fungible_data: AccessRule;
+  update_access_rules: AccessRule;
 }

@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use log::{info, warn};
 use passwords::PasswordGenerator;
-use tari_common::{configuration::Network, ConfigurationError};
 use tari_crypto::tari_utilities::SafePassword;
 use tari_key_manager::{
     cipher_seed::CipherSeed,
@@ -13,7 +12,11 @@ use tari_key_manager::{
     mnemonic::{Mnemonic, MnemonicLanguage},
     SeedWords,
 };
-use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
+use tari_ootle_common_types::{
+    optional::{IsNotFoundError, Optional},
+    Network,
+    NetworkParseError,
+};
 use zeroize::Zeroizing;
 
 use crate::{
@@ -322,8 +325,8 @@ pub enum WalletSdkError {
          `--password` cli option."
     )]
     FailedToAccessKeyRing,
-    #[error("Configuration error: {0}")]
-    Config(#[from] ConfigurationError),
+    #[error(transparent)]
+    NetworkParseError(#[from] NetworkParseError),
     #[error("Invariant error: {details}")]
     InvariantError { details: String },
 }
@@ -339,7 +342,7 @@ impl IsNotFoundError for WalletSdkError {
             Self::KeyManager(_) |
             Self::InvariantError { .. } |
             Self::FailedToAccessKeyRing |
-            Self::Config(_) => false,
+            Self::NetworkParseError(_) => false,
         }
     }
 }

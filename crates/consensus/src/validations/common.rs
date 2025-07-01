@@ -3,7 +3,6 @@
 use std::collections::HashSet;
 
 use log::{debug, warn};
-use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::ProposalCertificate;
 use tari_ootle_common_types::{
@@ -11,6 +10,7 @@ use tari_ootle_common_types::{
     DerivableFromPublicKey,
     Epoch,
     ExtraFieldKey,
+    Network,
     NodeHeight,
     NumPreshards,
     ShardGroup,

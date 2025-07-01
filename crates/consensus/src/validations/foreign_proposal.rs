@@ -1,8 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_common::configuration::Network;
-use tari_ootle_common_types::{committee::Committee, VotePower};
+use tari_ootle_common_types::{committee::Committee, Network, VotePower};
 use tari_ootle_storage::consensus_models::{CommandsCommitProof, ForeignProposal};
 
 use crate::{

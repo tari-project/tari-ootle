@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use futures::future::{select, Either};
-use tari_common::configuration::Network;
+use tari_ootle_common_types::Network;
 use tari_shutdown::Shutdown;
 use tokio::fs;
 

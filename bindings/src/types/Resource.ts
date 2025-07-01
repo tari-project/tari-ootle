@@ -12,7 +12,7 @@ export interface Resource {
   owner_key: Array<number>;
   access_rules: ResourceAccessRules;
   metadata: Metadata;
-  total_supply: Amount;
+  total_supply: Amount | null;
   view_key: string | null;
   auth_hook: AuthHook | null;
 }

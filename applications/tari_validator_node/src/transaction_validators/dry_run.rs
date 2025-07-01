@@ -32,7 +32,7 @@ impl Validator<Transaction> for TransactionDryRunValidator {
 #[cfg(test)]
 mod tests {
     use indexmap::IndexSet;
-    use tari_common::configuration::Network;
+    use tari_ootle_common_types::Network;
     use tari_template_lib::prelude::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
     use tari_transaction::{
         Transaction,

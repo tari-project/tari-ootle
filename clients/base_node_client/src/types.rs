@@ -6,8 +6,6 @@ use tari_common_types::types::FixedHash;
 use tari_core::transactions::{tari_amount::MicroMinotari, transaction_components::TransactionOutput};
 use tari_ootle_common_types::{Epoch, SubstateAddress};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
-#[cfg(feature = "ts")]
-use ts_rs::TS;
 
 #[derive(Debug, Clone)]
 pub struct BaseLayerMetadata {
@@ -31,7 +29,7 @@ pub struct BlockInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/base-node-client/")
 )]
 pub struct BaseLayerValidatorNode {

@@ -27,17 +27,13 @@ use std::{
 
 use config::Config;
 use serde::{Deserialize, Serialize};
-use tari_common::{
-    configuration::{CommonConfig, Network},
-    ConfigurationError,
-    DefaultConfigLoader,
-    SubConfigPath,
-};
+use tari_common::{configuration::CommonConfig, ConfigurationError, DefaultConfigLoader, SubConfigPath};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_ootle_app_utilities::{
     epoch_oracle_config::EpochOracleConfig,
     p2p_config::{P2pConfig, PeerSeedsConfig, RpcConfig},
 };
+use tari_ootle_common_types::Network;
 use tari_template_manager::implementation::TemplateConfig;
 
 #[derive(Debug, Clone)]

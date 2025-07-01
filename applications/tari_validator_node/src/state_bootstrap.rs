@@ -5,7 +5,6 @@ use std::ops::Deref;
 
 use serde::Serialize;
 use tari_bor::cbor;
-use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::BlockId;
 use tari_engine_types::{
@@ -17,6 +16,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{
     Epoch,
+    Network,
     NodeAddressable,
     NumPreshards,
     ShardGroup,

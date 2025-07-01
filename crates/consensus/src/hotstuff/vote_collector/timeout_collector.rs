@@ -2,9 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_common::configuration::Network;
 use tari_consensus_types::{HighTc, SignedMessage, TimeoutCertificate, TimeoutVote, Vote};
-use tari_ootle_common_types::{Epoch, NodeHeight};
+use tari_ootle_common_types::{Epoch, Network, NodeHeight};
 use tari_ootle_storage::StateStore;
 
 use super::collector::VoteCollector;

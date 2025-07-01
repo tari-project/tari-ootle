@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_common_types::types::FixedHash;
-use tari_ootle_common_types::{Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
+use tari_ootle_common_types::{Epoch, ExtraData, Network, NodeHeight, NumPreshards, ShardGroup};
 use tari_ootle_storage::{
     consensus_models::{Block, BookkeepingModel, Command, ForeignProposalStatus},
     StateStore,
@@ -24,7 +24,7 @@ fn foreign_proposals_rocksdb() {
 fn foreign_proposals_operations(db: impl StateStore) {
     let mut tx = db.create_write_tx().unwrap();
 
-    let network = Default::default();
+    let network = Network::LocalNet;
     const EPOCH: Epoch = Epoch(2);
 
     let zero_block = Block::zero_block(network, NumPreshards::P64);

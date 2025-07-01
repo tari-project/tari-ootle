@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_consensus_types::{BlockId, LeafBlock};
-use tari_ootle_common_types::{shard::Shard, Epoch, NodeHeight, ShardGroup};
+use tari_ootle_common_types::{shard::Shard, Epoch, Network, NodeHeight, ShardGroup};
 use tari_ootle_storage::{
     consensus_models::{Block, StateTransitionId, SubstateRecord},
     StateStore,
@@ -26,7 +26,7 @@ fn operations(db: impl StateStore) {
     const SHARD: Shard = Shard::first();
     let mut tx = db.create_write_tx().unwrap();
 
-    let zero_block = Block::zero_block(Default::default(), TEST_NUM_PRESHARDS);
+    let zero_block = Block::zero_block(Network::LocalNet, TEST_NUM_PRESHARDS);
     zero_block.insert(&mut tx).unwrap();
 
     let substates = gen_substates(0..num_transitions, 0);

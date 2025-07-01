@@ -59,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config_path = cli.common.config_path();
-    let cfg = load_configuration(config_path, true, &cli, cli.common.network)?;
+    let cfg = load_configuration(config_path, true, &cli, cli.network_override())?;
     let config = ApplicationConfig::load_from(&cfg)?;
 
     // Remove the pid file if it exists

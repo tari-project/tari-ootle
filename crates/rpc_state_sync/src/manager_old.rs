@@ -10,7 +10,6 @@ use std::{
 use async_trait::async_trait;
 use futures::StreamExt;
 use log::*;
-use tari_common::configuration::Network;
 use tari_consensus::{
     hotstuff::{calculate_state_merkle_diff, ProposalValidationError},
     traits::{ConsensusSpec, LeaderStrategy, SyncManager, SyncStatus},

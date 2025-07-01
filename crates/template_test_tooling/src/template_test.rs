@@ -11,7 +11,6 @@ use std::{
 
 use anyhow::anyhow;
 use serde::de::DeserializeOwned;
-use tari_common::configuration::Network;
 use tari_crypto::{
     keys::PublicKey as _,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
@@ -33,7 +32,12 @@ use tari_engine_types::{
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
     ToByteType,
 };
-use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::SubstateType, SubstateRequirement};
+use tari_ootle_common_types::{
+    crypto::create_key_pair_from_seed,
+    substate_type::SubstateType,
+    Network,
+    SubstateRequirement,
+};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     args::InstructionArg,

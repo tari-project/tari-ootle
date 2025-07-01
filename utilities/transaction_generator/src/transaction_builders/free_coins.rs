@@ -2,10 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use rand::rngs::OsRng;
-use tari_common::configuration::Network;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine_types::{component::new_component_address_from_public_key, ToByteType};
-use tari_ootle_common_types::SubstateRequirement;
+use tari_ootle_common_types::{Network, SubstateRequirement};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},

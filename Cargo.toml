@@ -83,13 +83,13 @@ tari_consensus = { path = "crates/consensus" }
 tari_consensus_types = { path = "crates/consensus_types" }
 tari_ootle_common_types = { path = "crates/common_types" }
 tari_engine = { path = "crates/engine" }
+tari_engine_types = { path = "crates/engine_types" }
 tari_ootle_p2p = { path = "crates/p2p" }
 tari_ootle_storage = { path = "crates/storage" }
 tari_ootle_storage_sqlite = { path = "crates/storage_sqlite" }
 tari_ootle_wallet_crypto = { path = "crates/wallet/crypto" }
 tari_ootle_wallet_sdk = { path = "crates/wallet/sdk" }
 tari_ootle_wallet_storage_sqlite = { path = "crates/wallet/storage_sqlite" }
-tari_engine_types = { path = "crates/engine_types" }
 tari_epoch_manager = { path = "crates/epoch_manager" }
 tari_epoch_oracles = { path = "crates/epoch_oracles" }
 tari_indexer_lib = { path = "crates/indexer_lib" }

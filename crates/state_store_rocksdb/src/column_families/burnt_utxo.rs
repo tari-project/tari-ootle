@@ -8,8 +8,8 @@ use tari_engine_types::{
 };
 
 use crate::{
-    codecs::{BlockIdCodec, BytesCodec, DefaultCodec, TupleBytesCodec, UnitCodec},
-    traits::{Cf, QueryCf},
+    codecs::{BlockIdCodec, BytesCodec, DefaultVersionedCodec, TupleBytesCodec, UnitCodec},
+    traits::{Cf, QueryCf, VersionedUnclaimedConfidentialOutput},
 };
 
 pub struct BurntUtxoCf;
@@ -18,7 +18,7 @@ impl Cf for BurntUtxoCf {
     type Key = UnclaimedConfidentialOutputAddress;
     type KeyCodec = BytesCodec;
     type Value = UnclaimedConfidentialOutput;
-    type ValueCodec = DefaultCodec<Self::Value>;
+    type ValueCodec = DefaultVersionedCodec<VersionedUnclaimedConfidentialOutput>;
 
     fn name() -> &'static str {
         "burnt_utxos"

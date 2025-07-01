@@ -24,8 +24,9 @@ use tari_ootle_storage::consensus_models::TransactionRecord;
 use tari_transaction::TransactionId;
 
 use crate::{
-    codecs::{DefaultCodec, TransactionIdCodec},
+    codecs::{DefaultVersionedCodec, TransactionIdCodec},
     traits::Cf,
+    versioned_types::VersionedTransactionRecord,
 };
 
 pub struct TransactionCf;
@@ -34,7 +35,7 @@ impl Cf for TransactionCf {
     type Key = TransactionId;
     type KeyCodec = TransactionIdCodec;
     type Value = TransactionRecord;
-    type ValueCodec = DefaultCodec<Self::Value>;
+    type ValueCodec = DefaultVersionedCodec<VersionedTransactionRecord>;
 
     fn name() -> &'static str {
         "transactions"

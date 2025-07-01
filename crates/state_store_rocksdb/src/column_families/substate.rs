@@ -23,11 +23,19 @@
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{shard::Shard, Epoch, SubstateAddress};
-use tari_ootle_storage::consensus_models::SubstateRecord;
 
 use crate::{
-    codecs::{DefaultCodec, EpochCodec, FixedBytesCodec, NumberCodec, ShardCodec, SubstateIdCodec},
+    codecs::{
+        DefaultCodec,
+        DefaultVersionedCodec,
+        EpochCodec,
+        FixedBytesCodec,
+        NumberCodec,
+        ShardCodec,
+        SubstateIdCodec,
+    },
     traits::{Cf, QueryCf},
+    versioned_types::{LatestSubstateRecord, VersionedSubstateRecord},
 };
 
 pub struct SubstateCf;
@@ -35,8 +43,8 @@ pub struct SubstateCf;
 impl Cf for SubstateCf {
     type Key = SubstateAddress;
     type KeyCodec = FixedBytesCodec<{ SubstateAddress::LENGTH }>;
-    type Value = SubstateRecord;
-    type ValueCodec = DefaultCodec<Self::Value>;
+    type Value = LatestSubstateRecord;
+    type ValueCodec = DefaultVersionedCodec<VersionedSubstateRecord>;
 
     fn name() -> &'static str {
         "substates"

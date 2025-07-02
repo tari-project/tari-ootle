@@ -273,6 +273,7 @@ function FlowEditor() {
             top: 64, // height of the toolbar
             height: "calc(100% - 64px)",
             position: "fixed",
+            zIndex: 20,
           },
         }}
       >

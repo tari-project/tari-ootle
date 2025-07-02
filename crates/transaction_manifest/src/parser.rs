@@ -245,10 +245,18 @@ impl ManifestParser {
             }) => {
                 if path.segments.len() != 1 {
                     // TODO: improve error
-                    return Err(syn::Error::new_spanned(path, "Invalid macro path"));
+                    return Err(syn::Error::new_spanned(path, "macro path must have a single segment"));
                 }
 
-                assignment_from_macro(var_ident.clone(), &path.segments[0].ident, tokens)?
+                assignment_from_macro(
+                    var_ident.clone(),
+                    &path
+                        .segments
+                        .first()
+                        .expect("macro path must have a single segment")
+                        .ident,
+                    tokens,
+                )?
             },
             _ => {
                 return Err(syn::Error::new_spanned(
@@ -302,13 +310,11 @@ impl ManifestParser {
                 mac: Macro { path, tokens, .. },
                 ..
             }) => {
-                if path.segments.len() != 1 {
-                    // TODO: improve error
-                    return Err(syn::Error::new_spanned(path, "Invalid macro path"));
-                }
+                let Some(mac) = path.segments.first() else {
+                    return Err(syn::Error::new_spanned(path, "macro path must have a single segment"));
+                };
 
-                let mac = &path.segments[0].ident;
-                macro_call(mac, tokens)
+                macro_call(&mac.ident, tokens)
             },
             _ => Err(syn::Error::new_spanned(
                 expr.clone(),
@@ -357,8 +363,8 @@ fn build_arguments(args: Punctuated<Expr, Comma>) -> Result<Vec<ManifestLiteral>
             Expr::Lit(lit) => Ok(ManifestLiteral::Lit(lit.lit)),
 
             Expr::Path(expr_path) => {
-                if expr_path.path.segments.len() == 1 {
-                    Ok(ManifestLiteral::Variable(expr_path.path.segments[0].ident.clone()))
+                if let Some(seg) = expr_path.path.segments.first() {
+                    Ok(ManifestLiteral::Variable(seg.ident.clone()))
                 } else {
                     Err(syn::Error::new_spanned(
                         expr_path,

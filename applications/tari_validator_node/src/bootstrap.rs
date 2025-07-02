@@ -29,10 +29,7 @@ use log::*;
 use minotari_app_utilities::identity_management;
 use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common::{
-    configuration::{
-        bootstrap::{grpc_default_port, ApplicationType},
-        Network,
-    },
+    configuration::bootstrap::{grpc_default_port, ApplicationType},
     exit_codes::{ExitCode, ExitError},
 };
 use tari_consensus::consensus_constants::ConsensusConstants;
@@ -56,6 +53,7 @@ use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_ootle_app_utilities::{
     common::verify_correct_network,
+    configuration::convert_network_to_l1_network,
     epoch_oracle_config::{BaseLayerOracleConfig, EpochOracleType},
     keypair::RistrettoKeypair,
     seed_peer::SeedPeer,
@@ -64,7 +62,7 @@ use tari_ootle_app_utilities::{
     transaction_executor::TariTransactionProcessor,
     utxo_store::StateUtxoStore,
 };
-use tari_ootle_common_types::PeerAddress;
+use tari_ootle_common_types::{Network, PeerAddress};
 use tari_ootle_p2p::TariMessagingSpec;
 use tari_ootle_storage::{global::GlobalDb, StateStore};
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
@@ -531,7 +529,7 @@ async fn create_base_layer_client(
     config: &BaseLayerOracleConfig,
 ) -> Result<GrpcBaseNodeClient, ExitError> {
     let base_node_address = config.base_node_grpc_url.clone().unwrap_or_else(|| {
-        let port = grpc_default_port(ApplicationType::BaseNode, network);
+        let port = grpc_default_port(ApplicationType::BaseNode, convert_network_to_l1_network(&network));
         format!("http://127.0.0.1:{port}")
             .parse()
             .expect("Default base node GRPC URL is malformed")

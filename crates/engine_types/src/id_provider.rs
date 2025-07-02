@@ -90,7 +90,7 @@ impl<'a> IdProvider<'a> {
             let bytes = self.new_uuid()?;
             let remaining = len - result.len();
             let end = bytes.len().min(remaining);
-            result.extend_from_slice(&bytes[..end]);
+            result.extend_from_slice(bytes.get(..end).expect("end bound is always <= length"));
         }
 
         Ok(result)

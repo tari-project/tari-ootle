@@ -119,6 +119,8 @@ use crate::{
         TransactionSubmitResponse,
         TransactionWaitResultRequest,
         TransactionWaitResultResponse,
+        WalletGetInfoRequest,
+        WalletGetInfoResponse,
     },
 };
 
@@ -153,9 +155,9 @@ impl WalletDaemonClient {
         self
     }
 
-    // pub async fn get_identity(&mut self) -> Result<GetIdentityResponse, WalletDaemonClientError> {
-    //     self.send_request("identities.get", json!({})).await
-    // }
+    pub async fn get_wallet_info(&mut self) -> Result<WalletGetInfoResponse, WalletDaemonClientError> {
+        self.send_request("wallet.get_info", &WalletGetInfoRequest {}).await
+    }
 
     pub async fn create_key(&mut self, branch: KeyBranch) -> Result<KeysCreateResponse, WalletDaemonClientError> {
         self.send_request("keys.create", &KeysCreateRequest {

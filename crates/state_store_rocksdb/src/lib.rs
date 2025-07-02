@@ -42,3 +42,4 @@ pub use options::*;
 mod read_only;
 #[cfg(test)]
 mod tests;
+mod versioned_types;

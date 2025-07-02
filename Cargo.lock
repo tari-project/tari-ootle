@@ -1884,7 +1884,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tari_bor",
- "tari_common",
  "tari_common_types",
  "tari_consensus",
  "tari_consensus_types",
@@ -9007,7 +9006,6 @@ dependencies = [
  "js-sys",
  "log",
  "mime",
- "mime_guess",
  "native-tls",
  "once_cell",
  "percent-encoding",
@@ -10703,7 +10701,6 @@ dependencies = [
  "indexmap 2.9.0",
  "log",
  "serde",
- "tari_common",
  "tari_common_types",
  "tari_consensus_types",
  "tari_crypto",
@@ -10879,7 +10876,6 @@ dependencies = [
  "semver",
  "serde",
  "tari_bor",
- "tari_common",
  "tari_common_types",
  "tari_crypto",
  "tari_engine_types",
@@ -10913,7 +10909,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tari_bor",
- "tari_common",
  "tari_common_types",
  "tari_crypto",
  "tari_hashing",
@@ -10970,23 +10965,6 @@ dependencies = [
 name = "tari_features"
 version = "4.5.0-pre.0"
 source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9fbdb854db1536e92610fb8fea0671ed67a77073"
-
-[[package]]
-name = "tari_generate"
-version = "0.10.4"
-dependencies = [
- "anyhow",
- "clap 3.2.25",
- "convert_case 0.6.0",
- "hex",
- "liquid",
- "liquid-core",
- "reqwest",
- "serde",
- "serde_json",
- "tari_engine",
- "tokio",
-]
 
 [[package]]
 name = "tari_hashing"
@@ -11241,7 +11219,9 @@ dependencies = [
 name = "tari_ootle_common_types"
 version = "0.10.4"
 dependencies = [
+ "blake2",
  "borsh",
+ "digest",
  "ethnum",
  "indexmap 2.9.0",
  "libp2p-identity",
@@ -11251,7 +11231,6 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "tari_bor",
- "tari_common",
  "tari_common_types",
  "tari_crypto",
  "tari_engine_types",
@@ -11295,7 +11274,6 @@ dependencies = [
  "log",
  "rand 0.8.5",
  "serde",
- "tari_common",
  "tari_common_types",
  "tari_consensus_types",
  "tari_crypto",
@@ -11370,6 +11348,7 @@ dependencies = [
  "tari_crypto",
  "tari_engine_types",
  "tari_hashing",
+ "tari_ootle_common_types",
  "tari_template_lib",
  "tari_template_test_tooling",
  "tari_utilities",
@@ -11390,7 +11369,6 @@ dependencies = [
  "passwords",
  "serde",
  "tari_bor",
- "tari_common",
  "tari_common_types",
  "tari_consensus_types",
  "tari_crypto",
@@ -11760,7 +11738,6 @@ dependencies = [
  "serde",
  "serde_json",
  "slug",
- "tari_common",
  "tari_common_types",
  "tari_core",
  "tari_crypto",
@@ -11804,7 +11781,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_lib"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "borsh",
  "newtype-ops",
@@ -11882,7 +11859,6 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "tari_bor",
- "tari_common",
  "tari_common_types",
  "tari_crypto",
  "tari_engine",
@@ -12130,7 +12106,6 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "tari_common",
  "tari_core",
  "tari_crypto",
  "tari_ootle_common_types",
@@ -12151,7 +12126,6 @@ dependencies = [
  "clap 4.5.40",
  "fern",
  "log",
- "tari_common",
  "tari_crypto",
  "tari_engine_types",
  "tari_ootle_common_types",
@@ -12791,7 +12765,6 @@ dependencies = [
  "once_cell",
  "rand 0.8.5",
  "rayon",
- "tari_common",
  "tari_crypto",
  "tari_engine_types",
  "tari_ootle_common_types",

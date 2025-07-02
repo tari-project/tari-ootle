@@ -193,7 +193,7 @@ fn replace_self_in_output(ast: &FunctionAst) -> Vec<Stmt> {
 }
 
 fn replace_self_in_single_value(type_path: &TypePath) -> Option<Stmt> {
-    let type_ident = &type_path.path.segments[0].ident;
+    let type_ident = &type_path.path.segments.first()?.ident;
 
     if type_ident == "Self" {
         // When we return self we use default rules - which only permit the owner of the component to call methods
@@ -218,7 +218,13 @@ fn replace_self_in_tuple(type_tuple: &TypeTuple) -> Stmt {
         .enumerate()
         .map(|(i, t)| match t {
             syn::Type::Path(path) => {
-                let ident = path.path.segments[0].ident.clone();
+                let ident = path
+                    .path
+                    .segments
+                    .first()
+                    .expect("path segments is empty")
+                    .ident
+                    .clone();
                 let field_expr = build_tuple_field_expr("rtn".to_string(), i as u32);
                 if ident == "Self" {
                     // When we return self we use default rules - which only permit the owner of the component to call

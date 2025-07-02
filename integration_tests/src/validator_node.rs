@@ -35,8 +35,10 @@ use tari_ootle_app_utilities::{
     keypair::create_new_keypair,
     p2p_config::PeerSeedsConfig,
 };
-use tari_ootle_common_types::layer_one_transaction::{LayerOneTransactionDef, ValidatorRegistrationParams};
-use tari_p2p::Network;
+use tari_ootle_common_types::{
+    layer_one_transaction::{LayerOneTransactionDef, ValidatorRegistrationParams},
+    Network,
+};
 use tari_shutdown::Shutdown;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_validator_node::{run_validator_node, ApplicationConfig, ValidatorNodeConfig};

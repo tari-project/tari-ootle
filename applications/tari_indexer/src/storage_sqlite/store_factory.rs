@@ -329,17 +329,14 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                         details: format!("Failed to parse substate data: {}", e),
                     })?;
 
-                let substate = tari_engine_types::substate::Substate::new(row.version as u32, value);
-
                 Ok(NonFungibleSubstate {
                     address: row.address.parse().map_err(|e| StorageError::DataInconsistency {
                         details: format!("Failed to parse address: {}", e),
                     })?,
-                    // TODO: improve the indexer api. The index is not used.
-                    index: row.version.try_into().map_err(|e| StorageError::DataInconsistency {
+                    version: row.version.try_into().map_err(|e| StorageError::DataInconsistency {
                         details: format!("Version overflow {}", e),
                     })?,
-                    substate,
+                    substate: value,
                 })
             })
             .collect()

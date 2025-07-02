@@ -3,7 +3,7 @@
 
 use std::{collections::HashMap, net::IpAddr, path::PathBuf};
 
-use tari_common::configuration::Network;
+use tari_ootle_common_types::Network;
 use url::Url;
 
 use crate::process_manager::{

@@ -7,7 +7,7 @@ use std::{
 };
 
 use clap::Parser;
-use tari_common::configuration::Network;
+use tari_ootle_common_types::Network;
 
 use crate::{
     config::{AutoStart, Config},

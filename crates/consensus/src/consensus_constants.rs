@@ -22,8 +22,7 @@
 
 use std::time::Duration;
 
-use tari_common::configuration::Network;
-use tari_ootle_common_types::{Epoch, NumPreshards};
+use tari_ootle_common_types::{Epoch, Network, NumPreshards};
 
 #[derive(Clone, Debug)]
 pub struct ConsensusConstants {

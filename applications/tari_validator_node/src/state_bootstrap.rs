@@ -5,7 +5,6 @@ use std::ops::Deref;
 
 use serde::Serialize;
 use tari_bor::cbor;
-use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::BlockId;
 use tari_engine_types::{
@@ -17,6 +16,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{
     Epoch,
+    Network,
     NodeAddressable,
     NumPreshards,
     ShardGroup,
@@ -77,6 +77,7 @@ where
         Metadata::from([(TOKEN_SYMBOL, "ID".to_string())]),
         None,
         None,
+        false,
     );
     create_substate(
         tx,
@@ -89,7 +90,7 @@ where
 
     let is_testnet = !matches!(network, Network::MainNet);
     let symbol = if is_testnet { "tXTR" } else { "XTR" };
-    let mut xtr_resource = Resource::new(
+    let xtr_resource = Resource::new(
         ResourceType::Confidential,
         None,
         OwnerRule::None,
@@ -97,11 +98,12 @@ where
         Metadata::from([(TOKEN_SYMBOL, symbol)]),
         None,
         None,
+        false,
     );
 
     if is_testnet {
         // Create tXTR faucet
-        create_xtr_faucet(tx, network, num_preshards, sidechain_id, &mut xtr_resource)?;
+        create_xtr_faucet(tx, network, num_preshards, sidechain_id)?;
         // Create NFT faucet
         create_nft_faucet(tx, network, num_preshards, sidechain_id)?;
     }
@@ -123,7 +125,6 @@ fn create_xtr_faucet<TTx>(
     network: Network,
     num_preshards: NumPreshards,
     sidechain_id: Option<RistrettoPublicKeyBytes>,
-    xtr_resource: &mut Resource,
 ) -> Result<(), StorageError>
 where
     TTx: StateStoreWriteTransaction + Deref,
@@ -150,7 +151,6 @@ where
         value,
     )?;
 
-    xtr_resource.increase_total_supply(Amount::MAX);
     let value = Vault::new(ResourceContainer::Confidential {
         address: CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
         commitments: Default::default(),
@@ -212,6 +212,7 @@ where
         metadata,
         None,
         None,
+        true,
     );
 
     create_substate(

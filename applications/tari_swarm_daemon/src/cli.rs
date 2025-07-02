@@ -5,7 +5,7 @@ use std::{fmt::Display, net::SocketAddr, path::PathBuf, str::FromStr};
 
 use anyhow::{anyhow, Context};
 use clap::{Parser, ValueEnum};
-use tari_common::configuration::Network;
+use tari_ootle_common_types::Network;
 
 use crate::{
     config::{Config, InstanceType},

@@ -14,7 +14,6 @@ minotari_node_grpc_client = { workspace = true }
 minotari_app_grpc = { workspace = true }
 tari_core = { workspace = true } # Used for VN registration signature
 tari_crypto = { workspace = true } # Used for `.to_vec()` in registration request
-tari_common = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 tari_shutdown = { workspace = true }
 tari_sidechain = { workspace = true }

@@ -22,9 +22,7 @@
 
 use std::time::Duration;
 
-use tari_common::configuration::Network;
-
-use crate::{Epoch, NumPreshards};
+use crate::{Epoch, Network, NumPreshards};
 
 #[derive(Clone, Debug)]
 pub struct ConsensusConstants {

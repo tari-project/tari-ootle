@@ -36,6 +36,7 @@ use crate::{
 };
 
 mod confirm_all_transitions {
+    use tari_ootle_common_types::Network;
 
     use super::*;
 
@@ -52,7 +53,7 @@ mod confirm_all_transitions {
         let atom2 = create_tx_atom();
         let atom3 = create_tx_atom();
 
-        let network = Default::default();
+        let network = Network::LocalNet;
         let zero_block = Block::zero_block(network, TEST_NUM_PRESHARDS);
         zero_block.insert(&mut tx).unwrap();
         tx.proposal_certificates_save(zero_block.justify()).unwrap();

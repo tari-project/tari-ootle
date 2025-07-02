@@ -11,7 +11,6 @@ use std::{
 
 use anyhow::anyhow;
 use serde::de::DeserializeOwned;
-use tari_common::configuration::Network;
 use tari_crypto::{
     keys::PublicKey as _,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
@@ -33,7 +32,12 @@ use tari_engine_types::{
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
     ToByteType,
 };
-use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::SubstateType, SubstateRequirement};
+use tari_ootle_common_types::{
+    crypto::create_key_pair_from_seed,
+    substate_type::SubstateType,
+    Network,
+    SubstateRequirement,
+};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     args::InstructionArg,
@@ -298,7 +302,13 @@ impl TemplateTest {
                 proofs,
             )
             .unwrap_success();
-        result.finalize.execution_results[0].decode().unwrap()
+        result
+            .finalize
+            .execution_results
+            .first()
+            .expect("single instruction without execution result")
+            .decode()
+            .unwrap()
     }
 
     pub fn call_function<T>(
@@ -321,7 +331,13 @@ impl TemplateTest {
                 proofs,
             )
             .unwrap();
-        result.finalize.execution_results[0].decode().unwrap()
+        result
+            .finalize
+            .execution_results
+            .first()
+            .expect("single instruction without execution result")
+            .decode()
+            .unwrap()
     }
 
     pub fn call_method<T>(
@@ -345,7 +361,13 @@ impl TemplateTest {
             )
             .unwrap();
 
-        result.finalize.execution_results[0].decode().unwrap()
+        result
+            .finalize
+            .execution_results
+            .first()
+            .expect("single instruction without execution result")
+            .decode()
+            .unwrap()
     }
 
     pub fn get_test_proof_and_secret_key(&self) -> (NonFungibleAddress, RistrettoSecretKey) {
@@ -398,7 +420,11 @@ impl TemplateTest {
             vec![owner_proof.clone()],
         );
 
-        let component = result.finalize.execution_results[2]
+        let component = result
+            .finalize
+            .execution_results
+            .get(2)
+            .expect("instruction at 2 no execution result")
             .decode::<ComponentAddress>()
             .unwrap();
 
@@ -427,7 +453,11 @@ impl TemplateTest {
             vec![owner_proof.clone()],
         );
 
-        let component = result.finalize.execution_results[2]
+        let component = result
+            .finalize
+            .execution_results
+            .get(2)
+            .expect("instruction at 2 no execution result")
             .decode::<ComponentAddress>()
             .unwrap();
 

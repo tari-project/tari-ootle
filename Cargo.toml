@@ -12,7 +12,6 @@ members = [
     "applications/tari_app_utilities",
     "applications/tari_wallet_cli",
     "applications/tari_walletd",
-    "applications/tari_generate",
     "applications/tari_indexer",
     "applications/tari_scaffolder",
     "applications/tari_signaling_server",
@@ -84,13 +83,13 @@ tari_consensus = { path = "crates/consensus" }
 tari_consensus_types = { path = "crates/consensus_types" }
 tari_ootle_common_types = { path = "crates/common_types" }
 tari_engine = { path = "crates/engine" }
+tari_engine_types = { path = "crates/engine_types" }
 tari_ootle_p2p = { path = "crates/p2p" }
 tari_ootle_storage = { path = "crates/storage" }
 tari_ootle_storage_sqlite = { path = "crates/storage_sqlite" }
 tari_ootle_wallet_crypto = { path = "crates/wallet/crypto" }
 tari_ootle_wallet_sdk = { path = "crates/wallet/sdk" }
 tari_ootle_wallet_storage_sqlite = { path = "crates/wallet/storage_sqlite" }
-tari_engine_types = { path = "crates/engine_types" }
 tari_epoch_manager = { path = "crates/epoch_manager" }
 tari_epoch_oracles = { path = "crates/epoch_oracles" }
 tari_indexer_lib = { path = "crates/indexer_lib" }
@@ -100,7 +99,7 @@ tari_state_tree = { path = "crates/state_tree" }
 tari_template_abi = { version = "0.10.0", path = "crates/template_abi", default-features = false }
 tari_template_builtin = { path = "crates/template_builtin" }
 tari_template_lib = { path = "crates/template_lib" }
-tari_template_lib_types = { version = "0.10.4", path = "crates/template_lib_types" }
+tari_template_lib_types = { version = "0.10.3", path = "crates/template_lib_types" }
 tari_template_macros = { version = "0.10.0", path = "crates/template_macros" }
 tari_template_manager = { path = "crates/template_manager" }
 tari_template_test_tooling = { path = "crates/template_test_tooling" }

@@ -94,7 +94,7 @@ impl Behaviour {
         match self.get_connections(&peer_id) {
             Some(connections) => {
                 let ix = (stream_id as usize) % connections.len();
-                let conn = &mut connections[ix];
+                let conn = connections.get_mut(ix).expect("mod operator ensures index is in range");
                 conn.pending_streams.insert(stream_id);
                 let conn_id = conn.id;
                 self.pending_events.push_back(ToSwarm::NotifyHandler {

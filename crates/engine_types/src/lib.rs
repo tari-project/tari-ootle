@@ -1,7 +1,6 @@
 //  Copyright 2022 The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
-pub mod base_layer_hashing;
 pub mod bucket;
 pub mod byte_types;
 pub mod commit_result;

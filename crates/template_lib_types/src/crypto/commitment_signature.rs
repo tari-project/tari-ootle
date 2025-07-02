@@ -84,8 +84,10 @@ impl TryFrom<&[u8]> for CommitmentSignatureBytes {
 /// Reads `length` bytes from `bytes` and returns a slice of those bytes.
 /// Panics if `bytes` is shorter than `length`.
 fn read_n_bytes<'a>(bytes: &mut &'a [u8], length: usize) -> &'a [u8] {
-    let slice = &bytes[..length];
-    *bytes = &bytes[length..];
+    let slice = bytes.get(..length).expect("read_n_bytes: Not enough bytes available");
+    *bytes = bytes
+        .get(length..)
+        .expect("read_n_bytes: if reading succeeds, len.. bound must be valid");
     slice
 }
 

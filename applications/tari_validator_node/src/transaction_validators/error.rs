@@ -1,9 +1,8 @@
 //    Copyright 2024 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use tari_common::{configuration::Network, ConfigurationError};
 use tari_networking::NetworkingError;
-use tari_ootle_common_types::Epoch;
+use tari_ootle_common_types::{Epoch, Network};
 use tari_ootle_storage::{consensus_models::TransactionPoolError, StorageError};
 use tari_template_manager::interface::TemplateManagerError;
 use tari_transaction::TransactionId;
@@ -41,8 +40,8 @@ pub enum TransactionValidationError {
     TransactionNotSigned { transaction_id: TransactionId },
     #[error("Network error: {0}")]
     NetworkingError(#[from] NetworkingError),
-    #[error("Unknown network byte \"{0:?}\": {1}")]
-    UnknownNetwork(u8, ConfigurationError),
+    #[error("Unknown network byte \"{byte}\": {details}")]
+    UnknownNetwork { byte: u8, details: String },
     #[error("Network mismatch! Current network: {actual}, Transaction network: {expected}")]
     NetworkMismatch { actual: Network, expected: Network },
     #[error("Dry run transactions are not allowed")]

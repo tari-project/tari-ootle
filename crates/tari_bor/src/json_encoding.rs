@@ -47,7 +47,7 @@ impl serde::Serialize for CborValueJsonSerializeWrapper<'_> {
                 let wrapped = map.iter().map(|(k, v)| (Self(k), Self(v))).collect::<Vec<_>>();
                 serde::Serializer::serialize_newtype_variant(serializer, "Value", 8u32, "Map", &wrapped)
             },
-            ref v => Err(serde::ser::Error::custom(format!("invalid value {:?}", v))),
+            ref v => Err(serde::ser::Error::custom(format!("invalid value {v:?}"))),
         }
     }
 }

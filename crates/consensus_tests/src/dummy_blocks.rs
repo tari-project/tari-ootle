@@ -1,7 +1,6 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_consensus::hotstuff::{
     calculate_dummy_blocks,
@@ -14,6 +13,7 @@ use tari_ootle_common_types::{
     crypto::create_key_pair_from_seed,
     DerivableFromPublicKey,
     Epoch,
+    Network,
     NodeHeight,
     PeerAddress,
     ShardGroup,

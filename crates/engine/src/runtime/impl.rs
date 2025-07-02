@@ -23,7 +23,6 @@
 use std::sync::Arc;
 
 use log::{warn, *};
-use tari_common::configuration::Network;
 use tari_crypto::{
     range_proof::RangeProofService,
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey},
@@ -31,7 +30,6 @@ use tari_crypto::{
     tari_utilities::ByteArray,
 };
 use tari_engine_types::{
-    base_layer_hashing::ownership_proof_hasher64,
     commit_result::{FinalizeResult, RejectReason, TransactionResult},
     component::ComponentHeader,
     confidential::{get_commitment_factory, get_range_proof_service, ConfidentialClaim, ConfidentialOutput},
@@ -51,7 +49,11 @@ use tari_engine_types::{
     FromByteType,
     ValidatorFeePoolAddress,
 };
-use tari_ootle_common_types::services::template_provider::TemplateProvider;
+use tari_ootle_common_types::{
+    base_layer_hashing::ownership_proof_hasher64,
+    services::template_provider::TemplateProvider,
+    Network,
+};
 use tari_template_abi::{TemplateDef, Type};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
@@ -390,14 +392,20 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             });
         }
 
-        if !matches!(func.arguments[1].arg_type.other(), Some("ResourceAuthAction")) {
+        if !matches!(
+            func.arguments.get(1).expect("length checked").arg_type.other(),
+            Some("ResourceAuthAction")
+        ) {
             return Err(RuntimeError::InvalidArgument {
                 argument: "CreateResourceArg",
                 reason: format!("Authorize hook '{}' must take a ResourceAuthAction as argument 1", hook),
             });
         }
 
-        if !matches!(func.arguments[2].arg_type.other(), Some("AuthHookCaller")) {
+        if !matches!(
+            func.arguments.get(2).expect("length checked").arg_type.other(),
+            Some("AuthHookCaller")
+        ) {
             return Err(RuntimeError::InvalidArgument {
                 argument: "CreateResourceArg",
                 reason: format!("Authorize hook '{}' must take an AuthHookCaller as argument 2", hook),
@@ -508,75 +516,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
     fn lock_component(&self, address: ComponentAddress, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError> {
         self.tracker.lock_substate(&SubstateId::Component(address), lock_flag)
-    }
-
-    fn caller_context_invoke(
-        &self,
-        action: CallerContextAction,
-        args: EngineArgs,
-    ) -> Result<InvokeResult, RuntimeError> {
-        self.invoke_modules_on_runtime_call("caller_context_invoke")?;
-
-        match action {
-            CallerContextAction::GetCallerPublicKey => {
-                args.assert_no_args("CallerContextAction::GetCallerPublicKey")?;
-                Ok(InvokeResult::encode(&self.transaction_signer_public_key)?)
-            },
-            CallerContextAction::GetComponentAddress => self.tracker.read_with(|state| {
-                args.assert_no_args("CallerContextAction::GetComponentAddress")?;
-                let call_frame = state.current_call_scope()?;
-                let maybe_address = call_frame
-                    .get_current_component_lock()
-                    .map(|l| l.address().as_component_address().unwrap());
-                Ok(InvokeResult::encode(&maybe_address)?)
-            }),
-        }
-    }
-
-    fn allocate_address_invoke(&self, action: AddressAllocationInvokeArg) -> Result<InvokeResult, RuntimeError> {
-        self.invoke_modules_on_runtime_call("allocate_address_invoke")?;
-
-        self.tracker.write_with(|state| {
-            match action {
-                AddressAllocationInvokeArg::GetAddress(id) => {
-                    let allocation = state.get_allocated_address(id)?;
-                    match allocation.substate_id() {
-                        SubstateId::Component(addr) => Ok(InvokeResult::encode(&addr)?),
-                        SubstateId::Resource(addr) => Ok(InvokeResult::encode(&addr)?),
-                        // Engine creates the allocations, so never creates other unsupported variants
-                        _ => unreachable!("Invalid SubstateId variant. Allocation created for unsupported substate"),
-                    }
-                },
-                AddressAllocationInvokeArg::CreateComponentAllocation { public_key } => {
-                    // Validate the public key
-                    let _ignore = public_key
-                        .map(|pk| {
-                            RistrettoPublicKey::from_canonical_bytes(pk.as_bytes()).map_err(|_| {
-                                RuntimeError::InvalidArgument {
-                                    argument: "public_key",
-                                    reason: "Invalid RistrettoPublicKeyBytes".to_string(),
-                                }
-                            })
-                        })
-                        .transpose()?;
-
-                    let (template, _) = state.current_template()?;
-                    let id_provider = state.id_provider()?;
-                    let address = public_key
-                        .as_ref()
-                        .map(|public_key| id_provider.derive_new_component_address(template, public_key))
-                        .unwrap_or_else(|| id_provider.new_component_address())?;
-
-                    let id = state.new_address_allocation(address)?;
-                    Ok(InvokeResult::encode(&ComponentAddressAllocation::new(id))?)
-                },
-                AddressAllocationInvokeArg::CreateResourceAllocation => {
-                    let address = state.id_provider()?.new_resource_address()?;
-                    let id = state.new_address_allocation(address)?;
-                    Ok(InvokeResult::encode(&ResourceAddressAllocation::new(id))?)
-                },
-            }
-        })
     }
 
     fn get_substate(&self, lock: &LockedSubstate) -> Result<SubstateValue, RuntimeError> {
@@ -849,6 +788,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         arg.metadata,
                         arg.view_key,
                         arg.authorize_hook,
+                        arg.is_total_supply_tracking_enabled,
                     );
 
                     let resource_address = match arg.address_allocation {
@@ -1137,9 +1077,11 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                     let resource = state_mut.get_resource(&resource_lock)?;
 
-                    state_mut
-                        .authorization()
-                        .require_ownership(ResourceAuthAction::UpdateAccessRules, resource.as_ownership())?;
+                    state_mut.authorization().check_resource_access_rules(
+                        ResourceAuthAction::UpdateAccessRules,
+                        resource.as_ownership(),
+                        resource.access_rules(),
+                    )?;
 
                     let auth_caller = state_mut.get_auth_caller()?;
                     Ok::<_, RuntimeError>((resource_lock, resource.auth_hook().cloned(), auth_caller))
@@ -2251,39 +2193,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         }
     }
 
-    fn call_invoke(&self, action: CallAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError> {
-        self.invoke_modules_on_runtime_call("call_invoke")?;
-        debug!(
-            target: LOG_TARGET,
-            "Call invoke: {:?} {:?}",
-            action,
-            args,
-        );
-
-        let exec_result = match action {
-            CallAction::CallFunction => {
-                let CallFunctionArg {
-                    template_address,
-                    function,
-                    args,
-                } = args.assert_one_arg()?;
-
-                self.invoke_template_function(&template_address, &function, args)?
-            },
-            CallAction::CallMethod => {
-                let CallMethodArg {
-                    component_address,
-                    method,
-                    args,
-                } = args.assert_one_arg()?;
-
-                self.invoke_component_method(component_address, &method, args)?
-            },
-        };
-
-        Ok(InvokeResult::from_value(exec_result.indexed.into_value()))
-    }
-
     fn generate_uuid(&self) -> Result<[u8; 32], RuntimeError> {
         self.invoke_modules_on_runtime_call("generate_uuid")?;
         self.tracker.read_with(|state| {
@@ -2436,6 +2345,121 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         })
     }
 
+    fn caller_context_invoke(
+        &self,
+        action: CallerContextAction,
+        args: EngineArgs,
+    ) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("caller_context_invoke")?;
+
+        match action {
+            CallerContextAction::GetCallerPublicKey => {
+                args.assert_no_args("CallerContextAction::GetCallerPublicKey")?;
+                Ok(InvokeResult::encode(&self.transaction_signer_public_key)?)
+            },
+            CallerContextAction::GetComponentAddress => self.tracker.read_with(|state| {
+                args.assert_no_args("CallerContextAction::GetComponentAddress")?;
+                let call_frame = state.current_call_scope()?;
+                let maybe_address = call_frame
+                    .get_current_component_lock()
+                    .map(|l| l.address().as_component_address().unwrap());
+                Ok(InvokeResult::encode(&maybe_address)?)
+            }),
+        }
+    }
+
+    fn allocate_address_invoke(&self, action: AddressAllocationInvokeArg) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("allocate_address_invoke")?;
+
+        self.tracker.write_with(|state| {
+            match action {
+                AddressAllocationInvokeArg::GetAddress(id) => {
+                    let allocation = state.get_allocated_address(id)?;
+                    match allocation.substate_id() {
+                        SubstateId::Component(addr) => Ok(InvokeResult::encode(&addr)?),
+                        SubstateId::Resource(addr) => Ok(InvokeResult::encode(&addr)?),
+                        // Engine creates the allocations, so never creates other unsupported variants
+                        _ => unreachable!("Invalid SubstateId variant. Allocation created for unsupported substate"),
+                    }
+                },
+                AddressAllocationInvokeArg::CreateComponentAllocation { public_key } => {
+                    // Validate the public key
+                    let _ignore = public_key
+                        .map(|pk| {
+                            RistrettoPublicKey::from_canonical_bytes(pk.as_bytes()).map_err(|_| {
+                                RuntimeError::InvalidArgument {
+                                    argument: "public_key",
+                                    reason: "Invalid RistrettoPublicKeyBytes".to_string(),
+                                }
+                            })
+                        })
+                        .transpose()?;
+
+                    let (template, _) = state.current_template()?;
+                    let id_provider = state.id_provider()?;
+                    let address = public_key
+                        .as_ref()
+                        .map(|public_key| id_provider.derive_new_component_address(template, public_key))
+                        .unwrap_or_else(|| id_provider.new_component_address())?;
+
+                    let id = state.new_address_allocation(address)?;
+                    Ok(InvokeResult::encode(&ComponentAddressAllocation::new(id))?)
+                },
+                AddressAllocationInvokeArg::CreateResourceAllocation => {
+                    let address = state.id_provider()?.new_resource_address()?;
+                    let id = state.new_address_allocation(address)?;
+                    Ok(InvokeResult::encode(&ResourceAddressAllocation::new(id))?)
+                },
+            }
+        })
+    }
+
+    fn call_invoke(&self, action: CallAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("call_invoke")?;
+        debug!(
+            target: LOG_TARGET,
+            "Call invoke: {:?} {:?}",
+            action,
+            args,
+        );
+
+        let exec_result = match action {
+            CallAction::CallFunction => {
+                let CallFunctionArg {
+                    template_address,
+                    function,
+                    args,
+                } = args.assert_one_arg()?;
+
+                self.invoke_template_function(&template_address, &function, args)?
+            },
+            CallAction::CallMethod => {
+                let CallMethodArg {
+                    component_address,
+                    method,
+                    args,
+                } = args.assert_one_arg()?;
+
+                self.invoke_component_method(component_address, &method, args)?
+            },
+        };
+
+        Ok(InvokeResult::from_value(exec_result.indexed.into_value()))
+    }
+
+    fn builtin_template_invoke(&self, action: BuiltinTemplateAction) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("builtin_template_invoke")?;
+
+        let address = match action {
+            BuiltinTemplateAction::GetTemplateAddress { bultin } => match bultin {
+                BuiltinTemplate::Account => ACCOUNT_TEMPLATE_ADDRESS,
+                BuiltinTemplate::AccountNft => NFT_FAUCET_TEMPLATE_ADDRESS,
+            },
+        };
+
+        Ok(InvokeResult::encode(&address)?)
+    }
+
     fn check_component_access_rules(&self, method: &str, locked: &LockedSubstate) -> Result<(), RuntimeError> {
         self.tracker
             .read_with(|state| state.authorization().check_component_access_rules(method, locked))
@@ -2454,19 +2478,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     fn pop_call_frame(&self) -> Result<(), RuntimeError> {
         self.tracker.pop_call_frame()?;
         Ok(())
-    }
-
-    fn builtin_template_invoke(&self, action: BuiltinTemplateAction) -> Result<InvokeResult, RuntimeError> {
-        self.invoke_modules_on_runtime_call("builtin_template_invoke")?;
-
-        let address = match action {
-            BuiltinTemplateAction::GetTemplateAddress { bultin } => match bultin {
-                BuiltinTemplate::Account => ACCOUNT_TEMPLATE_ADDRESS,
-                BuiltinTemplate::AccountNft => NFT_FAUCET_TEMPLATE_ADDRESS,
-            },
-        };
-
-        Ok(InvokeResult::encode(&address)?)
     }
 
     fn publish_template(&self, template: Vec<u8>) -> Result<(), RuntimeError> {

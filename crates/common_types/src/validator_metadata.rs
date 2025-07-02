@@ -2,13 +2,11 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Serialize};
-use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
-use tari_engine_types::base_layer_hashing::TariBaseLayerHasher32;
 use tari_hashing::TransactionHashDomain;
 use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
-use crate::SubstateAddress;
+use crate::{base_layer_hashing::TariBaseLayerHasher32, Network, SubstateAddress};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ValidatorMetadata {

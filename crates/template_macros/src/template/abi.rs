@@ -84,7 +84,7 @@ fn convert_to_arg_type(template_name: &str, ty: &TypeAst) -> ArgType {
         TypeAst::Receiver { mutability: false } => ArgType::Other {
             name: "&self".to_string(),
         },
-        TypeAst::Typed { type_path, .. } => path_segment_to_arg_type(template_name, &type_path.path.segments[0]),
+        TypeAst::Typed { type_path, .. } => path_segment_to_arg_type(template_name, type_path.path.segments.first()),
         TypeAst::Tuple { type_tuple, .. } => tuple_to_arg_type(template_name, type_tuple),
     }
 }
@@ -116,7 +116,7 @@ fn convert_to_arg_def(template_name: &str, rust_type: &TypeAst) -> Result<ArgDef
                 ));
             };
 
-            let arg_type = path_segment_to_arg_type(template_name, &path.path.segments[0]);
+            let arg_type = path_segment_to_arg_type(template_name, path.path.segments.first());
 
             Ok(ArgDef {
                 name: arg_name.to_string(),
@@ -142,44 +142,47 @@ fn convert_to_arg_def(template_name: &str, rust_type: &TypeAst) -> Result<ArgDef
     }
 }
 
-fn path_segment_to_arg_type(template_name: &str, segment: &PathSegment) -> ArgType {
-    match segment.ident.to_string().as_str() {
-        "" => ArgType::Unit,
-        "bool" => ArgType::Bool,
-        "i8" => ArgType::I8,
-        "i16" => ArgType::I16,
-        "i32" => ArgType::I32,
-        "i64" => ArgType::I64,
-        "i128" => ArgType::I128,
-        "u8" => ArgType::U8,
-        "u16" => ArgType::U16,
-        "u32" => ArgType::U32,
-        "u64" => ArgType::U64,
-        "u128" => ArgType::U128,
-        "String" => ArgType::String,
-        "Vec" => {
-            match &segment.arguments {
-                PathArguments::AngleBracketed(AngleBracketedGenericArguments { args, .. }) => {
-                    match &args[0] {
-                        GenericArgument::Type(Type::Path(path)) => {
-                            let ty = path_segment_to_arg_type(template_name, &path.path.segments[0]);
-                            ArgType::Vec(Box::new(ty))
-                        },
-                        GenericArgument::Type(Type::Tuple(tuple)) => tuple_to_arg_type(template_name, tuple),
-                        // TODO: These should be errors
-                        a => panic!("Invalid vec generic argument {:?}", a),
-                    }
-                },
-                PathArguments::Parenthesized(_) | PathArguments::None => {
-                    panic!("Vec must specify a type {:?}", segment)
-                },
-            }
-        },
-        "Self" => ArgType::Other {
-            name: format!("Component<{}>", template_name),
-        },
-        type_name => ArgType::Other {
-            name: type_name.to_string(),
+fn path_segment_to_arg_type(template_name: &str, segment: Option<&PathSegment>) -> ArgType {
+    match segment.map(|s| s.ident.to_string()) {
+        None => ArgType::Unit,
+        Some(ty) => match ty.as_str() {
+            "" => ArgType::Unit,
+            "bool" => ArgType::Bool,
+            "i8" => ArgType::I8,
+            "i16" => ArgType::I16,
+            "i32" => ArgType::I32,
+            "i64" => ArgType::I64,
+            "i128" => ArgType::I128,
+            "u8" => ArgType::U8,
+            "u16" => ArgType::U16,
+            "u32" => ArgType::U32,
+            "u64" => ArgType::U64,
+            "u128" => ArgType::U128,
+            "String" => ArgType::String,
+            "Vec" => {
+                match &segment.expect("segment is some").arguments {
+                    PathArguments::AngleBracketed(AngleBracketedGenericArguments { args, .. }) => {
+                        match &args[0] {
+                            GenericArgument::Type(Type::Path(path)) => {
+                                let ty = path_segment_to_arg_type(template_name, path.path.segments.first());
+                                ArgType::Vec(Box::new(ty))
+                            },
+                            GenericArgument::Type(Type::Tuple(tuple)) => tuple_to_arg_type(template_name, tuple),
+                            // TODO: These should be errors
+                            a => panic!("Invalid vec generic argument {:?}", a),
+                        }
+                    },
+                    PathArguments::Parenthesized(_) | PathArguments::None => {
+                        panic!("Vec must specify a type {:?}", segment)
+                    },
+                }
+            },
+            "Self" => ArgType::Other {
+                name: format!("Component<{}>", template_name),
+            },
+            type_name => ArgType::Other {
+                name: type_name.to_string(),
+            },
         },
     }
 }
@@ -190,7 +193,7 @@ fn tuple_to_arg_type(template_name: &str, tuple: &TypeTuple) -> ArgType {
         .iter()
         .map(|t| {
             match t {
-                Type::Path(path) => path_segment_to_arg_type(template_name, &path.path.segments[0]),
+                Type::Path(path) => path_segment_to_arg_type(template_name, path.path.segments.first()),
                 Type::Tuple(subtuple) => tuple_to_arg_type(template_name, subtuple),
                 // TODO: These should be errors
                 a => panic!("Invalid Tuple subtype argument {:?}", a),

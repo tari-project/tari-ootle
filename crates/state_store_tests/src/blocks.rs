@@ -85,6 +85,7 @@ mod basic_block_operations {
 
 mod block_parent_operations {
     use tari_consensus_types::QcId;
+    use tari_ootle_common_types::Network;
     use tari_template_lib::prelude::SchnorrSignatureBytes;
 
     use super::*;
@@ -99,7 +100,7 @@ mod block_parent_operations {
         let mut tx = db.create_write_tx().unwrap();
 
         // insert multiple blocks
-        let network = Default::default();
+        let network = Network::LocalNet;
         let atom1 = create_tx_atom();
         let atom2 = create_tx_atom();
 
@@ -210,6 +211,7 @@ mod block_parent_operations {
 
 mod block_query_operations {
     use tari_consensus_types::QcId;
+    use tari_ootle_common_types::Network;
     use tari_ootle_storage::consensus_models::BookkeepingModel;
     use tari_template_lib::prelude::SchnorrSignatureBytes;
 
@@ -226,7 +228,7 @@ mod block_query_operations {
         let mut tx = db.create_write_tx().unwrap();
 
         // insert multiple blocks
-        let network = Default::default();
+        let network = Network::LocalNet;
         let atom1 = create_tx_atom();
         let atom2 = create_tx_atom();
 

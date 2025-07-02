@@ -24,8 +24,9 @@ use tari_consensus_types::{ProposalCertificate, QcId, TcId, TimeoutCertificate};
 use tari_ootle_common_types::Epoch;
 
 use crate::{
-    codecs::{DefaultCodec, EpochCodec, FixedBytesCodec32},
+    codecs::{DefaultVersionedCodec, EpochCodec, FixedBytesCodec32},
     traits::{Cf, QueryCf},
+    versioned_types::{VersionedProposalCertificate, VersionedTimeoutCertificate},
 };
 
 pub mod proposal {
@@ -37,7 +38,7 @@ pub mod proposal {
         type Key = (Epoch, QcId);
         type KeyCodec = (EpochCodec, FixedBytesCodec32);
         type Value = ProposalCertificate;
-        type ValueCodec = DefaultCodec<Self::Value>;
+        type ValueCodec = DefaultVersionedCodec<VersionedProposalCertificate>;
 
         fn name() -> &'static str {
             "proposal_certificates"
@@ -62,7 +63,7 @@ pub mod timeout {
         type Key = (Epoch, TcId);
         type KeyCodec = (EpochCodec, FixedBytesCodec32);
         type Value = TimeoutCertificate;
-        type ValueCodec = DefaultCodec<Self::Value>;
+        type ValueCodec = DefaultVersionedCodec<VersionedTimeoutCertificate>;
 
         fn name() -> &'static str {
             "timeout_certificates"

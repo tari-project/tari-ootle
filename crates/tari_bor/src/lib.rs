@@ -42,7 +42,7 @@ where
     let len = encoded_len(val)?;
     writer
         .write_all(&(len as u32).to_le_bytes())
-        .map_err(|e| BorError::new(format!("{:?}", e)))?;
+        .map_err(|e| BorError::new(format!("{e:?}")))?;
     encode_into_writer(val, writer)?;
     Ok(())
 }
@@ -132,7 +132,7 @@ pub fn decode_len(input: &[u8]) -> Result<usize, BorError> {
     }
 
     let mut buf = [0u8; 4];
-    buf.copy_from_slice(&input[..4]);
+    buf.copy_from_slice(input.get(..4).unwrap());
     let len = u32::from_le_bytes(buf);
     Ok(len as usize)
 }

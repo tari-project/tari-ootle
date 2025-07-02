@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
-use tari_common::configuration::Network;
+use tari_ootle_common_types::Network;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]

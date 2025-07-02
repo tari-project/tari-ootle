@@ -72,7 +72,11 @@ impl Hash {
     ///
     /// Panics if `N` is greater than Self::LENGTH (32)
     pub fn leading_bytes<const N: usize>(&self) -> [u8; N] {
-        self.0[..N].try_into().unwrap()
+        self.0
+            .get(..N)
+            .expect("invariant violation: N > Self::LENGTH")
+            .try_into()
+            .unwrap()
     }
 
     /// Returns the trailing `N` bytes of the hash
@@ -81,7 +85,11 @@ impl Hash {
     ///
     /// Panics if `N` is greater than Self::LENGTH (32)
     pub fn trailing_bytes<const N: usize>(&self) -> [u8; N] {
-        self.0[(Self::LENGTH - N)..Self::LENGTH].try_into().unwrap()
+        self.0
+            .get((Self::LENGTH - N)..Self::LENGTH)
+            .expect("invariant violation: N > Self::LENGTH")
+            .try_into()
+            .unwrap()
     }
 }
 

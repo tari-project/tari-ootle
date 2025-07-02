@@ -5,7 +5,6 @@ use std::{collections::HashMap, iter, ops::ControlFlow};
 
 use indexmap::IndexMap;
 use log::*;
-use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, HighPc, HighTc, LeafBlock, ProposalCertificate, QcId};
 use tari_engine_types::{substate::SubstateDiff, template_lib_models::Amount, ValidatorFeePool};
@@ -16,6 +15,7 @@ use tari_ootle_common_types::{
     shard::Shard,
     substate_type::SubstateType,
     Epoch,
+    Network,
     NodeAddressable,
     NodeHeight,
     NumPreshards,

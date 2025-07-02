@@ -3,14 +3,13 @@
 
 use std::time::Duration;
 
-use tari_common::configuration::Network;
 use tari_consensus::{
     hotstuff::{ConsensusWorker, ConsensusWorkerContext, HotstuffConfig, HotstuffWorker},
     traits::ConsensusSpec,
 };
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_ootle_app_utilities::transaction_executor::TariTransactionProcessor;
-use tari_ootle_common_types::PeerAddress;
+use tari_ootle_common_types::{Network, PeerAddress};
 use tari_ootle_storage::consensus_models::TransactionPool;
 use tari_rpc_state_sync::RpcStateSyncClientProtocol;
 use tari_shutdown::ShutdownSignal;

@@ -20,24 +20,34 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use blake2::Blake2b;
-use digest::consts::{U32, U64};
-use tari_common::configuration::Network;
-use tari_crypto::hashing::DomainSeparatedHasher;
-use tari_hashing::{ConfidentialOutputHashDomain, DomainSeparatedBorshHasher, WalletOutputEncryptionKeysDomain};
+import {
+  TariPermissionAccountBalance,
+  TariPermissionAccountInfo,
+  TariPermissionAccountList,
+  TariPermissionGetNft,
+  TariPermissionKeyList,
+  TariPermissionNftGetOwnershipProof,
+  TariPermissionTransactionGet,
+  TariPermissionTransactionSend,
+} from "@tari-project/tari-permissions";
 
-pub type TariBaseLayerHasher64<M> = DomainSeparatedBorshHasher<M, Blake2b<U64>>;
-pub type TariBaseLayerHasher32<M> = DomainSeparatedBorshHasher<M, Blake2b<U32>>;
-fn confidential_hasher64(network: Network, label: &'static str) -> TariBaseLayerHasher64<ConfidentialOutputHashDomain> {
-    DomainSeparatedBorshHasher::<_, Blake2b<U64>>::new_with_label(&format!("{}.n{}", label, network.as_byte()))
-}
-
-type WalletOutputEncryptionKeysDomainHasher = DomainSeparatedHasher<Blake2b<U64>, WalletOutputEncryptionKeysDomain>;
-
-pub fn encrypted_data_hasher() -> WalletOutputEncryptionKeysDomainHasher {
-    WalletOutputEncryptionKeysDomainHasher::new_with_label("")
-}
-
-pub fn ownership_proof_hasher64(network: Network) -> TariBaseLayerHasher64<ConfidentialOutputHashDomain> {
-    confidential_hasher64(network, "commitment_signature")
+export function parse(permission: any) {
+  if (permission.hasOwnProperty("AccountBalance")) {
+    return new TariPermissionAccountBalance(permission.AccountBalance);
+  } else if (permission === "AccountInfo") {
+    return new TariPermissionAccountInfo();
+  } else if (permission.hasOwnProperty("AccountList")) {
+    return new TariPermissionAccountList(permission.AccountList);
+  } else if (permission == "KeyList") {
+    return new TariPermissionKeyList();
+  } else if (permission.hasOwnProperty("TransactionSend")) {
+    return new TariPermissionTransactionSend(permission.TransactionSend);
+  } else if (permission === "TransactionGet") {
+    return new TariPermissionTransactionGet();
+  } else if (permission.hasOwnProperty("GetNft")) {
+    return new TariPermissionGetNft(permission.GetNft);
+  } else if (permission.hasOwnProperty("NftGetOwnershipProof")) {
+    return new TariPermissionNftGetOwnershipProof(permission.NftGetOwnershipProof);
+  }
+  return permission;
 }

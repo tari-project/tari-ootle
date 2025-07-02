@@ -1,7 +1,6 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_common::configuration::Network;
 use tari_consensus::{
     hotstuff::substate_store::{LockFailedError, PendingSubstateStore, SubstateStoreError},
     traits::{CertificateStore, ReadableSubstateStore, WriteableSubstateStore},
@@ -14,6 +13,7 @@ use tari_engine_types::{
 use tari_ootle_common_types::{
     shard::Shard,
     Epoch,
+    Network,
     NodeHeight,
     NumPreshards,
     PeerAddress,

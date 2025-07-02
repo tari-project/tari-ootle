@@ -56,7 +56,6 @@ import { useTemplateGet } from "../../api/hooks/useTemplate";
 import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
 import FunctionsIcon from "@mui/icons-material/Functions";
 import SettingsEthernetIcon from "@mui/icons-material/SettingsEthernet";
-import useAccountStore from "../../store/accountStore";
 import { GeneratedCodeType, TariNetwork, TransactionProps } from "@tari-project/tari-extension-common";
 import { substateIdToString } from "../../utils/helpers";
 import CloseIcon from "@mui/icons-material/Close";

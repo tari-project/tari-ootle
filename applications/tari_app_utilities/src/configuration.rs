@@ -12,9 +12,32 @@ use std::{
 
 use config::Config;
 use log::*;
-use tari_common::configuration::{ConfigOverrideProvider, Network};
+use tari_common::configuration::{ConfigOverrideProvider, Network as L1Network};
+use tari_ootle_common_types::Network;
 
 const LOG_TARGET: &str = "tari::application::configuration";
+
+pub fn convert_network_to_l1_network(network: &Network) -> L1Network {
+    match network {
+        Network::MainNet => L1Network::MainNet,
+        Network::StageNet => L1Network::StageNet,
+        Network::NextNet => L1Network::NextNet,
+        Network::LocalNet => L1Network::LocalNet,
+        Network::Igor => L1Network::Igor,
+        Network::Esmeralda => L1Network::Esmeralda,
+    }
+}
+
+pub fn convert_l1_network_to_network(network: &L1Network) -> Network {
+    match network {
+        L1Network::MainNet => Network::MainNet,
+        L1Network::StageNet => Network::StageNet,
+        L1Network::NextNet => Network::NextNet,
+        L1Network::LocalNet => Network::LocalNet,
+        L1Network::Igor => Network::Igor,
+        L1Network::Esmeralda => Network::Esmeralda,
+    }
+}
 
 /// Loads the configuration file from the specified path, or creates a new one with the embedded default presets if it
 /// does not. This also prompts the user.
@@ -64,8 +87,7 @@ pub fn load_configuration_with_overrides<P: AsRef<Path>, TOverride: ConfigOverri
                 Network::from_str(&network).map_err(|e| ConfigError::new("Invalid network", Some(e.to_string())))?
             },
             Err(config::ConfigError::NotFound(_)) => {
-                debug!(target: LOG_TARGET, "No network configuration found. Using default network '{}'.", Network::default());
-                Network::default()
+                return Err(ConfigError::new("no network provided", None));
             },
             Err(e) => {
                 return Err(ConfigError::new(
@@ -76,7 +98,7 @@ pub fn load_configuration_with_overrides<P: AsRef<Path>, TOverride: ConfigOverri
         },
     };
 
-    let overrides = overrides.get_config_property_overrides(&network);
+    let overrides = overrides.get_config_property_overrides(&convert_network_to_l1_network(&network));
 
     let mut cfg = Config::builder().add_source(cfg);
     for (key, value) in overrides {

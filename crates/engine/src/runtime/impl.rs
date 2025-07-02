@@ -23,7 +23,6 @@
 use std::sync::Arc;
 
 use log::{warn, *};
-use tari_common::configuration::Network;
 use tari_crypto::{
     range_proof::RangeProofService,
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey},
@@ -31,7 +30,6 @@ use tari_crypto::{
     tari_utilities::ByteArray,
 };
 use tari_engine_types::{
-    base_layer_hashing::ownership_proof_hasher64,
     commit_result::{FinalizeResult, RejectReason, TransactionResult},
     component::ComponentHeader,
     confidential::{get_commitment_factory, get_range_proof_service, ConfidentialClaim, ConfidentialOutput},
@@ -51,7 +49,11 @@ use tari_engine_types::{
     FromByteType,
     ValidatorFeePoolAddress,
 };
-use tari_ootle_common_types::services::template_provider::TemplateProvider;
+use tari_ootle_common_types::{
+    base_layer_hashing::ownership_proof_hasher64,
+    services::template_provider::TemplateProvider,
+    Network,
+};
 use tari_template_abi::{TemplateDef, Type};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{

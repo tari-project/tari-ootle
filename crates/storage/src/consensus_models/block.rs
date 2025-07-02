@@ -11,7 +11,6 @@ use std::{
 use indexmap::IndexMap;
 use log::*;
 use serde::{Deserialize, Serialize};
-use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{
     BlockId,
@@ -34,6 +33,7 @@ use tari_ootle_common_types::{
     Epoch,
     ExtraData,
     ExtraFieldKey,
+    Network,
     NodeHeight,
     NumPreshards,
     ShardGroup,

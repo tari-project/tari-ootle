@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use tari_common::configuration::Network;
+use tari_ootle_common_types::Network;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::consensus_constants::ConsensusConstants;

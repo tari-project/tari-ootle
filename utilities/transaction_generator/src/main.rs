@@ -14,8 +14,8 @@ use std::{
 use anyhow::anyhow;
 use cli::Cli;
 use rand::rngs::OsRng;
-use tari_common::configuration::Network;
 use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey, tari_utilities::hex::Hex};
+use tari_ootle_common_types::Network;
 use tari_transaction_manifest::ManifestValue;
 use transaction_generator::{
     read_number_of_transactions,

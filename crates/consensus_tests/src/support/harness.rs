@@ -11,7 +11,6 @@ use std::{
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
 use itertools::Itertools;
 use log::info;
-use tari_common::configuration::Network;
 use tari_consensus::{
     consensus_constants::ConsensusConstants,
     hotstuff::{HotstuffConfig, HotstuffEvent},
@@ -26,6 +25,7 @@ use tari_ootle_common_types::{
     optional::Optional,
     shard::Shard,
     Epoch,
+    Network,
     NodeHeight,
     NumPreshards,
     ShardGroup,

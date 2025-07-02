@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_ootle_common_types::Epoch;
+use tari_ootle_common_types::{Epoch, Network};
 use tari_ootle_storage::{
     consensus_models::{Block, BookkeepingModel, ForeignParkedProposal},
     StateStore,
@@ -22,7 +22,7 @@ fn rocksdb() {
 fn run_test(db: impl StateStore) {
     let mut tx = db.create_write_tx().unwrap();
 
-    let zero_block = Block::zero_block(Default::default(), TEST_NUM_PRESHARDS);
+    let zero_block = Block::zero_block(Network::LocalNet, TEST_NUM_PRESHARDS);
     tx.blocks_insert(&zero_block).unwrap();
     zero_block.as_locked().set(&mut tx).unwrap();
 

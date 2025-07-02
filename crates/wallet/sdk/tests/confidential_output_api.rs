@@ -4,10 +4,9 @@
 use std::{convert::Infallible, str::FromStr};
 
 use async_trait::async_trait;
-use tari_common::configuration::Network;
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, tari_utilities::SafePassword};
 use tari_engine_types::{confidential::get_commitment_factory, substate::SubstateId, ToByteType};
-use tari_ootle_common_types::optional::Optional;
+use tari_ootle_common_types::{optional::Optional, Network};
 use tari_ootle_wallet_sdk::{
     models::{ConfidentialOutputModel, ConfidentialProofId, OutputStatus},
     network::{SubstateQueryResult, TransactionQueryResult, WalletNetworkInterface},

@@ -25,8 +25,9 @@ use std::{net::SocketAddr, path::PathBuf};
 use clap::Parser;
 use minotari_app_utilities::common_cli_args::CommonCliArgs;
 use reqwest::Url;
-use tari_common::configuration::{ConfigOverrideProvider, Network};
-use tari_ootle_app_utilities::p2p_config::ReachabilityMode;
+use tari_common::configuration::{ConfigOverrideProvider, Network as L1Network};
+use tari_ootle_app_utilities::{configuration::convert_l1_network_to_network, p2p_config::ReachabilityMode};
+use tari_ootle_common_types::Network;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -67,8 +68,14 @@ pub struct Cli {
     pub command: Option<Subcommand>,
 }
 
+impl Cli {
+    pub fn network_override(&self) -> Option<Network> {
+        self.common.network.as_ref().map(convert_l1_network_to_network)
+    }
+}
+
 impl ConfigOverrideProvider for Cli {
-    fn get_config_property_overrides(&self, network: &Network) -> Vec<(String, String)> {
+    fn get_config_property_overrides(&self, network: &L1Network) -> Vec<(String, String)> {
         let mut overrides = self.common.get_config_property_overrides(network);
         overrides.push(("network".to_string(), network.to_string()));
         overrides.push(("validator_node.override_from".to_string(), network.to_string()));

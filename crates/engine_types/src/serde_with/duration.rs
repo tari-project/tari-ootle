@@ -23,7 +23,7 @@ pub mod optional_seconds {
     //! Helper module for serialising configuration variables from `Duration` to integers representing seconds and back.
     //! Use this converter by employing
     //! ```ignore
-    //! use tari_common::configuration::serializers::seconds;
+    //! use tari_engine_types::serde_with::duration::optional_seconds;
     //! ...
     //! #[serde(with="optional_seconds")]
     //! pub my_var: Option<Duration>

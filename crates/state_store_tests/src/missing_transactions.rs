@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_common_types::types::FixedHash;
-use tari_ootle_common_types::{Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
+use tari_ootle_common_types::{Epoch, ExtraData, Network, NodeHeight, NumPreshards, ShardGroup};
 use tari_ootle_storage::{
     consensus_models::{Block, Command},
     StateStore,
@@ -22,7 +22,7 @@ fn missing_transactions_rocksdb() {
 fn missing_transactions_operations(db: impl StateStore) {
     let mut tx = db.create_write_tx().unwrap();
 
-    let network = Default::default();
+    let network = Network::LocalNet;
 
     // add some blocks to the database
     let genesis = create_block(None);

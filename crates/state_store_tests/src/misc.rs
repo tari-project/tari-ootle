@@ -14,7 +14,7 @@ use tari_consensus_types::{
     QcId,
     ValidatorSignatureBytes,
 };
-use tari_ootle_common_types::{optional::Optional, Epoch, NodeHeight, ShardGroup};
+use tari_ootle_common_types::{optional::Optional, Epoch, Network, NodeHeight, ShardGroup};
 use tari_ootle_storage::{
     consensus_models::{Block, EndOfEpochCommand, EpochCheckpoint},
     StateStore,
@@ -165,7 +165,7 @@ fn miscellaneous_operations(db: impl StateStore) {
 
     // epoch checkpoints
     let shard_group = ShardGroup::all_shards(TEST_NUM_PRESHARDS);
-    let block = Block::zero_block(Default::default(), TEST_NUM_PRESHARDS);
+    let block = Block::zero_block(Network::LocalNet, TEST_NUM_PRESHARDS);
     let mut shard_roots = IndexMap::new();
     shard_roots.insert(shard_group.start(), TreeHash::zero());
     let key = TreeHash::new([1; 32]);

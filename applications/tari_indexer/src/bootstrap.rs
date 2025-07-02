@@ -45,6 +45,7 @@ use tari_epoch_oracles::{
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_ootle_app_utilities::{
     common::verify_correct_network,
+    configuration::convert_network_to_l1_network,
     epoch_oracle_config::EpochOracleType,
     keypair::RistrettoKeypair,
     seed_peer::SeedPeer,
@@ -243,7 +244,10 @@ async fn create_base_layer_client(config: &ApplicationConfig) -> Result<GrpcBase
         .base_node_grpc_url
         .clone()
         .unwrap_or_else(|| {
-            let port = grpc_default_port(ApplicationType::BaseNode, config.network);
+            let port = grpc_default_port(
+                ApplicationType::BaseNode,
+                convert_network_to_l1_network(&config.network),
+            );
             format!("http://127.0.0.1:{port}")
                 .parse()
                 .expect("Default base node GRPC URL is malformed")

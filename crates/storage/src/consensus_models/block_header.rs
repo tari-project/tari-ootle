@@ -8,7 +8,6 @@ use std::{
 
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
-use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{
     BlockId,
@@ -23,7 +22,7 @@ use tari_consensus_types::{
 };
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_engine_types::serde_with;
-use tari_ootle_common_types::{hashing, Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
+use tari_ootle_common_types::{hashing, Epoch, ExtraData, Network, NodeHeight, NumPreshards, ShardGroup};
 use tari_sidechain::{BlockHeaderHashFields, BlockHeaderHashFieldsV1};
 use tari_state_tree::{compute_merkle_root_for_hashes, TreeHash};
 use tari_template_lib::{prelude::SchnorrSignatureBytes, types::crypto::RistrettoPublicKeyBytes};

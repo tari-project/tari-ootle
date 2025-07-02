@@ -24,7 +24,6 @@ use std::{sync::Arc, time::Instant};
 
 use log::*;
 use tari_bor::to_value;
-use tari_common::configuration::Network;
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
     component::new_component_address_from_public_key,
@@ -36,7 +35,7 @@ use tari_engine_types::{
     virtual_substate::VirtualSubstates,
     ComponentCall,
 };
-use tari_ootle_common_types::services::template_provider::TemplateProvider;
+use tari_ootle_common_types::{services::template_provider::TemplateProvider, Network};
 use tari_template_abi::{FunctionDef, Type};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
@@ -90,16 +89,6 @@ impl TransactionProcessorConfig {
     }
 }
 
-impl Default for TransactionProcessorConfig {
-    fn default() -> Self {
-        Self {
-            network: Default::default(),
-            template_binary_max_size_bytes: 1000 * 1000 * 5, // 5MB
-        }
-    }
-}
-
-#[derive(Default)]
 pub struct TransactionProcessorConfigBuilder {
     config: TransactionProcessorConfig,
 }
@@ -117,6 +106,17 @@ impl TransactionProcessorConfigBuilder {
 
     pub fn build(&self) -> TransactionProcessorConfig {
         self.config.clone()
+    }
+}
+
+impl Default for TransactionProcessorConfigBuilder {
+    fn default() -> Self {
+        Self {
+            config: TransactionProcessorConfig {
+                network: Network::Esmeralda,
+                template_binary_max_size_bytes: 1000 * 1000 * 5, // 5MB
+            },
+        }
     }
 }
 

@@ -2,9 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_common::configuration::Network;
 use tari_consensus_types::{HighPc, ProposalCertificate, ProposalVote, ValidatorSignatureBytes};
-use tari_ootle_common_types::{optional::Optional, Epoch, NodeHeight};
+use tari_ootle_common_types::{optional::Optional, Epoch, Network, NodeHeight};
 use tari_ootle_storage::{consensus_models::Block, StateStore};
 use tari_sidechain::QuorumDecision;
 

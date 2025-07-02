@@ -30,7 +30,7 @@ use tari_engine_types::{
     component::{ComponentBody, ComponentHeader},
     substate::{hash_substate, Substate, SubstateId, SubstateValue},
 };
-use tari_ootle_common_types::{shard::Shard, Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
+use tari_ootle_common_types::{shard::Shard, Epoch, ExtraData, Network, NodeHeight, NumPreshards, ShardGroup};
 use tari_ootle_storage::{
     consensus_models::{
         Block,
@@ -213,7 +213,7 @@ pub fn create_random_hash() -> FixedHash {
 }
 
 pub fn create_block(parent: Option<&Block>) -> Block {
-    let network = Default::default();
+    let network = Network::LocalNet;
 
     let Some(parent) = parent else {
         return Block::zero_block(network, num_preshards());
@@ -247,7 +247,7 @@ pub fn create_block(parent: Option<&Block>) -> Block {
 }
 
 pub fn create_block_with_qc(parent: &LeafBlock) -> Block {
-    let network = Default::default();
+    let network = Network::LocalNet;
 
     let atom1 = create_tx_atom();
 
@@ -339,7 +339,7 @@ pub fn create_foreign_proposal(parent_id: BlockId, epoch: Epoch) -> ForeignPropo
     );
 
     let foreign_block = Block::create(
-        Default::default(),
+        Network::LocalNet,
         parent_id,
         qc1.clone(),
         None,

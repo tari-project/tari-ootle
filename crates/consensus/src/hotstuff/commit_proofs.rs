@@ -275,11 +275,10 @@ fn convert_validator_block_signature(
 
 #[cfg(test)]
 mod tests {
-    use tari_common::configuration::Network;
     use tari_common_types::types::FixedHash;
     use tari_consensus_types::ProposalCertificate;
     use tari_crypto::tari_utilities::epoch_time::EpochTime;
-    use tari_ootle_common_types::{Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
+    use tari_ootle_common_types::{Epoch, ExtraData, Network, NodeHeight, NumPreshards, ShardGroup};
     use tari_sidechain::QuorumDecision;
 
     use super::*;

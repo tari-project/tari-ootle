@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use log::warn;
-use tari_common::configuration::Network;
+use tari_ootle_common_types::Network;
 use tari_transaction::Transaction;
 
 use crate::{transaction_validators::TransactionValidationError, validator::Validator};
@@ -27,8 +27,10 @@ impl Validator<Transaction> for TransactionNetworkValidator {
     fn validate(&self, _context: &Self::Context, input: &Transaction) -> Result<(), Self::Error> {
         match input {
             Transaction::V1(tx) => {
-                let tx_network = Network::try_from(tx.network())
-                    .map_err(|error| Self::Error::UnknownNetwork(tx.network(), error))?;
+                let tx_network = Network::try_from(tx.network()).map_err(|error| Self::Error::UnknownNetwork {
+                    byte: tx.network(),
+                    details: error.to_string(),
+                })?;
                 if tx_network == self.network {
                     Ok(())
                 } else {
@@ -46,7 +48,7 @@ impl Validator<Transaction> for TransactionNetworkValidator {
 #[cfg(test)]
 mod tests {
     use indexmap::IndexSet;
-    use tari_common::configuration::Network;
+    use tari_ootle_common_types::Network;
     use tari_template_lib::prelude::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
     use tari_transaction::{
         Transaction,
@@ -83,7 +85,7 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(
             result.err().unwrap(),
-            TransactionValidationError::UnknownNetwork(_, _)
+            TransactionValidationError::UnknownNetwork { .. }
         ));
     }
 

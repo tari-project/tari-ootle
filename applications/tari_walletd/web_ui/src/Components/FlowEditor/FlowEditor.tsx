@@ -20,13 +20,13 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import "@tari-project/tari-extension-query-builder/dist/tari-extension-query-builder.css";
 import PageHeading from "../../Components/PageHeading";
 import Grid from "@mui/material/Grid";
 import { StyledPaper } from "../../Components/StyledComponents";
 import { QueryBuilder, TemplateReader, useStore } from "@tari-project/tari-extension-query-builder";
-import "@tari-project/tari-extension-query-builder/dist/tari-extension-query-builder.css";
 import useThemeStore from "../../store/themeStore";
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import {
   Button,
   TextField,
@@ -38,10 +38,15 @@ import {
   Drawer,
   Box,
   Tooltip,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
+  SelectChangeEvent,
 } from "@mui/material";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
@@ -52,37 +57,62 @@ import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
 import FunctionsIcon from "@mui/icons-material/Functions";
 import SettingsEthernetIcon from "@mui/icons-material/SettingsEthernet";
 import useAccountStore from "../../store/accountStore";
-import { GeneratedCodeType, TransactionProps } from "@tari-project/tari-extension-common";
+import { GeneratedCodeType, TariNetwork, TransactionProps } from "@tari-project/tari-extension-common";
 import { substateIdToString } from "../../utils/helpers";
 import CloseIcon from "@mui/icons-material/Close";
 import { Highlight } from "prism-react-renderer";
-import { Transaction } from "@tari-project/tarijs-all";
 import useFlowEditorStore from "../../store/flowEditorStore";
+import { UnsignedTransactionV1 } from "@tari-project/typescript-bindings";
+import { settingsGet, submitTransactionDryRun, transactionsSubmit, transactionsWaitResult } from "../../utils/json_rpc";
+import { useAccountsList } from "../../api/hooks/useAccounts";
+
+enum Network {
+  MainNet = 0,
+  StageNet = 1,
+  NextNet = 2,
+  LocalNet = 16,
+  Igor = 36,
+  Esmeralda = 38,
+}
+enum TransactionStatus {
+  New = "New",
+  DryRun = "DryRun",
+  Pending = "Pending",
+  Accepted = "Accepted",
+  Rejected = "Rejected",
+  InvalidTransaction = "InvalidTransaction",
+  OnlyFeeAccepted = "OnlyFeeAccepted",
+}
 
 function FlowEditor() {
   const { themeMode } = useThemeStore();
   const {
     panelOpen,
     setPanelOpen,
-    componentId,
-    setComponentId,
+    templateId,
+    setTemplateId,
     codeDialogOpen,
     setCodeDialogOpen,
     generatedCode,
     setGeneratedCode,
     generatedCodeType,
     setGeneratedCodeType,
+    account,
+    setAccount,
+    fee,
+    setFee,
   } = useFlowEditorStore();
   const theme = useTheme();
-  const { account } = useAccountStore();
   const addNodeAt = useStore((store) => store.addNodeAt);
   const saveStateToString = useStore((store) => store.saveStateToString);
   const loadStateFromString = useStore((store) => store.loadStateFromString);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const { data: dataAccountsList } = useAccountsList(0, 20);
+
   const { data, isLoading, error, refetch } = useTemplateGet(
-    { template_address: componentId },
-    { enabled: !!componentId },
+    { template_address: templateId },
+    { enabled: !!templateId },
   );
 
   const templateDef = data?.template_definition;
@@ -90,21 +120,61 @@ function FlowEditor() {
 
   const addNodesToCenter = useCallback(
     (functionName: string) => {
-      if (componentId && templateDef) {
-        const reader = new TemplateReader(templateDef, componentId);
+      if (templateId && templateDef) {
+        const reader = new TemplateReader(templateDef, templateId);
         const nodeData = reader.getGenericNode(functionName);
         if (nodeData) {
           addNodeAt(nodeData);
         }
       }
     },
-    [addNodeAt, componentId, templateDef],
+    [addNodeAt, templateId, templateDef],
   );
 
+  const getTariNetwork = async (): Promise<TariNetwork> => {
+    const settings = await settingsGet();
+    switch (settings.network.byte) {
+      case Network.MainNet:
+        return TariNetwork.MainNet;
+      case Network.StageNet:
+        return TariNetwork.StageNet;
+      case Network.NextNet:
+        return TariNetwork.NextNet;
+      case Network.LocalNet:
+        return TariNetwork.LocalNet;
+      case Network.Igor:
+        return TariNetwork.Igor;
+      case Network.Esmeralda:
+        return TariNetwork.Esmeralda;
+      default:
+        return TariNetwork.LocalNet;
+    }
+  };
+
+  useEffect(() => {
+    if (dataAccountsList?.accounts && dataAccountsList.accounts.length > 0) {
+      const defaultAcc = dataAccountsList.accounts.find((acc) => acc.account.is_default);
+      setAccount(defaultAcc || dataAccountsList.accounts[0]);
+    }
+  }, [dataAccountsList]);
+
+  const onAccountChange = (e: SelectChangeEvent<string>) => {
+    const selected = dataAccountsList?.accounts.find(
+      (acc) => substateIdToString(acc.account.address) === e.target.value,
+    );
+    setAccount(selected);
+  };
+
   const getTransactionProps = async (): Promise<TransactionProps> => {
+    if (!account) {
+      throw new Error("Account is not available");
+    }
+    const network = await getTariNetwork();
+    const accountAddress = substateIdToString(account.account.address);
     return {
-      accountAddress: account ? substateIdToString(account.address) : "",
-      fee: 1000, // TODO:
+      network,
+      accountAddress,
+      fee,
     };
   };
 
@@ -114,7 +184,40 @@ function FlowEditor() {
     setCodeDialogOpen(true);
   };
 
-  const executeTransaction = async (transaction: Transaction, dryRun: boolean): Promise<void> => {};
+  const executeTransaction = async (transaction: UnsignedTransactionV1): Promise<void> => {
+    if (!account) {
+      throw new Error("Account is not available");
+    }
+    const request = {
+      transaction: { V1: transaction },
+      signing_key_index: account.account.key_index,
+      detect_inputs: true,
+      detect_inputs_use_unversioned: true,
+      proof_ids: [],
+    };
+    const submitResp = transaction.dry_run ? await submitTransactionDryRun(request) : await transactionsSubmit(request);
+    const result = await transactionsWaitResult({
+      transaction_id: submitResp.transaction_id,
+      timeout_secs: 60,
+    });
+    const txResult = result.result?.result;
+    const success = txResult && "Accept" in txResult;
+    if (success) {
+      if (transaction.dry_run) {
+        setFee(result.final_fee);
+      }
+    } else {
+      let failureReason = undefined;
+      if (!txResult) {
+        failureReason = "Execution failed";
+      } else if ("Reject" in txResult) {
+        failureReason = JSON.stringify(txResult.Reject);
+      } else {
+        failureReason = JSON.stringify(txResult.AcceptFeeRejectRest[1]);
+      }
+      throw new Error(failureReason);
+    }
+  };
 
   const handleSaveFlow = () => {
     const json = saveStateToString();
@@ -122,7 +225,7 @@ function FlowEditor() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "flow-editor.tari";
+    a.download = "flow.tari";
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -175,12 +278,43 @@ function FlowEditor() {
         }}
       >
         <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
-          <Typography variant="h6">Component Methods</Typography>
+          <Typography variant="h6">Details</Typography>
           <IconButton onClick={() => setPanelOpen(false)} size="small">
             <ChevronRightIcon />
           </IconButton>
         </Box>
+        <Box mb={2}>
+          <FormControl fullWidth size="small">
+            <InputLabel id="account-select-label">Account</InputLabel>
+            <Select
+              labelId="account-select-label"
+              name="account"
+              label="Account"
+              value={account ? substateIdToString(account.account.address) : ""}
+              onChange={onAccountChange}
+            >
+              {dataAccountsList?.accounts?.map((acc) => (
+                <MenuItem key={substateIdToString(acc.account.address)} value={substateIdToString(acc.account.address)}>
+                  {acc.account.name || substateIdToString(acc.account.address)}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Box>
         <Divider />
+        <Box mt={2} mb={2}>
+          <Typography variant="subtitle2" gutterBottom>
+            Transaction Fee
+          </Typography>
+          <TextField
+            size="small"
+            type="number"
+            value={fee}
+            onChange={(e) => setFee(Number(e.target.value))}
+            inputProps={{ min: 0 }}
+            fullWidth
+          />
+        </Box>
         <Box mt={2} mb={2} display="flex" gap={1}>
           <Button variant="outlined" onClick={handleSaveFlow} size="small">
             Save Flow
@@ -198,23 +332,23 @@ function FlowEditor() {
         </Box>
         <Box mt={2} mb={2}>
           <Typography variant="subtitle2" gutterBottom>
-            Component ID
+            Template ID
           </Typography>
           <Box display="flex" gap={1}>
             <TextField
               size="small"
-              value={componentId}
-              onChange={(e) => setComponentId(e.target.value)}
-              placeholder="Enter component id"
+              value={templateId}
+              onChange={(e) => setTemplateId(e.target.value)}
+              placeholder="Enter template id"
               fullWidth
             />
-            <Button variant="contained" onClick={() => refetch()} disabled={!componentId || isLoading}>
+            <Button variant="contained" onClick={() => refetch()} disabled={!templateId || isLoading}>
               Fetch
             </Button>
           </Box>
         </Box>
-        {componentId && isLoading && <Loading />}
-        {componentId && error && (
+        {templateId && isLoading && <Loading />}
+        {templateId && error && (
           <Typography color="error" variant="body2">
             {error.message || "Failed to fetch methods"}
           </Typography>
@@ -230,7 +364,7 @@ function FlowEditor() {
                   "CALL_NODE_DRAG_DROP_TYPE",
                   JSON.stringify({
                     template: templateDef,
-                    templateAddress: componentId,
+                    templateAddress: templateId,
                     functionName: m.name,
                   }),
                 );

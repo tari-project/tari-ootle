@@ -197,11 +197,11 @@ importers:
         specifier: ^4.33.0
         version: 4.36.1(@tanstack/react-query@4.36.1(react-dom@19.1.0(react@19.1.0))(react@19.1.0))(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
       '@tari-project/tari-extension-common':
-        specifier: ^0.0.9
-        version: 0.0.9
+        specifier: ^0.0.10
+        version: 0.0.10
       '@tari-project/tari-extension-query-builder':
-        specifier: ^0.0.9
-        version: 0.0.9(@types/node@22.14.0)(@types/react-dom@18.3.7(@types/react@18.3.20))(@types/react@18.3.20)(acorn@8.14.1)(jiti@2.4.2)(lightningcss@1.30.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)(typescript@5.8.3)(webextension-polyfill@0.12.0)(zustand@5.0.5(@types/react@18.3.20)(react@19.1.0)(use-sync-external-store@1.5.0(react@19.1.0)))
+        specifier: ^0.0.10
+        version: 0.0.10(@types/node@22.14.0)(@types/react-dom@18.3.7(@types/react@18.3.20))(@types/react@18.3.20)(acorn@8.14.1)(jiti@2.4.2)(lightningcss@1.30.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)(typescript@5.8.3)(webextension-polyfill@0.12.0)(zustand@5.0.5(@types/react@18.3.20)(react@19.1.0)(use-sync-external-store@1.5.0(react@19.1.0)))
       '@tari-project/typescript-bindings':
         specifier: link:../../../bindings
         version: link:../../../bindings
@@ -2052,11 +2052,11 @@ packages:
   '@tari-project/metamask-signer@0.10.1':
     resolution: {integrity: sha512-CuGiL2idq5UxVOxudKqDkjS+m7Cq0MifdNIJ+/rj36ONq1oRvtU/eW5CUWzA0U3XivFV2QxkEWjOtytOLHHk+A==}
 
-  '@tari-project/tari-extension-common@0.0.9':
-    resolution: {integrity: sha512-DkNh/9cea2ygPHk0Zb1XAEQXUybbjlDBGIoL25d/O95X5YNgDIHc4iQQsJPk/8Ndj9S9RMh6Ioyxf/Xcr9Ml/g==}
+  '@tari-project/tari-extension-common@0.0.10':
+    resolution: {integrity: sha512-0K5HekGjJ/lqbbsYniosqaDktb7NZGJdEY3XIc3q2eeRAzcdMDS003x6BIcfJOCRW+Kb2CJZp8DXBn8NUQJCXQ==}
 
-  '@tari-project/tari-extension-query-builder@0.0.9':
-    resolution: {integrity: sha512-cTJa0tNMFcYHnHpiZ8rtktPLdOhcfo0WcVdG+kYaYK3LGTww8jim2c8TGEd55enyI49DcAkGoBtedr+14CwtfQ==}
+  '@tari-project/tari-extension-query-builder@0.0.10':
+    resolution: {integrity: sha512-CZ96nBC2aTHAg+Ix44OO1lkgUazBtcVsJNKXh9ldJsXfkdVYk8TRu7WIF0pkJmIj3LCn6lJirrG+2pIUfwsQhw==}
     peerDependencies:
       react: '>=19.0.0'
       react-dom: '>=19.0.0'
@@ -7040,9 +7040,9 @@ snapshots:
       - supports-color
       - webextension-polyfill
 
-  '@tari-project/tari-extension-common@0.0.9': {}
+  '@tari-project/tari-extension-common@0.0.10': {}
 
-  '@tari-project/tari-extension-query-builder@0.0.9(@types/node@22.14.0)(@types/react-dom@18.3.7(@types/react@18.3.20))(@types/react@18.3.20)(acorn@8.14.1)(jiti@2.4.2)(lightningcss@1.30.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)(typescript@5.8.3)(webextension-polyfill@0.12.0)(zustand@5.0.5(@types/react@18.3.20)(react@19.1.0)(use-sync-external-store@1.5.0(react@19.1.0)))':
+  '@tari-project/tari-extension-query-builder@0.0.10(@types/node@22.14.0)(@types/react-dom@18.3.7(@types/react@18.3.20))(@types/react@18.3.20)(acorn@8.14.1)(jiti@2.4.2)(lightningcss@1.30.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)(typescript@5.8.3)(webextension-polyfill@0.12.0)(zustand@5.0.5(@types/react@18.3.20)(react@19.1.0)(use-sync-external-store@1.5.0(react@19.1.0)))':
     dependencies:
       '@ladle/react': 5.0.3(@types/node@22.14.0)(@types/react@18.3.20)(acorn@8.14.1)(jiti@2.4.2)(lightningcss@1.30.1)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)(typescript@5.8.3)
       '@radix-ui/react-alert-dialog': 1.1.14(@types/react-dom@18.3.7(@types/react@18.3.20))(@types/react@18.3.20)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
@@ -7055,7 +7055,7 @@ snapshots:
       '@radix-ui/react-separator': 1.1.7(@types/react-dom@18.3.7(@types/react@18.3.20))(@types/react@18.3.20)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
       '@radix-ui/react-slot': 1.2.3(@types/react@18.3.20)(react@19.1.0)
       '@radix-ui/react-tooltip': 1.2.7(@types/react-dom@18.3.7(@types/react@18.3.20))(@types/react@18.3.20)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
-      '@tari-project/tari-extension-common': 0.0.9
+      '@tari-project/tari-extension-common': 0.0.10
       '@tari-project/tarijs-all': 0.10.1(@types/react@18.3.20)(react@19.1.0)(typescript@5.8.3)(webextension-polyfill@0.12.0)(zod@3.25.67)
       '@xyflow/react': 12.7.1(@types/react@18.3.20)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
       class-variance-authority: 0.7.1

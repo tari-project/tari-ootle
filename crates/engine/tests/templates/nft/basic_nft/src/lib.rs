@@ -26,7 +26,7 @@ pub struct Sparkle {
     pub brightness: u32,
 }
 
-// #[template]
+#[template]
 mod sparkle_nft_template {
     use super::*;
 

@@ -243,6 +243,8 @@ export const keysSetActive = (request: KeysSetActiveRequest): Promise<KeysSetAct
 
 export const transactionsSubmit = (request: TransactionSubmitRequest): Promise<TransactionSubmitResponse> =>
   client().then((c) => c.submitTransaction(request));
+export const submitTransactionDryRun = (request: TransactionSubmitRequest): Promise<TransactionSubmitResponse> =>
+  client().then((c) => c.submitTransactionDryRun(request));
 export const transactionsGet = (request: TransactionGetRequest): Promise<TransactionGetResponse> =>
   client().then((c) => c.transactionsGet(request));
 export const transactionsGetResult = (request: TransactionGetResultRequest): Promise<TransactionGetResultResponse> =>

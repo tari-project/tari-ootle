@@ -41,6 +41,7 @@ import AccessToken from "./routes/AccessToken/AccessToken";
 import { jwtDecode } from "jwt-decode";
 import Templates from "./routes/Templates/Templates";
 import Manifest from "./routes/Manifest/Manifest";
+import FlowEditor from "./Components/FlowEditor/FlowEditor";
 
 export const breadcrumbRoutes = [
   {
@@ -111,6 +112,11 @@ export const breadcrumbRoutes = [
   {
     label: "Manifest",
     path: "/manifest",
+    dynamic: false,
+  },
+  {
+    label: "Flow Editor",
+    path: "/flow-editor",
     dynamic: false,
   },
 ];
@@ -248,6 +254,10 @@ function App() {
           <Route
             path="manifest"
             element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/manifest" component={Manifest} />}
+          />
+          <Route
+            path="flow-editor"
+            element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/flow-editor" component={FlowEditor} />}
           />
           <Route path="*" element={<ErrorPage />} />
         </Route>

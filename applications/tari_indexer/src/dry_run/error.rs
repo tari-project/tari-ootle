@@ -41,7 +41,7 @@ pub enum DryRunTransactionProcessorError {
     PayloadProcessor(#[from] TransactionProcessorError),
     #[error(
         "All validators for epoch {epoch} substate {substate_requirement} failed to return substate. does_not_exist: \
-         {nexist_count}/{max_failures}, substate_down: {err_count}/{max_failures} (committee_size: {committee_size})"
+         {nexist_count}/{max_failures}, errored: {err_count}/{max_failures} (committee_size: {committee_size})"
     )]
     AllValidatorsFailedToReturnSubstate {
         substate_requirement: SubstateRequirement,

@@ -173,6 +173,9 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
 
         let created_qc = substate
             .get_created_proposal_certificate(&tx)
+            // TODO: We may not have this... We dont sync PCs. Hmm...
+            // This does not actually prove this substate was committed anyhow.
+            .optional()
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
         let resp = if substate.is_destroyed() {
@@ -183,7 +186,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
                 status: SubstateStatus::Down as i32,
                 address: substate.substate_id().to_bytes(),
                 version: substate.version(),
-                quorum_certificates: Some(created_qc)
+                quorum_certificates: created_qc
                     .into_iter()
                     .chain(destroyed_qc)
                     .map(|qc| (&qc).into())
@@ -199,7 +202,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
                     .substate_value()
                     .map(|v| v.to_bytes())
                     .ok_or_else(|| RpcStatus::general("NEVER HAPPEN: UP substate has no value"))?,
-                quorum_certificates: vec![(&created_qc).into()],
+                quorum_certificates: created_qc.iter().map(Into::into).collect(),
             }
         };
 

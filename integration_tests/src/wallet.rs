@@ -271,6 +271,7 @@ pub fn run_wallet(runtime: Runtime, config: &mut ApplicationConfig, shutdown: &m
         profile_with_tokio_console: false,
         libtor_data_dir: None,
         birthday: None,
+        skip_recovery: false,
     };
 
     run_wallet_with_cli(shutdown, runtime, config, cli)

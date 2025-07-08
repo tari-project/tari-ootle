@@ -240,7 +240,7 @@ fn fail_partial_paid_fees() {
     let result = test.execute_expect_commit(
         Transaction::builder()
                 // Pay less fees than the cost of the main transaction
-                .fee_transaction_pay_from_component(account, Amount::from(50))
+                .fee_transaction_pay_from_component(account, Amount::ONE_HUNDRED)
                 // These instructions should not be applied
                 .call_method(account2, "withdraw", args![
                     CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
@@ -269,7 +269,7 @@ fn fail_partial_paid_fees() {
         call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
-    assert_eq!(new_balance, orig_balance - Amount::from(50));
+    assert_eq!(new_balance, orig_balance - Amount::ONE_HUNDRED);
 }
 
 #[test]

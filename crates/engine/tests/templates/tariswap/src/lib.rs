@@ -193,7 +193,7 @@ mod tariswap {
             let balance = self.get_pool_balance(resource);
 
             if balance.is_zero() {
-                Amount::one()
+                Amount::ONE
             } else {
                 amount / balance
             }

@@ -217,7 +217,7 @@ fn transfer_confidential_fails_with_invalid_balance() {
 
 #[test]
 fn reveal_confidential_and_transfer() {
-    let (confidential_proof, faucet_mask, _change) = generate_confidential_output_statement(10_000, None);
+    let (confidential_proof, faucet_mask, _change) = generate_confidential_output_statement(100_000, None);
     let (mut test, faucet, faucet_resx) = setup(confidential_proof, None);
 
     // Create an account
@@ -226,9 +226,9 @@ fn reveal_confidential_and_transfer() {
 
     // Create proof for transfer
 
-    let proof = generate_withdraw_proof(&faucet_mask, 100, Some(99000), 0);
+    let proof = generate_withdraw_proof(&faucet_mask, 1000, Some(99_000), 0);
     // Reveal 90 tokens and 10 confidentially
-    let reveal_proof = generate_withdraw_proof(&proof.output_mask, 10, Some(90), 90);
+    let reveal_proof = generate_withdraw_proof(&proof.output_mask, 10, Some(900), 90);
     // Then reveal the rest
     let reveal_bucket_proof = generate_withdraw_proof(&reveal_proof.output_mask, 0, None, 10);
 

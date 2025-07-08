@@ -384,7 +384,7 @@ mod errors {
                 assert!(
                     message.starts_with(
                         "Panic! failed to decode argument at position 0 \
-                         (tari_template_lib::models::numbers::amount::Amount) for function 'please_pass_invalid_args':"
+                         (tari_template_lib_types::amount::amount::Amount) for function 'please_pass_invalid_args':"
                     ),
                     "Got a different error: {}",
                     message

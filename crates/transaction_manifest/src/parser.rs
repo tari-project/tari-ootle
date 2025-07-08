@@ -29,7 +29,10 @@ use syn::{
     UseTree,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::{args::LogLevel, types::TemplateAddress};
+use tari_template_lib::{
+    args::LogLevel,
+    types::{Amount, TemplateAddress},
+};
 
 #[derive(Debug, Clone)]
 pub enum ManifestIntent {
@@ -75,7 +78,7 @@ pub enum ManifestLiteral {
 
 #[derive(Debug, Clone)]
 pub enum SpecialLiteral {
-    Amount(i64),
+    Amount(Amount),
     NonFungibleId(Lit),
 }
 

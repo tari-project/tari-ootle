@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::vault::Vault;
+use tari_engine_types::{confidential::commit_amount, vault::Vault, ToByteType};
 use tari_template_lib::{
     prelude::{ComponentAddress, ResourceType},
     types::Amount,
@@ -25,7 +25,7 @@ fn it_does_not_overflow_when_minting_a_huge_initial_supply() {
     );
 
     let component: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
-    let all_to_confidential = generate_withdraw_proof_with_inputs(&[], Amount::MAX, Amount::MAX, None, Amount::zero());
+    let all_to_confidential = generate_withdraw_proof_with_inputs(&[], u64::MAX, u64::MAX, None, 0);
     test.execute_expect_success(
         Transaction::builder()
             .call_method(component, "convert", args![all_to_confidential.proof])
@@ -34,7 +34,16 @@ fn it_does_not_overflow_when_minting_a_huge_initial_supply() {
     );
 
     let confidential_vault = get_confidential_vault(&test, component);
-    assert_eq!(confidential_vault.balance(), Amount::zero());
+    assert_eq!(confidential_vault.balance(), Amount::MAX - u64::MAX.into());
+    let commitment = confidential_vault
+        .get_confidential_commitments()
+        .unwrap()
+        .keys()
+        .next()
+        .copied()
+        .unwrap();
+    let expected = commit_amount(&all_to_confidential.output_mask, u64::MAX.into());
+    assert_eq!(commitment, expected.to_byte_type());
     assert_eq!(confidential_vault.get_confidential_commitments().unwrap().len(), 1);
 }
 
@@ -42,10 +51,6 @@ fn it_does_not_overflow_when_minting_a_huge_initial_supply() {
 fn it_does_not_overflow_when_minting_more_then_amount_max_fungible_tokens() {
     let mut test = TemplateTest::new(["tests/templates/fungible"]);
     let template = test.get_template_address("Fungible");
-    // let (account, _, _) = test.create_empty_account();
-
-    // let (mut initial_supply, mask, _) = generate_confidential_proof(Amount::MAX, None);
-    // initial_supply.output_revealed_amount = Amount::MAX;
 
     let result = test.execute_expect_success(
         Transaction::builder()
@@ -73,7 +78,7 @@ fn it_does_not_overflow_when_minting_more_then_amount_max_confidential_tokens() 
     let mut test = TemplateTest::new(["tests/templates/fungible"]);
     let template = test.get_template_address("Fungible");
 
-    let all_to_confidential = generate_withdraw_proof_with_inputs(&[], Amount::MAX, Amount::MAX, None, Amount::zero());
+    let all_to_confidential = generate_withdraw_proof_with_inputs(&[], u64::MAX, u64::MAX, None, 0);
     test.execute_expect_success(Transaction::builder().build_and_seal(test.secret_key()), vec![]);
 
     let result = test.execute_expect_success(
@@ -90,9 +95,8 @@ fn it_does_not_overflow_when_minting_more_then_amount_max_confidential_tokens() 
 
     let component: ComponentAddress = result.finalize.execution_results[1].decode().unwrap();
 
-    // total supply will be 3 x Amount::MAX
-    let (more_supply1, _mask, _) = generate_confidential_output_statement(Amount::MAX, None);
-    let (more_supply2, _mask, _) = generate_confidential_output_statement(Amount::MAX, None);
+    let (more_supply1, _mask, _) = generate_confidential_output_statement(u64::MAX, None);
+    let (more_supply2, _mask, _) = generate_confidential_output_statement(u64::MAX, None);
 
     test.execute_expect_success(
         Transaction::builder()

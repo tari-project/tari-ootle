@@ -24,6 +24,7 @@ impl ProcessDefinition for MinotariNode {
         let mut command = Command::new(context.bin());
         let p2p_port = context.get_free_port("p2p").await?;
         let grpc_port = context.get_free_port("grpc").await?;
+        let http_api_port = context.get_free_port("http_api").await?;
         let listen_ip = context.listen_ip();
         let listener_address = format!("/ip4/{listen_ip}/tcp/{p2p_port}");
         let public_ip = context.get_setting("public_ip").unwrap_or("127.0.0.1");
@@ -52,6 +53,7 @@ impl ProcessDefinition for MinotariNode {
             .arg(format!("-p{network}.base_node.identity_file=config/base_node_id.json"))
             .arg(format!("-pbase_node.p2p.public_addresses={public_address}"))
             .arg(format!("-pbase_node.grpc_address=/ip4/{listen_ip}/tcp/{grpc_port}"))
+            .arg(format!("-pbase_node.http_wallet_query_service.port={http_api_port}"))
             .args([
                 "--non-interactive",
                 "--enable-grpc",

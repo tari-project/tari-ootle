@@ -123,27 +123,27 @@ tari_wallet_daemon_client = { path = "clients/wallet_daemon_client" }
 transaction_generator = { path = "utilities/transaction_generator" }
 
 # external minotari/tari dependencies
-minotari_app_grpc = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
-minotari_app_utilities = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
-minotari_console_wallet = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
-minotari_node = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
-minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
-minotari_wallet = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
-minotari_wallet_grpc_client = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
-tari_common = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
-tari_common_types = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
-tari_common_sqlite = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
-tari_hashing = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
-tari_sidechain = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
-tari_jellyfish = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
+minotari_app_grpc = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
+minotari_app_utilities = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
+minotari_console_wallet = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
+minotari_node = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
+minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
+minotari_wallet = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
+minotari_wallet_grpc_client = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
+tari_common = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
+tari_common_types = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
+tari_common_sqlite = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
+tari_hashing = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
+tari_sidechain = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
+tari_jellyfish = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
 
 # avoid including default features so each crate can choose which ones to import
-tari_core = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2", default-features = false }
-tari_key_manager = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
-tari_metrics = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
-tari_mmr = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
-tari_p2p = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
-tari_shutdown = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
+tari_core = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1", default-features = false }
+tari_key_manager = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
+tari_metrics = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
+tari_mmr = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
+tari_p2p = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
+tari_shutdown = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
 
 tari_crypto = "0.22.0"
 tari_utilities = "0.8.0"

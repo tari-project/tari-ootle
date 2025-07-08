@@ -15,8 +15,11 @@ use futures::future::Either;
 use log::{debug, info};
 use minotari_wallet_grpc_client::grpc;
 use tari_common_types::types::FixedHash;
+use tari_core::consensus::NetworkConsensus;
 use tari_engine::wasm::WasmModule;
 use tari_engine_types::calculate_template_binary_hash;
+use tari_ootle_app_utilities::configuration::convert_network_to_l1_network;
+use tari_ootle_common_types::Network;
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib_types::TemplateAddress;
 use tari_validator_node_client::types::{AddPeerRequest, GetTemplatesRequest};
@@ -46,6 +49,7 @@ pub struct ProcessManager {
     enable_manual_connect: bool,
     base_dir: PathBuf,
     web_server_port: u16,
+    network: Network,
 }
 
 impl ProcessManager {
@@ -78,6 +82,7 @@ impl ProcessManager {
                 SocketAddr::V4(addr) => addr.port(),
                 SocketAddr::V6(addr) => addr.port(),
             },
+            network: config.network,
         };
         (this, ProcessManagerHandle::new(tx_request))
     }
@@ -794,15 +799,24 @@ impl ProcessManager {
             anyhow!("No MinoTariConsoleWallet instances found. Please start a wallet before waiting for funds")
         })?;
 
+        let constants = NetworkConsensus::from(convert_network_to_l1_network(&self.network))
+            .create_consensus_constants()
+            .pop()
+            .unwrap();
+        let initial_emission_amount = constants.emission_amounts().0;
+
         loop {
             let resp = wallet.get_balance().await?;
-            // Total guess of the minimum funds
-            if resp.available_balance > min_expected_blocks * 5000000 {
+            if resp.available_balance > min_expected_blocks * initial_emission_amount.as_u64() {
                 info!("💰 Wallet has funds. Available balance: {}", resp.available_balance);
                 break;
             }
             sleep(Duration::from_secs(2)).await;
-            info!("💱 Waiting for wallet to mine some funds");
+            info!(
+                "💱 Waiting for wallet to mine some funds ({} uT / {} uT)",
+                resp.available_balance,
+                min_expected_blocks * initial_emission_amount
+            );
         }
 
         Ok(())

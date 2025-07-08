@@ -127,6 +127,7 @@ pub async fn spawn_wallet(world: &mut TariWorld, wallet_name: String, base_node_
         .public_key()
         .clone();
     let base_node_port = world.base_nodes.get(&base_node_name).unwrap().port;
+    let base_node_http_port = world.base_nodes.get(&base_node_name).unwrap().http_port;
     let set_base_node_request = SetBaseNodeRequest {
         net_address: format! {"/ip4/127.0.0.1/tcp/{}", base_node_port},
         public_key_hex: base_node_public_key.to_string(),
@@ -175,6 +176,7 @@ pub async fn spawn_wallet(world: &mut TariWorld, wallet_name: String, base_node_
                 database_url: DbConnectionUrl::File(temp_dir.join("dht.sqlite")),
                 ..DhtConfig::default_local_test()
             };
+            wallet_config.wallet.http_client_url = format!("http://127.0.0.1:{}", base_node_http_port);
 
             wallet_config.wallet.custom_base_node = Some(format!(
                 "{}::/ip4/127.0.0.1/tcp/{}",

@@ -32,9 +32,14 @@ impl ProcessDefinition for MinotariWallet {
 
         let base_nodes = context.minotari_nodes().collect::<Vec<_>>();
 
-        if base_nodes.is_empty() {
+        let Some(base_node) = base_nodes.first()  else {
             return Err(anyhow!("Base nodes should be started before the console wallet"));
-        }
+        };
+        let base_node_api_port = base_node
+            .instance()
+            .allocated_ports()
+            .get("http_api")
+            .ok_or_else(|| anyhow!("Base node HTTP port should be allocated before starting the console wallet"))?;
 
         let mut base_node_addresses = Vec::with_capacity(base_nodes.len());
         for base_node in base_nodes {
@@ -59,6 +64,9 @@ impl ProcessDefinition for MinotariWallet {
             ))
             .arg(format!("-pwallet.p2p.public_addresses={public_address}"))
             .arg(format!("-pwallet.grpc_address=/ip4/{listen_ip}/tcp/{grpc_port}"))
+            .arg(format!(
+                "-pwallet.http_client_url=http://{listen_ip}:{base_node_api_port}"
+            ))
             .args(["--non-interactive", "-pwallet.p2p.allow_test_addresses=true"])
             .arg(format!(
                 "-p{}.p2p.seeds.peer_seeds={}",

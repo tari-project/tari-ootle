@@ -34,7 +34,7 @@ use tari_shutdown::Shutdown;
 use tokio::task;
 
 use crate::{
-    helpers::{get_os_assigned_ports, wait_listener_on_local_port},
+    helpers::{get_os_assigned_port, get_os_assigned_ports, wait_listener_on_local_port},
     logging::get_base_dir_for_scenario,
     TariWorld,
 };
@@ -44,6 +44,7 @@ pub struct BaseNodeProcess {
     pub name: String,
     pub port: u16,
     pub grpc_port: u16,
+    pub http_port: u16,
     pub identity: NodeIdentity,
     pub handle: task::JoinHandle<Result<(), ExitError>>,
     pub temp_dir_path: PathBuf,
@@ -59,6 +60,7 @@ impl BaseNodeProcess {
 pub async fn spawn_base_node(world: &mut TariWorld, bn_name: String) {
     // each spawned base node will use different ports
     let (port, grpc_port) = get_os_assigned_ports();
+    let http_port = get_os_assigned_port();
     // let (port, grpc_port) = match world.base_nodes.values().last() {
     // Some(v) => (v.port + 1, v.grpc_port + 1),
     // None => (19000, 19500), // default ports if it's the first base node to be spawned
@@ -136,6 +138,7 @@ pub async fn spawn_base_node(world: &mut TariWorld, bn_name: String) {
                 GrpcMethod::GetValidatorNodeChanges,
             ]
             .into();
+            base_node_config.base_node.http_wallet_query_service.port = http_port;
 
             let result = run_base_node(shutdown, Arc::new(base_node_identity), Arc::new(base_node_config)).await;
             if let Err(e) = result {
@@ -155,6 +158,7 @@ pub async fn spawn_base_node(world: &mut TariWorld, bn_name: String) {
         name: bn_name.clone(),
         port,
         grpc_port,
+        http_port,
         identity,
         handle,
         temp_dir_path,

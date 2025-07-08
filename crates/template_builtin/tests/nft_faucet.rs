@@ -4,7 +4,7 @@
 use tari_engine_types::commit_result::ExecuteResult;
 use tari_template_lib::{
     constants::NFT_FAUCET_COMPONENT_ADDRESS,
-    models::{Amount, ComponentAddress, NonFungibleAddress, NonFungibleId},
+    models::{ComponentAddress, NonFungibleAddress, NonFungibleId},
     prelude::Metadata,
     resource::TOKEN_SYMBOL,
 };

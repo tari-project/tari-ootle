@@ -5,8 +5,9 @@ use super::{IMAGE_URL, TOKEN_SYMBOL};
 use crate::{
     args::MintArg,
     auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
-    models::{Amount, Bucket, ComponentAddress, Metadata, ResourceAddress, ResourceAddressAllocation},
+    models::{Bucket, ComponentAddress, Metadata, ResourceAddress, ResourceAddressAllocation},
     resource::{ResourceManager, ResourceType},
+    types::Amount,
 };
 
 /// Utility for building fungible resources inside templates

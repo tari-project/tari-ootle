@@ -7,7 +7,7 @@ export interface AccountsCreateFreeTestCoinsResponse {
   account: Account;
   transaction_id: string;
   amount: Amount;
-  fee: Amount;
+  fee: number;
   result: FinalizeResult;
   public_key: string;
 }

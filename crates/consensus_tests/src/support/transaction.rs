@@ -90,7 +90,7 @@ pub fn create_execution_result_for_transaction(
                         Substate::new(output.versioned_substate_id().version(), ValidatorFeePool {
                             // This does not matter in tests
                             claim_public_key: Default::default(),
-                            amount: 100_000.into(),
+                            amount: 100_000,
                         }),
                     );
                 },
@@ -110,8 +110,8 @@ pub fn create_execution_result_for_transaction(
                 events: vec![],
                 logs: vec![],
                 fee_receipt: FeeReceipt {
-                    total_fee_payment: fee.try_into().unwrap(),
-                    total_fees_paid: fee.try_into().unwrap(),
+                    total_fee_payment: fee,
+                    total_fees_paid: fee,
                     cost_breakdown: FeeBreakdown::default(),
                 },
             }),
@@ -133,8 +133,8 @@ pub fn create_execution_result_for_transaction(
             vec![],
             result,
             FeeReceipt {
-                total_fee_payment: fee.try_into().unwrap(),
-                total_fees_paid: fee.try_into().unwrap(),
+                total_fee_payment: fee,
+                total_fees_paid: fee,
                 cost_breakdown: FeeBreakdown::default(),
             },
         ),

@@ -22,7 +22,6 @@
 
 use std::{
     collections::HashMap,
-    convert::{TryFrom, TryInto},
     fmt,
     fs,
     path::PathBuf,
@@ -47,9 +46,9 @@ use tari_template_lib::{
     args::InstructionArg,
     call_arg,
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-    models::{Amount, BucketId, NonFungibleAddress, NonFungibleId},
+    models::{BucketId, NonFungibleAddress, NonFungibleId},
     prelude::{ResourceAddress, RistrettoPublicKeyBytes},
-    types::TemplateAddress,
+    types::{Amount, TemplateAddress},
 };
 use tari_transaction::{args, Transaction, TransactionId, UnsignedTransaction};
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
@@ -244,7 +243,7 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
         .for_network(network.byte)
         .fee_transaction_pay_from_component(
             fee_account.address.as_component_address().unwrap(),
-            Amount::try_from(common.max_fee.unwrap_or(1000))?,
+            common.max_fee.unwrap_or(1000),
         )
         .add_instruction(instruction)
         .with_inputs(common.inputs)
@@ -368,11 +367,11 @@ pub async fn handle_send(args: SendArgs, client: &mut WalletDaemonClient) -> Res
     let destination_public_key =
         RistrettoPublicKeyBytes::from_bytes(&destination_public_key.into_inner()).map_err(anyhow::Error::msg)?;
 
-    let fee = common.max_fee.map(|f| f.try_into()).transpose()?;
+    let fee = common.max_fee;
     let resp = client
         .accounts_transfer(AccountsTransferRequest {
             account: source_account_name,
-            amount: Amount::try_from(amount)?,
+            amount: amount.into(),
             resource_address,
             destination_public_key,
             max_fee: fee,
@@ -408,10 +407,10 @@ pub async fn handle_confidential_transfer(
         .accounts_confidential_transfer(ConfidentialTransferRequest {
             account: source_account,
             input_selection: ConfidentialTransferInputSelection::PreferConfidential,
-            amount: Amount::try_from(amount)?,
+            amount: amount.into(),
             resource_address: resource_address.unwrap_or(CONFIDENTIAL_TARI_RESOURCE_ADDRESS),
             destination_public_key,
-            max_fee: common.max_fee.map(|f| f.try_into()).transpose()?,
+            max_fee: common.max_fee,
             output_to_revealed: false,
             proof_from_badge_resource: None,
             dry_run: false,

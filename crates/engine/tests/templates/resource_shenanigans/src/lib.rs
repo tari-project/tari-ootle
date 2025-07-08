@@ -23,7 +23,7 @@ mod template {
         }
 
         pub fn mint_different_resource_type(&mut self) -> Bucket {
-            ResourceManager::get(self.vault.resource_address()).mint_fungible(Amount(1000))
+            ResourceManager::get(self.vault.resource_address()).mint_fungible(1000)
         }
     }
 }

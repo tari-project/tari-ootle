@@ -7,7 +7,6 @@ use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::ProposalCertificate;
 use tari_engine_types::commit_result::FinalizeResult;
-use tari_template_lib::models::Amount;
 use tari_transaction::{Transaction, TransactionId};
 use time::PrimitiveDateTime;
 
@@ -25,7 +24,7 @@ pub struct WalletTransaction {
     pub transaction: Transaction,
     pub status: TransactionStatus,
     pub finalize: Option<FinalizeResult>,
-    pub final_fee: Option<Amount>,
+    pub final_fee: Option<u64>,
     pub qcs: Vec<ProposalCertificate>,
     #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number} | null"))]
     pub execution_time: Option<Duration>,

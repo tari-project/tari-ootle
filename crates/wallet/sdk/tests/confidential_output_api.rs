@@ -5,7 +5,11 @@ use std::{convert::Infallible, str::FromStr};
 
 use async_trait::async_trait;
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, tari_utilities::SafePassword};
-use tari_engine_types::{confidential::get_commitment_factory, substate::SubstateId, ToByteType};
+use tari_engine_types::{
+    confidential::{commit_amount_checked, get_commitment_factory},
+    substate::SubstateId,
+    ToByteType,
+};
 use tari_ootle_common_types::{optional::Optional, Network};
 use tari_ootle_wallet_sdk::{
     models::{ConfidentialOutputModel, ConfidentialProofId, OutputStatus},
@@ -18,10 +22,9 @@ use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_abi::TemplateDef;
 use tari_template_lib::{
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-    models::{Amount, EncryptedData},
-    prelude::PedersenCommitmentBytes,
+    models::EncryptedData,
     resource::ResourceType,
-    types::TemplateAddress,
+    types::{crypto::PedersenCommitmentBytes, Amount, TemplateAddress},
 };
 use tari_transaction::{Transaction, TransactionId};
 
@@ -37,7 +40,7 @@ fn outputs_locked_and_released() {
     let (inputs, total_value) = test
         .sdk()
         .confidential_outputs_api()
-        .lock_outputs_by_amount(&Test::test_vault_address(), Amount(50), proof_id)
+        .lock_outputs_by_amount(&Test::test_vault_address(), 50, proof_id)
         .unwrap();
     assert_eq!(total_value, 74);
     assert_eq!(inputs.len(), 2);
@@ -75,7 +78,7 @@ fn outputs_locked_and_finalized() {
     let proof_id = test.new_proof();
 
     let (inputs, total_value) = outputs_api
-        .lock_outputs_by_amount(&Test::test_vault_address(), Amount(50), proof_id)
+        .lock_outputs_by_amount(&Test::test_vault_address(), 50, proof_id)
         .unwrap();
     assert_eq!(total_value, 74);
     assert_eq!(inputs.len(), 2);
@@ -98,7 +101,7 @@ fn outputs_locked_and_finalized() {
             account_address: Test::test_account_address(),
             vault_address: Test::test_vault_address(),
             commitment: commitment_change,
-            value: 24,
+            value: 24.into(),
             sender_public_nonce: None,
             encryption_secret_key_index: 0,
             encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
@@ -184,10 +187,12 @@ impl Test {
             .unwrap()
     }
 
-    pub fn add_unspent_output(&self, amount: u64) -> PedersenCommitmentBytes {
+    pub fn add_unspent_output<A: Into<Amount>>(&self, amount: A) -> PedersenCommitmentBytes {
+        let amount = amount.into();
+
         let outputs_api = self.sdk.confidential_outputs_api();
-        let commitment = get_commitment_factory()
-            .commit_value(&Default::default(), amount)
+        let commitment = commit_amount_checked(&Default::default(), amount)
+            .expect("Cannot add unspent output with negative amount")
             .to_byte_type();
         outputs_api
             .add_output(ConfidentialOutputModel {
@@ -211,13 +216,13 @@ impl Test {
         outputs_api.add_proof(&Self::test_vault_address()).unwrap()
     }
 
-    pub fn get_unspent_balance(&self) -> u64 {
+    pub fn get_unspent_balance(&self) -> Amount {
         let outputs_api = self.sdk.confidential_outputs_api();
         outputs_api
             .get_unspent_balance(&Test::test_vault_address().as_vault_id().unwrap())
             .optional()
             .unwrap()
-            .unwrap_or(0)
+            .unwrap_or_default()
     }
 
     pub fn sdk(&self) -> &WalletSdk<SqliteWalletStore, PanicIndexer> {

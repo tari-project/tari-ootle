@@ -334,19 +334,14 @@ where
         }
 
         let outputs_api = self.wallet_sdk.confidential_outputs_api();
-        let confidential_balance = outputs_api.get_unspent_balance(&vault_id)?;
-        let new_confidential_balance = confidential_balance
-            .try_into()
-            .map_err(|_| AccountMonitorError::Overflow {
-                details: "confidential balance overflowed Amount".to_string(),
-            })?;
+        let new_confidential_balance = outputs_api.get_unspent_balance(&vault_id)?;
 
         if maybe_current_vault
             .is_none_or(|v| v.confidential_balance != new_confidential_balance || v.revealed_balance != new_balance)
         {
             info!(
                 target: LOG_TARGET,
-                "🔒️ vault {} in account {} has new balance {} and confidential balance {}",
+                "🔒️ balance updated in vault {} in account {}. Balance is {} and confidential balance is {}",
                 vault_id,
                 account_address,
                 new_balance,
@@ -740,8 +735,6 @@ pub enum AccountMonitorError {
 
     #[error("Expected new account '{account_name}'to be created in transaction {tx_id}")]
     ExpectedNewAccount { tx_id: TransactionId, account_name: String },
-    #[error("Overflow error: {details}")]
-    Overflow { details: String },
 }
 
 impl IsNotFoundError for AccountMonitorError {

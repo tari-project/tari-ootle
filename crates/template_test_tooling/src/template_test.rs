@@ -42,9 +42,9 @@ use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRES
 use tari_template_lib::{
     args::InstructionArg,
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS},
-    models::{Amount, ComponentAddress, NonFungibleAddress},
+    models::{ComponentAddress, NonFungibleAddress},
     prelude::RistrettoPublicKeyBytes,
-    types::TemplateAddress,
+    types::{Amount, TemplateAddress},
 };
 use tari_transaction::{args, builder::named_args::BuilderWorkspaceKey, Transaction, TransactionBuilder};
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
@@ -432,9 +432,9 @@ impl TemplateTest {
         (component, owner_proof, secret_key)
     }
 
-    pub fn create_custom_funded_account(
+    pub fn create_custom_funded_account<A: Into<Amount>>(
         &mut self,
-        amount: Amount,
+        amount: A,
     ) -> (
         ComponentAddress,
         NonFungibleAddress,
@@ -446,7 +446,7 @@ impl TemplateTest {
         self.enable_fees = false;
         let result = self.execute_expect_success(
             Transaction::builder()
-                .call_method(test_faucet_component(), "take_free_coins_custom", args![amount])
+                .call_method(test_faucet_component(), "take_free_coins_custom", args![amount.into()])
                 .put_last_instruction_output_on_workspace("bucket")
                 .create_account_with_bucket(public_key.to_byte_type(), "bucket")
                 .build_and_seal(&secret_key),

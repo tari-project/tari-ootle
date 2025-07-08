@@ -8,7 +8,7 @@ export interface AccountsTransferRequest {
   amount: Amount;
   resource_address: ResourceAddress;
   destination_public_key: string;
-  max_fee: Amount | null;
+  max_fee: number | null;
   proof_from_badge_resource: string | null;
   dry_run: boolean;
 }

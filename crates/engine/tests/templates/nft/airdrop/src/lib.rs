@@ -19,7 +19,7 @@
 //   SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-use tari_template_abi::rust::collections::HashSet;
+use tari_template_abi::rust::collections::BTreeSet;
 use tari_template_lib::prelude::*;
 
 #[template]
@@ -27,7 +27,7 @@ mod airdrop_template {
     use super::*;
 
     pub struct Airdrop {
-        allow_list: HashSet<ComponentAddress>,
+        allow_list: BTreeSet<ComponentAddress>,
         is_airdrop_open: bool,
         claimed_count: u32,
         vault: Vault,
@@ -40,7 +40,7 @@ mod airdrop_template {
                 .initial_supply((1..=100).map(NonFungibleId::from_u32));
 
             Component::new(Self {
-                allow_list: HashSet::new(),
+                allow_list: BTreeSet::new(),
                 is_airdrop_open: false,
                 claimed_count: 0,
                 vault: Vault::from_bucket(bucket),
@@ -71,7 +71,7 @@ mod airdrop_template {
             );
 
             self.claimed_count += 1;
-            self.vault.withdraw(Amount(1))
+            self.vault.withdraw(1)
         }
 
         pub fn claim_specific(&mut self, address: ComponentAddress, id: NonFungibleId) -> Bucket {

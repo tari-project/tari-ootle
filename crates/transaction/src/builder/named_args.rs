@@ -64,15 +64,14 @@ macro_rules! __expr_counter {
 /// Utility macro for building a single instruction argument
 #[macro_export]
 macro_rules! arg {
-    // Deprecated
-    (Variable($arg:expr)) => {
-        $crate::builder::named_args::NamedArg::workspace($arg)
-    };
     (Workspace($arg:expr)) => {
         $crate::builder::named_args::NamedArg::workspace($arg)
     };
     (Literal($arg:expr)) => {
         $crate::builder::named_args::NamedArg::from_type(&$arg).unwrap()
+    };
+    (Amount($arg:expr)) => {
+        $crate::builder::named_args::NamedArg::from_type(&::tari_template_lib::types::Amount::from($arg)).unwrap()
     };
 
     ($arg:expr) => {
@@ -84,15 +83,6 @@ macro_rules! arg {
 /// usage.
 #[macro_export]
 macro_rules! __args_inner {
-    (@ { $this:ident } Variable($e:expr), $($tail:tt)*) => {
-        $crate::builder::named_args::__push(&mut $this, $crate::arg!(Workspace($e)));
-        $crate::__args_inner!(@ { $this } $($tail)*);
-    };
-
-    (@ { $this:ident } Variable($e:expr) $(,)?) => {
-        $crate::builder::named_args::__push(&mut $this, $crate::arg!(Workspace($e)));
-    };
-
     (@ { $this:ident } Workspace($e:expr), $($tail:tt)*) => {
         $crate::builder::named_args::__push(&mut $this, $crate::arg!(Workspace($e)));
         $crate::__args_inner!(@ { $this } $($tail)*);
@@ -109,6 +99,15 @@ macro_rules! __args_inner {
 
     (@ { $this:ident } Literal($e:expr) $(,)?) => {
         $crate::builder::named_args::__push(&mut $this, $crate::arg!(Literal($e)));
+    };
+
+   (@ { $this:ident } Amount($e:expr), $($tail:tt)*) => {
+        $crate::builder::named_args::__push(&mut $this, $crate::arg!(Amount($e)));
+        $crate::__args_inner!(@ { $this } $($tail)*);
+    };
+
+    (@ { $this:ident } Amount($e:expr) $(,)?) => {
+        $crate::builder::named_args::__push(&mut $this, $crate::arg!(Amount($e)));
     };
 
     (@ { $this:ident } $e:expr, $($tail:tt)*) => {

@@ -25,8 +25,8 @@ use std::{collections::HashMap, fs};
 use tari_engine_types::{instruction::Instruction, substate::SubstateId};
 use tari_template_lib::{
     call_args,
-    models::{Amount, ComponentAddress, ResourceAddress},
-    types::{ObjectKey, TemplateAddress},
+    models::{ComponentAddress, ResourceAddress},
+    types::{Amount, ObjectKey, TemplateAddress},
 };
 use tari_transaction_manifest::{parse_manifest, ManifestInstructions};
 
@@ -68,7 +68,7 @@ fn manifest_smoke_test() {
         Instruction::CallMethod {
             call: test_faucet_component.into(),
             method: "take_free_coins".to_string(),
-            args: call_args![Amount(1_000)],
+            args: call_args![Amount::from(1_000)],
         },
         Instruction::PutLastInstructionOutputOnWorkspace { key: 1 },
         Instruction::CallMethod {

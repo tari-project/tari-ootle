@@ -8,8 +8,8 @@ use tari_engine_types::{
 };
 use tari_template_lib::{
     call_args,
-    models::{Amount, ComponentAddress, ResourceAddress},
-    types::TemplateAddress,
+    models::{ComponentAddress, ResourceAddress},
+    types::{Amount, TemplateAddress},
 };
 use tari_template_test_tooling::{support::assert_error::assert_access_denied_for_action, TemplateTest};
 use tari_transaction::{args, Transaction};
@@ -76,7 +76,7 @@ fn extract_component_address_from_result(result: &ExecuteResult, template_name: 
 fn create_resource_and_fund_account(test: &mut TemplateTest, account: ComponentAddress) -> ResourceAddress {
     // create a new fungible resource
     let faucet_template = test.get_template_address("TestFaucet");
-    let initial_supply = Amount(1_000_000_000_000);
+    let initial_supply = Amount::from(1_000_000_000_000u64);
     let result = test
         .execute_and_commit(
             vec![Instruction::CallFunction {

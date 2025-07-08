@@ -86,8 +86,8 @@ mod faucet_template {
             self.vault.withdraw_confidential(proof)
         }
 
-        pub fn total_supply(&self) -> Amount {
-            ResourceManager::get(self.vault.resource_address()).total_supply()
+        pub fn total_supply(&self) -> Option<Amount> {
+            ResourceManager::get(self.vault.resource_address()).total_supply_opt()
         }
 
         /// Utility function for tests

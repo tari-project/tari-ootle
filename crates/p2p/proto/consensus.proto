@@ -3,7 +3,7 @@
 
 syntax = "proto3";
 
-package tari.dan.consensus;
+package tari.ootle.consensus;
 
 import "common.proto";
 import "transaction.proto";
@@ -36,7 +36,7 @@ message ProposalMessage {
 message TimeoutVote {
   uint64 epoch = 1;
   uint64 height = 2;
-  tari.dan.common.SignatureAndPublicKey signature = 3;
+  tari.ootle.common.SignatureAndPublicKey signature = 3;
 }
 
 message ForeignProposalMessage {
@@ -77,7 +77,7 @@ message VoteMessage {
   bytes block_id = 2;
   uint64 block_height = 3;
   QuorumDecision decision = 4;
-  tari.dan.common.SignatureAndPublicKey signature = 5;
+  tari.ootle.common.SignatureAndPublicKey signature = 5;
 }
 
 message BlockHeader {
@@ -89,7 +89,7 @@ message BlockHeader {
   bytes proposed_by = 6;
   bytes state_merkle_root = 7;
   uint64 total_leader_fee = 8;
-  tari.dan.common.Signature signature = 10;
+  tari.ootle.common.Signature signature = 10;
   uint64 timestamp = 11;
   bytes epoch_hash = 13;
   ExtraData extra_data = 14;
@@ -171,7 +171,7 @@ message QuorumCertificate {
   bytes parent_id = 2;
   uint64 block_height = 3;
   uint64 epoch = 4;
-  repeated tari.dan.common.SignatureAndPublicKey signatures = 5;
+  repeated tari.ootle.common.SignatureAndPublicKey signatures = 5;
   QuorumDecision decision = 7;
   uint32 shard_group = 8;
 }
@@ -179,17 +179,17 @@ message QuorumCertificate {
 message TimeoutCertificate {
   uint64 epoch = 1;
   uint64 block_height = 2;
-  repeated tari.dan.common.SignatureAndPublicKey signatures = 3;
+  repeated tari.ootle.common.SignatureAndPublicKey signatures = 3;
 }
 
 message ValidatorMetadata {
   bytes public_key = 1;
   bytes vn_shard_key = 2;
-  tari.dan.common.Signature signature = 3;
+  tari.ootle.common.Signature signature = 3;
 }
 
 message TariDanPayload {
-  tari.dan.transaction.Transaction transaction = 1;
+  tari.ootle.transaction.Transaction transaction = 1;
 }
 
 enum QuorumDecision {
@@ -229,7 +229,7 @@ message MissingTransactionsResponse {
   uint32 request_id = 1;
   uint64 epoch = 2;
   bytes block_id = 3;
-  repeated tari.dan.transaction.Transaction transactions = 4;
+  repeated tari.ootle.transaction.Transaction transactions = 4;
 }
 
 message Substate {
@@ -246,7 +246,7 @@ message Substate {
 }
 
 message SubstateDestroyed {
-  tari.dan.common.Epoch epoch = 1;
+  tari.ootle.common.Epoch epoch = 1;
   uint32 shard = 2;
   uint64 block_height = 3;
   bytes justify = 4;

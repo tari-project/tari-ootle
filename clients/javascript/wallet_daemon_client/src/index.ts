@@ -225,9 +225,6 @@ export class WalletDaemonClient {
   }
 
   public substatesGet(params: SubstatesGetRequest): Promise<SubstatesGetResponse> {
-    // TODO: fix error if param type is `substate_id: Substate_id`
-    // `substateIdToString(substateId)` doesn't solve the issue
-    // possible tested fix is to change param type: `substate_id: string`
     return this.__invokeRpc("substates.get", params);
   }
 

@@ -16,10 +16,9 @@ use tari_template_builtin::NFT_FAUCET_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     auth::{ComponentAccessRules, OwnerRule, ResourceAccessRules},
     constants::{CONFIDENTIAL_TARI_RESOURCE_ADDRESS, NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS},
-    models::Amount,
     prelude::{ResourceType, RistrettoPublicKeyBytes, TemplateAddress},
     rule,
-    types::{EntityId, Hash},
+    types::{Amount, EntityId, Hash},
 };
 
 use crate::{template_test::test_nft_faucet_component, test_faucet_component};
@@ -29,7 +28,7 @@ pub fn initialize_builtin_faucet_state<TStore: StateWriter>(
     signer_public_key: &RistrettoPublicKey,
     test_faucet_template_address: TemplateAddress,
 ) {
-    const INITIAL_SUPPLY: Amount = Amount(1_000_000);
+    let initial_supply = Amount::from(1_000_000);
     let entity_id = EntityId::default();
     let object_ids = ObjectIds::new(10);
     let id_provider = IdProvider::new(entity_id, Hash::default(), &object_ids);
@@ -37,7 +36,7 @@ pub fn initialize_builtin_faucet_state<TStore: StateWriter>(
     let vault = Vault::new(ResourceContainer::confidential(
         CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
         vec![],
-        INITIAL_SUPPLY,
+        initial_supply,
     ));
     store
         .set_state(SubstateId::Vault(vault_id), Substate::new(0, vault))

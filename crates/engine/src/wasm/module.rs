@@ -29,17 +29,27 @@ use wasmer::{
     AsStoreMut,
     Engine,
     ExportError,
+    ExternType,
     Function,
     Instance,
+    Module,
     Pages,
     Store,
+    Type,
     TypedFunction,
     WasmPtr,
 };
 
 use crate::{
     template::{LoadedTemplate, TemplateLoaderError, TemplateModuleLoader},
-    wasm::{environment::WasmEnv, limiting_tunable::LimitingTunables, metering, WasmExecutionError},
+    wasm::{
+        environment::WasmEnv,
+        limiting_tunable::LimitingTunables,
+        limits,
+        metering,
+        WasmExecutionError,
+        WasmValidationError,
+    },
 };
 
 pub type MainFunction = TypedFunction<(WasmPtr<u8>, u32), WasmPtr<u8>>;
@@ -91,7 +101,9 @@ impl WasmModule {
         let base = BaseTunables::for_target(&Target::default());
         let tunables = LimitingTunables::new(base, MEMORY_PAGE_LIMIT);
         let mut compiler = Cranelift::new();
-        compiler.opt_level(CraneliftOptLevel::Speed).canonicalize_nans(true);
+        compiler
+            .opt_level(CraneliftOptLevel::SpeedAndSize)
+            .canonicalize_nans(true);
         // TODO: Configure metering limit
         compiler.push_middleware(Arc::new(metering::middleware(100_000_000)));
         let mut engine = Engine::from(compiler);
@@ -195,5 +207,50 @@ fn validate_instance<S: AsStoreMut>(
     // Check that the main function exists
     let _main: MainFunction = instance.exports.get_typed_function(store, main_fn)?;
 
+    validate_functions(instance.module())?;
+
+    Ok(())
+}
+
+fn validate_functions(module: &Module) -> Result<(), WasmValidationError> {
+    let mut function_count = 0usize;
+    for export in module.exports() {
+        if let ExternType::Function(func) = export.ty() {
+            function_count += 1;
+            let fn_name = export.name();
+            if fn_name.len() > limits::MAX_FUNCTION_NAME_LENGTH {
+                return Err(WasmValidationError::FunctionNameTooLong {
+                    name: format!(
+                        "{}...",
+                        fn_name
+                            .get(..limits::MAX_FUNCTION_NAME_LENGTH)
+                            .expect("len > limits::MAX_FUNCTION_NAME_LENGTH")
+                    ),
+                    max_length: limits::MAX_FUNCTION_NAME_LENGTH,
+                });
+            }
+            if func.params().len() > limits::MAX_FUNCTIONS_ARGUMENTS {
+                return Err(WasmValidationError::FunctionTooManyArguments {
+                    name: fn_name.to_string(),
+                    max_args: limits::MAX_FUNCTIONS_ARGUMENTS,
+                    num_args: func.params().len(),
+                });
+            }
+
+            if function_count > limits::MAX_FUNCTIONS {
+                return Err(WasmValidationError::TooManyFunctions {
+                    max_functions: limits::MAX_FUNCTIONS,
+                });
+            }
+
+            if func.params().iter().any(|t| matches!(t, Type::F32 | Type::F64)) ||
+                func.results().iter().any(|t| matches!(t, Type::F32 | Type::F64))
+            {
+                return Err(WasmValidationError::FunctionContainsFloats {
+                    name: fn_name.to_string(),
+                });
+            }
+        }
+    }
     Ok(())
 }

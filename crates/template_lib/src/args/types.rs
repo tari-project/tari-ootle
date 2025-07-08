@@ -36,7 +36,6 @@ use crate::{
     auth::{AuthHook, OwnerRule, ResourceAccessRules},
     models::{
         AddressAllocationId,
-        Amount,
         BucketId,
         ComponentAddress,
         ComponentAddressAllocation,
@@ -53,7 +52,10 @@ use crate::{
     prelude::{ComponentAccessRules, ConfidentialOutputStatement, TemplateAddress},
     resource::ResourceType,
     template::BuiltinTemplate,
-    types::crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    types::{
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+        Amount,
+    },
 };
 // -------------------------------- LOGS -------------------------------- //
 

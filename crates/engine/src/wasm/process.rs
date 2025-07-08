@@ -24,7 +24,7 @@ use log::*;
 use serde::{de::DeserializeOwned, Serialize};
 use tari_bor::{decode_exact, encode, encode_into_writer, encode_with_len_to_writer, encoded_len};
 use tari_engine_types::{indexed_value::IndexedValue, instruction_result::InstructionResult};
-use tari_template_abi::{CallInfo, EngineOp, FunctionDef};
+use tari_template_abi::{version, CallInfo, EngineOp, FunctionDef};
 use tari_template_lib::{
     args::{
         AddressAllocationInvokeArg,
@@ -61,11 +61,6 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::ootle::engine::wasm::process";
-
-// To update this version, update the cargo version here, in `tari_template_lib`, `tari_template_abi` and
-// `tari_template_macros` crates, and in the workspace root.
-/// The minimum supported version of the template_lib crate in the WASM.
-const MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION: &str = "0.10.0";
 
 pub struct WasmProcess {
     module: LoadedWasmTemplate,
@@ -252,12 +247,12 @@ impl WasmProcess {
     fn validate_template_tari_version(module: &LoadedWasmTemplate) -> Result<(), WasmExecutionError> {
         let template_tari_version = module.template_def().tari_version();
 
-        if are_versions_compatible(template_tari_version, MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION)? {
+        if are_versions_compatible(template_tari_version, version::MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION)? {
             log::debug!(target: LOG_TARGET, "The Tari version in the template WASM (\"{}\") is compatible with the one used in the engine", template_tari_version);
         } else {
-            log::error!(target: LOG_TARGET, "The Tari version in the template WASM (\"{}\") is incompatible with the one used in the engine (\"{}\")", template_tari_version, MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION);
+            log::error!(target: LOG_TARGET, "The Tari version in the template WASM (\"{}\") is incompatible with the one used in the engine (\"{}\")", template_tari_version, version::MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION);
             return Err(WasmExecutionError::TemplateVersionMismatch {
-                engine_version: MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION.to_owned(),
+                engine_version: version::MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION.to_owned(),
                 template_version: template_tari_version.to_owned(),
             });
         }

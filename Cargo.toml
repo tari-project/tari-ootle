@@ -96,11 +96,11 @@ tari_indexer_lib = { path = "crates/indexer_lib" }
 tari_rpc_state_sync = { path = "crates/rpc_state_sync" }
 tari_state_store_rocksdb = { path = "crates/state_store_rocksdb" }
 tari_state_tree = { path = "crates/state_tree" }
-tari_template_abi = { version = "0.10.0", path = "crates/template_abi", default-features = false }
+tari_template_abi = { version = "0.12.0", path = "crates/template_abi", default-features = false }
 tari_template_builtin = { path = "crates/template_builtin" }
 tari_template_lib = { path = "crates/template_lib" }
 tari_template_lib_types = { version = "0.10.3", path = "crates/template_lib_types" }
-tari_template_macros = { version = "0.10.0", path = "crates/template_macros" }
+tari_template_macros = { version = "0.12.0", path = "crates/template_macros" }
 tari_template_manager = { path = "crates/template_manager" }
 tari_template_test_tooling = { path = "crates/template_test_tooling" }
 tari_transaction = { path = "crates/transaction" }
@@ -164,6 +164,7 @@ bitflags = "2.4"
 blake2 = "0.10.6"
 borsh = { version = "1.5", default-features = false }
 bytes = "1.10.0"
+bnum = "0.13.0"
 cacache = "12.0.0"
 cargo_toml = "0.20.5"
 ciborium = { version = "0.2.2", default-features = false }

@@ -38,9 +38,9 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_template_lib::{
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-    models::Amount,
     prelude::{ResourceAddress, RistrettoPublicKeyBytes},
     resource::TOKEN_SYMBOL,
+    types::Amount,
 };
 use tari_transaction::{args, UnsignedTransaction};
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
@@ -86,7 +86,7 @@ pub async fn claim_burn(
     ownership_proof: CommitmentSignature<RistrettoPublicKey, RistrettoSecretKey>,
     reciprocal_claim_public_key: RistrettoPublicKey,
     wallet_daemon_name: String,
-    max_fee: i64,
+    max_fee: u64,
 ) -> Result<ClaimBurnResponse, WalletDaemonClientError> {
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
@@ -102,7 +102,7 @@ pub async fn claim_burn(
             "reciprocal_claim_public_key": BASE64.encode(reciprocal_claim_public_key.as_bytes()),
             "range_proof": BASE64.encode(range_proof.as_bytes()),
         }),
-        max_fee: Some(Amount(max_fee)),
+        max_fee: Some(max_fee),
         key_id: None,
     };
 
@@ -143,8 +143,8 @@ pub async fn reveal_burned_funds(world: &mut TariWorld, account_name: String, am
 
     let request = RevealFundsRequest {
         account: Some(ComponentAddressOrName::Name(account_name)),
-        amount_to_reveal: Amount(amount as i64),
-        max_fee: Some(Amount(5000)),
+        amount_to_reveal: amount.into(),
+        max_fee: Some(5000),
         pay_fee_from_reveal: true,
     };
 
@@ -199,8 +199,8 @@ pub async fn transfer_confidential(
 
     let create_transfer_proof_req = ProofsGenerateRequest {
         account: Some(source_account_name),
-        amount: Amount(amount as i64),
-        reveal_amount: Amount(0),
+        amount: amount.into(),
+        reveal_amount: Amount::zero(),
         resource_address,
         destination_public_key,
     };
@@ -210,13 +210,13 @@ pub async fn transfer_confidential(
     let proof_id = transfer_proof_resp.proof_id;
 
     let transaction = transaction_builder()
-        .fee_transaction_pay_from_component(source_component_address, Amount(5000))
+        .fee_transaction_pay_from_component(source_component_address, 5000)
         .call_method(source_component_address, "withdraw_confidential", args![
             resource_address,
             withdraw_proof
         ])
         .put_last_instruction_output_on_workspace("bucket")
-        .call_method(destination_account, "deposit", args![Variable("bucket")])
+        .call_method(destination_account, "deposit", args![Workspace("bucket")])
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
         .build_unsigned_transaction();
@@ -383,7 +383,7 @@ pub async fn list_account_nfts(
     submit_resp.nfts
 }
 
-pub async fn get_balance(world: &mut TariWorld, account_name: &str, wallet_daemon_name: &str) -> i64 {
+pub async fn get_balance(world: &mut TariWorld, account_name: &str, wallet_daemon_name: &str) -> Amount {
     let account_name = ComponentAddressOrName::Name(account_name.to_string());
     let get_balance_req = AccountsGetBalancesRequest {
         account: Some(account_name),
@@ -396,7 +396,7 @@ pub async fn get_balance(world: &mut TariWorld, account_name: &str, wallet_daemo
         .await
         .expect("Failed to get balance from account");
     eprintln!("resp = {}", serde_json::to_string_pretty(&resp).unwrap());
-    resp.balances.iter().map(|e| e.balance.value()).sum()
+    resp.balances.iter().map(|e| e.balance).sum()
 }
 
 pub async fn get_confidential_balance(
@@ -464,7 +464,7 @@ pub async fn submit_manifest_with_signing_keys(
     let instructions = parse_manifest(&manifest_content, globals, HashMap::new()).unwrap();
 
     let transaction = transaction_builder()
-        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(5000))
+        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), 5000)
         .with_instructions(instructions.instructions)
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
@@ -549,7 +549,7 @@ pub async fn submit_manifest(
     let AccountGetResponse { account, .. } = client.accounts_get_default().await.unwrap();
 
     let transaction = transaction_builder()
-        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(5000))
+        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), 5000)
         .with_instructions(instructions.instructions)
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
@@ -665,7 +665,7 @@ pub async fn create_component(
         .unwrap();
 
     let transaction = transaction_builder()
-        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(5000))
+        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), 5000)
         .call_function(template_address, &function_call, args)
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
@@ -769,7 +769,7 @@ pub async fn call_component(
     };
 
     let tx = transaction_builder()
-        .fee_transaction_pay_from_component(account_component_address, Amount(1000))
+        .fee_transaction_pay_from_component(account_component_address, 1000)
         .call_method(source_component_address, &function_call, vec![])
         .with_inputs(inputs)
         .build_unsigned_transaction();
@@ -825,7 +825,7 @@ pub async fn concurrent_call_component(
         let acc = account.clone();
         let clt = client.clone();
         let tx = transaction_builder()
-            .fee_transaction_pay_from_component(account_component_address, Amount(1000))
+            .fee_transaction_pay_from_component(account_component_address, 1000)
             .call_method(source_component_address, &function_call, vec![])
             .build_unsigned_transaction();
         join_set.spawn(submit_unsigned_tx_and_wait_for_response(clt, tx, acc, true));
@@ -867,7 +867,7 @@ pub async fn transfer(
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
     let account = Some(ComponentAddressOrName::Name(account_name));
-    let max_fee = Some(Amount(5000));
+    let max_fee = Some(5000);
 
     let request = AccountsTransferRequest {
         account,
@@ -894,7 +894,7 @@ pub async fn confidential_transfer(
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
     let account = Some(ComponentAddressOrName::Name(account_name));
-    let max_fee = Some(Amount(5000));
+    let max_fee = Some(5000);
 
     let request = ConfidentialTransferRequest {
         account,

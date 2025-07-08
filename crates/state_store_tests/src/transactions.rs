@@ -26,7 +26,7 @@ use tari_ootle_storage::{
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
 };
-use tari_template_lib::{models::Amount, prelude::SchnorrSignatureBytes, types::Hash};
+use tari_template_lib::{prelude::SchnorrSignatureBytes, types::Hash};
 use tari_transaction::{Instruction, Transaction};
 use tari_utilities::epoch_time::EpochTime;
 
@@ -280,8 +280,8 @@ mod transaction_execution_operations {
                     vec![],
                     TransactionResult::Accept(SubstateDiff::new()),
                     FeeReceipt {
-                        total_fee_payment: Amount(0),
-                        total_fees_paid: Amount(0),
+                        total_fee_payment: 0,
+                        total_fees_paid: 0,
                         cost_breakdown: FeeBreakdown::default(),
                     },
                 ),
@@ -304,8 +304,8 @@ mod transaction_execution_operations {
                     vec![],
                     TransactionResult::Accept(SubstateDiff::new()),
                     FeeReceipt {
-                        total_fee_payment: Amount(0),
-                        total_fees_paid: Amount(0),
+                        total_fee_payment: 0,
+                        total_fees_paid: 0,
                         cost_breakdown: FeeBreakdown::default(),
                     },
                 ),

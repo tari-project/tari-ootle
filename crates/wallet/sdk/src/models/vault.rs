@@ -2,10 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::substate::SubstateId;
-use tari_template_lib::{
-    models::{Amount, ResourceAddress},
-    resource::ResourceType,
-};
+use tari_template_lib::{models::ResourceAddress, resource::ResourceType, types::Amount};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VaultModel {
@@ -21,7 +18,9 @@ pub struct VaultModel {
 
 impl VaultModel {
     pub fn available_revealed_balance(&self) -> Amount {
-        self.revealed_balance - self.locked_revealed_balance
+        self.revealed_balance
+            .checked_sub(self.locked_revealed_balance)
+            .expect("Revealed balance should always be greater than or equal to locked revealed balance")
     }
 }
 

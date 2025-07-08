@@ -22,8 +22,9 @@ use tari_ootle_wallet_crypto::{
     WalletCryptoError,
 };
 use tari_template_lib::{
-    models::{Amount, ConfidentialOutputStatement, ConfidentialWithdrawProof, EncryptedData},
+    models::{ConfidentialOutputStatement, ConfidentialWithdrawProof, EncryptedData},
     prelude::PedersenCommitmentBytes,
+    types::Amount,
 };
 
 pub struct ConfidentialCryptoApi;
@@ -41,22 +42,31 @@ impl ConfidentialCryptoApi {
         kdfs::encrypted_data_dh_kdf_aead(private_key, public_nonce)
     }
 
-    pub fn generate_withdraw_proof(
+    pub fn generate_withdraw_proof<A: Into<Amount>>(
         &self,
         inputs: &[ConfidentialOutputMaskAndValue],
-        input_revealed_amount: Amount,
+        input_revealed_amount: A,
         output_statement: Option<&ConfidentialProofStatement>,
-        output_revealed_amount: Amount,
+        output_revealed_amount: A,
         change_statement: Option<&ConfidentialProofStatement>,
-        change_revealed_amount: Amount,
+        change_revealed_amount: A,
     ) -> Result<ConfidentialWithdrawProof, ConfidentialCryptoApiError> {
         let proof = create_withdraw_proof(
             inputs,
-            input_revealed_amount,
+            input_revealed_amount
+                .into()
+                .non_negative_checked()
+                .ok_or(ConfidentialCryptoApiError::NegativeAmount)?,
             output_statement,
-            output_revealed_amount,
+            output_revealed_amount
+                .into()
+                .non_negative_checked()
+                .ok_or(ConfidentialCryptoApiError::NegativeAmount)?,
             change_statement,
-            change_revealed_amount,
+            change_revealed_amount
+                .into()
+                .non_negative_checked()
+                .ok_or(ConfidentialCryptoApiError::NegativeAmount)?,
         )?;
         Ok(proof)
     }
@@ -82,14 +92,14 @@ impl ConfidentialCryptoApi {
         Ok(value_and_mask)
     }
 
-    pub fn generate_output_proof(
+    pub fn generate_output_proof<A: Into<Amount>>(
         &self,
         statement: &ConfidentialProofStatement,
-        revealed_amount: Amount,
+        revealed_amount: A,
     ) -> Result<ConfidentialOutputStatement, ConfidentialCryptoApiError> {
         let proof = create_confidential_output_statement(
             Some(statement).filter(|s| !s.amount.is_zero()),
-            revealed_amount,
+            revealed_amount.into(),
             None,
             Amount::zero(),
         )?;
@@ -154,4 +164,6 @@ pub enum ConfidentialCryptoApiError {
     ConfidentialProofError(#[from] ConfidentialProofError),
     #[error("Value lookup table error: {details}")]
     ValueLookupTableError { details: String },
+    #[error("Negative amount")]
+    NegativeAmount,
 }

@@ -321,7 +321,7 @@ mod access_rules_template {
         pub fn mint_resource(resource: ResourceAddress) -> Bucket {
             let manager = ResourceManager::get(resource);
             match manager.resource_type() {
-                ResourceType::Fungible => manager.mint_fungible(1000.into()),
+                ResourceType::Fungible => manager.mint_fungible(1000),
                 ResourceType::NonFungible => manager.mint_non_fungible(NonFungibleId::random(), &(), &()),
                 ty => panic!("Unsupported resource type {:?}", ty),
             }

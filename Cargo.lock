@@ -1208,6 +1208,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bnum"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "119771309b95163ec7aaf79810da82f7cd0599c19722d48b9c03894dca833966"
+dependencies = [
+ "borsh",
+]
+
+[[package]]
 name = "borsh"
 version = "1.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1816,7 +1825,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7486,7 +7495,7 @@ version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "af1844ef2428cc3e1cb900be36181049ef3d3193c63e43026cfe202983b27a56"
 dependencies = [
- "proc-macro-crate 1.1.3",
+ "proc-macro-crate 3.3.0",
  "proc-macro2",
  "quote",
  "syn 2.0.103",
@@ -11985,7 +11994,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_abi"
-version = "0.10.0"
+version = "0.12.0"
 dependencies = [
  "hashbrown 0.13.2",
  "serde",
@@ -12007,10 +12016,9 @@ dependencies = [
 
 [[package]]
 name = "tari_template_lib"
-version = "0.11.1"
+version = "0.12.0"
 dependencies = [
  "borsh",
- "newtype-ops",
  "serde",
  "serde_json",
  "tari_bor",
@@ -12024,7 +12032,10 @@ dependencies = [
 name = "tari_template_lib_types"
 version = "0.10.5"
 dependencies = [
+ "bincode 2.0.1",
+ "bnum",
  "borsh",
+ "newtype-ops",
  "serde",
  "serde_json",
  "tari_bor",
@@ -12034,7 +12045,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_macros"
-version = "0.10.0"
+version = "0.12.0"
 dependencies = [
  "indoc",
  "proc-macro2",
@@ -14195,7 +14206,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

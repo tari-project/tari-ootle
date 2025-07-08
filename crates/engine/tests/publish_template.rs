@@ -11,14 +11,13 @@ use tari_engine_types::{
     published_template::PublishedTemplateAddress,
     substate::{SubstateId, SubstateValue},
 };
-use tari_template_lib::models::Amount;
 use tari_template_test_tooling::TemplateTest;
 use tari_transaction::Transaction;
 
 #[test]
 fn publish_template_success() {
     let mut test = TemplateTest::new(Vec::<String>::new());
-    let (account_address, owner_proof, account_key, public_key) = test.create_custom_funded_account(Amount(250_000));
+    let (account_address, owner_proof, account_key, public_key) = test.create_custom_funded_account(250_000);
     let template = compile_template("tests/templates/hello_world", &[]).unwrap();
     let expected_binary_hash = hash_template_code(template.code());
     let expected_template_address = PublishedTemplateAddress::from_hash(
@@ -30,7 +29,7 @@ fn publish_template_success() {
 
     let result = test.execute_expect_success(
         Transaction::builder()
-            .fee_transaction_pay_from_component(account_address, Amount(200_000))
+            .fee_transaction_pay_from_component(account_address, 200_000)
             .publish_template(template.code().to_vec())
             .build_and_seal(&account_key),
         vec![owner_proof],
@@ -59,10 +58,10 @@ fn publish_template_success() {
 #[test]
 fn publish_template_invalid_binary() {
     let mut test = TemplateTest::new(Vec::<String>::new());
-    let (account_address, owner_proof, account_key, _) = test.create_custom_funded_account(Amount(250_000));
+    let (account_address, owner_proof, account_key, _) = test.create_custom_funded_account(250_000);
     let result = test.execute_expect_failure(
         Transaction::builder()
-            .fee_transaction_pay_from_component(account_address, Amount(200_000))
+            .fee_transaction_pay_from_component(account_address, 200_000)
             .publish_template(vec![1, 2, 3])
             .build_and_seal(&account_key),
         vec![owner_proof],
@@ -78,12 +77,12 @@ fn publish_template_invalid_binary() {
 #[test]
 fn publish_template_too_big_binary() {
     let mut test = TemplateTest::new(Vec::<String>::new());
-    let (account_address, owner_proof, account_key, _) = test.create_custom_funded_account(Amount(250_000));
+    let (account_address, owner_proof, account_key, _) = test.create_custom_funded_account(250_000);
     let random_wasm_binary = generate_random_binary(6 * 1000 * 1000); // 6 MB
     let wasm_binary_size = random_wasm_binary.len();
     let result = test.execute_expect_failure(
         Transaction::builder()
-            .fee_transaction_pay_from_component(account_address, Amount(200_000))
+            .fee_transaction_pay_from_component(account_address, 200_000)
             .publish_template(random_wasm_binary)
             .build_and_seal(&account_key),
         vec![owner_proof],

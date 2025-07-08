@@ -26,9 +26,6 @@
 mod address_allocation;
 pub use address_allocation::*;
 
-mod amount;
-pub use amount::Amount;
-
 mod binary_tag;
 pub use binary_tag::BinaryTag;
 
@@ -60,4 +57,5 @@ mod system;
 pub use system::SystemAddress;
 
 mod vault;
+
 pub use vault::{Vault, VaultId, VaultRef};

@@ -3,7 +3,7 @@
 
 syntax = "proto3";
 
-package tari.dan.transaction;
+package tari.ootle.transaction;
 
 import "common.proto";
 
@@ -80,7 +80,7 @@ message Instruction {
   // AssertBucketContains
   WorkspaceOffsetId assert_bucket_workspace_id = 20;
   bytes resource_address = 21;
-  int64 min_amount = 22;
+  tari.ootle.common.Amount min_amount = 22;
 
   // PublishTemplate
   bytes template_binary = 23;
@@ -133,7 +133,7 @@ message VersionedSubstateId {
 
 message ConfidentialWithdrawProof {
   repeated bytes inputs = 1;
-  uint64 input_revealed_amount = 2;
+  tari.ootle.common.Amount input_revealed_amount = 2;
   ConfidentialOutputStatement output_proof = 3;
   bytes balance_proof = 4;
 }
@@ -142,8 +142,8 @@ message ConfidentialOutputStatement {
   ConfidentialStatement output_statement = 1;
   ConfidentialStatement change_statement = 2;
   bytes range_proof = 3;
-  uint64 output_revealed_amount = 4;
-  uint64 change_revealed_amount = 5;
+  tari.ootle.common.Amount output_revealed_amount = 4;
+  tari.ootle.common.Amount change_revealed_amount = 5;
 }
 
 message ConfidentialStatement {

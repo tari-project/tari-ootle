@@ -69,7 +69,7 @@ pub struct LogIntent {
 #[derive(Debug, Clone)]
 pub enum ManifestLiteral {
     Lit(Lit),
-    Variable(Ident),
+    Workspace(Ident),
     Special(SpecialLiteral),
 }
 
@@ -364,7 +364,7 @@ fn build_arguments(args: Punctuated<Expr, Comma>) -> Result<Vec<ManifestLiteral>
 
             Expr::Path(expr_path) => {
                 if let Some(seg) = expr_path.path.segments.first() {
-                    Ok(ManifestLiteral::Variable(seg.ident.clone()))
+                    Ok(ManifestLiteral::Workspace(seg.ident.clone()))
                 } else {
                     Err(syn::Error::new_spanned(
                         expr_path,

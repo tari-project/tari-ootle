@@ -20,10 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{
-    convert::TryFrom,
-    sync::{Arc, Mutex, RwLock},
-};
+use std::sync::{Arc, Mutex, RwLock};
 
 use indexmap::IndexMap;
 use log::*;
@@ -42,7 +39,7 @@ use tari_engine_types::{
 use tari_ootle_common_types::Epoch;
 use tari_template_lib::{
     auth::{ComponentAccessRules, OwnerRule},
-    models::{Amount, ComponentAddress, ComponentAddressAllocation, Metadata, UnclaimedConfidentialOutputAddress},
+    models::{ComponentAddress, ComponentAddressAllocation, Metadata, UnclaimedConfidentialOutputAddress},
     prelude::{RistrettoPublicKeyBytes, TemplateAddress},
     types::Hash,
 };
@@ -356,12 +353,12 @@ impl StateTracker {
         })
     }
 
-    pub fn total_fee_payments(&self) -> Amount {
+    pub fn total_fee_payments(&self) -> u64 {
         self.read_with(|state| state.fee_state().total_payments())
     }
 
-    pub fn total_fee_charges(&self) -> Amount {
-        self.read_with(|state| Amount::try_from(state.fee_state().total_charges()).expect("fee overflowed i64::MAX"))
+    pub fn total_fee_charges(&self) -> u64 {
+        self.read_with(|state| state.fee_state().total_charges())
     }
 
     pub(super) fn read_with<R, F: FnOnce(&WorkingState) -> R>(&self, f: F) -> R {

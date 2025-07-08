@@ -100,7 +100,6 @@ use tari_template_lib::{
     call_args,
     constants::{CONFIDENTIAL_TARI_RESOURCE_ADDRESS, XTR},
     models::{
-        Amount,
         BucketId,
         ComponentAddress,
         ComponentAddressAllocation,
@@ -115,7 +114,7 @@ use tari_template_lib::{
     prelude::{ResourceType, RistrettoPublicKeyBytes},
     resource::{IMAGE_URL, TOKEN_SYMBOL},
     template::BuiltinTemplate,
-    types::{EntityId, TemplateAddress},
+    types::{Amount, EntityId, TemplateAddress},
 };
 
 use super::{working_state::WorkingState, Runtime};
@@ -1155,7 +1154,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let resource_type = state.get_resource(&resource_lock)?.resource_type();
                     let vault_id = state.id_provider()?.new_vault_id()?;
                     let resource = match resource_type {
-                        ResourceType::Fungible => ResourceContainer::fungible(*resource_address, 0.into()),
+                        ResourceType::Fungible => ResourceContainer::fungible(*resource_address, Amount::zero()),
                         ResourceType::NonFungible => {
                             ResourceContainer::non_fungible(*resource_address, Default::default())
                         },
@@ -1296,10 +1295,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         },
                         VaultWithdrawArg::NonFungible { ids } => {
                             let container = vault_mut.withdraw_non_fungibles(&ids)?;
-                            let amount =
-                                Amount(ids.len().try_into().map_err(|_| RuntimeError::NumericConversionError {
-                                    details: "Could not convert to i64".to_owned(),
-                                })?);
+                            let amount = ids.len().into();
                             (container, amount)
                         },
                         VaultWithdrawArg::Confidential { proof } => {

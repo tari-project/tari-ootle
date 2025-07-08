@@ -21,23 +21,23 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 pub mod transaction {
-    include!(concat!(env!("OUT_DIR"), "/tari.dan.transaction.rs"));
+    include!(concat!(env!("OUT_DIR"), "/tari.ootle.transaction.rs"));
 }
 
 pub mod consensus {
-    include!(concat!(env!("OUT_DIR"), "/tari.dan.consensus.rs"));
+    include!(concat!(env!("OUT_DIR"), "/tari.ootle.consensus.rs"));
 }
 
 pub mod network {
     #![allow(clippy::large_enum_variant)]
-    include!(concat!(env!("OUT_DIR"), "/tari.dan.network.rs"));
+    include!(concat!(env!("OUT_DIR"), "/tari.ootle.network.rs"));
 }
 
 pub mod rpc {
     #![allow(clippy::large_enum_variant)]
-    include!(concat!(env!("OUT_DIR"), "/tari.dan.rpc.rs"));
+    include!(concat!(env!("OUT_DIR"), "/tari.ootle.rpc.rs"));
 }
 
 pub mod common {
-    include!(concat!(env!("OUT_DIR"), "/tari.dan.common.rs"));
+    include!(concat!(env!("OUT_DIR"), "/tari.ootle.common.rs"));
 }

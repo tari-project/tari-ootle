@@ -113,19 +113,18 @@ mod sparkle_nft_template {
             self.vault.balance()
         }
 
-        pub fn burn(&mut self, bucket: Bucket) {
-            // this check is actually not needed, but with it we cover the "bucket.resource_type" method
-            assert!(
-                bucket.resource_type() == ResourceType::NonFungible,
+        pub fn burn(&self, bucket: Bucket) {
+            assert_eq!(
+                bucket.resource_type(),
+                ResourceType::NonFungible,
                 "The resource is not a NFT"
             );
-            assert!(
-                bucket.resource_address() == self.address,
+            assert_eq!(
+                bucket.resource_address(),
+                self.address,
                 "Cannot burn bucket not from this collection"
             );
             debug!("Burning bucket {} containing {}", bucket, bucket.amount());
-            // This is all that's required, typically the template would not need to include a burn function because a
-            // native instruction can be used instead
             bucket.burn();
         }
 

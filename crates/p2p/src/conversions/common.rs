@@ -26,7 +26,10 @@ use anyhow::Context;
 use tari_consensus_types::ValidatorSignatureBytes;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_ootle_common_types::{Epoch, SubstateAddress};
-use tari_template_lib::prelude::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
+use tari_template_lib::{
+    prelude::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
+    types::Amount,
+};
 use tari_transaction::TransactionSignature;
 
 use crate::proto;
@@ -143,5 +146,25 @@ impl From<proto::common::Epoch> for Epoch {
 impl From<Epoch> for proto::common::Epoch {
     fn from(epoch: Epoch) -> Self {
         Self { epoch: epoch.as_u64() }
+    }
+}
+
+//---------------------------------- Amount --------------------------------------------//
+
+impl From<proto::common::Amount> for Amount {
+    fn from(value: proto::common::Amount) -> Self {
+        let digits = [value.digit1, value.digit2, value.digit3];
+        Self::from_le_digits(digits)
+    }
+}
+
+impl From<Amount> for proto::common::Amount {
+    fn from(value: Amount) -> Self {
+        let digits = value.to_le_digits();
+        Self {
+            digit1: digits[0],
+            digit2: digits[1],
+            digit3: digits[2],
+        }
     }
 }

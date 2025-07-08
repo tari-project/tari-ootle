@@ -8,13 +8,14 @@ use tari_engine::runtime::{AssertError, RuntimeError};
 use tari_template_lib::{
     args::WorkspaceOffsetId,
     call_args,
-    models::{Amount, ComponentAddress, NonFungibleAddress, ResourceAddress},
+    models::{ComponentAddress, NonFungibleAddress, ResourceAddress},
     prelude::XTR,
+    types::Amount,
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 use tari_transaction::{args, Instruction, Transaction};
 
-const FAUCET_WITHDRAWAL_AMOUNT: Amount = Amount::new(1000);
+const FAUCET_WITHDRAWAL_AMOUNT: u32 = 1000;
 
 struct AssertTest {
     template_test: TemplateTest,
@@ -30,7 +31,7 @@ fn setup() -> AssertTest {
 
     let faucet_template = template_test.get_template_address("TestFaucet");
 
-    let initial_supply = Amount(1_000_000_000_000);
+    let initial_supply = Amount::from(1_000_000_000_000u64);
     let result = template_test
         .execute_and_commit(
             vec![Instruction::CallFunction {
@@ -126,8 +127,8 @@ fn it_fails_with_invalid_amount() {
     assert_reject_reason(
         reason,
         RuntimeError::AssertError(AssertError::InvalidAmount {
-            expected: min_amount,
-            got: FAUCET_WITHDRAWAL_AMOUNT,
+            expected: min_amount.into(),
+            got: FAUCET_WITHDRAWAL_AMOUNT.into(),
         }),
     );
 }
@@ -164,7 +165,7 @@ fn it_fails_with_invalid_workspace_key() {
             .add_instruction(Instruction::AssertBucketContains {
                 key: WorkspaceOffsetId::new(999),
                 resource_address: test.faucet_resource,
-                min_amount: FAUCET_WITHDRAWAL_AMOUNT
+                min_amount: FAUCET_WITHDRAWAL_AMOUNT.into()
             })
             .call_method(test.account, "deposit", args![Workspace("faucet_bucket")])
             .build_and_seal(&test.account_key),

@@ -14,11 +14,11 @@ impl<T, const TAG: u64> BorTag<T, TAG> {
         Self(Required(t))
     }
 
-    pub fn inner(&self) -> &T {
+    pub const fn inner(&self) -> &T {
         &self.0 .0
     }
 
-    pub fn inner_mut(&mut self) -> &mut T {
+    pub const fn inner_mut(&mut self) -> &mut T {
         &mut self.0 .0
     }
 

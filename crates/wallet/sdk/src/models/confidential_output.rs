@@ -7,6 +7,7 @@ use tari_engine_types::substate::SubstateId;
 use tari_template_lib::{
     models::EncryptedData,
     prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    types::Amount,
 };
 
 use crate::models::ConfidentialProofId;
@@ -16,7 +17,7 @@ pub struct ConfidentialOutputModel {
     pub account_address: SubstateId,
     pub vault_address: SubstateId,
     pub commitment: PedersenCommitmentBytes,
-    pub value: u64,
+    pub value: Amount,
     pub sender_public_nonce: Option<RistrettoPublicKeyBytes>,
     pub encryption_secret_key_index: u64,
     pub encrypted_data: EncryptedData,

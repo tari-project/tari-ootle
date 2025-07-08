@@ -346,13 +346,13 @@ async fn check_account_confidential_balance_is_via_daemon(
     let current_balance = wallet_daemon_cli::get_confidential_balance(world, account_name, wallet_daemon_name).await;
     match least_or_most.to_lowercase().as_str() {
         "least" => {
-            if current_balance.value() < amount {
+            if current_balance < amount {
                 println!("Expected balance to be at least {} but was {}", amount, current_balance);
                 panic!("Expected balance to be at least {} but was {}", amount, current_balance);
             }
         },
         "most" => {
-            if current_balance.value() > amount {
+            if current_balance > amount {
                 println!("Expected balance to be at most {} but was {}", amount, current_balance);
                 panic!("Expected balance to be at most {} but was {}", amount, current_balance);
             }
@@ -413,7 +413,7 @@ async fn when_transfer_via_wallet_daemon(
 )]
 async fn when_confidential_transfer_via_wallet_daemon(
     world: &mut TariWorld,
-    amount: i64,
+    amount: u64,
     account_name: String,
     destination_public_key: String,
     wallet_daemon_name: String,
@@ -425,7 +425,7 @@ async fn when_confidential_transfer_via_wallet_daemon(
         world,
         account_name,
         destination_public_key,
-        Amount(amount),
+        amount.into(),
         wallet_daemon_name,
         outputs_name,
     )

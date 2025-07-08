@@ -2,9 +2,10 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_crypto::ristretto::RistrettoSecretKey;
+use tari_template_lib::types::Amount;
 
 #[derive(Debug, Clone)]
 pub struct ConfidentialOutputMaskAndValue {
-    pub value: u64,
+    pub value: Amount,
     pub mask: RistrettoSecretKey,
 }

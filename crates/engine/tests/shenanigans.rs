@@ -6,8 +6,9 @@ use tari_engine_types::{indexed_value::IndexedWellKnownTypes, resource_container
 use tari_template_lib::{
     args::VaultAction,
     constants::XTR,
-    models::{Amount, ComponentAddress, ResourceAddress},
+    models::{ComponentAddress, ResourceAddress},
     prelude::ResourceType,
+    types::Amount,
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 use tari_transaction::{args, Transaction};
@@ -242,7 +243,7 @@ fn it_disallows_calls_on_vaults_that_are_not_owned_by_current_component() {
             .call_function(
                 template_addr,
                 "attempt_to_steal_funds_using_cross_template_call",
-                args![vault_id, attacker, Some(Amount(1000))],
+                args![vault_id, attacker, Some(Amount::from(1000))],
             )
             .build_and_seal(test.secret_key()),
         vec![test.get_test_proof()],

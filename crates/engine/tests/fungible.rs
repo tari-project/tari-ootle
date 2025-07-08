@@ -1,0 +1,137 @@
+//   Copyright 2023 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+use tari_engine_types::vault::Vault;
+use tari_template_lib::{
+    prelude::{ComponentAddress, ResourceType},
+    types::Amount,
+};
+use tari_template_test_tooling::{
+    support::confidential::{generate_confidential_output_statement, generate_withdraw_proof_with_inputs},
+    TemplateTest,
+};
+use tari_transaction::{args, Transaction};
+
+#[test]
+fn it_does_not_overflow_when_minting_a_huge_initial_supply() {
+    let mut test = TemplateTest::new(["tests/templates/fungible"]);
+    let template = test.get_template_address("Fungible");
+
+    let result = test.execute_expect_success(
+        Transaction::builder()
+            .call_function(template, "with_supply", args![Amount::MAX])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    let component: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
+    let all_to_confidential = generate_withdraw_proof_with_inputs(&[], Amount::MAX, Amount::MAX, None, Amount::zero());
+    test.execute_expect_success(
+        Transaction::builder()
+            .call_method(component, "convert", args![all_to_confidential.proof])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    let confidential_vault = get_confidential_vault(&test, component);
+    assert_eq!(confidential_vault.balance(), Amount::zero());
+    assert_eq!(confidential_vault.get_confidential_commitments().unwrap().len(), 1);
+}
+
+#[test]
+fn it_does_not_overflow_when_minting_more_then_amount_max_fungible_tokens() {
+    let mut test = TemplateTest::new(["tests/templates/fungible"]);
+    let template = test.get_template_address("Fungible");
+    // let (account, _, _) = test.create_empty_account();
+
+    // let (mut initial_supply, mask, _) = generate_confidential_proof(Amount::MAX, None);
+    // initial_supply.output_revealed_amount = Amount::MAX;
+
+    let result = test.execute_expect_success(
+        Transaction::builder()
+            .call_function(template, "with_supply", args![i64::MAX])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    let component: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
+
+    test.execute_expect_success(
+        Transaction::builder()
+            .call_method(component, "fungible_mint_more", args![i64::MAX])
+            .call_method(component, "fungible_mint_more", args![i64::MAX])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    let vault = get_fungible_vault(&test, component);
+    assert_eq!(vault.balance(), Amount::from(i64::MAX) * Amount::from(3));
+}
+
+#[test]
+fn it_does_not_overflow_when_minting_more_then_amount_max_confidential_tokens() {
+    let mut test = TemplateTest::new(["tests/templates/fungible"]);
+    let template = test.get_template_address("Fungible");
+
+    let all_to_confidential = generate_withdraw_proof_with_inputs(&[], Amount::MAX, Amount::MAX, None, Amount::zero());
+    test.execute_expect_success(Transaction::builder().build_and_seal(test.secret_key()), vec![]);
+
+    let result = test.execute_expect_success(
+        Transaction::builder()
+            .allocate_component_address("fungible")
+            .call_function(template, "with_address_and_supply", args![
+                Workspace("fungible"),
+                Amount::MAX
+            ])
+            .call_method("fungible", "convert", args![all_to_confidential.proof])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    let component: ComponentAddress = result.finalize.execution_results[1].decode().unwrap();
+
+    // total supply will be 3 x Amount::MAX
+    let (more_supply1, _mask, _) = generate_confidential_output_statement(Amount::MAX, None);
+    let (more_supply2, _mask, _) = generate_confidential_output_statement(Amount::MAX, None);
+
+    test.execute_expect_success(
+        Transaction::builder()
+            .call_method(component, "confidential_mint_more", args![more_supply1])
+            .call_method(component, "confidential_mint_more", args![more_supply2])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    let confidential_vault = get_confidential_vault(&test, component);
+    assert_eq!(confidential_vault.get_confidential_commitments().unwrap().len(), 3);
+}
+
+fn get_confidential_vault(test: &TemplateTest, component: ComponentAddress) -> Vault {
+    get_vault_by_resource_type(test, component, ResourceType::Confidential)
+}
+
+fn get_fungible_vault(test: &TemplateTest, component: ComponentAddress) -> Vault {
+    get_vault_by_resource_type(test, component, ResourceType::Fungible)
+}
+
+fn get_vault_by_resource_type(test: &TemplateTest, component: ComponentAddress, resource_type: ResourceType) -> Vault {
+    let indexed = test
+        .read_only_state_store()
+        .get_component(component)
+        .unwrap()
+        .body
+        .to_indexed_well_known_types()
+        .unwrap();
+    indexed
+        .vault_ids()
+        .iter()
+        .find_map(|vault_id| {
+            let vault = test.read_only_state_store().get_vault(vault_id).unwrap();
+            if vault.resource_type() == resource_type {
+                Some(vault)
+            } else {
+                None
+            }
+        })
+        .expect("No vault found for the specified resource type")
+}

@@ -36,7 +36,7 @@ mod template {
             if amount.is_zero() || amount.is_negative() {
                 panic!("Amount must be greater than zero");
             }
-            if amount >= Amount(10) {
+            if amount >= Amount::from(10) {
                 panic!("Amount must be less than or equal to 10");
             }
 
@@ -46,9 +46,10 @@ mod template {
             metadata.insert("original_owner", &owner);
 
             let mut counter = 0;
+            let amount_to_mint = amount.to_u64_checked().expect("Amount must be a positive");
             let manager = ResourceManager::get(NFT_FAUCET_RESOURCE_ADDRESS);
             manager.mint_many_non_fungible_with(&metadata, &mutable_data, || {
-                if counter == amount.value() as u64 {
+                if counter == amount_to_mint {
                     return None;
                 }
                 let id = NonFungibleId::from_u64(self.serial_number);

@@ -4,10 +4,7 @@
 use tari_engine::runtime::RuntimeError;
 use tari_engine_types::instruction::Instruction;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::{
-    call_args,
-    models::{Amount, ComponentAddress},
-};
+use tari_template_lib::{call_args, models::ComponentAddress, types::Amount};
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 use tari_transaction::{args, Transaction};
 
@@ -61,7 +58,7 @@ fn builtin_vault_events() {
 
     // create a fungible resource for transfer
     let faucet_template = template_test.get_template_address("TestFaucet");
-    let initial_supply = Amount(1_000_000_000_000);
+    let initial_supply = Amount::from(1_000_000_000_000u64);
     let result = template_test
         .execute_and_commit(
             vec![Instruction::CallFunction {
@@ -95,12 +92,12 @@ fn builtin_vault_events() {
         .expect_success();
 
     // transfer some tokens between accounts
-    let amount = Amount(100);
+    let amount = Amount::from(100);
     let result = template_test.build_and_execute(
         Transaction::builder()
             .call_method(sender_address, "withdraw", args![faucet_resource, amount])
             .put_last_instruction_output_on_workspace("foo_bucket")
-            .call_method(receiver_address, "deposit", args![Variable("foo_bucket")]),
+            .call_method(receiver_address, "deposit", args![Workspace("foo_bucket")]),
         // Sender proof needed to withdraw
         vec![sender_proof],
     );

@@ -80,7 +80,7 @@ impl Transaction {
                 details: e.to_string(),
             })?,
             finalize: self.result.as_deref().map(deserialize_json).transpose()?,
-            final_fee: self.final_fee.map(|f| f.into()),
+            final_fee: self.final_fee.map(|f| f as u64),
             qcs: self.qcs.map(|q| deserialize_json(&q)).transpose()?.unwrap_or_default(),
             new_account_info: self.new_account_info.as_deref().map(deserialize_json).transpose()?,
             is_dry_run: self.is_dry_run,

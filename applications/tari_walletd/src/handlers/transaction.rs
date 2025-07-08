@@ -11,7 +11,6 @@ use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::ToByteType;
 use tari_ootle_common_types::{optional::Optional, Epoch, Network};
 use tari_ootle_wallet_sdk::apis::{config::ConfigKey, key_manager};
-use tari_template_lib::models::Amount;
 use tari_transaction::{args, Transaction};
 use tari_transaction_manifest::parse_manifest;
 use tari_wallet_daemon_client::{
@@ -65,16 +64,13 @@ pub async fn handle_submit_instruction(
         builder = builder.put_last_instruction_output_on_workspace("bucket").call_method(
             dump_account.address.as_component_address().unwrap(),
             "deposit",
-            args![Variable("bucket")],
+            args![Workspace("bucket")],
         );
     }
     let fee_account = get_account(&req.fee_account, &sdk.accounts_api())?;
 
     let transaction = builder
-        .fee_transaction_pay_from_component(
-            fee_account.address.as_component_address().unwrap(),
-            req.max_fee.try_into()?,
-        )
+        .fee_transaction_pay_from_component(fee_account.address.as_component_address().unwrap(), req.max_fee)
         .with_min_epoch(req.min_epoch.map(Epoch))
         .with_max_epoch(req.max_epoch.map(Epoch))
         .build_unsigned_transaction();
@@ -260,8 +256,7 @@ pub async fn handle_submit_manifest(
 
     let network = context.wallet_sdk().config_api().get::<Network>(ConfigKey::Network)?;
 
-    let fee_amount = Amount::try_from(req.max_fee)
-        .map_err(|_| invalid_params("max_fee", Some("Invalid max_fee value".to_string())))?;
+    let fee_amount = req.max_fee;
 
     let (_, acc_key) = sdk
         .key_manager_api()
@@ -273,7 +268,7 @@ pub async fn handle_submit_manifest(
                 builder.call_method(
                     default_account.address.as_component_address().unwrap(),
                     "pay_fee",
-                    args![fee_amount],
+                    args![Amount(fee_amount)],
                 )
             } else {
                 builder.with_instructions(instructions.fee_instructions)
@@ -453,7 +448,7 @@ pub async fn handle_wait_result(
                     transaction_id: req.transaction_id,
                     result: None,
                     status: transaction.status,
-                    final_fee: Amount::zero(),
+                    final_fee: 0,
                     timed_out: true,
                 });
             },
@@ -484,10 +479,7 @@ pub async fn handle_publish_template(
     };
 
     let transaction = transaction_builder(context)
-        .fee_transaction_pay_from_component(
-            fee_account.address.as_component_address().unwrap(),
-            req.max_fee.try_into()?,
-        )
+        .fee_transaction_pay_from_component(fee_account.address.as_component_address().unwrap(), req.max_fee)
         .publish_template(wasm_binary)
         .build_unsigned_transaction();
 

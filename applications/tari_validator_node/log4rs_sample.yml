@@ -3,7 +3,7 @@
 #    * Console: For log messages with level INFO and higher
 #    * log/validator-node/network.log: INFO-level logs related to the comms crate. This file will be quite busy since there
 #      are lots of P2P debug messages, and so this traffic is segregated from the application log messages
-#    * log/validator-node/dan_layer.log: Non-comms related INFO-level messages and higher are logged into this file
+#    * log/validator-node/ootle.log: Non-comms related INFO-level messages and higher are logged into this file
 #    * log/validator-node/other.log: Third-party crates' messages will be logged here at an ERROR level
 #
 #  See https://docs.rs/log4rs/0.8.3/log4rs/encode/pattern/index.html for deciphering the log pattern. The log format
@@ -38,10 +38,10 @@ appenders:
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [Thread:{I}] {l:5} {m}// {f}:{L}{n}"
 
-  # An appender named "dan_layer" that writes to a file with a custom pattern encoder
-  dan_layer:
+  # An appender named "ootle" that writes to a file with a custom pattern encoder
+  ootle:
     kind: rolling_file
-    path: "{{log_dir}}/log/validator-node/dan_layer.log"
+    path: "{{log_dir}}/log/validator-node/ootle.log"
     policy:
       kind: compound
       trigger:
@@ -51,11 +51,11 @@ appenders:
         kind: fixed_window
         base: 1
         count: 5
-        pattern: "{{log_dir}}/log/validator-node/dan_layer.{}.log"
+        pattern: "{{log_dir}}/log/validator-node/ootle.{}.log"
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [{X(node-public-key)},{X(node-id)}] {l:5} {m} // {f}:{L}{n}"
 
-  # An appender named "dan_layer" that writes to a file with a custom pattern encoder
+  # An appender named "ootle" that writes to a file with a custom pattern encoder
   engine:
     kind: rolling_file
     path: "{{log_dir}}/log/validator-node/engine.log"
@@ -72,7 +72,7 @@ appenders:
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [{X(node-public-key)},{X(node-id)}] {l:5} {m} // {f}:{L}{n}"
 
-  # An appender named "dan_layer" that writes to a file with a custom pattern encoder
+  # An appender named "ootle" that writes to a file with a custom pattern encoder
   consensus:
     kind: rolling_file
     path: "{{log_dir}}/log/validator-node/consensus.log"
@@ -136,7 +136,7 @@ loggers:
   tari::application:
     level: info
     appenders:
-      - dan_layer
+      - ootle
       - other
       - stdout
     additive: false
@@ -144,14 +144,14 @@ loggers:
   tari::validator_node:
     level: debug
     appenders:
-      - dan_layer
+      - ootle
       - stdout
     additive: false
 
   tari::ootle:
     level: debug
     appenders:
-      - dan_layer
+      - ootle
       - stdout
     additive: false
 

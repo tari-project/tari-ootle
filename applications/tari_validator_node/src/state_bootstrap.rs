@@ -39,7 +39,7 @@ use tari_template_lib::{
         XTR_FAUCET_COMPONENT_ADDRESS,
         XTR_FAUCET_VAULT_ADDRESS,
     },
-    models::{Amount, Metadata},
+    models::Metadata,
     prelude::{ResourceType, RistrettoPublicKeyBytes},
     resource::TOKEN_SYMBOL,
     rule,
@@ -154,7 +154,8 @@ where
     let value = Vault::new(ResourceContainer::Confidential {
         address: CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
         commitments: Default::default(),
-        revealed_amount: Amount::MAX,
+        // just under 18.5 trillion tXTR
+        revealed_amount: u64::MAX.into(),
         locked_commitments: Default::default(),
         locked_revealed_amount: Default::default(),
     });

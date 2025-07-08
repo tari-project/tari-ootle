@@ -23,21 +23,23 @@
 use serde::{Deserialize, Serialize};
 use tari_bor::BorTag;
 use tari_template_abi::{call_engine, rust::fmt, EngineOp};
-#[cfg(feature = "ts")]
-use ts_rs::TS;
 
-use super::{NonFungible, NonFungibleId};
+use super::{BinaryTag, ConfidentialWithdrawProof, NonFungible, NonFungibleId, Proof, ResourceAddress};
 use crate::{
     args::{BucketAction, BucketInvokeArg, BucketRef, InvokeResult},
-    models::{Amount, BinaryTag, ConfidentialWithdrawProof, Proof, ResourceAddress},
     prelude::ResourceType,
+    types::Amount,
 };
 
 const TAG: u64 = BinaryTag::BucketId.as_u64();
 
 /// A bucket identifier. This identifier is assigned at runtime.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Ord, PartialOrd, Hash)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct BucketId(#[cfg_attr(feature = "ts", ts(type = "number"))] BorTag<u32, TAG>);
 
 impl From<u32> for BucketId {
@@ -99,7 +101,7 @@ impl Bucket {
     /// * for confidential resources, the `amount` is the number of revealed tokens to withdraw. Use `take_confidential`
     ///   to withdraw confidential tokens with a proof.
     pub fn take(&mut self, amount: Amount) -> Self {
-        assert!(!amount.is_zero() && amount.is_positive());
+        assert!(amount.is_positive());
         let resp: InvokeResult = call_engine(EngineOp::BucketInvoke, &BucketInvokeArg {
             bucket_ref: BucketRef::Ref(self.id),
             action: BucketAction::Take,

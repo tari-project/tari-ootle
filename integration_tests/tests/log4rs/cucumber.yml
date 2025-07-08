@@ -3,7 +3,7 @@
 #    * Console: For log messages with level INFO and higher
 #    * log/validator-node/network.log: INFO-level logs related to the comms crate. This file will be quite busy since there
 #      are lots of P2P debug messages, and so this traffic is segregated from the application log messages
-#    * log/validator-node/dan_layer.log: Non-comms related INFO-level messages and higher are logged into this file
+#    * log/validator-node/ootle.log: Non-comms related INFO-level messages and higher are logged into this file
 #    * log/validator-node/other.log: Third-party crates' messages will be logged here at an ERROR level
 #
 #  See https://docs.rs/log4rs/0.8.3/log4rs/encode/pattern/index.html for deciphering the log pattern. The log format
@@ -12,10 +12,10 @@
 refresh_rate: 30 seconds
 appenders:
 
-  # An appender named "dan_layer" that writes to a file with a custom pattern encoder
-  dan_layer:
+  # An appender named "ootle" that writes to a file with a custom pattern encoder
+  ootle:
     kind: rolling_file
-    path: "{{log_dir}}/dan_layer.log"
+    path: "{{log_dir}}/ootle.log"
     policy:
       kind: compound
       trigger:
@@ -25,7 +25,7 @@ appenders:
         kind: fixed_window
         base: 1
         count: 10
-        pattern: "{{log_dir}}/dan_layer.{}.log"
+        pattern: "{{log_dir}}/ootle.{}.log"
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S)} [{t}] {l:5} {m}// {f}:{L}{n}"
 
@@ -122,19 +122,19 @@ loggers:
   cucumber:
     level: debug
     appenders:
-      - dan_layer
+      - ootle
     additive: false
 
   tari::application:
     level: debug
     appenders:
-      - dan_layer
+      - ootle
     additive: false
 
   tari::validator_node:
     level: debug
     appenders:
-      - dan_layer
+      - ootle
     additive: false
 
   tari::ootle::wallet_daemon:
@@ -151,13 +151,13 @@ loggers:
   tari::ootle:
     level: debug
     appenders:
-      - dan_layer
+      - ootle
     additive: false
 
   tari::indexer:
     level: debug
     appenders:
-      - dan_layer
+      - ootle
     additive: false
 
   # Route log events sent to the "core" logger to the "base_layer" appender

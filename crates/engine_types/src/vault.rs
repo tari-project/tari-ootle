@@ -25,9 +25,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_template_lib::{
-    models::{Amount, ConfidentialWithdrawProof, NonFungibleId, ResourceAddress, VaultId},
+    models::{ConfidentialWithdrawProof, NonFungibleId, ResourceAddress, VaultId},
     prelude::ResourceType,
-    types::crypto::PedersenCommitmentBytes,
+    types::{crypto::PedersenCommitmentBytes, Amount},
 };
 
 use crate::{
@@ -59,8 +59,8 @@ impl Vault {
         Ok(())
     }
 
-    pub fn withdraw(&mut self, amount: Amount) -> Result<ResourceContainer, ResourceError> {
-        self.resource_container.withdraw(amount)
+    pub fn withdraw<T: Into<Amount>>(&mut self, amount: T) -> Result<ResourceContainer, ResourceError> {
+        self.resource_container.withdraw(amount.into())
     }
 
     pub fn withdraw_non_fungibles(
@@ -82,13 +82,13 @@ impl Vault {
         self.resource_container.recall_all()
     }
 
-    pub fn recall_confidential(
+    pub fn recall_confidential<T: Into<Amount>>(
         &mut self,
         commitments: &BTreeSet<PedersenCommitmentBytes>,
-        revealed_amount: Amount,
+        revealed_amount: T,
     ) -> Result<ResourceContainer, ResourceError> {
         self.resource_container
-            .recall_confidential_commitments(commitments, revealed_amount)
+            .recall_confidential_commitments(commitments, revealed_amount.into())
     }
 
     pub fn balance(&self) -> Amount {
@@ -99,7 +99,7 @@ impl Vault {
         self.resource_container.locked_amount()
     }
 
-    pub fn get_commitment_count(&self) -> u32 {
+    pub fn get_commitment_count(&self) -> u64 {
         self.resource_container.get_commitment_count()
     }
 
@@ -137,8 +137,12 @@ impl Vault {
         Ok(LockedResource::new(ContainerRef::Vault(vault_id), locked_resource))
     }
 
-    pub fn lock_by_amount(&mut self, vault_id: VaultId, amount: Amount) -> Result<LockedResource, ResourceError> {
-        let locked_resource = self.resource_container.lock_by_amount(amount)?;
+    pub fn lock_by_amount<T: Into<Amount>>(
+        &mut self,
+        vault_id: VaultId,
+        amount: T,
+    ) -> Result<LockedResource, ResourceError> {
+        let locked_resource = self.resource_container.lock_by_amount(amount.into())?;
         Ok(LockedResource::new(ContainerRef::Vault(vault_id), locked_resource))
     }
 

@@ -4,16 +4,18 @@
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::{BulletRangeProof, PrivateKey};
 use tari_crypto::{
-    commitment::HomomorphicCommitmentFactory,
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSchnorr},
     tari_utilities::ByteArray,
 };
 use tari_template_lib::{
-    models::{Amount, ConfidentialWithdrawProof, EncryptedData},
-    types::crypto::{BalanceProofSignature, RistrettoPublicKeyBytes},
+    models::{ConfidentialWithdrawProof, EncryptedData},
+    types::{
+        crypto::{BalanceProofSignature, RistrettoPublicKeyBytes},
+        Amount,
+    },
 };
 
-use super::{get_commitment_factory, messages, validate_confidential_proof, CompressedElgamalVerifiableBalance};
+use super::{commit_amount, messages, validate_confidential_proof, CompressedElgamalVerifiableBalance};
 use crate::{
     confidential::elgamal::ElgamalVerifiableBalance,
     resource_container::ResourceError,
@@ -81,13 +83,29 @@ pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a Pede
     let validated_proof = validate_confidential_proof(&withdraw_proof.output_proof, view_key)?;
 
     let input_revealed_amount = withdraw_proof.input_revealed_amount;
+    if input_revealed_amount.is_negative() {
+        return Err(ResourceError::InvalidBalanceProof {
+            details: "Input revealed amount cannot be negative".to_string(),
+        });
+    }
     // We expect the revealed amount to be excluded from the output commitment.
-    let total_output_revealed_amount =
-        withdraw_proof.output_proof.output_revealed_amount + withdraw_proof.output_proof.change_revealed_amount;
+    let total_output_revealed_amount = withdraw_proof
+        .output_proof
+        .output_revealed_amount
+        .checked_add_positive(withdraw_proof.output_proof.change_revealed_amount)
+        .ok_or_else(|| ResourceError::InvalidConfidentialProof {
+            details: format!(
+                "Output revealed amount {} + change revealed amount {} cannot be negative",
+                withdraw_proof.output_proof.output_revealed_amount, withdraw_proof.output_proof.change_revealed_amount
+            ),
+        })?;
 
     // Balance proof not required if only revealed funds are transferred
     if withdraw_proof.is_revealed_only() {
-        if input_revealed_amount.checked_sub(total_output_revealed_amount) != Some(Amount::zero()) {
+        if input_revealed_amount
+            .checked_sub(total_output_revealed_amount)
+            .is_none_or(|v| !v.is_zero())
+        {
             return Err(ResourceError::InvalidBalanceProof {
                 details: "Incorrect balance for revealed only withdraw proof".to_string(),
             });
@@ -114,8 +132,8 @@ pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a Pede
         .unwrap_or_default();
 
     // 0.G + v.H
-    let revealed_output_commitment =
-        get_commitment_factory().commit_value(&PrivateKey::default(), total_output_revealed_amount.value() as u64);
+    // We already checked that total_output_revealed_amount is positive
+    let revealed_output_commitment = commit_amount(&PrivateKey::default(), total_output_revealed_amount);
     let output_commitment_with_revealed = output_commitment + revealed_output_commitment.as_public_key();
 
     let balance_proof =
@@ -124,10 +142,8 @@ pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a Pede
         })?;
 
     // 0.G + v.H - users may convert revealed funds to confidential outputs so this must be part of the balance proof
-    let revealed_input_commitment = get_commitment_factory().commit_value(
-        &PrivateKey::default(),
-        withdraw_proof.input_revealed_amount.value() as u64,
-    );
+    // We already checked that input_revealed_amount is non-negative
+    let revealed_input_commitment = commit_amount(&PrivateKey::default(), input_revealed_amount);
     let agg_inputs = inputs.into_iter().fold(RistrettoPublicKey::default(), |sum, commit| {
         sum + commit.as_public_key()
     }) + revealed_input_commitment.as_public_key();

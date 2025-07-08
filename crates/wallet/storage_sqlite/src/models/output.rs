@@ -17,6 +17,7 @@ pub struct ConfidentialOutput {
     pub account_id: i32,
     pub vault_id: i32,
     pub commitment: String,
+    // TODO: change to a string to allow arbitrary precision
     pub value: i64,
     pub sender_public_nonce: Option<String>,
     pub encryption_secret_key_index: i64,
@@ -55,7 +56,7 @@ impl ConfidentialOutput {
                     details: "Corrupt db: invalid hex representation".to_string(),
                 }
             })?,
-            value: self.value as u64,
+            value: (self.value as u64).into(),
             sender_public_nonce: self
                 .sender_public_nonce
                 .map(|nonce| RistrettoPublicKeyBytes::from_hex(&nonce).unwrap()),

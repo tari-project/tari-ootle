@@ -3,7 +3,7 @@
 
 use tari_engine::runtime::{LockError, LockState};
 use tari_engine_types::lock::LockFlag;
-use tari_template_lib::models::{Amount, ComponentAddress};
+use tari_template_lib::models::ComponentAddress;
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 use tari_transaction::{args, Transaction};
 

@@ -469,19 +469,13 @@ where TConsensusSpec: ConsensusSpec
 
         // Add proposer fee substate
         if total_leader_fee > 0 {
-            let total_leader_fee_amt = total_leader_fee.try_into().map_err(|e| {
-                HotStuffError::InvariantError(format!(
-                    "Total leader fee ({total_leader_fee}) under/overflowed the Amount type: {e}"
-                ))
-            })?;
-
             // Apply leader fee to substate store before we calculate the state root
             apply_leader_fee_to_substate_store(
                 &mut substate_store,
                 local_claim_public_key_bytes,
                 local_committee_info.shard_group().start(),
                 local_committee_info.num_preshards(),
-                total_leader_fee_amt,
+                total_leader_fee,
             )?;
         }
 

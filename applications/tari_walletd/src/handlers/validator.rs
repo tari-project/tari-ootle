@@ -92,7 +92,7 @@ pub async fn handle_get_validator_fees(
             continue;
         };
 
-        if !amount.is_zero() {
+        if amount > 0 {
             fees.insert(shard, FeePoolDetails { amount, address });
         }
     }

@@ -5,7 +5,6 @@ use std::str::FromStr;
 
 use clap::{Args, Subcommand};
 use tari_ootle_common_types::{shard::Shard, ShardGroup};
-use tari_template_lib::models::Amount;
 use tari_wallet_daemon_client::{
     types::{AccountOrKeyIndex, ClaimValidatorFeesRequest, GetValidatorFeesRequest},
     ComponentAddressOrName,
@@ -95,7 +94,7 @@ pub async fn handle_claim_validator_fees(
                 .map(|name| ComponentAddressOrName::from_str(&name))
                 .transpose()?,
             claim_key_index: None,
-            max_fee: max_fee.map(Amount::from),
+            max_fee: max_fee.map(Into::into),
             shards: vec![shard],
             dry_run,
         })

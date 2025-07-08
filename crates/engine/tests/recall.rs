@@ -3,12 +3,14 @@
 
 use std::collections::BTreeMap;
 
+use tari_engine_types::ToByteType;
 use tari_template_lib::{
-    models::{Amount, NonFungibleId, ResourceAddress, VaultId},
+    models::{NonFungibleId, ResourceAddress, VaultId},
     prelude::ComponentAddress,
+    types::Amount,
 };
 use tari_template_test_tooling::{
-    support::confidential::{generate_confidential_proof, generate_withdraw_proof},
+    support::confidential::{generate_confidential_output_statement, generate_withdraw_proof},
     TemplateTest,
 };
 use tari_transaction::{args, Transaction};
@@ -19,8 +21,8 @@ fn it_recalls_all_resource_types() {
     let recall_template = test.get_template_address("Recall");
     let (account, _, _) = test.create_empty_account();
 
-    let (mut initial_supply, mask, _) = generate_confidential_proof(Amount(1000), None);
-    initial_supply.output_revealed_amount = Amount(1000);
+    let (mut initial_supply, mask, _) = generate_confidential_output_statement(Amount::from(1000), None);
+    initial_supply.output_revealed_amount = Amount::from(1000);
 
     let result = test.execute_expect_success(
         Transaction::builder()
@@ -36,7 +38,7 @@ fn it_recalls_all_resource_types() {
     let confidential_resource: ResourceAddress =
         result.finalize.execution_results[0].get_value("$.3").unwrap().unwrap();
 
-    let withdraw = generate_withdraw_proof(&mask, Amount(10), Some(Amount(980)), Amount(10));
+    let withdraw = generate_withdraw_proof(&mask, 10, Some(980), 10);
     test.execute_expect_success(
         Transaction::builder()
             .call_method(recall_component, "withdraw_some", args![withdraw.proof])
@@ -53,7 +55,10 @@ fn it_recalls_all_resource_types() {
     let non_fungible_vault = vaults[&non_fungible_resource];
     let confidential_vault = vaults[&confidential_resource];
 
-    let commitment = withdraw.to_commitment_bytes_for_output(Amount(10));
+    let commitment = withdraw
+        .to_commitment_for_output(Amount::from(10))
+        .unwrap()
+        .to_byte_type();
 
     let result = test.execute_expect_success(
         Transaction::builder()
@@ -75,11 +80,11 @@ fn it_recalls_all_resource_types() {
     );
 
     let fungible_balance = result.finalize.execution_results[4].decode::<Amount>().unwrap();
-    assert_eq!(fungible_balance, Amount(4));
+    assert_eq!(fungible_balance, Amount::from(4));
 
     let non_fungible_balance = result.finalize.execution_results[5].decode::<Amount>().unwrap();
-    assert_eq!(non_fungible_balance, Amount(1));
+    assert_eq!(non_fungible_balance, Amount::from(1));
 
     let confidential_balance = result.finalize.execution_results[6].decode::<Amount>().unwrap();
-    assert_eq!(confidential_balance, Amount(6));
+    assert_eq!(confidential_balance, Amount::from(6));
 }

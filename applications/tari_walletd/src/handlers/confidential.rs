@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{convert::TryInto, fs};
+use std::fs;
 
 use anyhow::anyhow;
 use axum::headers::authorization::Bearer;
@@ -16,7 +16,7 @@ use tari_ootle_wallet_sdk::{
     apis::key_manager,
     models::{ConfidentialOutputModel, OutputStatus},
 };
-use tari_template_lib::models::Amount;
+use tari_template_lib::types::Amount;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{
@@ -33,7 +33,7 @@ use tari_wallet_daemon_client::{
 use tokio::{task::block_in_place, time::Instant};
 
 use crate::handlers::{
-    helpers::{get_account_or_default, invalid_params},
+    helpers::{get_account_or_default, invalid_params, invalid_request},
     HandlerContext,
 };
 
@@ -49,15 +49,10 @@ pub async fn handle_create_transfer_proof(
     context.check_auth(token, &[JrpcPermission::Admin])?;
 
     if req.amount.is_negative() || req.reveal_amount.is_negative() {
-        return Err(JsonRpcError::new(
-            JsonRpcErrorReason::InvalidRequest,
-            format!(
-                "Amount to send must be positive. Amount = {}, Revealed = {}",
-                req.amount, req.reveal_amount
-            ),
-            json!({}),
-        )
-        .into());
+        return Err(invalid_request(format!(
+            "Amount to send must be positive. Amount = {}, Revealed = {}",
+            req.amount, req.reveal_amount
+        )));
     }
 
     let account = get_account_or_default(req.account, &sdk.accounts_api())?;
@@ -66,11 +61,16 @@ pub async fn handle_create_transfer_proof(
         .get_vault_by_resource(&account.address, &req.resource_address)?;
     let proof_id = sdk.confidential_outputs_api().add_proof(&vault.address)?;
     // Lock inputs we're going to spend
-    let (inputs, total_input_value) = sdk.confidential_outputs_api().lock_outputs_by_amount(
-        &vault.address,
-        req.amount + req.reveal_amount,
-        proof_id,
-    )?;
+
+    let amount_to_transfer = req.amount.checked_add_positive(req.reveal_amount).ok_or_else(|| {
+        invalid_request(format!(
+            "Amount to send must be greater than or equal to the amount to reveal. Amount = {}, Revealed = {}",
+            req.amount, req.reveal_amount
+        ))
+    })?;
+    let (inputs, total_input_value) =
+        sdk.confidential_outputs_api()
+            .lock_outputs_by_amount(&vault.address, amount_to_transfer, proof_id)?;
 
     info!(
         target: LOG_TARGET,
@@ -89,8 +89,15 @@ pub async fn handle_create_transfer_proof(
     let output_mask = sdk.key_manager_api().next_key(key_manager::TRANSACTION_BRANCH)?;
     let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
 
+    let amount_u64 = req.amount.to_u64_checked().ok_or_else(|| {
+        invalid_request(format!(
+            "Amount to send must be a non-negative integer that does not exceed u64::MAX. Amount = {}",
+            req.amount
+        ))
+    })?;
+
     let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
-        req.amount.as_u64_checked().unwrap(),
+        amount_u64,
         &output_mask.key,
         &public_nonce,
         &account_secret.key,
@@ -124,13 +131,31 @@ pub async fn handle_create_transfer_proof(
         resource_view_key: resource_view_key.clone(),
     };
 
-    let change_amount = total_input_value - req.amount.value() as u64 - req.reveal_amount.value() as u64;
-    let maybe_change_statement = if change_amount > 0 {
+    let spend_amount = req.amount.checked_sub_positive(req.reveal_amount).ok_or_else(|| {
+        invalid_request(format!(
+            "Amount to send must be greater than or equal to the amount to reveal. Amount = {}, Revealed = {}",
+            req.amount, req.reveal_amount
+        ))
+    })?;
+    let change_amount = total_input_value.checked_sub_positive(spend_amount).ok_or_else(|| {
+        invalid_request(format!(
+            "Insufficient funds to send {}. Total input value = {}",
+            req.amount, total_input_value
+        ))
+    })?;
+    let change_amount_u64 = change_amount.to_u64_checked().ok_or_else(|| {
+        invalid_request(format!(
+            "Change value exceeds the maximum value supported in a single UTXO. Change: {}. Total input value = {}",
+            change_amount, total_input_value
+        ))
+    })?;
+
+    let maybe_change_statement = if change_amount_u64 > 0 {
         let change_mask = sdk.key_manager_api().next_key(key_manager::TRANSACTION_BRANCH)?;
         let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
 
         let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
-            change_amount,
+            change_amount_u64,
             &change_mask.key,
             &public_nonce,
             &change_mask.key,
@@ -140,7 +165,7 @@ pub async fn handle_create_transfer_proof(
             account_address: account.address,
             vault_address: vault.address,
             commitment: get_commitment_factory()
-                .commit_value(&change_mask.key, change_amount)
+                .commit_value(&change_mask.key, change_amount_u64)
                 .to_byte_type(),
             value: change_amount,
             sender_public_nonce: Some(public_nonce.to_byte_type()),
@@ -152,7 +177,7 @@ pub async fn handle_create_transfer_proof(
         })?;
 
         Some(ConfidentialProofStatement {
-            amount: change_amount.try_into()?,
+            amount: change_amount,
             mask: change_mask.key,
             sender_public_nonce: public_nonce,
             encrypted_data,
@@ -214,14 +239,17 @@ pub async fn handle_create_output_proof(
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
 
-    if req.amount.is_negative() {
-        return Err(invalid_params("amount", Some("must be positive")));
-    }
+    let Some(amount) = req.amount.to_u64_checked() else {
+        return Err(invalid_params(
+            "amount",
+            Some("must be positive and less than u64::MAX"),
+        ));
+    };
 
     let output_mask = sdk.key_manager_api().next_key(key_manager::TRANSACTION_BRANCH)?;
     let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
     let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
-        req.amount.as_u64_checked().unwrap(),
+        amount,
         &output_mask.key,
         &public_nonce,
         &output_mask.key,

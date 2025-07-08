@@ -45,7 +45,6 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_shutdown::ShutdownSignal;
-use tari_template_lib::models::Amount;
 
 use crate::{
     cli::Cli,
@@ -58,7 +57,7 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon";
 
-const DEFAULT_FEE: Amount = Amount::new(1500);
+const DEFAULT_FEE: u64 = 1500;
 // TODO: must match the global network value. All testnets currently have 256 pre-shards.
 const NUM_PRESHARDS: NumPreshards = NumPreshards::current();
 

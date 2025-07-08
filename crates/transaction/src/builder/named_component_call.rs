@@ -31,3 +31,9 @@ impl From<CallFromWorkspace> for NamedComponentCall {
         Self::Workspace(workspace)
     }
 }
+
+impl From<&str> for NamedComponentCall {
+    fn from(name: &str) -> Self {
+        Self::Workspace(CallFromWorkspace::new(name))
+    }
+}

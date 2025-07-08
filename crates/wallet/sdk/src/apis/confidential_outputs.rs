@@ -7,10 +7,7 @@ use tari_engine_types::{confidential::ConfidentialOutput, substate::SubstateId, 
 use tari_key_manager::key_manager::DerivedKey;
 use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 use tari_ootle_wallet_crypto::{kdfs, ConfidentialOutputMaskAndValue};
-use tari_template_lib::{
-    models::{Amount, VaultId},
-    prelude::PedersenCommitmentBytes,
-};
+use tari_template_lib::{models::VaultId, prelude::PedersenCommitmentBytes, types::Amount};
 use tari_transaction::TransactionId;
 
 use crate::{
@@ -48,12 +45,20 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
         }
     }
 
-    pub fn lock_outputs_by_amount(
+    pub fn lock_outputs_by_amount<A: Into<Amount>>(
         &self,
         vault_address: &SubstateId,
-        amount: Amount,
+        amount: A,
         locked_by_proof_id: ConfidentialProofId,
-    ) -> Result<(Vec<ConfidentialOutputModel>, u64), ConfidentialOutputsApiError> {
+    ) -> Result<(Vec<ConfidentialOutputModel>, Amount), ConfidentialOutputsApiError> {
+        let amount =
+            amount
+                .into()
+                .non_negative_checked()
+                .ok_or_else(|| ConfidentialOutputsApiError::InvalidParameter {
+                    param: "amount",
+                    reason: "Amount must be non-negative".to_string(),
+                })?;
         let mut tx = self.store.create_write_tx()?;
         let (outputs, total_output_amount) =
             self.lock_outputs_internal(&mut tx, vault_address, amount, locked_by_proof_id)?;
@@ -73,7 +78,7 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
         vault_address: &SubstateId,
         amount: Amount,
         locked_by_proof_id: ConfidentialProofId,
-    ) -> Result<(Vec<ConfidentialOutputModel>, u64), ConfidentialOutputsApiError> {
+    ) -> Result<(Vec<ConfidentialOutputModel>, Amount), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
         let (outputs, total_output_amount) =
             self.lock_outputs_internal(&mut tx, vault_address, amount, locked_by_proof_id)?;
@@ -87,15 +92,14 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
         vault_address: &SubstateId,
         amount: Amount,
         locked_by_proof_id: ConfidentialProofId,
-    ) -> Result<(Vec<ConfidentialOutputModel>, u64), ConfidentialOutputsApiError> {
+    ) -> Result<(Vec<ConfidentialOutputModel>, Amount), ConfidentialOutputsApiError> {
         if amount.is_negative() {
             return Err(ConfidentialOutputsApiError::InvalidParameter {
                 param: "amount",
                 reason: "Amount cannot be negative".to_string(),
             });
         }
-        let amount = amount.as_u64_checked().unwrap();
-        let mut total_output_amount = 0;
+        let mut total_output_amount = Amount::zero();
         let mut outputs = Vec::new();
         while total_output_amount < amount {
             let output = tx
@@ -222,10 +226,10 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
         Ok(())
     }
 
-    pub fn get_unspent_balance(&self, vault_id: &VaultId) -> Result<u64, ConfidentialOutputsApiError> {
+    pub fn get_unspent_balance(&self, vault_id: &VaultId) -> Result<Amount, ConfidentialOutputsApiError> {
         let mut tx = self.store.create_read_tx()?;
         let balance = tx.outputs_get_unspent_balance(vault_id)?;
-        Ok(balance)
+        Ok(balance.into())
     }
 
     pub fn verify_and_update_confidential_outputs<
@@ -314,7 +318,7 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
                     commitment,
                     e
                 );
-                (0, OutputStatus::Invalid)
+                (Amount::zero(), OutputStatus::Invalid)
             },
         };
 

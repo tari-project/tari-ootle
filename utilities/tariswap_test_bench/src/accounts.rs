@@ -15,7 +15,6 @@ use tari_ootle_wallet_sdk::{apis::key_manager::TRANSACTION_BRANCH, models::Accou
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
-    models::Amount,
     resource::ResourceType,
 };
 use tari_transaction::args;
@@ -82,7 +81,7 @@ impl Runner {
 
         let mut builder = self.new_transaction_builder().fee_transaction_pay_from_component(
             pay_fee_account.address.as_component_address().unwrap(),
-            Amount(1000 * owners.len() as i64),
+            1000 * owners.len(),
         );
         for owner in &owners {
             builder = builder.create_account(RistrettoPublicKey::from_secret_key(&owner.key).to_byte_type());
@@ -146,7 +145,7 @@ impl Runner {
                 .new_transaction_builder()
                 .fee_transaction_pay_from_component(
                     fee_account.address.as_component_address().unwrap(),
-                    Amount(1000 * accounts.len() as i64),
+                    1000 * accounts.len(),
                 )
                 .then(|builder| {
                     accounts.iter().fold(builder, |builder, account| {

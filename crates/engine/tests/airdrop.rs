@@ -3,10 +3,7 @@
 
 use tari_engine_types::{substate::SubstateId, ToByteType};
 use tari_ootle_common_types::substate_type::SubstateType;
-use tari_template_lib::{
-    call_args,
-    models::{Amount, ComponentAddress},
-};
+use tari_template_lib::{call_args, models::ComponentAddress, types::Amount};
 use tari_template_test_tooling::TemplateTest;
 use tari_transaction::{args, Transaction};
 
@@ -24,7 +21,7 @@ fn airdrop() {
     let total_supply: Amount = template_test.call_method(airdrop, "total_supply", call_args![], vec![
         template_test.get_test_proof()
     ]);
-    assert_eq!(total_supply, Amount(100));
+    assert_eq!(total_supply, Amount::from(100));
 
     let builder = Transaction::builder().then(|builder| {
         // Create 100 accounts
@@ -79,7 +76,7 @@ fn airdrop() {
             result.finalize.execution_results[3 + (i * 4)]
                 .decode::<Amount>()
                 .unwrap(),
-            Amount(1)
+            1
         );
     }
 }

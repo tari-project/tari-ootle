@@ -15,7 +15,7 @@ use tari_template_lib::{
         RestrictedAccessRule,
     },
     call_args,
-    models::{Amount, ComponentAddress, Metadata, NonFungibleId, ResourceAddress, VaultId},
+    models::{ComponentAddress, Metadata, NonFungibleId, ResourceAddress, VaultId},
     rule,
 };
 use tari_template_test_tooling::{
@@ -213,6 +213,7 @@ mod component_access_rules {
 }
 
 mod resource_access_rules {
+    use tari_template_lib::types::Amount;
 
     use super::*;
 
@@ -808,7 +809,7 @@ mod resource_access_rules {
         assert_reject_reason(reason, RuntimeError::InvalidOpDepositLockedBucket {
             // badges is the 1st bucket
             bucket_id: 0.into(),
-            locked_amount: Amount(2),
+            locked_amount: Amount::from(2),
         });
 
         // User can take tokens, using a proof obtained from a bucket

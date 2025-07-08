@@ -47,9 +47,9 @@ use tari_ootle_common_types::{
 use tari_sidechain::QuorumDecision;
 use tari_template_lib::{
     args::InstructionArg,
-    models::{Amount, BucketId, NonFungibleAddress, NonFungibleId},
+    models::{BucketId, NonFungibleAddress, NonFungibleId},
     prelude::ResourceAddress,
-    types::TemplateAddress,
+    types::{Amount, TemplateAddress},
 };
 use tari_transaction::{arg, builder::named_args::NamedArg, Transaction, TransactionId};
 use tari_transaction_manifest::parse_manifest;

@@ -7,7 +7,7 @@ use indexmap::IndexMap;
 use log::*;
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, HighPc, HighTc, LeafBlock, ProposalCertificate, QcId};
-use tari_engine_types::{substate::SubstateDiff, template_lib_models::Amount, ValidatorFeePool};
+use tari_engine_types::{substate::SubstateDiff, ValidatorFeePool};
 use tari_ootle_common_types::{
     committee::{Committee, CommitteeInfo},
     derive_fee_pool_address,
@@ -364,14 +364,10 @@ pub fn apply_leader_fee_to_substate_store<TStore: StateStore>(
     claim_public_key_bytes: &RistrettoPublicKeyBytes,
     shard: Shard,
     num_preshards: NumPreshards,
-    total_leader_fee: Amount,
+    total_leader_fee: u64,
 ) -> Result<(), HotStuffError> {
     // Basic defensive checks
-    assert!(
-        total_leader_fee.is_positive(),
-        "apply_leader_fee_to_substate_store: total_leader_fee ({total_leader_fee}) must be positive"
-    );
-    if total_leader_fee.is_zero() {
+    if total_leader_fee == 0 {
         // Nothing to do
         return Ok(());
     }

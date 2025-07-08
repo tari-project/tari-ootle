@@ -25,20 +25,23 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 use tari_bor::BorTag;
 use tari_template_abi::{call_engine, rust::fmt, EngineOp};
-#[cfg(feature = "ts")]
-use ts_rs::TS;
 
 use crate::{
     args::{InvokeResult, ProofAction, ProofInvokeArg, ProofRef},
-    models::{Amount, BinaryTag, NonFungibleId, ResourceAddress},
+    models::{BinaryTag, NonFungibleId, ResourceAddress},
     prelude::ResourceType,
+    types::Amount,
 };
 
 const TAG: u64 = BinaryTag::ProofId.as_u64();
 
 /// The unique identification of a proof during a transaction execution
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Ord, PartialOrd, Hash)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct ProofId(#[cfg_attr(feature = "ts", ts(type = "number"))] BorTag<u32, TAG>);
 
 impl From<u32> for ProofId {

@@ -1457,10 +1457,7 @@ async fn multishard_validator_fee_claim() {
         fee: 1000,
         input_locks: vec![(address.into(), SubstateLockType::Write)],
         new_outputs: vec![],
-        validator_fee_withdrawals: vec![ValidatorFeeWithdrawal {
-            address,
-            amount: 500.into(),
-        }],
+        validator_fee_withdrawals: vec![ValidatorFeeWithdrawal { address, amount: 500 }],
     });
 
     // Get some fees

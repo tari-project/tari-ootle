@@ -53,15 +53,15 @@ import { Decision } from "@tari-project/typescript-bindings/dist/types/Decision"
 export default function TransactionDetails() {
   const { transactionHash } = useParams();
   const [state, setState] = useState<{
-    transaction: Transaction,
-    final_decision: Decision,
-    finalized_at: string,
-    result: ExecuteResult
+    transaction: Transaction;
+    final_decision: Decision;
+    finalized_at: string;
+    result: ExecuteResult;
   }>();
   const [upSubstate, setUpSubstate] = useState<[SubstateId, Substate][]>([]);
   const [downSubstate, setDownSubstate] = useState<VersionedSubstateId[]>([]);
   const [events, setEvents] = useState<Event[]>();
-  const [fee, setFee] = useState<number>();
+  const [fee, setFee] = useState<bigint>();
   const [logs, setLogs] = useState<LogEntry[]>();
   const [expandedPanels, setExpandedPanels] = useState<string[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -84,9 +84,12 @@ export default function TransactionDetails() {
         if (result && ("Accept" in result.finalize.result || "AcceptFeeRejectRest" in result.finalize.result)) {
           let diff = getSubstateDiffFromTransactionResult(result.finalize.result);
           if (diff) {
-            setDownSubstate(diff.down_substates.map(([substate_id, version]) => ({
-              substate_id, version,
-            })));
+            setDownSubstate(
+              diff.down_substates.map(([substate_id, version]) => ({
+                substate_id,
+                version,
+              })),
+            );
             setUpSubstate(diff.up_substates);
           }
         }
@@ -171,7 +174,7 @@ export default function TransactionDetails() {
                           </TableRow>
                           <TableRow>
                             <TableCell>Total Fees</TableCell>
-                            <DataTableCell>{fee}</DataTableCell>
+                            <DataTableCell>{fee?.toString()}</DataTableCell>
                           </TableRow>
                           {final_decision && (
                             <TableRow>
@@ -192,10 +195,8 @@ export default function TransactionDetails() {
                             <DataTableCell>
                               {renderResult(result)}
                               <br />
-                              Executed
-                              in {result.execution_time ? displayDuration(result.execution_time) : "--"},
-                              Finalized at{" "}
-                              {finalized_time}
+                              Executed in {result.execution_time ? displayDuration(result.execution_time) : "--"},
+                              Finalized at {finalized_time}
                             </DataTableCell>
                           </TableRow>
                         </TableBody>
@@ -241,30 +242,28 @@ export default function TransactionDetails() {
                     </div>
                   </>
                 )}
-                <Accordion expanded={expandedPanels.includes("panel1")}
-                           onChange={handleChange("panel1")}>
+                <Accordion expanded={expandedPanels.includes("panel1")} onChange={handleChange("panel1")}>
                   <AccordionSummary aria-controls="panel1bh-content" id="panel1bh-header">
                     <Typography>Fee Instructions</Typography>
                   </AccordionSummary>
                   <AccordionDetails>
-                    {transaction?.fee_instructions?.length ?
-                      <Instructions data={transaction.fee_instructions} /> : "Empty"}
+                    {transaction?.fee_instructions?.length ? (
+                      <Instructions data={transaction.fee_instructions} />
+                    ) : (
+                      "Empty"
+                    )}
                   </AccordionDetails>
                 </Accordion>
-                <Accordion expanded={expandedPanels.includes("panel2")}
-                           onChange={handleChange("panel2")}>
+                <Accordion expanded={expandedPanels.includes("panel2")} onChange={handleChange("panel2")}>
                   <AccordionSummary aria-controls="panel2bh-content" id="panel1bh-header">
                     <Typography>Instructions</Typography>
                   </AccordionSummary>
                   <AccordionDetails>
-                    {transaction?.instructions?.length ? (
-                      <Instructions data={transaction.instructions} />
-                    ) : "Empty"}
+                    {transaction?.instructions?.length ? <Instructions data={transaction.instructions} /> : "Empty"}
                   </AccordionDetails>
                 </Accordion>
                 {result && events && (
-                  <Accordion expanded={expandedPanels.includes("panel3")}
-                             onChange={handleChange("panel3")}>
+                  <Accordion expanded={expandedPanels.includes("panel3")} onChange={handleChange("panel3")}>
                     <AccordionSummary aria-controls="panel3bh-content" id="panel1bh-header">
                       <Typography>Events</Typography>
                     </AccordionSummary>
@@ -274,8 +273,7 @@ export default function TransactionDetails() {
                   </Accordion>
                 )}
                 {result && logs && (
-                  <Accordion expanded={expandedPanels.includes("panel4")}
-                             onChange={handleChange("panel4")}>
+                  <Accordion expanded={expandedPanels.includes("panel4")} onChange={handleChange("panel4")}>
                     <AccordionSummary aria-controls="panel4bh-content" id="panel1bh-header">
                       <Typography>Logs</Typography>
                     </AccordionSummary>
@@ -285,8 +283,7 @@ export default function TransactionDetails() {
                   </Accordion>
                 )}
                 {upSubstate && (
-                  <Accordion expanded={expandedPanels.includes("panel5")}
-                             onChange={handleChange("panel5")}>
+                  <Accordion expanded={expandedPanels.includes("panel5")} onChange={handleChange("panel5")}>
                     <AccordionSummary aria-controls="panel5bh-content" id="panel1bh-header">
                       <Typography>Substates</Typography>
                     </AccordionSummary>

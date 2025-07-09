@@ -53,18 +53,22 @@ export default function AccountBalance() {
     refetch();
   }, [account]);
 
-  const balanceObj = balancesData?.balances.find((b) => b.resource_address === XTR_RESOURCE);
-  const balance = balanceObj?.balance || 0 + (balanceObj?.confidential_balance || 0);
+  const XTR_DECIMALS = 6;
 
   let formattedBalance = "";
   if (balancesIsLoading || balancesIsRefetching) {
     formattedBalance = "...";
   } else {
     if (showBalance) {
-      formattedBalance = balance.toLocaleString("en-US", {
+      const balanceObj = balancesData?.balances.find((b) => b.resource_address === XTR_RESOURCE);
+      const balance = BigInt(balanceObj?.balance || 0) + BigInt(balanceObj?.confidential_balance || 0);
+
+      const wholeValues = (balance / BigInt(10 ** XTR_DECIMALS)).toLocaleString("en-US", {
         minimumFractionDigits: 0,
         maximumFractionDigits: 0,
       });
+      const fractionalValues = balance.toString().slice(-XTR_DECIMALS);
+      formattedBalance = `${wholeValues.toString()}.${fractionalValues}`;
     } else {
       formattedBalance = "************";
     }
@@ -89,13 +93,11 @@ export default function AccountBalance() {
               alignItems: "flex-start",
               justifyContent: "space-between",
               gap: theme.spacing(1),
-              minWidth: "230px",
+              minWidth: "250px",
             }}
           >
             <Typography variant="h2">
-              <>
-                <TariGem fill={theme.palette.text.primary} /> {formattedBalance}
-              </>
+              <TariGem fill={theme.palette.text.primary} style={{ float: "left" }} /> {formattedBalance}
             </Typography>
             <IconButton onClick={() => setShowBalance(!showBalance)}>
               {showBalance ? (

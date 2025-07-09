@@ -39,7 +39,14 @@ import { shortenSubstateId, substateIdToString } from "../../../utils/helpers";
 import NFTList from "../../../Components/NFTList";
 import { Button } from "@mui/material";
 import { SendMoneyDialog } from "./SendMoney";
-import { ResourceAddress, ResourceType, VaultId, BalanceEntry, Account } from "@tari-project/typescript-bindings";
+import {
+  ResourceAddress,
+  ResourceType,
+  VaultId,
+  BalanceEntry,
+  Account,
+  Amount,
+} from "@tari-project/typescript-bindings";
 import CopyAddress from "../../../Components/CopyAddress";
 import { Refresh } from "@mui/icons-material";
 
@@ -54,8 +61,8 @@ interface BalanceRowProps {
   resource_address: ResourceAddress;
   resource_type: ResourceType;
   vault_address: VaultId;
-  balance: number;
-  confidential_balance: number;
+  balance: Amount;
+  confidential_balance: Amount;
   onSendClicked?: (resource_address: ResourceAddress, resource_type: ResourceType) => void;
 }
 
@@ -87,7 +94,7 @@ function BalanceRow(props: BalanceRowProps) {
   );
 }
 
-function ConfidentialBalance(props: { show: boolean; balance: number; resourceType: string }) {
+function ConfidentialBalance(props: { show: boolean; balance: Amount; resourceType: string }) {
   switch (props.resourceType) {
     case "Confidential":
       return <>{props.show ? props.balance : "**************"}</>;

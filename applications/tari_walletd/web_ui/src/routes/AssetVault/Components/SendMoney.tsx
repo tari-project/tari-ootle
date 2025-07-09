@@ -103,7 +103,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
 
   const { data } = useAccountsGetBalances(substateIdToString(account.address));
   const badges = data?.balances
-    ?.filter((b: BalanceEntry) => b.resource_type === "NonFungible" && b.balance > 0)
+    ?.filter((b: BalanceEntry) => b.resource_type === "NonFungible" && BigInt(b.balance) > 0n)
     .map((b: BalanceEntry) => b.resource_address) as string[];
 
   // TODO: we should have separate calls for confidential and non-confidential transfers

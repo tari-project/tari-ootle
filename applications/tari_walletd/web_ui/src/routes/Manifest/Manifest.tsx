@@ -50,7 +50,7 @@ function Manifest() {
 
 function ManifestEditor() {
   const manifest = useManifestCodeStore();
-  const [fee, setFee] = useState<number>(0);
+  const [fee, setFee] = useState<bigint>(0n);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
 
   const { mutateAsync: submitManifest, isLoading: isSubmittingManifest, error } = useSubmitManifest();
@@ -64,7 +64,7 @@ function ManifestEditor() {
     submitManifest({
       manifest: manifest.code,
       variables: manifest.variables,
-      max_fee: isDryRun ? 3000 : fee,
+      max_fee: isDryRun ? 3000 : Number(fee),
       signing_key_index: null,
       dry_run: isDryRun,
     })
@@ -78,7 +78,7 @@ function ManifestEditor() {
           throw new Error("No result returned for dry run");
         }
         if ("Accept" in finalize!.result) {
-          setFee(finalize!.fee_receipt.total_fees_paid + 100);
+          setFee(finalize!.fee_receipt.total_fees_paid + 100n);
           console.log("Dry run successful:", finalize);
         } else if ("Reject" in finalize!.result) {
           setFinalizeError(rejectReasonToString(finalize!.result.Reject));
@@ -126,7 +126,7 @@ function ManifestEditor() {
               name="max-fee"
               placeholder="Max fee"
               value={fee}
-              onChange={(e) => setFee(Number(e.target.value))}
+              onChange={(e) => setFee(BigInt(e.target.value))}
               type="number"
             />
             <Button type="submit" variant="contained" color="primary">

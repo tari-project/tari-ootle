@@ -6,10 +6,7 @@ use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine_types::{component::new_component_address_from_public_key, ToByteType};
 use tari_ootle_common_types::{Network, SubstateRequirement};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::{
-    constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
-    models::Amount,
-};
+use tari_template_lib::constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS};
 use tari_transaction::{args, Transaction};
 
 pub fn builder(network: Network) -> impl Fn(u64) -> Transaction {

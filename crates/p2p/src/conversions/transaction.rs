@@ -37,7 +37,6 @@ use tari_template_lib::{
     args::{AllocatableAddressType, InstructionArg, WorkspaceId, WorkspaceOffsetId},
     auth::OwnerRule,
     models::{
-        Amount,
         ComponentAddress,
         ConfidentialOutputStatement,
         ConfidentialStatement,
@@ -277,7 +276,7 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                         .ok_or_else(|| anyhow!("assert_bucket_workspace_id not provided"))?
                         .try_into()?,
                     resource_address,
-                    min_amount: Amount::new(request.min_amount),
+                    min_amount: request.min_amount.unwrap_or_default().into(),
                 }
             },
             InstructionType::PublishTemplate => Instruction::PublishTemplate {
@@ -359,7 +358,7 @@ impl From<Instruction> for proto::transaction::Instruction {
                 result.instruction_type = InstructionType::AssertBucketContains as i32;
                 result.assert_bucket_workspace_id = Some(key.into());
                 result.resource_address = resource_address.as_bytes().to_vec();
-                result.min_amount = min_amount.0
+                result.min_amount = Some(min_amount.into());
             },
             Instruction::PublishTemplate { binary } => {
                 result.instruction_type = InstructionType::PublishTemplate as i32;
@@ -552,7 +551,7 @@ impl TryFrom<proto::transaction::ConfidentialWithdrawProof> for ConfidentialWith
                     PedersenCommitmentBytes::from_bytes(&v).map_err(|e| anyhow!("Invalid input commitment bytes: {e}"))
                 })
                 .collect::<Result<_, _>>()?,
-            input_revealed_amount: val.input_revealed_amount.try_into()?,
+            input_revealed_amount: val.input_revealed_amount.unwrap_or_default().into(),
             output_proof: val
                 .output_proof
                 .ok_or_else(|| anyhow!("output_proof is missing"))?
@@ -567,10 +566,7 @@ impl From<ConfidentialWithdrawProof> for proto::transaction::ConfidentialWithdra
     fn from(val: ConfidentialWithdrawProof) -> Self {
         Self {
             inputs: val.inputs.iter().map(|v| v.as_bytes().to_vec()).collect(),
-            input_revealed_amount: val
-                .input_revealed_amount
-                .as_u64_checked()
-                .expect("input_revealed_amount is negative or too large"),
+            input_revealed_amount: Some(val.input_revealed_amount.into()),
             output_proof: Some(val.output_proof.into()),
             balance_proof: val.balance_proof.to_bytes(),
         }
@@ -587,8 +583,8 @@ impl TryFrom<proto::transaction::ConfidentialOutputStatement> for ConfidentialOu
             output_statement: val.output_statement.map(TryInto::try_into).transpose()?,
             change_statement: val.change_statement.map(TryInto::try_into).transpose()?,
             range_proof: val.range_proof,
-            output_revealed_amount: val.output_revealed_amount.try_into()?,
-            change_revealed_amount: val.change_revealed_amount.try_into()?,
+            output_revealed_amount: val.output_revealed_amount.unwrap_or_default().into(),
+            change_revealed_amount: val.change_revealed_amount.unwrap_or_default().into(),
         })
     }
 }
@@ -599,14 +595,8 @@ impl From<ConfidentialOutputStatement> for proto::transaction::ConfidentialOutpu
             output_statement: val.output_statement.map(Into::into),
             change_statement: val.change_statement.map(Into::into),
             range_proof: val.range_proof,
-            output_revealed_amount: val
-                .output_revealed_amount
-                .as_u64_checked()
-                .expect("output_revealed_amount is negative or too large"),
-            change_revealed_amount: val
-                .change_revealed_amount
-                .as_u64_checked()
-                .expect("change_revealed_amount is negative or too large"),
+            output_revealed_amount: Some(val.output_revealed_amount.into()),
+            change_revealed_amount: Some(val.change_revealed_amount.into()),
         }
     }
 }

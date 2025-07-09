@@ -20,7 +20,7 @@ mod template {
         ) -> (Component<Self>, ResourceAddress, ResourceAddress, ResourceAddress) {
             let fungible = ResourceBuilder::fungible()
                 .recallable(rule!(allow_all))
-                .initial_supply(Amount(1_000_000));
+                .initial_supply(1_000_000);
 
             let fungible_resource = fungible.resource_address();
 
@@ -51,7 +51,7 @@ mod template {
         }
 
         pub fn withdraw_some(&mut self, confidential: ConfidentialWithdrawProof) -> (Bucket, Bucket, Bucket) {
-            let fungible = self.fungible.withdraw(Amount(10));
+            let fungible = self.fungible.withdraw(10);
             let non_fungible = self
                 .non_fungible
                 .withdraw_non_fungibles([NonFungibleId::from_u32(1), NonFungibleId::from_u32(2)]);

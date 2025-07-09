@@ -34,7 +34,16 @@ use tari_template_abi::{
 };
 use tari_template_lib_types::{EntityId, KeyParseError, ObjectKey};
 
-use super::{BinaryTag, NonFungible, Proof, ProofAuth};
+use super::{
+    BinaryTag,
+    Bucket,
+    ConfidentialWithdrawProof,
+    NonFungible,
+    NonFungibleId,
+    Proof,
+    ProofAuth,
+    ResourceAddress,
+};
 use crate::{
     args::{
         InvokeResult,
@@ -45,10 +54,10 @@ use crate::{
         VaultInvokeArg,
         VaultWithdrawArg,
     },
-    models::{Amount, Bucket, ConfidentialWithdrawProof, NonFungibleId, ResourceAddress},
     newtype_struct_serde_impl,
     prelude::ResourceType,
     resource::ResourceManager,
+    types::Amount,
 };
 
 const TAG: u64 = BinaryTag::VaultId as u64;
@@ -374,11 +383,14 @@ impl Vault {
 
     /// Pay a transaction fee with the funds present in the vault.
     /// Note that the vault must hold native Tari tokens to perform this operation.
-    pub fn pay_fee(&self, amount: Amount) {
+    pub fn pay_fee<A: Into<Amount>>(&self, amount: A) {
         let _resp: InvokeResult = call_engine(EngineOp::VaultInvoke, &VaultInvokeArg {
             vault_ref: self.vault_ref(),
             action: VaultAction::PayFee,
-            args: invoke_args![PayFeeArg { amount, proof: None }],
+            args: invoke_args![PayFeeArg {
+                amount: amount.into(),
+                proof: None
+            }],
         });
     }
 
@@ -443,11 +455,11 @@ impl Vault {
     /// Returns a new proof that demonstrates ownership of a specific amount of tokens.
     /// The tokens will be locked during the lifespan of the proof i.e until proof.drop() is called.
     /// Used primarily to authorize cross-component calls.
-    pub fn create_proof_by_amount(&self, amount: Amount) -> Proof {
+    pub fn create_proof_by_amount<A: Into<Amount>>(&self, amount: A) -> Proof {
         let resp: InvokeResult = call_engine(EngineOp::VaultInvoke, &VaultInvokeArg {
             vault_ref: self.vault_ref(),
             action: VaultAction::CreateProofByFungibleAmount,
-            args: invoke_args![VaultCreateProofByFungibleAmountArg { amount }],
+            args: invoke_args![VaultCreateProofByFungibleAmountArg { amount: amount.into() }],
         });
 
         resp.decode().expect("CreateProofByFungibleAmount failed")

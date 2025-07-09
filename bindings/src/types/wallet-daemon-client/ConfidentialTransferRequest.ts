@@ -10,7 +10,7 @@ export interface ConfidentialTransferRequest {
   input_selection: ConfidentialTransferInputSelection;
   resource_address: ResourceAddress;
   destination_public_key: string;
-  max_fee: Amount | null;
+  max_fee: number | null;
   output_to_revealed: boolean;
   proof_from_badge_resource: string | null;
   dry_run: boolean;

@@ -3,7 +3,7 @@
 #    * Console: For log messages with level INFO and higher
 #    * log/validator-node/network.log: INFO-level logs related to the comms crate. This file will be quite busy since there
 #      are lots of P2P debug messages, and so this traffic is segregated from the application log messages
-#    * log/validator-node/dan_layer.log: Non-comms related INFO-level messages and higher are logged into this file
+#    * log/validator-node/ootle.log: Non-comms related INFO-level messages and higher are logged into this file
 #    * log/validator-node/other.log: Third-party crates' messages will be logged here at an ERROR level
 #
 #  See https://docs.rs/log4rs/0.8.3/log4rs/encode/pattern/index.html for deciphering the log pattern. The log format

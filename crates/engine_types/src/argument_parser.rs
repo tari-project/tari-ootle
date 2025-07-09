@@ -9,8 +9,8 @@ use tari_bor::{cbor, encode, to_value};
 use tari_template_lib::{
     args::{InstructionArg, WorkspaceId},
     call_arg,
-    models::{Amount, Metadata},
-    types::TemplateAddress,
+    models::Metadata,
+    types::{Amount, ParseIntError, TemplateAddress},
 };
 
 use crate::{substate::SubstateId, template::parse_template_address};
@@ -37,13 +37,13 @@ where D: Deserializer<'de> {
 }
 
 fn convert_value_to_arg(arg: json::Value) -> Result<InstructionArg, ArgParseError> {
-    if let Some(s) = arg.as_str() {
-        // Support for special string literals e.g. "Amount(123)"
-        parse_arg(s)
-    } else if is_arg_json(&arg) {
+    if is_arg_json(&arg) {
         // Support for {"Literal": ...} or {"Workspace": ...]}
         let parsed = json::from_value(arg)?;
         Ok(parsed)
+    } else if let Some(s) = arg.as_str() {
+        // Support for special string literals e.g. "Amount(123)"
+        parse_arg(s)
     } else {
         // Support for json objects
         let value = convert_to_cbor(arg);
@@ -103,17 +103,15 @@ fn try_parse_special_string_arg(s: &str) -> Result<ParsedArg<'_>, ArgParseError>
         }
     }
 
-    if let Some(contents) = strip_cast_func(s, "Amount") {
-        let amt = contents
-            .parse()
-            .map(Amount)
-            .map_err(|_| ArgParseError::ExpectedAmount {
-                got: contents.to_string(),
-            })?;
+    if let Some(contents) = strip_coercion_func(s, "Amount") {
+        let amt = contents.parse().map_err(|e| ArgParseError::ExpectedAmount {
+            got: contents.to_string(),
+            error: e,
+        })?;
         return Ok(ParsedArg::Amount(amt));
     }
 
-    if let Some(contents) = strip_cast_func(s, "Workspace") {
+    if let Some(contents) = strip_coercion_func(s, "Workspace") {
         let id = WorkspaceId::from_str(contents).map_err(|_| ArgParseError::SyntaxError {
             details: format!("Expected Workspace(number) but got workspace ID: '{}'", contents),
         })?;
@@ -149,10 +147,10 @@ fn try_parse_special_string_arg(s: &str) -> Result<ParsedArg<'_>, ArgParseError>
     Ok(ParsedArg::String(s))
 }
 
-/// Strips off "casting" syntax and returns the contents e.g. Foo(bar baz) returns "bar baz". Or None if there is no
-/// cast in the input string.
-fn strip_cast_func<'a>(s: &'a str, cast: &str) -> Option<&'a str> {
-    s.strip_prefix(cast)
+/// Strips off "coercing" syntax and returns the contents e.g. Foo(bar baz) returns "bar baz". Or None if the
+/// coercion syntax in the input string is invalid.
+fn strip_coercion_func<'a>(s: &'a str, fn_name: &str) -> Option<&'a str> {
+    s.strip_prefix(fn_name)
         .and_then(|s| s.strip_prefix('('))
         .and_then(|s| s.strip_suffix(')'))
 }
@@ -211,7 +209,7 @@ fn convert_to_cbor(value: json::Value) -> tari_bor::Value {
         // Allow special string parsing within nested arrays and objects
         json::Value::String(s) => match try_parse_special_string_arg(&s) {
             Ok(parsed) => match parsed {
-                ParsedArg::Amount(amount) => tari_bor::Value::Integer(amount.value().into()),
+                ParsedArg::Amount(amount) => to_value(&amount).expect("infallible encoding of Amount -> CBOR"),
                 ParsedArg::String(s) => tari_bor::Value::Text(s.to_string()),
                 ParsedArg::Workspace(key) => cbor!({"Workspace" => key}).unwrap(),
                 ParsedArg::SubstateId(s) => match s {
@@ -245,8 +243,8 @@ fn convert_to_cbor(value: json::Value) -> tari_bor::Value {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ArgParseError {
-    #[error("Expected an integer, got '{got}'")]
-    ExpectedAmount { got: String },
+    #[error("Failed to parse Amount, got '{got}': {error}")]
+    ExpectedAmount { got: String, error: ParseIntError },
     #[error("Syntax error: {details}")]
     SyntaxError { details: String },
     #[error("JSON error: {0}")]
@@ -362,10 +360,10 @@ mod tests {
     #[test]
     fn it_parses_amounts() {
         let a = parse_arg("Amount(123)").unwrap();
-        assert_eq!(a, call_arg!(Amount(123)));
+        assert_eq!(a, call_arg!(Amount::from(123)));
 
         let a = parse_arg("Amount(-123)").unwrap();
-        assert_eq!(a, call_arg!(Amount(-123)));
+        assert_eq!(a, call_arg!(Amount::from(-123)));
     }
 
     #[test]

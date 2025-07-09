@@ -26,9 +26,9 @@ use serde::{Deserialize, Serialize};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArrayError};
 use tari_template_lib::{
     auth::{AuthHook, OwnerRule, Ownership, ResourceAccessRules},
-    models::{Amount, Metadata},
+    models::Metadata,
     resource::{ResourceType, TOKEN_SYMBOL},
-    types::crypto::RistrettoPublicKeyBytes,
+    types::{crypto::RistrettoPublicKeyBytes, Amount},
 };
 
 use crate::FromByteType;
@@ -51,6 +51,7 @@ pub struct Resource {
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     view_key: Option<RistrettoPublicKeyBytes>,
     auth_hook: Option<AuthHook>,
+    divisibility: u8,
 }
 
 impl Resource {
@@ -62,15 +63,25 @@ impl Resource {
         metadata: Metadata,
         view_key: Option<RistrettoPublicKeyBytes>,
         auth_hook: Option<AuthHook>,
+        mut divisibility: u8,
         is_total_supply_tracking_enabled: bool,
     ) -> Self {
+        // TODO: improve API to make it impossible to set incorrect divisibility
+        if resource_type.is_non_fungible() {
+            divisibility = 0;
+        }
+
         Self {
             resource_type,
             owner_rule,
             owner_key,
             access_rules,
             metadata,
-            total_supply: Some(0.into()).filter(|_| is_total_supply_tracking_enabled),
+            // Disable total supply tracking if requested and for confidential resources since there is no way for a
+            // validator to track this (depending on the resource access rules, the contract/user is able to)
+            total_supply: Some(0.into())
+                .filter(|_| is_total_supply_tracking_enabled && !resource_type.is_confidential()),
+            divisibility,
             view_key,
             auth_hook,
         }
@@ -119,18 +130,28 @@ impl Resource {
     }
 
     /// Increases the total supply. This is a no-op if total supply tracking is disabled.
+    /// Returns `true` if the total supply was successfully increased or supply tracking is disabled, or `false` if it
+    /// would overflow.
     ///
     /// ## Panics
-    /// Panics if the amount is not positive or if the amount causes an overflow when added to the current total supply.
-    pub fn increase_total_supply(&mut self, amount: Amount) {
+    /// Panics if the amount is not positive
+    pub fn increase_total_supply(&mut self, amount: Amount) -> bool {
         assert!(
-            amount.is_positive(),
-            "Invariant violation in increase_total_supply: amount must be positive"
+            amount.is_non_negative(),
+            "Invariant violation in increase_total_supply: amount must be non-negative but was {}",
+            amount
         );
-        if let Some(supply_mut) = self.total_supply.as_mut() {
-            *supply_mut = supply_mut
-                .checked_add(amount)
-                .expect("Invariant violation in increase_total_supply: overflow when increasing total supply");
+        let Some(supply_mut) = self.total_supply.as_mut() else {
+            // Total supply tracking is disabled, this call succeeded
+            return true;
+        };
+        let next_supply = supply_mut.checked_add(amount);
+        match next_supply {
+            Some(new_supply) => {
+                *supply_mut = new_supply;
+                true
+            },
+            None => false,
         }
     }
 
@@ -140,7 +161,7 @@ impl Resource {
     /// Panics if the amount is not positive or if the amount is greater than the total supply.
     pub fn decrease_total_supply(&mut self, amount: Amount) {
         assert!(
-            amount.is_positive(),
+            amount.is_non_negative(),
             "Invariant violation in decrease_total_supply: amount must be positive"
         );
         if let Some(supply_mut) = self.total_supply.as_mut() {

@@ -593,7 +593,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .first::<Option<BigDecimal>>(self.connection())
             .map_err(|e| WalletStorageError::general("outputs_get_unspent_balance", e))?;
 
-        Ok(balance.map(|v| v.to_u64().unwrap()).unwrap_or(0))
+        Ok(balance.map(|v| v.to_u64().expect("overflow")).unwrap_or(0))
     }
 
     fn outputs_get_locked_by_proof(

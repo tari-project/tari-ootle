@@ -9,12 +9,15 @@ use tari_crypto::{
     tari_utilities::ByteArray,
 };
 use tari_engine_types::{
-    confidential::{get_commitment_factory, messages},
+    confidential::{commit_amount_checked, get_commitment_factory, messages},
     ToByteType,
 };
 use tari_template_lib::{
-    models::{Amount, ConfidentialOutputStatement, ConfidentialWithdrawProof, EncryptedData},
-    types::crypto::{BalanceProofSignature, PedersenCommitmentBytes},
+    models::{ConfidentialOutputStatement, ConfidentialWithdrawProof, EncryptedData},
+    types::{
+        crypto::{BalanceProofSignature, PedersenCommitmentBytes},
+        Amount,
+    },
 };
 
 use crate::{
@@ -39,16 +42,18 @@ pub fn create_withdraw_proof(
         change_statement,
         change_revealed_amount,
     )?;
-    let (input_commitments, agg_input_mask) = inputs.iter().fold(
+    let (input_commitments, agg_input_mask) = inputs.iter().try_fold(
         (Vec::with_capacity(inputs.len()), RistrettoSecretKey::default()),
         |(mut commitments, agg_input), input| {
-            let commitment = get_commitment_factory().commit_value(&input.mask, input.value);
-            commitments.push(
-                PedersenCommitmentBytes::from_bytes(commitment.as_bytes()).expect("PedersenCommitment not 32 bytes"),
-            );
-            (commitments, agg_input + &input.mask)
+            let commitment =
+                commit_amount_checked(&input.mask, input.value).ok_or_else(|| WalletCryptoError::InvalidArgument {
+                    name: "input value",
+                    details: format!("Input value {} must be non-negative", input.value),
+                })?;
+            commitments.push(commitment.to_byte_type());
+            Ok::<_, WalletCryptoError>((commitments, agg_input + &input.mask))
         },
-    );
+    )?;
 
     let output_revealed_amount = output_proof.output_revealed_amount + output_proof.change_revealed_amount;
     let balance_proof = generate_balance_proof(
@@ -109,7 +114,10 @@ pub fn unblind_output(
     let (value, mask) = extract_value_and_mask(&encryption_key, output_commitment, output_encrypted_value)?;
     let commitment = get_commitment_factory().commit_value(&mask, value);
     if output_commitment.as_bytes() == commitment.as_bytes() {
-        Ok(ConfidentialOutputMaskAndValue { value, mask })
+        Ok(ConfidentialOutputMaskAndValue {
+            value: value.into(),
+            mask,
+        })
     } else {
         Err(WalletCryptoError::UnableToOpenCommitment)
     }

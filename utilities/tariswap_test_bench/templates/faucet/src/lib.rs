@@ -44,7 +44,7 @@ mod template {
         }
 
         pub fn take_free_coins(&self) -> Bucket {
-            self.take_amount_of_free_coins(Amount(1000))
+            self.take_amount_of_free_coins(1000.into())
         }
 
         pub fn take_amount_of_free_coins(&self, amount: Amount) -> Bucket {

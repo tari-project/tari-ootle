@@ -5,8 +5,9 @@ use tari_engine_types::instruction::Instruction;
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_template_lib::{
     call_args,
-    models::{Amount, ComponentAddress},
+    models::ComponentAddress,
     prelude::{NonFungibleAddress, ResourceAddress},
+    types::Amount,
 };
 use tari_template_test_tooling::TemplateTest;
 use tari_transaction::{args, Transaction};
@@ -46,7 +47,7 @@ fn setup(fee: u16) -> TariSwapTest {
 }
 
 fn create_faucet_component(template_test: &mut TemplateTest, symbol: String) -> (ComponentAddress, ResourceAddress) {
-    let initial_supply = Amount(1_000_000_000_000);
+    let initial_supply = Amount::from(1_000_000_000_000u64);
     let component_address: ComponentAddress = template_test.call_function(
         "TestFaucet",
         "mint_with_symbol",
@@ -150,7 +151,7 @@ fn add_liquidity(test: &mut TariSwapTest, a_amount: Amount, b_amount: Amount) {
                 .put_last_instruction_output_on_workspace("lp_bucket")
                 .call_method(test.account_address, "deposit", args![Workspace("lp_bucket")]),
             // proof needed to withdraw (from account) and mint (the lp_resource owned by the test identity)
-            vec![test.account_proof.clone(), test.template_test.get_test_proof()],
+            vec![test.account_proof.clone(), test.template_test.owner_proof()],
         )
         .expect_success();
 }
@@ -167,7 +168,7 @@ fn remove_liquidity(test: &mut TariSwapTest, lp_amount: Amount) {
                 .call_method(test.account_address, "deposit", args![Workspace("pool_buckets.1")]),
             // proof needed to withdraw (from account) and burn (the lp_resource owned by the test identity)
             // respectively
-            vec![test.account_proof.clone(), test.template_test.get_test_proof()],
+            vec![test.account_proof.clone(), test.template_test.owner_proof()],
         )
         .expect_success();
 }
@@ -185,13 +186,13 @@ fn get_account_balance(test: &mut TariSwapTest, resource_address: ResourceAddres
 fn assert_swap(
     test: &mut TariSwapTest,
     input_resource: &ResourceAddress,
-    input_amount: i64,
+    input_amount: u64,
     output_resource: &ResourceAddress,
-    expected_output_amount: i64,
+    expected_output_amount: u64,
 ) {
     // create the amount objects
-    let input_amount = Amount::new(input_amount);
-    let expected_output_amount = Amount::new(expected_output_amount);
+    let input_amount = Amount::from(input_amount);
+    let expected_output_amount = Amount::from(expected_output_amount);
 
     // save the current pool balances for later comparison
     let input_pool_balance = get_pool_balance(test, *input_resource);
@@ -207,11 +208,11 @@ fn assert_swap(
     assert_eq!(new_output_pool_balance, output_pool_balance - expected_output_amount);
 }
 
-fn assert_add_liquidity(test: &mut TariSwapTest, a_amount: i64, b_amount: i64, expected_lp_amount: i64) {
+fn assert_add_liquidity(test: &mut TariSwapTest, a_amount: u64, b_amount: u64, expected_lp_amount: u64) {
     // create the amount objects
-    let a_amount = Amount::new(a_amount);
-    let b_amount = Amount::new(b_amount);
-    let expected_lp_amount = Amount::new(expected_lp_amount);
+    let a_amount = Amount::from(a_amount);
+    let b_amount = Amount::from(b_amount);
+    let expected_lp_amount = Amount::from(expected_lp_amount);
 
     // save the resource addreses to keep the compiler happy
     let a_resource = test.a_resource;
@@ -239,14 +240,14 @@ fn assert_add_liquidity(test: &mut TariSwapTest, a_amount: i64, b_amount: i64, e
 
 fn assert_remove_liquidity(
     test: &mut TariSwapTest,
-    lp_amount_to_remove: i64,
-    expected_a_amount: i64,
-    expected_b_amount: i64,
+    lp_amount_to_remove: u64,
+    expected_a_amount: u64,
+    expected_b_amount: u64,
 ) {
     // create the amount objects
-    let lp_amount_to_remove = Amount::new(lp_amount_to_remove);
-    let expected_a_amount = Amount::new(expected_a_amount);
-    let expected_b_amount = Amount::new(expected_b_amount);
+    let lp_amount_to_remove = Amount::from(lp_amount_to_remove);
+    let expected_a_amount = Amount::from(expected_a_amount);
+    let expected_b_amount = Amount::from(expected_b_amount);
 
     // save the resource addreses to keep the compiler happy
     let a_resource = test.a_resource;

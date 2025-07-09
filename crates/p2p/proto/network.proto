@@ -27,7 +27,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 syntax = "proto3";
 
-package tari.dan.network;
+package tari.ootle.network;
 
 import "common.proto";
 import "transaction.proto";
@@ -35,7 +35,7 @@ import "consensus.proto";
 
 message TariMessage {
   oneof message {
-    tari.dan.transaction.NewTransactionMessage new_transaction = 1;
+    tari.ootle.transaction.NewTransactionMessage new_transaction = 1;
   }
 
   // Message tag for debugging purposes. This is typically set to some
@@ -51,7 +51,7 @@ message NetworkAnnounce {
 
 message IdentitySignature {
   uint32 version = 1;
-  tari.dan.common.Signature signature = 2;
+  tari.ootle.common.Signature signature = 2;
   int64 updated_at = 3;
 }
 

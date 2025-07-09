@@ -30,7 +30,7 @@ use std::{
 use anyhow::anyhow;
 use clap::{Args, Subcommand};
 use tari_ootle_wallet_sdk::models::NonFungibleToken;
-use tari_template_lib::prelude::{Amount, NonFungibleId};
+use tari_template_lib::prelude::NonFungibleId;
 use tari_wallet_daemon_client::{
     types::{GetAccountNftRequest, ListAccountNftRequest, MintFaucetNftRequest},
     ComponentAddressOrName,
@@ -139,7 +139,7 @@ pub async fn handle_mint_faucet_nft(
         account,
         mutable_data: metadata,
         number_to_mint: 1,
-        max_fee: max_fee.map(|f| Amount::new(i64::from(f))),
+        max_fee: max_fee.map(Into::into),
     };
 
     let resp = client

@@ -16,7 +16,7 @@ use tari_ootle_common_types::{
     VersionedSubstateIdRef,
 };
 use tari_template_lib::{
-    models::{Amount, VaultId},
+    models::VaultId,
     prelude::{
         ComponentAddress,
         NonFungibleAddress,
@@ -25,7 +25,7 @@ use tari_template_lib::{
         ResourceAddress,
         RistrettoPublicKeyBytes,
     },
-    types::TemplateAddress,
+    types::{Amount, TemplateAddress},
 };
 use tari_transaction::{Transaction, TransactionId};
 use time::PrimitiveDateTime;
@@ -84,6 +84,8 @@ pub trait WalletStore {
 pub enum WalletStorageError {
     #[error("General database failure for operation {operation}: {details}")]
     GeneralFailure { operation: &'static str, details: String },
+    #[error("Bad query for operation {operation}: {details}")]
+    BadQuery { operation: &'static str, details: String },
     #[error("Failed to decode for operation {operation} on {item}: {details}")]
     DecodingError {
         operation: &'static str,
@@ -119,6 +121,13 @@ impl WalletStorageError {
         Self::GeneralFailure {
             operation,
             details: e.to_string(),
+        }
+    }
+
+    pub fn bad_query<E: Into<String>>(operation: &'static str, details: E) -> Self {
+        Self::BadQuery {
+            operation,
+            details: details.into(),
         }
     }
 
@@ -275,7 +284,7 @@ pub trait WalletStoreWriter {
         &mut self,
         transaction_id: TransactionId,
         result: Option<&FinalizeResult>,
-        final_fee: Option<Amount>,
+        final_fee: Option<u64>,
         qcs: Option<&[ProposalCertificate]>,
         new_status: TransactionStatus,
         execution_time: Option<Duration>,

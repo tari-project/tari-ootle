@@ -9,7 +9,7 @@ use tari_engine_types::{instruction::Instruction, substate::SubstateId};
 use tari_template_lib::{
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
     call_arg,
-    models::{Amount, NonFungibleId},
+    models::NonFungibleId,
     types::TemplateAddress,
 };
 
@@ -156,7 +156,7 @@ impl ManifestInstructionGenerator {
         args.into_iter()
             .map(|arg| match arg {
                 ManifestLiteral::Lit(lit) => lit_to_arg(&lit),
-                ManifestLiteral::Variable(ident) => {
+                ManifestLiteral::Workspace(ident) => {
                     // Is it a global?
                     self.globals
                         .get(&ident.to_string())
@@ -191,7 +191,7 @@ impl ManifestInstructionGenerator {
                             }
                         })?
                 },
-                ManifestLiteral::Special(SpecialLiteral::Amount(amount)) => Ok(call_arg!(Amount(amount))),
+                ManifestLiteral::Special(SpecialLiteral::Amount(amount)) => Ok(call_arg!(amount)),
                 ManifestLiteral::Special(SpecialLiteral::NonFungibleId(lit)) => {
                     let id = lit_to_nonfungible_id(&lit)?;
                     Ok(call_arg!(id))

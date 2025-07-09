@@ -4,7 +4,7 @@
 pub mod compile;
 
 mod error;
-pub use error::{WasmError, WasmExecutionError};
+pub use error::*;
 
 mod environment;
 
@@ -17,5 +17,6 @@ mod process;
 pub use process::WasmProcess;
 
 mod limiting_tunable;
+mod limits;
 mod mem_writer;
 mod version;

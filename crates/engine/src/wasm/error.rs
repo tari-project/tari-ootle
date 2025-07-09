@@ -63,7 +63,26 @@ pub enum WasmExecutionError {
         engine_version: String,
         template_version: String,
     },
+    #[error("Wasm validation error: {0}")]
+    WasmValidationError(#[from] WasmValidationError),
 }
+
+#[derive(Debug, thiserror::Error)]
+pub enum WasmValidationError {
+    #[error("Function name {name} is too long, maximum length is {max_length}")]
+    FunctionNameTooLong { name: String, max_length: usize },
+    #[error("Function {name} is not allowed to contain floats")]
+    FunctionContainsFloats { name: String },
+    #[error("Function {name} contained too many arguments, maximum is {max_args}, but got {num_args}")]
+    FunctionTooManyArguments {
+        name: String,
+        max_args: usize,
+        num_args: usize,
+    },
+    #[error("Too many functions in the module, maximum is {max_functions}")]
+    TooManyFunctions { max_functions: usize },
+}
+
 impl From<wasmer::InstantiationError> for WasmExecutionError {
     fn from(value: InstantiationError) -> Self {
         Self::InstantiationError(Box::new(value))

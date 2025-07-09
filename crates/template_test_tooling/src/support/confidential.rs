@@ -4,31 +4,29 @@
 use rand::rngs::OsRng;
 use tari_common_types::types::PrivateKey;
 use tari_crypto::{
-    commitment::HomomorphicCommitmentFactory,
     keys::SecretKey,
-    ristretto::RistrettoPublicKey,
-    tari_utilities::ByteArray,
+    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey},
 };
-use tari_engine_types::confidential::get_commitment_factory;
+use tari_engine_types::confidential::commit_amount_checked;
 use tari_ootle_wallet_crypto::{ConfidentialOutputMaskAndValue, ConfidentialProofStatement};
 use tari_template_lib::{
-    models::{Amount, ConfidentialOutputStatement, ConfidentialWithdrawProof, EncryptedData},
-    types::crypto::PedersenCommitmentBytes,
+    models::{ConfidentialOutputStatement, ConfidentialWithdrawProof, EncryptedData},
+    types::Amount,
 };
 
-pub fn generate_confidential_proof(
-    output_amount: Amount,
-    change: Option<Amount>,
+pub fn generate_confidential_output_statement<A: Into<Amount>>(
+    output_amount: A,
+    change: Option<A>,
 ) -> (ConfidentialOutputStatement, PrivateKey, Option<PrivateKey>) {
-    generate_confidential_proof_internal(output_amount, change, None)
+    generate_confidential_proof_internal(output_amount.into(), change.map(Into::into), None)
 }
 
-pub fn generate_confidential_proof_with_view_key(
-    output_amount: Amount,
-    change: Option<Amount>,
+pub fn generate_confidential_proof_with_view_key<A: Into<Amount>>(
+    output_amount: A,
+    change: Option<A>,
     view_key: &RistrettoPublicKey,
 ) -> (ConfidentialOutputStatement, PrivateKey, Option<PrivateKey>) {
-    generate_confidential_proof_internal(output_amount, change, Some(view_key.clone()))
+    generate_confidential_proof_internal(output_amount.into(), change.map(Into::into), Some(view_key.clone()))
 }
 
 fn generate_confidential_proof_internal(
@@ -73,18 +71,21 @@ pub struct WithdrawProofOutput {
 }
 
 impl WithdrawProofOutput {
-    pub fn to_commitment_bytes_for_output(&self, amount: Amount) -> PedersenCommitmentBytes {
-        let commitment = get_commitment_factory().commit_value(&self.output_mask, amount.value() as u64);
-        PedersenCommitmentBytes::from_bytes(commitment.as_bytes()).unwrap()
+    pub fn to_commitment_for_output(&self, amount: Amount) -> Option<PedersenCommitment> {
+        commit_amount_checked(&self.output_mask, amount)
     }
 }
 
-pub fn generate_withdraw_proof(
+pub fn generate_withdraw_proof<A: Into<Amount>>(
     input_mask: &PrivateKey,
-    output_amount: Amount,
-    change_amount: Option<Amount>,
-    revealed_amount: Amount,
+    output_amount: A,
+    change_amount: Option<A>,
+    revealed_amount: A,
 ) -> WithdrawProofOutput {
+    let output_amount = output_amount.into();
+    let change_amount = change_amount.map(|a| a.into());
+    let revealed_amount = revealed_amount.into();
+
     let total_amount = output_amount + change_amount.unwrap_or_else(Amount::zero) + revealed_amount;
 
     generate_withdraw_proof_internal(
@@ -97,37 +98,37 @@ pub fn generate_withdraw_proof(
     )
 }
 
-pub fn generate_withdraw_proof_with_inputs(
+pub fn generate_withdraw_proof_with_inputs<A: Into<Amount>>(
     inputs: &[(PrivateKey, Amount)],
-    input_revealed_amount: Amount,
-    output_amount: Amount,
-    change_amount: Option<Amount>,
-    revealed_output_amount: Amount,
+    input_revealed_amount: A,
+    output_amount: A,
+    change_amount: Option<A>,
+    revealed_output_amount: A,
 ) -> WithdrawProofOutput {
     generate_withdraw_proof_internal(
         inputs,
-        input_revealed_amount,
-        output_amount,
-        change_amount,
-        revealed_output_amount,
+        input_revealed_amount.into(),
+        output_amount.into(),
+        change_amount.map(Into::into),
+        revealed_output_amount.into(),
         None,
     )
 }
 
-pub fn generate_withdraw_proof_with_view_key(
+pub fn generate_withdraw_proof_with_view_key<A: Into<Amount>>(
     input_mask: &PrivateKey,
-    input_value: Amount,
-    output_amount: Amount,
-    change_amount: Option<Amount>,
-    revealed_amount: Amount,
+    input_value: A,
+    output_amount: A,
+    change_amount: Option<A>,
+    revealed_amount: A,
     view_key: &RistrettoPublicKey,
 ) -> WithdrawProofOutput {
     generate_withdraw_proof_internal(
-        &[(input_mask.clone(), input_value)],
+        &[(input_mask.clone(), input_value.into())],
         Amount::zero(),
-        output_amount,
-        change_amount,
-        revealed_amount,
+        output_amount.into(),
+        change_amount.map(Into::into),
+        revealed_amount.into(),
         Some(view_key.clone()),
     )
 }
@@ -169,7 +170,7 @@ fn generate_withdraw_proof_internal(
         &inputs
             .iter()
             .map(|(mask, amount)| ConfidentialOutputMaskAndValue {
-                value: amount.as_u64_checked().unwrap(),
+                value: *amount,
                 mask: mask.clone(),
             })
             .collect::<Vec<_>>(),

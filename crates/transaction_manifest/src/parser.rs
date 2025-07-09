@@ -29,7 +29,10 @@ use syn::{
     UseTree,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::{args::LogLevel, types::TemplateAddress};
+use tari_template_lib::{
+    args::LogLevel,
+    types::{Amount, TemplateAddress},
+};
 
 #[derive(Debug, Clone)]
 pub enum ManifestIntent {
@@ -69,13 +72,13 @@ pub struct LogIntent {
 #[derive(Debug, Clone)]
 pub enum ManifestLiteral {
     Lit(Lit),
-    Variable(Ident),
+    Workspace(Ident),
     Special(SpecialLiteral),
 }
 
 #[derive(Debug, Clone)]
 pub enum SpecialLiteral {
-    Amount(i64),
+    Amount(Amount),
     NonFungibleId(Lit),
 }
 
@@ -364,7 +367,7 @@ fn build_arguments(args: Punctuated<Expr, Comma>) -> Result<Vec<ManifestLiteral>
 
             Expr::Path(expr_path) => {
                 if let Some(seg) = expr_path.path.segments.first() {
-                    Ok(ManifestLiteral::Variable(seg.ident.clone()))
+                    Ok(ManifestLiteral::Workspace(seg.ident.clone()))
                 } else {
                     Err(syn::Error::new_spanned(
                         expr_path,

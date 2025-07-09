@@ -20,18 +20,11 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{
-    convert::{TryFrom, TryInto},
-    fs,
-    io,
-    io::Read,
-    path::PathBuf,
-};
+use std::{fs, io, io::Read, path::PathBuf};
 
 use anyhow::anyhow;
 use clap::{Args, Subcommand};
 use serde_json as json;
-use tari_template_lib::models::Amount;
 use tari_wallet_daemon_client::{
     types::{
         AccountInfo,
@@ -162,7 +155,7 @@ async fn handle_create(args: CreateArgs, client: &mut WalletDaemonClient) -> Res
             account_name: args.account_name,
             custom_access_rules: None,
             is_default: args.is_default,
-            max_fee: args.fee.map(|u| Amount::new(u.into())),
+            max_fee: args.fee.map(Into::into),
             key_id: args.key_id,
         })
         .await?;
@@ -264,8 +257,9 @@ async fn handle_create_free_test_coins(
     let resp = client
         .create_free_test_coins(AccountsCreateFreeTestCoinsRequest {
             account: args.account,
-            amount: Amount::new(args.amount.unwrap_or(100000) as i64),
-            max_fee: args.fee.map(|u| u.try_into()).transpose()?,
+            // Default 1 tXTR
+            amount: args.amount.unwrap_or(1_000_000).into(),
+            max_fee: args.fee,
             key_id: args.key_id,
         })
         .await?;
@@ -326,7 +320,7 @@ pub async fn handle_reveal_funds(args: RevealFundsArgs, client: &mut WalletDaemo
     let resp = client
         .accounts_reveal_funds(RevealFundsRequest {
             account,
-            amount_to_reveal: Amount::try_from(reveal_amount).expect("Reveal amount too large"),
+            amount_to_reveal: reveal_amount.into(),
             max_fee: max_fee.map(Into::into),
             pay_fee_from_reveal: pay_from_reveal,
         })

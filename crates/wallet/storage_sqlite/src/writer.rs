@@ -31,9 +31,9 @@ use tari_ootle_wallet_sdk::{
     storage::{WalletStorageError, WalletStoreReader, WalletStoreWriter},
 };
 use tari_template_lib::{
-    models::{Amount, EncryptedData, NonFungibleId, VaultId},
+    models::{EncryptedData, NonFungibleId, VaultId},
     prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
-    types::TemplateAddress,
+    types::{Amount, TemplateAddress},
 };
 use tari_transaction::{Transaction, TransactionId};
 use tari_utilities::hex::Hex;
@@ -324,7 +324,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         &mut self,
         transaction_id: TransactionId,
         result: Option<&FinalizeResult>,
-        final_fee: Option<Amount>,
+        final_fee: Option<u64>,
         qcs: Option<&[ProposalCertificate]>,
         new_status: TransactionStatus,
         execution_time: Option<Duration>,
@@ -336,7 +336,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .set((
                 transactions::result.eq(result.map(serialize_json).transpose()?),
                 transactions::status.eq(new_status.as_key_str()),
-                transactions::final_fee.eq(final_fee.map(|v| v.value())),
+                transactions::final_fee.eq(final_fee.map(|v| v as i64)),
                 transactions::qcs.eq(qcs.map(serialize_json).transpose()?),
                 transactions::executed_time_ms
                     .eq(execution_time.map(|v| i64::try_from(v.as_millis()).unwrap_or(i64::MAX))),
@@ -528,8 +528,15 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         let values = (
             vaults::account_id.eq(account_id),
             vaults::address.eq(vault.address.to_string()),
-            vaults::revealed_balance.eq(vault.revealed_balance.value()),
-            vaults::confidential_balance.eq(vault.confidential_balance.value()),
+            // TODO: consider migrating to a string
+            vaults::revealed_balance.eq(vault
+                .revealed_balance
+                .to_u64_checked()
+                .expect("revealed balance is too large") as i64),
+            vaults::confidential_balance.eq(vault
+                .confidential_balance
+                .to_u64_checked()
+                .expect("confidential balance is too large") as i64),
             vaults::resource_address.eq(vault.resource_address.to_string()),
             vaults::resource_type.eq(format!("{:?}", vault.resource_type)),
             vaults::token_symbol.eq(vault.token_symbol),
@@ -551,8 +558,12 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         use crate::schema::vaults;
 
         let changeset = (
-            vaults::revealed_balance.eq(revealed_balance.value()),
-            vaults::confidential_balance.eq(confidential_balance.value()),
+            vaults::revealed_balance.eq(revealed_balance
+                .to_u64_checked()
+                .expect("revealed balance is too large") as i64),
+            vaults::confidential_balance.eq(confidential_balance
+                .to_u64_checked()
+                .expect("revealed balance is too large") as i64),
         );
 
         let num_rows = diesel::update(vaults::table)
@@ -577,15 +588,26 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         proof_id: ConfidentialProofId,
         amount_to_lock: Amount,
     ) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "vaults_lock_revealed_funds";
         use crate::schema::{proofs, vaults};
+        if amount_to_lock.is_negative() {
+            return Err(WalletStorageError::bad_query(
+                OPERATION,
+                "amount to lock cannot be negative",
+            ));
+        }
 
-        let changeset = proofs::locked_revealed_amount.eq(proofs::locked_revealed_amount.add(amount_to_lock.value()));
+        // TODO: we add using sql, limiting the max to i64::MAX. Work out how we'll handle huge values.
+        let amount_to_lock = amount_to_lock.to_u64_checked().expect("amount to lock is too large");
+        let amount_to_lock = i64::try_from(amount_to_lock).expect("amount to lock is too large");
+
+        let changeset = proofs::locked_revealed_amount.eq(proofs::locked_revealed_amount.add(amount_to_lock));
 
         let num_rows = diesel::update(proofs::table)
             .set(changeset)
             .filter(proofs::id.eq(proof_id as i32))
             .execute(self.connection())
-            .map_err(|e| WalletStorageError::general("vaults_lock_revealed_funds", e))?;
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
         if num_rows == 0 {
             return Err(WalletStorageError::NotFound {
@@ -597,7 +619,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
 
         let proof = self.get_proof(proof_id)?;
 
-        let changeset = vaults::locked_revealed_balance.eq(vaults::locked_revealed_balance.add(amount_to_lock.value()));
+        let changeset = vaults::locked_revealed_balance.eq(vaults::locked_revealed_balance.add(amount_to_lock));
 
         let num_rows = diesel::update(vaults::table)
             .set(changeset)
@@ -731,7 +753,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                     details: "Corrupt db: invalid hex representation".to_string(),
                 }
             })?,
-            value: locked_output.value as u64,
+            value: (locked_output.value as u64).into(),
             sender_public_nonce: locked_output
                 .sender_public_nonce
                 .map(|nonce| {
@@ -776,7 +798,8 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 outputs::account_id.eq(account_id),
                 outputs::vault_id.eq(vault_id),
                 outputs::commitment.eq(output.commitment.to_hex()),
-                outputs::value.eq(output.value as i64),
+                // TODO: allow arbitrary precision in wallet
+                outputs::value.eq(output.value.to_u64_checked().expect("value overflow u64") as i64),
                 outputs::sender_public_nonce.eq(output.sender_public_nonce.map(|pk| pk.to_hex())),
                 outputs::encryption_secret_key_index.eq(output.encryption_secret_key_index as i64),
                 outputs::encrypted_data.eq(output.encrypted_data.as_ref()),

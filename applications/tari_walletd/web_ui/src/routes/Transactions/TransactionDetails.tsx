@@ -181,7 +181,7 @@ export default function TransactionDetails() {
                   </TableRow>
                   <TableRow>
                     <TableCell>Total Fees</TableCell>
-                    <DataTableCell>{data?.result?.fee_receipt.total_fees_paid || 0}</DataTableCell>
+                    <DataTableCell>{data?.result?.fee_receipt.total_fees_paid.toString() || 0}</DataTableCell>
                   </TableRow>
                   <TableRow>
                     <TableCell>Status</TableCell>

@@ -67,12 +67,7 @@ impl TransactionExecution {
             return 0;
         }
 
-        self.result
-            .finalize
-            .fee_receipt
-            .total_fees_paid()
-            .as_u64_checked()
-            .expect("invariant: engine calculated negative fee")
+        self.result.finalize.fee_receipt.total_fees_paid()
     }
 
     pub fn resolved_inputs(&self) -> &[VersionedSubstateIdLockIntent] {

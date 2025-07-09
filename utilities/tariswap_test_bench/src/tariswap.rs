@@ -9,8 +9,9 @@ use tari_engine_types::{indexed_value::decode_value_at_path, ToByteType};
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
 use tari_ootle_wallet_sdk::{apis::key_manager::TRANSACTION_BRANCH, models::Account};
 use tari_template_lib::{
-    models::{Amount, ComponentAddress, VaultId},
+    models::{ComponentAddress, VaultId},
     prelude::{ResourceAddress, ResourceType, XTR},
+    types::Amount,
 };
 use tari_transaction::args;
 
@@ -40,14 +41,14 @@ impl Runner {
             .new_transaction_builder()
             .fee_transaction_pay_from_component(
                 in_account.address.as_component_address().unwrap(),
-                Amount(1000 * num_tariswaps as i64),
+                1000 * num_tariswaps,
             )
             .then(|mut builder| {
                 for _ in 0..num_tariswaps {
                     builder = builder.call_function(self.tariswap_template.address, "new", args![
                         XTR,
                         faucet.resource_address,
-                        Amount(1)
+                        1 // fee
                     ]);
                 }
                 builder
@@ -134,7 +135,7 @@ impl Runner {
                         SubstateRequirement::unversioned(XTR),
                     ])
                     .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
-                    .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(2000))
+                    .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), 2000)
                     .call_method(account.address.as_component_address().unwrap(), "withdraw", args![
                         XTR, amount_a
                     ])
@@ -249,8 +250,8 @@ impl Runner {
                         SubstateRequirement::unversioned(tariswap.lp_resource_address),
                     ])
                     .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
-                    .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(1000))
-                    .call_method(tariswap.component_address, "get_pool_balance", args![XTR,])
+                    .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), 1000)
+                    .call_method(tariswap.component_address, "get_pool_balance", args![XTR])
                     .call_method(tariswap.component_address, "get_pool_balance", args![
                         faucet.resource_address,
                     ])
@@ -285,7 +286,8 @@ impl Runner {
                 let balance_b = result.execution_results[1].decode::<Amount>()?;
                 let ratio_a = result.execution_results[2].decode::<Amount>()?;
                 let ratio_b = result.execution_results[3].decode::<Amount>()?;
-                let amount_swapped = amount_a_for_b.value() as f64 * (ratio_b.value() as f64 / 1000.0);
+                let amount_swapped = amount_a_for_b.to_u64_checked().expect("overflow") as f64 *
+                    (ratio_b.to_u64_checked().expect("overflow") as f64 / 1000.0);
                 info!(
                     "Swap {n} for {amount_a_for_b} XTR -> {amount_swapped} FAUCET @ {ratio_a}:{ratio_b} | pool \
                      liquidity: {balance_a} XTR {balance_b} FAUCET",
@@ -319,7 +321,7 @@ impl Runner {
                         SubstateRequirement::unversioned(tariswap.lp_resource_address),
                     ])
                     .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
-                    .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(1000))
+                    .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), 1000)
                     .call_method(tariswap.component_address, "get_pool_balance", args![XTR])
                     .call_method(tariswap.component_address, "get_pool_balance", args![
                         faucet.resource_address
@@ -350,7 +352,8 @@ impl Runner {
                 let balance_b = result.execution_results[1].decode::<Amount>()?;
                 let ratio_a = result.execution_results[2].decode::<Amount>()?;
                 let ratio_b = result.execution_results[3].decode::<Amount>()?;
-                let amount_swapped = amount_b_for_a.value() as f64 * (ratio_a.value() as f64 / 1000.0);
+                let amount_swapped = amount_b_for_a.to_u64_checked().expect("overflow") as f64 *
+                    (ratio_a.to_u64_checked().expect("overflow") as f64 / 1000.0);
                 log::info!(
                     "Swap {n} for {amount_b_for_a} FAUCET -> {amount_swapped} XTR @ {ratio_b}:{ratio_a} | pool \
                      liquidity: {balance_a} XTR {balance_b} FAUCET",

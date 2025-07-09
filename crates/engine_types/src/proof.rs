@@ -23,8 +23,9 @@
 use std::collections::BTreeSet;
 
 use tari_template_lib::{
-    models::{Amount, BucketId, NonFungibleId, ResourceAddress, VaultId},
+    models::{BucketId, NonFungibleId, ResourceAddress, VaultId},
     prelude::ResourceType,
+    types::Amount,
 };
 
 use crate::resource_container::ResourceContainer;

@@ -6,10 +6,7 @@ use std::str::FromStr;
 use diesel::{Identifiable, Queryable};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_wallet_sdk::storage::WalletStorageError;
-use tari_template_lib::{
-    models::{Amount, ResourceAddress},
-    resource::ResourceType,
-};
+use tari_template_lib::{models::ResourceAddress, resource::ResourceType, types::Amount};
 use time::PrimitiveDateTime;
 
 use crate::schema::vaults;
@@ -51,9 +48,9 @@ impl Vault {
             })?,
             resource_type: db_str_to_resource_type(&self.resource_type)?,
             token_symbol: self.token_symbol,
-            revealed_balance: Amount(self.revealed_balance),
-            locked_revealed_balance: Amount(self.locked_revealed_balance),
-            confidential_balance: Amount(self.confidential_balance),
+            revealed_balance: Amount::from(self.revealed_balance),
+            locked_revealed_balance: Amount::from(self.locked_revealed_balance),
+            confidential_balance: Amount::from(self.confidential_balance),
         })
     }
 }

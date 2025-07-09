@@ -7,7 +7,8 @@ use tari_engine_types::commit_result::RejectReason;
 use tari_template_lib::{
     call_args,
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-    models::{Amount, ComponentAddress},
+    models::ComponentAddress,
+    types::Amount,
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, test_faucet_component, TemplateTest};
 use tari_transaction::{args, Transaction};
@@ -28,7 +29,7 @@ fn deducts_fees_from_payments_and_refunds_the_rest() {
 
     let result = test.execute_expect_success(
         Transaction::builder()
-            .fee_transaction_pay_from_component(account, Amount(1000))
+            .fee_transaction_pay_from_component(account, Amount::from(1000))
             .call_function(test.get_template_address("State"), "new", args![])
             .build_and_seal(&private_key),
         vec![owner_token],
@@ -44,8 +45,8 @@ fn deducts_fees_from_payments_and_refunds_the_rest() {
         call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
-    assert_eq!(new_balance, orig_balance - payment.total_fees_charged());
-    assert_eq!(payment.total_refunded(), Amount(1000) - payment.total_fees_charged());
+    assert_eq!(new_balance, orig_balance - payment.total_fees_charged().into());
+    assert_eq!(payment.total_refunded(), 1000 - payment.total_fees_charged());
     assert!(payment.is_paid_in_full());
 }
 
@@ -65,7 +66,7 @@ fn deducts_fees_when_transaction_fails() {
 
     let result = test.execute_and_commit_on_success(
         Transaction::builder()
-            .fee_transaction_pay_from_component(account, Amount(1000))
+            .fee_transaction_pay_from_component(account, Amount::from(1000))
             .call_function(test.get_template_address("State"), "this_doesnt_exist", args![])
             .build_and_seal(&private_key),
         vec![owner_token],
@@ -84,7 +85,7 @@ fn deducts_fees_when_transaction_fails() {
         call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
-    assert!(!payment.total_fees_paid().is_zero());
+    assert_ne!(payment.total_fees_paid(), 0);
     assert_eq!(orig_balance - new_balance, payment.total_fees_paid());
 }
 
@@ -143,9 +144,9 @@ fn another_account_pays_partially_for_fees() {
     let result = test.execute_expect_success(
         Transaction::builder()
                 // Faucet pays a little
-                .fee_transaction_pay_from_component(test_faucet_component(), Amount(200))
+                .fee_transaction_pay_from_component(test_faucet_component(), Amount::from(200))
                 // Account pays the rest
-                .fee_transaction_pay_from_component(account_fee, Amount(1000))
+                .fee_transaction_pay_from_component(account_fee, Amount::from(1000))
                 .call_method(test_faucet_component(), "take_free_coins", args![])
                 .put_last_instruction_output_on_workspace("bucket")
                 .call_method(account, "deposit", args![Workspace("bucket")])
@@ -163,9 +164,12 @@ fn another_account_pays_partially_for_fees() {
         call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
-    assert_eq!(new_balance, orig_balance + Amount(200) - payment.total_fees_charged());
+    assert_eq!(
+        new_balance,
+        orig_balance + Amount::from(200) - Amount::from(payment.total_fees_charged())
+    );
     // Check that this test is charging more than just the faucet's portion
-    assert!(payment.total_fees_charged() > Amount(200));
+    assert!(Amount::from(200) < payment.total_fees_charged());
 
     // Check the rest of the transaction was committed
     let balance: Amount = test.call_method(
@@ -174,7 +178,7 @@ fn another_account_pays_partially_for_fees() {
         call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
-    assert_eq!(balance, Amount(1000));
+    assert_eq!(balance, Amount::from(1000));
 }
 
 #[test]
@@ -236,7 +240,7 @@ fn fail_partial_paid_fees() {
     let result = test.execute_expect_commit(
         Transaction::builder()
                 // Pay less fees than the cost of the main transaction
-                .fee_transaction_pay_from_component(account, Amount(50))
+                .fee_transaction_pay_from_component(account, Amount::ONE_HUNDRED)
                 // These instructions should not be applied
                 .call_method(account2, "withdraw", args![
                     CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
@@ -265,7 +269,7 @@ fn fail_partial_paid_fees() {
         call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
-    assert_eq!(new_balance, orig_balance - Amount(50));
+    assert_eq!(new_balance, orig_balance - Amount::ONE_HUNDRED);
 }
 
 #[test]
@@ -320,7 +324,10 @@ fn fail_pay_less_fees_than_fee_transaction() {
     assert_reject_reason(reason, RejectReason::InsufficientFeesPaid(String::new()));
 
     let (_, s) = diff.up_iter().find(|(id, _)| id.is_vault()).expect("Account not found");
-    assert_eq!(s.substate_value().as_vault().unwrap().balance(), orig_balance - 100);
+    assert_eq!(
+        s.substate_value().as_vault().unwrap().balance(),
+        orig_balance - Amount::from(100)
+    );
 
     // Fee was not deducted
     let new_balance: Amount = test.call_method(
@@ -427,7 +434,10 @@ fn success_pay_fee_in_main_instructions() {
         call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
-    assert_eq!(new_balance, orig_balance + Amount(500) - fees.total_fees_charged());
+    assert_eq!(
+        new_balance,
+        orig_balance + Amount::from(500) - fees.total_fees_charged().into()
+    );
 }
 
 #[test]
@@ -446,7 +456,7 @@ fn dangling_bucket_pay_fees() {
 
     let result = test.execute_and_commit_on_success(
         Transaction::builder()
-            .fee_transaction_pay_from_component(account, Amount(500))
+            .fee_transaction_pay_from_component(account, Amount::from(500))
             .call_method(account, "withdraw", args![
                 CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
                 Amount(10)
@@ -461,7 +471,7 @@ fn dangling_bucket_pay_fees() {
     assert!(matches!(reason, RejectReason::ExecutionFailure(_)));
     assert!(reason.to_string().contains("dangling bucket"));
 
-    // The transaction still finishes succesfully
+    // The transaction still finishes successfully
     result.expect_finalization_success();
 
     test.disable_fees();
@@ -474,6 +484,6 @@ fn dangling_bucket_pay_fees() {
         call_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
-    assert!(!payment.total_fees_paid().is_zero());
+    assert_ne!(payment.total_fees_paid(), 0);
     assert_eq!(orig_balance - new_balance, payment.total_fees_paid());
 }

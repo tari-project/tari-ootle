@@ -6,7 +6,7 @@ use tari_ootle_common_types::SubstateRequirement;
 use tari_ootle_wallet_sdk::{apis::key_manager::TRANSACTION_BRANCH, models::Account};
 use tari_template_lib::{
     constants::XTR,
-    models::{Amount, ComponentAddress, ResourceAddress, VaultId},
+    models::{ComponentAddress, ResourceAddress, VaultId},
 };
 use tari_transaction::args;
 
@@ -29,7 +29,7 @@ impl Runner {
 
         let transaction = self
             .new_transaction_builder()
-            .fee_transaction_pay_from_component(in_account.address.as_component_address().unwrap(), Amount(1000))
+            .fee_transaction_pay_from_component(in_account.address.as_component_address().unwrap(), 1000)
             .call_function(self.faucet_template.address, "mint", args![Amount(1_000_000_000)])
             .with_inputs([
                 SubstateRequirement::unversioned(in_account.address.clone()),

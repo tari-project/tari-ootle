@@ -14,7 +14,10 @@ use tari_crypto::{
     },
     tari_utilities::ByteArray,
 };
-use tari_template_lib::models::{Amount, ConfidentialOutputStatement, ViewableBalanceProof};
+use tari_template_lib::{
+    models::{ConfidentialOutputStatement, ViewableBalanceProof},
+    types::Amount,
+};
 
 use super::{get_commitment_factory, get_range_proof_service, messages};
 use crate::{

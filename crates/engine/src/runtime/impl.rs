@@ -100,7 +100,6 @@ use tari_template_lib::{
     call_args,
     constants::{CONFIDENTIAL_TARI_RESOURCE_ADDRESS, XTR},
     models::{
-        Amount,
         BucketId,
         ComponentAddress,
         ComponentAddressAllocation,
@@ -115,10 +114,10 @@ use tari_template_lib::{
     prelude::{ResourceType, RistrettoPublicKeyBytes},
     resource::{IMAGE_URL, TOKEN_SYMBOL},
     template::BuiltinTemplate,
-    types::{EntityId, TemplateAddress},
+    types::{Amount, EntityId, TemplateAddress},
 };
 
-use super::{working_state::WorkingState, Runtime};
+use super::{limits, working_state::WorkingState, Runtime};
 use crate::{
     runtime::{
         engine_args::EngineArgs,
@@ -768,6 +767,20 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     });
                 }
 
+                if arg.divisibility > limits::MAX_DIVISIBILITY {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "CreateResourceArg",
+                        reason: format!("Divisibility must be between 0 and {}", limits::MAX_DIVISIBILITY),
+                    });
+                }
+
+                if arg.resource_type.is_non_fungible() && arg.divisibility > 0 {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "CreateResourceArg",
+                        reason: "Non-fungible resources cannot have divisibility".to_string(),
+                    });
+                }
+
                 let owner_key = match &arg.owner_rule {
                     OwnerRule::OwnedBySigner => Some(self.transaction_signer_public_key),
                     OwnerRule::ByPublicKey(key) => Some(*key),
@@ -788,6 +801,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         arg.metadata,
                         arg.view_key,
                         arg.authorize_hook,
+                        arg.divisibility,
                         arg.is_total_supply_tracking_enabled,
                     );
 
@@ -1155,7 +1169,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let resource_type = state.get_resource(&resource_lock)?.resource_type();
                     let vault_id = state.id_provider()?.new_vault_id()?;
                     let resource = match resource_type {
-                        ResourceType::Fungible => ResourceContainer::fungible(*resource_address, 0.into()),
+                        ResourceType::Fungible => ResourceContainer::fungible(*resource_address, Amount::zero()),
                         ResourceType::NonFungible => {
                             ResourceContainer::non_fungible(*resource_address, Default::default())
                         },
@@ -1296,10 +1310,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         },
                         VaultWithdrawArg::NonFungible { ids } => {
                             let container = vault_mut.withdraw_non_fungibles(&ids)?;
-                            let amount =
-                                Amount(ids.len().try_into().map_err(|_| RuntimeError::NumericConversionError {
-                                    details: "Could not convert to i64".to_owned(),
-                                })?);
+                            let amount = ids.len().into();
                             (container, amount)
                         },
                         VaultWithdrawArg::Confidential { proof } => {

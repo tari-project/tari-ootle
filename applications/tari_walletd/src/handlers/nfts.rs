@@ -18,7 +18,7 @@ use tari_ootle_wallet_sdk::apis::{key_manager, substate::ValidatorScanResult};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS},
-    models::{Amount, ComponentAddress, NonFungibleAddress, ResourceAddress},
+    models::{ComponentAddress, NonFungibleAddress, ResourceAddress},
 };
 use tari_transaction::{args, TransactionId};
 use tari_wallet_daemon_client::{
@@ -100,9 +100,7 @@ pub async fn handle_mint_faucet_nft(
 
     let mutable_data = convert_json_to_cbor(req.mutable_data).map_err(|e| invalid_params("mutable_data", Some(e)))?;
 
-    let number_to_mint = Amount::try_from(req.number_to_mint)
-        .map_err(|e| invalid_params("number_to_mint", Some(format!("number_to_mint out of range: {}", e))))?;
-    if number_to_mint.is_zero() {
+    if req.number_to_mint == 0 {
         return Err(invalid_params("number_to_mint", Some("number_to_mint is zero")));
     }
 
@@ -114,7 +112,7 @@ pub async fn handle_mint_faucet_nft(
     let transaction = transaction_builder(context)
         .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), fee)
         .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![
-            number_to_mint,
+            Amount(req.number_to_mint),
             mutable_data
         ])
         .put_last_instruction_output_on_workspace("tokens")
@@ -308,6 +306,7 @@ pub async fn handle_transfer_nft(
         let finalize = execute_result.finalize;
         return Ok(TransferNftResponse {
             transaction_id,
+            // TODO: this could cause a crash, change api to use u64
             fee: finalize.fee_receipt.total_fees_paid,
             fee_refunded: finalize.fee_receipt.total_fee_payment - finalize.fee_receipt.total_fees_paid,
             result: finalize,

@@ -7,9 +7,10 @@ use tari_engine_types::{instruction::Instruction, ToByteType};
 use tari_template_lib::{
     call_args,
     constants::XTR,
-    models::{Amount, ComponentAddress, ResourceAddress},
+    models::{ComponentAddress, ResourceAddress},
     prelude::AccessRules,
     rule,
+    types::Amount,
 };
 use tari_template_test_tooling::{
     support::assert_error::{assert_access_denied_for_action, assert_reject_reason},
@@ -24,7 +25,7 @@ fn basic_faucet_transfer() {
 
     let faucet_template = template_test.get_template_address("TestFaucet");
 
-    let initial_supply = Amount(1_000_000_000_000);
+    let initial_supply = Amount::from(1_000_000_000_000u64);
     let result = template_test
         .execute_and_commit(
             vec![Instruction::CallFunction {
@@ -32,7 +33,7 @@ fn basic_faucet_transfer() {
                 function: "mint".to_string(),
                 args: call_args![initial_supply],
             }],
-            vec![template_test.get_test_proof()],
+            vec![template_test.owner_proof()],
         )
         .unwrap();
     let faucet_component: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
@@ -54,7 +55,7 @@ fn basic_faucet_transfer() {
                 .call_method(faucet_component, "take_free_coins", args![])
                 .put_last_instruction_output_on_workspace("free_coins")
                 .call_method(sender_address, "deposit", args![Workspace("free_coins")]),
-            vec![template_test.get_test_proof()],
+            vec![template_test.owner_proof()],
         )
         .unwrap_success();
 
@@ -71,8 +72,14 @@ fn basic_faucet_transfer() {
         )
         .unwrap_success();
 
-    assert_eq!(result.finalize.execution_results[3].decode::<Amount>().unwrap(), 900u64);
-    assert_eq!(result.finalize.execution_results[4].decode::<Amount>().unwrap(), 100u64);
+    assert_eq!(
+        result.finalize.execution_results[3].decode::<Amount>().unwrap(),
+        Amount::from(900)
+    );
+    assert_eq!(
+        result.finalize.execution_results[4].decode::<Amount>().unwrap(),
+        Amount::from(100u64)
+    );
 }
 
 #[test]
@@ -81,7 +88,7 @@ fn withdraw_from_account_prevented() {
 
     let faucet_template = template_test.get_template_address("TestFaucet");
 
-    let initial_supply = Amount(1_000_000_000_000);
+    let initial_supply = Amount::from(1_000_000_000_000u64);
     let result = template_test
         .execute_and_commit(
             vec![Instruction::CallFunction {
@@ -89,7 +96,7 @@ fn withdraw_from_account_prevented() {
                 function: "mint".to_string(),
                 args: call_args![initial_supply],
             }],
-            vec![template_test.get_test_proof()],
+            vec![template_test.owner_proof()],
         )
         .unwrap();
     let faucet_component: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
@@ -155,7 +162,7 @@ fn withdraw_from_account_prevented() {
         .unwrap();
     assert_eq!(
         result.finalize.execution_results[0].decode::<Amount>().unwrap(),
-        Amount(0)
+        Amount::zero()
     );
 }
 
@@ -210,7 +217,7 @@ fn gasless() {
 
     let result = test.execute_expect_success(
         Transaction::builder()
-            .fee_transaction_pay_from_component(fee_account, Amount(1000))
+            .fee_transaction_pay_from_component(fee_account, 1000)
             .call_method(user_account, "withdraw", args![XTR, Amount(100)])
             .put_last_instruction_output_on_workspace("b")
             .call_method(user2_account, "deposit", args![Workspace("b")])
@@ -221,7 +228,7 @@ fn gasless() {
     );
 
     let balance = result.expect_return::<Vec<(ResourceAddress, Amount)>>(3);
-    assert_eq!(balance[0].1, 100);
+    assert_eq!(balance[0].1, 100u64);
 }
 
 #[test]

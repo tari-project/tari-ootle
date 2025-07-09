@@ -53,7 +53,7 @@ pub use crate::{
     invoke_args,
     log,
     models::{
-        Amount,
+        Account,
         Bucket,
         BucketId,
         ComponentAddress,
@@ -75,5 +75,6 @@ pub use crate::{
     resource::{ResourceBuilder, ResourceManager, ResourceType},
     rule,
     template::{BuiltinTemplate, TemplateManager},
+    types::*,
     warn,
 };

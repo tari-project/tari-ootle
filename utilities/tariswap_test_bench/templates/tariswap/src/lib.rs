@@ -20,16 +20,17 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_template_abi::rust::collections::HashMap;
+use tari_template_abi::rust::collections::BTreeMap;
 use tari_template_lib::prelude::*;
 
 #[template]
 mod tariswap {
+
     use super::*;
 
     // Constant product AMM
     pub struct TariSwapPool {
-        pools: HashMap<ResourceAddress, Vault>,
+        pools: BTreeMap<ResourceAddress, Vault>,
         lp_resource: ResourceAddress,
         fee: u16,
     }
@@ -39,7 +40,7 @@ mod tariswap {
         // the fees is represented as a per-mil quantity (e.g. "1" represents "0.1%")
         pub fn new(a_addr: ResourceAddress, b_addr: ResourceAddress, fee: u16) -> Component<Self> {
             // check that the resource pair is correct
-            assert!(a_addr != b_addr, "The resources of the pair must be different");
+            assert_ne!(a_addr, b_addr, "The resources of the pair must be different");
             Self::check_resource_is_fungible(a_addr);
             Self::check_resource_is_fungible(b_addr);
 
@@ -48,7 +49,7 @@ mod tariswap {
             assert!(valid_fee_range.contains(&fee), "Invalid fee {}", fee);
 
             // create the vaults to store the funds
-            let mut pools = HashMap::new();
+            let mut pools = BTreeMap::new();
             pools.insert(a_addr, Vault::new_empty(a_addr));
             pools.insert(b_addr, Vault::new_empty(b_addr));
 
@@ -90,9 +91,8 @@ mod tariswap {
 
             // apply the fee to the input bucket
             // so the user will get a lesser amout of tokens than the theoritical (for the gain of the LP holders)
-            let input_bucket_balance = input_bucket.amount().value();
-            let effective_input_balance = input_bucket_balance - (input_bucket_balance * (self.fee as i64)) / 1000;
-            let effective_input_balance = Amount::new(effective_input_balance);
+            let input_bucket_balance = input_bucket.amount();
+            let effective_input_balance = input_bucket_balance - (input_bucket_balance * self.fee.into()) / 1000.into();
 
             // recalculate the new vault balances for the swap
             // constant product AMM formula is "k = a * b"
@@ -142,14 +142,15 @@ mod tariswap {
 
             // get the pool information
             let a_resource = self.get_a_resource();
-            let a_balance = self.get_pool_balance(a_resource).value() as f64;
+            let a_balance = self.get_pool_balance(a_resource);
             let b_resource = self.get_b_resource();
-            let b_balance = self.get_pool_balance(b_resource).value() as f64;
+            let b_balance = self.get_pool_balance(b_resource);
 
             // calculate the amount of tokens to take from each pool
-            let lp_ratio = lp_bucket.amount().value() as f64 / self.lp_total_supply().value() as f64;
-            let a_amount = Amount::new((lp_ratio * a_balance).ceil() as i64);
-            let b_amount = Amount::new((lp_ratio * b_balance).ceil() as i64);
+            let decimals = Amount::from(1_000_000u64);
+            let lp_ratio = (lp_bucket.amount() * decimals) / (self.lp_total_supply() * decimals);
+            let a_amount = (lp_ratio.div_ceil(decimals)) * a_balance;
+            let b_amount = (lp_ratio.div_ceil(decimals)) * b_balance;
 
             // burn the LP tokens
             lp_bucket.burn();
@@ -168,11 +169,11 @@ mod tariswap {
             *self.pools.keys().nth(1).unwrap()
         }
 
-        pub fn get_pool_balances(&self) -> HashMap<ResourceAddress, Amount> {
-            let mut balances = HashMap::new();
+        pub fn get_pool_balances(&self) -> BTreeMap<ResourceAddress, Amount> {
+            let mut balances = BTreeMap::new();
 
             for (resource, vault) in &self.pools {
-                balances.insert(resource.clone(), vault.balance());
+                balances.insert(*resource, vault.balance());
             }
 
             balances
@@ -190,7 +191,7 @@ mod tariswap {
             let balance = self.get_pool_balance(resource);
 
             if balance == 0 {
-                Amount::new(1)
+                1.into()
             } else {
                 amount / balance
             }
@@ -209,7 +210,7 @@ mod tariswap {
         }
 
         fn check_pool_resources(&self, a_resource: ResourceAddress, b_resource: ResourceAddress) {
-            assert!(a_resource != b_resource, "The resource addresses are the same");
+            assert_ne!(a_resource, b_resource, "The resource addresses are the same");
             assert!(
                 self.pools.contains_key(&a_resource),
                 "The resource {} is not in the pool",

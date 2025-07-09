@@ -1,12 +1,9 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_crypto::{
-    commitment::HomomorphicCommitmentFactory,
-    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey},
-};
-use tari_engine_types::confidential::get_commitment_factory;
-use tari_template_lib::models::{Amount, EncryptedData};
+use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey};
+use tari_engine_types::confidential::commit_amount_checked;
+use tari_template_lib::{models::EncryptedData, types::Amount};
 
 #[derive(Debug, Clone)]
 pub struct ConfidentialProofStatement {
@@ -19,7 +16,7 @@ pub struct ConfidentialProofStatement {
 }
 
 impl ConfidentialProofStatement {
-    pub fn to_commitment(&self) -> PedersenCommitment {
-        get_commitment_factory().commit_value(&self.mask, self.amount.value() as u64)
+    pub fn to_commitment(&self) -> Option<PedersenCommitment> {
+        commit_amount_checked(&self.mask, self.amount)
     }
 }

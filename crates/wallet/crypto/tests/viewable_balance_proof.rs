@@ -16,8 +16,9 @@ use tari_ootle_wallet_crypto::{
     ConfidentialProofStatement,
 };
 use tari_template_lib::{
-    models::{Amount, EncryptedData},
+    models::EncryptedData,
     template_dependencies::{decode_exact, encode_with_len},
+    types::Amount,
 };
 use tari_utilities::ByteArray;
 
@@ -116,11 +117,11 @@ fn serialize_deserialize() {
 
     let proof = create_withdraw_proof(
         &[],
-        Amount(123),
+        Amount::from(123),
         Some(&output_statement),
-        Amount(123),
+        Amount::from(123),
         Some(&change_statement),
-        Amount(0),
+        Amount::from(0),
     )
     .unwrap();
 

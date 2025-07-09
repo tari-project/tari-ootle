@@ -42,7 +42,6 @@ use crate::{
     },
     auth::{OwnerRule, ResourceAccessRules},
     models::{
-        Amount,
         Bucket,
         ConfidentialOutputStatement,
         Metadata,
@@ -53,7 +52,10 @@ use crate::{
         VaultId,
     },
     prelude::{AuthHook, ResourceType},
-    types::crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    types::{
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+        Amount,
+    },
 };
 
 /// Provides an interface for various resource operations e.g. Minting, recalling, creating, etc.
@@ -122,6 +124,7 @@ impl ResourceManager {
         view_key: Option<RistrettoPublicKeyBytes>,
         authorize_hook: Option<AuthHook>,
         address_allocation: Option<ResourceAddressAllocation>,
+        divisibility: u8,
         is_total_supply_tracking_enabled: bool,
     ) -> (ResourceAddress, Option<Bucket>) {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
@@ -136,6 +139,7 @@ impl ResourceManager {
                 view_key,
                 authorize_hook,
                 address_allocation,
+                divisibility,
                 is_total_supply_tracking_enabled,
             }],
         });
@@ -261,9 +265,9 @@ impl ResourceManager {
     /// # Arguments
     ///
     /// * `amount` - The amount of new tokens to be minted
-    pub fn mint_fungible(&self, amount: Amount) -> Bucket {
+    pub fn mint_fungible<A: Into<Amount>>(&self, amount: A) -> Bucket {
         self.mint_internal(MintResourceArg {
-            mint_arg: MintArg::Fungible { amount },
+            mint_arg: MintArg::Fungible { amount: amount.into() },
         })
     }
 
@@ -293,9 +297,9 @@ impl ResourceManager {
     ///
     /// * `vault_id` - The vault whose tokens are going to be recalled
     /// * `amount` - The amount of tokens to be recalled from the
-    pub fn recall_fungible_amount(&self, vault_id: VaultId, amount: Amount) -> Bucket {
+    pub fn recall_fungible_amount<A: Into<Amount>>(&self, vault_id: VaultId, amount: A) -> Bucket {
         self.recall_internal(RecallResourceArg {
-            resource: ResourceDiscriminator::Fungible { amount },
+            resource: ResourceDiscriminator::Fungible { amount: amount.into() },
             vault_id,
         })
     }
@@ -349,23 +353,32 @@ impl ResourceManager {
     /// * `vault_id` - The vault whose tokens are going to be recalled
     /// * `commitments` - The Pedersen commitments of the tokens that are going to be recalled
     /// * `revealed_amount` - The amount of tokens that are going to be recalled
-    pub fn recall_confidential(
+    pub fn recall_confidential<A: Into<Amount>>(
         &self,
         vault_id: VaultId,
         commitments: BTreeSet<PedersenCommitmentBytes>,
-        revealed_amount: Amount,
+        revealed_amount: A,
     ) -> Bucket {
         self.recall_internal(RecallResourceArg {
             resource: ResourceDiscriminator::Confidential {
                 commitments,
-                revealed_amount,
+                revealed_amount: revealed_amount.into(),
             },
             vault_id,
         })
     }
 
-    /// Returns the total supply of tokens for the resource being managed
+    /// Returns the total supply of tokens for the resource being managed if the resource has total supply tracking
+    /// enabled. If not, this function panics. If you want to check if the resource has total supply tracking
+    /// enabled, use `total_supply_opt` instead.
     pub fn total_supply(&self) -> Amount {
+        self.total_supply_opt()
+            .expect("Resource does not have total supply tracking enabled")
+    }
+
+    /// Returns the total supply of tokens for the resource being managed if the resource has total supply tracking
+    /// enabled. If not, it returns `None`.
+    pub fn total_supply_opt(&self) -> Option<Amount> {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
             resource_ref: self.expect_resource_address(),
             action: ResourceAction::GetTotalSupply,

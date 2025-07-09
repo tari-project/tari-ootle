@@ -88,7 +88,7 @@ export default function Transactions({ account }: { account: Account }) {
                       <DataTableCell>
                         <StatusChip status={status} showTitle />
                       </DataTableCell>
-                      <DataTableCell>{result?.fee_receipt.total_fees_paid || "--"}</DataTableCell>
+                      <DataTableCell>{result?.fee_receipt.total_fees_paid.toString() || "--"}</DataTableCell>
                       <DataTableCell>
                         <IconButton
                           component={Link}

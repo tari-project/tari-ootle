@@ -6,5 +6,5 @@ export interface RevealFundsRequest {
   account: ComponentAddressOrName | null;
   amount_to_reveal: Amount;
   pay_fee_from_reveal: boolean;
-  max_fee: Amount | null;
+  max_fee: number | null;
 }

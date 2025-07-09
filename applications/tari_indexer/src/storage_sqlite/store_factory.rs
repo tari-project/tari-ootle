@@ -519,7 +519,7 @@ pub trait IndexerStoreWriteTransaction {
     fn save_event(&mut self, new_event: NewEvent) -> Result<(), StorageError>;
     fn save_scanned_block_id(&mut self, new_scanned_block_id: NewScannedBlockId) -> Result<(), StorageError>;
     fn delete_scanned_epochs_older_than(&mut self, epoch: Epoch) -> Result<(), StorageError>;
-    fn insert_transaction(&mut self, transaction: &Transaction) -> Result<(), StorageError>;
+    fn insert_or_ignore_transaction(&mut self, transaction: &Transaction) -> Result<(), StorageError>;
 }
 
 impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
@@ -678,7 +678,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         Ok(())
     }
 
-    fn insert_transaction(&mut self, transaction: &Transaction) -> Result<(), StorageError> {
+    fn insert_or_ignore_transaction(&mut self, transaction: &Transaction) -> Result<(), StorageError> {
         use crate::storage_sqlite::schema::transactions;
 
         diesel::insert_into(transactions::table)
@@ -686,6 +686,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                 transactions::transaction_id.eq(serialize_hex(transaction.calculate_id())),
                 transactions::body.eq(serialize_json(transaction).unwrap()),
             ))
+            .on_conflict_do_nothing()
             .execute(self.connection())
             .map_err(|e| StorageError::QueryError {
                 reason: format!("insert_transaction: {e}"),

@@ -4,8 +4,9 @@
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 use tari_template_lib::{
-    models::{Amount, ResourceAddress, VaultId},
+    models::{ResourceAddress, VaultId},
     prelude::ResourceType,
+    types::Amount,
 };
 
 use crate::{

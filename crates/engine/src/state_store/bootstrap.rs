@@ -17,6 +17,7 @@ use crate::state_store::{memory::MemoryStateStore, StateStoreError, StateWriter}
 
 pub fn new_memory_store() -> MemoryStateStore {
     let mut state_db = MemoryStateStore::new();
+    // TODO: remove this - it's not correct
     // Add shared global resources
     add_global_resources(&mut state_db).unwrap();
     state_db
@@ -40,6 +41,7 @@ fn add_global_resources<T: StateWriter>(state_db: &mut T) -> Result<(), StateSto
                 metadata,
                 None,
                 None,
+                0,
                 false,
             ),
         ),
@@ -61,6 +63,7 @@ fn add_global_resources<T: StateWriter>(state_db: &mut T) -> Result<(), StateSto
                 metadata,
                 None,
                 None,
+                6,
                 false,
             ),
         ),

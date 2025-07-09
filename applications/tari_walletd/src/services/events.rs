@@ -3,7 +3,6 @@
 
 use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateId};
 use tari_ootle_wallet_sdk::models::{Account, NewAccountInfo, TransactionStatus};
-use tari_template_lib::models::Amount;
 use tari_transaction::TransactionId;
 
 #[derive(Debug, Clone)]
@@ -63,7 +62,7 @@ pub struct TransactionSubmittedEvent {
 pub struct TransactionFinalizedEvent {
     pub transaction_id: TransactionId,
     pub finalize: FinalizeResult,
-    pub final_fee: Amount,
+    pub final_fee: u64,
     pub status: TransactionStatus,
 }
 
@@ -84,7 +83,7 @@ pub struct TransactionInvalidEvent {
     pub transaction_id: TransactionId,
     pub status: TransactionStatus,
     pub finalize: Option<FinalizeResult>,
-    pub final_fee: Option<Amount>,
+    pub final_fee: Option<u64>,
 }
 
 #[derive(Debug, Clone)]

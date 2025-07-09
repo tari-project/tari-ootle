@@ -51,9 +51,9 @@ use tari_ootle_wallet_sdk::{
 use tari_template_abi::{FunctionDef, TemplateDef};
 use tari_template_lib::{
     auth::ComponentAccessRules,
-    models::{Amount, ConfidentialOutputStatement, NonFungibleId, ResourceAddress, VaultId},
+    models::{ConfidentialOutputStatement, NonFungibleId, ResourceAddress, VaultId},
     prelude::{ComponentAddress, ConfidentialWithdrawProof, ResourceType, RistrettoPublicKeyBytes},
-    types::{crypto::PedersenCommitmentBytes, TemplateAddress},
+    types::{crypto::PedersenCommitmentBytes, Amount, TemplateAddress},
 };
 use tari_transaction::{Transaction, TransactionId, UnsignedTransaction};
 use time::PrimitiveDateTime;
@@ -224,7 +224,8 @@ pub struct PublishTemplateRequest {
 pub struct PublishTemplateResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
-    pub dry_run_fee: Option<Amount>,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub dry_run_fee: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -321,7 +322,8 @@ pub struct TransactionWaitResultResponse {
     pub transaction_id: TransactionId,
     pub result: Option<FinalizeResult>,
     pub status: TransactionStatus,
-    pub final_fee: Amount,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub final_fee: u64,
     pub timed_out: bool,
 }
 
@@ -437,7 +439,8 @@ pub struct KeysCreateResponse {
 pub struct AccountsCreateRequest {
     pub account_name: Option<String>,
     pub custom_access_rules: Option<ComponentAccessRules>,
-    pub max_fee: Option<Amount>,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub max_fee: Option<u64>,
     pub is_default: bool,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub key_id: Option<u64>,
@@ -620,7 +623,8 @@ pub struct AccountsTransferRequest {
     pub resource_address: ResourceAddress,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub destination_public_key: RistrettoPublicKeyBytes,
-    pub max_fee: Option<Amount>,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub max_fee: Option<u64>,
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     pub proof_from_badge_resource: Option<ResourceAddress>,
     pub dry_run: bool,
@@ -635,8 +639,10 @@ pub struct AccountsTransferRequest {
 pub struct AccountsTransferResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
-    pub fee: Amount,
-    pub fee_refunded: Amount,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub fee: u64,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub fee_refunded: u64,
     pub result: FinalizeResult,
 }
 
@@ -734,7 +740,8 @@ pub struct ConfidentialTransferRequest {
     pub resource_address: ResourceAddress,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub destination_public_key: RistrettoPublicKeyBytes,
-    pub max_fee: Option<Amount>,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub max_fee: Option<u64>,
     pub output_to_revealed: bool,
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     pub proof_from_badge_resource: Option<ResourceAddress>,
@@ -750,7 +757,8 @@ pub struct ConfidentialTransferRequest {
 pub struct ConfidentialTransferResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
-    pub fee: Amount,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub fee: u64,
     pub result: FinalizeResult,
 }
 
@@ -793,7 +801,8 @@ pub struct ClaimBurnRequest {
     // TODO: make this a type
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub claim_proof: serde_json::Value,
-    pub max_fee: Option<Amount>,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub max_fee: Option<u64>,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub key_id: Option<u64>,
 }
@@ -807,7 +816,8 @@ pub struct ClaimBurnRequest {
 pub struct ClaimBurnResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
-    pub fee: Amount,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub fee: u64,
     pub result: FinalizeResult,
 }
 
@@ -834,7 +844,8 @@ pub struct RevealFundsRequest {
     /// Pay fee from revealed funds. If false, previously revealed funds in the account are used.
     pub pay_fee_from_reveal: bool,
     /// The amount of fees to add to the transaction. Any fees not charged are refunded.
-    pub max_fee: Option<Amount>,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub max_fee: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -846,7 +857,8 @@ pub struct RevealFundsRequest {
 pub struct RevealFundsResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
-    pub fee: Amount,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub fee: u64,
     pub result: FinalizeResult,
 }
 
@@ -859,7 +871,8 @@ pub struct RevealFundsResponse {
 pub struct AccountsCreateFreeTestCoinsRequest {
     pub account: Option<ComponentAddressOrName>,
     pub amount: Amount,
-    pub max_fee: Option<Amount>,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub max_fee: Option<u64>,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub key_id: Option<u64>,
 }
@@ -875,7 +888,8 @@ pub struct AccountsCreateFreeTestCoinsResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
     pub amount: Amount,
-    pub fee: Amount,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub fee: u64,
     pub result: FinalizeResult,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub public_key: RistrettoPublicKeyBytes,
@@ -937,6 +951,7 @@ pub type EncodedJwtString = Zeroizing<String>;
 pub struct AuthLoginResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub auth_token: EncodedJwtString,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub valid_for_secs: u64,
 }
 
@@ -1011,7 +1026,8 @@ pub struct MintFaucetNftRequest {
     #[cfg_attr(feature = "ts", ts(type = "object"))]
     pub mutable_data: serde_json::Value,
     pub number_to_mint: u64,
-    pub max_fee: Option<Amount>,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub max_fee: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1024,7 +1040,7 @@ pub struct MintFaucetNftResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
     pub finalize: FinalizeResult,
-    pub fee: Amount,
+    pub fee: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1124,7 +1140,8 @@ pub struct GetValidatorFeesResponse {
 )]
 pub struct FeePoolDetails {
     pub address: ValidatorFeePoolAddress,
-    pub amount: Amount,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub amount: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1138,7 +1155,8 @@ pub struct ClaimValidatorFeesRequest {
     pub account: Option<ComponentAddressOrName>,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub claim_key_index: Option<u64>,
-    pub max_fee: Option<Amount>,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub max_fee: Option<u64>,
     pub shards: Vec<Shard>,
     pub dry_run: bool,
 }
@@ -1152,7 +1170,8 @@ pub struct ClaimValidatorFeesRequest {
 pub struct ClaimValidatorFeesResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
-    pub fee: Amount,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub fee: u64,
     pub result: FinalizeResult,
 }
 
@@ -1507,7 +1526,8 @@ pub struct TransferNftRequest {
     pub source_account: ComponentAddressOrName,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub target_account_public_key: RistrettoPublicKeyBytes,
-    pub max_fee: Amount,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub max_fee: u64,
     pub dry_run: bool,
 }
 
@@ -1520,7 +1540,9 @@ pub struct TransferNftRequest {
 pub struct TransferNftResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
-    pub fee: Amount,
-    pub fee_refunded: Amount,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub fee: u64,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub fee_refunded: u64,
     pub result: FinalizeResult,
 }

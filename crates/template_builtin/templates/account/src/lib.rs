@@ -174,7 +174,7 @@ mod account_template {
             self.vaults.iter().map(|(k, v)| (*k, v.balance())).collect()
         }
 
-        /// Withdraws funds using the ConfidentialWithdrawProof, and immediately deposits the withdraw back into the
+        /// Withdraws funds using the ConfidentialWithdrawProof, and immediately deposits the withdrawal back into the
         /// vault. It will panic if the proof is invalid or the resource type contained in the vault is not
         /// confidential. This is useful for converting confidential tokens into revealed tokens and vice versa.
         pub fn join_confidential(&mut self, resource: ResourceAddress, proof: ConfidentialWithdrawProof) {

@@ -28,10 +28,12 @@ use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     call_args,
-    constants::{XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
-    models::{Amount, UnclaimedConfidentialOutputAddress},
-    prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, CONFIDENTIAL_TARI_RESOURCE_ADDRESS},
-    types::crypto::CommitmentSignatureBytes,
+    constants::{CONFIDENTIAL_TARI_RESOURCE_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
+    models::UnclaimedConfidentialOutputAddress,
+    types::{
+        crypto::{CommitmentSignatureBytes, PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
+        Amount,
+    },
 };
 use tari_transaction::args;
 use tari_wallet_daemon_client::{
@@ -68,6 +70,7 @@ use tokio::task;
 use super::context::HandlerContext;
 use crate::{
     handlers::helpers::{
+        application_error,
         get_account,
         get_account_or_default,
         get_account_with_inputs,
@@ -78,6 +81,7 @@ use crate::{
         wait_for_result_and_account,
     },
     indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
+    jrpc_server::ApplicationErrorCode,
     services::TransactionSubmittedEvent,
     DEFAULT_FEE,
 };
@@ -285,14 +289,18 @@ pub async fn handle_reveal_funds(
             .get_vault_by_resource(&account.address, &CONFIDENTIAL_TARI_RESOURCE_ADDRESS)?;
 
         let max_fee = req.max_fee.unwrap_or(DEFAULT_FEE);
-        let amount_to_reveal = req.amount_to_reveal + if req.pay_fee_from_reveal { max_fee } else { 0.into() };
+        let amount_to_reveal = req.amount_to_reveal +
+            if req.pay_fee_from_reveal {
+                max_fee.into()
+            } else {
+                0.into()
+            };
 
         let proof_id = sdk.confidential_outputs_api().add_proof(&vault.address)?;
 
-        let (inputs, input_value) =
+        let (inputs, input_amount) =
             sdk.confidential_outputs_api()
                 .lock_outputs_by_amount(&vault.address, amount_to_reveal, proof_id)?;
-        let input_amount = Amount::try_from(input_value)?;
 
         let account_key = sdk
             .key_manager_api()
@@ -303,7 +311,7 @@ pub async fn handle_reveal_funds(
 
         let remaining_confidential_amount = input_amount - amount_to_reveal;
         let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
-            remaining_confidential_amount.as_u64_checked().unwrap(),
+            remaining_confidential_amount.to_u64_checked().unwrap(),
             &output_mask.key,
             &public_nonce,
             &account_key.key,
@@ -411,9 +419,6 @@ pub async fn handle_claim_burn(
     } = req;
 
     let max_fee = max_fee.unwrap_or(DEFAULT_FEE);
-    if max_fee.is_negative() {
-        return Err(invalid_params("fee", Some("cannot be negative")));
-    }
 
     let reciprocal_claim_public_key = RistrettoPublicKey::from_canonical_bytes(
         &base64::decode(
@@ -466,6 +471,8 @@ pub async fn handle_claim_burn(
     )
     .map_err(|e| invalid_params("ownership_proof.v", Some(e)))?;
 
+    // TODO: validate the proof_of_knowledge from the claim before submitting the transaction
+
     let mut inputs = vec![];
     let accounts_api = sdk.accounts_api();
     let (account_address, account_secret_key, new_account_name) =
@@ -517,19 +524,23 @@ pub async fn handle_claim_burn(
     let mask = sdk.key_manager_api().next_key(key_manager::TRANSACTION_BRANCH)?;
     let (nonce, output_public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
 
-    let final_amount = Amount::try_from(unmasked_output.value)? - max_fee;
-    if final_amount.is_negative() {
-        return Err(anyhow::anyhow!(
-            "Fee ({}) is greater than the claimed output amount ({})",
-            max_fee,
-            unmasked_output.value
-        ));
-    }
+    let final_amount = unmasked_output
+        .value
+        .checked_sub(max_fee.into())
+        .ok_or_else(|| invalid_params("max_fee", Some("more fees paid than claimed amount")))?;
 
-    // TODO: validate the proof_of_knowledge from the claim before submitting the transaction
+    let final_amount_u64 = final_amount.to_u64_checked().ok_or_else(|| {
+        application_error(
+            ApplicationErrorCode::NotImplemented,
+            format!("Amount to spend {final_amount} is too large and not currently supported"),
+        )
+    })?;
 
+    // NOTE: the confidential encryption format currently does not support amounts larger than u64. Apart from it being
+    // insane/basically impossible to have that much in a single UTXO, the L1 emission will reach this much in many
+    // thousands of years.
     let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
-        final_amount.as_u64_checked().unwrap(),
+        final_amount_u64,
         &mask.key,
         &account_public_key,
         &nonce,
@@ -546,11 +557,11 @@ pub async fn handle_claim_burn(
 
     let reveal_proof = sdk.confidential_crypto_api().generate_withdraw_proof(
         &[unmasked_output],
-        Amount::zero(),
+        0,
         Some(&output_statement).filter(|o| !o.amount.is_zero()),
         max_fee,
         None,
-        Amount::zero(),
+        0,
     )?;
 
     let instructions = vec![Instruction::ClaimBurn {
@@ -599,7 +610,7 @@ async fn finish_claiming<T: WalletStore>(
     sdk: &WalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>,
     mut inputs: Vec<SubstateRequirement>,
     account_public_key: RistrettoPublicKeyBytes,
-    max_fee: Amount,
+    max_fee: u64,
     account_secret_key: DerivedKey<RistrettoPublicKey>,
     accounts_api: &tari_ootle_wallet_sdk::apis::accounts::AccountsApi<'_, T>,
     context: &HandlerContext,
@@ -626,7 +637,7 @@ async fn finish_claiming<T: WalletStore>(
         fee_builder = fee_builder.create_account_with_bucket(account_public_key, "bucket");
     }
 
-    fee_builder = fee_builder.call_method(account_component_address, "pay_fee", args![max_fee]);
+    fee_builder = fee_builder.call_method(account_component_address, "pay_fee", args![Amount(max_fee)]);
 
     let transaction = transaction_builder(context)
         .with_fee_instructions(fee_builder.build_unsigned_transaction().into_instructions())
@@ -679,9 +690,6 @@ pub async fn handle_create_free_test_coins(
     } = req;
 
     let max_fee = max_fee.unwrap_or(DEFAULT_FEE);
-    if max_fee.is_negative() {
-        return Err(invalid_params("fee", Some("cannot be negative")));
-    }
 
     let mut inputs = vec![
         SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
@@ -917,6 +925,7 @@ pub async fn handle_transfer(
         let finalize = execute_result.finalize;
         return Ok(AccountsTransferResponse {
             transaction_id,
+            // TODO: technically this could cause a crash, update the api to a u64
             fee: finalize.fee_receipt.total_fees_paid,
             fee_refunded: finalize.fee_receipt.total_fee_payment - finalize.fee_receipt.total_fees_paid,
             result: finalize,
@@ -995,6 +1004,7 @@ pub async fn handle_confidential_transfer(
             let finalize = exec_result.finalize;
             return Ok(ConfidentialTransferResponse {
                 transaction_id,
+                // TODO: technically this could cause a crash, update the api to a u64
                 fee: finalize.fee_receipt.total_fees_paid,
                 result: finalize,
             });

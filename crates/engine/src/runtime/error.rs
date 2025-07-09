@@ -40,7 +40,6 @@ use tari_template_lib::{
     args::{WorkspaceId, WorkspaceOffsetId},
     models::{
         AddressAllocationId,
-        Amount,
         BucketId,
         ComponentAddress,
         NonFungibleId,
@@ -49,7 +48,7 @@ use tari_template_lib::{
         UnclaimedConfidentialOutputAddress,
         VaultId,
     },
-    types::TemplateAddress,
+    types::{Amount, TemplateAddress},
 };
 
 use super::workspace::WorkspaceError;
@@ -139,6 +138,14 @@ pub enum RuntimeError {
     ResourceNotFound { resource_address: ResourceAddress },
     #[error(transparent)]
     ResourceError(#[from] ResourceError),
+    #[error(
+        "Resource supply would overflow: resource {resource_address}, current supply {current_supply}, amount {amount}"
+    )]
+    ResourceSupplyWouldOverflow {
+        resource_address: ResourceAddress,
+        current_supply: Amount,
+        amount: Amount,
+    },
     #[error("Bucket {bucket_id} was dropped but was not empty")]
     BucketNotEmpty { bucket_id: BucketId },
     #[error("Item at id {id} does not exist on the workspace (existing ids: {})", .existing_ids.display())]
@@ -185,7 +192,7 @@ pub enum RuntimeError {
     #[error("Template {template_address} not found")]
     TemplateNotFound { template_address: TemplateAddress },
     #[error("Insufficient fees paid: required {required_fee}, paid {fees_paid}")]
-    InsufficientFeesPaid { required_fee: Amount, fees_paid: Amount },
+    InsufficientFeesPaid { required_fee: u64, fees_paid: u64 },
     #[error("No fee checkpoint")]
     NoFeeCheckpoint,
     #[error("Component address must be sequential. Index before {index} was not found")]

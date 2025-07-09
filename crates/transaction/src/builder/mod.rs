@@ -20,9 +20,9 @@ use tari_template_lib::{
     args::{AllocatableAddressType, InstructionArg, WorkspaceOffsetId},
     auth::OwnerRule,
     call_args,
-    models::{Amount, ConfidentialWithdrawProof, ResourceAddress},
+    models::{ConfidentialWithdrawProof, ResourceAddress},
     prelude::AccessRules,
-    types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
+    types::{crypto::RistrettoPublicKeyBytes, Amount, TemplateAddress},
 };
 
 use crate::{
@@ -84,11 +84,15 @@ impl TransactionBuilder {
     /// This method must exist and return a Bucket with containing revealed confidential XTR resource.
     /// This allows the fee to originate from sources other than the transaction sender's account.
     /// The fee instruction will lock up the "max_fee" amount for the duration of the transaction.
-    pub fn fee_transaction_pay_from_component<A: Into<ComponentCall>>(self, call: A, max_fee: Amount) -> Self {
+    pub fn fee_transaction_pay_from_component<C: Into<ComponentCall>, A: Into<Amount>>(
+        self,
+        call: C,
+        max_fee: A,
+    ) -> Self {
         self.add_fee_instruction(Instruction::CallMethod {
             call: call.into(),
             method: "pay_fee".to_string(),
-            args: call_args![max_fee],
+            args: call_args![max_fee.into().non_negative_checked().expect("Negative fee not allowed")],
         })
     }
 
@@ -184,17 +188,17 @@ impl TransactionBuilder {
         self.add_instruction(Instruction::PutLastInstructionOutputOnWorkspace { key })
     }
 
-    pub fn assert_bucket_contains<T: AsRef<str>>(
+    pub fn assert_bucket_contains<T: AsRef<str>, A: Into<Amount>>(
         self,
         label: T,
         resource_address: ResourceAddress,
-        min_amount: Amount,
+        min_amount: A,
     ) -> Self {
         let key = self.get_workspace_offset_id_from_named_arg(label.as_ref());
         self.add_instruction(Instruction::AssertBucketContains {
             key,
             resource_address,
-            min_amount,
+            min_amount: min_amount.into(),
         })
     }
 

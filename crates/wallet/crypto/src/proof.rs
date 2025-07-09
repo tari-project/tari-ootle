@@ -30,13 +30,12 @@ use tari_crypto::{
     tari_utilities::ByteArray,
 };
 use tari_engine_types::{
-    confidential::{get_commitment_factory, get_range_proof_service, messages},
+    confidential::{convert_amount_to_secret, get_commitment_factory, get_range_proof_service, messages},
     ToByteType,
 };
 use tari_hashing::TransactionSecureNonceKdfDomain;
 use tari_template_lib::{
     models::{
-        Amount,
         ConfidentialOutputStatement,
         ConfidentialStatement,
         EncryptedData,
@@ -44,7 +43,7 @@ use tari_template_lib::{
         ViewableBalanceProofChallengeFields,
     },
     prelude::{PedersenCommitmentBytes, Scalar32Bytes},
-    types::crypto::RistrettoPublicKeyBytes,
+    types::{crypto::RistrettoPublicKeyBytes, Amount},
 };
 use tari_utilities::safe_array::SafeArray;
 use zeroize::{Zeroize, Zeroizing};
@@ -60,21 +59,20 @@ pub fn create_confidential_output_statement(
     let proof_change_statement = change_statement
         .as_ref()
         .map(|stmt| -> Result<_, ConfidentialProofError> {
-            let change_commitment = stmt.to_commitment();
+            let change_commitment = stmt.to_commitment().ok_or(ConfidentialProofError::NegativeAmount)?;
             Ok(ConfidentialStatement {
                 commitment: change_commitment.to_byte_type(),
                 sender_public_nonce: RistrettoPublicKeyBytes::from_bytes(stmt.sender_public_nonce.as_bytes())
                     .expect("[generate_confidential_proof] change nonce"),
                 encrypted_data: stmt.encrypted_data.clone(),
                 minimum_value_promise: stmt.minimum_value_promise,
-                viewable_balance_proof: stmt.resource_view_key.as_ref().map(|view_key| {
-                    create_viewable_balance_proof(
-                        &stmt.mask,
-                        stmt.amount.as_u64_checked().unwrap(),
-                        &change_commitment,
-                        view_key,
-                    )
-                }),
+                viewable_balance_proof: stmt
+                    .resource_view_key
+                    .as_ref()
+                    .map(|view_key| {
+                        create_viewable_balance_proof(&stmt.mask, stmt.amount, &change_commitment, view_key)
+                    })
+                    .transpose()?,
             })
         })
         .transpose()?;
@@ -82,21 +80,28 @@ pub fn create_confidential_output_statement(
         .as_ref()
         .map(|o| o.amount)
         .unwrap_or_default()
-        .as_u64_checked()
+        .non_negative_checked()
         .ok_or(ConfidentialProofError::NegativeAmount)?;
 
-    let proof_output_statement = output_statement.as_ref().map(|stmt| {
-        let commitment = stmt.to_commitment();
-        ConfidentialStatement {
-            commitment: commitment.to_byte_type(),
-            sender_public_nonce: stmt.sender_public_nonce.to_byte_type(),
-            encrypted_data: stmt.encrypted_data.clone(),
-            minimum_value_promise: stmt.minimum_value_promise,
-            viewable_balance_proof: stmt.resource_view_key.as_ref().map(|view_key| {
-                create_viewable_balance_proof(&stmt.mask, confidential_output_value, &commitment, view_key)
-            }),
-        }
-    });
+    let proof_output_statement = output_statement
+        .as_ref()
+        .map(|stmt| {
+            let commitment = stmt.to_commitment().ok_or(ConfidentialProofError::NegativeAmount)?;
+            Ok::<_, ConfidentialProofError>(ConfidentialStatement {
+                commitment: commitment.to_byte_type(),
+                sender_public_nonce: stmt.sender_public_nonce.to_byte_type(),
+                encrypted_data: stmt.encrypted_data.clone(),
+                minimum_value_promise: stmt.minimum_value_promise,
+                viewable_balance_proof: stmt
+                    .resource_view_key
+                    .as_ref()
+                    .map(|view_key| {
+                        create_viewable_balance_proof(&stmt.mask, confidential_output_value, &commitment, view_key)
+                    })
+                    .transpose()?,
+            })
+        })
+        .transpose()?;
 
     let output_range_proof = generate_extended_bullet_proof(output_statement, change_statement)?;
 
@@ -123,16 +128,17 @@ fn inner_encrypted_data_kdf_aead(
 
 pub fn create_viewable_balance_proof(
     mask: &RistrettoSecretKey,
-    output_amount: u64,
+    output_amount: Amount,
     commitment: &PedersenCommitment,
     view_key: &RistrettoPublicKey,
-) -> ViewableBalanceProof {
+) -> Result<ViewableBalanceProof, ConfidentialProofError> {
     let (elgamal_secret_nonce, elgamal_public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
     let r = &elgamal_secret_nonce;
-    let value_as_secret = RistrettoSecretKey::from(output_amount);
+    let output_amount_as_secret =
+        convert_amount_to_secret(&output_amount).ok_or(ConfidentialProofError::NegativeAmount)?;
 
     // E = v.G + rP
-    let elgamal_encrypted = RistrettoPublicKey::from_secret_key(&value_as_secret) + r * view_key;
+    let elgamal_encrypted = RistrettoPublicKey::from_secret_key(&output_amount_as_secret) + r * view_key;
 
     // Nonces
     let x_v = RistrettoSecretKey::random(&mut OsRng);
@@ -168,7 +174,7 @@ pub fn create_viewable_balance_proof(
     //       time. The challenge is never a secret (in all current usages), so non-zeroed memory is not an issue.
 
     // sv = ev + x_v
-    let s_v = RistrettoSchnorr::sign_raw_uniform(&value_as_secret, x_v, &e)
+    let s_v = RistrettoSchnorr::sign_raw_uniform(&output_amount_as_secret, x_v, &e)
         .expect("INVARIANT VIOLATION: sv RistrettoSchnorr::sign_raw_uniform and challenge hash output length mismatch");
     // sm = em + x_m
     let s_m = RistrettoSchnorr::sign_raw_uniform(mask, x_m, &e)
@@ -177,7 +183,7 @@ pub fn create_viewable_balance_proof(
     let s_r = RistrettoSchnorr::sign_raw_uniform(r, x_r, &e)
         .expect("INVARIANT VIOLATION: sr RistrettoSchnorr::sign_raw_uniform and challenge hash output length mismatch");
 
-    ViewableBalanceProof {
+    Ok(ViewableBalanceProof {
         elgamal_encrypted,
         elgamal_public_nonce,
         c_prime,
@@ -189,7 +195,7 @@ pub fn create_viewable_balance_proof(
             .expect("INVARIANT VIOLATION: s_m length mismatch"),
         s_r: Scalar32Bytes::from_bytes(s_r.get_signature().as_bytes())
             .expect("INVARIANT VIOLATION: s_r length mismatch"),
-    }
+    })
 }
 
 const ENCRYPTED_DATA_TAG: &[u8] = b"TARI_AAD_VALUE_AND_MASK_EXTEND_NONCE_VARIANT";
@@ -297,7 +303,10 @@ fn generate_extended_bullet_proof(
             RistrettoExtendedMask::assign(ExtensionDegree::DefaultPedersen, vec![stmt.mask.clone()]).unwrap();
         extended_witnesses.push(RistrettoExtendedWitness {
             mask: extended_mask,
-            value: stmt.amount.value() as u64,
+            value: stmt
+                .amount
+                .to_u64_checked()
+                .expect("BUG: Invalid output statement amount provided to generate_extended_bullet_proof"),
             minimum_value_promise: stmt.minimum_value_promise,
         });
         agg_factor += 1;
@@ -307,7 +316,10 @@ fn generate_extended_bullet_proof(
             RistrettoExtendedMask::assign(ExtensionDegree::DefaultPedersen, vec![stmt.mask.clone()]).unwrap();
         extended_witnesses.push(RistrettoExtendedWitness {
             mask: extended_mask,
-            value: stmt.amount.value() as u64,
+            value: stmt
+                .amount
+                .to_u64_checked()
+                .expect("BUG: Invalid output statement amount provided to generate_extended_bullet_proof"),
             minimum_value_promise: stmt.minimum_value_promise,
         });
         agg_factor += 1;
@@ -322,7 +334,7 @@ mod tests {
     use rand::rngs::OsRng;
     use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
     use tari_engine_types::confidential::validate_confidential_proof;
-    use tari_template_lib::models::Amount;
+    use tari_template_lib::types::Amount;
 
     use super::*;
 

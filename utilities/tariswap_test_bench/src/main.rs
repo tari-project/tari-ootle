@@ -13,7 +13,6 @@ mod timer;
 use std::{fs, time::Instant};
 
 use log::info;
-use tari_template_lib::models::Amount;
 
 use crate::{
     cli::{Cli, SubCommand},
@@ -74,8 +73,8 @@ async fn run(cli: cli::CommonArgs, _args: cli::RunArgs) -> anyhow::Result<()> {
             &tariswaps,
             &primary_account,
             &accounts,
-            Amount(1000),
-            Amount(100),
+            1000.into(),
+            100.into(),
             &faucet,
         )
         .await?;
@@ -88,8 +87,8 @@ async fn run(cli: cli::CommonArgs, _args: cli::RunArgs) -> anyhow::Result<()> {
                 &tariswaps,
                 &primary_account,
                 &accounts,
-                Amount(1000),
-                Amount(100),
+                1000.into(),
+                100.into(),
                 &faucet,
             )
             .await?;

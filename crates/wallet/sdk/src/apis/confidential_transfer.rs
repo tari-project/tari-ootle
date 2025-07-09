@@ -24,8 +24,9 @@ use tari_ootle_wallet_crypto::{ConfidentialOutputMaskAndValue, ConfidentialProof
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-    models::{Amount, ComponentAddress, ResourceAddress, VaultId},
+    models::{ComponentAddress, ResourceAddress, VaultId},
     prelude::RistrettoPublicKeyBytes,
+    types::Amount,
 };
 use tari_transaction::{args, Transaction};
 
@@ -165,7 +166,7 @@ where
                     .outputs_api
                     .resolve_output_masks(confidential_inputs, key_manager::TRANSACTION_BRANCH)?;
 
-                let total_confidential_spent = confidential_inputs.iter().map(|i| i.value).sum::<u64>();
+                let total_confidential_spent = confidential_inputs.iter().map(|i| i.value).sum::<Amount>();
 
                 self.outputs_api.lock_revealed_funds(proof_id, revealed_to_spend)?;
 
@@ -193,12 +194,7 @@ where
                         .lock_outputs_until_partial_amount(&src_vault.address, spend_amount, proof_id)?;
 
                 let revealed_to_spend = spend_amount
-                    .saturating_sub_positive(amount_locked.try_into().map_err(|_| {
-                        ConfidentialTransferApiError::InvalidParameter {
-                            param: "transfer_param",
-                            reason: "Attempt to spend more than Amount::MAX".to_string(),
-                        }
-                    })?)
+                    .saturating_sub_positive(amount_locked)
                     .unwrap_or_else(Amount::zero);
 
                 if src_vault.revealed_balance < revealed_to_spend {
@@ -320,10 +316,11 @@ where
         }
 
         // Reserve and lock input funds for fees
+        let max_fee = params.max_fee.into();
         let fee_inputs_to_spend = self.resolved_inputs_for_transfer(
             from_account_address,
             CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-            params.max_fee,
+            max_fee,
             ConfidentialTransferInputSelection::PreferRevealed,
         )?;
 
@@ -333,8 +330,7 @@ where
         let account_public_key = PublicKey::from_secret_key(&account_secret.key);
 
         // Generate fee proof
-        let fee_not_paid_by_revealed = params
-            .max_fee
+        let fee_not_paid_by_revealed = max_fee
             .checked_sub_positive(fee_inputs_to_spend.revealed)
             .expect("BUG: PreferRevealed did not pay <= the max_fee in revealed fees");
         let confidential_change = fee_inputs_to_spend.total_confidential_amount() - fee_not_paid_by_revealed;
@@ -347,8 +343,11 @@ where
             self.outputs_api.add_output(ConfidentialOutputModel {
                 account_address: account.address.clone(),
                 vault_address: src_vault.address.clone(),
-                commitment: statement.to_commitment().to_byte_type(),
-                value: confidential_change.as_u64_checked().unwrap(),
+                commitment: statement
+                    .to_commitment()
+                    .expect("BUG: to_commitment negative amount")
+                    .to_byte_type(),
+                value: confidential_change,
                 sender_public_nonce: Some(statement.sender_public_nonce.to_byte_type()),
                 encryption_secret_key_index: account_secret.key_index,
                 encrypted_data: statement.encrypted_data.clone(),
@@ -367,7 +366,7 @@ where
             fee_inputs_to_spend.confidential.as_slice(),
             fee_inputs_to_spend.revealed,
             None,
-            params.max_fee,
+            params.max_fee.into(),
             maybe_fee_change_statement.as_ref(),
             // We always withdraw the exact amount of revealed required
             Amount::zero(),
@@ -456,13 +455,16 @@ where
                 resource_view_key,
             )?;
 
-            let change_value = statement.amount.as_u64_checked().unwrap();
+            let change_value = statement.amount;
 
             if !statement.amount.is_zero() {
                 self.outputs_api.add_output(ConfidentialOutputModel {
                     account_address: account.address,
                     vault_address: src_vault.address,
-                    commitment: statement.to_commitment().to_byte_type(),
+                    commitment: statement
+                        .to_commitment()
+                        .expect("BUG: to_commitment negative amount")
+                        .to_byte_type(),
                     value: change_value,
                     sender_public_nonce: Some(statement.sender_public_nonce.to_byte_type()),
                     encryption_secret_key_index: account_secret.key_index,
@@ -550,8 +552,13 @@ where
         let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
         let encrypted_data = self.crypto_api.encrypt_value_and_mask(
             confidential_amount
-                .as_u64_checked()
-                .unwrap_or_else(|| panic!("BUG: confidential_amount {} is negative", confidential_amount)),
+                .to_u64_checked()
+                .ok_or_else(|| ConfidentialTransferApiError::AmountOverflow {
+                    param: "confidential_amount",
+                    details: "Confidential amount exceeds u64. This is currently a limitation due to the format of \
+                              EncryptedData"
+                        .to_string(),
+                })?,
             &mask,
             dest_public_key,
             &nonce,
@@ -587,7 +594,7 @@ pub struct TransferParams {
     /// Address of the resource to transfer
     pub resource_address: ResourceAddress,
     /// Fee to lock for the transaction
-    pub max_fee: Amount,
+    pub max_fee: u64,
     /// If true, the output will contain only a revealed amount. Otherwise, only confidential amounts.
     pub output_to_revealed: bool,
     /// If some, instructions are added that create a access rule proof for this resource before calling withdraw
@@ -616,7 +623,7 @@ impl TransferParams {
 
 impl TransferParams {
     pub fn total_amount(&self) -> Amount {
-        self.amount + self.max_fee
+        self.amount + self.max_fee.into()
     }
 }
 
@@ -646,8 +653,7 @@ impl InputsToSpend {
     }
 
     pub fn total_confidential_amount(&self) -> Amount {
-        let confidential_amt = self.confidential.iter().map(|o| o.value).sum::<u64>();
-        Amount::try_from(confidential_amt).unwrap()
+        self.confidential.iter().map(|o| o.value).sum()
     }
 }
 
@@ -673,6 +679,8 @@ pub enum ConfidentialTransferApiError {
     UnexpectedIndexerResponse { details: String },
     #[error("Config API error: {0}")]
     ConfigApi(#[from] ConfigApiError),
+    #[error("Amount overflow for parameter `{param}`: {details}")]
+    AmountOverflow { param: &'static str, details: String },
 }
 
 impl IsNotFoundError for ConfidentialTransferApiError {

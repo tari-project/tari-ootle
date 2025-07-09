@@ -13,7 +13,7 @@ use tari_bor::BorTag;
 use tari_template_lib::{
     auth::{OwnerRule, Ownership},
     constants::XTR,
-    models::{Amount, BinaryTag},
+    models::BinaryTag,
     types::{crypto::RistrettoPublicKeyBytes, Hash, KeyParseError, ObjectKey},
 };
 
@@ -109,11 +109,11 @@ impl borsh::BorshDeserialize for ValidatorFeePoolAddress {
 pub struct ValidatorFeePool {
     #[cfg_attr(feature = "ts", ts(type = "ArrayBuffer"))]
     pub claim_public_key: RistrettoPublicKeyBytes,
-    pub amount: Amount,
+    pub amount: u64,
 }
 
 impl ValidatorFeePool {
-    pub fn new(claim_public_key: RistrettoPublicKeyBytes, amount: Amount) -> Self {
+    pub fn new(claim_public_key: RistrettoPublicKeyBytes, amount: u64) -> Self {
         Self {
             claim_public_key,
             amount,
@@ -132,8 +132,8 @@ impl ValidatorFeePool {
     /// NB: Do not use this function in the engine. This is used at the consensus level to update fee substates in
     /// place.
     #[must_use]
-    pub fn withdraw_direct(&mut self, amount: Amount) -> bool {
-        match self.amount.checked_sub_positive(amount) {
+    pub fn withdraw_direct(&mut self, amount: u64) -> bool {
+        match self.amount.checked_sub(amount) {
             Some(new_amount) => {
                 self.amount = new_amount;
                 true
@@ -142,15 +142,12 @@ impl ValidatorFeePool {
         }
     }
 
-    /// Deposits the given amount into the pool. If the amount is zero or negative, the function will return false and
-    /// the balance will remain unchanged.
+    /// Deposits the given amount into the pool. Will return false and
+    /// the balance will remain unchanged if the deposit overflows u64.
     /// NB: Do not use this function in the engine. This is used at the consensus level to update fee substates in
     /// place.
     #[must_use]
-    pub fn deposit_direct(&mut self, amount: Amount) -> bool {
-        if amount.is_negative() {
-            return false;
-        }
+    pub fn deposit_direct(&mut self, amount: u64) -> bool {
         match self.amount.checked_add(amount) {
             Some(new_amount) => {
                 self.amount = new_amount;
@@ -160,7 +157,7 @@ impl ValidatorFeePool {
         }
     }
 
-    pub fn amount(&self) -> Amount {
+    pub fn amount(&self) -> u64 {
         self.amount
     }
 
@@ -172,17 +169,17 @@ impl ValidatorFeePool {
     /// If the pool has insufficient funds, an error is returned.
     /// This function is used in the engine to withdraw the funds from the pool and create a Bucket.
     pub fn withdraw_all(&mut self) -> Result<ResourceContainer, ResourceError> {
-        if self.amount.is_zero() {
+        if self.amount == 0 {
             return Err(ResourceError::InsufficientBalance {
                 details: "ValidatorFeePool has insufficient balance. Current balance is 0".to_string(),
             });
         }
         let amount = self.amount;
-        self.amount = Amount::zero();
+        self.amount = 0;
         Ok(ResourceContainer::Confidential {
             address: XTR,
             commitments: Default::default(),
-            revealed_amount: amount,
+            revealed_amount: amount.into(),
             locked_commitments: Default::default(),
             locked_revealed_amount: Default::default(),
         })
@@ -197,5 +194,5 @@ impl ValidatorFeePool {
 )]
 pub struct ValidatorFeeWithdrawal {
     pub address: ValidatorFeePoolAddress,
-    pub amount: Amount,
+    pub amount: u64,
 }

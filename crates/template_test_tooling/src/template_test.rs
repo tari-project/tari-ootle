@@ -42,9 +42,9 @@ use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRES
 use tari_template_lib::{
     args::InstructionArg,
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS},
-    models::{Amount, ComponentAddress, NonFungibleAddress},
+    models::{ComponentAddress, NonFungibleAddress},
     prelude::RistrettoPublicKeyBytes,
-    types::TemplateAddress,
+    types::{Amount, TemplateAddress},
 };
 use tari_transaction::{args, builder::named_args::BuilderWorkspaceKey, Transaction, TransactionBuilder};
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
@@ -261,6 +261,7 @@ impl TemplateTest {
     fn commit_diff(&mut self, diff: &SubstateDiff) {
         self.last_outputs.clear();
 
+        eprintln!("State changes:");
         for (address, _) in diff.down_iter() {
             eprintln!("DOWN substate: {}", address);
             self.state_store.delete_state(address);
@@ -271,6 +272,7 @@ impl TemplateTest {
             self.last_outputs.insert(address.clone());
             self.state_store.set_state(address.clone(), substate.clone()).unwrap();
         }
+        eprintln!();
     }
 
     pub fn get_module(&self, module_name: &str) -> LoadedWasmTemplate {
@@ -371,11 +373,16 @@ impl TemplateTest {
     }
 
     pub fn get_test_proof_and_secret_key(&self) -> (NonFungibleAddress, RistrettoSecretKey) {
-        (self.get_test_proof(), self.secret_key.clone())
+        (self.owner_proof(), self.secret_key.clone())
     }
 
+    #[deprecated(note = "Please use owner_proof instead. This method will be removed.")]
     pub fn get_test_proof(&self) -> NonFungibleAddress {
-        NonFungibleAddress::from_public_key(self.get_test_public_key_bytes())
+        self.owner_proof()
+    }
+
+    pub fn owner_proof(&self) -> NonFungibleAddress {
+        NonFungibleAddress::from_public_key(self.public_key.to_byte_type())
     }
 
     pub fn secret_key(&self) -> &RistrettoSecretKey {
@@ -432,9 +439,9 @@ impl TemplateTest {
         (component, owner_proof, secret_key)
     }
 
-    pub fn create_custom_funded_account(
+    pub fn create_custom_funded_account<A: Into<Amount>>(
         &mut self,
-        amount: Amount,
+        amount: A,
     ) -> (
         ComponentAddress,
         NonFungibleAddress,
@@ -446,7 +453,7 @@ impl TemplateTest {
         self.enable_fees = false;
         let result = self.execute_expect_success(
             Transaction::builder()
-                .call_method(test_faucet_component(), "take_free_coins_custom", args![amount])
+                .call_method(test_faucet_component(), "take_free_coins_custom", args![amount.into()])
                 .put_last_instruction_output_on_workspace("bucket")
                 .create_account_with_bucket(public_key.to_byte_type(), "bucket")
                 .build_and_seal(&secret_key),

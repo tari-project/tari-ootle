@@ -24,7 +24,6 @@ use std::str::FromStr;
 
 use clap::{Args, Subcommand};
 use tari_bor::encode;
-use tari_template_lib::models::Amount;
 use tari_wallet_daemon_client::{types::ConfidentialCreateOutputProofRequest, WalletDaemonClient};
 
 #[derive(Debug, Subcommand, Clone)]
@@ -67,7 +66,7 @@ impl ProofsSubcommand {
             Generate(args) => {
                 let resp = client
                     .create_confidential_output_proof(ConfidentialCreateOutputProofRequest {
-                        amount: Amount(args.amount),
+                        amount: args.amount.into(),
                     })
                     .await?;
 

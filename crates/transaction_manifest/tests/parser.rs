@@ -25,7 +25,7 @@ use std::{collections::HashMap, fs};
 use tari_engine_types::{instruction::Instruction, substate::SubstateId};
 use tari_template_lib::{
     call_args,
-    models::{Amount, ComponentAddress, ResourceAddress},
+    models::{ComponentAddress, ResourceAddress},
     types::{ObjectKey, TemplateAddress},
 };
 use tari_transaction_manifest::{parse_manifest, ManifestInstructions};

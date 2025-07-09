@@ -36,7 +36,7 @@ use tari_ootle_common_types::substate_type::SubstateType;
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     call_args,
-    models::{Amount, ComponentAddress, NonFungible, NonFungibleAddress, NonFungibleId, ResourceAddress},
+    models::{ComponentAddress, NonFungible, NonFungibleAddress, NonFungibleId, ResourceAddress},
     types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
@@ -381,10 +381,14 @@ mod errors {
         println!("{:?}", result.finalize.result);
         match result.finalize.result.any_reject().unwrap() {
             RejectReason::ExecutionFailure(message) => {
-                assert!(message.starts_with(
-                    "Panic! failed to decode argument at position 0 (tari_template_lib::models::amount::Amount) for \
-                     function 'please_pass_invalid_args':"
-                ),);
+                assert!(
+                    message.starts_with(
+                        "Panic! failed to decode argument at position 0 \
+                         (tari_template_lib_types::amount::amount::Amount) for function 'please_pass_invalid_args':"
+                    ),
+                    "Got a different error: {}",
+                    message
+                );
             },
             reason => panic!("Unexpected failure reason: {}", reason),
         }
@@ -411,6 +415,8 @@ mod consensus {
 }
 
 mod fungible {
+    use tari_template_lib::types::Amount;
+
     use super::*;
 
     #[test]
@@ -419,7 +425,7 @@ mod fungible {
 
         let faucet_template = template_test.get_template_address("TestFaucet");
 
-        let initial_supply = Amount(1_000_000_000_000);
+        let initial_supply = Amount::from(1_000_000_000_000u64);
         template_test
             .execute_and_commit(
                 vec![Instruction::CallFunction {
@@ -440,7 +446,7 @@ mod fungible {
 
         assert_eq!(total_supply, initial_supply);
 
-        let owner_proof = template_test.get_test_proof();
+        let owner_proof = template_test.owner_proof();
         let result = template_test.build_and_execute(
             Transaction::builder()
                 .call_method(faucet_component, "burn_coins", args![Amount(500)])
@@ -451,12 +457,14 @@ mod fungible {
 
         assert_eq!(
             result.finalize.execution_results[1].decode::<Amount>().unwrap(),
-            initial_supply - Amount(500)
+            initial_supply - Amount::from(500)
         );
 
         let result = template_test.build_and_execute(
             Transaction::builder()
-                .call_method(faucet_component, "burn_coins", args![initial_supply - Amount(500)])
+                .call_method(faucet_component, "burn_coins", args![
+                    initial_supply - Amount::from(500)
+                ])
                 .call_method(faucet_component, "total_supply", args![]),
             vec![owner_proof],
         );
@@ -464,7 +472,7 @@ mod fungible {
 
         assert_eq!(
             result.finalize.execution_results[1].decode::<Amount>().unwrap(),
-            Amount(0)
+            Amount::zero()
         );
 
         template_test
@@ -477,6 +485,8 @@ mod fungible {
 }
 
 mod basic_nft {
+    use tari_template_lib::types::Amount;
+
     use super::*;
 
     fn setup() -> (
@@ -508,7 +518,7 @@ mod basic_nft {
         ];
 
         let total_supply: Amount = template_test.call_method(nft_component, "total_supply", args![], vec![]);
-        assert_eq!(total_supply, Amount(4));
+        assert_eq!(total_supply, 4);
 
         let result = template_test
             .execute_and_commit_manifest(
@@ -543,7 +553,7 @@ mod basic_nft {
         assert_eq!(diff.up_iter().filter(|(addr, _)| addr.is_non_fungible()).count(), 1);
 
         let total_supply: Amount = template_test.call_method(nft_component, "total_supply", args![], vec![]);
-        assert_eq!(total_supply, Amount(5));
+        assert_eq!(total_supply, 5);
 
         let result = template_test
             .execute_and_commit_manifest(
@@ -565,20 +575,11 @@ mod basic_nft {
             .unwrap();
         result.finalize.result.expect("execution failed");
         // sparkle_nft.inner_vault_balance()
-        assert_eq!(
-            result.finalize.execution_results[3].decode::<Amount>().unwrap(),
-            Amount(0)
-        );
+        assert_eq!(result.finalize.execution_results[3].decode::<Amount>().unwrap(), 0);
         // account.balance(nft_resx)
-        assert_eq!(
-            result.finalize.execution_results[4].decode::<Amount>().unwrap(),
-            Amount(5)
-        );
+        assert_eq!(result.finalize.execution_results[4].decode::<Amount>().unwrap(), 5);
         // sparkle_nft.total_supply()
-        assert_eq!(
-            result.finalize.execution_results[5].decode::<Amount>().unwrap(),
-            Amount(5)
-        );
+        assert_eq!(result.finalize.execution_results[5].decode::<Amount>().unwrap(), 5);
     }
 
     #[test]
@@ -586,7 +587,7 @@ mod basic_nft {
         let (mut template_test, (account_address, account_owner), nft_component, _nft_resx) = setup();
 
         let total_supply: Amount = template_test.call_method(nft_component, "total_supply", args![], vec![]);
-        assert_eq!(total_supply, Amount(4));
+        assert_eq!(total_supply, 4);
 
         let vars = [("account", account_address.into()), ("nft", nft_component.into())];
 
@@ -693,7 +694,7 @@ mod basic_nft {
         ];
 
         let total_supply: Amount = template_test.call_method(nft_component, "total_supply", args![], vec![]);
-        assert_eq!(total_supply, Amount(4));
+        assert_eq!(total_supply, 4);
 
         let result = template_test
             .execute_and_commit_manifest(
@@ -744,10 +745,7 @@ mod basic_nft {
             1
         );
         assert_eq!(nfts.len(), 4);
-        assert_eq!(
-            result.finalize.execution_results[12].decode::<Amount>().unwrap(),
-            Amount(8)
-        );
+        assert_eq!(result.finalize.execution_results[12].decode::<Amount>().unwrap(), 8);
 
         // Try mint 2 nfts with the same id in a single transaction - should fail
         template_test
@@ -778,7 +776,7 @@ mod basic_nft {
         ];
 
         let total_supply: Amount = template_test.call_method(nft_component, "total_supply", args![], vec![]);
-        assert_eq!(total_supply, Amount(4));
+        assert_eq!(total_supply, 4);
 
         template_test
             .execute_and_commit_manifest(
@@ -795,7 +793,7 @@ mod basic_nft {
             .unwrap();
 
         let total_supply: Amount = template_test.call_method(nft_component, "total_supply", args![], vec![]);
-        assert_eq!(total_supply, Amount(5));
+        assert_eq!(total_supply, 5);
 
         let result = template_test
             .execute_and_commit_manifest(
@@ -814,13 +812,10 @@ mod basic_nft {
             )
             .unwrap();
 
-        assert_eq!(
-            result.finalize.execution_results[3].decode::<Amount>().unwrap(),
-            Amount(4)
-        );
+        assert_eq!(result.finalize.execution_results[3].decode::<Amount>().unwrap(), 4);
 
         let total_supply: Amount = template_test.call_method(nft_component, "total_supply", args![], vec![]);
-        assert_eq!(total_supply, Amount(4));
+        assert_eq!(total_supply, 4);
 
         // Cannot mint it again
         template_test
@@ -850,7 +845,7 @@ mod basic_nft {
         ];
 
         let total_supply: Amount = template_test.call_method(nft_component, "total_supply", args![], vec![]);
-        assert_eq!(total_supply, Amount(4));
+        assert_eq!(total_supply, 4);
 
         let result = template_test
             .execute_and_commit_manifest(
@@ -881,7 +876,7 @@ mod basic_nft {
 }
 
 mod emoji_id {
-    use tari_template_lib::{call_args, constants::XTR};
+    use tari_template_lib::{call_args, constants::XTR, types::Amount};
 
     use super::*;
 
@@ -932,7 +927,7 @@ mod emoji_id {
         // initialize the emoji id minter
         let emoji_id_template = test.get_template_address("EmojiIdMinter");
         let max_emoji_id_len = 10_u64;
-        let price = Amount(20);
+        let price = Amount::from(20);
         let result = test
             .build_and_execute(
                 Transaction::builder().call_function(emoji_id_template, "new", args![XTR, max_emoji_id_len, price]),
@@ -950,7 +945,7 @@ mod emoji_id {
 
         // At first, we don't have any emojis minted
         let total_supply: Amount = test.call_method(emoji_id_minter, "total_supply", args![], vec![]);
-        assert_eq!(total_supply, Amount(0));
+        assert_eq!(total_supply, 0);
 
         // mint a new emoji_id
         let emoji_id = EmojiId(vec![Emoji::Smile, Emoji::Laugh]);
@@ -967,10 +962,10 @@ mod emoji_id {
 
         // the supply of emoji ids should have increased
         let total_supply: Amount = test.call_method(emoji_id_minter, "total_supply", call_args![], vec![]);
-        assert_eq!(total_supply, Amount(1));
+        assert_eq!(total_supply, 1);
         // check that the account holds the newly minted nft
         let nft_balance: Amount = test.call_method(account_address, "balance", call_args![emoji_id_resource], vec![]);
-        assert_eq!(nft_balance, Amount(1));
+        assert_eq!(nft_balance, 1);
 
         // emoji id are unique, so minting the same emojis again must fail
         mint_emoji_id(
@@ -1017,6 +1012,7 @@ mod tickets {
     use tari_template_lib::{
         call_args,
         constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS},
+        types::Amount,
     };
 
     use super::*;
@@ -1037,7 +1033,7 @@ mod tickets {
         // initialize the ticket seller
         let ticket_template = template_test.get_template_address("TicketSeller");
         let initial_supply = 10;
-        let price = Amount(20);
+        let price = Amount::from(20);
         let event_description = "My music festival".to_string();
         let result = template_test.execute_expect_success(
             Transaction::builder()
@@ -1056,7 +1052,7 @@ mod tickets {
 
         // at the beginning we have the initial supply of tickets
         let total_supply: Amount = template_test.call_method(ticket_seller, "total_supply", args![], vec![]);
-        assert_eq!(total_supply, Amount(initial_supply));
+        assert_eq!(total_supply, initial_supply);
 
         // get some funds into the account
         template_test.execute_expect_success(

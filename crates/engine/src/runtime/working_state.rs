@@ -35,7 +35,6 @@ use tari_template_lib::{
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
     models::{
         AddressAllocationId,
-        Amount,
         BucketId,
         ComponentAddress,
         NonFungibleAddress,
@@ -44,7 +43,7 @@ use tari_template_lib::{
         VaultId,
     },
     prelude::{AuthHookCaller, PUBLIC_IDENTITY_RESOURCE_ADDRESS},
-    types::{EntityId, Hash, TemplateAddress},
+    types::{Amount, EntityId, Hash, TemplateAddress},
 };
 
 use super::workspace::Workspace;
@@ -570,7 +569,15 @@ impl WorkingState {
                 .into());
             }
             // Increase the total supply of the resource if enabled
-            resource_mut.increase_total_supply(resource_container.amount());
+            if !resource_mut.increase_total_supply(resource_container.amount()) {
+                return Err(RuntimeError::ResourceSupplyWouldOverflow {
+                    resource_address,
+                    current_supply: resource_mut
+                        .total_supply()
+                        .expect("Resource supply tracking is enabled"),
+                    amount: resource_container.amount(),
+                });
+            }
         }
 
         Ok(resource_container)
@@ -758,7 +765,13 @@ impl WorkingState {
     }
 
     pub fn pay_fee(&mut self, resource: ResourceContainer, return_vault: VaultId) -> Result<(), RuntimeError> {
-        self.fee_state.fee_payments.push((resource, return_vault));
+        let amount = resource.amount();
+        if !self.fee_state.add_fee_payment(resource, return_vault) {
+            return Err(RuntimeError::InvalidAmount {
+                amount,
+                reason: "Payed an invalid amount. Amount must be positive and not overflow".to_string(),
+            });
+        }
         Ok(())
     }
 
@@ -788,11 +801,10 @@ impl WorkingState {
                 details: format!("Expected substate at address {address} to be an ValidatorFeePool",),
             })?;
 
+        let amount = pool_mut.amount();
         let resource_container = pool_mut.withdraw_all()?;
-        self.validator_fee_withdrawals.push(ValidatorFeeWithdrawal {
-            address,
-            amount: resource_container.amount(),
-        });
+        self.validator_fee_withdrawals
+            .push(ValidatorFeeWithdrawal { address, amount });
         Ok(resource_container)
     }
 
@@ -872,14 +884,7 @@ impl WorkingState {
         &mut self,
         substates_to_persist: &mut IndexMap<SubstateId, SubstateValue>,
     ) -> Result<TransactionReceipt, RuntimeError> {
-        let total_fees =
-            Amount::try_from(self.fee_state.total_charges()).map_err(|_| RuntimeError::InvariantError {
-                function: "finalize_fees",
-                details: format!(
-                    "Total fees {} could not be converted to Amount",
-                    self.fee_state.total_charges()
-                ),
-            })?;
+        let total_fees = self.fee_state.total_charges();
 
         let total_fee_payment = self.fee_state.total_payments();
 
@@ -889,12 +894,15 @@ impl WorkingState {
         // Collect the fee
         let mut remaining_fees = total_fees;
         for (resx, _) in &mut self.fee_state.fee_payments {
-            if remaining_fees.is_zero() {
+            if remaining_fees == 0 {
                 break;
             }
-            let amount_to_withdraw = cmp::min(resx.amount(), remaining_fees);
+            // PANIC: this is checked by FeeState
+            let fee_amount = resx.amount().to_u64_checked().expect("invalid fee entry in fee state");
+
+            let amount_to_withdraw = cmp::min(fee_amount, remaining_fees);
             remaining_fees -= amount_to_withdraw;
-            fee_resource.deposit(resx.withdraw(amount_to_withdraw)?)?;
+            fee_resource.deposit(resx.withdraw(amount_to_withdraw.into())?)?;
         }
 
         // Refund the remaining payments if any
@@ -917,7 +925,10 @@ impl WorkingState {
             logs: self.logs.clone(),
             fee_receipt: FeeReceipt {
                 total_fee_payment,
-                total_fees_paid: fee_resource.amount(),
+                total_fees_paid: fee_resource
+                    .amount()
+                    .to_u64_checked()
+                    .expect("FeeState guarantees that the total fee payments fit in a u64"),
                 cost_breakdown: mem::take(&mut self.fee_state.fee_charges),
             },
         })
@@ -1184,7 +1195,7 @@ impl WorkingState {
             let new_substate = match self.store.get_unmodified_substate(&id).optional()? {
                 Some(existing_state) => {
                     substate_diff.down(id.clone(), existing_state.version());
-                    if substate.as_validator_fee_pool().is_some_and(|fee| fee.amount.is_zero()) {
+                    if substate.as_validator_fee_pool().is_some_and(|fee| fee.amount == 0) {
                         // If there are no fees left, do not up the fee pool
                         continue;
                     }
@@ -1217,7 +1228,7 @@ impl WorkingState {
         address: &SubstateId,
         action: T,
     ) -> Result<(), RuntimeError> {
-        // Since we dont propagate _owned_ substate references up the call stack, if the substate is in scope, then it
+        // Since we don't propagate _owned_ substate references up the call stack, if the substate is in scope, then it
         // was created in this scope and therefore owned.
         if self.current_call_scope()?.is_substate_in_scope(address) {
             return Ok(());

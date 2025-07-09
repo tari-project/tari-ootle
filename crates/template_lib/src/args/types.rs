@@ -36,7 +36,6 @@ use crate::{
     auth::{AuthHook, OwnerRule, ResourceAccessRules},
     models::{
         AddressAllocationId,
-        Amount,
         BucketId,
         ComponentAddress,
         ComponentAddressAllocation,
@@ -53,7 +52,10 @@ use crate::{
     prelude::{ComponentAccessRules, ConfidentialOutputStatement, TemplateAddress},
     resource::ResourceType,
     template::BuiltinTemplate,
-    types::crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    types::{
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+        Amount,
+    },
 };
 // -------------------------------- LOGS -------------------------------- //
 
@@ -267,13 +269,8 @@ pub struct CreateResourceArg {
     pub view_key: Option<RistrettoPublicKeyBytes>,
     pub authorize_hook: Option<AuthHook>,
     pub address_allocation: Option<ResourceAddressAllocation>,
-    // For backward compatibility, this defaults to true if not specified
-    #[serde(default = "return_true")]
+    pub divisibility: u8,
     pub is_total_supply_tracking_enabled: bool,
-}
-
-const fn return_true() -> bool {
-    true
 }
 
 /// A resource minting operation argument

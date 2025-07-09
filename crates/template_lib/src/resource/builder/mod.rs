@@ -34,6 +34,8 @@ use crate::resource::builder::{
 /// user-friendly identification of the underlying token
 pub const TOKEN_SYMBOL: &str = "SYMBOL";
 pub const IMAGE_URL: &str = "IMAGE_URL";
+/// Default divisibility for fungible resources (18)
+pub const DEFAULT_DIVISIBILITY: u8 = 18;
 
 /// Utility for building resources inside templates
 pub struct ResourceBuilder {}

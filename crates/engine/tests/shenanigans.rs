@@ -6,8 +6,9 @@ use tari_engine_types::{indexed_value::IndexedWellKnownTypes, resource_container
 use tari_template_lib::{
     args::VaultAction,
     constants::XTR,
-    models::{Amount, ComponentAddress, ResourceAddress},
+    models::{ComponentAddress, ResourceAddress},
     prelude::ResourceType,
+    types::Amount,
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 use tari_transaction::{args, Transaction};
@@ -69,7 +70,7 @@ fn it_rejects_dangling_vaults_in_component() {
         Transaction::builder()
             .call_method(component_address, "drop_vault", args![])
             .build_and_seal(test.secret_key()),
-        vec![test.get_test_proof()],
+        vec![test.owner_proof()],
     );
 
     assert_reject_reason(reason, RuntimeError::OrphanedSubstate {
@@ -150,7 +151,7 @@ fn it_rejects_double_ownership_of_vault() {
         Transaction::builder()
             .call_function(template_addr, "with_vault_copy", args![])
             .build_and_seal(test.secret_key()),
-        vec![test.get_test_proof()],
+        vec![test.owner_proof()],
     );
 
     assert_reject_reason(reason, "Duplicate reference to substate");
@@ -172,7 +173,7 @@ fn it_prevents_access_to_vault_id_in_component_context() {
         Transaction::builder()
             .call_function(template_addr, "with_vault", args![])
             .build_and_seal(test.secret_key()),
-        vec![test.get_test_proof()],
+        vec![test.owner_proof()],
     );
 
     let shenanigans = result.finalize.execution_results[0]
@@ -183,7 +184,7 @@ fn it_prevents_access_to_vault_id_in_component_context() {
         Transaction::builder()
             .call_method(shenanigans, "take_from_a_vault", args![vault_id, Amount(1000)])
             .build_and_seal(test.secret_key()),
-        vec![test.get_test_proof()],
+        vec![test.owner_proof()],
     );
 
     // take_bucket_zero fails because the component didnt create the vault
@@ -203,7 +204,7 @@ fn it_prevents_access_to_out_of_scope_component() {
         Transaction::builder()
             .call_function(template_addr, "new", args![])
             .build_and_seal(test.secret_key()),
-        vec![test.get_test_proof()],
+        vec![test.owner_proof()],
     );
 
     let shenanigans = result.finalize.execution_results[0]
@@ -214,7 +215,7 @@ fn it_prevents_access_to_out_of_scope_component() {
         Transaction::builder()
             .call_method(shenanigans, "empty_state_on_component", args![account])
             .build_and_seal(test.secret_key()),
-        vec![test.get_test_proof()],
+        vec![test.owner_proof()],
     );
 
     // Fails because the engine does not lock this component
@@ -242,10 +243,10 @@ fn it_disallows_calls_on_vaults_that_are_not_owned_by_current_component() {
             .call_function(
                 template_addr,
                 "attempt_to_steal_funds_using_cross_template_call",
-                args![vault_id, attacker, Some(Amount(1000))],
+                args![vault_id, attacker, Some(Amount::from(1000))],
             )
             .build_and_seal(test.secret_key()),
-        vec![test.get_test_proof()],
+        vec![test.owner_proof()],
     );
 
     // fails because the function called withdraw on a vault that wasn't in scope. We then check if the vault is owned
@@ -271,7 +272,7 @@ fn it_disallows_vault_access_if_vault_is_not_owned() {
         Transaction::builder()
             .call_function(template_addr, "ref_stolen_vault", args![vault_id])
             .build_and_seal(test.secret_key()),
-        vec![test.get_test_proof()],
+        vec![test.owner_proof()],
     );
 
     // fails because the function called withdraw on a vault that wasnt in scope. We then check if the vault is owned by
@@ -418,7 +419,7 @@ fn it_disallows_withdraws_from_vaults_outside_of_owning_component() {
             .call_method(account, "deposit", args![Workspace("bucket")])
             .add_input(vault_id)
             .build_and_seal(test.secret_key()),
-        vec![test.get_test_proof()],
+        vec![test.owner_proof()],
     );
 
     assert_reject_reason(reason, RuntimeError::SubstateNotOwned {

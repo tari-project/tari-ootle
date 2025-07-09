@@ -15,3 +15,6 @@ pub use template_test::{test_faucet_component, TemplateTest};
 pub mod crypto {
     pub use tari_crypto::{keys::*, ristretto::*};
 }
+
+pub use tari_engine_types as engine_types;
+pub use tari_transaction as transaction;

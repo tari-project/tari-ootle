@@ -5,6 +5,6 @@ import type { ComponentAddressOrName } from "./ComponentAddressOrName";
 export interface AccountsCreateFreeTestCoinsRequest {
   account: ComponentAddressOrName | null;
   amount: Amount;
-  max_fee: Amount | null;
+  max_fee: number | null;
   key_id: number | null;
 }

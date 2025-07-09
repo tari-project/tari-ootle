@@ -6,9 +6,9 @@ use std::mem::size_of;
 use serde::{Deserialize, Serialize};
 use tari_template_lib_types::serde_helpers;
 
-use crate::{
-    models::Amount,
-    types::crypto::{BalanceProofSignature, PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
+use crate::types::{
+    crypto::{BalanceProofSignature, PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
+    Amount,
 };
 
 /// A statement for confidential and revealed outputs. A statement must contain either confidential outputs or non-zero
@@ -221,7 +221,7 @@ impl ConfidentialWithdrawProof {
             self.balance_proof == BalanceProofSignature::zero() &&
             // There are revealed funds
             self.input_revealed_amount > Amount::zero() &&
-            self.output_proof.output_revealed_amount + self.output_proof.change_revealed_amount > Amount::zero()
+            self.output_proof.output_revealed_amount.checked_add(self.output_proof.change_revealed_amount).is_some_and(|a| a > Amount::zero())
     }
 
     pub fn revealed_input_amount(&self) -> Amount {

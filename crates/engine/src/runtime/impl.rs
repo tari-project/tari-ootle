@@ -117,7 +117,7 @@ use tari_template_lib::{
     types::{Amount, EntityId, TemplateAddress},
 };
 
-use super::{working_state::WorkingState, Runtime};
+use super::{limits, working_state::WorkingState, Runtime};
 use crate::{
     runtime::{
         engine_args::EngineArgs,
@@ -767,6 +767,20 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     });
                 }
 
+                if arg.divisibility > limits::MAX_DIVISIBILITY {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "CreateResourceArg",
+                        reason: format!("Divisibility must be between 0 and {}", limits::MAX_DIVISIBILITY),
+                    });
+                }
+
+                if arg.resource_type.is_non_fungible() && arg.divisibility > 0 {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "CreateResourceArg",
+                        reason: "Non-fungible resources cannot have divisibility".to_string(),
+                    });
+                }
+
                 let owner_key = match &arg.owner_rule {
                     OwnerRule::OwnedBySigner => Some(self.transaction_signer_public_key),
                     OwnerRule::ByPublicKey(key) => Some(*key),
@@ -787,6 +801,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         arg.metadata,
                         arg.view_key,
                         arg.authorize_hook,
+                        arg.divisibility,
                         arg.is_total_supply_tracking_enabled,
                     );
 

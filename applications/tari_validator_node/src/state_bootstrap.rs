@@ -77,6 +77,7 @@ where
         Metadata::from([(TOKEN_SYMBOL, "ID".to_string())]),
         None,
         None,
+        0,
         false,
     );
     create_substate(
@@ -98,6 +99,7 @@ where
         Metadata::from([(TOKEN_SYMBOL, symbol)]),
         None,
         None,
+        6,
         false,
     );
 
@@ -213,6 +215,7 @@ where
         metadata,
         None,
         None,
+        0,
         true,
     );
 

@@ -261,6 +261,7 @@ impl TemplateTest {
     fn commit_diff(&mut self, diff: &SubstateDiff) {
         self.last_outputs.clear();
 
+        eprintln!("State changes:");
         for (address, _) in diff.down_iter() {
             eprintln!("DOWN substate: {}", address);
             self.state_store.delete_state(address);
@@ -271,6 +272,7 @@ impl TemplateTest {
             self.last_outputs.insert(address.clone());
             self.state_store.set_state(address.clone(), substate.clone()).unwrap();
         }
+        eprintln!();
     }
 
     pub fn get_module(&self, module_name: &str) -> LoadedWasmTemplate {
@@ -371,11 +373,16 @@ impl TemplateTest {
     }
 
     pub fn get_test_proof_and_secret_key(&self) -> (NonFungibleAddress, RistrettoSecretKey) {
-        (self.get_test_proof(), self.secret_key.clone())
+        (self.owner_proof(), self.secret_key.clone())
     }
 
+    #[deprecated(note = "Please use owner_proof instead. This method will be removed.")]
     pub fn get_test_proof(&self) -> NonFungibleAddress {
-        NonFungibleAddress::from_public_key(self.get_test_public_key_bytes())
+        self.owner_proof()
+    }
+
+    pub fn owner_proof(&self) -> NonFungibleAddress {
+        NonFungibleAddress::from_public_key(self.public_key.to_byte_type())
     }
 
     pub fn secret_key(&self) -> &RistrettoSecretKey {

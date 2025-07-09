@@ -310,6 +310,8 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             .await?
             .fee_claim_public_key;
 
+        self.request_initial_catch_up_sync(&epoch_state).await?;
+
         loop {
             let current_height = self.pacemaker.current_view().get_height();
             let current_epoch = self.pacemaker.current_view().get_epoch();
@@ -597,17 +599,20 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         Ok(())
     }
 
-    // async fn request_initial_catch_up_sync(&mut self, current_epoch: Epoch) -> Result<(), HotStuffError> {
-    //     let mut committee = self.epoch_manager.get_local_committee(current_epoch).await?;
-    //     committee.shuffle();
-    //     for (member, _) in committee {
-    //         if member != self.local_validator_addr {
-    //             self.on_catch_up_sync.request_sync(current_epoch, member).await?;
-    //             break;
-    //         }
-    //     }
-    //     Ok(())
-    // }
+    async fn request_initial_catch_up_sync(
+        &mut self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+    ) -> Result<(), HotStuffError> {
+        for member in epoch_state.local_committee().shuffled() {
+            if member.address != self.local_validator_addr {
+                self.on_catch_up_sync
+                    .request_sync(epoch_state.epoch(), member.address.clone())
+                    .await?;
+                break;
+            }
+        }
+        Ok(())
+    }
 
     async fn on_failure(&mut self, context: &str, err: &HotStuffError) {
         self.hooks.on_error(err);

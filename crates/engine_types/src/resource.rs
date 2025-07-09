@@ -51,6 +51,7 @@ pub struct Resource {
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     view_key: Option<RistrettoPublicKeyBytes>,
     auth_hook: Option<AuthHook>,
+    divisibility: u8,
 }
 
 impl Resource {
@@ -62,8 +63,14 @@ impl Resource {
         metadata: Metadata,
         view_key: Option<RistrettoPublicKeyBytes>,
         auth_hook: Option<AuthHook>,
+        mut divisibility: u8,
         is_total_supply_tracking_enabled: bool,
     ) -> Self {
+        // TODO: improve API to make it impossible to set incorrect divisibility
+        if resource_type.is_non_fungible() {
+            divisibility = 0;
+        }
+
         Self {
             resource_type,
             owner_rule,
@@ -74,6 +81,7 @@ impl Resource {
             // validator to track this (depending on the resource access rules, the contract/user is able to)
             total_supply: Some(0.into())
                 .filter(|_| is_total_supply_tracking_enabled && !resource_type.is_confidential()),
+            divisibility,
             view_key,
             auth_hook,
         }

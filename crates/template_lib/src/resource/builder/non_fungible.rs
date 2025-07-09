@@ -218,6 +218,7 @@ impl NonFungibleResourceBuilder {
             None,
             self.authorize_hook,
             self.address_allocation,
+            0,
             self.is_total_supply_tracking_enabled,
         )
     }

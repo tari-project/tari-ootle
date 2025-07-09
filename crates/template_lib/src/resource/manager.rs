@@ -124,6 +124,7 @@ impl ResourceManager {
         view_key: Option<RistrettoPublicKeyBytes>,
         authorize_hook: Option<AuthHook>,
         address_allocation: Option<ResourceAddressAllocation>,
+        divisibility: u8,
         is_total_supply_tracking_enabled: bool,
     ) -> (ResourceAddress, Option<Bucket>) {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
@@ -138,6 +139,7 @@ impl ResourceManager {
                 view_key,
                 authorize_hook,
                 address_allocation,
+                divisibility,
                 is_total_supply_tracking_enabled,
             }],
         });

@@ -12,10 +12,9 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::substate_type::SubstateType;
-use tari_template_builtin::account::Account;
 use tari_template_lib::{
     call_args,
-    models::ComponentAddress,
+    models::{Account, ComponentAddress},
     prelude::ConfidentialOutputStatement,
     types::{
         crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
@@ -282,13 +281,13 @@ fn reveal_confidential_and_transfer() {
     let acc1 = test.read_only_state_store().get_component(account1).unwrap();
     let acc1 = Account::from_value(acc1.state()).unwrap();
     let vault1 = acc1.get_vault_by_resource(&faucet_resx).unwrap();
-    let vault1 = test.read_only_state_store().get_vault(&vault1).unwrap();
+    let vault1 = test.read_only_state_store().get_vault(&vault1.vault_id()).unwrap();
     assert_eq!(vault1.balance(), 10);
 
     let acc2 = test.read_only_state_store().get_component(account2).unwrap();
     let acc2 = Account::from_value(acc2.state()).unwrap();
     let vault2 = acc2.get_vault_by_resource(&faucet_resx).unwrap();
-    let vault2 = test.read_only_state_store().get_vault(&vault2).unwrap();
+    let vault2 = test.read_only_state_store().get_vault(&vault2.vault_id()).unwrap();
     assert_eq!(vault2.balance(), 90);
 }
 

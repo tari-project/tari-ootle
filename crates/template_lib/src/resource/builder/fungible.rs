@@ -6,7 +6,7 @@ use crate::{
     args::MintArg,
     auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
     models::{Bucket, ComponentAddress, Metadata, ResourceAddress, ResourceAddressAllocation},
-    resource::{ResourceManager, ResourceType},
+    resource::{ResourceManager, ResourceType, DEFAULT_DIVISIBILITY},
     types::Amount,
 };
 
@@ -18,6 +18,7 @@ pub struct FungibleResourceBuilder {
     metadata: Metadata,
     authorize_hook: Option<AuthHook>,
     address_allocation: Option<ResourceAddressAllocation>,
+    divisibility: u8,
     is_total_supply_tracking_enabled: bool,
 }
 
@@ -31,6 +32,7 @@ impl FungibleResourceBuilder {
             metadata: Metadata::new(),
             authorize_hook: None,
             address_allocation: None,
+            divisibility: DEFAULT_DIVISIBILITY,
             is_total_supply_tracking_enabled: true,
         }
     }
@@ -114,6 +116,16 @@ impl FungibleResourceBuilder {
         self.add_metadata(IMAGE_URL, url)
     }
 
+    /// Sets the divisibility of the resource. i.e. the number of decimal places the resource can be divided into.
+    /// Panic if the divisibility is greater than 18.
+    pub fn with_divisibility(mut self, divisibility: u8) -> Self {
+        if divisibility > 18 {
+            panic!("Divisibility cannot be greater than 18");
+        }
+        self.divisibility = divisibility;
+        self
+    }
+
     /// Specify a hook method that will be called to authorize actions on the resource.
     /// The signature of the method must be `fn(action: ResourceAuthAction, caller: CallerContext)`.
     /// The method should panic to deny the action.
@@ -183,6 +195,7 @@ impl FungibleResourceBuilder {
             None,
             self.authorize_hook,
             self.address_allocation,
+            self.divisibility,
             self.is_total_supply_tracking_enabled,
         )
     }

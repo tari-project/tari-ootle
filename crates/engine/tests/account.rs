@@ -33,7 +33,7 @@ fn basic_faucet_transfer() {
                 function: "mint".to_string(),
                 args: call_args![initial_supply],
             }],
-            vec![template_test.get_test_proof()],
+            vec![template_test.owner_proof()],
         )
         .unwrap();
     let faucet_component: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
@@ -55,7 +55,7 @@ fn basic_faucet_transfer() {
                 .call_method(faucet_component, "take_free_coins", args![])
                 .put_last_instruction_output_on_workspace("free_coins")
                 .call_method(sender_address, "deposit", args![Workspace("free_coins")]),
-            vec![template_test.get_test_proof()],
+            vec![template_test.owner_proof()],
         )
         .unwrap_success();
 
@@ -96,7 +96,7 @@ fn withdraw_from_account_prevented() {
                 function: "mint".to_string(),
                 args: call_args![initial_supply],
             }],
-            vec![template_test.get_test_proof()],
+            vec![template_test.owner_proof()],
         )
         .unwrap();
     let faucet_component: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();

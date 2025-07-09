@@ -446,7 +446,7 @@ mod fungible {
 
         assert_eq!(total_supply, initial_supply);
 
-        let owner_proof = template_test.get_test_proof();
+        let owner_proof = template_test.owner_proof();
         let result = template_test.build_and_execute(
             Transaction::builder()
                 .call_method(faucet_component, "burn_coins", args![Amount(500)])

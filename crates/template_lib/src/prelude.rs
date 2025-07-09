@@ -53,6 +53,7 @@ pub use crate::{
     invoke_args,
     log,
     models::{
+        Account,
         Bucket,
         BucketId,
         ComponentAddress,

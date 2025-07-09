@@ -1123,7 +1123,7 @@ mod resource_access_rules {
                 Transaction::builder()
                     .call_function(access_rules_template, "with_auth_hook", args![true, hook])
                     .build_and_seal(test.secret_key()),
-                vec![test.get_test_proof()],
+                vec![test.owner_proof()],
             );
 
             assert_reject_reason(reason, RuntimeError::InvalidArgument {

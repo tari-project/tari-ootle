@@ -39,7 +39,7 @@ fn setup() -> AssertTest {
                 function: "mint".to_string(),
                 args: call_args![initial_supply],
             }],
-            vec![template_test.get_test_proof()],
+            vec![template_test.owner_proof()],
         )
         .unwrap();
 

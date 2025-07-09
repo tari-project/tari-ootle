@@ -11,3 +11,5 @@ pub const ENGINE_LIMITS: EngineLimits = EngineLimits {
     max_call_args: 100,
     // max_function_name_length: 64,
 };
+
+pub const MAX_DIVISIBILITY: u8 = 18;

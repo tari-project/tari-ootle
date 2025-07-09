@@ -61,7 +61,8 @@ where
     }
 
     pub async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, TransactionManagerError> {
-        self.store.with_write_tx(|tx| tx.insert_transaction(&transaction))?;
+        self.store
+            .with_write_tx(|tx| tx.insert_or_ignore_transaction(&transaction))?;
         let id = self.network_client.submit_transaction(transaction).await?;
         Ok(id)
     }

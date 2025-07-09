@@ -151,7 +151,7 @@ fn add_liquidity(test: &mut TariSwapTest, a_amount: Amount, b_amount: Amount) {
                 .put_last_instruction_output_on_workspace("lp_bucket")
                 .call_method(test.account_address, "deposit", args![Workspace("lp_bucket")]),
             // proof needed to withdraw (from account) and mint (the lp_resource owned by the test identity)
-            vec![test.account_proof.clone(), test.template_test.get_test_proof()],
+            vec![test.account_proof.clone(), test.template_test.owner_proof()],
         )
         .expect_success();
 }
@@ -168,7 +168,7 @@ fn remove_liquidity(test: &mut TariSwapTest, lp_amount: Amount) {
                 .call_method(test.account_address, "deposit", args![Workspace("pool_buckets.1")]),
             // proof needed to withdraw (from account) and burn (the lp_resource owned by the test identity)
             // respectively
-            vec![test.account_proof.clone(), test.template_test.get_test_proof()],
+            vec![test.account_proof.clone(), test.template_test.owner_proof()],
         )
         .expect_success();
 }

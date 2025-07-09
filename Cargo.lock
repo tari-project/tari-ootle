@@ -12006,8 +12006,6 @@ dependencies = [
 name = "tari_template_builtin"
 version = "0.10.5"
 dependencies = [
- "serde",
- "tari_bor",
  "tari_engine_types",
  "tari_template_lib",
  "tari_template_test_tooling",

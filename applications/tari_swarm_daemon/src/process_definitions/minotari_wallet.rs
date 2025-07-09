@@ -32,7 +32,7 @@ impl ProcessDefinition for MinotariWallet {
 
         let base_nodes = context.minotari_nodes().collect::<Vec<_>>();
 
-        let Some(base_node) = base_nodes.first()  else {
+        let Some(base_node) = base_nodes.first() else {
             return Err(anyhow!("Base nodes should be started before the console wallet"));
         };
         let base_node_api_port = base_node

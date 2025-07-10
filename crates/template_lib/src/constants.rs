@@ -11,11 +11,13 @@ use crate::models::{ComponentAddress, ResourceAddress, VaultId};
 
 /// Resource address for all public identity-based non-fungible tokens.
 /// This resource provides a space for a virtual token representing ownership based on a public key.
+/// resource_0100000000000000000000000000000000000000000000000000000000000000
 pub const PUBLIC_IDENTITY_RESOURCE_ADDRESS: ResourceAddress = ResourceAddress::new(ObjectKey::from_array([
     1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ]));
 
 /// The Tari network native resource address, used for paying network fees
+/// resource_0101010101010101010101010101010101010101010101010101010101010101
 pub const CONFIDENTIAL_TARI_RESOURCE_ADDRESS: ResourceAddress =
     ResourceAddress::new(ObjectKey::from_array([1u8; ObjectKey::LENGTH]));
 
@@ -37,6 +39,7 @@ pub const NFT_FAUCET_COMPONENT_ADDRESS: ComponentAddress = ComponentAddress::new
     0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ]));
 /// Address of the builtin NFT faucet resource
+/// resource_ff00000000000000000000000000000000000000000000000000000000000001
 pub const NFT_FAUCET_RESOURCE_ADDRESS: ResourceAddress = ResourceAddress::new(ObjectKey::from_array([
     0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
 ]));

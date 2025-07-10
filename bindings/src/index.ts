@@ -144,4 +144,5 @@ export * from "./tari-indexer-client";
 export * from "./validator-node-client";
 export * from "./wallet-daemon-client";
 export * from "./helpers/BigAmount";
+export * from "./helpers/NetworkByte";
 export * from "./helpers/helpers";

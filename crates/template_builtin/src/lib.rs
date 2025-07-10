@@ -22,10 +22,16 @@
 
 use tari_template_lib::types::TemplateAddress;
 
+/// Address of the account template.
+/// 0000000000000000000000000000000000000000000000000000000000000000
 pub const ACCOUNT_TEMPLATE_ADDRESS: TemplateAddress = TemplateAddress::from_array([0; 32]);
+/// Address of the NFT faucet template.
+/// 0000000000000000000000000000000000000000000000000000000000000001
 pub const NFT_FAUCET_TEMPLATE_ADDRESS: TemplateAddress = TemplateAddress::from_array([
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
 ]);
+/// Address of the XTR faucet template.
+/// 0102030000000000000000000000000000000000000000000000000000000000
 pub const XTR_FAUCET_TEMPLATE_ADDRESS: TemplateAddress = TemplateAddress::from_array([
     1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ]);

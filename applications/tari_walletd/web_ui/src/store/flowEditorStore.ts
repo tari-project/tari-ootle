@@ -23,6 +23,7 @@
 import { create } from "zustand";
 import { GeneratedCodeType } from "@tari-project/tari-extension-common";
 import { AccountInfo } from "@tari-project/typescript-bindings";
+import { persist } from "zustand/middleware";
 
 interface FlowEditorStore {
   panelOpen: boolean;
@@ -37,25 +38,41 @@ interface FlowEditorStore {
   setGeneratedCodeType: (type: GeneratedCodeType | null) => void;
   account: AccountInfo | undefined;
   setAccount: (account: AccountInfo | undefined) => void;
+  setCurrentJson: (json: any) => void;
+  currentJson: any;
   fee: number;
   setFee: (fee: number) => void;
 }
 
-const useFlowEditorStore = create<FlowEditorStore>()((set) => ({
-  panelOpen: true,
-  setPanelOpen: (open) => set({ panelOpen: open }),
-  templateId: "",
-  setTemplateId: (id) => set({ templateId: id }),
-  codeDialogOpen: false,
-  setCodeDialogOpen: (open) => set({ codeDialogOpen: open }),
-  generatedCode: "",
-  setGeneratedCode: (code) => set({ generatedCode: code }),
-  generatedCodeType: null,
-  setGeneratedCodeType: (type) => set({ generatedCodeType: type }),
-  account: undefined,
-  setAccount: (account) => set({ account }),
-  fee: 3000,
-  setFee: (fee) => set({ fee }),
-}));
+export const INITIAL_FLOW_STATE = {
+  $schema: "https://tari-project.github.io/tari-vscode-nocode-extension/schemas/tari-schema-v1.0.json",
+  version: "1.0",
+  nodes: [],
+  edges: [],
+};
+
+const useFlowEditorStore = create<FlowEditorStore>()(
+  persist<FlowEditorStore>(
+    (set) => ({
+      panelOpen: true,
+      setPanelOpen: (open) => set({ panelOpen: open }),
+      templateId: "",
+      setTemplateId: (id) => set({ templateId: id }),
+      codeDialogOpen: false,
+      setCodeDialogOpen: (open) => set({ codeDialogOpen: open }),
+      generatedCode: "",
+      setGeneratedCode: (code) => set({ generatedCode: code }),
+      generatedCodeType: null,
+      setGeneratedCodeType: (type) => set({ generatedCodeType: type }),
+      account: undefined,
+      setAccount: (account) => set({ account }),
+      currentJson: INITIAL_FLOW_STATE,
+      setCurrentJson: (json) => set({ currentJson: json }),
+      fee: 3000,
+      setFee: (fee) => set({ fee }),
+    }),
+    { name: "flowEditor" },
+  ),
+);
 
 export default useFlowEditorStore;

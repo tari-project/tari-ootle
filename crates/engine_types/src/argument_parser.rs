@@ -9,7 +9,7 @@ use tari_bor::{cbor, encode, to_value};
 use tari_template_lib::{
     args::{InstructionArg, WorkspaceId},
     call_arg,
-    models::Metadata,
+    models::{Metadata, NonFungibleId},
     types::{Amount, ParseIntError, TemplateAddress},
 };
 
@@ -126,6 +126,12 @@ fn try_parse_special_string_arg(s: &str) -> Result<ParsedArg<'_>, ArgParseError>
         return Ok(ParsedArg::SubstateId(address));
     }
 
+    if let Some(id) = strip_coercion_func(s, "NFT") {
+        if let Ok(address) = NonFungibleId::try_from_canonical_string(id) {
+            return Ok(ParsedArg::NonFungibleId(address));
+        }
+    }
+
     if let Ok(metadata) = Metadata::from_str(s) {
         return Ok(ParsedArg::Metadata(metadata));
     }
@@ -161,6 +167,7 @@ pub enum ParsedArg<'a> {
     Workspace(WorkspaceId),
     Bytes(Vec<u8>),
     SubstateId(SubstateId),
+    NonFungibleId(NonFungibleId),
     TemplateAddress(TemplateAddress),
     UnsignedInteger(u64),
     SignedInteger(i64),
@@ -184,6 +191,7 @@ impl From<ParsedArg<'_>> for InstructionArg {
                 SubstateId::Template(v) => call_arg!(v),
                 SubstateId::ValidatorFeePool(v) => call_arg!(v),
             },
+            ParsedArg::NonFungibleId(v) => call_arg!(v),
             ParsedArg::TemplateAddress(v) => call_arg!(v),
             ParsedArg::UnsignedInteger(v) => call_arg!(v),
             ParsedArg::SignedInteger(v) => call_arg!(v),
@@ -222,6 +230,7 @@ fn convert_to_cbor(value: json::Value) -> tari_bor::Value {
                     SubstateId::Template(id) => to_value(&id).unwrap(),
                     SubstateId::ValidatorFeePool(id) => to_value(&id).unwrap(),
                 },
+                ParsedArg::NonFungibleId(id) => to_value(&id).unwrap(),
                 ParsedArg::TemplateAddress(address) => to_value(&address).unwrap(),
                 ParsedArg::UnsignedInteger(i) => tari_bor::Value::Integer(i.into()),
                 ParsedArg::SignedInteger(i) => tari_bor::Value::Integer(i.into()),

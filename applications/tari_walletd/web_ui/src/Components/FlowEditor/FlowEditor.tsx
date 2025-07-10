@@ -60,19 +60,28 @@ import { GeneratedCodeType, TariNetwork, TransactionProps } from "@tari-project/
 import { substateIdToString } from "../../utils/helpers";
 import CloseIcon from "@mui/icons-material/Close";
 import { Highlight } from "prism-react-renderer";
-import useFlowEditorStore from "../../store/flowEditorStore";
-import { UnsignedTransactionV1 } from "@tari-project/typescript-bindings";
+import useFlowEditorStore, { INITIAL_FLOW_STATE } from "../../store/flowEditorStore";
+import { shortenString, UnsignedTransactionV1, NetworkByte } from "@tari-project/typescript-bindings";
 import { settingsGet, submitTransactionDryRun, transactionsSubmit, transactionsWaitResult } from "../../utils/json_rpc";
 import { useAccountsList } from "../../api/hooks/useAccounts";
+import CopyAddress from "../CopyAddress";
 
-enum Network {
-  MainNet = 0,
-  StageNet = 1,
-  NextNet = 2,
-  LocalNet = 16,
-  Igor = 36,
-  Esmeralda = 38,
-}
+const KNOWN_TEMPLATES = [
+  {
+    address: "0000000000000000000000000000000000000000000000000000000000000000",
+    name: "Account",
+  },
+  {
+    address: "0000000000000000000000000000000000000000000000000000000000000001",
+    name: "NFT Faucet",
+    testnet: true,
+  },
+  {
+    address: "0102030000000000000000000000000000000000000000000000000000000000",
+    name: "tXTR faucet",
+  },
+];
+
 enum TransactionStatus {
   New = "New",
   DryRun = "DryRun",
@@ -100,6 +109,8 @@ function FlowEditor() {
     setAccount,
     fee,
     setFee,
+    currentJson,
+    setCurrentJson,
   } = useFlowEditorStore();
   const theme = useTheme();
   const addNodeAt = useStore((store) => store.addNodeAt);
@@ -124,6 +135,8 @@ function FlowEditor() {
         const nodeData = reader.getGenericNode(functionName);
         if (nodeData) {
           addNodeAt(nodeData);
+          const json = saveStateToString();
+          setCurrentJson(JSON.parse(json));
         }
       }
     },
@@ -133,17 +146,17 @@ function FlowEditor() {
   const getTariNetwork = async (): Promise<TariNetwork> => {
     const settings = await settingsGet();
     switch (settings.network.byte) {
-      case Network.MainNet:
+      case NetworkByte.MainNet:
         return TariNetwork.MainNet;
-      case Network.StageNet:
+      case NetworkByte.StageNet:
         return TariNetwork.StageNet;
-      case Network.NextNet:
+      case NetworkByte.NextNet:
         return TariNetwork.NextNet;
-      case Network.LocalNet:
+      case NetworkByte.LocalNet:
         return TariNetwork.LocalNet;
-      case Network.Igor:
+      case NetworkByte.Igor:
         return TariNetwork.Igor;
-      case Network.Esmeralda:
+      case NetworkByte.Esmeralda:
         return TariNetwork.Esmeralda;
       default:
         return TariNetwork.LocalNet;
@@ -156,6 +169,15 @@ function FlowEditor() {
       setAccount(defaultAcc || dataAccountsList.accounts[0]);
     }
   }, [dataAccountsList]);
+
+  useEffect(() => {
+    try {
+      loadStateFromString(JSON.stringify(currentJson));
+    } catch (err) {
+      console.error("Failed to load flow state from JSON:", err);
+      loadStateFromString(JSON.stringify(INITIAL_FLOW_STATE));
+    }
+  }, [currentJson]);
 
   const onAccountChange = (e: SelectChangeEvent<string>) => {
     const selected = dataAccountsList?.accounts.find(
@@ -220,6 +242,7 @@ function FlowEditor() {
 
   const handleSaveFlow = () => {
     const json = saveStateToString();
+    setCurrentJson(JSON.parse(json));
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -285,7 +308,7 @@ function FlowEditor() {
         </Box>
         <Box mb={2}>
           <FormControl fullWidth size="small">
-            <InputLabel id="account-select-label">Account</InputLabel>
+            <InputLabel id="account-select-label">Account used to pay fees</InputLabel>
             <Select
               labelId="account-select-label"
               name="account"
@@ -300,6 +323,15 @@ function FlowEditor() {
               ))}
             </Select>
           </FormControl>
+          {account ? (
+            <Typography variant="subtitle2" mt={1}>
+              Address: <CopyAddress address={substateIdToString(account.account.address)} />
+            </Typography>
+          ) : (
+            <Typography color="error" variant="subtitle2" mt={1}>
+              No account selected
+            </Typography>
+          )}
         </Box>
         <Divider />
         <Box mt={2} mb={2}>
@@ -342,6 +374,29 @@ function FlowEditor() {
               placeholder="Enter template id"
               fullWidth
             />
+          </Box>
+          <Box mt={2} mb={2}>
+            <InputLabel id="template-select-label">Builtin Templates</InputLabel>
+            <Select
+              style={{ minWidth: "100%" }}
+              labelId="template-select-label"
+              name="templateId"
+              label="Template Id"
+              placeholder="Select a builtin template"
+              value={KNOWN_TEMPLATES.find((t) => t.address === templateId)?.address || ""}
+              onChange={(e) => setTemplateId(e.target.value)}
+            >
+              <MenuItem key={""} value={""}>
+                <em>None</em>
+              </MenuItem>
+              {KNOWN_TEMPLATES.map((template) => (
+                <MenuItem key={template.address} value={template.address}>
+                  {template.name} {shortenString(template.address)}
+                </MenuItem>
+              ))}
+            </Select>
+          </Box>
+          <Box>
             <Button variant="contained" onClick={() => refetch()} disabled={!templateId || isLoading}>
               Fetch
             </Button>

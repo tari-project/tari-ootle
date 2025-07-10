@@ -15,4 +15,5 @@ export interface Resource {
   total_supply: Amount | null;
   view_key: string | null;
   auth_hook: AuthHook | null;
+  divisibility: number;
 }

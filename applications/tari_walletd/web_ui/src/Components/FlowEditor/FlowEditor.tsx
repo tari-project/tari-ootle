@@ -114,8 +114,8 @@ function FlowEditor() {
   } = useFlowEditorStore();
   const theme = useTheme();
   const addNodeAt = useStore((store) => store.addNodeAt);
-  const saveStateToString = useStore((store) => store.saveStateToString);
-  const loadStateFromString = useStore((store) => store.loadStateFromString);
+  const getState = useStore((store) => store.getState);
+  const setState = useStore((store) => store.setState);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: dataAccountsList } = useAccountsList(0, 20);
@@ -135,8 +135,7 @@ function FlowEditor() {
         const nodeData = reader.getGenericNode(functionName);
         if (nodeData) {
           addNodeAt(nodeData);
-          const json = saveStateToString();
-          setCurrentJson(JSON.parse(json));
+          setCurrentJson(getState());
         }
       }
     },
@@ -172,10 +171,9 @@ function FlowEditor() {
 
   useEffect(() => {
     try {
-      loadStateFromString(JSON.stringify(currentJson));
+      setState(currentJson);
     } catch (err) {
-      console.error("Failed to load flow state from JSON:", err);
-      loadStateFromString(JSON.stringify(INITIAL_FLOW_STATE));
+      console.error("Failed to load flow state:", err, currentJson);
     }
   }, [currentJson]);
 
@@ -241,9 +239,9 @@ function FlowEditor() {
   };
 
   const handleSaveFlow = () => {
-    const json = saveStateToString();
-    setCurrentJson(JSON.parse(json));
-    const blob = new Blob([json], { type: "application/json" });
+    const state = getState();
+    setCurrentJson(state);
+    const blob = new Blob([JSON.stringify(state, undefined, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -258,12 +256,18 @@ function FlowEditor() {
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        loadStateFromString(event.target?.result as string);
+        setState(JSON.parse(event.target?.result as string));
       } catch (err) {
         alert("Failed to load flow: " + err);
       }
     };
     reader.readAsText(file);
+  };
+
+  const onChange = () => {
+    const state = getState();
+    console.log(state);
+    setCurrentJson(state);
   };
 
   return (
@@ -280,6 +284,9 @@ function FlowEditor() {
                 getTransactionProps={getTransactionProps}
                 showGeneratedCode={showGeneratedCode}
                 executeTransaction={executeTransaction}
+                onNodesChange={onChange}
+                onEdgesChange={onChange}
+                onConnect={onChange}
               />
             </div>
           </StyledPaper>

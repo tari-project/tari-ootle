@@ -32,6 +32,7 @@ import TariGem from "../../../assets/TariGem";
 import useAccountStore from "../../../store/accountStore";
 import { substateIdToString } from "@tari-project/typescript-bindings";
 import { useEffect } from "react";
+import { bigintToDecimalString } from "../../../utils/helpers";
 
 const XTR_RESOURCE = "resource_0101010101010101010101010101010101010101010101010101010101010101";
 export default function AccountBalance() {
@@ -52,8 +53,6 @@ export default function AccountBalance() {
     refetch();
   }, [account]);
 
-  const XTR_DECIMALS = 6;
-
   let formattedBalance = "";
   if (balancesIsLoading) {
     formattedBalance = "...";
@@ -61,13 +60,8 @@ export default function AccountBalance() {
     if (showBalance) {
       const balanceObj = balancesData?.balances.find((b) => b.resource_address === XTR_RESOURCE);
       const balance = BigInt(balanceObj?.balance || 0) + BigInt(balanceObj?.confidential_balance || 0);
-
-      const wholeValues = (balance / BigInt(10 ** XTR_DECIMALS)).toLocaleString("en-US", {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 0,
-      });
-      const fractionalValues = balance.toString().slice(-XTR_DECIMALS);
-      formattedBalance = `${wholeValues.toString()}.${fractionalValues}`;
+      const xtr_decimals = balanceObj?.divisibility || 6;
+      formattedBalance = bigintToDecimalString(balance, xtr_decimals);
     } else {
       formattedBalance = "************";
     }

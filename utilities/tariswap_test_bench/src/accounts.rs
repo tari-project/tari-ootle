@@ -58,6 +58,7 @@ impl Runner {
             XTR,
             ResourceType::Confidential,
             Some("XTR".to_string()),
+            6,
         )?;
         let account = self.sdk.accounts_api().get_account_by_address(account)?;
 
@@ -214,6 +215,7 @@ impl Runner {
                         *vault.resource_address(),
                         vault.resource_type(),
                         None,
+                        0,
                     )?;
                 }
             }

@@ -14,6 +14,7 @@ pub struct VaultModel {
     pub revealed_balance: Amount,
     pub locked_revealed_balance: Amount,
     pub token_symbol: Option<String>,
+    pub divisibility: u8,
 }
 
 impl VaultModel {

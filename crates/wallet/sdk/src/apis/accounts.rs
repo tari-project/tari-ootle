@@ -166,6 +166,7 @@ impl<'a, TStore: WalletStore> AccountsApi<'a, TStore> {
         resource_address: ResourceAddress,
         resource_type: ResourceType,
         token_symbol: Option<String>,
+        divisibility: u8,
     ) -> Result<(), AccountsApiError> {
         let mut tx = self.store.create_write_tx()?;
         tx.vaults_insert(VaultModel {
@@ -177,6 +178,7 @@ impl<'a, TStore: WalletStore> AccountsApi<'a, TStore> {
             confidential_balance: Amount::zero(),
             locked_revealed_balance: Amount::zero(),
             token_symbol,
+            divisibility,
         })?;
         tx.commit()?;
         Ok(())

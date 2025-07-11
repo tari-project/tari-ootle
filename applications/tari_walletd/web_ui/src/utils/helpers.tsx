@@ -21,7 +21,13 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { ChangeEvent } from "react";
-import type { FinalizeResult, SubstateId, Transaction, TransactionStatus } from "@tari-project/typescript-bindings";
+import type {
+  Amount,
+  FinalizeResult,
+  SubstateId,
+  Transaction,
+  TransactionStatus,
+} from "@tari-project/typescript-bindings";
 
 export const renderJson = (json: any) => {
   if (Array.isArray(json)) {
@@ -225,4 +231,26 @@ export function base64FromArrayBuffer(arrayBuffer: ArrayBuffer) {
   }
 
   return base64;
+}
+
+export function bigintToDecimalString(int: bigint | Amount, decimalPlaces: number, locale: string = "en-US"): string {
+  const number = typeof int === "bigint" ? int : BigInt(int);
+
+  if (decimalPlaces == 0) {
+    return number.toLocaleString(locale, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    });
+  }
+  const wholeValues = (number / BigInt(10 ** decimalPlaces)).toLocaleString(locale, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
+  const fractionalValues = number.toString().slice(-decimalPlaces);
+  if (wholeValues === "0" && fractionalValues === "0") {
+    return "0";
+  }
+
+  const padding = "0".repeat(decimalPlaces - fractionalValues.length);
+  return `${wholeValues}.${padding}${fractionalValues}`;
 }

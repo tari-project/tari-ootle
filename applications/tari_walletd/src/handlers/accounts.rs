@@ -224,6 +224,7 @@ pub async fn handle_get_balances(
             resource_type: vault.resource_type,
             confidential_balance: vault.confidential_balance,
             token_symbol: vault.token_symbol,
+            divisibility: vault.divisibility,
         })
     }
 

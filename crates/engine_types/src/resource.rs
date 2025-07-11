@@ -183,4 +183,8 @@ impl Resource {
     pub fn token_symbol(&self) -> Option<&str> {
         self.metadata.get(TOKEN_SYMBOL).map(|s| s.as_str())
     }
+
+    pub fn divisibility(&self) -> u8 {
+        self.divisibility
+    }
 }

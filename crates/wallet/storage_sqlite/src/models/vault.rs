@@ -25,6 +25,7 @@ pub struct Vault {
     pub token_symbol: Option<String>,
     pub created_at: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
+    pub divisibility: i32,
 }
 
 impl Vault {
@@ -51,6 +52,11 @@ impl Vault {
             revealed_balance: Amount::from(self.revealed_balance),
             locked_revealed_balance: Amount::from(self.locked_revealed_balance),
             confidential_balance: Amount::from(self.confidential_balance),
+            divisibility: u8::try_from(self.divisibility as u32).map_err(|e| WalletStorageError::DecodingError {
+                operation: "try_into_vault",
+                item: "vault.divisibility",
+                details: format!("Invalid divisibility: {}", e),
+            })?,
         })
     }
 }

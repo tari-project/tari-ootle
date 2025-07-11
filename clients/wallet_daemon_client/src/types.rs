@@ -533,6 +533,7 @@ pub struct BalanceEntry {
     pub resource_type: ResourceType,
     pub confidential_balance: Amount,
     pub token_symbol: Option<String>,
+    pub divisibility: u8,
 }
 
 impl BalanceEntry {

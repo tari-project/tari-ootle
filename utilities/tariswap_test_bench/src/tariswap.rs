@@ -85,6 +85,7 @@ impl Runner {
             .collect())
     }
 
+    #[allow(clippy::too_many_lines)]
     pub async fn add_liquidity(
         &mut self,
         tariswaps: &[TariSwap],
@@ -196,6 +197,7 @@ impl Runner {
                 tariswaps[0].lp_resource_address,
                 ResourceType::NonFungible,
                 Some("LP".to_string()),
+                0,
             )?;
         }
 

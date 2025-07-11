@@ -290,6 +290,7 @@ where
 
             let resource = self.fetch_resource(*latest_vault.resource_address()).await?;
             let token_symbol = resource.metadata().get(TOKEN_SYMBOL).cloned();
+            let divisibility = resource.divisibility();
 
             accounts_api.add_vault(
                 account_address.clone(),
@@ -297,6 +298,7 @@ where
                 *latest_vault.resource_address(),
                 latest_vault.resource_type(),
                 token_symbol,
+                divisibility,
             )?;
             has_changed = true;
         }
@@ -648,7 +650,11 @@ where
             },
         };
 
-        let token_symbol = maybe_resource.and_then(|r| r.metadata().get(TOKEN_SYMBOL).map(|s| s.to_string()));
+        let token_symbol = maybe_resource
+            .as_ref()
+            .and_then(|r| r.metadata().get(TOKEN_SYMBOL).map(|s| s.to_string()));
+        let divisibility = maybe_resource.as_ref().map(|r| r.divisibility()).unwrap_or(0);
+
         info!(
             target: LOG_TARGET,
             "👁️‍🗨️ New {} in account {}",
@@ -661,6 +667,7 @@ where
             *vault.resource_address(),
             vault.resource_type(),
             token_symbol,
+            divisibility,
         )?;
 
         Ok(())

@@ -35,9 +35,7 @@ function NftListItem({ nft }: { nft: NonFungibleToken }) {
     <TableRow>
       <DataTableCell>{displayNftId(nft.nft_id)}</DataTableCell>
       <DataTableCell>{shortenSubstateId(nft.vault_id)}</DataTableCell>
-      <DataTableCell>
-        <DataTableCell>{renderJson(convertCborValue(nft.data))}</DataTableCell>
-      </DataTableCell>
+      <DataTableCell>{renderJson(convertCborValue(nft.data))}</DataTableCell>
       <DataTableCell>{renderJson(convertCborValue(nft.mutable_data))}</DataTableCell>
       <DataTableCell>
         {nft.is_burned ? (
@@ -93,7 +91,7 @@ export default function NFTList(props: NftListProps) {
           <FetchStatusCheck
             isError={nftsListIsError}
             errorMessage={nftsListError?.message || "Error fetching data"}
-            isLoading={nftsListIsFetching}
+            isLoading={nftsListIsFetching && !nftsListData?.nfts.length}
           >
             {nftsListData?.nfts.map((nft: NonFungibleToken, index: number) => <NftListItem key={index} nft={nft} />)}
           </FetchStatusCheck>

@@ -86,7 +86,7 @@ export function convertTaggedValue(tag: number, value: any): string | any {
   }
 }
 
-enum BinaryTag {
+export enum BinaryTag {
   ComponentAddress = 128,
   Metadata = 129,
   NonFungibleAddress = 130,

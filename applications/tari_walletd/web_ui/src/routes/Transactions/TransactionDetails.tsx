@@ -31,7 +31,6 @@ import { DataTableCell, StyledPaper } from "../../Components/StyledComponents";
 import PageHeading from "../../Components/PageHeading";
 import Events from "./Events";
 import Logs from "./Logs";
-import FeeInstructions from "./FeeInstructions";
 import Instructions from "./Instructions";
 import Substates from "./Substates";
 import StatusChip from "../../Components/StatusChip";
@@ -246,7 +245,7 @@ export default function TransactionDetails() {
                     fontSize: "0.85rem",
                   }}
                   startIcon={<KeyboardArrowUpIcon />}
-                  disabled={expandedPanels.length === 0 ? true : false}
+                  disabled={expandedPanels.length === 0}
                 >
                   Collapse All
                 </Button>
@@ -259,7 +258,7 @@ export default function TransactionDetails() {
             </AccordionSummary>
             <AccordionDetails>
               {transaction?.fee_instructions?.length ? (
-                <FeeInstructions data={transaction?.fee_instructions} />
+                <Instructions data={transaction?.fee_instructions} />
               ) : (
                 <span>Empty</span>
               )}

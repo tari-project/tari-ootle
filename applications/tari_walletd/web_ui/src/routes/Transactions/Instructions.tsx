@@ -28,6 +28,9 @@ import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import CodeBlockExpand from "../../Components/CodeBlock";
 import { useTheme } from "@mui/material/styles";
 import type { Instruction } from "@tari-project/typescript-bindings";
+import { decode } from "cbor2";
+import { toHexString } from "../../utils/helpers";
+import { BinaryTag } from "../../utils/cbor";
 
 function RowData({ title, data }: { title: string; data: Instruction }, index: number) {
   const [open, setOpen] = useState(false);
@@ -58,12 +61,85 @@ function RowData({ title, data }: { title: string; data: Instruction }, index: n
           colSpan={2}
         >
           <Collapse in={open} timeout="auto" unmountOnExit>
-            <CodeBlockExpand title={title} content={data} />
+            <CodeBlockExpand title={title} content={inspectify(data)} />
           </Collapse>
         </DataTableCell>
       </TableRow>
     </>
   );
+}
+
+function inspectify(instruction: Instruction) {
+  let method;
+  if (typeof instruction !== "object" || instruction === null) {
+    return instruction;
+  }
+
+  if ("CallFunction" in instruction) {
+    method = "CallFunction" as keyof Instruction;
+  } else if ("CallMethod" in instruction) {
+    method = "CallMethod" as keyof Instruction;
+  } else {
+    return instruction;
+  }
+
+  const addressMapper = (tag: BinaryTag, prefix: string): [BinaryTag, (value: any) => string] => [
+    tag,
+    (value: any) => prefix + "_" + toHexString(value.contents),
+  ];
+
+  const tags = new Map([
+    addressMapper(BinaryTag.VaultId, "vault"),
+    addressMapper(BinaryTag.ResourceAddress, "resource"),
+    addressMapper(BinaryTag.ComponentAddress, "component"),
+    addressMapper(BinaryTag.FeeClaim, "vnfp"),
+    addressMapper(BinaryTag.TransactionReceipt, "txreceipt"),
+  ]);
+
+  const contents = instruction[method] as any;
+  const args = contents.args.map((arg: { Literal: string }) => {
+    if ("Literal" in arg) {
+      return { Literal: decode(arg.Literal, { encoding: "hex", tags }) };
+    }
+    return arg;
+  });
+  return {
+    [method]: {
+      ...contents,
+      args,
+    },
+  };
+
+  // if ("CallFunction" in instruction) {
+  //   const args = instruction.CallFunction.args.map((arg) => {
+  //     if ("Literal" in arg) {
+  //       return { Literal: decode(arg.Literal as unknown as string, { encoding: "hex" }) };
+  //     }
+  //     return arg;
+  //   });
+  //   return {
+  //     CallFunction: {
+  //       ...instruction.CallFunction,
+  //       args,
+  //     },
+  //   };
+  // }
+  // if ("CallMethod" in instruction) {
+  //   const args = instruction.CallMethod.args.map((arg) => {
+  //     if ("Literal" in arg) {
+  //       return { Literal: decode(arg.Literal as unknown as string, { encoding: "hex" }) };
+  //     }
+  //     return arg;
+  //   });
+  //   return {
+  //     CallMethod: {
+  //       ...instruction.CallMethod,
+  //       args,
+  //     },
+  //   };
+  // }
+  //
+  // return instruction;
 }
 
 export default function Instructions({ data }: { data: Array<Instruction> }, index: number) {

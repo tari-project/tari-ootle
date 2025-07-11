@@ -68,6 +68,11 @@ export function toHexString(byteArray: any): string {
       return ("0" + (byte & 0xff).toString(16)).slice(-2);
     }).join("");
   }
+  // if a uint8array
+  if (byteArray instanceof Uint8Array) {
+    return Array.prototype.map.call(byteArray, (x) => x.toString(16).padStart(2, "0")).join("");
+  }
+
   if (byteArray === undefined) {
     return "undefined";
   }

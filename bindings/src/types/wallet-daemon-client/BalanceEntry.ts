@@ -11,4 +11,5 @@ export interface BalanceEntry {
   resource_type: ResourceType;
   confidential_balance: Amount;
   token_symbol: string | null;
+  divisibility: number;
 }

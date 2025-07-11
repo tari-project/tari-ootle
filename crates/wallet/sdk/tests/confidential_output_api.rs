@@ -165,6 +165,7 @@ impl Test {
                 CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
                 ResourceType::Confidential,
                 Some("TEST".to_string()),
+                6,
             )
             .unwrap();
 

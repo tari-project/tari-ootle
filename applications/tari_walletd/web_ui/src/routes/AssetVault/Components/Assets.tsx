@@ -35,7 +35,7 @@ import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import { DataTableCell } from "../../../Components/StyledComponents";
 import { useAccountNFTsList, useAccountsGetBalances } from "../../../api/hooks/useAccounts";
 import useAccountStore from "../../../store/accountStore";
-import { shortenSubstateId, substateIdToString } from "../../../utils/helpers";
+import { bigintToDecimalString, shortenSubstateId, substateIdToString } from "../../../utils/helpers";
 import NFTList from "../../../Components/NFTList";
 import { Button } from "@mui/material";
 import { SendMoneyDialog } from "./SendMoney";
@@ -63,12 +63,21 @@ interface BalanceRowProps {
   vault_address: VaultId;
   balance: Amount;
   confidential_balance: Amount;
+  divisibility: number;
   onSendClicked?: (resource_address: ResourceAddress, resource_type: ResourceType) => void;
 }
 
 function BalanceRow(props: BalanceRowProps) {
-  const { token_symbol, resource_address, resource_type, balance, confidential_balance, vault_address, onSendClicked } =
-    props;
+  const {
+    token_symbol,
+    resource_address,
+    resource_type,
+    balance,
+    confidential_balance,
+    vault_address,
+    divisibility,
+    onSendClicked,
+  } = props;
   const { showBalance } = useAccountStore();
   return (
     <TableRow key={token_symbol || resource_address}>
@@ -81,9 +90,14 @@ function BalanceRow(props: BalanceRowProps) {
           display={`${token_symbol || shortenSubstateId(resource_address)} ${resource_type}`}
         />
       </DataTableCell>
-      <DataTableCell>{showBalance ? balance : "*************"}</DataTableCell>
+      <DataTableCell>{showBalance ? bigintToDecimalString(balance, divisibility) : "*************"}</DataTableCell>
       <DataTableCell>
-        <ConfidentialBalance show={showBalance} resourceType={resource_type} balance={confidential_balance} />
+        <ConfidentialBalance
+          show={showBalance}
+          resourceType={resource_type}
+          balance={confidential_balance}
+          divisibility={divisibility}
+        />
       </DataTableCell>
       <DataTableCell>
         <Button variant="outlined" onClick={() => onSendClicked?.(resource_address, resource_type)}>
@@ -94,10 +108,10 @@ function BalanceRow(props: BalanceRowProps) {
   );
 }
 
-function ConfidentialBalance(props: { show: boolean; balance: Amount; resourceType: string }) {
+function ConfidentialBalance(props: { show: boolean; balance: Amount; resourceType: string; divisibility: number }) {
   switch (props.resourceType) {
     case "Confidential":
-      return <>{props.show ? props.balance : "**************"}</>;
+      return <>{props.show ? bigintToDecimalString(props.balance, props.divisibility) : "**************"}</>;
     default:
       return <>--</>;
   }
@@ -201,6 +215,7 @@ function Assets({ account }: { account: Account }) {
                       confidential_balance,
                       token_symbol,
                       vault_address,
+                      divisibility,
                     }: BalanceEntry,
                     i: number,
                   ) => (
@@ -212,6 +227,7 @@ function Assets({ account }: { account: Account }) {
                       balance={balance}
                       confidential_balance={confidential_balance}
                       vault_address={vault_address as unknown as string}
+                      divisibility={divisibility}
                       onSendClicked={handleSendResourceClicked}
                     />
                   ),

@@ -154,6 +154,7 @@ diesel::table! {
         token_symbol -> Nullable<Text>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
+        divisibility -> Integer,
     }
 }
 

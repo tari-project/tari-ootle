@@ -45,7 +45,6 @@ export default function AccountBalance() {
     error: balancesError,
     isFetching: balancesIsFetching,
     isLoading: balancesIsLoading,
-    isRefetching: balancesIsRefetching,
     refetch,
   } = useAccountsGetBalances(substateIdToString(account.address));
 
@@ -56,7 +55,7 @@ export default function AccountBalance() {
   const XTR_DECIMALS = 6;
 
   let formattedBalance = "";
-  if (balancesIsLoading || balancesIsRefetching) {
+  if (balancesIsLoading) {
     formattedBalance = "...";
   } else {
     if (showBalance) {

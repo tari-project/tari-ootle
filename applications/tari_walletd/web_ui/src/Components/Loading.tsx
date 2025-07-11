@@ -24,7 +24,7 @@ import CircularProgress from "@mui/material/CircularProgress";
 
 export default function Loading() {
   return (
-    <div
+    <span
       style={{
         display: "flex",
         justifyContent: "center",
@@ -35,6 +35,6 @@ export default function Loading() {
       }}
     >
       <CircularProgress />
-    </div>
+    </span>
   );
 }

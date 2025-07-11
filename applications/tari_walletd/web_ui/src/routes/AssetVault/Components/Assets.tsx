@@ -178,7 +178,7 @@ function Assets({ account }: { account: Account }) {
         <FetchStatusCheck
           isError={balancesIsError}
           errorMessage={balancesError?.message || "Error fetching data"}
-          isLoading={balancesIsFetching}
+          isLoading={balancesIsFetching && !balancesData?.balances.length}
         >
           <TableContainer>
             <Table>

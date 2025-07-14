@@ -8,7 +8,7 @@ use tari_engine_types::commit_result::ExecuteResult;
 use tari_ootle_common_types::optional::IsNotFoundError;
 use tari_ootle_wallet_sdk::{
     models::{NewAccountInfo, TransactionStatus},
-    network::WalletNetworkInterface,
+    network::{StatusResponseError, WalletNetworkInterface},
     storage::WalletStore,
     WalletSdk,
 };
@@ -45,7 +45,7 @@ impl<TStore, TNetworkInterface> TransactionService<TStore, TNetworkInterface>
 where
     TStore: WalletStore + Clone + Send + Sync + 'static,
     TNetworkInterface: WalletNetworkInterface + Clone + Send + Sync + 'static,
-    TNetworkInterface::Error: IsNotFoundError,
+    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
 {
     pub fn new(
         notify: Notify<WalletEvent>,
@@ -160,6 +160,7 @@ where
             .insert_new_transaction(transaction, vec![], new_account_info.clone(), false)
             .await?;
         transaction_api.submit_transaction(transaction_id).await?;
+
         self.notify.notify(TransactionSubmittedEvent {
             transaction_id,
             new_account: new_account_info,

@@ -6,15 +6,13 @@ use std::{
     ops::{Add, Deref, DerefMut, Sub},
     str::FromStr,
     sync::MutexGuard,
-    time::Duration,
 };
 
 use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection};
 use log::*;
 use serde::Serialize;
 use tari_bor::json_encoding::CborValueJsonSerializeWrapper;
-use tari_consensus_types::ProposalCertificate;
-use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateId};
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{SubstateRequirement, VersionedSubstateIdRef};
 use tari_ootle_wallet_sdk::{
     models::{
@@ -27,6 +25,7 @@ use tari_ootle_wallet_sdk::{
         SubstateModel,
         TransactionStatus,
         VaultModel,
+        WalletTransactionUpdate,
     },
     storage::{WalletStorageError, WalletStoreReader, WalletStoreWriter},
 };
@@ -320,30 +319,23 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
-    fn transactions_set_result_and_status(
-        &mut self,
-        transaction_id: TransactionId,
-        result: Option<&FinalizeResult>,
-        final_fee: Option<u64>,
-        qcs: Option<&[ProposalCertificate]>,
-        new_status: TransactionStatus,
-        execution_time: Option<Duration>,
-        finalized_time: Option<PrimitiveDateTime>,
-    ) -> Result<(), WalletStorageError> {
+    fn transactions_update(&mut self, update: WalletTransactionUpdate<'_>) -> Result<(), WalletStorageError> {
         use crate::schema::transactions;
 
         let num_rows = diesel::update(transactions::table)
             .set((
-                transactions::result.eq(result.map(serialize_json).transpose()?),
-                transactions::status.eq(new_status.as_key_str()),
-                transactions::final_fee.eq(final_fee.map(|v| v as i64)),
-                transactions::qcs.eq(qcs.map(serialize_json).transpose()?),
-                transactions::executed_time_ms
-                    .eq(execution_time.map(|v| i64::try_from(v.as_millis()).unwrap_or(i64::MAX))),
-                transactions::finalized_time.eq(finalized_time),
+                transactions::result.eq(update.result.map(serialize_json).transpose()?),
+                transactions::status.eq(update.new_status.as_key_str()),
+                transactions::final_fee.eq(update.final_fee.map(|v| v as i64)),
+                transactions::qcs.eq(update.qcs.map(serialize_json).transpose()?),
+                transactions::executed_time_ms.eq(update
+                    .execution_time
+                    .map(|v| i64::try_from(v.as_millis()).unwrap_or(i64::MAX))),
+                transactions::finalized_time.eq(update.finalized_time),
+                transactions::invalid_reason.eq(update.invalid_reason),
                 transactions::updated_at.eq(diesel::dsl::now),
             ))
-            .filter(transactions::hash.eq(transaction_id.to_string()))
+            .filter(transactions::hash.eq(update.transaction_id.to_string()))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("transactions_set_result_and_status", e))?;
 
@@ -351,7 +343,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             return Err(WalletStorageError::NotFound {
                 operation: "transactions_set_result_and_status",
                 entity: "transaction".to_string(),
-                key: transaction_id.to_string(),
+                key: update.transaction_id.to_string(),
             });
         }
 

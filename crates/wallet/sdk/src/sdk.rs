@@ -32,7 +32,7 @@ use crate::{
         template::TemplateApi,
         transaction::TransactionApi,
     },
-    network::WalletNetworkInterface,
+    network::{StatusResponseError, WalletNetworkInterface},
     storage::{WalletStorageError, WalletStore},
 };
 
@@ -60,7 +60,7 @@ impl<TStore, TNetworkInterface> WalletSdk<TStore, TNetworkInterface>
 where
     TStore: WalletStore,
     TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError,
+    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
 {
     pub fn initialize(
         store: TStore,

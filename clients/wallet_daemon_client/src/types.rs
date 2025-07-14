@@ -135,7 +135,6 @@ const fn return_true() -> bool {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct TransactionSubmitResponse {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
 }
 
@@ -162,7 +161,6 @@ pub struct TransactionSubmitDryRunRequest {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct TransactionSubmitDryRunResponse {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
     pub result: ExecuteResult,
 }
@@ -190,7 +188,6 @@ pub struct TransactionSubmitManifestRequest {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct TransactionSubmitManifestResponse {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
     pub result: Option<ExecuteResult>,
 }
@@ -222,7 +219,6 @@ pub struct PublishTemplateRequest {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct PublishTemplateResponse {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub dry_run_fee: Option<u64>,
@@ -235,7 +231,6 @@ pub struct PublishTemplateResponse {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct TransactionGetRequest {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
 }
 
@@ -281,7 +276,6 @@ pub struct TransactionGetAllResponse {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct TransactionGetResultRequest {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
 }
 
@@ -292,7 +286,6 @@ pub struct TransactionGetResultRequest {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct TransactionGetResultResponse {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
     pub status: TransactionStatus,
     pub result: Option<FinalizeResult>,
@@ -305,7 +298,6 @@ pub struct TransactionGetResultResponse {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct TransactionWaitResultRequest {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub timeout_secs: Option<u64>,
@@ -318,7 +310,6 @@ pub struct TransactionWaitResultRequest {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct TransactionWaitResultResponse {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
     pub result: Option<FinalizeResult>,
     pub status: TransactionStatus,
@@ -334,7 +325,6 @@ pub struct TransactionWaitResultResponse {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct TransactionClaimBurnResponse {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
     pub inputs: Vec<SubstateAddress>,
     pub outputs: Vec<SubstateAddress>,
@@ -638,7 +628,6 @@ pub struct AccountsTransferRequest {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct AccountsTransferResponse {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub fee: u64,
@@ -756,7 +745,6 @@ pub struct ConfidentialTransferRequest {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct ConfidentialTransferResponse {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub fee: u64,
@@ -815,7 +803,6 @@ pub struct ClaimBurnRequest {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct ClaimBurnResponse {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub fee: u64,
@@ -856,7 +843,6 @@ pub struct RevealFundsRequest {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct RevealFundsResponse {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub fee: u64,
@@ -886,7 +872,6 @@ pub struct AccountsCreateFreeTestCoinsRequest {
 )]
 pub struct AccountsCreateFreeTestCoinsResponse {
     pub account: Account,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
     pub amount: Amount,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
@@ -1038,7 +1023,6 @@ pub struct MintFaucetNftRequest {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct MintFaucetNftResponse {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
     pub finalize: FinalizeResult,
     pub fee: u64,
@@ -1169,7 +1153,6 @@ pub struct ClaimValidatorFeesRequest {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct ClaimValidatorFeesResponse {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub fee: u64,
@@ -1288,8 +1271,6 @@ pub struct WalletSubstateRecord {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct TemplatesGetRequest {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[serde(with = "serde_with::string")]
     pub template_address: TemplateAddress,
 }
 
@@ -1325,9 +1306,7 @@ pub struct TemplatesListAuthoredRequest {
 )]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AuthoredTemplate {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub author_public_key: RistrettoPublicKeyBytes,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub address: TemplateAddress,
     pub name: String,
     pub tari_version: String,
@@ -1539,7 +1518,6 @@ pub struct TransferNftRequest {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct TransferNftResponse {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub fee: u64,

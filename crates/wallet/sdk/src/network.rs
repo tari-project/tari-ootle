@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::time::Duration;
+use std::{convert::Infallible, time::Duration};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -48,6 +48,33 @@ pub trait WalletNetworkInterface {
     async fn fetch_template_definition(&self, template_address: TemplateAddress) -> Result<TemplateDef, Self::Error>;
 
     async fn wait_until_ready(&self) -> Result<(), Self::Error>;
+}
+
+/// A trait for responses that can provide a [WalletQueryErrorStatus]
+pub trait StatusResponseError {
+    fn get_status(&self) -> WalletQueryErrorStatus;
+    fn get_error_message(&self) -> String;
+}
+
+// This is required for tests (PanicInterface) - in general, if a type is `Infallible` it should never reach the error.
+impl StatusResponseError for Infallible {
+    fn get_status(&self) -> WalletQueryErrorStatus {
+        unreachable!("Infallible should never be used as an error type in this context")
+    }
+
+    fn get_error_message(&self) -> String {
+        unreachable!("Infallible should never be used as an error type in this context")
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum WalletQueryErrorStatus {
+    #[error("Not found: {message}")]
+    NotFound { message: String },
+    #[error("Transaction rejected: {message}")]
+    TransactionRejected { message: String },
+    #[error("Internal error: {message}")]
+    InternalError { message: String },
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

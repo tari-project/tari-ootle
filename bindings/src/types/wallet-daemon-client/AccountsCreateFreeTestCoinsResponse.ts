@@ -2,10 +2,11 @@
 import type { Account } from "../Account";
 import type { Amount } from "../Amount";
 import type { FinalizeResult } from "../FinalizeResult";
+import type { TransactionId } from "../TransactionId";
 
 export interface AccountsCreateFreeTestCoinsResponse {
   account: Account;
-  transaction_id: string;
+  transaction_id: TransactionId;
   amount: Amount;
   fee: number;
   result: FinalizeResult;

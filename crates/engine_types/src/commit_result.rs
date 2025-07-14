@@ -34,7 +34,6 @@ use crate::{
     fees::FeeReceipt,
     instruction_result::InstructionResult,
     logs::LogEntry,
-    serde_with,
     substate::SubstateDiff,
 };
 
@@ -142,8 +141,6 @@ impl ExecuteResult {
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct FinalizeResult {
-    #[serde(with = "serde_with::hex")]
-    #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
     pub transaction_hash: Hash,
     pub events: Vec<Event>,
     pub logs: Vec<LogEntry>,

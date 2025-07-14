@@ -138,6 +138,7 @@ diesel::table! {
         new_account_info -> Nullable<Text>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
+        invalid_reason -> Nullable<Text>,
     }
 }
 

@@ -9,7 +9,16 @@ use crate::{crypto::InvalidByteLengthError, serde_helpers};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
-pub struct Scalar32Bytes(#[serde(with = "serde_helpers::fixed_hex")] [u8; Scalar32Bytes::length()]);
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
+pub struct Scalar32Bytes(
+    #[serde(with = "serde_helpers::fixed_hex")]
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    [u8; Scalar32Bytes::length()],
+);
 
 impl Scalar32Bytes {
     pub const fn length() -> usize {

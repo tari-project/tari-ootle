@@ -11637,7 +11637,6 @@ dependencies = [
  "serde_json",
  "tari_bor",
  "tari_common_types",
- "tari_consensus_types",
  "tari_engine_types",
  "tari_ootle_common_types",
  "tari_ootle_wallet_sdk",

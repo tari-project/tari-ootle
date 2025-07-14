@@ -33,10 +33,8 @@ pub struct BlockInfo {
     ts(export, export_to = "../../bindings/src/types/base-node-client/")
 )]
 pub struct BaseLayerValidatorNode {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub public_key: RistrettoPublicKeyBytes,
     pub shard_key: SubstateAddress,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub sidechain_id: Option<RistrettoPublicKeyBytes>,
 }
 

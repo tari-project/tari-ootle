@@ -4,7 +4,7 @@ import type { FeeReceipt } from "./FeeReceipt";
 import type { LogEntry } from "./LogEntry";
 
 export interface TransactionReceipt {
-  transaction_hash: Uint8Array;
+  transaction_hash: string;
   events: Array<Event>;
   logs: Array<LogEntry>;
   fee_receipt: FeeReceipt;

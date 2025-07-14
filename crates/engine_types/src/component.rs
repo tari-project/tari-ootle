@@ -60,7 +60,7 @@ pub fn new_component_address_from_public_key(
 )]
 pub struct ComponentHeader {
     #[serde(with = "serde_with::hex")]
-    #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub template_address: TemplateAddress,
     pub module_name: String,
     #[serde(with = "serde_with::hex::option")]

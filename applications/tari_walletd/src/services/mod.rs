@@ -7,7 +7,7 @@ pub use events::*;
 mod account_monitor;
 pub use account_monitor::AccountMonitorHandle;
 
-mod transaction_service;
+pub mod transaction_service;
 mod webauthn;
 pub use webauthn::*;
 
@@ -21,7 +21,11 @@ use anyhow::anyhow;
 use futures::{future, future::BoxFuture, FutureExt};
 pub use session_store::*;
 use tari_ootle_common_types::optional::IsNotFoundError;
-use tari_ootle_wallet_sdk::{network::WalletNetworkInterface, storage::WalletStore, WalletSdk};
+use tari_ootle_wallet_sdk::{
+    network::{StatusResponseError, WalletNetworkInterface},
+    storage::WalletStore,
+    WalletSdk,
+};
 use tari_shutdown::ShutdownSignal;
 use tokio::{sync::oneshot, task::JoinHandle};
 use transaction_service::TransactionService;
@@ -42,7 +46,7 @@ pub fn spawn_services<TStore, TNetworkInterface>(
 where
     TStore: WalletStore + Clone + Send + Sync + 'static,
     TNetworkInterface: WalletNetworkInterface + Clone + Send + Sync + 'static,
-    TNetworkInterface::Error: IsNotFoundError,
+    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
 {
     let (transaction_service, transaction_service_handle) =
         TransactionService::new(notify.clone(), wallet_sdk.clone(), shutdown_signal.clone());

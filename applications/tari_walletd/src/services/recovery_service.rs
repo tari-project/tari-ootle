@@ -17,7 +17,7 @@ use tari_ootle_wallet_sdk::{
         config::ConfigKey,
         key_manager::{KeyManagerApiError, TRANSACTION_BRANCH},
     },
-    network::WalletNetworkInterface,
+    network::{StatusResponseError, WalletNetworkInterface},
     storage::{WalletStorageError, WalletStore},
     WalletSdk,
 };
@@ -41,7 +41,7 @@ impl<TStore, TNetworkInterface> Service<TStore, TNetworkInterface>
 where
     TStore: WalletStore,
     TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError,
+    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
 {
     pub fn new(
         wallet_sdk: WalletSdk<TStore, TNetworkInterface>,

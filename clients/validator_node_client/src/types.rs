@@ -82,8 +82,6 @@ pub struct GetIdentityResponse {
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetTemplateRequest {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[serde(with = "serde_with::string")]
     pub template_address: TemplateAddress,
 }
 
@@ -171,8 +169,6 @@ pub struct GetTemplatesResponse {
 )]
 pub struct TemplateMetadata {
     pub name: String,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[serde(with = "serde_with::string")]
     pub address: TemplateAddress,
     /// SHA hash of binary
     pub binary_sha: Vec<u8>,
@@ -205,7 +201,6 @@ pub struct SubmitTransactionRequest {
     )
 )]
 pub struct SubmitTransactionResponse {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
     /// The result is a _dry run_ transaction.
     pub dry_run_result: Option<DryRunTransactionFinalizeResult>,
@@ -313,7 +308,6 @@ pub enum ValidatorNodeChange {
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetTransactionRequest {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
 }
 
@@ -338,7 +332,6 @@ pub struct GetTransactionResponse {
     )
 )]
 pub struct GetTransactionResultRequest {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
 }
 

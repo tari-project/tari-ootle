@@ -1,9 +1,11 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::fmt;
+
 use crate::HashParseError;
 
-pub(crate) fn fixed_bytes_from_hex<const L: usize>(s: &str) -> Result<[u8; L], HashParseError> {
+pub fn fixed_bytes_from_hex<const L: usize>(s: &str) -> Result<[u8; L], HashParseError> {
     if s.len() != L * 2 {
         return Err(HashParseError);
     }
@@ -15,7 +17,7 @@ pub(crate) fn fixed_bytes_from_hex<const L: usize>(s: &str) -> Result<[u8; L], H
     Ok(bytes)
 }
 
-pub(crate) fn bytes_from_hex(s: &str) -> Result<Vec<u8>, HashParseError> {
+pub fn bytes_from_hex(s: &str) -> Result<Vec<u8>, HashParseError> {
     if s.len() % 2 != 0 {
         return Err(HashParseError);
     }
@@ -28,11 +30,15 @@ pub(crate) fn bytes_from_hex(s: &str) -> Result<Vec<u8>, HashParseError> {
     Ok(bytes)
 }
 
-pub(crate) fn bytes_to_hex<T: AsRef<[u8]>>(bytes: T) -> String {
+pub fn bytes_to_hex<T: AsRef<[u8]>>(bytes: T) -> String {
     let mut hex = String::with_capacity(bytes.as_ref().len() * 2);
-    for byte in bytes.as_ref() {
-        hex.push(char::from_digit(u32::from(byte >> 4), 16).expect("num is radix 16 digit"));
-        hex.push(char::from_digit(u32::from(byte & 0x0f), 16).expect("num is radix 16 digit"));
-    }
+    write_hex_fmt(&mut hex, bytes.as_ref()).expect("String write infaiible");
     hex
+}
+
+pub fn write_hex_fmt<W: fmt::Write>(writer: &mut W, bytes: &[u8]) -> fmt::Result {
+    for b in bytes {
+        write!(writer, "{:02x?}", b)?;
+    }
+    Ok(())
 }

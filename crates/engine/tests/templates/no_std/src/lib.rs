@@ -3,10 +3,7 @@
 
 #![no_std]
 
-use tari_template_lib::{
-    prelude::*,
-    template_dependencies::rust::{format, vec::Vec},
-};
+use tari_template_lib::prelude::*;
 
 #[template]
 mod template {

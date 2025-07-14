@@ -20,6 +20,8 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+
+
 pub mod confidential;
 pub mod fungible;
 pub mod non_fungible;
@@ -33,6 +35,8 @@ use crate::resource::builder::{
 /// Metadata key used as convention to represent the symbol (a.k.a. ticker) of a token. Meant as a shorthand,
 /// user-friendly identification of the underlying token
 pub const TOKEN_SYMBOL: &str = "SYMBOL";
+/// Metadata key used as convention to represent the image URL of a token. Meant to be used in user interfaces
+/// to display the token's logo or image
 pub const IMAGE_URL: &str = "IMAGE_URL";
 /// Default divisibility for fungible resources (18)
 pub const DEFAULT_DIVISIBILITY: u8 = 18;

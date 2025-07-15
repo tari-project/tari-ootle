@@ -35,7 +35,7 @@ use crate::{
 /// let resource_address = ResourceBuilder::fungible()
 ///     .with_token_symbol("TARI")
 ///     .with_divisibility(9)
-///     .mintable(AccessRule::AllowAll)
+///     .mintable(rule!(allow_all))
 ///     .build();
 /// ```
 ///
@@ -112,7 +112,7 @@ impl FungibleResourceBuilder {
     /// use tari_template_lib::auth::AccessRule;
     /// use tari_template_lib::resource::builder::ResourceBuilder;
     /// ResourceBuilder::fungible()
-    ///     .mintable(AccessRule::AllowAll)
+    ///     .mintable(rule!(allow_all))
     ///     .build();
     /// ```
     pub fn mintable(mut self, rule: AccessRule) -> Self {
@@ -131,7 +131,7 @@ impl FungibleResourceBuilder {
     /// use tari_template_lib::auth::AccessRule;
     /// use tari_template_lib::resource::builder::ResourceBuilder;
     /// ResourceBuilder::fungible()
-    ///     .burnable(AccessRule::AllowAll)
+    ///     .burnable(rule!(allow_all))
     ///     .build();
     /// ```
     pub fn burnable(mut self, rule: AccessRule) -> Self {
@@ -153,7 +153,7 @@ impl FungibleResourceBuilder {
     /// use tari_template_lib::auth::AccessRule;
     /// use tari_template_lib::resource::builder::ResourceBuilder;
     /// ResourceBuilder::fungible()
-    ///    .recallable(AccessRule::AllowAll)
+    ///    .recallable(rule!(allow_all))
     ///   .build();
     /// ```
     pub fn recallable(mut self, rule: AccessRule) -> Self {
@@ -193,7 +193,7 @@ impl FungibleResourceBuilder {
     /// use tari_template_lib::auth::AccessRule;
     /// use tari_template_lib::resource::builder::ResourceBuilder;
     /// ResourceBuilder::fungible()
-    ///    .depositable(AccessRule::AllowAll)
+    ///    .depositable(rule!(allow_all))
     ///     .build();
     /// ```
     pub fn depositable(mut self, rule: AccessRule) -> Self {

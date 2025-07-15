@@ -34,7 +34,7 @@
 //! ```rust,ignore
 //! use tari_template_lib::resource::manager::ResourceManager;
 //! let resource_manager = ResourceManager::get(my_resource_address);
-//! resource_manager.mint_fungible(Amount(1000));
+//! resource_manager.mint_fungible(1000);
 //! ```
 
 use std::collections::BTreeSet;

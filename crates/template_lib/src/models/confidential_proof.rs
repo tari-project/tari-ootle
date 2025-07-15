@@ -96,28 +96,20 @@ pub struct ConfidentialStatement {
 pub struct ViewableBalanceProof {
     /// The encrypted value that takes the form: E = v.G + r.P
     /// where v is the value, G is the generator, r is the secret_nonce and P is the view key
-    #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
     pub elgamal_encrypted: RistrettoPublicKeyBytes,
     /// The public nonce used in the ElGamal encryption R = r.G
-    #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
     pub elgamal_public_nonce: RistrettoPublicKeyBytes,
     /// Part of the proof that the encrypted value is correctly constructed. C' = x_v.H + x_m.G
-    #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
     pub c_prime: PedersenCommitmentBytes,
     /// Part of the proof that the encrypted value is correctly constructed. E' = x_v.G + x_r.P
-    #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
     pub e_prime: RistrettoPublicKeyBytes,
     /// Part of the proof that the encrypted value is correctly constructed. R' = x_r.G
-    #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
     pub r_prime: RistrettoPublicKeyBytes,
     /// Part of the proof that the encrypted value is correctly constructed. s_v = x_v + e.v
-    #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
     pub s_v: Scalar32Bytes,
     /// Part of the proof that the encrypted value is correctly constructed. s_m = x_m + e.m
-    #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
     pub s_m: Scalar32Bytes,
     /// Part of the proof that the encrypted value is correctly constructed. s_r = x_r + e.r
-    #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
     pub s_r: Scalar32Bytes,
 }
 
@@ -159,7 +151,7 @@ pub struct ViewableBalanceProofChallengeFields<'a> {
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct ConfidentialWithdrawProof {
-    #[cfg_attr(feature = "ts", ts(type = "Array<Uint8Array>"))]
+    #[cfg_attr(feature = "ts", ts(type = "Array<string>"))]
     pub inputs: Vec<PedersenCommitmentBytes>,
     /// The amount to withdraw from revealed funds i.e. the revealed funds as inputs
     #[cfg_attr(feature = "ts", ts(type = "number"))]

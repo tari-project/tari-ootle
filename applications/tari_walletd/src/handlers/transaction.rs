@@ -10,7 +10,10 @@ use log::*;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::ToByteType;
 use tari_ootle_common_types::{optional::Optional, Epoch, Network};
-use tari_ootle_wallet_sdk::apis::{config::ConfigKey, key_manager};
+use tari_ootle_wallet_sdk::{
+    apis::{config::ConfigKey, key_manager, transaction::TransactionApiError},
+    network::WalletQueryErrorStatus,
+};
 use tari_transaction::{args, Transaction};
 use tari_transaction_manifest::parse_manifest;
 use tari_wallet_daemon_client::{
@@ -40,11 +43,18 @@ use tokio::time;
 use super::context::HandlerContext;
 use crate::{
     handlers::{
-        helpers::{get_account, get_account_or_default, invalid_params, transaction_builder},
+        helpers::{
+            get_account,
+            get_account_or_default,
+            invalid_params,
+            not_found,
+            transaction_builder,
+            transaction_rejected,
+        },
         wasm_optimizer::optimize_wasm_template,
         HandlerError,
     },
-    services::WalletEvent,
+    services::{transaction_service::TransactionServiceError, WalletEvent},
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::transaction";
@@ -157,7 +167,34 @@ pub async fn handle_submit(
         transaction.calculate_id()
     );
 
-    let transaction_id = context.transaction_service().submit_transaction(transaction).await?;
+    let transaction_id = context
+        .transaction_service()
+        .submit_transaction(transaction)
+        .await
+        .map_err(|e| {
+            error!(target: LOG_TARGET, "Transaction submission failed: {}", e);
+            match &e {
+                TransactionServiceError::TransactionApiError(TransactionApiError::NetworkInterfaceError {
+                    status,
+                    message,
+                }) => match &status {
+                    WalletQueryErrorStatus::TransactionRejected { .. } => transaction_rejected(message),
+                    WalletQueryErrorStatus::NotFound { message } => not_found(message),
+                    _ => JsonRpcError::new(
+                        JsonRpcErrorReason::ApplicationError(1),
+                        format!("Failed to submit transaction: {}", e),
+                        serde_json::Value::Null,
+                    )
+                    .into(),
+                },
+                _ => JsonRpcError::new(
+                    JsonRpcErrorReason::ApplicationError(1),
+                    format!("Failed to submit transaction: {}", e),
+                    serde_json::Value::Null,
+                )
+                .into(),
+            }
+        })?;
 
     Ok(TransactionSubmitResponse { transaction_id })
 }

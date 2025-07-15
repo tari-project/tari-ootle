@@ -4,11 +4,9 @@
 use std::{
     collections::HashSet,
     ops::{Deref, DerefMut},
-    time::Duration,
 };
 
-use tari_consensus_types::ProposalCertificate;
-use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateId};
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{
     optional::IsNotFoundError,
     substate_type::SubstateType,
@@ -28,7 +26,6 @@ use tari_template_lib::{
     types::{Amount, TemplateAddress},
 };
 use tari_transaction::{Transaction, TransactionId};
-use time::PrimitiveDateTime;
 use webauthn_rs::prelude::Passkey;
 
 use crate::models::{
@@ -44,6 +41,7 @@ use crate::models::{
     TransactionStatus,
     VaultModel,
     WalletTransaction,
+    WalletTransactionUpdate,
 };
 
 pub trait WalletStore {
@@ -280,16 +278,7 @@ pub trait WalletStoreWriter {
         new_account_info: Option<&NewAccountInfo>,
         is_dry_run: bool,
     ) -> Result<(), WalletStorageError>;
-    fn transactions_set_result_and_status(
-        &mut self,
-        transaction_id: TransactionId,
-        result: Option<&FinalizeResult>,
-        final_fee: Option<u64>,
-        qcs: Option<&[ProposalCertificate]>,
-        new_status: TransactionStatus,
-        execution_time: Option<Duration>,
-        finalized_time: Option<PrimitiveDateTime>,
-    ) -> Result<(), WalletStorageError>;
+    fn transactions_update(&mut self, update: WalletTransactionUpdate<'_>) -> Result<(), WalletStorageError>;
 
     // Substates
     fn substates_upsert_root(

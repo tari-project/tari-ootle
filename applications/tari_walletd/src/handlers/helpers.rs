@@ -170,6 +170,15 @@ pub(super) fn invalid_request<T: Display>(details: T) -> anyhow::Error {
     )
 }
 
+pub(super) fn transaction_rejected<T: Display>(details: T) -> anyhow::Error {
+    axum_jrpc::error::JsonRpcError::new(
+        axum_jrpc::error::JsonRpcErrorReason::ApplicationError(ApplicationErrorCode::TransactionRejected as i32),
+        format!("Transaction rejected: {details}"),
+        serde_json::Value::Null,
+    )
+    .into()
+}
+
 /// Returns a TransactionBuilder with the current network configured.
 pub fn transaction_builder(context: &HandlerContext) -> TransactionBuilder {
     Transaction::builder().for_network(context.config().network.as_byte())

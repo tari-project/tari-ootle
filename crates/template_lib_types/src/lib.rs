@@ -7,7 +7,7 @@ pub mod crypto;
 mod entity_id;
 mod error;
 mod hash;
-mod hex;
+pub mod hex;
 pub mod serde_helpers;
 
 pub use amount::*;

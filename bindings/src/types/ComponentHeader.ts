@@ -5,7 +5,7 @@ import type { EntityId } from "./EntityId";
 import type { OwnerRule } from "./OwnerRule";
 
 export interface ComponentHeader {
-  template_address: Uint8Array;
+  template_address: string;
   module_name: string;
   owner_key: string | null;
   owner_rule: OwnerRule;

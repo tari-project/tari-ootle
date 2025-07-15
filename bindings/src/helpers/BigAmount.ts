@@ -7,7 +7,7 @@
  * Class that represents an arbitrary precision value.
  * This encodes to JSON using the "special" syntax to coerce a value to an Amount.
  */
-export default class BigAmount {
+export class BigAmount {
   private inner: BigInt;
 
   constructor(amount: bigint | string | number) {

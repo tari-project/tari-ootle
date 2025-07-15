@@ -24,7 +24,7 @@ use tari_ootle_wallet_sdk::{
         transaction::TransactionApiError,
     },
     models::{NewAccountInfo, NonFungibleToken},
-    network::WalletNetworkInterface,
+    network::{StatusResponseError, WalletNetworkInterface},
     storage::WalletStore,
     WalletSdk,
 };
@@ -61,7 +61,7 @@ impl<TStore, TNetworkInterface> AccountMonitor<TStore, TNetworkInterface>
 where
     TStore: WalletStore,
     TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError,
+    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
 {
     pub fn new(
         notify: Notify<WalletEvent>,

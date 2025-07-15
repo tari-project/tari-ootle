@@ -23,8 +23,9 @@ use crate::{
 ///
 /// You typically start by creating a new builder via [`ResourceBuilder::fungible()`],
 /// then chain configuration methods like `.with_owner_rule()`, `.mintable()`, or
-/// `.with_token_symbol()`, and finally call `.build()` or `.initial_supply()` to create
-/// the resource.
+/// `.with_token_symbol()`, and finally call `.build()` to create an empty resource, or 
+/// `.initial_supply(some_amount)` to mint funds when creating the resource and return 
+/// them in a bucket.
 ///
 /// # Examples
 ///

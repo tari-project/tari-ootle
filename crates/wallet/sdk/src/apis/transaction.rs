@@ -17,8 +17,8 @@ use tari_template_lib::{constants::XTR, prelude::ComponentAddress};
 use tari_transaction::{Transaction, TransactionId};
 
 use crate::{
-    models::{NewAccountInfo, TransactionStatus, WalletTransaction},
-    network::{TransactionFinalizedResult, WalletNetworkInterface},
+    models::{NewAccountInfo, TransactionStatus, WalletTransaction, WalletTransactionUpdate},
+    network::{StatusResponseError, TransactionFinalizedResult, WalletNetworkInterface, WalletQueryErrorStatus},
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
@@ -33,7 +33,7 @@ impl<'a, TStore, TNetworkInterface> TransactionApi<'a, TStore, TNetworkInterface
 where
     TStore: WalletStore,
     TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError,
+    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
 {
     pub fn new(store: &'a TStore, network_interface: &'a TNetworkInterface) -> Self {
         Self {
@@ -73,22 +73,32 @@ where
             }));
         }
 
-        self.network_interface
-            .submit_transaction(transaction.transaction)
-            .await
-            .map_err(|e| TransactionApiError::NetworkInterfaceError(e.to_string()))?;
+        let resp = self.network_interface.submit_transaction(transaction.transaction).await;
 
-        self.store.with_write_tx(|tx| {
-            tx.transactions_set_result_and_status(
-                transaction_id,
-                None,
-                None,
-                None,
-                TransactionStatus::Pending,
-                None,
-                None,
-            )
-        })?;
+        match resp {
+            Ok(_) => {
+                self.store.with_write_tx(|tx| {
+                    tx.transactions_update(
+                        WalletTransactionUpdate::new(transaction_id).with_new_status(TransactionStatus::Pending),
+                    )
+                })?;
+            },
+            Err(err) => match err.get_status() {
+                WalletQueryErrorStatus::TransactionRejected { message } => {
+                    warn!(target: LOG_TARGET, "Invalid transaction submission: {transaction_id} {message}");
+                    self.store.with_write_tx(|tx| {
+                        tx.transactions_update(
+                            WalletTransactionUpdate::new(transaction_id)
+                                .with_new_status(TransactionStatus::InvalidTransaction)
+                                .with_invalid_reason(&message),
+                        )
+                    })?;
+                },
+                _ => {
+                    return Err(err.into());
+                },
+            },
+        }
 
         Ok(())
     }
@@ -101,18 +111,14 @@ where
             .with_write_tx(|tx| tx.transactions_insert(&transaction, &[], None, true))?;
 
         let tx_id = transaction.calculate_id();
-        let result = self
-            .network_interface
-            .submit_dry_run_transaction(transaction)
-            .await
-            .map_err(|e| TransactionApiError::NetworkInterfaceError(e.to_string()));
+        let result = self.network_interface.submit_dry_run_transaction(transaction).await;
 
         match result {
             Ok(query) => match &query.result {
                 TransactionFinalizedResult::Pending => {
-                    return Err(TransactionApiError::NetworkInterfaceError(
-                        "Pending execution result returned from dry run".to_string(),
-                    ));
+                    return Err(TransactionApiError::InvalidTransactionQueryResponse {
+                        details: "Pending execution result returned from dry run".to_string(),
+                    });
                 },
                 TransactionFinalizedResult::Finalized {
                     execution_result,
@@ -121,33 +127,28 @@ where
                     ..
                 } => {
                     self.store.with_write_tx(|tx| {
-                        tx.transactions_set_result_and_status(
-                            query.transaction_id,
-                            execution_result.as_ref().map(|e| &e.finalize),
-                            execution_result
-                                .as_ref()
-                                .map(|e| e.finalize.fee_receipt.total_fees_charged()),
-                            None,
-                            TransactionStatus::DryRun,
-                            Some(*execution_time),
-                            Some(*finalized_time),
+                        tx.transactions_update(
+                            WalletTransactionUpdate::new(query.transaction_id)
+                                .with_result(execution_result.as_ref().map(|e| &e.finalize))
+                                .with_final_fee(
+                                    execution_result
+                                        .as_ref()
+                                        .map(|e| e.finalize.fee_receipt.total_fees_charged()),
+                                )
+                                .with_new_status(TransactionStatus::DryRun)
+                                .with_execution_time(*execution_time)
+                                .with_finalized_time(*finalized_time),
                         )
                     })?;
                 },
             },
             Err(err) => {
                 self.store.with_write_tx(|tx| {
-                    tx.transactions_set_result_and_status(
-                        tx_id,
-                        None,
-                        None,
-                        None,
-                        TransactionStatus::DryRunFailed,
-                        None,
-                        None,
+                    tx.transactions_update(
+                        WalletTransactionUpdate::new(tx_id).with_new_status(TransactionStatus::DryRunFailed),
                     )
                 })?;
-                return Err(err);
+                return Err(err.into());
             },
         }
 
@@ -181,8 +182,7 @@ where
             .network_interface
             .query_transaction_result(transaction_id)
             .await
-            .optional()
-            .map_err(|e| TransactionApiError::NetworkInterfaceError(e.to_string()))?;
+            .optional()?;
 
         let Some(resp) = maybe_resp else {
             // TODO: if this happens forever we might want to resubmit or mark as invalid
@@ -235,18 +235,17 @@ where
                         self.commit_diff(tx, diff)?;
                     }
 
-                    tx.transactions_set_result_and_status(
-                        transaction_id,
-                        execution_result.as_ref().map(|e| &e.finalize),
-                        execution_result
-                            .as_ref()
-                            .map(|e| e.finalize.fee_receipt.total_fees_charged()),
-                        // TODO: readd qcs
-                        None,
-                        // Some(&qc_resp.qcs),
-                        new_status,
-                        Some(execution_time),
-                        Some(finalized_time),
+                    tx.transactions_update(
+                        WalletTransactionUpdate::new(transaction_id)
+                            .with_result(execution_result.as_ref().map(|e| &e.finalize))
+                            .with_final_fee(
+                                execution_result
+                                    .as_ref()
+                                    .map(|e| e.finalize.fee_receipt.total_fees_charged()),
+                            )
+                            .with_new_status(new_status)
+                            .with_execution_time(execution_time)
+                            .with_finalized_time(finalized_time),
                     )?;
 
                     // if the transaction being processed is confidential,
@@ -493,8 +492,11 @@ where
 pub enum TransactionApiError {
     #[error("Store error: {0}")]
     StoreError(#[from] WalletStorageError),
-    #[error("Network interface error: {0}")]
-    NetworkInterfaceError(String),
+    #[error("Network interface error: {status} {message}")]
+    NetworkInterfaceError {
+        status: WalletQueryErrorStatus,
+        message: String,
+    },
     #[error("Failed to extract known type data from value: {0}")]
     IndexedValueError(#[from] IndexedValueError),
     #[error("Invalid transaction query response: {details}")]
@@ -504,5 +506,14 @@ pub enum TransactionApiError {
 impl IsNotFoundError for TransactionApiError {
     fn is_not_found_error(&self) -> bool {
         matches!(self, Self::StoreError(e) if e.is_not_found_error() )
+    }
+}
+
+impl<T: StatusResponseError> From<T> for TransactionApiError {
+    fn from(value: T) -> Self {
+        TransactionApiError::NetworkInterfaceError {
+            status: value.get_status(),
+            message: value.get_error_message(),
+        }
     }
 }

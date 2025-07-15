@@ -51,11 +51,11 @@ pub fn generate_dispatcher(ast: &TemplateAst) -> Result<TokenStream> {
                 panic!("call_info is null");
             }
 
-            let call_data = unsafe { Vec::from_raw_parts(call_info, call_info_len as usize, call_info_len as usize) };
+            let call_data = unsafe { rust::vec::Vec::from_raw_parts(call_info, call_info_len as usize, call_info_len as usize) };
             let call_info: CallInfo = decode_exact(&call_data).expect("Failed to decode CallArgs");
 
             init_context(&call_info);
-            engine().emit_log(LogLevel::Debug, format!("Call {}", call_info.func_name));
+            engine().emit_log(LogLevel::Debug, rust::format!("Call {}", call_info.func_name));
 
             let result;
             match call_info.func_name.as_str() {

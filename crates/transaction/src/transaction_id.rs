@@ -9,39 +9,43 @@ use std::{
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHashSizeError;
-use tari_crypto::tari_utilities::hex::{from_hex, Hex};
 use tari_engine_types::{serde_with, transaction_receipt::TransactionReceiptAddress};
 use tari_ootle_common_types::{SubstateAddress, ToSubstateAddress};
-use tari_template_lib::types::Hash;
+use tari_template_lib::types::{from_hex, hex::write_hex_fmt, Hash};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, Default, BorshSerialize)]
 #[serde(transparent)]
-pub struct TransactionId {
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
+pub struct TransactionId(
     #[serde(with = "serde_with::hex")]
-    id: [u8; 32],
-}
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    [u8; 32],
+);
 
 impl TransactionId {
-    pub const fn new(id: [u8; 32]) -> Self {
-        Self { id }
+    pub const fn new(id: [u8; Self::byte_size()]) -> Self {
+        Self(id)
     }
 
     pub fn as_bytes(&self) -> &[u8] {
-        self.id.as_slice()
+        self.0.as_slice()
     }
 
-    pub fn into_array(self) -> [u8; 32] {
-        self.id
+    pub fn into_array(self) -> [u8; Self::byte_size()] {
+        self.0
     }
 
     pub fn as_hash(&self) -> Hash {
-        Hash::from(self.id)
+        Hash::from(self.0)
     }
 
     pub fn from_hex(hex: &str) -> Result<Self, FixedHashSizeError> {
-        // TODO: This error isnt correct
         let bytes = from_hex(hex).map_err(|_| FixedHashSizeError)?;
-        Self::try_from(bytes.as_slice())
+        Ok(Self(bytes))
     }
 
     pub const fn byte_size() -> usize {
@@ -53,7 +57,7 @@ impl TransactionId {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.id.iter().all(|&b| b == 0)
+        self.0.iter().all(|&b| b == 0)
     }
 }
 
@@ -65,7 +69,7 @@ impl ToSubstateAddress for TransactionId {
 
 impl AsRef<[u8]> for TransactionId {
     fn as_ref(&self) -> &[u8] {
-        self.id.as_slice()
+        self.0.as_slice()
     }
 }
 
@@ -77,7 +81,7 @@ impl AsRef<TransactionId> for TransactionId {
 
 impl Display for TransactionId {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.id.to_hex())
+        write_hex_fmt(f, self.as_bytes())
     }
 }
 
@@ -93,10 +97,10 @@ impl TryFrom<&[u8]> for TransactionId {
     type Error = FixedHashSizeError;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        if value.len() != 32 {
+        if value.len() != TransactionId::byte_size() {
             return Err(FixedHashSizeError);
         }
-        let mut id = [0u8; 32];
+        let mut id = [0u8; TransactionId::byte_size()];
         id.copy_from_slice(value);
         Ok(TransactionId::new(id))
     }
@@ -110,7 +114,7 @@ impl From<[u8; 32]> for TransactionId {
 
 impl From<TransactionId> for Hash {
     fn from(id: TransactionId) -> Self {
-        Hash::from(id.id)
+        Hash::from(id.0)
     }
 }
 

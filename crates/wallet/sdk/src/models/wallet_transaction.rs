@@ -26,6 +26,7 @@ pub struct WalletTransaction {
     pub finalize: Option<FinalizeResult>,
     pub final_fee: Option<u64>,
     pub qcs: Vec<ProposalCertificate>,
+    pub invalid_reason: Option<String>,
     #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number} | null"))]
     pub execution_time: Option<Duration>,
     #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number} | null"))]
@@ -90,5 +91,67 @@ impl FromStr for TransactionStatus {
 impl Display for TransactionStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_key_str())
+    }
+}
+
+#[derive(Debug)]
+pub struct WalletTransactionUpdate<'a> {
+    pub transaction_id: TransactionId,
+    pub result: Option<&'a FinalizeResult>,
+    pub final_fee: Option<u64>,
+    pub qcs: Option<&'a [ProposalCertificate]>,
+    pub new_status: TransactionStatus,
+    pub invalid_reason: Option<&'a str>,
+    pub execution_time: Option<Duration>,
+    pub finalized_time: Option<PrimitiveDateTime>,
+}
+
+impl<'a> WalletTransactionUpdate<'a> {
+    pub fn new(transaction_id: TransactionId) -> Self {
+        Self {
+            transaction_id,
+            result: None,
+            final_fee: None,
+            qcs: None,
+            new_status: TransactionStatus::default(),
+            invalid_reason: None,
+            execution_time: None,
+            finalized_time: None,
+        }
+    }
+
+    pub fn with_result(mut self, result: Option<&'a FinalizeResult>) -> Self {
+        self.result = result;
+        self
+    }
+
+    pub fn with_final_fee(mut self, final_fee: Option<u64>) -> Self {
+        self.final_fee = final_fee;
+        self
+    }
+
+    pub fn with_qcs(mut self, qcs: &'a [ProposalCertificate]) -> Self {
+        self.qcs = Some(qcs);
+        self
+    }
+
+    pub fn with_new_status(mut self, new_status: TransactionStatus) -> Self {
+        self.new_status = new_status;
+        self
+    }
+
+    pub fn with_invalid_reason(mut self, invalid_reason: &'a str) -> Self {
+        self.invalid_reason = Some(invalid_reason);
+        self
+    }
+
+    pub fn with_execution_time(mut self, execution_time: Duration) -> Self {
+        self.execution_time = Some(execution_time);
+        self
+    }
+
+    pub fn with_finalized_time(mut self, finalized_time: PrimitiveDateTime) -> Self {
+        self.finalized_time = Some(finalized_time);
+        self
     }
 }

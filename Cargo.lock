@@ -11637,7 +11637,6 @@ dependencies = [
  "serde_json",
  "tari_bor",
  "tari_common_types",
- "tari_consensus_types",
  "tari_engine_types",
  "tari_ootle_common_types",
  "tari_ootle_wallet_sdk",
@@ -12014,7 +12013,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_lib"
-version = "0.12.1"
+version = "0.12.3"
 dependencies = [
  "borsh",
  "serde",
@@ -12028,7 +12027,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_lib_types"
-version = "0.12.0"
+version = "0.12.3"
 dependencies = [
  "bincode 2.0.1",
  "bnum",
@@ -12043,7 +12042,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_macros"
-version = "0.12.0"
+version = "0.12.3"
 dependencies = [
  "indoc",
  "proc-macro2",

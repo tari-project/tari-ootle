@@ -20,16 +20,20 @@ use tari_indexer_client::{
 };
 use tari_ootle_common_types::{optional::IsNotFoundError, substate_type::SubstateType};
 use tari_ootle_wallet_sdk::network::{
+    StatusResponseError,
     SubstateListItem,
     SubstateListResult,
     SubstateQueryResult,
     TransactionFinalizedResult,
     TransactionQueryResult,
     WalletNetworkInterface,
+    WalletQueryErrorStatus,
 };
 use tari_template_lib::types::TemplateAddress;
 use tari_transaction::{Transaction, TransactionId};
 use url::ParseError;
+
+use crate::jrpc_server::ApplicationErrorCode;
 
 #[derive(Debug, Clone)]
 pub struct IndexerJsonRpcNetworkInterface {
@@ -203,6 +207,44 @@ impl IsNotFoundError for IndexerJrpcError {
             IndexerJrpcError::IndexerClientError(err) => err.is_not_found_error(),
             _ => false,
         }
+    }
+}
+
+impl StatusResponseError for IndexerJrpcError {
+    fn get_status(&self) -> WalletQueryErrorStatus {
+        match self {
+            IndexerJrpcError::IndexerClientError(err) => {
+                if err.is_not_found_error() {
+                    return WalletQueryErrorStatus::NotFound {
+                        message: "The requested resource was not found".to_string(),
+                    };
+                }
+                match err {
+                    IndexerClientError::RequestFailedWithStatus { code, message }
+                        if *code == ApplicationErrorCode::InvalidRequest as i64 =>
+                    {
+                        WalletQueryErrorStatus::TransactionRejected {
+                            message: message.clone(),
+                        }
+                    },
+                    IndexerClientError::RequestFailedWithStatus { code, message } => {
+                        WalletQueryErrorStatus::InternalError {
+                            message: format!("Indexer request failed with status {code}: {message}"),
+                        }
+                    },
+                    _ => WalletQueryErrorStatus::InternalError {
+                        message: format!("Indexer client error: {err}"),
+                    },
+                }
+            },
+            IndexerJrpcError::IndexerParseError(e) => WalletQueryErrorStatus::InternalError {
+                message: format!("Indexer parse error: {e}"),
+            },
+        }
+    }
+
+    fn get_error_message(&self) -> String {
+        self.to_string()
     }
 }
 

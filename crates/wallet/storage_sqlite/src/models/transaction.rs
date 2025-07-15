@@ -44,6 +44,7 @@ pub struct Transaction {
     pub new_account_info: Option<String>,
     pub updated_at: PrimitiveDateTime,
     pub created_at: PrimitiveDateTime,
+    pub invalid_reason: Option<String>,
 }
 
 impl Transaction {
@@ -83,6 +84,7 @@ impl Transaction {
             final_fee: self.final_fee.map(|f| f as u64),
             qcs: self.qcs.map(|q| deserialize_json(&q)).transpose()?.unwrap_or_default(),
             new_account_info: self.new_account_info.as_deref().map(deserialize_json).transpose()?,
+            invalid_reason: self.invalid_reason,
             is_dry_run: self.is_dry_run,
             execution_time: self
                 .executed_time_ms

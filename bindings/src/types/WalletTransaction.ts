@@ -12,6 +12,7 @@ export interface WalletTransaction {
   finalize: FinalizeResult | null;
   final_fee: bigint | null;
   qcs: Array<ProposalCertificate>;
+  invalid_reason: string | null;
   execution_time: { secs: number; nanos: number } | null;
   finalized_time: { secs: number; nanos: number } | null;
   new_account_info: NewAccountInfo | null;

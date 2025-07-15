@@ -9,7 +9,6 @@ use tari_common_types::types::FixedHash;
 use tari_consensus_types::Decision;
 use tari_engine_types::{
     commit_result::ExecuteResult,
-    serde_with as serde_tools,
     substate::{SubstateId, SubstateValue},
     template_lib_models::{NonFungibleAddress, ResourceAddress},
 };
@@ -26,8 +25,6 @@ use tari_transaction::{Transaction, TransactionId};
     ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
 )]
 pub struct ListSubstatesRequest {
-    #[serde(default, with = "serde_tools::string::option")]
-    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     pub filter_by_template: Option<TemplateAddress>,
     pub filter_by_type: Option<SubstateType>,
     pub limit: Option<u64>,
@@ -54,8 +51,6 @@ pub struct ListSubstateItem {
     pub substate_id: SubstateId,
     pub module_name: Option<String>,
     pub version: u32,
-    #[serde(default, with = "serde_tools::string::option")]
-    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     pub template_address: Option<TemplateAddress>,
     pub timestamp: u64,
 }
@@ -143,7 +138,6 @@ pub struct SubmitTransactionRequest {
     )
 )]
 pub struct SubmitTransactionResponse {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
     pub result: IndexerTransactionFinalizedResult,
 }
@@ -176,7 +170,6 @@ pub struct ListTemplatesResponse {
 )]
 pub struct TemplateMetadata {
     pub name: String,
-    #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
     pub address: TemplateAddress,
     /// SHA hash of binary
     pub binary_sha: String,
@@ -193,7 +186,6 @@ pub struct TemplateMetadata {
     )
 )]
 pub struct GetTransactionResultRequest {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
 }
 
@@ -277,8 +269,6 @@ pub enum IndexerTransactionFinalizedResult {
 )]
 pub struct GetIdentityResponse {
     pub peer_id: String,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[serde(with = "serde_tools::hex")]
     pub public_key: RistrettoPublicKeyBytes,
     #[cfg_attr(feature = "ts", ts(type = "Array<string>"))]
     pub public_addresses: Vec<Multiaddr>,
@@ -442,8 +432,6 @@ pub struct GetConnectionsResponse {
     ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
 )]
 pub struct GetTemplateDefinitionRequest {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[serde(with = "serde_tools::string")]
     pub template_address: TemplateAddress,
 }
 

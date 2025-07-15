@@ -138,7 +138,7 @@ fn outputs_locked_and_finalized() {
 
 struct Test {
     store: SqliteWalletStore,
-    sdk: WalletSdk<SqliteWalletStore, PanicIndexer>,
+    sdk: WalletSdk<SqliteWalletStore, PanicNetworkInterface>,
     _temp: tempfile::TempDir,
 }
 
@@ -148,7 +148,7 @@ impl Test {
         let store = SqliteWalletStore::try_open(temp.path().join("data/wallet.sqlite")).unwrap();
         store.run_migrations().unwrap();
 
-        let mut sdk = WalletSdk::initialize(store.clone(), PanicIndexer, WalletSdkConfig {
+        let mut sdk = WalletSdk::initialize(store.clone(), PanicNetworkInterface, WalletSdkConfig {
             network: Network::LocalNet,
             override_keyring_password: Some(SafePassword::from_str("SuuuCh Sekret W0W").unwrap()),
         })
@@ -226,7 +226,7 @@ impl Test {
             .unwrap_or_default()
     }
 
-    pub fn sdk(&self) -> &WalletSdk<SqliteWalletStore, PanicIndexer> {
+    pub fn sdk(&self) -> &WalletSdk<SqliteWalletStore, PanicNetworkInterface> {
         &self.sdk
     }
 
@@ -236,11 +236,11 @@ impl Test {
 }
 
 #[derive(Debug, Clone)]
-struct PanicIndexer;
+struct PanicNetworkInterface;
 
 // TODO: test the substate scanning in the SDK
 #[async_trait]
-impl WalletNetworkInterface for PanicIndexer {
+impl WalletNetworkInterface for PanicNetworkInterface {
     type Error = Infallible;
 
     #[allow(clippy::diverging_sub_expression)]

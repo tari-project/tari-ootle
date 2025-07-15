@@ -10,8 +10,7 @@ use tari_ootle_common_types::{
     substate_type::SubstateType,
 };
 use tari_ootle_wallet_sdk::{
-    apis::transaction::TransactionApiError,
-    network::WalletNetworkInterface,
+    network::{StatusResponseError, WalletNetworkInterface},
     storage::WalletStore,
     WalletSdk,
 };
@@ -33,7 +32,7 @@ impl<TStore, TNetworkInterface> TemplateMonitor<TStore, TNetworkInterface>
 where
     TStore: WalletStore,
     TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError,
+    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
 {
     pub fn new(
         notify: Notify<WalletEvent>,
@@ -58,8 +57,7 @@ where
             match network_interface
                 .fetch_template_definition(template_address)
                 .await
-                .optional()
-                .map_err(|error| TransactionApiError::NetworkInterfaceError(error.to_string()))?
+                .optional()?
             {
                 Some(template_def) => {
                     return Ok(template_def);

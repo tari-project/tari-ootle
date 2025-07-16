@@ -8,6 +8,11 @@ const ALL_FLAGS: u8 = 0b0011;
 
 #[derive(Clone, Debug, Copy, Default, Serialize, Deserialize)]
 #[serde(transparent)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct VaultFreezeFlags(u8);
 
 impl VaultFreezeFlags {

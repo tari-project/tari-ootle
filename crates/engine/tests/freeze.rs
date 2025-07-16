@@ -50,7 +50,7 @@ fn it_freezes_vaults_containing_a_freezable_resource() {
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(account, "deposit", args![Workspace("bucket")])
             .build_and_seal(test.secret_key()),
-        vec![account_proof],
+        vec![account_proof.clone()],
     );
 
     assert_reject_reason(reason, RuntimeError::VaultFrozen {

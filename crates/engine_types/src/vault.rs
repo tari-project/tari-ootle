@@ -25,6 +25,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_template_lib::{
+    args::VaultFreezeFlags,
     models::{ConfidentialWithdrawProof, NonFungibleId, ResourceAddress, VaultId},
     prelude::ResourceType,
     types::{crypto::PedersenCommitmentBytes, Amount},
@@ -45,12 +46,15 @@ use crate::{
 )]
 pub struct Vault {
     resource_container: ResourceContainer,
+    #[serde(default)]
+    freeze_flags: VaultFreezeFlags,
 }
 
 impl Vault {
     pub fn new(resource: ResourceContainer) -> Self {
         Self {
             resource_container: resource,
+            freeze_flags: VaultFreezeFlags::empty(),
         }
     }
 
@@ -89,6 +93,18 @@ impl Vault {
     ) -> Result<ResourceContainer, ResourceError> {
         self.resource_container
             .recall_confidential_commitments(commitments, revealed_amount.into())
+    }
+
+    pub fn set_freeze(&mut self, flags: VaultFreezeFlags) {
+        self.freeze_flags = flags;
+    }
+
+    pub fn unfreeze(&mut self) {
+        self.set_freeze(VaultFreezeFlags::empty());
+    }
+
+    pub fn freeze_flags(&self) -> VaultFreezeFlags {
+        self.freeze_flags
     }
 
     pub fn balance(&self) -> Amount {

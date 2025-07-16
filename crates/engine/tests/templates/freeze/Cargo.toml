@@ -1,0 +1,12 @@
+[workspace]
+[package]
+name = "recall"
+version = "0.1.0"
+edition = "2021"
+
+
+[dependencies]
+tari_template_lib = { path = "../../../../template_lib", default-features = false, features = ["macro"] }
+
+[lib]
+crate-type = ["cdylib", "lib"]

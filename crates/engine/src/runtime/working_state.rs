@@ -31,7 +31,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{optional::Optional, Epoch};
 use tari_template_lib::{
-    args::{MintArg, ResourceDiscriminator},
+    args::{MintArg, ResourceDiscriminator, VaultFreezeFlags},
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
     models::{
         AddressAllocationId,
@@ -581,6 +581,39 @@ impl WorkingState {
         }
 
         Ok(resource_container)
+    }
+
+    pub fn set_vault_freeze(
+        &mut self,
+        vault_lock: &LockedSubstate,
+        flags: VaultFreezeFlags,
+    ) -> Result<(), RuntimeError> {
+        let vault_mut = self.get_vault_mut(vault_lock)?;
+        vault_mut.set_freeze(flags);
+
+        let template_address = self.current_template().map(|(addr, _)| *addr)?;
+        let event = if flags.is_empty() {
+            Event::std(
+                Some(vault_lock.address().clone()),
+                template_address,
+                self.transaction_hash(),
+                "vault",
+                "unfrozen",
+                tari_template_lib::models::Metadata::default(),
+            )
+        } else {
+            Event::std(
+                Some(vault_lock.address().clone()),
+                template_address,
+                self.transaction_hash(),
+                "vault",
+                "set_freeze",
+                flags.iter().map(|f| (f.to_string(), "true".to_string())).collect(),
+            )
+        };
+        self.push_event(event);
+
+        Ok(())
     }
 
     pub fn recall_resource_from_vault(

@@ -70,10 +70,10 @@ use tari_template_lib::{
         CallerContextAction,
         ComponentAction,
         ComponentRef,
-        ConfidentialRevealArg,
         ConsensusAction,
         CreateComponentArg,
         CreateResourceArg,
+        FreezeResourceArg,
         GenerateRandomAction,
         InstructionArg,
         InvokeResult,
@@ -91,6 +91,7 @@ use tari_template_lib::{
         VaultAction,
         VaultCreateProofByFungibleAmountArg,
         VaultCreateProofByNonFungiblesArg,
+        VaultFreezeFlag,
         VaultWithdrawArg,
         WorkspaceAction,
         WorkspaceId,
@@ -1122,6 +1123,58 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     Ok(InvokeResult::unit())
                 })
             },
+            ResourceAction::SetFreeze => {
+                let resource_address =
+                    resource_ref
+                        .as_resource_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "Freeze resource action requires a resource address".to_string(),
+                        })?;
+                let arg: FreezeResourceArg = args.assert_one_arg()?;
+
+                if !arg.flags.validate() {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "FreezeResourceArg",
+                        reason: "Invalid freeze flags".to_string(),
+                    });
+                }
+
+                let (maybe_auth_hook, auth_caller) = self.tracker.write_with(|state_mut| {
+                    let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(resource_address))?;
+
+                    let resource = state_mut.get_resource(&resource_lock)?;
+
+                    state_mut.authorization().check_resource_access_rules(
+                        ResourceAuthAction::Freeze,
+                        resource.as_ownership(),
+                        resource.access_rules(),
+                    )?;
+
+                    let auth_hook = resource.auth_hook().cloned();
+                    let auth_caller = state_mut.get_auth_caller()?;
+
+                    state_mut.unlock_substate(resource_lock)?;
+                    Ok::<_, RuntimeError>((auth_hook, auth_caller))
+                })?;
+
+                if let Some(auth_hook) = maybe_auth_hook {
+                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Freeze)?;
+                }
+
+                self.tracker.write_with(|state_mut| {
+                    let vault_lock = state_mut.write_lock_substate(&arg.vault_id.into())?;
+                    state_mut.set_vault_freeze(&vault_lock, arg.flags)?;
+                    let payload =
+                        Metadata::from_iter([("vault_id", arg.vault_id.to_string()), ("flags", arg.flags.to_string())]);
+                    let action = if arg.flags.is_empty() { "freeze" } else { "unfreeze" };
+                    self.emit_std_event("resource", action, resource_address.into(), payload, state_mut)?;
+
+                    state_mut.unlock_substate(vault_lock)?;
+
+                    Ok(InvokeResult::unit())
+                })
+            },
         }
     }
 
@@ -1209,7 +1262,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     self.tracker.write_with(|state_mut| {
                         let vault_lock = state_mut.write_lock_substate(&SubstateId::Vault(vault_id))?;
 
-                        let resource_address = state_mut.get_vault(&vault_lock)?.resource_address();
+                        let vault = state_mut.get_vault(&vault_lock)?;
+                        if vault.freeze_flags().contains(VaultFreezeFlag::Deposits) {
+                            return Err(RuntimeError::VaultFrozen {
+                                vault_id,
+                                freeze_flag: VaultFreezeFlag::Deposits,
+                            });
+                        }
+                        let resource_address = vault.resource_address();
 
                         let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(*resource_address))?;
 
@@ -1268,7 +1328,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     self.tracker.write_with(|state_mut| {
                         let vault_lock = state_mut.write_lock_substate(&SubstateId::Vault(vault_id))?;
 
-                        let resource_address = state_mut.get_vault(&vault_lock)?.resource_address();
+                        let vault = state_mut.get_vault(&vault_lock)?;
+                        if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
+                            return Err(RuntimeError::VaultFrozen {
+                                vault_id,
+                                freeze_flag: VaultFreezeFlag::Withdrawals,
+                            });
+                        }
+                        let resource_address = vault.resource_address();
 
                         let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(*resource_address))?;
 
@@ -1411,64 +1478,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     Ok(InvokeResult::encode(&commitment_count)?)
                 })
             },
-            VaultAction::ConfidentialReveal => {
-                let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
-                    argument: "vault_ref",
-                    reason: "Vault::ConfidentialReveal action requires a vault id".to_string(),
-                })?;
-
-                let arg: ConfidentialRevealArg = args.assert_one_arg()?;
-
-                let (vault_lock, resource_lock, maybe_auth_hook, auth_caller) =
-                    self.tracker.write_with(|state_mut| {
-                        let vault_lock = state_mut.write_lock_substate(&SubstateId::Vault(vault_id))?;
-
-                        let resource_address = state_mut.get_vault(&vault_lock)?.resource_address();
-
-                        let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(*resource_address))?;
-
-                        let resource = state_mut.get_resource(&resource_lock)?;
-
-                        state_mut.authorization().check_resource_access_rules(
-                            ResourceAuthAction::Withdraw,
-                            resource.as_ownership(),
-                            resource.access_rules(),
-                        )?;
-
-                        let auth_caller = state_mut.get_auth_caller()?;
-                        Ok::<_, RuntimeError>((vault_lock, resource_lock, resource.auth_hook().cloned(), auth_caller))
-                    })?;
-
-                if let Some(auth_hook) = maybe_auth_hook {
-                    self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Withdraw)?;
-                }
-
-                self.tracker.write_with(|state| {
-                    let resource = state.get_resource(&resource_lock)?;
-                    let maybe_view_key =
-                        resource
-                            .to_view_key_public_key()
-                            .map_err(|e| RuntimeError::InvariantError {
-                                function: "VaultAction::ConfidentialReveal",
-                                details: format!(
-                                    "Resource {} has a malformed view key: {}",
-                                    resource_lock.address(),
-                                    e
-                                ),
-                            })?;
-
-                    let vault_mut = state.get_vault_mut(&vault_lock)?;
-                    let resource_container = vault_mut.withdraw_confidential(arg.proof, maybe_view_key.as_ref())?;
-                    let bucket_id = state.id_provider()?.new_bucket_id();
-                    state.new_bucket(bucket_id, resource_container)?;
-
-                    state.unlock_substate(vault_lock)?;
-                    state.unlock_substate(resource_lock)?;
-
-                    let bucket = tari_template_lib::models::Bucket::from_id(bucket_id);
-                    Ok(InvokeResult::encode(&bucket)?)
-                })
-            },
             VaultAction::PayFee => {
                 let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "vault_ref",
@@ -1483,10 +1492,18 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     });
                 }
 
-                self.tracker.write_with(|state| {
-                    let vault_lock = state.write_lock_substate(&SubstateId::Vault(vault_id))?;
-                    let resource_address = *state.get_vault(&vault_lock)?.resource_address();
-                    if resource_address != XTR {
+                self.tracker.write_with(|state_mut| {
+                    let vault_lock = state_mut.write_lock_substate(&SubstateId::Vault(vault_id))?;
+
+                    let vault = state_mut.get_vault(&vault_lock)?;
+                    if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
+                        return Err(RuntimeError::VaultFrozen {
+                            vault_id,
+                            freeze_flag: VaultFreezeFlag::Withdrawals,
+                        });
+                    }
+                    let resource_address = vault.resource_address();
+                    if *resource_address != XTR {
                         return Err(RuntimeError::InvalidArgument {
                             argument: "vault_ref",
                             reason: format!(
@@ -1495,10 +1512,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                             ),
                         });
                     }
-                    let resource_lock = state.read_lock_substate(&SubstateId::Resource(XTR))?;
-                    let resource = state.get_resource(&resource_lock)?;
+                    let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(XTR))?;
+                    let resource = state_mut.get_resource(&resource_lock)?;
 
-                    state.authorization().check_resource_access_rules(
+                    state_mut.authorization().check_resource_access_rules(
                         ResourceAuthAction::Withdraw,
                         resource.as_ownership(),
                         resource.access_rules(),
@@ -1510,7 +1527,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                             details: format!("Resource {} has a malformed view key: {}", resource_lock.address(), e),
                         })?;
 
-                    let vault_mut = state.get_vault_mut(&vault_lock)?;
+                    let vault_mut = state_mut.get_vault_mut(&vault_lock)?;
 
                     let mut container = ResourceContainer::confidential(XTR, None, Amount::zero());
                     if !arg.amount.is_zero() {
@@ -1528,10 +1545,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         });
                     }
 
-                    state.pay_fee(container, vault_id)?;
+                    state_mut.pay_fee(container, vault_id)?;
 
-                    state.unlock_substate(resource_lock)?;
-                    state.unlock_substate(vault_lock)?;
+                    state_mut.unlock_substate(resource_lock)?;
+                    state_mut.unlock_substate(vault_lock)?;
 
                     Ok(InvokeResult::unit())
                 })
@@ -1547,7 +1564,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     self.tracker.write_with(|state_mut| {
                         let vault_lock = state_mut.write_lock_substate(&SubstateId::Vault(vault_id))?;
 
-                        let resource_address = state_mut.get_vault(&vault_lock)?.resource_address();
+                        let vault = state_mut.get_vault(&vault_lock)?;
+                        if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
+                            return Err(RuntimeError::VaultFrozen {
+                                vault_id,
+                                freeze_flag: VaultFreezeFlag::Withdrawals,
+                            });
+                        }
+                        let resource_address = vault.resource_address();
 
                         let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(*resource_address))?;
 
@@ -1590,7 +1614,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     self.tracker.write_with(|state_mut| {
                         let vault_lock = state_mut.write_lock_substate(&SubstateId::Vault(vault_id))?;
 
-                        let resource_address = state_mut.get_vault(&vault_lock)?.resource_address();
+                        let vault = state_mut.get_vault(&vault_lock)?;
+                        if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
+                            return Err(RuntimeError::VaultFrozen {
+                                vault_id,
+                                freeze_flag: VaultFreezeFlag::Withdrawals,
+                            });
+                        }
+                        let resource_address = vault.resource_address();
 
                         let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(*resource_address))?;
 
@@ -1633,7 +1664,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     self.tracker.write_with(|state_mut| {
                         let vault_lock = state_mut.write_lock_substate(&SubstateId::Vault(vault_id))?;
 
-                        let resource_address = state_mut.get_vault(&vault_lock)?.resource_address();
+                        let vault = state_mut.get_vault(&vault_lock)?;
+                        if vault.freeze_flags().contains(VaultFreezeFlag::Withdrawals) {
+                            return Err(RuntimeError::VaultFrozen {
+                                vault_id,
+                                freeze_flag: VaultFreezeFlag::Withdrawals,
+                            });
+                        }
+                        let resource_address = vault.resource_address();
 
                         let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(*resource_address))?;
 
@@ -1665,7 +1703,9 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     Ok(InvokeResult::encode(&proof_id)?)
                 })
             },
-            VaultAction::CreateProofByConfidentialResource => todo!("CreateProofByConfidentialResource"),
+            VaultAction::CreateProofByConfidentialResource => Err(RuntimeError::NotSupported {
+                details: "CreateProofByConfidentialResource not implemented".to_string(),
+            }),
             VaultAction::GetNonFungibles => {
                 let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "vault_ref",

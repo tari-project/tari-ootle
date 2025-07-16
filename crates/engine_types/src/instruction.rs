@@ -33,7 +33,7 @@ pub enum Instruction {
         address: TemplateAddress,
         function: String,
         #[serde(deserialize_with = "crate::argument_parser::json_deserialize")]
-        #[cfg_attr(feature = "ts", ts(type = "Array<string | object>"))]
+        #[cfg_attr(feature = "ts", ts(type = "Array<any>"))]
         args: Vec<InstructionArg>,
     },
     CallMethod {
@@ -41,7 +41,7 @@ pub enum Instruction {
         method: String,
         #[serde(deserialize_with = "crate::argument_parser::json_deserialize")]
         // Argument parser takes an array of strings as input
-        #[cfg_attr(feature = "ts", ts(type = "Array<string | object>"))]
+        #[cfg_attr(feature = "ts", ts(type = "Array<any>"))]
         args: Vec<InstructionArg>,
     },
     PutLastInstructionOutputOnWorkspace {

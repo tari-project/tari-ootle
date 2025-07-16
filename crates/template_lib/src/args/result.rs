@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use tari_bor::{decode_exact, from_value, to_value, BorError};
+use tari_bor::{from_value, to_value, BorError};
 
 /// The result of an instruction invocation, which is either the CBOR encoded result value or a `String` with an error
 /// message
@@ -30,12 +30,17 @@ impl InvokeResult {
         self.0.map_err(BorError::new)
     }
 
-    pub fn raw(data: Vec<u8>) -> Self {
-        // TODO: unwrap
-        Self(Ok(decode_exact(&data).unwrap()))
+    pub const fn unit() -> Self {
+        Self(Ok(tari_bor::Value::Null))
     }
+}
 
-    pub fn unit() -> Self {
-        Self(Ok(to_value(&()).unwrap()))
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unit_decode() {
+        from_value::<()>(&InvokeResult::unit().0.unwrap()).unwrap();
     }
 }

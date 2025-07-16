@@ -86,6 +86,12 @@ impl ConfidentialResourceBuilder {
         self
     }
 
+    /// Sets up who can freeze vaults containing this resource.
+    pub fn freezable(mut self, rule: AccessRule) -> Self {
+        self.access_rules = self.access_rules.freezable(rule);
+        self
+    }
+
     /// Sets up who can withdraw tokens of the resource from any vault
     pub fn withdrawable(mut self, rule: AccessRule) -> Self {
         self.access_rules = self.access_rules.withdrawable(rule);

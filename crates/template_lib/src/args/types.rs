@@ -20,19 +20,15 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    hash::Hash,
-};
-
 use serde::{Deserialize, Serialize};
 use tari_template_abi::rust::{
+    collections::{BTreeMap, BTreeSet},
     fmt::{Display, Formatter},
     str::FromStr,
 };
 
 use crate::{
-    args::InstructionArg,
+    args::{freeze_flags::VaultFreezeFlags, InstructionArg},
     auth::{AuthHook, OwnerRule, ResourceAccessRules},
     models::{
         AddressAllocationId,
@@ -138,7 +134,7 @@ pub enum ComponentAction {
 }
 
 /// Encapsulates all the ways that a component can be referenced
-#[derive(Clone, Copy, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum ComponentRef {
     Component,
     Ref(ComponentAddress),
@@ -191,7 +187,7 @@ pub struct ResourceInvokeArg {
 }
 
 /// Encapsulates all the ways that a resource can be referenced
-#[derive(Clone, Copy, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum ResourceRef {
     Resource,
     Ref(ResourceAddress),
@@ -221,17 +217,27 @@ impl Display for ResourceRef {
     }
 }
 
-/// The possible actions that can be performed on resources
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+/// An action performed on a Resource
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ResourceAction {
+    /// Create a new resource
     Create,
+    /// Mint more of a resource
     Mint,
+    /// Recall an amount resource from a vault
     Recall,
+    /// Update on a non-fungible
     UpdateNonFungibleData,
+    /// Get the total supply of a resource
     GetTotalSupply,
+    /// Get the [ResourceType] of a resource
     GetResourceType,
+    /// Gets a non-fungible resource by its ID
     GetNonFungible,
+    /// Update the access rules of a resource
     UpdateAccessRules,
+    /// Sets the freeze flags on a vault of a resource.
+    SetFreeze,
 }
 
 /// All the possible minting operation types
@@ -335,6 +341,14 @@ pub struct RecallResourceArg {
     pub vault_id: VaultId,
     pub resource: ResourceDiscriminator,
 }
+
+/// A resource freeze operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FreezeResourceArg {
+    pub vault_id: VaultId,
+    pub flags: VaultFreezeFlags,
+}
+
 // -------------------------------- Vault -------------------------------- //
 
 /// A vault operation argument
@@ -346,7 +360,7 @@ pub struct VaultInvokeArg {
 }
 
 /// The possible actions that can be performed on vaults
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum VaultAction {
     Create,
     Deposit,
@@ -356,7 +370,6 @@ pub enum VaultAction {
     GetResourceAddress,
     GetNonFungibleIds,
     GetCommitmentCount,
-    ConfidentialReveal,
     PayFee,
     CreateProofByResource,
     CreateProofByFungibleAmount,
@@ -386,14 +399,6 @@ pub enum VaultWithdrawArg {
     Fungible { amount: Amount },
     NonFungible { ids: BTreeSet<NonFungibleId> },
     Confidential { proof: Box<ConfidentialWithdrawProof> },
-}
-
-// -------------------------------- Confidential -------------------------------- //
-
-/// A confidential resource reveal operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ConfidentialRevealArg {
-    pub proof: ConfidentialWithdrawProof,
 }
 
 // -------------------------------- Fees -------------------------------- //

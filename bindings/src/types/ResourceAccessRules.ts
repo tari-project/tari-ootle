@@ -9,4 +9,5 @@ export interface ResourceAccessRules {
   depositable: AccessRule;
   update_non_fungible_data: AccessRule;
   update_access_rules: AccessRule;
+  freeze: AccessRule;
 }

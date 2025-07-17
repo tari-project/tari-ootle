@@ -46,6 +46,7 @@ use tari_template_abi::{call_engine, rust::collections::BTreeMap, EngineOp};
 use crate::{
     args::{
         CreateResourceArg,
+        FreezeResourceArg,
         InvokeResult,
         MintArg,
         MintResourceArg,
@@ -56,6 +57,7 @@ use crate::{
         ResourceInvokeArg,
         ResourceRef,
         ResourceUpdateNonFungibleDataArg,
+        VaultFreezeFlags,
     },
     auth::{OwnerRule, ResourceAccessRules},
     models::{
@@ -829,6 +831,28 @@ impl ResourceManager {
         });
 
         resp.decode().expect("[set_access_rules] Failed")
+    }
+
+    /// Freezes all withdrawals, deposits and burns for the specified vault.
+    pub fn freeze(&self, vault_id: VaultId) {
+        self.set_freeze(vault_id, VaultFreezeFlags::all());
+    }
+
+    /// Sets the freeze flags for the specified vault.
+    pub fn set_freeze(&self, vault_id: VaultId, flags: VaultFreezeFlags) {
+        let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
+            resource_ref: self.expect_resource_address(),
+            action: ResourceAction::SetFreeze,
+            args: invoke_args![FreezeResourceArg { vault_id, flags }],
+        });
+
+        resp.decode().expect("SetFreeze failed")
+    }
+
+    /// Unfreezes all withdrawals, deposits and burns for the specified vault.
+    /// Equivalent to `manager.set_freeze(FreezeFlags::empty())`.
+    pub fn unfreeze(&self, vault_id: VaultId) {
+        self.set_freeze(vault_id, VaultFreezeFlags::empty());
     }
 
     fn recall_internal(&self, arg: RecallResourceArg) -> Bucket {

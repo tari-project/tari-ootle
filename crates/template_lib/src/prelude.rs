@@ -40,6 +40,7 @@ pub use tari_template_macros::template;
 pub use tari_template_macros::template_non_wasm as template;
 
 pub use crate::{
+    args::{VaultFreezeFlag, VaultFreezeFlags},
     auth::{ComponentAccessRules as AccessRules, RestrictedAccessRule::*, *},
     call_args,
     caller_context::CallerContext,

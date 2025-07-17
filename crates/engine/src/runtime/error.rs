@@ -37,7 +37,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{displayable::Displayable, optional::IsNotFoundError};
 use tari_template_lib::{
-    args::{WorkspaceId, WorkspaceOffsetId},
+    args::{VaultFreezeFlag, WorkspaceId, WorkspaceOffsetId},
     models::{
         AddressAllocationId,
         BucketId,
@@ -119,6 +119,11 @@ pub enum RuntimeError {
     CurrentFrameError { details: String },
     #[error("Vault not found with id ({vault_id})")]
     VaultNotFound { vault_id: VaultId },
+    #[error("Vault {vault_id} is frozen for {freeze_flag}")]
+    VaultFrozen {
+        vault_id: VaultId,
+        freeze_flag: VaultFreezeFlag,
+    },
     #[error("Non-fungible token not found with address {resource_address} and id {nft_id}")]
     NonFungibleNotFound {
         resource_address: ResourceAddress,

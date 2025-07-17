@@ -51,7 +51,7 @@ import {
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import { useTheme } from "@mui/material/styles";
-import Loading from "../Loading";
+import Loading from "../../Components/Loading";
 import { useTemplateGet } from "../../api/hooks/useTemplate";
 import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
 import FunctionsIcon from "@mui/icons-material/Functions";
@@ -61,36 +61,33 @@ import { substateIdToString } from "../../utils/helpers";
 import CloseIcon from "@mui/icons-material/Close";
 import { Highlight } from "prism-react-renderer";
 import useFlowEditorStore, { INITIAL_FLOW_STATE } from "../../store/flowEditorStore";
-import { shortenString, UnsignedTransactionV1, NetworkByte } from "@tari-project/typescript-bindings";
+import {
+  shortenString,
+  UnsignedTransactionV1,
+  NetworkByte,
+  ACCOUNT_TEMPLATE_ADDRESS,
+  TESTNET_NFT_FAUCET_ADDRESS,
+  TESTNET_XTR_FAUCET_ADDRESS,
+} from "@tari-project/typescript-bindings";
 import { settingsGet, submitTransactionDryRun, transactionsSubmit, transactionsWaitResult } from "../../utils/json_rpc";
 import { useAccountsList } from "../../api/hooks/useAccounts";
-import CopyAddress from "../CopyAddress";
+import CopyAddress from "../../Components/CopyAddress";
 
 const KNOWN_TEMPLATES = [
   {
-    address: "0000000000000000000000000000000000000000000000000000000000000000",
+    address: ACCOUNT_TEMPLATE_ADDRESS,
     name: "Account",
   },
   {
-    address: "0000000000000000000000000000000000000000000000000000000000000001",
+    address: TESTNET_NFT_FAUCET_ADDRESS,
     name: "NFT Faucet",
     testnet: true,
   },
   {
-    address: "0102030000000000000000000000000000000000000000000000000000000000",
+    address: TESTNET_XTR_FAUCET_ADDRESS,
     name: "tXTR faucet",
   },
 ];
-
-enum TransactionStatus {
-  New = "New",
-  DryRun = "DryRun",
-  Pending = "Pending",
-  Accepted = "Accepted",
-  Rejected = "Rejected",
-  InvalidTransaction = "InvalidTransaction",
-  OnlyFeeAccepted = "OnlyFeeAccepted",
-}
 
 function FlowEditor() {
   const { themeMode } = useThemeStore();
@@ -109,8 +106,8 @@ function FlowEditor() {
     setAccount,
     fee,
     setFee,
-    currentJson,
-    setCurrentJson,
+    currentState,
+    setCurrentState,
   } = useFlowEditorStore();
   const theme = useTheme();
   const addNodeAt = useStore((store) => store.addNodeAt);
@@ -135,7 +132,7 @@ function FlowEditor() {
         const nodeData = reader.getGenericNode(functionName);
         if (nodeData) {
           addNodeAt(nodeData);
-          setCurrentJson(getState());
+          setCurrentState(getState());
         }
       }
     },
@@ -171,11 +168,13 @@ function FlowEditor() {
 
   useEffect(() => {
     try {
-      setState(currentJson);
+      if (currentState) {
+        setState(currentState);
+      }
     } catch (err) {
-      console.error("Failed to load flow state:", err, currentJson);
+      console.error("Failed to load flow state:", err, currentState);
     }
-  }, [currentJson]);
+  }, [currentState]);
 
   const onAccountChange = (e: SelectChangeEvent<string>) => {
     const selected = dataAccountsList?.accounts.find(
@@ -240,7 +239,7 @@ function FlowEditor() {
 
   const handleSaveFlow = () => {
     const state = getState();
-    setCurrentJson(state);
+    setCurrentState(state);
     const blob = new Blob([JSON.stringify(state, undefined, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -256,7 +255,7 @@ function FlowEditor() {
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        setState(JSON.parse(event.target?.result as string));
+        setCurrentState(JSON.parse(event.target?.result as string));
       } catch (err) {
         alert("Failed to load flow: " + err);
       }
@@ -267,7 +266,7 @@ function FlowEditor() {
   const onChange = () => {
     const state = getState();
     console.log(state);
-    setCurrentJson(state);
+    setCurrentState(state);
   };
 
   return (

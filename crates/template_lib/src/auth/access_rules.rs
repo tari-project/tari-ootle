@@ -205,6 +205,7 @@ pub enum ResourceAuthAction {
     Deposit,
     UpdateNonFungibleData,
     UpdateAccessRules,
+    Freeze,
 }
 
 impl ResourceAuthAction {
@@ -228,22 +229,29 @@ pub struct ResourceAccessRules {
     depositable: AccessRule,
     update_non_fungible_data: AccessRule,
     update_access_rules: AccessRule,
+    #[serde(default = "deny_all")]
+    freeze: AccessRule,
+}
+
+fn deny_all() -> AccessRule {
+    AccessRule::DenyAll
 }
 
 impl ResourceAccessRules {
     /// Builds a new set of access rules for a resource.
     ///
     /// By default:
-    /// * Updating the access rules is disabled for all users
-    /// * Minting, burning and recalling are disabled for all users
+    /// * Updating the access rules is disabled for all users (i.e. only the OwnerRule applies)
+    /// * Minting, burning, recalling and freezing are disabled for all users
     /// * Withdrawals, deposits and non-fungible data updates are allowed for all users
     pub fn new() -> Self {
         Self {
-            // User should explicitly enable minting and/or burning
+            // User should explicitly enable minting, burning etc
             mintable: AccessRule::DenyAll,
             burnable: AccessRule::DenyAll,
             recallable: AccessRule::DenyAll,
             update_access_rules: AccessRule::DenyAll,
+            freeze: AccessRule::DenyAll,
             // But explicitly disable withdrawing, updating and/or depositing
             withdrawable: AccessRule::AllowAll,
             depositable: AccessRule::AllowAll,
@@ -261,6 +269,7 @@ impl ResourceAccessRules {
             withdrawable: AccessRule::DenyAll,
             depositable: AccessRule::DenyAll,
             update_non_fungible_data: AccessRule::DenyAll,
+            freeze: AccessRule::DenyAll,
         }
     }
 
@@ -280,6 +289,12 @@ impl ResourceAccessRules {
     /// A recall is the forceful withdrawal of tokens from any external vault
     pub fn recallable(mut self, rule: AccessRule) -> Self {
         self.recallable = rule;
+        self
+    }
+
+    /// Sets up who can freeze a vault containing this resource, preventing withdrawals.
+    pub fn freezable(mut self, rule: AccessRule) -> Self {
+        self.freeze = rule;
         self
     }
 
@@ -317,6 +332,7 @@ impl ResourceAccessRules {
             ResourceAuthAction::Deposit => &self.depositable,
             ResourceAuthAction::UpdateNonFungibleData => &self.update_non_fungible_data,
             ResourceAuthAction::UpdateAccessRules => &self.update_access_rules,
+            ResourceAuthAction::Freeze => &self.freeze,
         }
     }
 }

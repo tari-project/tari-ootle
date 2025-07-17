@@ -8,7 +8,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tari_bor::BorTag;
-use tari_template_lib_types::{KeyParseError, ObjectKey};
+use tari_template_lib_types::{crypto::PedersenCommitmentBytes, KeyParseError, ObjectKey};
 
 use crate::models::BinaryTag;
 
@@ -35,8 +35,8 @@ impl UnclaimedConfidentialOutputAddress {
         Ok(Self(BorTag::new(ObjectKey::from_hex(hex)?)))
     }
 
-    pub fn try_from_commitment(commitment_bytes: &[u8]) -> Result<Self, KeyParseError> {
-        Ok(Self(BorTag::new(ObjectKey::try_from(commitment_bytes)?)))
+    pub fn from_commitment(commitment_bytes: &PedersenCommitmentBytes) -> Self {
+        Self(BorTag::new(ObjectKey::from_array(commitment_bytes.into_array())))
     }
 
     pub fn as_object_key(&self) -> &ObjectKey {

@@ -42,7 +42,6 @@ pub struct UnclaimedConfidentialOutput {
 
 impl UnclaimedConfidentialOutput {
     pub fn to_address(&self) -> UnclaimedConfidentialOutputAddress {
-        UnclaimedConfidentialOutputAddress::try_from_commitment(self.commitment.as_bytes())
-            .expect("try_from_commitment: Incorrect commitment bytes when using Commitment")
+        UnclaimedConfidentialOutputAddress::from_commitment(&self.commitment)
     }
 }

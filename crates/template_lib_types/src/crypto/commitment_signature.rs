@@ -5,6 +5,11 @@ use serde::{Deserialize, Serialize};
 use crate::crypto::{scalar::Scalar32Bytes, InvalidByteLengthError, PedersenCommitmentBytes};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct CommitmentSignatureBytes {
     public_nonce: PedersenCommitmentBytes,
     u: Scalar32Bytes,

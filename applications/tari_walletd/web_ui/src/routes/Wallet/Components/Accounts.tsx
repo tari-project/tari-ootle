@@ -105,7 +105,7 @@ function Accounts() {
 
   const { mutateAsync: mutateClaimBurn } = useAccountsClaimBurn(
     claimBurnFormState.account,
-    claimBurnFormState.claimProof ? JSON.parse(claimBurnFormState.claimProof) : null,
+    JSON.parse(claimBurnFormState.claimProof),
     +claimBurnFormState.fee,
   );
 

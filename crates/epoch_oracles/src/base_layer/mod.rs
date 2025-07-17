@@ -394,17 +394,18 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                             ))
                         })?;
 
-                        let substate = UnclaimedConfidentialOutput {
-                            commitment: PedersenCommitmentBytes::from_bytes(commitment.as_bytes()).expect(
-                                "commitment: Compressed<PedersenCommitment> and PedersenCommitmentBytes must be the \
-                                 same length",
-                            ),
+                        let commitment = PedersenCommitmentBytes::from_bytes(commitment.as_bytes()).expect(
+                            "commitment: Compressed<PedersenCommitment> and PedersenCommitmentBytes must be the same \
+                             length",
+                        );
+                        let unclaimed_utxo = UnclaimedConfidentialOutput {
+                            commitment,
                             encrypted_data,
                         };
 
                         self.pending_events.push_back(EpochEvent::NewConfidentialOutput {
                             epoch: current_epoch,
-                            substate,
+                            substate: unclaimed_utxo,
                         });
                     },
                     SideChainFeatureData::EvictionProof(eviction_proof) => {

@@ -47,8 +47,6 @@ tari_comms = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-p
 tari_comms_dht = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
 
 anyhow = { workspace = true }
-# if we set this version in the workspace it would break other crates
-base64 = "0.21.0"
 config = { workspace = true }
 cucumber = { version = "0.21.1", features = ["default", "libtest", "output-junit"] }
 httpmock = { workspace = true }

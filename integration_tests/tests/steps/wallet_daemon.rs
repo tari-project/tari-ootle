@@ -43,7 +43,7 @@ async fn when_i_claim_burn_via_wallet_daemon(
     let claim_burn_resp = wallet_daemon_cli::claim_burn(
         world,
         account_name,
-        commitment.clone(),
+        *commitment,
         rangeproof.clone(),
         proof.clone(),
         reciprocal_claim_public_key.clone(),
@@ -88,11 +88,12 @@ async fn when_i_claim_burn_via_wallet_daemon_it_fails(
         .unwrap_or_else(|| panic!("Claim public key {} not found", claim_pubkey_name));
 
     // TODO: The walletd picks up the substate that doesnt exist before the transaction is submitted. This doesnt test
-    // the validator node behaviour. We should submit the transaction directly ithout any special claim burn handling
+    // the validator node behaviour. We should submit the transaction directly without using the wallet's claim burn
+    // implementation
     let _err = wallet_daemon_cli::claim_burn(
         world,
         account_name,
-        commitment.clone(),
+        *commitment,
         rangeproof.clone(),
         proof.clone(),
         reciprocal_claim_public_key.clone(),
@@ -252,7 +253,9 @@ async fn when_i_burn_funds_with_wallet_daemon(
         .into_inner();
 
     assert!(resp.is_success);
-    world.commitments.insert(commitment_name, resp.commitment);
+    world
+        .commitments
+        .insert(commitment_name, resp.commitment.as_slice().try_into().unwrap());
 
     let ownership_proof = resp.ownership_proof.unwrap();
     world

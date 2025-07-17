@@ -23,14 +23,12 @@
 use std::{collections::HashMap, str::FromStr, time::Duration};
 
 use anyhow::{anyhow, bail};
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde_json::json;
 use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     signatures::CommitmentSignature,
-    tari_utilities::ByteArray,
 };
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::{substate::SubstateId, ToByteType};
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_ootle_wallet_sdk::{
     apis::confidential_transfer::ConfidentialTransferInputSelection,
@@ -38,7 +36,7 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_template_lib::{
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-    prelude::{ResourceAddress, RistrettoPublicKeyBytes},
+    prelude::{PedersenCommitmentBytes, ResourceAddress, RistrettoPublicKeyBytes},
     resource::TOKEN_SYMBOL,
     types::Amount,
 };
@@ -53,6 +51,7 @@ use tari_wallet_daemon_client::{
         AccountsCreateRequest,
         AccountsGetBalancesRequest,
         AccountsTransferRequest,
+        ClaimBurnProof,
         ClaimBurnRequest,
         ClaimBurnResponse,
         ClaimValidatorFeesRequest,
@@ -81,7 +80,7 @@ use crate::{
 pub async fn claim_burn(
     world: &mut TariWorld,
     account_name: String,
-    commitment: Vec<u8>,
+    commitment: PedersenCommitmentBytes,
     range_proof: Vec<u8>,
     ownership_proof: CommitmentSignature<RistrettoPublicKey, RistrettoSecretKey>,
     reciprocal_claim_public_key: RistrettoPublicKey,
@@ -92,16 +91,12 @@ pub async fn claim_burn(
 
     let claim_burn_request = ClaimBurnRequest {
         account: Some(ComponentAddressOrName::Name(account_name.clone())),
-        claim_proof: json!({
-            "commitment": BASE64.encode(commitment.as_bytes()),
-            "ownership_proof": {
-                "public_nonce": BASE64.encode(ownership_proof.public_nonce().as_bytes()),
-                "u": BASE64.encode(ownership_proof.u().as_bytes()),
-                "v": BASE64.encode(ownership_proof.v().as_bytes())
-            },
-            "reciprocal_claim_public_key": BASE64.encode(reciprocal_claim_public_key.as_bytes()),
-            "range_proof": BASE64.encode(range_proof.as_bytes()),
-        }),
+        claim_proof: ClaimBurnProof {
+            commitment,
+            ownership_proof: ownership_proof.to_byte_type(),
+            reciprocal_claim_public_key: reciprocal_claim_public_key.to_byte_type(),
+            range_proof,
+        },
         max_fee: Some(max_fee),
         key_id: None,
     };

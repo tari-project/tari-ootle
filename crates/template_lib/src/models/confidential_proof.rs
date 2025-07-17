@@ -151,14 +151,12 @@ pub struct ViewableBalanceProofChallengeFields<'a> {
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct ConfidentialWithdrawProof {
-    #[cfg_attr(feature = "ts", ts(type = "Array<string>"))]
     pub inputs: Vec<PedersenCommitmentBytes>,
     /// The amount to withdraw from revealed funds i.e. the revealed funds as inputs
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub input_revealed_amount: Amount,
     pub output_proof: ConfidentialOutputStatement,
     /// Balance proof
-    #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
+    #[cfg_attr(feature = "ts", ts(type = "{public_nonce: string, signature: string}"))]
     pub balance_proof: BalanceProofSignature,
 }
 

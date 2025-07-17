@@ -1,18 +1,17 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
-use std::convert::TryFrom;
 
 use anyhow::anyhow;
 use axum::headers::authorization::Bearer;
-use base64;
 use log::*;
 use rand::rngs::OsRng;
-use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
+use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
     component::new_component_address_from_public_key,
     confidential::ConfidentialClaim,
     instruction::Instruction,
     substate::{Substate, SubstateId},
+    FromByteType,
     ToByteType,
 };
 use tari_key_manager::key_manager::DerivedKey;
@@ -30,10 +29,7 @@ use tari_template_lib::{
     call_args,
     constants::{CONFIDENTIAL_TARI_RESOURCE_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
     models::UnclaimedConfidentialOutputAddress,
-    types::{
-        crypto::{CommitmentSignatureBytes, PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
-        Amount,
-    },
+    types::{crypto::RistrettoPublicKeyBytes, Amount},
 };
 use tari_transaction::args;
 use tari_wallet_daemon_client::{
@@ -56,6 +52,7 @@ use tari_wallet_daemon_client::{
         AccountsTransferRequest,
         AccountsTransferResponse,
         BalanceEntry,
+        ClaimBurnProof,
         ClaimBurnRequest,
         ClaimBurnResponse,
         ConfidentialTransferRequest,
@@ -421,56 +418,12 @@ pub async fn handle_claim_burn(
 
     let max_fee = max_fee.unwrap_or(DEFAULT_FEE);
 
-    let reciprocal_claim_public_key = RistrettoPublicKey::from_canonical_bytes(
-        &base64::decode(
-            claim_proof["reciprocal_claim_public_key"]
-                .as_str()
-                .ok_or_else(|| invalid_params::<&str>("reciprocal_claim_public_key", None))?,
-        )
-        .map_err(|e| invalid_params("reciprocal_claim_public_key", Some(e)))?,
-    )
-    .map_err(|e| invalid_params("reciprocal_claim_public_key", Some(e)))?;
-    let commitment = base64::decode(
-        claim_proof["commitment"]
-            .as_str()
-            .ok_or_else(|| invalid_params::<&str>("commitment", None))?,
-    )
-    .map_err(|e| invalid_params("commitment", Some(e)))?;
-    let range_proof = base64::decode(
-        claim_proof["range_proof"]
-            .as_str()
-            .or_else(|| claim_proof["rangeproof"].as_str())
-            .ok_or_else(|| invalid_params::<&str>("range_proof", None))?,
-    )
-    .map_err(|e| invalid_params("range_proof", Some(e)))?;
-
-    let public_nonce = RistrettoPublicKey::from_canonical_bytes(
-        &base64::decode(
-            claim_proof["ownership_proof"]["public_nonce"]
-                .as_str()
-                .ok_or_else(|| invalid_params::<&str>("ownership_proof.public_nonce", None))?,
-        )
-        .map_err(|e| invalid_params("ownership_proof.public_nonce", Some(e)))?,
-    )
-    .map_err(|e| invalid_params("ownership_proof.public_nonce", Some(e)))?;
-    let u = Scalar32Bytes::from_bytes(
-        &base64::decode(
-            claim_proof["ownership_proof"]["u"]
-                .as_str()
-                .ok_or_else(|| invalid_params::<&str>("ownership_proof.u", None))?,
-        )
-        .map_err(|e| invalid_params("ownership_proof.u", Some(e)))?,
-    )
-    .map_err(|e| invalid_params("ownership_proof.u", Some(e)))?;
-    let v = Scalar32Bytes::from_bytes(
-        &base64::decode(
-            claim_proof["ownership_proof"]["v"]
-                .as_str()
-                .ok_or_else(|| invalid_params::<&str>("ownership_proof.v", None))?,
-        )
-        .map_err(|e| invalid_params("ownership_proof.v", Some(e)))?,
-    )
-    .map_err(|e| invalid_params("ownership_proof.v", Some(e)))?;
+    let ClaimBurnProof {
+        reciprocal_claim_public_key,
+        commitment,
+        ownership_proof,
+        range_proof,
+    } = claim_proof;
 
     // TODO: validate the proof_of_knowledge from the claim before submitting the transaction
 
@@ -489,9 +442,8 @@ pub async fn handle_claim_burn(
 
     // Add all versioned account child addresses as inputs
     // add the commitment substate id as input to the claim burn transaction
-    let commitment_substate_address =
-        SubstateRequirement::unversioned(UnclaimedConfidentialOutputAddress::try_from(commitment.as_slice())?);
-    inputs.push(commitment_substate_address.clone());
+    let address = UnclaimedConfidentialOutputAddress::from_commitment(&commitment);
+    inputs.push(SubstateRequirement::unversioned(address));
 
     info!(
         target: LOG_TARGET,
@@ -501,25 +453,22 @@ pub async fn handle_claim_burn(
     );
 
     // We have to unmask the commitment to allow us to reveal funds for the fee payment
-    let ValidatorScanResult { substate: output, .. } = sdk
-        .substate_api()
-        .scan_for_substate(
-            &commitment_substate_address.substate_id,
-            commitment_substate_address.version,
-        )
-        .await?;
+    let ValidatorScanResult { substate: output, .. } =
+        sdk.substate_api().scan_for_substate(&address.into(), None).await?;
     let output = output.into_unclaimed_confidential_output().ok_or_else(|| {
         anyhow!(
             "Expected the indexer to return an unclaimed confidential output substate for {}, but another substate \
              type was returned",
-            commitment_substate_address.substate_id
+            address,
         )
     })?;
+    let reciprocal_claim_public_key_expanded = RistrettoPublicKey::try_from_byte_type(&reciprocal_claim_public_key)
+        .map_err(|e| invalid_params("claim_proof.reciprocal_claim_public_key", Some(e)))?;
     let unmasked_output = sdk.confidential_crypto_api().unblind_output(
         &output.commitment,
         &output.encrypted_data,
         &account_secret_key.key,
-        &reciprocal_claim_public_key,
+        &reciprocal_claim_public_key_expanded,
     )?;
 
     let mask = sdk.key_manager_api().next_key(key_manager::TRANSACTION_BRANCH)?;
@@ -531,6 +480,8 @@ pub async fn handle_claim_burn(
         .ok_or_else(|| invalid_params("max_fee", Some("more fees paid than claimed amount")))?;
 
     let final_amount_u64 = final_amount.to_u64_checked().ok_or_else(|| {
+        // NOTE: this can never be anywhere close to this large because this would be more than the total supply of XTM
+        // for thousands of years
         application_error(
             ApplicationErrorCode::NotImplemented,
             format!("Amount to spend {final_amount} is too large and not currently supported"),
@@ -567,17 +518,10 @@ pub async fn handle_claim_burn(
 
     let instructions = vec![Instruction::ClaimBurn {
         claim: Box::new(ConfidentialClaim {
-            public_key: reciprocal_claim_public_key.to_byte_type(),
-            output_address: commitment_substate_address
-                .substate_id
-                .as_unclaimed_confidential_output_address()
-                .unwrap(),
+            public_key: reciprocal_claim_public_key,
+            output_address: address,
             range_proof,
-            proof_of_knowledge: CommitmentSignatureBytes::new(
-                PedersenCommitmentBytes::from_public_key(public_nonce.to_byte_type()),
-                u,
-                v,
-            ),
+            proof_of_knowledge: ownership_proof,
             withdraw_proof: Some(reveal_proof),
         }),
     }];

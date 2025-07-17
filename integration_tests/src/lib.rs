@@ -54,7 +54,7 @@ use tari_crypto::{
 };
 use tari_ootle_common_types::SubstateRequirement;
 use tari_sidechain::EvictionProof;
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib::prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes};
 use template::RegisteredTemplate;
 use validator_node::ValidatorNodeProcess;
 use wallet::WalletProcess;
@@ -89,7 +89,7 @@ pub struct TariWorld {
     pub http_server: Option<MockHttpServer>,
     pub template_mock_server_port: Option<u16>,
     pub current_scenario_name: Option<String>,
-    pub commitments: IndexMap<String, Vec<u8>>,
+    pub commitments: IndexMap<String, PedersenCommitmentBytes>,
     pub commitment_ownership_proofs: IndexMap<String, RistrettoComSig>,
     pub rangeproofs: IndexMap<String, Vec<u8>>,
     pub addresses: IndexMap<String, String>,

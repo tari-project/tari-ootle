@@ -23,6 +23,7 @@
 import { ChangeEvent } from "react";
 import type {
   Amount,
+  ClaimBurnProof,
   FinalizeResult,
   SubstateId,
   Transaction,

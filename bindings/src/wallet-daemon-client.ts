@@ -32,6 +32,7 @@ export * from "./types/wallet-daemon-client/BalanceEntry";
 export * from "./types/wallet-daemon-client/KeysListRequest";
 export * from "./types/wallet-daemon-client/SubstatesGetRequest";
 export * from "./types/wallet-daemon-client/ProofsFinalizeResponse";
+export * from "./types/wallet-daemon-client/ClaimBurnProof";
 export * from "./types/wallet-daemon-client/AuthRevokeTokenRequest";
 export * from "./types/wallet-daemon-client/TransactionWaitResultRequest";
 export * from "./types/wallet-daemon-client/PublishTemplateResponse";

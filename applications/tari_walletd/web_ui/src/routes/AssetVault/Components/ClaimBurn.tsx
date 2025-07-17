@@ -32,7 +32,7 @@ import InputLabel from "@mui/material/InputLabel";
 import Select, { SelectChangeEvent } from "@mui/material/Select/Select";
 import MenuItem from "@mui/material/MenuItem";
 import Box from "@mui/material/Box";
-import { useAccountsList, useAccountsClaimBurn } from "../../../api/hooks/useAccounts";
+import { useAccountsList } from "../../../api/hooks/useAccounts";
 import { useTheme } from "@mui/material/styles";
 import { accountsClaimBurn } from "../../../utils/json_rpc";
 import useAccountStore from "../../../store/accountStore";
@@ -73,7 +73,7 @@ export default function ClaimBurn() {
       account = selected_account.account.name || "";
       new_account_name = false;
     } else {
-      if (claimBurnFormState.newAccount === false) {
+      if (!claimBurnFormState.newAccount) {
         account = "";
       }
       new_account_name = true;

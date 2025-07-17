@@ -4983,7 +4983,6 @@ name = "integration_tests"
 version = "0.11.2"
 dependencies = [
  "anyhow",
- "base64 0.21.7",
  "config",
  "cucumber",
  "httpmock",
@@ -10745,9 +10744,9 @@ dependencies = [
 
 [[package]]
 name = "tari_bulletproofs_plus"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8eac57729e3b003c18e822c64c8c4977770102b2eaea920a7c40bca5caf12c54"
+checksum = "98e43bc4d522de252647e34e72aef4d5e33f845a6acc23fb7b1f4e877a7f9053"
 dependencies = [
  "blake2",
  "byteorder",
@@ -11076,9 +11075,9 @@ dependencies = [
 
 [[package]]
 name = "tari_crypto"
-version = "0.22.0"
+version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86ee9850e74d1b331d9513c79d1cd6e64ac2fe4698140cc30218e5972731f165"
+checksum = "b74b1ee79be37e04fcdb307b2809e658f19e05f31a2b5263c128fc3a5e2dee16"
 dependencies = [
  "blake2",
  "borsh",
@@ -11654,7 +11653,6 @@ dependencies = [
  "anyhow",
  "axum 0.6.20",
  "axum-jrpc",
- "base64 0.20.0",
  "clap 3.2.25",
  "config",
  "either",
@@ -11953,7 +11951,6 @@ dependencies = [
  "async-trait",
  "axum 0.6.20",
  "axum-jrpc",
- "base64 0.22.1",
  "clap 3.2.25",
  "fern",
  "futures 0.3.31",

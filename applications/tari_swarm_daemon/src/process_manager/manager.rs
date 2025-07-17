@@ -813,7 +813,7 @@ impl ProcessManager {
             }
             sleep(Duration::from_secs(2)).await;
             info!(
-                "💱 Waiting for wallet to mine some funds ({} uT / {} uT)",
+                "💱 Waiting for wallet to mine some funds ({} uT / {})",
                 resp.available_balance,
                 min_expected_blocks * initial_emission_amount
             );
@@ -831,13 +831,10 @@ impl ProcessManager {
         loop {
             let resp = wallet.get_transaction_info(tx_ids.clone()).await?;
             if resp.iter().all(|tx| {
-                if tx.status() == grpc::TransactionStatus::Broadcast {
-                    debug!("Transaction {} is broadcast", tx.tx_id);
-                    true
-                } else {
-                    debug!("Transaction {} is {:?}", tx.tx_id, tx.status());
-                    false
-                }
+                let status = tx.status();
+                debug!("Transaction {} is {:?}", tx.tx_id, status);
+                use grpc::TransactionStatus::*;
+                !matches!(status, NotFound | Pending | Queued)
             }) {
                 info!("📡 Wallet has broadcast all transactions");
                 break;

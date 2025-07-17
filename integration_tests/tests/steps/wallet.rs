@@ -11,6 +11,7 @@ use tari_crypto::{
     ristretto::{pedersen::PedersenCommitment, RistrettoComSig, RistrettoPublicKey},
     tari_utilities::ByteArray,
 };
+use tari_template_lib::prelude::PedersenCommitmentBytes;
 use tokio::time::sleep;
 
 use crate::{spawn_wallet, TariWorld};
@@ -28,7 +29,7 @@ async fn when_i_burn_on_wallet(
     world: &mut TariWorld,
     amount: u64,
     wallet_name: String,
-    commitment: String,
+    commitment_name: String,
     proof: String,
     account_name: String,
     range_proof: String,
@@ -62,8 +63,10 @@ async fn when_i_burn_on_wallet(
         .into_inner();
 
     assert!(resp.is_success);
-    world.commitments.insert(commitment, resp.commitment);
-    // TODO: use proto::transaction::CommitmentSignature to deserialize once we update tari to include https://github.com/tari-project/tari/pull/5200
+    world.commitments.insert(
+        commitment_name,
+        PedersenCommitmentBytes::try_from(resp.commitment.as_slice()).unwrap(),
+    );
     let ownership_proof = resp.ownership_proof.unwrap();
     world.commitment_ownership_proofs.insert(
         proof,

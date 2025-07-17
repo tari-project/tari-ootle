@@ -20,7 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{fs, io, io::Read, path::PathBuf};
+use std::{fs, io, path::PathBuf};
 
 use anyhow::anyhow;
 use clap::{Args, Subcommand};
@@ -31,6 +31,7 @@ use tari_wallet_daemon_client::{
         AccountsCreateFreeTestCoinsRequest,
         AccountsCreateRequest,
         AccountsGetBalancesRequest,
+        ClaimBurnProof,
         ClaimBurnRequest,
         RevealFundsRequest,
     },
@@ -212,20 +213,18 @@ pub async fn handle_claim_burn(args: ClaimBurnArgs, client: &mut WalletDaemonCli
         key_id,
     } = args;
 
-    let claim_proof = if let Some(proof_json) = proof_json {
-        proof_json
+    let claim_proof: ClaimBurnProof = if let Some(proof_json) = proof_json {
+        json::from_value(proof_json).map_err(|e| anyhow!("Failed to serialize proof JSON: {}", e))?
     } else if let Some(proof_file) = proof_file {
-        let proof_json = fs::read_to_string(proof_file).map_err(|e| anyhow!("Failed to read proof file: {}", e))?;
-        json::from_str::<json::Value>(proof_json.trim()).map_err(|e| anyhow!("Failed to parse proof JSON: {}", e))?
+        let mut file = fs::File::open(proof_file).map_err(|e| anyhow!("Failed to read proof file: {}", e))?;
+        json::from_reader(&mut file).map_err(|e| anyhow!("Failed to parse proof JSON: {}", e))?
     } else {
         println!(
             "Please paste console wallet JSON output from claim_burn call in the terminal: Press <Ctrl/Cmd + d> once \
              done"
         );
 
-        let mut proof_json = String::new();
-        io::stdin().read_to_string(&mut proof_json)?;
-        json::from_str::<json::Value>(proof_json.trim()).map_err(|e| anyhow!("Failed to parse proof JSON: {}", e))?
+        json::from_reader(&mut io::stdin()).map_err(|e| anyhow!("Failed to parse proof JSON: {}", e))?
     };
 
     println!("✅ Claim burn submitted");

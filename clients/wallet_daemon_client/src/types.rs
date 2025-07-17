@@ -53,7 +53,11 @@ use tari_template_lib::{
     auth::ComponentAccessRules,
     models::{ConfidentialOutputStatement, NonFungibleId, ResourceAddress, VaultId},
     prelude::{ComponentAddress, ConfidentialWithdrawProof, ResourceType, RistrettoPublicKeyBytes},
-    types::{crypto::PedersenCommitmentBytes, Amount, TemplateAddress},
+    types::{
+        crypto::{CommitmentSignatureBytes, PedersenCommitmentBytes},
+        Amount,
+        TemplateAddress,
+    },
 };
 use tari_transaction::{Transaction, TransactionId, UnsignedTransaction};
 use time::PrimitiveDateTime;
@@ -787,13 +791,26 @@ pub struct ConfidentialViewVaultBalanceResponse {
 pub struct ClaimBurnRequest {
     #[serde(deserialize_with = "opt_string_or_struct")]
     pub account: Option<ComponentAddressOrName>,
-    // TODO: make this a type
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub claim_proof: serde_json::Value,
+    pub claim_proof: ClaimBurnProof,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub max_fee: Option<u64>,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub key_id: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct ClaimBurnProof {
+    pub reciprocal_claim_public_key: RistrettoPublicKeyBytes,
+    pub commitment: PedersenCommitmentBytes,
+    pub ownership_proof: CommitmentSignatureBytes,
+    #[serde(with = "serde_with::hex")]
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub range_proof: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

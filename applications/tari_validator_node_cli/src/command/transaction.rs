@@ -404,6 +404,14 @@ fn print_substate_diff(diff: &SubstateDiff) {
             SubstateValue::Template(_) => {
                 println!("      ▶ Template: {}", address);
             },
+            SubstateValue::Utxo(_) => {
+                println!("      ▶ UTXO:");
+                let utxo_addr = address.as_utxo().unwrap();
+                let resx = utxo_addr.resource_address();
+                let id = utxo_addr.id();
+                println!("        ▶ Resource Address: {}", resx);
+                println!("        ▶ ID: {}", id);
+            },
         }
         println!();
     }
@@ -735,6 +743,7 @@ impl CliArg {
                 SubstateId::TransactionReceipt(v) => arg!(v),
                 SubstateId::Template(v) => arg!(v),
                 SubstateId::ValidatorFeePool(v) => arg!(v),
+                SubstateId::Utxo(v) => arg!(v),
             },
             CliArg::TemplateAddress(v) => arg!(v),
             CliArg::NonFungibleId(v) => arg!(v),

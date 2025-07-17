@@ -120,7 +120,10 @@ pub async fn handle_submit(
                     .map(|req| req.substate_id().clone()),
             )
             .collect::<Vec<_>>();
-        let loaded_substates = sdk.substate_api().locate_dependent_substates(&substates).await?;
+        let loaded_substates = sdk
+            .substate_api()
+            .locate_dependent_substates(&substates, req.detect_inputs_use_unversioned)
+            .await?;
         loaded_substates
             .into_iter()
             .map(|input| {
@@ -216,7 +219,10 @@ pub async fn handle_submit_dry_run(
         // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
         let substates = req.transaction.to_referenced_substates()?;
         let substates = substates.into_iter().collect::<Vec<_>>();
-        let dependencies = sdk.substate_api().locate_dependent_substates(&substates).await?;
+        let dependencies = sdk
+            .substate_api()
+            .locate_dependent_substates(&substates, req.detect_inputs_use_unversioned)
+            .await?;
         dependencies
             .into_iter()
             .map(|input| {
@@ -325,7 +331,7 @@ pub async fn handle_submit_manifest(
     // Detect inputs
     let substates = transaction.to_referenced_substates()?;
     let substates = substates.into_iter().collect::<Vec<_>>();
-    let dependencies = sdk.substate_api().locate_dependent_substates(&substates).await?;
+    let dependencies = sdk.substate_api().locate_dependent_substates(&substates, true).await?;
     let inputs = dependencies.into_iter().map(|input| input.into_unversioned());
 
     // set currently requested dry run status

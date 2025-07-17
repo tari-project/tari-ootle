@@ -26,6 +26,8 @@ use crate::{
     serde_with,
     substate::SubstateId,
     transaction_receipt::TransactionReceiptAddress,
+    UtxoAddress,
+    UtxoAddressContents,
     ValidatorFeePoolAddress,
 };
 
@@ -159,6 +161,7 @@ pub struct IndexedWellKnownTypes {
     unclaimed_confidential_output_address: Vec<UnclaimedConfidentialOutputAddress>,
     published_template_addresses: Vec<PublishedTemplateAddress>,
     validator_node_fee_pools: Vec<ValidatorFeePoolAddress>,
+    utxos: Vec<UtxoAddress>,
     #[cfg_attr(feature = "ts", ts(type = "[number]"))]
     component_address_allocations: Vec<ComponentAddressAllocation>,
     #[cfg_attr(feature = "ts", ts(type = "[number]"))]
@@ -179,6 +182,7 @@ impl IndexedWellKnownTypes {
             unclaimed_confidential_output_address: vec![],
             published_template_addresses: vec![],
             validator_node_fee_pools: vec![],
+            utxos: vec![],
             component_address_allocations: vec![],
             resource_address_allocations: vec![],
         }
@@ -204,6 +208,7 @@ impl IndexedWellKnownTypes {
             unclaimed_confidential_output_address: visitor.unclaimed_confidential_output_addresses,
             published_template_addresses: visitor.published_templates,
             validator_node_fee_pools: visitor.validator_node_fee_pools,
+            utxos: visitor.utxos,
             component_address_allocations: visitor.component_address_allocations,
             resource_address_allocations: visitor.resource_address_allocations,
         })
@@ -240,6 +245,9 @@ impl IndexedWellKnownTypes {
                     WellKnownTariValue::ValidatorNodeFeePool(addr) => {
                         found = *address == addr;
                     },
+                    WellKnownTariValue::Utxo(addr) => {
+                        found = *address == addr;
+                    },
                     WellKnownTariValue::BucketId(_) |
                     WellKnownTariValue::Metadata(_) |
                     WellKnownTariValue::ComponentAddressAllocation(_) |
@@ -267,6 +275,7 @@ impl IndexedWellKnownTypes {
             .chain(self.non_fungible_addresses.iter().map(|a| a.clone().into()))
             .chain(self.vault_ids.iter().map(|a| (*a).into()))
             .chain(self.unclaimed_confidential_output_address.iter().map(|a| (*a).into()))
+            .chain(self.utxos.iter().map(|a| a.clone().into()))
             .chain(self.published_template_addresses.iter().map(|a| (*a).into()))
             .chain(self.validator_node_fee_pools.iter().map(|a| (*a).into()))
     }
@@ -280,6 +289,7 @@ impl IndexedWellKnownTypes {
             .chain(self.non_fungible_addresses.into_iter().map(Into::into))
             .chain(self.vault_ids.into_iter().map(Into::into))
             .chain(self.unclaimed_confidential_output_address.into_iter().map(Into::into))
+            .chain(self.utxos.into_iter().map(Into::into))
             .chain(self.published_template_addresses.into_iter().map(Into::into))
             .chain(self.validator_node_fee_pools.into_iter().map(Into::into))
     }
@@ -342,6 +352,7 @@ impl IndexedWellKnownTypes {
                 &other.published_template_addresses,
             ),
             validator_node_fee_pools: diff_vec(&self.validator_node_fee_pools, &other.validator_node_fee_pools),
+            utxos: diff_vec(&self.utxos, &other.utxos),
             component_address_allocations: diff_vec(
                 &self.component_address_allocations,
                 &other.component_address_allocations,
@@ -394,6 +405,7 @@ pub enum WellKnownTariValue {
     ValidatorNodeFeePool(ValidatorFeePoolAddress),
     ComponentAddressAllocation(ComponentAddressAllocation),
     ResourceAddressAllocation(ResourceAddressAllocation),
+    Utxo(UtxoAddress),
 }
 
 impl FromTagAndValue for WellKnownTariValue {
@@ -455,6 +467,10 @@ impl FromTagAndValue for WellKnownTariValue {
                 let value = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::ResourceAddressAllocation(ResourceAddressAllocation::new(value)))
             },
+            BinaryTag::Utxo => {
+                let value: UtxoAddressContents = value.deserialized().map_err(BorError::from)?;
+                Ok(Self::Utxo(value.into()))
+            },
         }
     }
 }
@@ -472,6 +488,7 @@ pub struct IndexedValueVisitor {
     unclaimed_confidential_output_addresses: Vec<UnclaimedConfidentialOutputAddress>,
     published_templates: Vec<PublishedTemplateAddress>,
     validator_node_fee_pools: Vec<ValidatorFeePoolAddress>,
+    utxos: Vec<UtxoAddress>,
     component_address_allocations: Vec<ComponentAddressAllocation>,
     resource_address_allocations: Vec<ResourceAddressAllocation>,
 }
@@ -490,6 +507,7 @@ impl IndexedValueVisitor {
             unclaimed_confidential_output_addresses: vec![],
             published_templates: vec![],
             validator_node_fee_pools: vec![],
+            utxos: vec![],
             component_address_allocations: vec![],
             resource_address_allocations: vec![],
         }
@@ -539,6 +557,9 @@ impl ValueVisitor<WellKnownTariValue> for IndexedValueVisitor {
             },
             WellKnownTariValue::ResourceAddressAllocation(allocation) => {
                 self.resource_address_allocations.push(allocation);
+            },
+            WellKnownTariValue::Utxo(utxo) => {
+                self.utxos.push(utxo);
             },
         }
         Ok(ControlFlow::Continue(()))

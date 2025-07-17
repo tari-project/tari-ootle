@@ -63,6 +63,9 @@ impl serde::Serialize for SubstateId {
             SubstateId::ValidatorFeePool(ref addr) => {
                 serde::Serializer::serialize_newtype_variant(serializer, "SubstateId", 7u32, "ValidatorFeePool", addr)
             },
+            SubstateId::Utxo(ref addr) => {
+                serde::Serializer::serialize_newtype_variant(serializer, "SubstateId", 8u32, "Utxo", addr)
+            },
         }
     }
 }
@@ -73,7 +76,7 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
     where __D: serde::Deserializer<'de> {
         #[allow(non_camel_case_types)]
         #[doc(hidden)]
-        enum __Field {
+        enum Field {
             __field0,
             __field1,
             __field2,
@@ -82,11 +85,12 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
             __field5,
             __field6,
             __field7,
+            __field8,
         }
         #[doc(hidden)]
         struct __FieldVisitor;
         impl serde::de::Visitor<'_> for __FieldVisitor {
-            type Value = __Field;
+            type Value = Field;
 
             fn expecting(&self, __formatter: &mut Formatter) -> fmt::Result {
                 Formatter::write_str(__formatter, "variant identifier")
@@ -95,14 +99,15 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
             fn visit_u64<__E>(self, __value: u64) -> Result<Self::Value, __E>
             where __E: serde::de::Error {
                 match __value {
-                    0u64 => Ok(__Field::__field0),
-                    1u64 => Ok(__Field::__field1),
-                    2u64 => Ok(__Field::__field2),
-                    3u64 => Ok(__Field::__field3),
-                    4u64 => Ok(__Field::__field4),
-                    5u64 => Ok(__Field::__field5),
-                    6u64 => Ok(__Field::__field6),
-                    7u64 => Ok(__Field::__field7),
+                    0u64 => Ok(Field::__field0),
+                    1u64 => Ok(Field::__field1),
+                    2u64 => Ok(Field::__field2),
+                    3u64 => Ok(Field::__field3),
+                    4u64 => Ok(Field::__field4),
+                    5u64 => Ok(Field::__field5),
+                    6u64 => Ok(Field::__field6),
+                    7u64 => Ok(Field::__field7),
+                    8u64 => Ok(Field::__field8),
                     _ => Err(serde::de::Error::invalid_value(
                         serde::de::Unexpected::Unsigned(__value),
                         &"variant index 0 <= i < 9",
@@ -113,14 +118,15 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
             fn visit_str<__E>(self, __value: &str) -> Result<Self::Value, __E>
             where __E: serde::de::Error {
                 match __value {
-                    "Component" => Ok(__Field::__field0),
-                    "Resource" => Ok(__Field::__field1),
-                    "Vault" => Ok(__Field::__field2),
-                    "UnclaimedConfidentialOutput" => Ok(__Field::__field3),
-                    "NonFungible" => Ok(__Field::__field4),
-                    "TransactionReceipt" => Ok(__Field::__field5),
-                    "Template" => Ok(__Field::__field6),
-                    "ValidatorFeePool" => Ok(__Field::__field7),
+                    "Component" => Ok(Field::__field0),
+                    "Resource" => Ok(Field::__field1),
+                    "Vault" => Ok(Field::__field2),
+                    "UnclaimedConfidentialOutput" => Ok(Field::__field3),
+                    "NonFungible" => Ok(Field::__field4),
+                    "TransactionReceipt" => Ok(Field::__field5),
+                    "Template" => Ok(Field::__field6),
+                    "ValidatorFeePool" => Ok(Field::__field7),
+                    "Utxo" => Ok(Field::__field8),
                     _ => Err(serde::de::Error::unknown_variant(__value, VARIANTS)),
                 }
             }
@@ -128,22 +134,23 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
             fn visit_bytes<__E>(self, __value: &[u8]) -> Result<Self::Value, __E>
             where __E: serde::de::Error {
                 match __value {
-                    b"Component" => Ok(__Field::__field0),
-                    b"Resource" => Ok(__Field::__field1),
-                    b"Vault" => Ok(__Field::__field2),
-                    b"UnclaimedConfidentialOutput" => Ok(__Field::__field3),
-                    b"NonFungible" => Ok(__Field::__field4),
-                    b"TransactionReceipt" => Ok(__Field::__field5),
-                    b"Template" => Ok(__Field::__field6),
-                    b"ValidatorFeePool" => Ok(__Field::__field7),
+                    b"Component" => Ok(Field::__field0),
+                    b"Resource" => Ok(Field::__field1),
+                    b"Vault" => Ok(Field::__field2),
+                    b"UnclaimedConfidentialOutput" => Ok(Field::__field3),
+                    b"NonFungible" => Ok(Field::__field4),
+                    b"TransactionReceipt" => Ok(Field::__field5),
+                    b"Template" => Ok(Field::__field6),
+                    b"ValidatorFeePool" => Ok(Field::__field7),
+                    b"Utxo" => Ok(Field::__field8),
                     _ => {
-                        let __value = &String::from_utf8_lossy(__value);
-                        Err(serde::de::Error::unknown_variant(__value, VARIANTS))
+                        let value = String::from_utf8_lossy(__value);
+                        Err(serde::de::Error::unknown_variant(&value, VARIANTS))
                     },
                 }
             }
         }
-        impl<'de> serde::Deserialize<'de> for __Field {
+        impl<'de> serde::Deserialize<'de> for Field {
             #[inline]
             fn deserialize<__D>(__deserializer: __D) -> Result<Self, __D::Error>
             where __D: serde::Deserializer<'de> {
@@ -165,38 +172,41 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
             fn visit_enum<__A>(self, __data: __A) -> Result<Self::Value, __A::Error>
             where __A: serde::de::EnumAccess<'de> {
                 match serde::de::EnumAccess::variant(__data)? {
-                    (__Field::__field0, __variant) => Result::map(
-                        serde::de::VariantAccess::newtype_variant::<ComponentAddress>(__variant),
+                    (Field::__field0, variant) => Result::map(
+                        serde::de::VariantAccess::newtype_variant::<ComponentAddress>(variant),
                         SubstateId::Component,
                     ),
-                    (__Field::__field1, __variant) => Result::map(
-                        serde::de::VariantAccess::newtype_variant::<ResourceAddress>(__variant),
+                    (Field::__field1, variant) => Result::map(
+                        serde::de::VariantAccess::newtype_variant::<ResourceAddress>(variant),
                         SubstateId::Resource,
                     ),
-                    (__Field::__field2, __variant) => Result::map(
-                        serde::de::VariantAccess::newtype_variant::<VaultId>(__variant),
+                    (Field::__field2, variant) => Result::map(
+                        serde::de::VariantAccess::newtype_variant::<VaultId>(variant),
                         SubstateId::Vault,
                     ),
-                    (__Field::__field3, __variant) => Result::map(
-                        serde::de::VariantAccess::newtype_variant::<UnclaimedConfidentialOutputAddress>(__variant),
+                    (Field::__field3, variant) => Result::map(
+                        serde::de::VariantAccess::newtype_variant::<UnclaimedConfidentialOutputAddress>(variant),
                         SubstateId::UnclaimedConfidentialOutput,
                     ),
-                    (__Field::__field4, __variant) => Result::map(
-                        serde::de::VariantAccess::newtype_variant::<NonFungibleAddress>(__variant),
+                    (Field::__field4, variant) => Result::map(
+                        serde::de::VariantAccess::newtype_variant::<NonFungibleAddress>(variant),
                         SubstateId::NonFungible,
                     ),
-                    (__Field::__field5, __variant) => Result::map(
-                        serde::de::VariantAccess::newtype_variant::<TransactionReceiptAddress>(__variant),
+                    (Field::__field5, variant) => Result::map(
+                        serde::de::VariantAccess::newtype_variant::<TransactionReceiptAddress>(variant),
                         SubstateId::TransactionReceipt,
                     ),
-                    (__Field::__field6, __variant) => Result::map(
-                        serde::de::VariantAccess::newtype_variant::<PublishedTemplateAddress>(__variant),
+                    (Field::__field6, variant) => Result::map(
+                        serde::de::VariantAccess::newtype_variant::<PublishedTemplateAddress>(variant),
                         SubstateId::Template,
                     ),
-                    (__Field::__field7, __variant) => Result::map(
-                        serde::de::VariantAccess::newtype_variant::<ValidatorFeePoolAddress>(__variant),
+                    (Field::__field7, variant) => Result::map(
+                        serde::de::VariantAccess::newtype_variant::<ValidatorFeePoolAddress>(variant),
                         SubstateId::ValidatorFeePool,
                     ),
+                    (Field::__field8, variant) => {
+                        Result::map(serde::de::VariantAccess::newtype_variant(variant), SubstateId::Utxo)
+                    },
                 }
             }
         }
@@ -210,6 +220,7 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
             "TransactionReceipt",
             "Template",
             "ValidatorFeePool",
+            "Utxo",
         ];
         if deserializer.is_human_readable() {
             let s = Cow::<str>::deserialize(deserializer)?;
@@ -225,26 +236,64 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
 
 #[cfg(test)]
 mod tests {
-    use tari_template_lib::types::ObjectKey;
+    use tari_template_lib::{
+        models::NonFungibleId,
+        types::{Hash, ObjectKey},
+    };
 
     use super::*;
+    use crate::{UtxoAddress, UtxoId};
 
     #[test]
-    fn it_works() {
+    fn encoding_and_decoding() {
         let component_id = SubstateId::Component(ComponentAddress::new(ObjectKey::from([0; ObjectKey::LENGTH])));
-        let serialized = serde_json::to_string(&component_id).unwrap();
-        assert_eq!(
-            serialized,
-            r#""component_0000000000000000000000000000000000000000000000000000000000000000""#
-        );
+        check(&component_id);
+        let resource_id = SubstateId::Resource(ResourceAddress::new(ObjectKey::from([1; ObjectKey::LENGTH])));
+        check(&resource_id);
+        let vault_id = SubstateId::Vault(VaultId::new(ObjectKey::from([2; ObjectKey::LENGTH])));
+        check(&vault_id);
+        let unclaimed_output_id = SubstateId::UnclaimedConfidentialOutput(UnclaimedConfidentialOutputAddress::new(
+            ObjectKey::from([3; ObjectKey::LENGTH]),
+        ));
+        check(&unclaimed_output_id);
+        let non_fungible_id = SubstateId::NonFungible(NonFungibleAddress::new(
+            resource_id.as_resource_address().unwrap(),
+            NonFungibleId::from_string("hello"),
+        ));
+        check(&non_fungible_id);
+        let transaction_receipt_id =
+            SubstateId::TransactionReceipt(TransactionReceiptAddress::from_array([123; ObjectKey::LENGTH]));
+        check(&transaction_receipt_id);
+        let template_id =
+            SubstateId::Template(PublishedTemplateAddress::from_hash(Hash::from_array([6; Hash::LENGTH])));
+        check(&template_id);
+        let validator_fee_pool_id = SubstateId::ValidatorFeePool(ValidatorFeePoolAddress::from_array([7; 32]));
+        check(&validator_fee_pool_id);
+        let utxo_id = SubstateId::Utxo(UtxoAddress::new(
+            resource_id.as_resource_address().unwrap(),
+            UtxoId::from_array([8; UtxoId::LENGTH]),
+        ));
+        check(&utxo_id);
 
-        let deserialized: SubstateId = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(deserialized, component_id);
+        fn check(id: &SubstateId) {
+            // JSON
+            let serialized = serde_json::to_string(&id).unwrap();
+            assert_eq!(serialized, format!(r#""{}""#, id));
 
-        // bincode
-        let bincode_serialized = bincode::serde::encode_to_vec(&component_id, bincode::config::standard()).unwrap();
-        let (bincode_deserialized, _): (SubstateId, _) =
-            bincode::serde::decode_from_slice(&bincode_serialized, bincode::config::standard()).unwrap();
-        assert_eq!(bincode_deserialized, component_id);
+            let deserialized: SubstateId = serde_json::from_str(&serialized).unwrap();
+            assert_eq!(deserialized, *id);
+
+            // CBOR
+            let cbor_serialized = tari_bor::encode(&id).unwrap();
+            let cbor_deserialized: SubstateId = tari_bor::decode(&cbor_serialized)
+                .unwrap_or_else(|e| panic!("Failed to deserialize {id} from CBOR: {e}"));
+            assert_eq!(cbor_deserialized, *id);
+
+            // bincode
+            let bincode_serialized = bincode::serde::encode_to_vec(id, bincode::config::standard()).unwrap();
+            let (bincode_deserialized, _): (SubstateId, _) =
+                bincode::serde::decode_from_slice(&bincode_serialized, bincode::config::standard()).unwrap();
+            assert_eq!(bincode_deserialized, *id);
+        }
     }
 }

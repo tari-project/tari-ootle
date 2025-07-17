@@ -1,6 +1,8 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+import { TariCborTags } from "@tari-project/typescript-bindings";
+
 export function getValueByPath(cborRepr: object, path: string): any {
   let value = cborRepr;
   for (const part of path.split(".")) {
@@ -73,25 +75,23 @@ function bytesToAddressString(type: String, tag: ArrayLike<number>): string {
 
 export function convertTaggedValue(tag: number, value: any): string | any {
   switch (tag) {
-    case BinaryTag.VaultId:
+    case TariCborTags.VaultId:
       return bytesToAddressString("vault", value.Bytes!);
-    case BinaryTag.ComponentAddress:
+    case TariCborTags.ComponentAddress:
       return bytesToAddressString("component", value.Bytes!);
-    case BinaryTag.ResourceAddress:
+    case TariCborTags.ResourceAddress:
       return bytesToAddressString("resource", value.Bytes!);
-    case BinaryTag.Metadata:
+    case TariCborTags.NonFungibleAddress:
+      return bytesToAddressString("non_fungible", value.Bytes!);
+    case TariCborTags.UnclaimedConfidentialOutputAddress:
+      return bytesToAddressString("commitment", value.Bytes!);
+    case TariCborTags.TemplateAddress:
+      return bytesToAddressString("template", value.Bytes!);
+    case TariCborTags.Utxo:
+      return bytesToAddressString("utxo", value.Bytes!);
+    case TariCborTags.Metadata:
       return convertCborValue(value);
     default:
       return value;
   }
-}
-
-enum BinaryTag {
-  ComponentAddress = 128,
-  Metadata = 129,
-  NonFungibleAddress = 130,
-  ResourceAddress = 131,
-  VaultId = 132,
-  TransactionReceipt = 134,
-  FeeClaim = 135,
 }

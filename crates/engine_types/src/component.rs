@@ -59,12 +59,8 @@ pub fn new_component_address_from_public_key(
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct ComponentHeader {
-    #[serde(with = "serde_with::hex")]
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub template_address: TemplateAddress,
     pub module_name: String,
-    #[serde(with = "serde_with::hex::option")]
-    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     pub owner_key: Option<RistrettoPublicKeyBytes>,
     pub owner_rule: OwnerRule,
     pub access_rules: ComponentAccessRules,

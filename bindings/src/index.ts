@@ -154,3 +154,4 @@ export * from "./helpers/BigAmount";
 export * from "./helpers/NetworkByte";
 export * from "./helpers/consts";
 export * from "./helpers/helpers";
+export * from "./helpers/tariCborTags";

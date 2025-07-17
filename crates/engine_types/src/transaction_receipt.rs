@@ -15,7 +15,7 @@ use tari_template_lib::{
     types::{Hash, KeyParseError, ObjectKey},
 };
 
-use crate::{events::Event, fees::FeeReceipt, logs::LogEntry, serde_with};
+use crate::{events::Event, fees::FeeReceipt, logs::LogEntry};
 
 const TAG: u64 = BinaryTag::TransactionReceipt.as_u64();
 
@@ -91,8 +91,6 @@ impl borsh::BorshDeserialize for TransactionReceiptAddress {
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct TransactionReceipt {
-    #[serde(with = "serde_with::hex")]
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_hash: Hash,
     pub events: Vec<Event>,
     pub logs: Vec<LogEntry>,

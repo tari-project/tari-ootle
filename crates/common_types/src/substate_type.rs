@@ -21,6 +21,7 @@ pub enum SubstateType {
     TransactionReceipt,
     ValidatorFeePool,
     Template,
+    Utxo,
 }
 
 impl SubstateType {
@@ -34,6 +35,7 @@ impl SubstateType {
             SubstateType::TransactionReceipt => "txreceipt",
             SubstateType::ValidatorFeePool => "vnfp",
             SubstateType::Template => "template",
+            SubstateType::Utxo => "utxo",
         }
     }
 
@@ -48,6 +50,7 @@ impl SubstateType {
             (SubstateType::TransactionReceipt, SubstateId::TransactionReceipt(_)) => true,
             (SubstateType::ValidatorFeePool, SubstateId::ValidatorFeePool(_)) => true,
             (SubstateType::Template, SubstateId::Template(_)) => true,
+            (SubstateType::Utxo, SubstateId::Utxo(_)) => true,
             _ => false,
         }
     }
@@ -64,6 +67,7 @@ impl From<&SubstateValue> for SubstateType {
             SubstateValue::TransactionReceipt(_) => SubstateType::TransactionReceipt,
             SubstateValue::Template(_) => SubstateType::Template,
             SubstateValue::ValidatorFeePool(_) => SubstateType::ValidatorFeePool,
+            SubstateValue::Utxo(_) => SubstateType::Utxo,
         }
     }
 }
@@ -79,6 +83,7 @@ impl From<&SubstateId> for SubstateType {
             SubstateId::TransactionReceipt(_) => SubstateType::TransactionReceipt,
             SubstateId::ValidatorFeePool(_) => SubstateType::ValidatorFeePool,
             SubstateId::Template(_) => SubstateType::Template,
+            SubstateId::Utxo(_) => SubstateType::Utxo,
         }
     }
 }

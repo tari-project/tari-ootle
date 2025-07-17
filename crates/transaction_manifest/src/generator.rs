@@ -165,13 +165,14 @@ impl ManifestInstructionGenerator {
                             ManifestValue::SubstateId(addr) => match addr {
                                 SubstateId::Component(addr) => Ok(call_arg!(*addr)),
                                 SubstateId::Resource(addr) => Ok(call_arg!(*addr)),
-                                // TODO: should tx receipt addresses be allowed to be reference ?
+                                // TODO: should tx receipt addresses be allowed to be referenced?
                                 SubstateId::TransactionReceipt(addr) => Ok(call_arg!(*addr)),
                                 SubstateId::Vault(addr) => Ok(call_arg!(*addr)),
                                 SubstateId::NonFungible(addr) => Ok(call_arg!(addr)),
                                 SubstateId::UnclaimedConfidentialOutput(addr) => Ok(call_arg!(*addr)),
                                 SubstateId::Template(addr) => Ok(call_arg!(*addr)),
                                 SubstateId::ValidatorFeePool(addr) => Ok(call_arg!(*addr)),
+                                SubstateId::Utxo(addr) => Ok(call_arg!(*addr)),
                             },
                             ManifestValue::Literal(lit) => lit_to_arg(lit),
                             ManifestValue::NonFungibleId(id) => Ok(call_arg!(id.clone())),

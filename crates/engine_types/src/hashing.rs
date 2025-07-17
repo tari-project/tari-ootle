@@ -187,6 +187,7 @@ pub enum EngineHashDomainLabel {
     QuorumCertificate,
     SubstateValue,
     ViewKey,
+    UtxoAddress,
 }
 
 impl EngineHashDomainLabel {
@@ -210,6 +211,7 @@ impl EngineHashDomainLabel {
             Self::SubstateValue => "SubstateValue",
             Self::ViewKey => "ViewKey",
             Self::TemplateAddress => "TemplateAddress",
+            Self::UtxoAddress => "UtxoAddress",
         }
     }
 }

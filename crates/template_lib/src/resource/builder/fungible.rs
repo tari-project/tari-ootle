@@ -1,8 +1,6 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-
-
 use super::{IMAGE_URL, TOKEN_SYMBOL};
 use crate::{
     args::MintArg,
@@ -75,9 +73,9 @@ impl FungibleResourceBuilder {
     }
 
     /// Sets up who will be the owner of the resource.
-    /// 
+    ///
     /// By default, the owner is the signer of the resource creation transaction ([`OwnerRule::OwnedBySigner`]).
-    /// 
+    ///
     /// Resource owners are the only ones allowed to update the resource's access rules after creation.
     pub fn with_owner_rule(mut self, rule: OwnerRule) -> Self {
         self.owner_rule = rule;
@@ -85,9 +83,9 @@ impl FungibleResourceBuilder {
     }
 
     /// Sets up who can access the resource for each type of action
-    /// 
+    ///
     /// This allows you to pass the access rules that will be applied to the resource in a single call.
-    /// 
+    ///
     /// Using this function will override the default access rules defined in [`ResourceAccessRules::new()`].
     pub fn with_access_rules(mut self, rules: ResourceAccessRules) -> Self {
         self.access_rules = rules;
@@ -101,13 +99,13 @@ impl FungibleResourceBuilder {
     }
 
     /// Sets up who can mint new tokens of the resource
-    /// 
+    ///
     /// Allows you to pass an [`AccessRule`] that defines who can mint new tokens of the resource.
     ///
     /// By default, minting is disabled for all users.
-    /// 
+    ///
     /// #Examples
-    /// 
+    ///
     /// ```rust, ignore
     /// use tari_template_lib::auth::AccessRule;
     /// use tari_template_lib::resource::builder::ResourceBuilder;
@@ -121,10 +119,10 @@ impl FungibleResourceBuilder {
     }
 
     /// Sets up who can burn (destroy) tokens of the resource
-    /// 
+    ///
     /// Allows you to pass an [`AccessRule`] that defines who can burn tokens of the resource.
     /// By default, burning is disabled for all users.
-    /// 
+    ///
     /// #Examples
     ///
     /// ```rust, ignore
@@ -140,15 +138,15 @@ impl FungibleResourceBuilder {
     }
 
     /// Sets up who can recall tokens of the resource.
-    /// 
+    ///
     /// A recall is the forceful withdrawal of **ALL** tokens from any external vault.
-    /// 
+    ///
     /// Allows you to pass an [`AccessRule`] that defines who can recall tokens from a vault.
-    /// 
+    ///
     /// By default, recalling is disabled for all users.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust, ignore
     /// use tari_template_lib::auth::AccessRule;
     /// use tari_template_lib::resource::builder::ResourceBuilder;
@@ -168,13 +166,13 @@ impl FungibleResourceBuilder {
     }
 
     /// Sets up who can withdraw tokens of the resource from any vault
-    /// 
-    /// Allows you to pass an [`AccessRule`] that defines who can withdraw tokens (via a specified amount) from a vault. 
-    /// 
+    ///
+    /// Allows you to pass an [`AccessRule`] that defines who can withdraw tokens (via a specified amount) from a vault.
+    ///
     /// By default, withdrawal is allowed for all users.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust, ignore
     /// use tari_template_lib::auth::AccessRule;
     /// use tari_template_lib::resource::builder::ResourceBuilder;
@@ -188,13 +186,13 @@ impl FungibleResourceBuilder {
     }
 
     /// Sets up who can deposit tokens of the resource into any vault
-    /// 
+    ///
     /// Allows you to pass an [`AccessRule`] that defines who can deposit tokens (via a specified amount) into a vault.
     ///
     /// By default, deposit is allowed for all users.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust, ignore
     /// use tari_template_lib::auth::AccessRule;
     /// use tari_template_lib::resource::builder::ResourceBuilder;
@@ -208,12 +206,12 @@ impl FungibleResourceBuilder {
     }
 
     /// Sets up who can update the access rules of the resource.
-    /// 
+    ///
     /// Allows you to pass an [`AccessRule`] that defines who can update the access rules of the resource.
-    /// 
-    /// By default, the ability to update access rules is denied for all users. If you want to allow the owner to update the access rules, 
-    /// you can use `.update_access_rules(AccessRule::require_owner())`
-    /// 
+    ///
+    /// By default, the ability to update access rules is denied for all users. If you want to allow the owner to update
+    /// the access rules, you can use `.update_access_rules(AccessRule::require_owner())`
+    ///
     /// # Examples
     ///
     /// ```rust, ignore
@@ -229,7 +227,7 @@ impl FungibleResourceBuilder {
     }
 
     /// Sets up the specified `symbol` as the token symbol in the metadata of the resource
-    /// 
+    ///
     /// # Examples
     /// ```rust, ignore
     ///  use tari_template_lib::resource::builder::ResourceBuilder;
@@ -243,13 +241,13 @@ impl FungibleResourceBuilder {
     }
 
     /// Adds a new metadata entry to the resource
-    /// 
+    ///
     /// Allows you to add a key-value pair to the resource's metadata.
-    /// 
+    ///
     /// # Notes
-    /// 
+    ///
     /// `.add_metadata()` will override any existing metadata with the same key.
-    /// 
+    ///
     /// # Examples
     /// ```rust, ignore
     /// use tari_template_lib::resource::builder::ResourceBuilder;
@@ -286,9 +284,10 @@ impl FungibleResourceBuilder {
     }
 
     /// Sets up the image URL of the resource
-    /// 
-    /// Allows you to set the image URL of the resource, which can be used in user interfaces to display the token's logo or image.
-    /// 
+    ///
+    /// Allows you to set the image URL of the resource, which can be used in user interfaces to display the token's
+    /// logo or image.
+    ///
     /// # Examples
     /// ```rust, ignore
     /// use tari_template_lib::resource::builder::ResourceBuilder;
@@ -296,19 +295,19 @@ impl FungibleResourceBuilder {
     ///     .with_image_url("https://example.com/my_token_image.png".to_string())
     ///     .build();
     /// ```
-         
+
     pub fn with_image_url(self, url: String) -> Self {
         self.add_metadata(IMAGE_URL, url)
     }
 
-    /// Sets the divisibility of the resource. i.e. the number of decimal places the resource can be divided into.
-    /// 
-    /// The default divisibility is 18, which means the resource can be divided into 10^18 parts.
-    /// 
+    /// Sets the divisibility of the resource. i.e. the number of decimal places
+    ///
+    /// The default divisibility is 18, which means the smallest unit of the resource is 0.000000000000000001 of the whole unit.
+    ///
     /// # Panics
     /// method will panic if:
     /// * The divisibility is greater than 18.
-    /// 
+    ///
     /// # Examples
     /// ```rust, ignore
     /// use tari_template_lib::resource::builder::ResourceBuilder;
@@ -358,7 +357,7 @@ impl FungibleResourceBuilder {
     ///
     /// By default, total supply tracking is enabled. `.disable_total_supply_tracking()` can be used to disable it.
     /// Use cases include privacy focused tokens or utility tokens where the total supply is not relevant.
-    /// 
+    ///
     /// # Examples
     /// ```rust, ignore
     /// use tari_template_lib::resource::builder::ResourceBuilder;
@@ -372,7 +371,7 @@ impl FungibleResourceBuilder {
     }
 
     /// Build the resource, returning the address
-    /// 
+    ///
     /// Utilises an internal method to create the resource with the specified properties.
     ///      
     pub fn build(self) -> ResourceAddress {
@@ -381,7 +380,7 @@ impl FungibleResourceBuilder {
     }
 
     /// This builds the resource and returns a bucket containing the initial supply based on the passed [`Amount`].
-    /// 
+    ///
     /// # Examples
     /// ```rust, ignore
     /// use tari_template_lib::resource::builder::ResourceBuilder;

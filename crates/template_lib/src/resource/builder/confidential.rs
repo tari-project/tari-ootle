@@ -133,7 +133,7 @@ impl ConfidentialResourceBuilder {
         self.add_metadata(IMAGE_URL, url)
     }
 
-    /// Sets the divisibility of the resource. i.e. the number of decimal places the resource can be divided into.
+    /// Sets the divisibility of the resource. i.e. the number of decimal places.
     /// Panic if the divisibility is greater than 18.
     pub fn with_divisibility(mut self, divisibility: u8) -> Self {
         if divisibility > 18 {

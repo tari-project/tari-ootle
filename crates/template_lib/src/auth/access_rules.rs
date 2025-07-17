@@ -241,6 +241,7 @@ impl ResourceAccessRules {
     /// Builds a new set of access rules for a resource.
     ///
     /// By default:
+    /// * Updating the access rules is disabled for all users (i.e. only the OwnerRule applies)
     /// * Minting, burning, recalling and freezing are disabled for all users
     /// * Withdrawals, deposits and non-fungible data updates are allowed for all users
     pub fn new() -> Self {

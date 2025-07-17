@@ -9,8 +9,43 @@ use crate::{
     resource::{ResourceManager, ResourceType, DEFAULT_DIVISIBILITY},
     types::Amount,
 };
-
-/// Utility for building fungible resources inside templates
+/// A builder for creating fungible resources (tokens) inside templates.
+///
+/// This builder provides a fluent API to configure and create fungible tokens with
+/// various properties such as ownership rules, access controls, metadata, divisibility,
+/// and authorization hooks.
+///
+/// If values are not set, defaults for the various properties will be used.
+///
+/// # Usage
+///
+/// You typically start by creating a new builder via [`ResourceBuilder::fungible()`],
+/// then chain configuration methods like `.with_owner_rule()`, `.mintable()`, or
+/// `.with_token_symbol()`, and finally call `.build()` or `.initial_supply()` to create
+/// the resource.
+///
+/// # Examples
+///
+/// Basic usage:
+/// ```ignore
+/// use tari_template_lib::resource::builder::ResourceBuilder;
+///
+/// let resource_address = ResourceBuilder::fungible()
+///     .with_token_symbol("TARI")
+///     .with_divisibility(9)
+///     .mintable(rule!(allow_all))
+///     .build();
+/// ```
+///
+/// Creating a resource with an initial supply:
+/// ```ignore
+/// use tari_template_lib::resource::builder::ResourceBuilder;
+/// use tari_template_lib::types::Amount;
+///
+/// let bucket = ResourceBuilder::fungible()
+///     .with_token_symbol("YOUR_TOKEN")
+///     .initial_supply(Amount::from(1_000_000));
+/// ```
 pub struct FungibleResourceBuilder {
     owner_rule: OwnerRule,
     access_rules: ResourceAccessRules,
@@ -23,7 +58,7 @@ pub struct FungibleResourceBuilder {
 }
 
 impl FungibleResourceBuilder {
-    /// Returns a new fungible resource builder
+    /// Returns a new fungible resource builder with default values.
     pub(super) fn new() -> Self {
         Self {
             owner_rule: OwnerRule::default(),
@@ -38,13 +73,20 @@ impl FungibleResourceBuilder {
     }
 
     /// Sets up who will be the owner of the resource.
-    /// Resource owners are the only ones allowed to update the resource's access rules after creation
+    ///
+    /// By default, the owner is the signer of the resource creation transaction ([`OwnerRule::OwnedBySigner`]).
+    ///
+    /// Resource owners are the only ones allowed to update the resource's access rules after creation.
     pub fn with_owner_rule(mut self, rule: OwnerRule) -> Self {
         self.owner_rule = rule;
         self
     }
 
     /// Sets up who can access the resource for each type of action
+    ///
+    /// This allows you to pass the access rules that will be applied to the resource in a single call.
+    ///
+    /// Using this function will override the default access rules defined in [`ResourceAccessRules::new()`].
     pub fn with_access_rules(mut self, rules: ResourceAccessRules) -> Self {
         self.access_rules = rules;
         self
@@ -57,19 +99,61 @@ impl FungibleResourceBuilder {
     }
 
     /// Sets up who can mint new tokens of the resource
+    ///
+    /// Allows you to pass an [`AccessRule`] that defines who can mint new tokens of the resource.
+    ///
+    /// By default, minting is disabled for all users.
+    ///
+    /// #Examples
+    ///
+    /// ```rust, ignore
+    /// use tari_template_lib::auth::AccessRule;
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::fungible()
+    ///     .mintable(rule!(allow_all))
+    ///     .build();
+    /// ```
     pub fn mintable(mut self, rule: AccessRule) -> Self {
         self.access_rules = self.access_rules.mintable(rule);
         self
     }
 
     /// Sets up who can burn (destroy) tokens of the resource
+    ///
+    /// Allows you to pass an [`AccessRule`] that defines who can burn tokens of the resource.
+    /// By default, burning is disabled for all users.
+    ///
+    /// #Examples
+    ///
+    /// ```rust, ignore
+    /// use tari_template_lib::auth::AccessRule;
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::fungible()
+    ///     .burnable(rule!(allow_all))
+    ///     .build();
+    /// ```
     pub fn burnable(mut self, rule: AccessRule) -> Self {
         self.access_rules = self.access_rules.burnable(rule);
         self
     }
 
     /// Sets up who can recall tokens of the resource.
-    /// A recall is the forceful withdrawal of tokens from any external vault
+    ///
+    /// A recall is the forceful withdrawal of **ALL** tokens from any external vault.
+    ///
+    /// Allows you to pass an [`AccessRule`] that defines who can recall tokens from a vault.
+    ///
+    /// By default, recalling is disabled for all users.
+    ///
+    /// # Examples
+    ///
+    /// ```rust, ignore
+    /// use tari_template_lib::auth::AccessRule;
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::fungible()
+    ///    .recallable(rule!(allow_all))
+    ///   .build();
+    /// ```
     pub fn recallable(mut self, rule: AccessRule) -> Self {
         self.access_rules = self.access_rules.recallable(rule);
         self
@@ -82,48 +166,155 @@ impl FungibleResourceBuilder {
     }
 
     /// Sets up who can withdraw tokens of the resource from any vault
+    ///
+    /// Allows you to pass an [`AccessRule`] that defines who can withdraw tokens (via a specified amount) from a vault.
+    ///
+    /// By default, withdrawal is allowed for all users.
+    ///
+    /// # Examples
+    ///
+    /// ```rust, ignore
+    /// use tari_template_lib::auth::AccessRule;
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::fungible()
+    ///     .withdrawable(AccessRule::DenyAll)
+    ///     .build();
+    /// ```
     pub fn withdrawable(mut self, rule: AccessRule) -> Self {
         self.access_rules = self.access_rules.withdrawable(rule);
         self
     }
 
     /// Sets up who can deposit tokens of the resource into any vault
+    ///
+    /// Allows you to pass an [`AccessRule`] that defines who can deposit tokens (via a specified amount) into a vault.
+    ///
+    /// By default, deposit is allowed for all users.
+    ///
+    /// # Examples
+    ///
+    /// ```rust, ignore
+    /// use tari_template_lib::auth::AccessRule;
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::fungible()
+    ///    .depositable(rule!(allow_all))
+    ///     .build();
+    /// ```
     pub fn depositable(mut self, rule: AccessRule) -> Self {
         self.access_rules = self.access_rules.depositable(rule);
         self
     }
 
-    /// Sets up who (apart from the owner) can update the access rules of the resource.
+    /// Sets up who can update the access rules of the resource.
+    ///
+    /// Allows you to pass an [`AccessRule`] that defines who can update the access rules of the resource.
+    ///
+    /// By default, the ability to update access rules is denied for all users. If you want to allow the owner to update
+    /// the access rules, you can use `.update_access_rules(AccessRule::require_owner())`
+    ///
+    /// # Examples
+    ///
+    /// ```rust, ignore
+    /// use tari_template_lib::auth::AccessRule;
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::fungible()
+    ///     .update_access_rules(AccessRule::require_owner())
+    ///     .build();
+    /// ```
     pub fn update_access_rules(mut self, rule: AccessRule) -> Self {
         self.access_rules = self.access_rules.update_access_rules(rule);
         self
     }
 
     /// Sets up the specified `symbol` as the token symbol in the metadata of the resource
+    ///
+    /// # Examples
+    /// ```rust, ignore
+    ///  use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::fungible()
+    ///     .with_token_symbol("MY_TOKEN")
+    ///     .build();
+    /// ```
     pub fn with_token_symbol<S: Into<String>>(mut self, symbol: S) -> Self {
         self.token_symbol = Some(symbol.into());
         self
     }
 
     /// Adds a new metadata entry to the resource
+    ///
+    /// Allows you to add a key-value pair to the resource's metadata.
+    ///
+    /// # Notes
+    ///
+    /// `.add_metadata()` will override any existing metadata with the same key.
+    ///
+    /// # Examples
+    /// ```rust, ignore
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::fungible()
+    ///    .add_metadata("CharacterName", "Tari")
+    ///    .add_metadata("CharacterType", "Mascot")
+    ///    .add_metadata("CharacterLvl", "99")
+    /// .build();
+    /// ```
     pub fn add_metadata<K: Into<String>, V: Into<String>>(mut self, key: K, value: V) -> Self {
         self.metadata.insert(key, value);
         self
     }
 
-    /// Sets up all the metadata entries of the resource
+    /// Replaces the resource's metadata with the given [`Metadata`] object.
+    ///
+    /// Note: This will overwrite any existing metadata, including entries added via `.add_metadata()`.
+    ///
+    /// # Examples
+    /// ```rust, ignore
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// use tari_template_lib::models::Metadata;
+    /// let metadata = Metadata::from([
+    ///     ("Type", "NFT"),
+    ///     ("Creator", "Tari Project"),
+    /// ]);
+    /// let address = ResourceBuilder::fungible()
+    ///     .with_metadata(metadata)
+    ///     .build();
+    /// ```
     pub fn with_metadata(mut self, metadata: Metadata) -> Self {
         self.metadata = metadata;
         self
     }
 
     /// Sets up the image URL of the resource
+    ///
+    /// Allows you to set the image URL of the resource, which can be used in user interfaces to display the token's
+    /// logo or image.
+    ///
+    /// # Examples
+    /// ```rust, ignore
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::fungible()
+    ///     .with_image_url("https://example.com/my_token_image.png".to_string())
+    ///     .build();
+    /// ```
     pub fn with_image_url(self, url: String) -> Self {
         self.add_metadata(IMAGE_URL, url)
     }
 
-    /// Sets the divisibility of the resource. i.e. the number of decimal places the resource can be divided into.
-    /// Panic if the divisibility is greater than 18.
+    /// Sets the divisibility of the resource. i.e. the number of decimal places
+    ///
+    /// The default divisibility is 18, which means the smallest unit of the resource is 0.000000000000000001 of the
+    /// whole unit.
+    ///
+    /// # Panics
+    /// method will panic if:
+    /// * The divisibility is greater than 18.
+    ///
+    /// # Examples
+    /// ```rust, ignore
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::fungible()
+    ///     .with_divisibility(9)
+    ///     .build();
+    /// ```
     pub fn with_divisibility(mut self, divisibility: u8) -> Self {
         if divisibility > 18 {
             panic!("Divisibility cannot be greater than 18");
@@ -164,21 +355,40 @@ impl FungibleResourceBuilder {
 
     /// Disables the tracking of total supply for the resource.
     ///
-    /// This is useful for resources that do not need to track the total supply.
-    /// Disabling total supply tracking can save on fees.
+    /// By default, total supply tracking is enabled. `.disable_total_supply_tracking()` can be used to disable it.
+    /// Use cases include privacy focused tokens or utility tokens where the total supply is not relevant.
+    ///
+    /// # Examples
+    /// ```rust, ignore
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::fungible()
+    ///     .disable_total_supply_tracking()
+    ///     .build();
+    /// ```
     pub fn disable_total_supply_tracking(mut self) -> Self {
         self.is_total_supply_tracking_enabled = false;
         self
     }
 
     /// Build the resource, returning the address
+    ///
+    /// Utilises an internal method to create the resource with the specified properties.
+    ///      
     pub fn build(self) -> ResourceAddress {
         let (address, _) = self.build_internal(None);
         address
     }
 
-    /// Sets up how many tokens are going to be minted on resource creation
-    /// This builds the resource and returns a bucket containing the initial supply.
+    /// This builds the resource and returns a bucket containing the initial supply based on the passed [`Amount`].
+    ///
+    /// # Examples
+    /// ```rust, ignore
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// use tari_template_lib::types::Amount;
+    /// let bucket = ResourceBuilder::fungible()
+    ///     .with_token_symbol("YOUR_TOKEN")
+    ///     .initial_supply(Amount::from(1_000_000));
+    /// ```
     pub fn initial_supply<A: Into<Amount>>(self, initial_supply: A) -> Bucket {
         let mint_arg = MintArg::Fungible {
             amount: initial_supply.into(),

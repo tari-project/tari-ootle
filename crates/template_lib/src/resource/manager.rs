@@ -118,11 +118,11 @@ impl ResourceManager {
     }
 
     /// A public function that returns the resource type of the resource being managed.
-    /// 
+    ///
     /// # Panics
-    /// 
-    /// If the resource type is not recognized on a resource or if the resource address is not set via `ResourceManager`.
-    /// 
+    ///
+    /// If the resource type is not recognized on a resource or if the resource address is not set via
+    /// `ResourceManager`.
     pub fn resource_type(&self) -> ResourceType {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
             resource_ref: self.expect_resource_address(),
@@ -133,7 +133,7 @@ impl ResourceManager {
             .expect("Resource GetResourceType returned invalid resource type")
     }
 
-   /// Creates a new resource on the Tari network.
+    /// Creates a new resource on the Tari network.
     ///
     /// This function registers a new resource, such as a fungible, non-fungible, or confidential asset,
     /// and optionally mints an initial supply. It returns the address of the created resource and,
@@ -146,10 +146,12 @@ impl ResourceManager {
     ///
     /// * `resource_type` – The type of resource to create, defined by the [`ResourceType`] enum.
     /// * `owner_rule` – Specifies [`OwnerRule`]s, such as requiring a signature or badge to control the resource.
-    /// * `access_rules` – Defines fine-grained permissions ([`ResourceAccessRules`]) for actions like minting, burning, or updating data.
+    /// * `access_rules` – Defines fine-grained permissions ([`ResourceAccessRules`]) for actions like minting, burning,
+    ///   or updating data.
     /// * `metadata` – Immutable metadata that describes the resource, such as name, symbol, or description.
     /// * `mint_arg` – Optional initial minting configuration. Must match the `resource_type`.
-    /// * `view_key` – (Optional) A [`RistrettoPublicKeyBytes`] used for confidential assets to enable visibility control.
+    /// * `view_key` – (Optional) A [`RistrettoPublicKeyBytes`] used for confidential assets to enable visibility
+    ///   control.
     /// * `authorize_hook` – (Optional) An [`AuthHook`] for delegating authorization to another component.
     /// * `address_allocation` – (Optional) A specific [`ResourceAddressAllocation`] used to predefine the address.
     /// * `divisibility` – Number of decimal places allowed. For non-fungible resources, must be 0.
@@ -233,8 +235,8 @@ impl ResourceManager {
     ///
     /// # Arguments
     ///
-    /// * `proof` – A [`ConfidentialOutputStatement`] containing the zero-knowledge proof and associated metadata.
-    ///   This includes the output and change statements, a range proof, and revealed amounts for output and change.
+    /// * `proof` – A [`ConfidentialOutputStatement`] containing the zero-knowledge proof and associated metadata. This
+    ///   includes the output and change statements, a range proof, and revealed amounts for output and change.
     ///
     /// # Returns
     ///
@@ -265,9 +267,9 @@ impl ResourceManager {
     /// is returned.
     ///
     /// # Note
-    /// 
-    /// 
-    /// 
+    ///
+    ///
+    ///
     /// # Type Parameters
     ///
     /// * `T` – The type of the static (immutable) metadata associated with the NFT.
@@ -275,7 +277,8 @@ impl ResourceManager {
     ///
     /// # Arguments
     ///
-    /// * `id` – A unique identifier for the NFT. Must be one of the supported [`NonFungibleId`] variants: `U256`, `Uint64`, `Uint32`, or `String`.
+    /// * `id` – A unique identifier for the NFT. Must be one of the supported [`NonFungibleId`] variants: `U256`,
+    ///   `Uint64`, `Uint32`, or `String`.
     /// * `metadata` – Immutable data describing the NFT (e.g., name, attributes, external links).
     /// * `mutable_data` – Data that can be updated after minting (e.g., usage counters or evolving states).
     ///
@@ -325,7 +328,7 @@ impl ResourceManager {
     /// This method generates random [`NonFungibleId`]s locally without checking for global uniqueness.
     /// While collisions are extremely unlikely due to the large ID space, they are theoretically possible.
     /// Consumers should be aware of this when minting large numbers of NFTs.
-    /// 
+    ///
     /// # Arguments
     ///
     /// * `metadata` - A serializable value representing the immutable metadata of the non-fungibles. This is typically
@@ -353,7 +356,6 @@ impl ResourceManager {
     ///     10,
     /// );
     /// ```
-
     pub fn mint_many_non_fungible<T: Serialize + ?Sized, U: Serialize + ?Sized>(
         &self,
         metadata: &T,
@@ -371,11 +373,11 @@ impl ResourceManager {
     }
 
     /// Mints multiple non-fungible tokens (NFTs) using a custom ID generator.
-    /// 
+    ///
     /// This method allows template authors to programmatically define the `NonFungibleId`s
     /// to be used for minting NFTs, by passing a closure that generates new IDs. Each minted
     /// NFT shares the same metadata and mutable data provided to the function.
-    /// 
+    ///
     /// The ID generator (`producer`) closure is repeatedly called until it returns `None`.
     /// If the closure returns duplicate IDs, the function will panic to avoid collisions.
     ///
@@ -385,13 +387,13 @@ impl ResourceManager {
     /// If an ID collides with an existing non-fungible token, the mint operation will panic or fail.
     /// Therefore, callers must ensure their ID generation strategy produces globally unique IDs,
     /// typically by using cryptographically secure randomness or a coordinated scheme.
-    /// 
+    ///
     /// # Type Parameters
     ///
     /// - `T`: The type of the immutable metadata. Must implement [`Serialize`].
     /// - `U`: The type of the mutable data. Must implement [`Serialize`].
-    /// - `F`: A closure that returns [`Some(NonFungibleId)`] for each new token,
-    ///         or [`None`] to stop the minting process.
+    /// - `F`: A closure that returns [`Some(NonFungibleId)`] for each new token, or [`None`] to stop the minting
+    ///   process.
     ///
     /// # Arguments
     ///
@@ -448,8 +450,9 @@ impl ResourceManager {
 
     /// Mints a specified amount of fungible tokens for the resource managed by this `ResourceManager`.
     ///
-    /// The minted tokens are returned inside a [`Bucket`], which can be used to hold, transfer, or manipulate the tokens.
-    /// The `amount` specifies how many of the smallest indivisible units of the fungible resource should be minted.
+    /// The minted tokens are returned inside a [`Bucket`], which can be used to hold, transfer, or manipulate the
+    /// tokens. The `amount` specifies how many of the smallest indivisible units of the fungible resource should be
+    /// minted.
     ///
     /// # Type Parameters
     ///
@@ -457,7 +460,8 @@ impl ResourceManager {
     ///
     /// # Arguments
     ///
-    /// * `amount` – The quantity of tokens to mint, expressed in the smallest unit of the resource (e.g., satoshis, wei).
+    /// * `amount` – The quantity of tokens to mint, expressed in the smallest unit of the resource (e.g., satoshis,
+    ///   wei).
     ///
     /// # Returns
     ///
@@ -476,7 +480,6 @@ impl ResourceManager {
     /// // Mint 1000 units of the fungible token managed by `resource_manager`
     /// let bucket = resource_manager.mint_fungible(1000u64);
     /// ```
-
     pub fn mint_fungible<A: Into<Amount>>(&self, amount: A) -> Bucket {
         self.mint_internal(MintResourceArg {
             mint_arg: MintArg::Fungible { amount: amount.into() },
@@ -498,15 +501,15 @@ impl ResourceManager {
     ///
     /// # Panics
     ///
-    /// This function will panic if the caller lacks the necessary [`OwnerRule`] or [`ResourceAccessRules`] to recall tokens for the resource.
-    /// 
+    /// This function will panic if the caller lacks the necessary [`OwnerRule`] or [`ResourceAccessRules`] to recall
+    /// tokens for the resource.
+    ///
     /// # Examples
     ///
     /// ```rust,ignore
     /// let vault_id = component.get_user_vault("alice");
     /// let bucket = resource_manager.recall_fungible_all(vault_id);
     /// ```
-
     pub fn recall_fungible_all(&self, vault_id: VaultId) -> Bucket {
         self.recall_internal(RecallResourceArg {
             resource: ResourceDiscriminator::Everything,
@@ -515,11 +518,11 @@ impl ResourceManager {
     }
 
     /// Withdraws an amount of tokens of the resource from the specified vault.
-    /// 
+    ///
     /// Allows the user to specify an amount of fungible tokens to be recalled from a specified vault.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `vault_id` - The vault whose tokens are going to be recalled.
     /// * `amount` - The amount of tokens to be recalled from the vault.
     ///
@@ -528,11 +531,12 @@ impl ResourceManager {
     /// Returns a [`Bucket`] with the recalled tokens
     ///
     /// # Panics
-    /// 
+    ///
     /// It will panic if:
     /// * The [`ResourceType`] is not fungible
-    /// * The caller doesn't have the necessary [`OwnerRule`] or [`ResourceAccessRules`] to recall tokens for the resource
-    /// 
+    /// * The caller doesn't have the necessary [`OwnerRule`] or [`ResourceAccessRules`] to recall tokens for the
+    ///   resource
+    ///
     /// # Examples
     ///
     /// ```rust,ignore
@@ -548,25 +552,25 @@ impl ResourceManager {
     }
 
     /// Withdraws a single non-fungible token of the resource from the specified vault.
-    /// 
+    ///
     /// Method for recalling a single non-fungible token identified by `token` from the specified vault.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// `vault_id` - The vault whose tokens are going to be recalled
     /// `token` - The ID of the non-fungible token to be recalled.
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// Returns a [`Bucket`] with the recalled tokens
     ///
     /// # Panics:
-    /// 
+    ///
     /// It will panic if:
     /// * The resource is not of [`ResourceType`] non-fungible
-    /// * The caller doesn't have the necessary [`OwnerRule`] or [`ResourceAccessRules`] to recall tokens for the resource
+    /// * The caller doesn't have the necessary [`OwnerRule`] or [`ResourceAccessRules`] to recall tokens for the
+    ///   resource
     /// * The resource does not contain tokens with the ID specified by `token`
-    ///
     pub fn recall_non_fungible(&self, vault_id: VaultId, token: NonFungibleId) -> Bucket {
         self.recall_non_fungibles(vault_id, Some(token).into_iter().collect())
     }
@@ -589,7 +593,8 @@ impl ResourceManager {
     /// This function will panic if:
     /// - The resource type of the vault is not [`ResourceType::NonFungible`]
     /// - Any of the requested NFTs do not exist or have been burned
-    /// - The caller lacks the necessary permissions sufficient permissions to perform the recall, as defined in the resource's [`ResourceAccessRules`] or [`OwnerRule`].
+    /// - The caller lacks the necessary permissions sufficient permissions to perform the recall, as defined in the
+    ///   resource's [`ResourceAccessRules`] or [`OwnerRule`].
     ///
     /// # Example
     ///
@@ -601,7 +606,6 @@ impl ResourceManager {
     ///
     /// let bucket = resource_manager.recall_non_fungibles(vault_id, token_ids);
     /// ```
-
     pub fn recall_non_fungibles(&self, vault_id: VaultId, tokens: BTreeSet<NonFungibleId>) -> Bucket {
         self.recall_internal(RecallResourceArg {
             resource: ResourceDiscriminator::NonFungible { tokens },
@@ -613,21 +617,22 @@ impl ResourceManager {
     /// Returns a `Bucket` with the recalled tokens
     ///
     /// # Arguments
-    /// 
+    ///
     /// * `vault_id` - The vault whose tokens are going to be recalled
     /// * `commitments` - The [`PedersenCommitmentBytes`] of the tokens that are going to be recalled
     /// * `revealed_amount` - The amount of tokens that are going to be recalled
-    /// 
+    ///
     ///  # Panics
-    /// 
+    ///
     /// It will panic if:
     /// * The resource is not of [`ResourceType::Confidential`]
-    /// * The caller doesn't have the necessary [`OwnerRule`] or [`ResourceAccessRules`] to recall tokens for the resource
+    /// * The caller doesn't have the necessary [`OwnerRule`] or [`ResourceAccessRules`] to recall tokens for the
+    ///   resource
     /// * `commitments` contain invalid commitments (invalid Pedersen commitments)
     /// * `revealed_amount` is greater than the amount of tokens present in the vault
-    /// 
+    ///
     /// # Example
-    /// 
+    ///
     /// ```rust,ignore
     /// use std::collections::BTreeSet;
     /// use my_crate::{VaultId, PedersenCommitmentBytes, Amount};
@@ -640,7 +645,6 @@ impl ResourceManager {
     /// let bucket = engine.recall_confidential(vault_id, commitments, revealed_amount);
     /// assert!(!bucket.is_empty());
     /// ```
-    /// 
     pub fn recall_confidential<A: Into<Amount>>(
         &self,
         vault_id: VaultId,
@@ -657,18 +661,18 @@ impl ResourceManager {
     }
 
     /// Returns the total supply of tokens for the resource being managed in a [`ResourceManager`] instance.
-    /// 
+    ///
     /// If the resource has total supply tracking enabled, the function will return the total supply of tokens.
-    /// 
+    ///
     /// If you want to check if the resource has total supply tracking enabled, use [`total_supply_opt`].
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// Panics if:
     /// * the resource does not have total supply tracking enabled. You can check this with [`total_supply_opt`].
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust,ignore
     /// let total = resource_manager.total_supply();
     /// println!("Total supply: {}", total);
@@ -714,25 +718,24 @@ impl ResourceManager {
     }
 
     /// Returns the non-fungible token identified by the given [`NonFungibleId`].
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `id` - The unique identifier of the non-fungible token to retrieve.
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// A [`NonFungible`] NFT object containing the token's metadata and mutable data.
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// This method will panic if:
     /// - The resource is not of type [`ResourceType::NonFungible`].
     /// - The token with the specified `id` does not exist or has been burned.
-    /// - The caller does not have the necessary [`ResourceAccessRules`] or [`OwnerRule`]
-    ///   to access the non-fungible token.
-    ///     
+    /// - The caller does not have the necessary [`ResourceAccessRules`] or [`OwnerRule`] to access the non-fungible
+    ///   token.
     /// # Example
-    /// 
+    ///
     ///  ```rust,ignore
     /// let id = NonFungibleId::String("unique_nft_id".to_string());
     /// let nft = resource_manager.get_non_fungible(&id);
@@ -805,19 +808,20 @@ impl ResourceManager {
     }
 
     /// Updates access rules that determine who can operate the resource
-    /// 
-    /// The function allows the caller to overwrite the existing [`ResourceAccessRules`] for the resource with a new set. This will replace the existing access rules entirely.
-    /// 
+    ///
+    /// The function allows the caller to overwrite the existing [`ResourceAccessRules`] for the resource with a new
+    /// set. This will replace the existing access rules entirely.
+    ///
     /// # Arugments
-    /// 
+    ///
     /// * `access_rules` - The new [`ResourceAccessRules`] to set for the resource.
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// It will panic if:
     /// - The caller does not have the necessary [`ResourceAccessRules`] or [`OwnerRule`] to update the access rules.
     /// - The [`ResourceAccessRules`] are invalid or malformed.
-    /// 
+    ///
     /// # Examples
     /// ```rust,ignore
     /// let new_access_rules = ResourceAccessRules::default()

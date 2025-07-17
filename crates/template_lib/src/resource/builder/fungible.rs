@@ -295,14 +295,14 @@ impl FungibleResourceBuilder {
     ///     .with_image_url("https://example.com/my_token_image.png".to_string())
     ///     .build();
     /// ```
-
     pub fn with_image_url(self, url: String) -> Self {
         self.add_metadata(IMAGE_URL, url)
     }
 
     /// Sets the divisibility of the resource. i.e. the number of decimal places
     ///
-    /// The default divisibility is 18, which means the smallest unit of the resource is 0.000000000000000001 of the whole unit.
+    /// The default divisibility is 18, which means the smallest unit of the resource is 0.000000000000000001 of the
+    /// whole unit.
     ///
     /// # Panics
     /// method will panic if:
@@ -389,7 +389,6 @@ impl FungibleResourceBuilder {
     ///     .with_token_symbol("YOUR_TOKEN")
     ///     .initial_supply(Amount::from(1_000_000));
     /// ```
-
     pub fn initial_supply<A: Into<Amount>>(self, initial_supply: A) -> Bucket {
         let mint_arg = MintArg::Fungible {
             amount: initial_supply.into(),

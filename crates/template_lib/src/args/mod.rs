@@ -29,7 +29,10 @@ pub use types::*;
 mod arg;
 pub use arg::*;
 
+mod freeze_flags;
+pub use freeze_flags::*;
 mod result;
+
 pub use result::*;
 
 /// Low-level macro used for counting characters in the encoding of arguments. Not intended for general usage

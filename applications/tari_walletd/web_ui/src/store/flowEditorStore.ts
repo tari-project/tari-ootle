@@ -38,8 +38,8 @@ interface FlowEditorStore {
   setGeneratedCodeType: (type: GeneratedCodeType | null) => void;
   account: AccountInfo | undefined;
   setAccount: (account: AccountInfo | undefined) => void;
-  setCurrentJson: (json: any) => void;
-  currentJson: any;
+  setCurrentState: (state: any) => void;
+  currentState: any;
   fee: number;
   setFee: (fee: number) => void;
 }
@@ -66,8 +66,8 @@ const useFlowEditorStore = create<FlowEditorStore>()(
       setGeneratedCodeType: (type) => set({ generatedCodeType: type }),
       account: undefined,
       setAccount: (account) => set({ account }),
-      currentJson: INITIAL_FLOW_STATE,
-      setCurrentJson: (json) => set({ currentJson: json }),
+      currentState: INITIAL_FLOW_STATE,
+      setCurrentState: (json) => set({ currentState: json }),
       fee: 3000,
       setFee: (fee) => set({ fee }),
     }),

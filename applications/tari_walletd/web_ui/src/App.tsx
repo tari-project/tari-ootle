@@ -41,7 +41,7 @@ import AccessToken from "./routes/AccessToken/AccessToken";
 import { jwtDecode } from "jwt-decode";
 import Templates from "./routes/Templates/Templates";
 import Manifest from "./routes/Manifest/Manifest";
-import FlowEditor from "./Components/FlowEditor/FlowEditor";
+import FlowEditor from "./routes/FlowEditor/FlowEditor";
 
 export const breadcrumbRoutes = [
   {

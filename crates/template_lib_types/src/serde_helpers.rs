@@ -7,13 +7,28 @@ use ::serde::{
     Deserializer,
     Serializer,
 };
-use tari_template_abi::rust::{borrow::Cow, fmt, marker::PhantomData};
+use tari_template_abi::rust::{fmt, marker::PhantomData};
+
+// Cow is not available in no_std, so we define our own
+enum BytesCow<'a> {
+    Borrowed(&'a [u8]),
+    Owned(Vec<u8>),
+}
+
+impl<'a> AsRef<[u8]> for BytesCow<'a> {
+    fn as_ref(&self) -> &[u8] {
+        match self {
+            BytesCow::Borrowed(v) => v,
+            BytesCow::Owned(v) => v.as_ref(),
+        }
+    }
+}
 
 #[derive(Default)]
 struct BytesVisitor<'a>(PhantomData<&'a ()>);
 
 impl<'a> Visitor<'a> for BytesVisitor<'a> {
-    type Value = Cow<'a, [u8]>;
+    type Value = BytesCow<'a>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         formatter.write_str("bytes")
@@ -21,17 +36,17 @@ impl<'a> Visitor<'a> for BytesVisitor<'a> {
 
     fn visit_borrowed_bytes<E>(self, v: &'a [u8]) -> Result<Self::Value, E>
     where E: Error {
-        Ok(Cow::Borrowed(v))
+        Ok(BytesCow::Borrowed(v))
     }
 
     fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
     where E: Error {
-        Ok(Cow::Owned(v))
+        Ok(BytesCow::Owned(v))
     }
 
     fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
     where E: Error {
-        Ok(Cow::Owned(v.to_vec()))
+        Ok(BytesCow::Owned(v.to_vec()))
     }
 }
 
@@ -54,7 +69,7 @@ pub mod fixed_hex {
         T: From<[u8; L]>,
     {
         let value = if d.is_human_readable() {
-            let hex = <Cow<'_, str> as Deserialize>::deserialize(d)?;
+            let hex = String::deserialize(d)?;
             let bytes = fixed_bytes_from_hex(&hex).map_err(Error::custom)?;
             T::from(bytes)
         } else {
@@ -104,7 +119,7 @@ pub mod dynamic_hex {
         for<'a> T: TryFrom<&'a [u8]>,
     {
         if d.is_human_readable() {
-            let hex = <Cow<'_, str> as Deserialize>::deserialize(d)?;
+            let hex = String::deserialize(d)?;
             let bytes = bytes_from_hex(&hex).map_err(Error::custom)?;
             return T::try_from(&bytes).map_err(|_| {
                 Error::custom(format!(
@@ -114,8 +129,8 @@ pub mod dynamic_hex {
             });
         }
 
-        let bytes: Cow<'_, [u8]> = d.deserialize_bytes(BytesVisitor::default())?;
-        T::try_from(&bytes).map_err(|_| {
+        let bytes = d.deserialize_bytes(BytesVisitor::default())?;
+        T::try_from(bytes.as_ref()).map_err(|_| {
             Error::custom(format!(
                 "Failed to convert bytes to type: {}",
                 std::any::type_name::<T>()

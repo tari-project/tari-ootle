@@ -3,8 +3,11 @@ import type { Epoch } from "./Epoch";
 import type { NodeHeight } from "./NodeHeight";
 import type { ValidatorSignatureBytes } from "./ValidatorSignatureBytes";
 
-export interface TimeoutCertificate {
+export type TimeoutCertificate = {
   epoch: Epoch;
   height: NodeHeight;
+  /**
+   * A quorum of validator signatures that sign the timeout certificate.
+   */
   signatures: Array<ValidatorSignatureBytes>;
-}
+};

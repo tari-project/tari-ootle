@@ -5,7 +5,7 @@ import type { ProposalCertificate } from "./ProposalCertificate";
 import type { Transaction } from "./Transaction";
 import type { TransactionStatus } from "./TransactionStatus";
 
-export interface WalletTransaction {
+export type WalletTransaction = {
   id: string;
   transaction: Transaction;
   status: TransactionStatus;
@@ -18,4 +18,4 @@ export interface WalletTransaction {
   new_account_info: NewAccountInfo | null;
   is_dry_run: boolean;
   last_update_time: string;
-}
+};

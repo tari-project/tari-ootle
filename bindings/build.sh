@@ -22,6 +22,10 @@ fi
 cargo test --workspace --exclude integration_tests export_bindings --features ts
 npx shx mv ../crates/bindings/src/types/* ./src/types/
 npx shx rm -rf ../crates/bindings/
+npx shx mv ../clients/bindings/src/types/* ./src/types/
+npx shx rm -rf ../clients/bindings/
+npx shx mv ../crates/wallet/bindings/src/types/* ./src/types/
+npx shx rm -rf ../crates/wallet/bindings/
 
 # Add the license header
 echo "//   Copyright $(date +%Y) The Tari Project" >> $SOURCE_PATH/$MAIN_INDEX_FILE
@@ -38,6 +42,7 @@ done
 for dir in $(find $TYPES_DIR -mindepth 1 -maxdepth 1 -type d | sort); do
   module_dir_name="$(basename $dir)"
   module_export_file="$module_dir_name.ts"
+  echo "Generating ${module_export_file}...";
   if [ -f "$module_export_file" ]; then
     npx shx rm "$module_export_file"
   fi
@@ -59,7 +64,3 @@ for file in $(find $HELPERS_DIR -name "*.ts" | sort); do
     echo "export * from './$HELPERS_DIR/$MODULE_NAME';" >> $MAIN_INDEX_FILE
   fi
 done
-
-# This is temporary solution to the problem of 'Commitment' not being exported, and we have to do manual types in the
-# code for BTreeMap<Commitment, ConfidentialOutput>. Because of this the ConfidentialOutput type is not imported.
-echo "import { ConfidentialOutput } from './ConfidentialOutput';" >> $TYPES_DIR/ResourceContainer.ts

@@ -3,13 +3,57 @@ import type { PedersenCommitmentBytes } from "./PedersenCommitmentBytes";
 import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
 import type { Scalar32Bytes } from "./Scalar32Bytes";
 
-export interface ViewableBalanceProof {
+/**
+ * ### Verifiable encryption
+ *
+ * A verifiable ElGamal encryption proving system that asserts the value bound to a Pedersen
+ * commitment matches the value encrypted to a given public key. This will be used to assert that the issuer can
+ * decrypt account balances without knowing the opening to the account's balance commitment.
+ *
+ * The proving relation is $\\{ (C, E, R, P); (v, m, r) | C = mG + vH, E = vG + rP, R = rG \\}$.
+ *
+ * The prover samples $x_v, x_m, x_r$ uniformly at random.
+ * It computes $C' = x_v H + x_m G$, $E' = x_v G + x_r P$, and $R' = x_r G$ and sends them to the verifier.
+ * The verifier samples nonzero $e$ uniformly at random and sends it to the prover.
+ * The prover computes $s_v = ev + x_v$, $s_m = em + x_m$, and $s_r = er + x_r$ and sends them to the verifier.
+ * The verifier accepts the proof if and only if $eC + C' = s_v H + s_m G$, $eE + E' = s_v G + s_r P$, and $eR + R' =
+ * s_r G$.
+ *
+ * It is a sigma protocol for the relation that is complete, $2$-special sound, and special honest-verifier zero
+ * knowledge.
+ */
+export type ViewableBalanceProof = {
+  /**
+   * The encrypted value that takes the form: E = v.G + r.P
+   * where v is the value, G is the generator, r is the secret_nonce and P is the view key
+   */
   elgamal_encrypted: RistrettoPublicKeyBytes;
+  /**
+   * The public nonce used in the ElGamal encryption R = r.G
+   */
   elgamal_public_nonce: RistrettoPublicKeyBytes;
+  /**
+   * Part of the proof that the encrypted value is correctly constructed. C' = x_v.H + x_m.G
+   */
   c_prime: PedersenCommitmentBytes;
+  /**
+   * Part of the proof that the encrypted value is correctly constructed. E' = x_v.G + x_r.P
+   */
   e_prime: RistrettoPublicKeyBytes;
+  /**
+   * Part of the proof that the encrypted value is correctly constructed. R' = x_r.G
+   */
   r_prime: RistrettoPublicKeyBytes;
+  /**
+   * Part of the proof that the encrypted value is correctly constructed. s_v = x_v + e.v
+   */
   s_v: Scalar32Bytes;
+  /**
+   * Part of the proof that the encrypted value is correctly constructed. s_m = x_m + e.m
+   */
   s_m: Scalar32Bytes;
+  /**
+   * Part of the proof that the encrypted value is correctly constructed. s_r = x_r + e.r
+   */
   s_r: Scalar32Bytes;
-}
+};

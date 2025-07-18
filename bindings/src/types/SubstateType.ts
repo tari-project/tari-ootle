@@ -8,4 +8,5 @@ export type SubstateType =
   | "NonFungible"
   | "TransactionReceipt"
   | "ValidatorFeePool"
-  | "Template";
+  | "Template"
+  | "Utxo";

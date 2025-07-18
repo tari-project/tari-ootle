@@ -1,7 +1,7 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-import { TariCborTags } from "@tari-project/typescript-bindings";
+import { TariTypeTag } from "@tari-project/typescript-bindings";
 
 export function getValueByPath(cborRepr: object, path: string): any {
   let value = cborRepr;
@@ -75,21 +75,21 @@ function bytesToAddressString(type: String, tag: ArrayLike<number>): string {
 
 export function convertTaggedValue(tag: number, value: any): string | any {
   switch (tag) {
-    case TariCborTags.VaultId:
+    case TariTypeTag.VaultId:
       return bytesToAddressString("vault", value.Bytes!);
-    case TariCborTags.ComponentAddress:
+    case TariTypeTag.ComponentAddress:
       return bytesToAddressString("component", value.Bytes!);
-    case TariCborTags.ResourceAddress:
+    case TariTypeTag.ResourceAddress:
       return bytesToAddressString("resource", value.Bytes!);
-    case TariCborTags.NonFungibleAddress:
+    case TariTypeTag.NonFungibleAddress:
       return bytesToAddressString("non_fungible", value.Bytes!);
-    case TariCborTags.UnclaimedConfidentialOutputAddress:
+    case TariTypeTag.UnclaimedConfidentialOutputAddress:
       return bytesToAddressString("commitment", value.Bytes!);
-    case TariCborTags.TemplateAddress:
+    case TariTypeTag.TemplateAddress:
       return bytesToAddressString("template", value.Bytes!);
-    case TariCborTags.Utxo:
+    case TariTypeTag.Utxo:
       return bytesToAddressString("utxo", value.Bytes!);
-    case TariCborTags.Metadata:
+    case TariTypeTag.Metadata:
       return convertCborValue(value);
     default:
       return value;

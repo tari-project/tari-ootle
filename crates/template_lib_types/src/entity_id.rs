@@ -16,7 +16,11 @@ use crate::serde_helpers;
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
-pub struct EntityId(#[serde(with = "serde_helpers::fixed_hex")] [u8; Self::LENGTH]);
+pub struct EntityId(
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "serde_helpers::fixed_hex")]
+    [u8; Self::LENGTH],
+);
 
 impl EntityId {
     pub const LENGTH: usize = 20;
@@ -116,7 +120,11 @@ impl Display for EntityId {
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
-pub struct ComponentKey(#[serde(with = "serde_helpers::fixed_hex")] [u8; Self::LENGTH]);
+pub struct ComponentKey(
+    #[serde(with = "serde_helpers::fixed_hex")]
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    [u8; Self::LENGTH],
+);
 
 impl ComponentKey {
     pub const LENGTH: usize = 12;

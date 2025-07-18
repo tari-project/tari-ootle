@@ -4,11 +4,14 @@ import type { NumPreshards } from "./NumPreshards";
 import type { ShardGroup } from "./ShardGroup";
 import type { VotePower } from "./VotePower";
 
-export interface CommitteeInfo {
+/**
+ * Represents a "slice" of the 256-bit shard space
+ */
+export type CommitteeInfo = {
   num_shards: NumPreshards;
   num_shard_group_members: number;
   num_committees: number;
   shard_group: ShardGroup;
   epoch: Epoch;
   total_power: VotePower;
-}
+};

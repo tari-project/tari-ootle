@@ -963,7 +963,7 @@ mod tests {
             check("txreceipt_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
             check("commitment_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
             check("template_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
-            check("utxo_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
+            check("utxo_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
         }
     }
 }

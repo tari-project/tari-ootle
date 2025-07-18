@@ -4,7 +4,7 @@ import type { Evidence } from "./Evidence";
 import type { LeaderFee } from "./LeaderFee";
 import type { TransactionPoolStage } from "./TransactionPoolStage";
 
-export interface TransactionPoolRecord {
+export type TransactionPoolRecord = {
   transaction_id: string;
   evidence: Evidence;
   is_global: boolean;
@@ -16,4 +16,4 @@ export interface TransactionPoolRecord {
   local_decision: Decision | null;
   remote_decision: Decision | null;
   is_ready: boolean;
-}
+};

@@ -19,9 +19,7 @@ use crate::{confidential::value_lookup_table::ValueLookupTable, FromByteType, To
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct CompressedElgamalVerifiableBalance {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub encrypted: RistrettoPublicKeyBytes,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub public_nonce: RistrettoPublicKeyBytes,
 }
 

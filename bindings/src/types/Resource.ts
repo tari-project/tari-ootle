@@ -6,14 +6,17 @@ import type { OwnerRule } from "./OwnerRule";
 import type { ResourceAccessRules } from "./ResourceAccessRules";
 import type { ResourceType } from "./ResourceType";
 
-export interface Resource {
+export type Resource = {
   resource_type: ResourceType;
   owner_rule: OwnerRule;
   owner_key: Array<number>;
   access_rules: ResourceAccessRules;
   metadata: Metadata;
+  /**
+   * The total supply of the resource. None means total_supply tracking is disabled.
+   */
   total_supply: Amount | null;
   view_key: string | null;
   auth_hook: AuthHook | null;
   divisibility: number;
-}
+};

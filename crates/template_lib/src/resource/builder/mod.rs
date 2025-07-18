@@ -71,12 +71,4 @@ impl ResourceBuilder {
     pub fn confidential() -> ConfidentialResourceBuilder {
         ConfidentialResourceBuilder::new()
     }
-
-    /// Returns a new stealth resource builder.
-    ///
-    /// The highest level of confidentiality. Funds are not kept in vaults, and each output is a confidential substate
-    /// that lives on the ledger.
-    pub fn stealth() -> ConfidentialResourceBuilder {
-        ConfidentialResourceBuilder::new()
-    }
 }

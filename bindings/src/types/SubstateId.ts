@@ -5,9 +5,13 @@ import type { PublishedTemplateAddress } from "./PublishedTemplateAddress";
 import type { ResourceAddress } from "./ResourceAddress";
 import type { TransactionReceiptAddress } from "./TransactionReceiptAddress";
 import type { UnclaimedConfidentialOutputAddress } from "./UnclaimedConfidentialOutputAddress";
+import type { UtxoAddress } from "./UtxoAddress";
 import type { ValidatorFeePoolAddress } from "./ValidatorFeePoolAddress";
 import type { VaultId } from "./VaultId";
 
+/**
+ * Base object address, version tuples
+ */
 export type SubstateId =
   | { Component: ComponentAddress }
   | { Resource: ResourceAddress }
@@ -16,4 +20,5 @@ export type SubstateId =
   | { NonFungible: NonFungibleAddress }
   | { TransactionReceipt: TransactionReceiptAddress }
   | { Template: PublishedTemplateAddress }
-  | { ValidatorFeePool: ValidatorFeePoolAddress };
+  | { ValidatorFeePool: ValidatorFeePoolAddress }
+  | { Utxo: UtxoAddress };

@@ -3,7 +3,7 @@
  * //   SPDX-License-Identifier: BSD-3-Clause
  */
 
-export enum TariCborTags {
+export enum TariTypeTag {
   ComponentAddress = 128,
   Metadata = 129,
   NonFungibleAddress = 130,

@@ -4,6 +4,9 @@ import type { Hash } from "./Hash";
 import type { NonFungibleAddress } from "./NonFungibleAddress";
 import type { ResourceAddress } from "./ResourceAddress";
 
+/**
+ * Specifies a requirement for a [RequireRule].
+ */
 export type RuleRequirement =
   | { Resource: ResourceAddress }
   | { NonFungibleAddress: NonFungibleAddress }

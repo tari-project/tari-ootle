@@ -4,10 +4,10 @@ import type { ConfidentialWithdrawProof } from "./ConfidentialWithdrawProof";
 import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
 import type { UnclaimedConfidentialOutputAddress } from "./UnclaimedConfidentialOutputAddress";
 
-export interface ConfidentialClaim {
+export type ConfidentialClaim = {
   public_key: RistrettoPublicKeyBytes;
   output_address: UnclaimedConfidentialOutputAddress;
   range_proof: string;
   proof_of_knowledge: CommitmentSignatureBytes;
   withdraw_proof: ConfidentialWithdrawProof | null;
-}
+};

@@ -161,10 +161,11 @@ pub struct IndexedWellKnownTypes {
     unclaimed_confidential_output_address: Vec<UnclaimedConfidentialOutputAddress>,
     published_template_addresses: Vec<PublishedTemplateAddress>,
     validator_node_fee_pools: Vec<ValidatorFeePoolAddress>,
+    #[serde(default)]
     utxos: Vec<UtxoAddress>,
-    #[cfg_attr(feature = "ts", ts(type = "[number]"))]
+    #[cfg_attr(feature = "ts", ts(type = "number[]"))]
     component_address_allocations: Vec<ComponentAddressAllocation>,
-    #[cfg_attr(feature = "ts", ts(type = "[number]"))]
+    #[cfg_attr(feature = "ts", ts(type = "number[]"))]
     resource_address_allocations: Vec<ResourceAddressAllocation>,
 }
 

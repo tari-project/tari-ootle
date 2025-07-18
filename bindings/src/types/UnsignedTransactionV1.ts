@@ -3,13 +3,16 @@ import type { Epoch } from "./Epoch";
 import type { Instruction } from "./Instruction";
 import type { SubstateRequirement } from "./SubstateRequirement";
 
-export interface UnsignedTransactionV1 {
+export type UnsignedTransactionV1 = {
   network: number;
   fee_instructions: Array<Instruction>;
   instructions: Array<Instruction>;
+  /**
+   * Input objects that may be read/write
+   */
   inputs: Array<SubstateRequirement>;
   min_epoch: Epoch | null;
   max_epoch: Epoch | null;
   is_seal_signer_authorized: boolean;
   dry_run: boolean;
-}
+};

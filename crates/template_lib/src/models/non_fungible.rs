@@ -233,7 +233,7 @@ mod borsh_impl {
     }
 }
 
-/// Data used to build a `NonFungibleAddress`
+/// A NonFungibleId namespaced by a ResourceAddress.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(
     feature = "ts",

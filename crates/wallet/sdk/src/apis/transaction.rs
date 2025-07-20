@@ -481,6 +481,14 @@ where
                         None,
                     )?;
                 },
+                SubstateId::Utxo(addr) => {
+                    tx.substates_upsert_root(
+                        VersionedSubstateIdRef::new(id, substate.version()),
+                        [(*addr.resource_address()).into()].into_iter().collect(),
+                        None,
+                        None,
+                    )?;
+                },
             }
         }
 

@@ -2,10 +2,30 @@
 import type { Amount } from "./Amount";
 import type { ConfidentialStatement } from "./ConfidentialStatement";
 
-export interface ConfidentialOutputStatement {
+/**
+ * A statement for confidential and revealed outputs. A statement must contain either confidential outputs or non-zero
+ * revealed funds or both.
+ */
+export type ConfidentialOutputStatement = {
+  /**
+   * Proof of the confidential resources that are going to be transferred to the receiver
+   */
   output_statement: ConfidentialStatement | null;
+  /**
+   * Proof of the transaction change, which goes back to the sender's vault
+   */
   change_statement: ConfidentialStatement | null;
+  /**
+   * Bulletproof range proof for the output and change commitments proving that values are in the range
+   * [minimum_value_promise, 2^64)
+   */
   range_proof: string;
+  /**
+   * The amount of revealed funds to output
+   */
   output_revealed_amount: Amount;
+  /**
+   * The amount of revealed funds to return to the sender
+   */
   change_revealed_amount: Amount;
-}
+};

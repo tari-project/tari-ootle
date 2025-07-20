@@ -4,20 +4,68 @@ import type { ExtraData } from "./ExtraData";
 import type { NodeHeight } from "./NodeHeight";
 import type { ShardGroup } from "./ShardGroup";
 
-export interface BlockHeader {
+export type BlockHeader = {
+  /**
+   * "Cached" block ID/hash. This can be computed from the contents of the block header,
+   */
   id: string;
+  /**
+   * Network this block belongs to.
+   */
   network: string;
+  /**
+   * Parent block ID.
+   */
   parent: string;
+  /**
+   * The quorum certificate proposed in this block. Note that this QC justifies a previous block.
+   */
   justify_id: string;
+  /**
+   * Block height.
+   */
   height: NodeHeight;
+  /**
+   * Epoch this block belongs to.
+   */
   epoch: Epoch;
+  /**
+   * Shard group that created this block.
+   */
   shard_group: ShardGroup;
+  /**
+   * The public key of the proposer.
+   */
   proposed_by: string;
+  /**
+   * The total leader fee for this block. This should match the sum of the leader fees in the block's body.
+   */
   total_leader_fee: number;
+  /**
+   * A Merkle root hash committing to all state after this block has been applied.
+   */
   state_merkle_root: string;
+  /**
+   * A Merkle root hash committing to commands in this block. It is zero if the block has no commands.
+   */
   command_merkle_root: string;
+  /**
+   * Proposer signature that signs the Block ID
+   */
   signature: { public_nonce: string; signature: string } | null;
+  /**
+   * The time indicating the creation time of the block. Currently, this can be chosen arbitrarily and is only
+   * informational/used for metrics.
+   */
   timestamp: number;
+  /**
+   * The epoch hash is a hash given by the epoch oracle. E.g. the base layer epoch oracle gives the first block hash
+   * of the epoch.
+   */
   epoch_hash: string;
+  /**
+   * Extra data to allow for potential future data to be provided as necessary without breaking changes.
+   * Currently, this is used to store the block's sidechain_id (if applicable).
+   */
   extra_data: ExtraData;
-}
+};

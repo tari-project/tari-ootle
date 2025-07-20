@@ -230,7 +230,16 @@ impl ConfidentialWithdrawProof {
 /// Used by the receiver to determine the value component of the commitment, in both confidential transfers and Minotari
 /// burns
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct EncryptedData(#[serde(with = "serde_helpers::dynamic_hex")] Vec<u8>);
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
+pub struct EncryptedData(
+    #[serde(with = "serde_helpers::dynamic_hex")]
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    Vec<u8>,
+);
 
 impl EncryptedData {
     pub const ENCRYPTED_DATA_SIZE_TOTAL: usize = Self::SIZE_NONCE + Self::SIZE_VALUE + Self::SIZE_MASK + Self::SIZE_TAG;

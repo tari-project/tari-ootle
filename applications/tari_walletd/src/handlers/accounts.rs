@@ -103,7 +103,7 @@ pub async fn handle_create(
     let default_account = sdk.accounts_api().get_default()?;
     let inputs = sdk
         .substate_api()
-        .locate_dependent_substates(&[default_account.address.clone()])
+        .locate_dependent_substates(&[default_account.address.clone()], true)
         .await?;
 
     let signing_key_index = req.key_id.unwrap_or(default_account.key_index);

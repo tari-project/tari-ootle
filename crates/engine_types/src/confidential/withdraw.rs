@@ -46,11 +46,9 @@ pub struct ValidatedConfidentialWithdrawProof {
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct ConfidentialOutput {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub stealth_public_nonce: RistrettoPublicKeyBytes,
-    #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
     pub encrypted_data: EncryptedData,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    #[cfg_attr(feature = "ts", ts(type = "number | bigint"))]
     pub minimum_value_promise: u64,
     pub viewable_balance: Option<CompressedElgamalVerifiableBalance>,
 }
@@ -112,7 +110,7 @@ pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a Pede
         }
 
         // This only contains revealed funds transfer, so a simple balance check is all that's needed.
-        // The given zero signature _would_ be valid (public_excess == (0)), however the signature implementation
+        // The given zero signature _would_ be valid (R + e.0.G == (r + e.0).G), however the signature implementation
         // correctly disallows the zero key. See [ConfidentialWithdrawProof::revealed_withdraw].
         return Ok(ValidatedConfidentialWithdrawProof {
             output: None,
@@ -124,6 +122,11 @@ pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a Pede
         });
     }
 
+    let balance_proof =
+        try_decode_to_signature(&withdraw_proof.balance_proof).ok_or_else(|| ResourceError::InvalidBalanceProof {
+            details: "Malformed balance proof".to_string(),
+        })?;
+
     // k.G + v.H or 0.G if None
     let output_commitment = validated_proof
         .output
@@ -131,24 +134,19 @@ pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a Pede
         .map(|o| o.commitment.as_public_key().clone())
         .unwrap_or_default();
 
-    // 0.G + v.H
-    // We already checked that total_output_revealed_amount is positive
-    let revealed_output_commitment = commit_amount(&PrivateKey::default(), total_output_revealed_amount);
-    let output_commitment_with_revealed = output_commitment + revealed_output_commitment.as_public_key();
-
-    let balance_proof =
-        try_decode_to_signature(&withdraw_proof.balance_proof).ok_or_else(|| ResourceError::InvalidBalanceProof {
-            details: "Malformed balance proof".to_string(),
-        })?;
-
     // 0.G + v.H - users may convert revealed funds to confidential outputs so this must be part of the balance proof
-    // We already checked that input_revealed_amount is non-negative
+    // PANIC: We already checked that input_revealed_amount is non-negative
     let revealed_input_commitment = commit_amount(&PrivateKey::default(), input_revealed_amount);
-    let agg_inputs = inputs.into_iter().fold(RistrettoPublicKey::default(), |sum, commit| {
+    let agg_inputs_with_revealed = inputs.into_iter().fold(RistrettoPublicKey::default(), |sum, commit| {
         sum + commit.as_public_key()
     }) + revealed_input_commitment.as_public_key();
 
-    let public_excess = agg_inputs -
+    // 0.G + v.H
+    // PANIC: We already checked that total_output_revealed_amount is positive
+    let revealed_output_commitment = commit_amount(&PrivateKey::default(), total_output_revealed_amount);
+    let output_commitment_with_revealed = output_commitment + revealed_output_commitment.as_public_key();
+
+    let public_excess = agg_inputs_with_revealed -
         &output_commitment_with_revealed -
         validated_proof
             .change_output

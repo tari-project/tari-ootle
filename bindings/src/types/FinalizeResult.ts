@@ -6,11 +6,11 @@ import type { InstructionResult } from "./InstructionResult";
 import type { LogEntry } from "./LogEntry";
 import type { TransactionResult } from "./TransactionResult";
 
-export interface FinalizeResult {
+export type FinalizeResult = {
   transaction_hash: Hash;
   events: Array<Event>;
   logs: Array<LogEntry>;
   execution_results: Array<InstructionResult>;
   result: TransactionResult;
   fee_receipt: FeeReceipt;
-}
+};

@@ -35,11 +35,13 @@ mod instruction_call;
 pub mod json_cbor;
 pub mod published_template;
 mod substate_serde;
+mod utxo;
 mod validator_fee;
 
 pub use argument_parser::parse_arg;
 pub use byte_types::*;
 pub use instruction_call::*;
+pub use utxo::*;
 pub use validator_fee::*;
 
 pub mod template_lib_models {

@@ -5,6 +5,7 @@ import type { PublishedTemplate } from "./PublishedTemplate";
 import type { Resource } from "./Resource";
 import type { TransactionReceipt } from "./TransactionReceipt";
 import type { UnclaimedConfidentialOutput } from "./UnclaimedConfidentialOutput";
+import type { Utxo } from "./Utxo";
 import type { ValidatorFeePool } from "./ValidatorFeePool";
 import type { Vault } from "./Vault";
 
@@ -16,4 +17,5 @@ export type SubstateValue =
   | { UnclaimedConfidentialOutput: UnclaimedConfidentialOutput }
   | { TransactionReceipt: TransactionReceipt }
   | { Template: PublishedTemplate }
-  | { ValidatorFeePool: ValidatorFeePool };
+  | { ValidatorFeePool: ValidatorFeePool }
+  | { Utxo: Utxo };

@@ -3,9 +3,27 @@ import type { Amount } from "./Amount";
 import type { ConfidentialOutputStatement } from "./ConfidentialOutputStatement";
 import type { PedersenCommitmentBytes } from "./PedersenCommitmentBytes";
 
-export interface ConfidentialWithdrawProof {
+/**
+ * A confidential proof that defines a confidential and/or revealed withdrawal, e.g. from a vault containing
+ * confidential resources. This proof contains:
+ * - Inputs: The confidential inputs that are being withdrawn identified by their Pedersen commitments.
+ * - Input revealed amount: The amount of revealed funds to withdraw.
+ * - Output proof: The confidential output statement that contains the output and change statements, range proof, and
+ *   revealed amounts.
+ * - Balance proof: The balance proof signature that proves knowledge of the excess. inputs - output - change = (0)
+ *   where (0) is the excess. Knowledge of the excess is not possible unless the inputs and outputs balance.
+ *
+ * Withdrawals can be revealed only, confidential only, or a mix of both.
+ */
+export type ConfidentialWithdrawProof = {
   inputs: Array<PedersenCommitmentBytes>;
+  /**
+   * The amount to withdraw from revealed funds i.e. the revealed funds as inputs
+   */
   input_revealed_amount: Amount;
   output_proof: ConfidentialOutputStatement;
+  /**
+   * Balance proof
+   */
   balance_proof: { public_nonce: string; signature: string };
-}
+};

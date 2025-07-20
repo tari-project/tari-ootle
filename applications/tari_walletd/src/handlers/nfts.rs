@@ -106,7 +106,7 @@ pub async fn handle_mint_faucet_nft(
 
     let inputs = sdk
         .substate_api()
-        .locate_dependent_substates(&[account.address.clone()])
+        .locate_dependent_substates(&[account.address.clone()], true)
         .await?;
     let fee = req.max_fee.unwrap_or(DEFAULT_FEE);
     let transaction = transaction_builder(context)

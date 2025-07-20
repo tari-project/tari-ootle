@@ -2,8 +2,8 @@
 import type { ExecuteResult } from "./ExecuteResult";
 import type { VersionedSubstateIdLockIntent } from "./VersionedSubstateIdLockIntent";
 
-export interface TransactionExecution {
+export type TransactionExecution = {
   result: ExecuteResult;
   resolved_inputs: Array<VersionedSubstateIdLockIntent>;
   resulting_outputs: Array<VersionedSubstateIdLockIntent>;
-}
+};

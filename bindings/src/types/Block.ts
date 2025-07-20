@@ -4,13 +4,32 @@ import type { Command } from "./Command";
 import type { ProposalCertificate } from "./ProposalCertificate";
 import type { TimeoutCertificate } from "./TimeoutCertificate";
 
-export interface Block {
+export type Block = {
   header: BlockHeader;
+  /**
+   * Collection of signatures that justify a previous block and potentially a change to the next higher view.
+   */
   justify: ProposalCertificate;
+  /**
+   * Commands in the block. These are in canonical order to ensure a deterministic block hash.
+   */
   commands: Array<Command>;
+  /**
+   * The block's justification for a view timeout. This is only relevant if it is for a higher view height than the
+   * ProposalCertificate.
+   */
   timeout_certificate: TimeoutCertificate | null;
+  /**
+   * The QC that justified this block
+   */
   justify_qc_id: string | null;
+  /**
+   * The QC that caused this block to be committed
+   */
   commit_qc_id: string | null;
   block_time: number | null;
+  /**
+   * Timestamp when was this stored.
+   */
   stored_at: string | null;
-}
+};

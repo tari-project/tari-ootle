@@ -44,7 +44,9 @@ use crate::{
     published_template::{PublishedTemplate, PublishedTemplateAddress},
     resource::Resource,
     transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
+    utxo::Utxo,
     vault::Vault,
+    UtxoAddress,
     ValidatorFeePool,
     ValidatorFeePoolAddress,
     ValidatorFeeWithdrawal,
@@ -128,6 +130,7 @@ pub enum SubstateId {
     TransactionReceipt(TransactionReceiptAddress),
     Template(PublishedTemplateAddress),
     ValidatorFeePool(ValidatorFeePoolAddress),
+    Utxo(UtxoAddress),
 }
 
 impl SubstateId {
@@ -180,6 +183,13 @@ impl SubstateId {
         }
     }
 
+    pub fn as_utxo(&self) -> Option<UtxoAddress> {
+        match self {
+            Self::Utxo(address) => Some(address.clone()),
+            _ => None,
+        }
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         encode(self).unwrap()
     }
@@ -207,6 +217,15 @@ impl SubstateId {
             SubstateId::TransactionReceipt(addr) => *addr.as_object_key(),
             SubstateId::Template(addr) => *addr.as_object_key(),
             SubstateId::ValidatorFeePool(addr) => *addr.as_object_key(),
+            SubstateId::Utxo(addr) => {
+                let key = hasher32(EngineHashDomainLabel::UtxoAddress)
+                    .chain(addr.resource_address())
+                    .chain(addr.id())
+                    .result()
+                    .into_array();
+
+                ObjectKey::from_array(key)
+            },
         }
     }
 
@@ -268,6 +287,10 @@ impl SubstateId {
         matches!(self, Self::ValidatorFeePool(_))
     }
 
+    pub fn is_utxo(&self) -> bool {
+        matches!(self, Self::Utxo(_))
+    }
+
     pub fn is_global(&self) -> bool {
         self.is_template()
     }
@@ -322,6 +345,12 @@ impl From<PublishedTemplateAddress> for SubstateId {
 impl From<ValidatorFeePoolAddress> for SubstateId {
     fn from(address: ValidatorFeePoolAddress) -> Self {
         Self::ValidatorFeePool(address)
+    }
+}
+
+impl From<UtxoAddress> for SubstateId {
+    fn from(address: UtxoAddress) -> Self {
+        Self::Utxo(address)
     }
 }
 
@@ -446,6 +475,7 @@ impl Display for SubstateId {
             SubstateId::TransactionReceipt(addr) => write!(f, "{addr}"),
             SubstateId::Template(addr) => write!(f, "{addr}"),
             SubstateId::ValidatorFeePool(addr) => write!(f, "{addr}"),
+            SubstateId::Utxo(addr) => write!(f, "{addr}"),
         }
     }
 }
@@ -496,6 +526,10 @@ impl FromStr for SubstateId {
                     ValidatorFeePoolAddress::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
                 Ok(SubstateId::ValidatorFeePool(addr))
             },
+            Some(("utxo", addr)) => {
+                let addr = UtxoAddress::from_str(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
+                Ok(SubstateId::Utxo(addr))
+            },
             Some(_) | None => Err(InvalidSubstateIdFormat(s.to_string())),
         }
     }
@@ -526,6 +560,7 @@ impl_partial_eq!(NonFungibleAddress, NonFungible);
 impl_partial_eq!(TransactionReceiptAddress, TransactionReceipt);
 impl_partial_eq!(PublishedTemplateAddress, Template);
 impl_partial_eq!(ValidatorFeePoolAddress, ValidatorFeePool);
+impl_partial_eq!(UtxoAddress, Utxo);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
@@ -542,6 +577,7 @@ pub enum SubstateValue {
     TransactionReceipt(TransactionReceipt),
     Template(PublishedTemplate),
     ValidatorFeePool(ValidatorFeePool),
+    Utxo(Utxo),
 }
 
 impl SubstateValue {
@@ -625,6 +661,13 @@ impl SubstateValue {
     pub fn into_template(self) -> Option<PublishedTemplate> {
         match self {
             SubstateValue::Template(template) => Some(template),
+            _ => None,
+        }
+    }
+
+    pub fn into_utxo(self) -> Option<Utxo> {
+        match self {
+            SubstateValue::Utxo(utxo) => Some(utxo),
             _ => None,
         }
     }
@@ -716,6 +759,13 @@ impl SubstateValue {
     pub fn as_template(&self) -> Option<&PublishedTemplate> {
         match self {
             SubstateValue::Template(template) => Some(template),
+            _ => None,
+        }
+    }
+
+    pub fn as_utxo(&self) -> Option<&Utxo> {
+        match self {
+            SubstateValue::Utxo(utxo) => Some(utxo),
             _ => None,
         }
     }
@@ -913,6 +963,7 @@ mod tests {
             check("txreceipt_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
             check("commitment_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
             check("template_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
+            check("utxo_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
         }
     }
 }

@@ -244,7 +244,7 @@ tower = "0.4"
 tower-http = { version = "0.4", default-features = false }
 tracing = "0.1.40"
 toml = "0.8"
-ts-rs = { version = "7.1", features = ["chrono-impl", "no-serde-warnings", "indexmap-impl"] }
+ts-rs = { version = "11.0", features = ["chrono-impl", "no-serde-warnings", "indexmap-impl"] }
 url = "2.4.1"
 urlencoding = "2.1.3"
 wasmer = "6.0.1"

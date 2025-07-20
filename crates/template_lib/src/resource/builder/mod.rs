@@ -43,17 +43,31 @@ pub const DEFAULT_DIVISIBILITY: u8 = 18;
 pub struct ResourceBuilder {}
 
 impl ResourceBuilder {
-    /// Returns a new fungible resource builder
+    /// Returns a new publicly visible fungible resource builder.
+    ///
+    /// WARNING: this resource is not confidential. Balances in vaults will be visible to anyone with access to the
+    /// ledger.
     pub fn fungible() -> FungibleResourceBuilder {
         FungibleResourceBuilder::new()
     }
 
-    /// Returns a new non-fungible resource builder
+    /// Returns a new non-fungible resource builder.
+    ///
+    /// A vault containing this resource holds a collection of non-fungible tokens (NFTs), each with a unique
+    /// identifier.
+    ///
+    /// WARNING: this resource is not confidential. NFTs in vaults will be visible to anyone with access to the
+    /// ledger.
     pub fn non_fungible() -> NonFungibleResourceBuilder {
         NonFungibleResourceBuilder::new()
     }
 
-    /// Returns a new confidential resource builder
+    /// Returns a new confidential resource builder.
+    ///
+    /// Vaults containing this resource consist of blinded outputs in addition to a revealed portion that is publicly
+    /// visible. A user may transfer funds to and from confidential outputs to the revealed balance. The primary use
+    /// cose of revealed balances is to allow excess funds, previously revealed to pay fees, to be refunded to the
+    /// vault.
     pub fn confidential() -> ConfidentialResourceBuilder {
         ConfidentialResourceBuilder::new()
     }

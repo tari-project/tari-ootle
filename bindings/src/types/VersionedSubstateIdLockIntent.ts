@@ -2,8 +2,8 @@
 import type { SubstateLockType } from "./SubstateLockType";
 import type { VersionedSubstateId } from "./VersionedSubstateId";
 
-export interface VersionedSubstateIdLockIntent {
+export type VersionedSubstateIdLockIntent = {
   versioned_substate_id: VersionedSubstateId;
   lock_type: SubstateLockType;
   require_version: boolean;
-}
+};

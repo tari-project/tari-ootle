@@ -2,8 +2,4 @@
 import type { PedersenCommitmentBytes } from "./PedersenCommitmentBytes";
 import type { Scalar32Bytes } from "./Scalar32Bytes";
 
-export interface CommitmentSignatureBytes {
-  public_nonce: PedersenCommitmentBytes;
-  u: Scalar32Bytes;
-  v: Scalar32Bytes;
-}
+export type CommitmentSignatureBytes = { public_nonce: PedersenCommitmentBytes; u: Scalar32Bytes; v: Scalar32Bytes };

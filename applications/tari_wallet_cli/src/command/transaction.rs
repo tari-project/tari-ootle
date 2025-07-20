@@ -501,37 +501,43 @@ fn summarize(result: &FinalizeResult, time_taken: Duration) {
 }
 
 pub fn print_substate_diff(diff: &SubstateDiff) {
-    for (address, substate) in diff.up_iter() {
-        println!("️🌲 UP substate {} (v{})", address, substate.version(),);
+    for (id, substate) in diff.up_iter() {
+        println!("️🌲 UP substate {} (v{})", id, substate.version(),);
         println!(
             "      🧩 Substate address: {}",
-            SubstateAddress::from_substate_id(address, substate.version())
+            SubstateAddress::from_substate_id(id, substate.version())
         );
         match substate.substate_value() {
             SubstateValue::Component(component) => {
-                println!("      ▶ component ({}): {}", component.module_name, address,);
+                println!("      ▶ component ({}): {}", component.module_name, id,);
             },
             SubstateValue::Resource(_) => {
-                println!("      ▶ resource: {}", address);
+                println!("      ▶ resource: {}", id);
             },
             SubstateValue::TransactionReceipt(_) => {
-                println!("      ▶ transaction_receipt: {}", address);
+                println!("      ▶ transaction_receipt: {}", id);
             },
             SubstateValue::Vault(vault) => {
-                println!("      ▶ vault: {} {}", address, vault.resource_address());
+                println!("      ▶ vault: {} {}", id, vault.resource_address());
             },
             SubstateValue::NonFungible(_) => {
-                println!("      ▶ NFT: {}", address);
+                println!("      ▶ NFT: {}", id);
             },
             SubstateValue::UnclaimedConfidentialOutput(_) => {
-                println!("      ▶ Layer 1 commitment: {}", address);
+                println!("      ▶ Layer 1 commitment: {}", id);
             },
             SubstateValue::Template(_) => {
-                println!("      ▶ Template: {}", address);
+                println!("      ▶ Template: {}", id);
             },
             SubstateValue::ValidatorFeePool(pool) => {
-                println!("      ▶ Validator Fee Pool: {}", address);
+                println!("      ▶ Validator Fee Pool: {}", id);
                 println!("        ▶ Total fees: {}", pool.amount());
+            },
+            SubstateValue::Utxo(_) => {
+                println!("      ▶ UTXO:");
+                let utxo_address = id.as_utxo().unwrap();
+                println!("        ▶ Resource: {}", utxo_address.resource_address());
+                println!("        ▶ id: {}", utxo_address.id());
             },
         }
         println!();
@@ -825,6 +831,7 @@ impl CliArg {
                 SubstateId::TransactionReceipt(v) => call_arg!(v),
                 SubstateId::Template(v) => call_arg!(v),
                 SubstateId::ValidatorFeePool(v) => call_arg!(v),
+                SubstateId::Utxo(v) => call_arg!(v),
             },
             CliArg::TemplateAddress(v) => call_arg!(v),
             CliArg::NonFungibleId(v) => call_arg!(v),

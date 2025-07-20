@@ -2,7 +2,4 @@
 import type { TransactionSealSignature } from "./TransactionSealSignature";
 import type { UnsealedTransactionV1 } from "./UnsealedTransactionV1";
 
-export interface TransactionV1 {
-  body: UnsealedTransactionV1;
-  seal_signature: TransactionSealSignature;
-}
+export type TransactionV1 = { body: UnsealedTransactionV1; seal_signature: TransactionSealSignature };

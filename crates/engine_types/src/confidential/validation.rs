@@ -43,38 +43,36 @@ pub fn validate_confidential_proof(
         });
     }
 
-    let maybe_output =
-        proof
-            .output_statement
-            .as_ref()
-            .map(|statement| {
-                let output_commitment = PedersenCommitment::from_canonical_bytes(statement.commitment.as_bytes())
-                    .map_err(|_| ResourceError::InvalidConfidentialProof {
-                        details: "Invalid commitment".to_string(),
-                    })?;
+    let maybe_output = proof
+        .output_statement
+        .as_ref()
+        .map(|statement| {
+            let output_commitment = PedersenCommitment::from_canonical_bytes(&*statement.commitment).map_err(|_| {
+                ResourceError::InvalidConfidentialProof {
+                    details: "Invalid commitment".to_string(),
+                }
+            })?;
 
-                let output_public_nonce = RistrettoPublicKey::from_canonical_bytes(
-                    statement.sender_public_nonce.as_bytes(),
-                )
+            let output_public_nonce = RistrettoPublicKey::from_canonical_bytes(&*statement.sender_public_nonce)
                 .map_err(|_| ResourceError::InvalidConfidentialProof {
                     details: "Invalid sender public nonce".to_string(),
                 })?;
 
-                let viewable_balance = validate_elgamal_verifiable_balance_proof(
-                    &output_commitment,
-                    view_key,
-                    statement.viewable_balance_proof.as_ref(),
-                )?;
+            let viewable_balance = validate_elgamal_verifiable_balance_proof(
+                &output_commitment,
+                view_key,
+                statement.viewable_balance_proof.as_ref(),
+            )?;
 
-                Ok(ValidatedConfidentialOutput {
-                    commitment: output_commitment,
-                    stealth_public_nonce: output_public_nonce,
-                    encrypted_data: statement.encrypted_data.clone(),
-                    minimum_value_promise: statement.minimum_value_promise,
-                    viewable_balance,
-                })
+            Ok(ValidatedConfidentialOutput {
+                commitment: output_commitment,
+                stealth_public_nonce: output_public_nonce,
+                encrypted_data: statement.encrypted_data.clone(),
+                minimum_value_promise: statement.minimum_value_promise,
+                viewable_balance,
             })
-            .transpose()?;
+        })
+        .transpose()?;
 
     let maybe_change = proof
         .change_statement

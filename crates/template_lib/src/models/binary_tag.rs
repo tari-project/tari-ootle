@@ -37,6 +37,7 @@ pub enum BinaryTag {
     ValidatorNodeFeePool = 138,
     AllocatedComponentAddress = 139,
     AllocatedResourceAddress = 140,
+    Utxo = 141,
 }
 
 impl BinaryTag {
@@ -55,6 +56,7 @@ impl BinaryTag {
             138 => Some(Self::ValidatorNodeFeePool),
             139 => Some(Self::AllocatedComponentAddress),
             140 => Some(Self::AllocatedResourceAddress),
+            141 => Some(Self::Utxo),
             _ => None,
         }
     }
@@ -84,6 +86,7 @@ mod tests {
             BinaryTag::ValidatorNodeFeePool,
             BinaryTag::AllocatedComponentAddress,
             BinaryTag::AllocatedResourceAddress,
+            BinaryTag::Utxo,
         ];
 
         for case in cases {

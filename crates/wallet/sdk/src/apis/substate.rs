@@ -80,6 +80,7 @@ where
     pub async fn locate_dependent_substates(
         &self,
         parents: &[SubstateId],
+        unversioned: bool,
     ) -> Result<HashSet<SubstateRequirement>, SubstateApiError> {
         let mut substate_ids = HashSet::with_capacity(parents.len());
 
@@ -114,9 +115,13 @@ where
                                     continue;
                                 }
 
-                                let ValidatorScanResult { address: addr, .. } =
-                                    self.scan_for_substate(&addr, None).await?;
-                                substate_ids.insert(addr.into());
+                                if unversioned {
+                                    substate_ids.insert(addr.into());
+                                } else {
+                                    let ValidatorScanResult { address: addr, .. } =
+                                        self.scan_for_substate(&addr, None).await?;
+                                    substate_ids.insert(addr.into());
+                                }
                             }
                         },
                         SubstateValue::Resource(_) => {},
@@ -127,18 +132,25 @@ where
                             if substate_ids.contains(&tx_receipt_addr) {
                                 continue;
                             }
-                            let ValidatorScanResult { address: id, .. } =
-                                self.scan_for_substate(&tx_receipt_addr, None).await?;
-                            substate_ids.insert(id.into());
+                            if unversioned {
+                                substate_ids.insert(tx_receipt_addr.into());
+                            } else {
+                                // Tx receipts are always v0
+                                substate_ids.insert(SubstateRequirement::versioned(tx_receipt_addr, 0));
+                            }
                         },
                         SubstateValue::Vault(vault) => {
                             let resx_addr = SubstateId::Resource(*vault.resource_address());
                             if substate_ids.contains(&resx_addr) {
                                 continue;
                             }
-                            let ValidatorScanResult { address: id, .. } =
-                                self.scan_for_substate(&resx_addr, None).await?;
-                            substate_ids.insert(id.into());
+                            if unversioned {
+                                substate_ids.insert(resx_addr.into());
+                            } else {
+                                let ValidatorScanResult { address: id, .. } =
+                                    self.scan_for_substate(&resx_addr, None).await?;
+                                substate_ids.insert(id.into());
+                            }
                         },
                         SubstateValue::NonFungible(_) => {
                             let nft_addr = substate_id.substate_id().as_non_fungible_address().ok_or_else(|| {
@@ -152,9 +164,14 @@ where
                             if substate_ids.contains(&resx_addr) {
                                 continue;
                             }
-                            let ValidatorScanResult { address: id, .. } =
-                                self.scan_for_substate(&resx_addr, None).await?;
-                            substate_ids.insert(id.into());
+                            if unversioned {
+                                substate_ids.insert(resx_addr.into());
+                            } else {
+                                // NonFungible substates are always v0
+                                let ValidatorScanResult { address: id, .. } =
+                                    self.scan_for_substate(&resx_addr, None).await?;
+                                substate_ids.insert(id.into());
+                            }
                         },
                         SubstateValue::ValidatorFeePool(_) => {
                             let resx_addr = SubstateId::Resource(XTR);
@@ -164,6 +181,26 @@ where
                         },
                         SubstateValue::UnclaimedConfidentialOutput(_) => {},
                         SubstateValue::Template(_) => {},
+                        SubstateValue::Utxo(_) => {
+                            let addr = substate_id.substate_id().as_utxo().ok_or_else(|| {
+                                SubstateApiError::InvalidValidatorNodeResponse(format!(
+                                    "Utxo substate does not have a valid address {}",
+                                    substate_id
+                                ))
+                            })?;
+
+                            let resx_addr = SubstateId::Resource(*addr.resource_address());
+                            if substate_ids.contains(&resx_addr) {
+                                continue;
+                            }
+                            if unversioned {
+                                substate_ids.insert(resx_addr.into());
+                            } else {
+                                let ValidatorScanResult { address: id, .. } =
+                                    self.scan_for_substate(&resx_addr, None).await?;
+                                substate_ids.insert(id.into());
+                            }
+                        },
                     }
 
                     debug!(

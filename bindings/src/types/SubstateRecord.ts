@@ -5,7 +5,7 @@ import type { SubstateDestroyed } from "./SubstateDestroyed";
 import type { SubstateId } from "./SubstateId";
 import type { SubstateValue } from "./SubstateValue";
 
-export interface SubstateRecord {
+export type SubstateRecord = {
   substate_id: SubstateId;
   version: number;
   substate_value: SubstateValue | null;
@@ -15,4 +15,4 @@ export interface SubstateRecord {
   created_by_shard: Shard;
   created_at_epoch: Epoch;
   destroyed: SubstateDestroyed | null;
-}
+};

@@ -11,11 +11,11 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use tari_bor::{BorTag, Deserialize, Serialize};
 use tari_template_lib::{
     models::{BinaryTag, ResourceAddress},
-    prelude::{from_hex, serde_helpers, KeyParseError},
+    prelude::{from_hex, serde_helpers, KeyParseError, PedersenCommitmentBytes},
     types::hex::write_hex_fmt,
 };
 
-use crate::confidential::ConfidentialOutput;
+use crate::crypto::PrivateOutput;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
@@ -24,20 +24,25 @@ use crate::confidential::ConfidentialOutput;
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct Utxo {
-    pub output: ConfidentialOutput,
+    pub output: Option<PrivateOutput>,
     pub is_frozen: bool,
 }
 
 impl Utxo {
-    pub fn new(output: ConfidentialOutput) -> Self {
+    pub fn new(output: PrivateOutput) -> Self {
         Self {
-            output,
+            output: Some(output),
             is_frozen: false,
         }
     }
 
-    pub fn output(&self) -> &ConfidentialOutput {
-        &self.output
+    pub fn output(&self) -> Option<&PrivateOutput> {
+        self.output.as_ref()
+    }
+
+    pub fn burn(&mut self) {
+        self.output = None;
+        self.is_frozen = true;
     }
 }
 
@@ -113,6 +118,12 @@ impl UtxoId {
 
     pub fn from_hex(hex: &str) -> Result<Self, KeyParseError> {
         from_hex(hex).map(Self::from_array)
+    }
+}
+
+impl From<PedersenCommitmentBytes> for UtxoId {
+    fn from(commitment: PedersenCommitmentBytes) -> Self {
+        Self::from_array(commitment.into_array())
     }
 }
 

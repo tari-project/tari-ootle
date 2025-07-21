@@ -1,38 +1,40 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use serde::Serialize;
-use tari_bor::to_value;
-
 use super::{IMAGE_URL, TOKEN_SYMBOL};
 use crate::{
     args::MintArg,
     auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
-    models::{Bucket, ComponentAddress, Metadata, NonFungibleId, ResourceAddress, ResourceAddressAllocation},
-    resource::{ResourceManager, ResourceType},
+    models::{Bucket, ComponentAddress, Metadata, ResourceAddress, ResourceAddressAllocation, StealthOutputStatement},
+    resource::{ResourceManager, ResourceType, DEFAULT_DIVISIBILITY},
+    types::crypto::RistrettoPublicKeyBytes,
 };
 
-/// Utility for building non-fungible resources inside templates
-pub struct NonFungibleResourceBuilder {
-    owner_rule: OwnerRule,
+/// Implements the builder pattern for Confidential resources.
+pub struct StealthResourceBuilder {
     metadata: Metadata,
     access_rules: ResourceAccessRules,
+    view_key: Option<RistrettoPublicKeyBytes>,
     token_symbol: Option<String>,
+    owner_rule: OwnerRule,
     authorize_hook: Option<AuthHook>,
     address_allocation: Option<ResourceAddressAllocation>,
+    divisibility: u8,
     is_total_supply_tracking_enabled: bool,
 }
 
-impl NonFungibleResourceBuilder {
-    /// Returns a new non-fungible resource builder
+impl StealthResourceBuilder {
+    /// Returns a new confidential resource builder
     pub(super) fn new() -> Self {
         Self {
-            owner_rule: OwnerRule::default(),
             metadata: Metadata::new(),
             access_rules: ResourceAccessRules::new(),
+            view_key: None,
             token_symbol: None,
+            owner_rule: OwnerRule::default(),
             authorize_hook: None,
             address_allocation: None,
+            divisibility: DEFAULT_DIVISIBILITY,
             is_total_supply_tracking_enabled: true,
         }
     }
@@ -53,6 +55,14 @@ impl NonFungibleResourceBuilder {
     /// Sets the already allocated address for the resource
     pub fn with_address_allocation(mut self, address: ResourceAddressAllocation) -> Self {
         self.address_allocation = Some(address);
+        self
+    }
+
+    /// Specify a view key for the confidential resource. This allows anyone with the secret key to uncover the balance
+    /// of commitments generated for the resource.
+    /// NOTE: it is not currently possible to change the view key after the resource is created.
+    pub fn with_view_key(mut self, view_key: RistrettoPublicKeyBytes) -> Self {
+        self.view_key = Some(view_key);
         self
     }
 
@@ -93,12 +103,6 @@ impl NonFungibleResourceBuilder {
         self
     }
 
-    /// Sets up who can update the mutable data of the tokens in the resource
-    pub fn update_non_fungible_data(mut self, rule: AccessRule) -> Self {
-        self.access_rules = self.access_rules.update_non_fungible_data(rule);
-        self
-    }
-
     /// Sets up who (apart from the owner) can update the access rules of the resource.
     pub fn update_access_rules(mut self, rule: AccessRule) -> Self {
         self.access_rules = self.access_rules.update_access_rules(rule);
@@ -128,18 +132,28 @@ impl NonFungibleResourceBuilder {
         self.add_metadata(IMAGE_URL, url)
     }
 
+    /// Sets the divisibility of the resource. i.e. the number of decimal places.
+    /// Panic if the divisibility is greater than 18.
+    pub fn with_divisibility(mut self, divisibility: u8) -> Self {
+        if divisibility > 18 {
+            panic!("Divisibility cannot be greater than 18");
+        }
+        self.divisibility = divisibility;
+        self
+    }
+
     /// Specify a hook method that will be called to authorize actions on the resource.
     /// The signature of the method must be `fn(action: ResourceAuthAction, caller: CallerContext)`.
     /// The method should panic to deny the action.
-    /// The resource will fail to build if the component's template does not have a method with the specified signature.
+    /// The resource will fail to build if the component's template does not have a method with the correct signature.
     /// Hooks are only run when the resource is acted on by an external component.
     ///
     /// ## Examples
     ///
     /// Building a resource with a hook from within a component
     /// ```ignore
-    /// use tari_template_lib::{caller_context::CallerContext, prelude::ResourceBuilder};
-    /// ResourceBuilder::non_fungible()
+    /// # use tari_template_lib::{caller_context::CallerContext, prelude::ResourceBuilder};
+    /// ResourceBuilder::confidential()
     ///     .with_authorization_hook(CallerContext::current_component_address(), "my_hook")
     ///     .build();
     /// ```
@@ -147,9 +161,9 @@ impl NonFungibleResourceBuilder {
     /// Building a resource with a hook in a static template function. The address is allocated beforehand.
     ///
     /// ```ignore
-    /// use tari_template_lib::{caller_context::CallerContext, prelude::ResourceBuilder};
+    /// # use tari_template_lib::{caller_context::CallerContext, prelude::ResourceBuilder};
     /// let alloc = CallerContext::allocate_component_address();
-    /// ResourceBuilder::non_fungible()
+    /// ResourceBuilder::confidential()
     ///     .with_authorization_hook(*alloc.address(), "my_hook")
     ///     .build();
     /// ```
@@ -161,7 +175,7 @@ impl NonFungibleResourceBuilder {
     /// Disables the tracking of total supply for the resource.
     ///
     /// This is useful for resources that do not need to track the total supply.
-    /// Disabling total supply tracking can save on fees when minting/burning.
+    /// Disabling total supply tracking can save on fees.
     pub fn disable_total_supply_tracking(mut self) -> Self {
         self.is_total_supply_tracking_enabled = false;
         self
@@ -173,58 +187,33 @@ impl NonFungibleResourceBuilder {
         address
     }
 
-    pub fn initial_supply<I: IntoIterator<Item = NonFungibleId>>(self, initial_supply: I) -> Bucket {
-        let mint_arg = MintArg::NonFungible {
-            tokens: initial_supply
-                .into_iter()
-                .map(|id| (id, (tari_bor::Value::Null, tari_bor::Value::Null)))
-                .collect(),
+    /// Sets up how many tokens are going to be minted on resource creation
+    /// This builds the resource and mints the initial supply of tokens, returning the address of the resource.
+    /// NOTE that stealth resources do not return the bucket of the initial supply since
+    /// they are minted as individual UTXO substates and cannot be placed in vault.
+    pub fn initial_supply(self, initial_supply: StealthOutputStatement) -> ResourceAddress {
+        let mint_arg = MintArg::Stealth {
+            statement: Box::new(initial_supply),
         };
 
-        let (_, bucket) = self.build_internal(Some(mint_arg));
-        bucket.expect("[initial_supply] Bucket not returned from engine")
-    }
-
-    pub fn initial_supply_with_data<'a, I, T, U>(self, initial_supply: I) -> Bucket
-    where
-        I: IntoIterator<Item = (NonFungibleId, (&'a T, &'a U))>,
-        T: Serialize + ?Sized + 'a,
-        U: Serialize + ?Sized + 'a,
-    {
-        let mint_arg = MintArg::NonFungible {
-            tokens: initial_supply
-                .into_iter()
-                .map(|(id, (data, mutable))| {
-                    (
-                        id,
-                        (
-                            to_value(data).expect("failed to encode immutable NFT data"),
-                            to_value(mutable).expect("failed to encode mutable NFT data"),
-                        ),
-                    )
-                })
-                .collect(),
-        };
-
-        let (_, bucket) = self.build_internal(Some(mint_arg));
-        bucket.expect("[initial_supply] Bucket not returned from engine")
+        let (address, _) = self.build_internal(Some(mint_arg));
+        address
     }
 
     fn build_internal(mut self, mint_arg: Option<MintArg>) -> (ResourceAddress, Option<Bucket>) {
         if let Some(symbol) = self.token_symbol {
             self.metadata.insert(TOKEN_SYMBOL, symbol);
         }
-
         ResourceManager::create(
-            ResourceType::NonFungible,
+            ResourceType::Stealth,
             self.owner_rule,
             self.access_rules,
             self.metadata,
             mint_arg,
-            None,
+            self.view_key,
             self.authorize_hook,
             self.address_allocation,
-            0,
+            self.divisibility,
             self.is_total_supply_tracking_enabled,
         )
     }

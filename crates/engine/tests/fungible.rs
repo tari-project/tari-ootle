@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::{confidential::commit_amount, vault::Vault, ToByteType};
+use tari_engine_types::{crypto::commit_amount, vault::Vault, ToByteType};
 use tari_template_lib::{
     prelude::{ComponentAddress, ResourceType},
     types::Amount,

@@ -6,7 +6,7 @@ use std::ops::RangeInclusive;
 use tari_common_types::types::PrivateKey;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::{
-    confidential::{ConfidentialOutput, ElgamalVerifiableBalance, ValueLookupTable},
+    crypto::{ElgamalVerifiableBalance, PrivateOutput, ValueLookupTable},
     FromByteType,
 };
 use tari_ootle_wallet_crypto::{
@@ -131,7 +131,7 @@ impl ConfidentialCryptoApi {
     ) -> Result<Vec<Option<u64>>, ConfidentialCryptoApiError>
     where
         TLookup: ValueLookupTable,
-        TOutputsIter: Iterator<Item = &'a ConfidentialOutput>,
+        TOutputsIter: Iterator<Item = &'a PrivateOutput>,
     {
         let outputs_viewable_balance_decompressed = outputs
             .filter_map(|output| output.viewable_balance.as_ref())

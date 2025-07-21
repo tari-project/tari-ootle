@@ -32,7 +32,8 @@ use tari_crypto::{
 use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason, TransactionResult},
     component::ComponentHeader,
-    confidential::{get_commitment_factory, get_range_proof_service, ConfidentialClaim, ConfidentialOutput},
+    confidential::ConfidentialClaim,
+    crypto::{get_commitment_factory, get_range_proof_service, PrivateOutput},
     entity_id_provider::EntityIdProvider,
     events::Event,
     hashing::hash_template_code,
@@ -42,7 +43,7 @@ use tari_engine_types::{
     logs::LogEntry,
     published_template::{PublishedTemplate, PublishedTemplateAddress},
     resource::Resource,
-    resource_container::ResourceContainer,
+    resource_container::{ResourceContainer, ResourceError},
     substate::{SubstateId, SubstateValue},
     vault::Vault,
     ComponentCall,
@@ -834,10 +835,19 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                     let mut output_bucket = None;
                     if let Some(mint_arg) = arg.mint_arg {
-                        let bucket_id = state_mut.id_provider()?.new_bucket_id();
-                        let container = state_mut.mint_resource(&resource_lock, mint_arg)?;
-                        state_mut.new_bucket(bucket_id, container)?;
-                        output_bucket = Some(tari_template_lib::models::Bucket::from_id(bucket_id));
+                        match mint_arg.as_resource_type() {
+                            ResourceType::Fungible | ResourceType::NonFungible | ResourceType::Confidential => {
+                                let container = state_mut.mint_resource(&resource_lock, mint_arg)?;
+                                let bucket_id = state_mut.id_provider()?.new_bucket_id();
+                                state_mut.new_bucket(bucket_id, container)?;
+                                output_bucket = Some(tari_template_lib::models::Bucket::from_id(bucket_id));
+                            },
+                            ResourceType::Stealth => {
+                                // PANIC: checked that this is a stealth resource type
+                                let stmt = mint_arg.expect_stealth_statement();
+                                state_mut.mint_stealth_substates(&resource_lock, &stmt)?;
+                            },
+                        }
                     }
 
                     state_mut.unlock_substate(resource_lock)?;
@@ -912,21 +922,38 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 }
 
                 self.tracker.write_with(|state_mut| {
-                    let resource = state_mut.mint_resource(&resource_lock, mint_resource.mint_arg)?;
-                    let bucket_id = state_mut.id_provider()?.new_bucket_id();
+                    let mint_arg = mint_resource.mint_arg;
+                    let mut output_bucket = None;
+                    match mint_arg.as_resource_type() {
+                        ResourceType::Fungible | ResourceType::NonFungible | ResourceType::Confidential => {
+                            let resource = state_mut.mint_resource(&resource_lock, mint_arg)?;
+                            let bucket_id = state_mut.id_provider()?.new_bucket_id();
 
-                    let payload = Metadata::from_iter([
-                        ("resource_type", resource.resource_type().to_string()),
-                        ("amount", resource.amount().to_string()),
-                    ]);
-                    self.emit_std_event("resource", "mint", resource_address.into(), payload, state_mut)?;
+                            let payload = Metadata::from_iter([
+                                ("resource_type", resource.resource_type().to_string()),
+                                ("amount", resource.amount().to_string()),
+                            ]);
+                            self.emit_std_event("resource", "mint", resource_address.into(), payload, state_mut)?;
 
-                    state_mut.new_bucket(bucket_id, resource)?;
+                            state_mut.new_bucket(bucket_id, resource)?;
+                            output_bucket = Some(tari_template_lib::models::Bucket::from_id(bucket_id));
+                        },
+                        ResourceType::Stealth => {
+                            // PANIC: checked that this is a stealth resource type
+                            let stmt = mint_arg.expect_stealth_statement();
+                            state_mut.mint_stealth_substates(&resource_lock, &stmt)?;
 
-                    let bucket = tari_template_lib::models::Bucket::from_id(bucket_id);
+                            let payload = Metadata::from_iter([
+                                ("resource_type", ResourceType::Stealth.to_string()),
+                                ("num_outputs", stmt.outputs.len().to_string()),
+                            ]);
+                            self.emit_std_event("resource", "mint", resource_address.into(), payload, state_mut)?;
+                        },
+                    }
+
                     state_mut.unlock_substate(resource_lock)?;
 
-                    Ok(InvokeResult::encode(&bucket)?)
+                    Ok(InvokeResult::encode(&output_bucket)?)
                 })
             },
             ResourceAction::Recall => {
@@ -943,6 +970,13 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
+                    if resource.resource_type().is_stealth() {
+                        return Err(ResourceError::OperationNotAllowed(format!(
+                            "Cannot recall stealth resources: {}",
+                            resource_address
+                        ))
+                        .into());
+                    }
 
                     state_mut.authorization().check_resource_access_rules(
                         ResourceAuthAction::Recall,
@@ -1228,6 +1262,12 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         },
                         ResourceType::Confidential => {
                             ResourceContainer::confidential(*resource_address, None, Amount::zero())
+                        },
+                        ResourceType::Stealth => {
+                            return Err(ResourceError::OperationNotAllowed(
+                                "Cannot deposit stealth resources into a vault".to_string(),
+                            )
+                            .into())
                         },
                     };
 
@@ -2301,7 +2341,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         }
 
         // 3. range_proof must be valid
-        if !get_range_proof_service(1).verify(&range_proof, &commitment) {
+        if !get_range_proof_service(1).verify(range_proof.as_ref(), &commitment) {
             warn!(target: LOG_TARGET, "Claim burn failed - Invalid range proof");
             return Err(RuntimeError::InvalidRangeProof);
         }
@@ -2309,7 +2349,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         // 4. Create the confidential resource
         let mut resource = ResourceContainer::confidential(
             CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-            Some((unclaimed_output.commitment, ConfidentialOutput {
+            Some((unclaimed_output.commitment, PrivateOutput {
                 stealth_public_nonce: diffie_hellman_public_key,
                 encrypted_data: unclaimed_output.encrypted_data,
                 minimum_value_promise: 0,

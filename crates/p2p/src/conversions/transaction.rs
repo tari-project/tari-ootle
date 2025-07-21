@@ -46,7 +46,13 @@ use tari_template_lib::{
     },
     prelude::{AccessRules, Scalar32Bytes},
     types::{
-        crypto::{BalanceProofSignature, CommitmentSignatureBytes, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+        crypto::{
+            BalanceProofSignature,
+            CommitmentSignatureBytes,
+            PedersenCommitmentBytes,
+            RangeProofBytes,
+            RistrettoPublicKeyBytes,
+        },
         ObjectKey,
     },
 };
@@ -251,7 +257,8 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                         .as_slice()
                         .try_into()
                         .map_err(|e| anyhow!("claim_burn_commitment_address: {}", e))?,
-                    range_proof: request.claim_burn_range_proof,
+                    range_proof: RangeProofBytes::try_from(request.claim_burn_range_proof)
+                        .context("invalid range proof")?,
                     proof_of_knowledge: request
                         .claim_burn_proof_of_knowledge
                         .ok_or_else(|| anyhow!("claim_burn_proof_of_knowledge not provided"))?
@@ -338,7 +345,7 @@ impl From<Instruction> for proto::transaction::Instruction {
             Instruction::ClaimBurn { claim } => {
                 result.instruction_type = InstructionType::ClaimBurn as i32;
                 result.claim_burn_commitment_address = claim.output_address.as_bytes().to_vec();
-                result.claim_burn_range_proof = claim.range_proof.to_vec();
+                result.claim_burn_range_proof = claim.range_proof.into_vec();
                 result.claim_burn_proof_of_knowledge = Some(claim.proof_of_knowledge.into());
                 result.claim_burn_public_key = claim.public_key.to_vec();
                 result.claim_burn_withdraw_proof = claim.withdraw_proof.map(Into::into);
@@ -582,7 +589,7 @@ impl TryFrom<proto::transaction::ConfidentialOutputStatement> for ConfidentialOu
         Ok(ConfidentialOutputStatement {
             output_statement: val.output_statement.map(TryInto::try_into).transpose()?,
             change_statement: val.change_statement.map(TryInto::try_into).transpose()?,
-            range_proof: val.range_proof,
+            range_proof: RangeProofBytes::try_from(val.range_proof).context("Invalid range proof")?,
             output_revealed_amount: val.output_revealed_amount.unwrap_or_default().into(),
             change_revealed_amount: val.change_revealed_amount.unwrap_or_default().into(),
         })
@@ -594,7 +601,7 @@ impl From<ConfidentialOutputStatement> for proto::transaction::ConfidentialOutpu
         Self {
             output_statement: val.output_statement.map(Into::into),
             change_statement: val.change_statement.map(Into::into),
-            range_proof: val.range_proof,
+            range_proof: val.range_proof.into_vec(),
             output_revealed_amount: Some(val.output_revealed_amount.into()),
             change_revealed_amount: Some(val.change_revealed_amount.into()),
         }

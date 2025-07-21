@@ -37,15 +37,15 @@
 //!
 //! The module also re-exports builders and managers for resource creation and lifecycle management.
 
-mod builder;
+use tari_template_abi::rust::fmt::Display;
 
-use std::fmt::Display;
+mod builder;
+mod manager;
+// mod stealth_manager;
 
 pub use builder::*;
-mod manager;
 pub use manager::*;
-#[cfg(feature = "ts")]
-use ts_rs::TS;
+// pub use stealth_manager::*;
 
 /// Represents every possible type of resource in the Tari network.
 ///
@@ -54,13 +54,21 @@ use ts_rs::TS;
 ///
 /// - **Fungible** tokens are interchangeable and divisible (e.g., currency, shares).
 /// - **NonFungible** tokens represent unique, indivisible assets (e.g., collectibles).
-/// - **Confidential** tokens are fungible tokens with privacy-preserving features.
+/// - **Confidential** A type of fungible resource that uses cryptographic privacy to keep balances confidential. Funds
+///   are placed in vaults and can therefore be associated with a component that contains them, typically an Account.
+/// - **Stealth** A fungible resource using the highest level of confidentiality. Funds are not kept in vaults, and each
+///   output is an independent confidential substate (kind of like creating a new unlinked vault for each currency
+///   note).
 ///
 /// This enum is serializable/deserializable with `serde` and optionally generates
 /// TypeScript bindings when the `ts` feature is enabled.
 
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub enum ResourceType {
     /// Fungible tokens do not have individual identity, making them interchangeable.
     /// Examples include monetary units, liquidity pool tokens, or tokenized shares.
@@ -68,24 +76,33 @@ pub enum ResourceType {
     /// A resource (i.e., collection) of non-fungible tokens.
     /// Each NFT is uniquely identifiable within the parent resource and indivisible.
     NonFungible,
-    /// A type of fungible resource that uses cryptographic privacy to keep balances confidential.
+    /// A type of fungible resource that uses cryptographic privacy to keep balances confidential. Funds are placed in
+    /// vaults and can therefore be associated with a component that contains them, typically an Account.
     Confidential,
+    /// A fungible resource using the highest level of confidentiality. Funds are not kept in vaults, and each output
+    /// is an independent confidential substate (kind of like creating a new unlinked vault for each currency note).
+    Stealth,
 }
 
 impl ResourceType {
-    /// Returns `true` if the resource type is fungible.
+    /// Returns `true` if the resource type is fungible, otherwise `false`.
     pub fn is_fungible(&self) -> bool {
         matches!(self, Self::Fungible)
     }
 
-    /// Returns `true` if the resource type is non-fungible.
+    /// Returns `true` if the resource type is non-fungible, otherwise `false`.
     pub fn is_non_fungible(&self) -> bool {
         matches!(self, Self::NonFungible)
     }
 
-    /// Returns `true` if the resource type is confidential fungible.
+    /// Returns `true` if the resource type is confidential fungible, otherwise `false`.
     pub fn is_confidential(&self) -> bool {
         matches!(self, Self::Confidential)
+    }
+
+    /// Returns `true` if the resource type is stealth, otherwise `false`.
+    pub fn is_stealth(&self) -> bool {
+        matches!(self, Self::Stealth)
     }
 }
 

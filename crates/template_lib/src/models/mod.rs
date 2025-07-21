@@ -24,41 +24,35 @@
 //! proofs, etc.)
 
 mod account;
-pub use account::*;
-
 mod address_allocation;
-pub use address_allocation::*;
-
 mod binary_tag;
-pub use binary_tag::BinaryTag;
-
 mod bucket;
-pub use bucket::{Bucket, BucketId};
-
 mod component;
-pub use component::*;
-
 mod confidential_proof;
-pub use confidential_proof::*;
-
+mod encrypted_data;
 mod layer_one_commitment;
-pub use layer_one_commitment::UnclaimedConfidentialOutputAddress;
-
 mod metadata;
-pub use metadata::Metadata;
-
 mod non_fungible;
-pub use non_fungible::{NonFungible, NonFungibleAddress, NonFungibleAddressContents, NonFungibleId};
-
-mod resource;
-pub use resource::ResourceAddress;
-
 mod proof;
-pub use proof::*;
-
+mod resource;
+mod stealth_proof;
 mod system;
-pub use system::SystemAddress;
-
 mod vault;
+mod viewable_balance;
 
-pub use vault::{Vault, VaultId, VaultRef};
+pub use account::*;
+pub use address_allocation::*;
+pub use binary_tag::*;
+pub use bucket::*;
+pub use component::*;
+pub use confidential_proof::*;
+pub use encrypted_data::*;
+pub use layer_one_commitment::*;
+pub use metadata::*;
+pub use non_fungible::*;
+pub use proof::*;
+pub use resource::ResourceAddress;
+pub use stealth_proof::*;
+pub use system::*;
+pub use vault::*;
+pub use viewable_balance::*;

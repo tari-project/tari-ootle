@@ -9,7 +9,7 @@ use tari_crypto::{
     tari_utilities::ByteArray,
 };
 use tari_engine_types::{
-    confidential::{commit_amount_checked, get_commitment_factory, messages},
+    crypto::{commit_amount_checked, get_commitment_factory, messages},
     ToByteType,
 };
 use tari_template_lib::{

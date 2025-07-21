@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tari_template_lib::{
     models::{ConfidentialWithdrawProof, UnclaimedConfidentialOutputAddress},
     prelude::RistrettoPublicKeyBytes,
-    types::{crypto::CommitmentSignatureBytes, serde_helpers},
+    types::crypto::{CommitmentSignatureBytes, RangeProofBytes},
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize, Eq, PartialEq)]
@@ -17,9 +17,7 @@ use tari_template_lib::{
 pub struct ConfidentialClaim {
     pub public_key: RistrettoPublicKeyBytes,
     pub output_address: UnclaimedConfidentialOutputAddress,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[serde(with = "serde_helpers::dynamic_hex")]
-    pub range_proof: Vec<u8>,
+    pub range_proof: RangeProofBytes,
     pub proof_of_knowledge: CommitmentSignatureBytes,
     pub withdraw_proof: Option<ConfidentialWithdrawProof>,
 }

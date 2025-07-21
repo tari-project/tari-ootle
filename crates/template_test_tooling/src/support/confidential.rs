@@ -7,7 +7,7 @@ use tari_crypto::{
     keys::SecretKey,
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey},
 };
-use tari_engine_types::confidential::commit_amount_checked;
+use tari_engine_types::crypto::commit_amount_checked;
 use tari_ootle_wallet_crypto::{ConfidentialOutputMaskAndValue, ConfidentialProofStatement};
 use tari_template_lib::{
     models::{ConfidentialOutputStatement, ConfidentialWithdrawProof, EncryptedData},

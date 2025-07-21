@@ -1,10 +1,6 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-// Clippy complains about mutable key types in the serde::Deserialize implementation. PublicKey is a safe key type as
-// there is no way to actually mutate the compressed value once it is lazily initialized.
-#![allow(clippy::mutable_key_type)]
-
 use std::{collections::BTreeMap, mem};
 
 use serde::{Deserialize, Serialize};
@@ -26,7 +22,8 @@ use tari_template_lib::{
 };
 
 use crate::{
-    confidential::{validate_confidential_proof, validate_confidential_withdraw, ConfidentialOutput},
+    confidential::{validate_confidential_statement, validate_confidential_withdraw},
+    crypto::PrivateOutput,
     substate::SubstateId,
     ToByteType,
 };
@@ -51,9 +48,9 @@ pub enum ResourceContainer {
     },
     Confidential {
         address: ResourceAddress,
-        commitments: BTreeMap<PedersenCommitmentBytes, ConfidentialOutput>,
+        commitments: BTreeMap<PedersenCommitmentBytes, PrivateOutput>,
         revealed_amount: Amount,
-        locked_commitments: BTreeMap<PedersenCommitmentBytes, ConfidentialOutput>,
+        locked_commitments: BTreeMap<PedersenCommitmentBytes, PrivateOutput>,
         locked_revealed_amount: Amount,
     },
 }
@@ -75,7 +72,7 @@ impl ResourceContainer {
         }
     }
 
-    pub fn confidential<I: IntoIterator<Item = (PedersenCommitmentBytes, ConfidentialOutput)>>(
+    pub fn confidential<I: IntoIterator<Item = (PedersenCommitmentBytes, PrivateOutput)>>(
         address: ResourceAddress,
         commitment: I,
         revealed_amount: Amount,
@@ -102,7 +99,7 @@ impl ResourceContainer {
                 details: "Change revealed amount must be zero for minting".to_string(),
             });
         }
-        let validated_proof = validate_confidential_proof(&proof, view_key)?;
+        let validated_proof = validate_confidential_statement(&proof, view_key)?;
         assert!(
             validated_proof.change_output.is_none(),
             "invariant failed: validate_confidential_proof returned change with no change in input proof"
@@ -499,14 +496,14 @@ impl ResourceContainer {
     }
 
     /// Returns all confidential commitments. If the resource is not confidential, None is returned.
-    pub fn get_confidential_commitments(&self) -> Option<&BTreeMap<PedersenCommitmentBytes, ConfidentialOutput>> {
+    pub fn get_confidential_commitments(&self) -> Option<&BTreeMap<PedersenCommitmentBytes, PrivateOutput>> {
         match self {
             ResourceContainer::Fungible { .. } | ResourceContainer::NonFungible { .. } => None,
             ResourceContainer::Confidential { commitments, .. } => Some(commitments),
         }
     }
 
-    pub fn into_confidential_commitments(self) -> Option<BTreeMap<PedersenCommitmentBytes, ConfidentialOutput>> {
+    pub fn into_confidential_commitments(self) -> Option<BTreeMap<PedersenCommitmentBytes, PrivateOutput>> {
         match self {
             ResourceContainer::Fungible { .. } | ResourceContainer::NonFungible { .. } => None,
             ResourceContainer::Confidential { commitments, .. } => Some(commitments),

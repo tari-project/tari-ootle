@@ -6,6 +6,7 @@
 mod balance_proof;
 mod commitment;
 mod commitment_signature;
+mod range_proof;
 mod ristretto;
 mod scalar;
 mod schnorr;
@@ -13,6 +14,7 @@ mod schnorr;
 pub use balance_proof::*;
 pub use commitment::*;
 pub use commitment_signature::*;
+pub use range_proof::*;
 pub use ristretto::*;
 pub use scalar::*;
 pub use schnorr::*;

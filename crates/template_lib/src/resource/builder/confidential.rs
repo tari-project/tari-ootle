@@ -21,7 +21,6 @@ pub struct ConfidentialResourceBuilder {
     authorize_hook: Option<AuthHook>,
     address_allocation: Option<ResourceAddressAllocation>,
     divisibility: u8,
-    is_total_supply_tracking_enabled: bool,
 }
 
 impl ConfidentialResourceBuilder {
@@ -36,7 +35,6 @@ impl ConfidentialResourceBuilder {
             authorize_hook: None,
             address_allocation: None,
             divisibility: DEFAULT_DIVISIBILITY,
-            is_total_supply_tracking_enabled: true,
         }
     }
 
@@ -173,15 +171,6 @@ impl ConfidentialResourceBuilder {
         self
     }
 
-    /// Disables the tracking of total supply for the resource.
-    ///
-    /// This is useful for resources that do not need to track the total supply.
-    /// Disabling total supply tracking can save on fees.
-    pub fn disable_total_supply_tracking(mut self) -> Self {
-        self.is_total_supply_tracking_enabled = false;
-        self
-    }
-
     /// Build the resource, returning the address
     pub fn build(self) -> ResourceAddress {
         let (address, _) = self.build_internal(None);
@@ -192,7 +181,7 @@ impl ConfidentialResourceBuilder {
     /// This builds the resource and returns a bucket containing the initial supply.
     pub fn initial_supply(self, initial_supply_proof: ConfidentialOutputStatement) -> Bucket {
         let mint_arg = MintArg::Confidential {
-            proof: Box::new(initial_supply_proof),
+            statement: Box::new(initial_supply_proof),
         };
 
         let (_, bucket) = self.build_internal(Some(mint_arg));
@@ -203,7 +192,7 @@ impl ConfidentialResourceBuilder {
         if let Some(symbol) = self.token_symbol {
             self.metadata.insert(TOKEN_SYMBOL, symbol);
         }
-        ResourceManager::new().create(
+        ResourceManager::create(
             ResourceType::Confidential,
             self.owner_rule,
             self.access_rules,
@@ -213,7 +202,7 @@ impl ConfidentialResourceBuilder {
             self.authorize_hook,
             self.address_allocation,
             self.divisibility,
-            self.is_total_supply_tracking_enabled,
+            false,
         )
     }
 }

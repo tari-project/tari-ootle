@@ -30,7 +30,7 @@ use tari_crypto::{
     tari_utilities::ByteArray,
 };
 use tari_engine_types::{
-    confidential::{convert_amount_to_secret, get_commitment_factory, get_range_proof_service, messages},
+    crypto::{convert_amount_to_secret, get_commitment_factory, get_range_proof_service, messages},
     ToByteType,
 };
 use tari_hashing::TransactionSecureNonceKdfDomain;
@@ -43,7 +43,10 @@ use tari_template_lib::{
         ViewableBalanceProofChallengeFields,
     },
     prelude::{PedersenCommitmentBytes, Scalar32Bytes},
-    types::{crypto::RistrettoPublicKeyBytes, Amount},
+    types::{
+        crypto::{RangeProofBytes, RistrettoPublicKeyBytes},
+        Amount,
+    },
 };
 use tari_utilities::safe_array::SafeArray;
 use zeroize::{Zeroize, Zeroizing};
@@ -104,6 +107,8 @@ pub fn create_confidential_output_statement(
         .transpose()?;
 
     let output_range_proof = generate_extended_bullet_proof(output_statement, change_statement)?;
+    let output_range_proof = RangeProofBytes::try_from(output_range_proof)
+        .expect("invariant: generate_extended_bullet_proof returned invalid range proof");
 
     Ok(ConfidentialOutputStatement {
         output_statement: proof_output_statement,
@@ -333,7 +338,7 @@ fn generate_extended_bullet_proof(
 mod tests {
     use rand::rngs::OsRng;
     use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
-    use tari_engine_types::confidential::validate_confidential_proof;
+    use tari_engine_types::confidential::validate_confidential_statement;
     use tari_template_lib::types::Amount;
 
     use super::*;
@@ -363,16 +368,16 @@ mod tests {
         #[test]
         fn it_is_valid_if_proof_is_valid() {
             let proof = create_valid_proof(100.into(), 0);
-            validate_confidential_proof(&proof, None).unwrap();
+            validate_confidential_statement(&proof, None).unwrap();
         }
 
         #[test]
         fn it_is_invalid_if_minimum_value_changed() {
             let mut proof = create_valid_proof(100.into(), 100);
             proof.output_statement.as_mut().unwrap().minimum_value_promise = 99;
-            validate_confidential_proof(&proof, None).unwrap_err();
+            validate_confidential_statement(&proof, None).unwrap_err();
             proof.output_statement.as_mut().unwrap().minimum_value_promise = 1000;
-            validate_confidential_proof(&proof, None).unwrap_err();
+            validate_confidential_statement(&proof, None).unwrap_err();
         }
     }
 

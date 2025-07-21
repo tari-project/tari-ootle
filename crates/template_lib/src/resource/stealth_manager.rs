@@ -20,21 +20,21 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-//! This module provides the `ResourceManager` struct, a high-level interface for managing
+//! This module provides the `StealthResourceManager` struct, a high-level interface for managing
 //! Tari Ootle resources. Resources can be non-private fungible tokens, non-fungible tokens, confidential fungible and
 //! stealth fungible.
 //!
 //! It abstracts common operations like creating resources, minting tokens, recalling tokens from vaults,
 //! querying supply, and updating non-fungible metadata.
 //!
-//! The `ResourceManager` uses engine calls to perform resource operations and enforces
+//! The `StealthResourceManager` uses engine calls to perform resource operations and enforces
 //! access rules and permissions based on the resource configuration.
 //!
 //! # Examples
 //!
 //! ```rust,ignore
-//! use tari_template_lib::resource::manager::ResourceManager;
-//! let resource_manager = ResourceManager::get(my_resource_address);
+//! use tari_template_lib::resource::manager::StealthResourceManager;
+//! let resource_manager = StealthResourceManager::get(my_resource_address);
 //! resource_manager.mint_fungible(1000);
 //! ```
 
@@ -84,17 +84,17 @@ use crate::{
 ///
 /// # Example
 /// ```rust,ignore
-/// use tari_template_lib::resource::manager::ResourceManager;
-/// let resource_manager = ResourceManager::get(my_resource_address);
+/// use tari_template_lib::resource::manager::StealthResourceManager;
+/// let resource_manager = StealthResourceManager::get(my_resource_address);
 /// resource_manager.mint_fungible(Amount(1000));
 /// ```
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct ResourceManager {
+pub struct StealthResourceManager {
     resource_address: ResourceAddress,
 }
 
-impl ResourceManager {
+impl StealthResourceManager {
     /// Returns the address of the resource that is being managed
     pub fn get(resource_address: ResourceAddress) -> Self {
         Self { resource_address }
@@ -103,22 +103,6 @@ impl ResourceManager {
     /// Returns the address of the resource that is being managed.
     pub fn resource_address(&self) -> ResourceAddress {
         self.resource_address
-    }
-
-    /// A public function that returns the resource type of the resource being managed.
-    ///
-    /// # Panics
-    ///
-    /// If the resource type is not recognized on a resource or if the resource address is not set via
-    /// `ResourceManager`.
-    pub fn resource_type(&self) -> ResourceType {
-        let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
-            resource_ref: self.resource_address.into(),
-            action: ResourceAction::GetResourceType,
-            args: invoke_args![],
-        });
-        resp.decode()
-            .expect("Resource GetResourceType returned invalid resource type")
     }
 
     /// Creates a new resource on the Tari network.
@@ -214,7 +198,7 @@ impl ResourceManager {
             .expect("[register_non_fungible] Failed to decode ResourceAddress, Option<Bucket> tuple")
     }
 
-    /// Mints new tokens for the confidential resource managed by this `ResourceManager`.
+    /// Mints new tokens for the confidential resource managed by this `StealthResourceManager`.
     ///
     /// This method accepts a zero-knowledge proof that authorizes the minting of confidential tokens.
     /// Upon success, a [`Bucket`] containing the newly minted tokens is returned to the caller.
@@ -250,7 +234,7 @@ impl ResourceManager {
         .expect("mint_confidential: engine returned None")
     }
 
-    /// Mints new tokens for the stealth resource managed by this `ResourceManager`.
+    /// Mints new tokens for the stealth resource managed by this `StealthResourceManager`.
     ///
     /// This method accepts a zero-knowledge proof that authorizes the minting of stealth tokens.
     ///
@@ -279,7 +263,7 @@ impl ResourceManager {
         });
     }
 
-    /// Mints a new non-fungible token (NFT) for the resource managed by this `ResourceManager`.
+    /// Mints a new non-fungible token (NFT) for the resource managed by this `StealthResourceManager`.
     ///
     /// This method creates an NFT with the specified [`NonFungibleId`] and attaches associated metadata and
     /// mutable data. The data must be serializable. On success, a [`Bucket`] containing the newly minted NFT
@@ -469,7 +453,7 @@ impl ResourceManager {
         .expect("mint_many_non_fungible_with: engine returned None")
     }
 
-    /// Mints a specified amount of fungible tokens for the resource managed by this `ResourceManager`.
+    /// Mints a specified amount of fungible tokens for the resource managed by this `StealthResourceManager`.
     ///
     /// The minted tokens are returned inside a [`Bucket`], which can be used to hold, transfer, or manipulate the
     /// tokens. The `amount` specifies how many of the smallest indivisible units of the fungible resource should be
@@ -682,7 +666,7 @@ impl ResourceManager {
         })
     }
 
-    /// Returns the total supply of tokens for the resource being managed in a [`ResourceManager`] instance.
+    /// Returns the total supply of tokens for the resource being managed in a [`StealthResourceManager`] instance.
     ///
     /// If the resource has total supply tracking enabled, the function will return the total supply of tokens.
     ///
@@ -800,7 +784,7 @@ impl ResourceManager {
     ///
     /// ```rust
     /// # use tari_template_lib::models::NonFungibleId;
-    /// # use tari_template_lib::prelude::ResourceManager;
+    /// # use tari_template_lib::prelude::StealthResourceManager;
     ///
     /// #[derive(serde::Serialize)]
     /// struct MyMutableData {
@@ -810,7 +794,8 @@ impl ResourceManager {
     /// let id = NonFungibleId::String("my_unique_nft".into());
     /// let data = MyMutableData { views: 42 };
     ///
-    /// ResourceManager::get("resource_xxx".parse().unwrap()).update_non_fungible_data(id, &data);
+    /// StealthResourceManager::get("resource_xxx".parse().unwrap())
+    ///     .update_non_fungible_data(id, &data);
     /// ```
     pub fn update_non_fungible_data<T: Serialize + ?Sized>(&self, id: NonFungibleId, data: &T) {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
@@ -900,7 +885,7 @@ impl ResourceManager {
     }
 }
 
-impl From<ResourceAddress> for ResourceManager {
+impl From<ResourceAddress> for StealthResourceManager {
     fn from(resource_address: ResourceAddress) -> Self {
         Self::get(resource_address)
     }

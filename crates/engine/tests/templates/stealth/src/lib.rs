@@ -22,59 +22,50 @@
 
 use tari_template_lib::prelude::*;
 
-#[template]
-mod faucet_template {
+// #[template]
+mod template {
+
     use super::*;
 
-    pub struct ConfidentialFaucet {
-        vault: Vault,
+    pub struct StealthFaucet {
+        stealth_manager: StealthResourceManager,
+        available_funds: Amount,
     }
 
-    impl ConfidentialFaucet {
-        pub fn mint(confidential_proof: ConfidentialOutputStatement) -> Component<Self> {
-            let coins = ResourceBuilder::confidential()
+    impl StealthFaucet {
+        pub fn new(initial_supply: StealthOutputStatement, available_funds: Amount) -> Component<Self> {
+            let resource_address = ResourceBuilder::stealth()
                 .mintable(rule!(allow_all))
-                .initial_supply(confidential_proof);
+                .initial_supply(initial_supply);
 
             Component::new(Self {
-                vault: Vault::from_bucket(coins),
+                stealth_manager: resource_address.into(),
+                available_funds,
             })
             .with_access_rules(AccessRules::allow_all())
             .create()
         }
 
-        pub fn mint_with_view_key(
-            confidential_proof: ConfidentialOutputStatement,
+        pub fn new_with_view_key(
+            outputs: StealthOutputStatement,
             view_key: RistrettoPublicKeyBytes,
+            available_funds: Amount,
         ) -> Component<Self> {
-            let coins = ResourceBuilder::confidential()
+            let resource_address = ResourceBuilder::stealth()
                 .mintable(rule!(allow_all))
                 .with_view_key(view_key)
-                .initial_supply(confidential_proof);
+                .initial_supply(outputs);
 
             Component::new(Self {
-                vault: Vault::from_bucket(coins),
+                stealth_manager: resource_address.into(),
+                available_funds,
             })
             .with_access_rules(AccessRules::allow_all())
             .create()
         }
 
-        pub fn mint_revealed(&mut self, amount: Amount) {
-            let proof = ConfidentialOutputStatement::mint_revealed(amount);
-            let bucket = ResourceManager::get(self.vault.resource_address()).mint_confidential(proof);
-            self.vault.deposit(bucket);
-        }
-
-        pub fn mint_revealed_with_bad_range_proof(&mut self, amount: Amount) {
-            let mut proof = ConfidentialOutputStatement::mint_revealed(amount);
-            proof.range_proof = crypto::RangeProofBytes::try_from(vec![1, 2, 3]).unwrap();
-            let bucket = ResourceManager::get(self.vault.resource_address()).mint_confidential(proof);
-            self.vault.deposit(bucket);
-        }
-
-        pub fn mint_more(&mut self, proof: ConfidentialOutputStatement) {
-            let bucket = ResourceManager::get(self.vault.resource_address()).mint_confidential(proof);
-            self.vault.deposit(bucket);
+        pub fn mint_more(&mut self, statement: StealthOutputStatement, amount_to_mint: Amount) {
+            self.stealth_manager.mint_stealth(statement);
         }
 
         pub fn take_free_coins(&mut self, proof: ConfidentialWithdrawProof) -> Bucket {
@@ -84,20 +75,6 @@ mod faucet_template {
                 proof.inputs.len()
             );
             self.vault.withdraw_confidential(proof)
-        }
-
-        pub fn total_supply(&self) -> Option<Amount> {
-            ResourceManager::get(self.vault.resource_address()).total_supply_opt()
-        }
-
-        /// Utility function for tests
-        pub fn split_coins(mut bucket: Bucket, proof: ConfidentialWithdrawProof) -> (Bucket, Bucket) {
-            let new_bucket = bucket.take_confidential(proof);
-            (new_bucket, bucket)
-        }
-
-        pub fn vault_balance(&self) -> Amount {
-            self.vault.balance()
         }
     }
 }

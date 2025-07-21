@@ -3,7 +3,7 @@
 
 use log::*;
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
-use tari_engine_types::{confidential::ConfidentialOutput, substate::SubstateId, FromByteType, ToByteType};
+use tari_engine_types::{crypto::PrivateOutput, substate::SubstateId, FromByteType, ToByteType};
 use tari_key_manager::key_manager::DerivedKey;
 use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 use tari_ootle_wallet_crypto::{kdfs, ConfidentialOutputMaskAndValue};
@@ -234,7 +234,7 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
 
     pub fn verify_and_update_confidential_outputs<
         'i,
-        I: IntoIterator<Item = (&'i PedersenCommitmentBytes, &'i ConfidentialOutput)>,
+        I: IntoIterator<Item = (&'i PedersenCommitmentBytes, &'i PrivateOutput)>,
     >(
         &self,
         account_addr: &SubstateId,
@@ -287,7 +287,7 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
         key: &DerivedKey<RistrettoPublicKey>,
         vault_address: &SubstateId,
         commitment: PedersenCommitmentBytes,
-        output: &ConfidentialOutput,
+        output: &PrivateOutput,
     ) -> Result<ConfidentialOutputModel, ConfidentialOutputsApiError> {
         // Validate the commitment is well-formed.
         let _output_commitment = PedersenCommitment::try_from_byte_type(&commitment).map_err(|e| {

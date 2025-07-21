@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey};
-use tari_engine_types::confidential::commit_amount_checked;
+use tari_engine_types::crypto::commit_amount_checked;
 use tari_template_lib::{models::EncryptedData, types::Amount};
 
 #[derive(Debug, Clone)]

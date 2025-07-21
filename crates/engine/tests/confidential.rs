@@ -7,7 +7,7 @@ use rand::rngs::OsRng;
 use tari_common_types::types::PrivateKey;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
-    confidential::{ConfidentialOutput, ElgamalVerifiableBalance, ValueLookupTable},
+    crypto::{ElgamalVerifiableBalance, PrivateOutput, ValueLookupTable},
     resource_container::ResourceError,
     substate::SubstateId,
 };
@@ -457,7 +457,7 @@ fn mint_revealed_with_invalid_proof() {
 
     let reason = test.execute_expect_failure(
         Transaction::builder()
-            .call_method(faucet, "mint_revealed_with_range_proof", args![Amount(123)])
+            .call_method(faucet, "mint_revealed_with_bad_range_proof", args![Amount(123)])
             .build_and_seal(test.secret_key()),
         vec![],
     );
@@ -468,7 +468,7 @@ fn mint_revealed_with_invalid_proof() {
 }
 
 pub fn try_brute_force_confidential_balance<I, TValueLookup>(
-    utxos: &BTreeMap<PedersenCommitmentBytes, ConfidentialOutput>,
+    utxos: &BTreeMap<PedersenCommitmentBytes, PrivateOutput>,
     secret_view_key: &PrivateKey,
     value_range: I,
     value_lookup: &mut TValueLookup,

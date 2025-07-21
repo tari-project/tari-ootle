@@ -2,13 +2,21 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use lazy_static::lazy_static;
-use tari_common_types::types::CommitmentFactory;
+use tari_common_types::types::{CommitmentFactory, PrivateKey};
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
-    ristretto::{bulletproofs_plus::BulletproofsPlusService, pedersen::PedersenCommitment, RistrettoSecretKey},
+    ristretto::{
+        bulletproofs_plus::BulletproofsPlusService,
+        pedersen::PedersenCommitment,
+        RistrettoPublicKey,
+        RistrettoSchnorr,
+        RistrettoSecretKey,
+    },
     tari_utilities::ByteArray,
 };
-use tari_template_lib::types::Amount;
+use tari_template_lib::{prelude::BalanceProofSignature, types::Amount};
+
+use crate::FromByteType;
 
 lazy_static! {
     /// Static reference to the default commitment factory. Each instance of CommitmentFactory requires a number of heap allocations.
@@ -68,37 +76,10 @@ pub fn convert_amount_to_secret(amount: &Amount) -> Option<RistrettoSecretKey> {
     )
 }
 
-pub mod messages {
-    use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
-    use tari_template_lib::{models::ViewableBalanceProofChallengeFields, types::Amount};
-
-    use crate::hashing::{hasher64, EngineHashDomainLabel};
-
-    pub fn confidential_withdraw64(
-        excess: &RistrettoPublicKey,
-        public_nonce: &RistrettoPublicKey,
-        input_revealed_amount: Amount,
-        output_revealed_amount: Amount,
-    ) -> [u8; 64] {
-        hasher64(EngineHashDomainLabel::ConfidentialTransfer)
-            .chain(excess)
-            .chain(public_nonce)
-            .chain(&input_revealed_amount)
-            .chain(&output_revealed_amount)
-            .result()
-    }
-
-    pub fn viewable_balance_proof_challenge64(
-        commitment: &PedersenCommitment,
-        view_key: &RistrettoPublicKey,
-        challenge_fields: ViewableBalanceProofChallengeFields<'_>,
-    ) -> [u8; 64] {
-        hasher64(EngineHashDomainLabel::ViewKey)
-            .chain(commitment)
-            .chain(view_key)
-            .chain(&challenge_fields)
-            .result()
-    }
+pub fn try_decode_to_signature(balance_proof: &BalanceProofSignature) -> Option<RistrettoSchnorr> {
+    let public_nonce = RistrettoPublicKey::try_from_byte_type(balance_proof.public_nonce()).ok()?;
+    let signature = PrivateKey::from_canonical_bytes(balance_proof.signature().as_bytes()).ok()?;
+    Some(RistrettoSchnorr::new(public_nonce, signature))
 }
 
 #[cfg(test)]

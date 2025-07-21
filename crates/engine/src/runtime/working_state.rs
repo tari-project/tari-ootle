@@ -22,10 +22,14 @@ use tari_engine_types::{
     proof::{ContainerRef, LockedResource, Proof},
     resource::Resource,
     resource_container::{ResourceContainer, ResourceError},
+    stealth::validate_stealth_statement,
     substate::{Substate, SubstateDiff, SubstateId, SubstateValue},
     transaction_receipt::TransactionReceipt,
     vault::Vault,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
+    ToByteType,
+    Utxo,
+    UtxoAddress,
     ValidatorFeePoolAddress,
     ValidatorFeeWithdrawal,
 };
@@ -39,6 +43,7 @@ use tari_template_lib::{
         ComponentAddress,
         NonFungibleAddress,
         ProofId,
+        StealthOutputStatement,
         UnclaimedConfidentialOutputAddress,
         VaultId,
     },
@@ -541,7 +546,7 @@ impl WorkingState {
 
                 ResourceContainer::non_fungible(resource_address, token_ids)
             },
-            MintArg::Confidential { proof } => {
+            MintArg::Confidential { statement } => {
                 let resource = self.get_resource(locked_resource)?;
                 debug!(
                     target: LOG_TARGET,
@@ -553,7 +558,16 @@ impl WorkingState {
                         function: "MintArg::Confidential",
                         details: format!("Resource contained a malformed view key: {e}. This should never happen!",),
                     })?;
-                ResourceContainer::mint_confidential(resource_address, *proof, maybe_view_key.as_ref())?
+                ResourceContainer::mint_confidential(resource_address, *statement, maybe_view_key.as_ref())?
+            },
+            MintArg::Stealth { .. } => {
+                return Err(RuntimeError::InvariantError {
+                    function: "mint_resource",
+                    details: format!(
+                        "Cannot call mint_resource on stealth resources (resource_addr = {})",
+                        locked_resource.address()
+                    ),
+                })
             },
         };
 
@@ -568,7 +582,7 @@ impl WorkingState {
                 }
                 .into());
             }
-            // Increase the total supply of the resource if enabled
+            // Increase the total supply of the resource (no-op if disabled)
             if !resource_mut.increase_total_supply(resource_container.amount()) {
                 return Err(RuntimeError::ResourceSupplyWouldOverflow {
                     resource_address,
@@ -581,6 +595,41 @@ impl WorkingState {
         }
 
         Ok(resource_container)
+    }
+
+    pub fn mint_stealth_substates(
+        &mut self,
+        locked_resource: &LockedSubstate,
+        stmt: &StealthOutputStatement,
+    ) -> Result<(), RuntimeError> {
+        let resource_address =
+            locked_resource
+                .address()
+                .as_resource_address()
+                .ok_or_else(|| RuntimeError::InvariantError {
+                    function: "mint_resource",
+                    details: "LockedSubstate substate_id is not a ResourceAddress".to_string(),
+                })?;
+        let resource = self.get_resource(locked_resource)?;
+        debug!(
+            target: LOG_TARGET,
+            "Minting confidential tokens on resource: {}", resource_address
+        );
+        let maybe_view_key = resource
+            .to_view_key_public_key()
+            .map_err(|e| RuntimeError::InvariantError {
+                function: "MintArg::Stealth",
+                details: format!("Resource contained a malformed view key: {e}. This should never happen!"),
+            })?;
+
+        let validated = validate_stealth_statement(stmt, maybe_view_key.as_ref())?;
+
+        for output in validated.outputs {
+            let address = UtxoAddress::new(resource_address, output.commitment.to_byte_type().into());
+            self.new_substate(address, Utxo::new(output.into()))?;
+        }
+
+        Ok(())
     }
 
     pub fn set_vault_freeze(

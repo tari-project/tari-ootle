@@ -549,6 +549,9 @@ impl BalanceEntry {
                     symbol
                 )
             },
+            ResourceType::Stealth => {
+                format!("{} {} (stealth)", self.balance + self.confidential_balance, symbol)
+            },
         }
     }
 }

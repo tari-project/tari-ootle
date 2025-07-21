@@ -402,7 +402,7 @@ impl FungibleResourceBuilder {
         if let Some(symbol) = self.token_symbol {
             self.metadata.insert(TOKEN_SYMBOL, symbol);
         }
-        ResourceManager::new().create(
+        ResourceManager::create(
             ResourceType::Fungible,
             self.owner_rule,
             self.access_rules,

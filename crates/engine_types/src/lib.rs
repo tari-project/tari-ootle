@@ -6,6 +6,7 @@ pub mod byte_types;
 pub mod commit_result;
 pub mod component;
 pub mod confidential;
+pub mod crypto;
 pub mod events;
 pub mod fees;
 pub mod hashing;
@@ -19,13 +20,13 @@ pub mod proof;
 pub mod resource;
 pub mod resource_container;
 pub mod serde_with;
+pub mod stealth;
 pub mod substate;
 pub mod transaction_receipt;
 pub mod vault;
 pub mod virtual_substate;
 
 mod template;
-pub use template::{calculate_template_binary_hash, parse_template_address};
 
 pub mod entity_id_provider;
 pub mod id_provider;
@@ -41,6 +42,7 @@ mod validator_fee;
 pub use argument_parser::parse_arg;
 pub use byte_types::*;
 pub use instruction_call::*;
+pub use template::{calculate_template_binary_hash, parse_template_address};
 pub use utxo::*;
 pub use validator_fee::*;
 

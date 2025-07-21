@@ -827,6 +827,12 @@ impl From<ValidatorFeePool> for SubstateValue {
     }
 }
 
+impl From<Utxo> for SubstateValue {
+    fn from(utxo: Utxo) -> Self {
+        Self::Utxo(utxo)
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",

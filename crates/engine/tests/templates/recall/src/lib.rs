@@ -71,6 +71,9 @@ mod template {
                 ResourceType::Confidential => {
                     self.confidential.deposit(bucket);
                 },
+                ResourceType::Stealth => {
+                    panic!("Stealth resources cannot be recalled");
+                },
             }
         }
 

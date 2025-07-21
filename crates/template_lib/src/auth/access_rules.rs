@@ -229,12 +229,7 @@ pub struct ResourceAccessRules {
     depositable: AccessRule,
     update_non_fungible_data: AccessRule,
     update_access_rules: AccessRule,
-    #[serde(default = "deny_all")]
     freeze: AccessRule,
-}
-
-fn deny_all() -> AccessRule {
-    AccessRule::DenyAll
 }
 
 impl ResourceAccessRules {

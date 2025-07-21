@@ -69,6 +69,7 @@ pub use crate::{
         ProofId,
         ResourceAddress,
         ResourceAddressAllocation,
+        StealthOutputStatement,
         Vault,
         VaultId,
     },

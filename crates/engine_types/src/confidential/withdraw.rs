@@ -1,36 +1,22 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use serde::{Deserialize, Serialize};
-use tari_common_types::types::{BulletRangeProof, PrivateKey};
-use tari_crypto::{
-    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSchnorr},
-    tari_utilities::ByteArray,
-};
-use tari_template_lib::{
-    models::{ConfidentialWithdrawProof, EncryptedData},
-    types::{
-        crypto::{BalanceProofSignature, RistrettoPublicKeyBytes},
-        Amount,
-    },
-};
+use tari_common_types::types::PrivateKey;
+use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
+use tari_template_lib::{models::ConfidentialWithdrawProof, types::Amount};
 
-use super::{commit_amount, messages, validate_confidential_proof, CompressedElgamalVerifiableBalance};
+use super::validate_confidential_statement;
 use crate::{
-    confidential::elgamal::ElgamalVerifiableBalance,
+    crypto::{commit_amount, messages, try_decode_to_signature, ValidatedPrivateOutput},
     resource_container::ResourceError,
-    FromByteType,
-    ToByteType,
 };
 
 #[derive(Debug, Clone)]
 pub struct ValidatedConfidentialWithdrawProof {
     /// Optional confidential output of the withdraw. This will be created as a new output commitment.
-    pub output: Option<ValidatedConfidentialOutput>,
+    pub output: Option<ValidatedPrivateOutput>,
     /// Optional confidential change output of the withdraw. This will replace any inputs used.
-    pub change_output: Option<ValidatedConfidentialOutput>,
-    /// Range proof
-    pub range_proof: BulletRangeProof,
+    pub change_output: Option<ValidatedPrivateOutput>,
     /// Amount of revealed value to use as an input.
     pub input_revealed_amount: Amount,
     /// Amount of revealed value to include in the revealed value of the output
@@ -39,46 +25,12 @@ pub struct ValidatedConfidentialWithdrawProof {
     pub change_revealed_amount: Amount,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
-pub struct ConfidentialOutput {
-    pub stealth_public_nonce: RistrettoPublicKeyBytes,
-    pub encrypted_data: EncryptedData,
-    #[cfg_attr(feature = "ts", ts(type = "number | bigint"))]
-    pub minimum_value_promise: u64,
-    pub viewable_balance: Option<CompressedElgamalVerifiableBalance>,
-}
-
-impl From<ValidatedConfidentialOutput> for ConfidentialOutput {
-    fn from(output: ValidatedConfidentialOutput) -> Self {
-        Self {
-            stealth_public_nonce: output.stealth_public_nonce.to_byte_type(),
-            encrypted_data: output.encrypted_data,
-            minimum_value_promise: output.minimum_value_promise,
-            viewable_balance: output.viewable_balance.map(Into::into),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ValidatedConfidentialOutput {
-    pub commitment: PedersenCommitment,
-    pub stealth_public_nonce: RistrettoPublicKey,
-    pub encrypted_data: EncryptedData,
-    pub minimum_value_promise: u64,
-    pub viewable_balance: Option<ElgamalVerifiableBalance>,
-}
-
 pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a PedersenCommitment>>(
     inputs: I,
     view_key: Option<&RistrettoPublicKey>,
     withdraw_proof: ConfidentialWithdrawProof,
 ) -> Result<ValidatedConfidentialWithdrawProof, ResourceError> {
-    let validated_proof = validate_confidential_proof(&withdraw_proof.output_proof, view_key)?;
+    let validated_proof = validate_confidential_statement(&withdraw_proof.output_proof, view_key)?;
 
     let input_revealed_amount = withdraw_proof.input_revealed_amount;
     if input_revealed_amount.is_negative() {
@@ -115,7 +67,6 @@ pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a Pede
         return Ok(ValidatedConfidentialWithdrawProof {
             output: None,
             change_output: validated_proof.change_output,
-            range_proof: BulletRangeProof(withdraw_proof.output_proof.range_proof),
             input_revealed_amount,
             output_revealed_amount: withdraw_proof.output_proof.output_revealed_amount,
             change_revealed_amount: withdraw_proof.output_proof.change_revealed_amount,
@@ -170,15 +121,8 @@ pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a Pede
     Ok(ValidatedConfidentialWithdrawProof {
         output: validated_proof.output,
         change_output: validated_proof.change_output,
-        range_proof: BulletRangeProof(withdraw_proof.output_proof.range_proof),
         input_revealed_amount: withdraw_proof.input_revealed_amount,
         output_revealed_amount: withdraw_proof.output_proof.output_revealed_amount,
         change_revealed_amount: withdraw_proof.output_proof.change_revealed_amount,
     })
-}
-
-fn try_decode_to_signature(balance_proof: &BalanceProofSignature) -> Option<RistrettoSchnorr> {
-    let public_nonce = RistrettoPublicKey::try_from_byte_type(balance_proof.public_nonce()).ok()?;
-    let signature = PrivateKey::from_canonical_bytes(balance_proof.signature().as_bytes()).ok()?;
-    Some(RistrettoSchnorr::new(public_nonce, signature))
 }

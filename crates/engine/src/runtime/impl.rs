@@ -33,21 +33,26 @@ use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason, TransactionResult},
     component::ComponentHeader,
     confidential::ConfidentialClaim,
-    crypto::{get_commitment_factory, get_range_proof_service, PrivateOutput},
+    crypto::{get_commitment_factory, get_static_range_proof_service, PrivateOutput},
     entity_id_provider::EntityIdProvider,
     events::Event,
     hashing::hash_template_code,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     instruction_result::InstructionResult,
+    limits,
     lock::LockFlag,
     logs::LogEntry,
     published_template::{PublishedTemplate, PublishedTemplateAddress},
     resource::Resource,
     resource_container::{ResourceContainer, ResourceError},
+    stealth,
     substate::{SubstateId, SubstateValue},
     vault::Vault,
     ComponentCall,
     FromByteType,
+    ToByteType,
+    Utxo,
+    UtxoAddress,
     ValidatorFeePoolAddress,
 };
 use tari_ootle_common_types::{
@@ -111,6 +116,7 @@ use tari_template_lib::{
         NotAuthorized,
         ResourceAddress,
         ResourceAddressAllocation,
+        StealthTransferStatement,
         VaultRef,
     },
     prelude::{ResourceType, RistrettoPublicKeyBytes},
@@ -119,7 +125,7 @@ use tari_template_lib::{
     types::{Amount, EntityId, TemplateAddress},
 };
 
-use super::{limits, working_state::WorkingState, Runtime};
+use super::{working_state::WorkingState, Runtime};
 use crate::{
     runtime::{
         engine_args::EngineArgs,
@@ -127,6 +133,7 @@ use crate::{
         locking::{LockError, LockedSubstate},
         scope::PushCallFrame,
         tracker::StateTracker,
+        validation::check_stealth_transfer_limits,
         RuntimeError,
         RuntimeInterface,
         RuntimeModule,
@@ -437,7 +444,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 state
                     .current_call_scope()?
                     .get_current_component_lock()
-                    .and_then(|l| l.address().as_component_address()),
+                    .and_then(|l| l.substate_id().as_component_address()),
             )
         })?;
         let substate_id = component_address_option.map(SubstateId::Component);
@@ -585,7 +592,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let is_already_locked = state
                         .current_call_scope()?
                         .get_current_component_lock()
-                        .map(|l| *l.address() == component_address)
+                        .map(|l| *l.substate_id() == component_address)
                         .unwrap_or(false);
 
                     let component_lock = if is_already_locked {
@@ -601,7 +608,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     };
 
                     // We only allow mutating of the current component.
-                    if *component_lock.address() != component_address {
+                    if *component_lock.substate_id() != component_address {
                         return Err(RuntimeError::LockError(LockError::SubstateNotLocked {
                             address: SubstateId::Component(component_address),
                         }));
@@ -639,10 +646,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     // security itself, it's just checking the engine call is made correctly. The security comes from
                     // the fact that the engine creates the lock on the currently executing component and that is the
                     // lock we use to gain access.
-                    if *component_lock.address() != component_address {
+                    if *component_lock.substate_id() != component_address {
                         return Err(RuntimeError::AccessDeniedSetComponentState {
                             attempted_on: component_address.into(),
-                            attempted_by: Box::new(component_lock.address().clone()),
+                            attempted_by: Box::new(component_lock.substate_id().clone()),
                         });
                     }
 
@@ -680,7 +687,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     // security itself, it's just checking the engine call is made correctly. The security comes from
                     // the fact that the engine creates the lock on the currently executing component and that is the
                     // lock we use to gain access.
-                    if *component_lock.address() != component_address {
+                    if *component_lock.substate_id() != component_address {
                         return Err(RuntimeError::LockError(LockError::SubstateNotLocked {
                             address: SubstateId::Component(component_address),
                         }));
@@ -762,10 +769,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     });
                 }
 
-                if arg.view_key.is_some() && !arg.resource_type.is_confidential() {
+                if arg.view_key.is_some() && !arg.resource_type.is_confidential() && !arg.resource_type.is_stealth() {
                     return Err(RuntimeError::InvalidArgument {
                         argument: "CreateResourceArg",
-                        reason: "View key can only be set for confidential resources".to_string(),
+                        reason: "View key can only be set for stealth or confidential resources".to_string(),
                     });
                 }
 
@@ -844,7 +851,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                             },
                             ResourceType::Stealth => {
                                 // PANIC: checked that this is a stealth resource type
-                                let stmt = mint_arg.expect_stealth_statement();
+                                let stmt = mint_arg.expect_stealth_mint_statement();
                                 state_mut.mint_stealth_substates(&resource_lock, &stmt)?;
                             },
                         }
@@ -940,12 +947,13 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         },
                         ResourceType::Stealth => {
                             // PANIC: checked that this is a stealth resource type
-                            let stmt = mint_arg.expect_stealth_statement();
+                            let stmt = mint_arg.expect_stealth_mint_statement();
                             state_mut.mint_stealth_substates(&resource_lock, &stmt)?;
 
                             let payload = Metadata::from_iter([
                                 ("resource_type", ResourceType::Stealth.to_string()),
-                                ("num_outputs", stmt.outputs.len().to_string()),
+                                ("num_outputs", stmt.outputs_statement.outputs.len().to_string()),
+                                ("amount", stmt.balance_proof.total_mint_amount.to_string()),
                             ]);
                             self.emit_std_event("resource", "mint", resource_address.into(), payload, state_mut)?;
                         },
@@ -1263,12 +1271,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         ResourceType::Confidential => {
                             ResourceContainer::confidential(*resource_address, None, Amount::zero())
                         },
-                        ResourceType::Stealth => {
-                            return Err(ResourceError::OperationNotAllowed(
-                                "Cannot deposit stealth resources into a vault".to_string(),
-                            )
-                            .into())
-                        },
+                        ResourceType::Stealth => ResourceContainer::stealth(*resource_address, Amount::zero()),
                     };
 
                     let vault = Vault::new(resource);
@@ -1404,14 +1407,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                                 function: "VaultAction::Withdraw",
                                 details: format!(
                                     "Resource {} has a malformed view key: {}",
-                                    resource_lock.address(),
+                                    resource_lock.substate_id(),
                                     e
                                 ),
                             })?;
 
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
-                    let (resource_container, amount) = match arg {
-                        VaultWithdrawArg::Fungible { amount } => {
+                    let (resource_container, public_amount) = match arg {
+                        VaultWithdrawArg::Fungible { amount } | VaultWithdrawArg::Stealth { amount } => {
                             let container = vault_mut.withdraw(amount)?;
                             (container, amount)
                         },
@@ -1431,7 +1434,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let payload = Metadata::from_iter([
                         ("resource_address", resource_container.resource_address().to_string()),
                         ("resource_type", resource_container.resource_type().to_string()),
-                        ("amount", amount.to_string()),
+                        ("amount", public_amount.to_string()),
                     ]);
 
                     self.emit_std_event("vault", "withdraw", vault_id.into(), payload, state)?;
@@ -1564,7 +1567,11 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         .to_view_key_public_key()
                         .map_err(|e| RuntimeError::InvariantError {
                             function: "VaultAction::PayFee",
-                            details: format!("Resource {} has a malformed view key: {}", resource_lock.address(), e),
+                            details: format!(
+                                "Resource {} has a malformed view key: {}",
+                                resource_lock.substate_id(),
+                                e
+                            ),
                         })?;
 
                     let vault_mut = state_mut.get_vault_mut(&vault_lock)?;
@@ -1849,7 +1856,11 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         .to_view_key_public_key()
                         .map_err(|e| RuntimeError::InvariantError {
                             function: "BucketAction::TakeConfidential",
-                            details: format!("Resource {} has a malformed view key: {}", resource_lock.address(), e),
+                            details: format!(
+                                "Resource {} has a malformed view key: {}",
+                                resource_lock.substate_id(),
+                                e
+                            ),
                         })?;
                     let bucket_mut = state.get_bucket_mut(bucket_id)?;
                     let resource = bucket_mut.take_confidential(proof, view_key.as_ref())?;
@@ -2341,7 +2352,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         }
 
         // 3. range_proof must be valid
-        if !get_range_proof_service(1).verify(range_proof.as_ref(), &commitment) {
+        if !get_static_range_proof_service(1).verify(range_proof.as_ref(), &commitment) {
             warn!(target: LOG_TARGET, "Claim burn failed - Invalid range proof");
             return Err(RuntimeError::InvalidRangeProof);
         }
@@ -2410,8 +2421,13 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             self.reset_to_fee_checkpoint()?;
         }
 
-        let substates_to_persist = self.tracker.take_substates_to_persist();
-        let mut finalized = self.tracker.finalize(substates_to_persist)?;
+        let (substates_to_persist, downed_utxos) = self.tracker.write_with(|state_mut| {
+            let mutated_substates = state_mut.take_mutated_substates();
+            let downed_utxos = state_mut.take_downed_utxos();
+            (mutated_substates, downed_utxos)
+        });
+
+        let mut finalized = self.tracker.finalize(substates_to_persist, downed_utxos)?;
 
         if !finalized.fee_receipt.is_paid_in_full() {
             let reason = RejectReason::InsufficientFeesPaid(format!(
@@ -2453,7 +2469,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 let call_frame = state.current_call_scope()?;
                 let maybe_address = call_frame
                     .get_current_component_lock()
-                    .map(|l| l.address().as_component_address().unwrap());
+                    .map(|l| l.substate_id().as_component_address().unwrap());
                 Ok(InvokeResult::encode(&maybe_address)?)
             }),
         }
@@ -2637,6 +2653,78 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     )))
                 },
             }
+        })
+    }
+
+    fn stealth_transfer(
+        &self,
+        resource_address: ResourceAddress,
+        statement: StealthTransferStatement,
+        revealed_funds_bucket_id: Option<BucketId>,
+    ) -> Result<Option<BucketId>, RuntimeError> {
+        check_stealth_transfer_limits(&limits::STEALTH_LIMITS, &statement)?;
+
+        self.tracker.write_with(|state_mut| {
+            let resource_lock = state_mut.read_lock_substate(&resource_address.into())?;
+
+            let revealed_funds_bucket = revealed_funds_bucket_id
+                .map(|id| state_mut.take_bucket(id))
+                .transpose()?;
+            if let Some(ref bucket) = revealed_funds_bucket {
+                if *bucket.resource_address() != resource_address {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "revealed_funds_bucket",
+                        reason: format!(
+                            "Revealed funds bucket resource address ({}) does not match the statement's resource \
+                             address ({})",
+                            bucket.resource_address(),
+                            resource_address
+                        ),
+                    });
+                }
+            }
+
+            let input_substates = statement
+                .inputs
+                .iter()
+                .map(|c| UtxoAddress::new(resource_address, c.into()));
+
+            // TODO: this checks that the inputs exist and downs them, do we need this map that's returned?
+            let _inputs = state_mut.spend_utxos(input_substates)?;
+            let revealed_input_amount = revealed_funds_bucket.as_ref().map(|b| b.amount()).unwrap_or_default();
+
+            let resource = state_mut.get_resource(&resource_lock)?;
+            let view_key = resource
+                .view_key()
+                .map(RistrettoPublicKey::try_from_byte_type)
+                .transpose()
+                .map_err(|e| {
+                    warn!(target: LOG_TARGET, "Stealth transfer failed - malformed view key: {}", e);
+                    RuntimeError::InvalidArgument {
+                        argument: "view_key",
+                        reason: "Malformed RistrettoPublicKeyBytes".to_string(),
+                    }
+                })?;
+
+            let valid_transfer = stealth::validate_transfer(&statement, revealed_input_amount, view_key.as_ref())?;
+
+            for output in valid_transfer.outputs {
+                let address = UtxoAddress::new(resource_address, output.commitment.to_byte_type().into());
+                let value = Utxo::new(output.into());
+                state_mut.new_substate(address, value)?;
+            }
+
+            if valid_transfer.revealed_output_amount.is_zero() {
+                return Ok(None);
+            }
+
+            let bucket_id = state_mut.new_bucket_id();
+            state_mut.new_bucket(
+                bucket_id,
+                ResourceContainer::stealth(resource_address, valid_transfer.revealed_output_amount),
+            )?;
+
+            Ok(Some(bucket_id))
         })
     }
 }

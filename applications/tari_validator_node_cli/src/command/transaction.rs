@@ -406,7 +406,7 @@ fn print_substate_diff(diff: &SubstateDiff) {
             },
             SubstateValue::Utxo(_) => {
                 println!("      ▶ UTXO:");
-                let utxo_addr = address.as_utxo().unwrap();
+                let utxo_addr = address.as_utxo_address().unwrap();
                 let resx = utxo_addr.resource_address();
                 let id = utxo_addr.id();
                 println!("        ▶ Resource Address: {}", resx);

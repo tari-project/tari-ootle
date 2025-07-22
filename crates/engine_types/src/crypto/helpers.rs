@@ -9,32 +9,52 @@ use tari_crypto::{
         bulletproofs_plus::BulletproofsPlusService,
         pedersen::PedersenCommitment,
         RistrettoPublicKey,
-        RistrettoSchnorr,
         RistrettoSecretKey,
     },
     tari_utilities::ByteArray,
 };
 use tari_template_lib::{prelude::BalanceProofSignature, types::Amount};
 
-use crate::FromByteType;
+use crate::{hashing::EngineSchnorrSignature, FromByteType, ReadOnly};
+
+// TODO RistrettoSecretKey should provide a constant ZERO
+pub const ZERO_SECRET_KEY: RistrettoSecretKey = unsafe { std::mem::transmute([0u8; 32]) };
+
+// Note that the BP-plus implementation currently does not support bit lengths over 64
+const BP_BIT_LENGTH: usize = u64::BITS as usize;
 
 lazy_static! {
     /// Static reference to the default commitment factory. Each instance of CommitmentFactory requires a number of heap allocations.
     static ref COMMITMENT_FACTORY: CommitmentFactory = CommitmentFactory::default();
     /// Static reference to the default range proof service. Each instance of RangeProofService requires a number of heap allocations.
     static ref RANGE_PROOF_AGG_1_SERVICE: BulletproofsPlusService =
-        BulletproofsPlusService::init(64, 1, CommitmentFactory::default()).unwrap();
+        BulletproofsPlusService::init(BP_BIT_LENGTH, 1, CommitmentFactory::default()).unwrap();
     static ref RANGE_PROOF_AGG_2_SERVICE: BulletproofsPlusService =
-        BulletproofsPlusService::init(64, 2, CommitmentFactory::default()).unwrap();
+        BulletproofsPlusService::init(BP_BIT_LENGTH, 2, CommitmentFactory::default()).unwrap();
+    static ref RANGE_PROOF_AGG_4_SERVICE: BulletproofsPlusService =
+        BulletproofsPlusService::init(BP_BIT_LENGTH, 4, CommitmentFactory::default()).unwrap();
 }
 
-pub fn get_range_proof_service(aggregation_factor: usize) -> &'static BulletproofsPlusService {
+pub fn get_static_range_proof_service(aggregation_factor: usize) -> &'static BulletproofsPlusService {
     match aggregation_factor {
         1 => &RANGE_PROOF_AGG_1_SERVICE,
         2 => &RANGE_PROOF_AGG_2_SERVICE,
+        4 => &RANGE_PROOF_AGG_4_SERVICE,
         _ => panic!(
-            "Unsupported BP aggregation factor {}. Expected 1 or 2",
+            "Unsupported BP aggregation factor {}. Expected 1/2/4",
             aggregation_factor
+        ),
+    }
+}
+
+pub fn bullet_proof_service_factory(aggregation_factor: usize) -> ReadOnly<'static, BulletproofsPlusService> {
+    match aggregation_factor.next_power_of_two() {
+        1 => ReadOnly::Borrowed(&RANGE_PROOF_AGG_1_SERVICE),
+        2 => ReadOnly::Borrowed(&RANGE_PROOF_AGG_2_SERVICE),
+        4 => ReadOnly::Borrowed(&RANGE_PROOF_AGG_4_SERVICE),
+        n => ReadOnly::Owned(
+            BulletproofsPlusService::init(BP_BIT_LENGTH, n, CommitmentFactory::default())
+                .expect("Failed to initialize BulletproofsPlusService"),
         ),
     }
 }
@@ -76,10 +96,10 @@ pub fn convert_amount_to_secret(amount: &Amount) -> Option<RistrettoSecretKey> {
     )
 }
 
-pub fn try_decode_to_signature(balance_proof: &BalanceProofSignature) -> Option<RistrettoSchnorr> {
+pub fn try_decode_to_signature(balance_proof: &BalanceProofSignature) -> Option<EngineSchnorrSignature> {
     let public_nonce = RistrettoPublicKey::try_from_byte_type(balance_proof.public_nonce()).ok()?;
     let signature = PrivateKey::from_canonical_bytes(balance_proof.signature().as_bytes()).ok()?;
-    Some(RistrettoSchnorr::new(public_nonce, signature))
+    Some(EngineSchnorrSignature::new(public_nonce, signature))
 }
 
 #[cfg(test)]

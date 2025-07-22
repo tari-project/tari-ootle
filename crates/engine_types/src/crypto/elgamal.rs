@@ -85,7 +85,7 @@ pub fn validate_elgamal_verifiable_balance_proof(
     })?;
 
     // Fiat-Shamir challenge
-    let e = &RistrettoSecretKey::from_uniform_bytes(&messages::viewable_balance_proof_challenge64(
+    let e = &RistrettoSecretKey::from_uniform_bytes(&messages::viewable_balance_proof64(
         commitment,
         view_key,
         proof.as_challenge_fields(),

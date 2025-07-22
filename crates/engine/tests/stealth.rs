@@ -1,0 +1,368 @@
+//   Copyright 2025 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+use std::{collections::BTreeMap, iter, time::Instant};
+
+use rand::rngs::OsRng;
+use tari_common_types::types::PrivateKey;
+use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
+use tari_engine_types::{
+    crypto::{ElgamalVerifiableBalance, PrivateOutput, ValueLookupTable},
+    resource_container::ResourceError,
+};
+use tari_ootle_common_types::substate_type::SubstateType;
+use tari_template_lib::{
+    call_args,
+    models::{ComponentAddress, ResourceAddress, StealthMintStatement},
+    prelude::PedersenCommitmentBytes,
+    types::crypto::RistrettoPublicKeyBytes,
+};
+use tari_template_test_tooling::{
+    support::{assert_error::assert_reject_reason, stealth, AlwaysMissLookupTable},
+    wallet_crypto::MaskAndValue,
+    TemplateTest,
+};
+use tari_transaction::{args, Transaction};
+use tari_utilities::ByteArray;
+
+const TEMPLATE_PATHS: &[&str] = &["tests/templates/stealth"];
+const TEMPLATE_NAME: &str = "StealthFaucet";
+
+fn setup(
+    initial_supply: StealthMintStatement,
+    view_key: Option<&RistrettoPublicKey>,
+) -> (TemplateTest, ComponentAddress, ResourceAddress) {
+    let mut test = TemplateTest::new(TEMPLATE_PATHS);
+
+    let faucet: ComponentAddress = view_key
+        .map(|vk| {
+            let vk = RistrettoPublicKeyBytes::from_bytes(vk.as_bytes()).unwrap();
+            test.call_function(
+                TEMPLATE_NAME,
+                "new_with_view_key",
+                call_args![initial_supply, vk],
+                vec![],
+            )
+        })
+        .unwrap_or_else(|| test.call_function(TEMPLATE_NAME, "new", call_args![initial_supply], vec![]));
+
+    let resx = test.get_previous_output_address(SubstateType::Resource);
+
+    (test, faucet, resx.as_resource_address().unwrap())
+}
+
+#[test]
+fn mint_initial_supply() {
+    let outputs = vec![100, 1000, 10000];
+    let (mint, _masks) = stealth::generate_mint_statement(outputs, 0, None);
+    let (test, _faucet, faucet_resx) = setup(mint, None);
+
+    let resource = test.read_only_state_store().get_resource(&faucet_resx).unwrap();
+    let total_supply = resource.total_supply().unwrap();
+    assert_eq!(total_supply, 11100);
+}
+
+#[test]
+fn mint_more_later() {
+    let (mint, _masks) = stealth::generate_mint_statement([0], 0, None);
+    let (mut test, faucet, faucet_resx) = setup(mint, None);
+
+    let outputs = vec![100, 1000, 10000];
+    let (mint, _masks) = stealth::generate_mint_statement(outputs, 0, None);
+    test.call_method::<()>(faucet, "mint", call_args![mint], vec![]);
+
+    let resource = test.read_only_state_store().get_resource(&faucet_resx).unwrap();
+    let total_supply = resource.total_supply().unwrap();
+    assert_eq!(total_supply, 11100);
+}
+
+#[test]
+fn basic_transfer() {
+    let outputs = vec![100, 1000, 10000];
+    let (mint, masks) = stealth::generate_mint_statement(outputs, 0, None);
+    let (mut test, _faucet, faucet_resx) = setup(mint, None);
+
+    let transfer = stealth::generate_transfer_data(
+        &[MaskAndValue {
+            mask: masks[0].clone(),
+            value: 100.into(),
+        }],
+        0,
+        Some(100),
+        0,
+    );
+    let result = test.execute_expect_success(
+        Transaction::builder()
+            .stealth_transfer(faucet_resx, transfer.statement)
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    let diff = result.finalize.accept().unwrap();
+    let utxos = diff
+        .up_iter()
+        .filter_map(|(_, substate)| substate.substate_value().as_utxo())
+        .collect::<Vec<_>>();
+    assert_eq!(utxos.len(), 1);
+    assert!(utxos[0].output().is_some());
+}
+
+#[test]
+fn transfer_with_revealed_outputs() {
+    let outputs = [100, 1000, 10000];
+    let (mint, masks) = stealth::generate_mint_statement(outputs, 0, None);
+    let (mut test, _faucet, faucet_resx) = setup(mint, None);
+    let (account, _proof, _sk) = test.create_empty_account();
+
+    let transfer = stealth::generate_transfer_data(
+        &[MaskAndValue {
+            mask: masks[1].clone(),
+            value: 1000.into(),
+        }],
+        0,
+        [100, 200],
+        700,
+    );
+    let result = test.execute_expect_success(
+        Transaction::builder()
+            .stealth_transfer(faucet_resx, transfer.statement)
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(account, "deposit", args![Workspace("bucket")])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    let diff = result.finalize.accept().unwrap();
+    let utxos = diff
+        .up_iter()
+        .filter_map(|(_, substate)| substate.substate_value().as_utxo())
+        .collect::<Vec<_>>();
+    assert_eq!(utxos.len(), 2);
+    let store = test.read_only_state_store();
+    let vaults = store.get_vaults_for_account(account).unwrap();
+    let vault = vaults.get(&faucet_resx).unwrap();
+    assert_eq!(vault.balance(), 700);
+}
+
+#[test]
+fn transfer_revealed_between_accounts() {
+    let outputs = [100, 1000, 10000];
+    let (mint, masks) = stealth::generate_mint_statement(outputs, 0, None);
+    let (mut test, _faucet, faucet_resx) = setup(mint, None);
+    let (alice, alice_proof, alice_sk) = test.create_empty_account();
+    let (bob, _proof, _sk) = test.create_empty_account();
+
+    let transfer_from_faucet = stealth::generate_transfer_data(
+        &[
+            MaskAndValue {
+                mask: masks[2].clone(),
+                value: 10000.into(),
+            },
+            MaskAndValue {
+                mask: masks[1].clone(),
+                value: 1000.into(),
+            },
+        ],
+        0,
+        [999, 9901],
+        100,
+    );
+    let transfer_from_alice_to_bob = stealth::generate_transfer_data(&[], 100, [25, 25, 25], 25);
+    let result = test.execute_expect_success(
+        Transaction::builder()
+            .stealth_transfer(faucet_resx, transfer_from_faucet.statement)
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(alice, "deposit", args![Workspace("bucket")])
+            .call_method(alice, "withdraw", args![faucet_resx, 100])
+            .put_last_instruction_output_on_workspace("alice_to_bob")
+            .stealth_transfer_with_input_bucket(faucet_resx, transfer_from_alice_to_bob.statement, "alice_to_bob")
+            .put_last_instruction_output_on_workspace("transfer_to_bob")
+            .call_method(bob, "deposit", args![Workspace("transfer_to_bob")])
+            .build_and_seal(&alice_sk),
+        vec![alice_proof],
+    );
+
+    let diff = result.finalize.accept().unwrap();
+    let utxos = diff
+        .up_iter()
+        .filter_map(|(_, substate)| substate.substate_value().as_utxo())
+        .collect::<Vec<_>>();
+    assert_eq!(utxos.len(), 5);
+    let store = test.read_only_state_store();
+    let vaults = store.get_vaults_for_account(alice).unwrap();
+    let vault = vaults.get(&faucet_resx).unwrap();
+    assert_eq!(vault.balance(), 0);
+    let vaults = store.get_vaults_for_account(bob).unwrap();
+    let vault = vaults.get(&faucet_resx).unwrap();
+    assert_eq!(vault.balance(), 25);
+}
+
+#[test]
+fn transfer_invalid_balance_in_statement() {
+    let outputs = [100, 1000];
+    let (mint, masks) = stealth::generate_mint_statement(outputs, 0, None);
+    let (mut test, _faucet, faucet_resx) = setup(mint, None);
+    let (alice, _proof, _sk) = test.create_empty_account();
+
+    let transfer_from_faucet = stealth::generate_transfer_data(
+        &[MaskAndValue {
+            mask: masks[0].clone(),
+            value: 100.into(),
+        }],
+        0,
+        [99],
+        // Try to skim a little (1) off the top
+        2,
+    );
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .stealth_transfer(faucet_resx, transfer_from_faucet.statement)
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(alice, "deposit", args![Workspace("bucket")])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    assert_reject_reason(reason, ResourceError::InvalidBalanceProof {
+        details: "Balance proof signature verification failed".to_string(),
+    });
+}
+
+#[test]
+fn transfer_invalid_range_proof_in_statement() {
+    let outputs = [100, 1000];
+    let (mint, masks) = stealth::generate_mint_statement(outputs, 0, None);
+    let (mut test, _faucet, faucet_resx) = setup(mint, None);
+    let (alice, _proof, _sk) = test.create_empty_account();
+
+    let mut transfer_from_faucet = stealth::generate_transfer_data(
+        &[MaskAndValue {
+            mask: masks[0].clone(),
+            value: 100.into(),
+        }],
+        0,
+        [99],
+        1,
+    );
+    let mut rp = transfer_from_faucet
+        .statement
+        .outputs_statement
+        .agg_range_proof
+        .clone()
+        .into_vec();
+    rp[100] += 1; // Corrupt the range proof
+    transfer_from_faucet.statement.outputs_statement.agg_range_proof = rp.try_into().unwrap();
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .stealth_transfer(faucet_resx, transfer_from_faucet.statement)
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(alice, "deposit", args![Workspace("bucket")])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    assert_reject_reason(reason, "Invalid range proof");
+}
+
+#[test]
+fn many_outputs() {
+    let outputs = [1000];
+    let (mint, masks) = stealth::generate_mint_statement(outputs, 0, None);
+    let (mut test, _faucet, faucet_resx) = setup(mint, None);
+
+    let timer = Instant::now();
+    let transfer_from_faucet = stealth::generate_transfer_data(
+        &[MaskAndValue {
+            mask: masks[0].clone(),
+            value: 1000.into(),
+        }],
+        0,
+        iter::repeat_n(2, 500),
+        0,
+    );
+
+    // ± 23s on my mac
+    eprintln!("Generated transfer in {:.2?}", timer.elapsed());
+
+    let result = test.execute_expect_success(
+        Transaction::builder()
+            .stealth_transfer(faucet_resx, transfer_from_faucet.statement)
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    let diff = result.finalize.accept().unwrap();
+    let utxos = diff
+        .up_iter()
+        .filter_map(|(_, substate)| substate.substate_value().as_utxo())
+        .collect::<Vec<_>>();
+    assert_eq!(utxos.len(), 500);
+}
+
+pub fn try_brute_force_stealth_balance<I, TValueLookup>(
+    utxos: &BTreeMap<PedersenCommitmentBytes, PrivateOutput>,
+    secret_view_key: &PrivateKey,
+    value_range: I,
+    value_lookup: &mut TValueLookup,
+) -> Result<Option<u64>, TValueLookup::Error>
+where
+    I: IntoIterator<Item = u64> + Clone,
+    TValueLookup: ValueLookupTable,
+{
+    let decompressed_viewable_balances = utxos
+        .values()
+        .filter_map(|utxo| utxo.viewable_balance.as_ref().map(|vb| vb.try_into().unwrap()))
+        .collect::<Vec<_>>();
+
+    let balances = ElgamalVerifiableBalance::batched_brute_force(
+        secret_view_key,
+        value_range,
+        value_lookup,
+        &decompressed_viewable_balances,
+    )?;
+
+    // If any of the commitments cannot be brute forced, then we return None
+    Ok(balances.into_iter().sum())
+}
+
+#[test]
+fn mint_with_view_key() {
+    let (view_key_secret, view_key) = RistrettoPublicKey::random_keypair(&mut OsRng);
+    let (mint, masks) = stealth::generate_mint_statement([1000], 0, Some(view_key.clone()));
+    let (mut test, _faucet, faucet_resx) = setup(mint, Some(&view_key));
+
+    let withdraw_proof = stealth::generate_transfer_data_with_view_key(
+        &[MaskAndValue {
+            mask: masks[0].clone(),
+            value: 1000.into(),
+        }],
+        0,
+        [100, 200, 200, 200, 200, 100],
+        0,
+        &view_key,
+    );
+    let result = test.execute_expect_success(
+        Transaction::builder()
+            .stealth_transfer(faucet_resx, withdraw_proof.statement)
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    let diff = result.finalize.result.accept().unwrap();
+    let utxos = diff
+        .up_iter()
+        .filter_map(|(addr, substate)| {
+            addr.as_utxo_address().map(|addr| {
+                (
+                    addr.id().into_commitment_bytes(),
+                    substate.substate_value().as_utxo().unwrap().clone().output.unwrap(),
+                )
+            })
+        })
+        .collect();
+
+    let total_balance =
+        try_brute_force_stealth_balance(&utxos, &view_key_secret, 0..=200, &mut AlwaysMissLookupTable).unwrap();
+    assert_eq!(total_balance, Some(1000));
+}

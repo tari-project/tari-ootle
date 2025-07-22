@@ -17,6 +17,5 @@ mod process;
 pub use process::WasmProcess;
 
 mod limiting_tunable;
-mod limits;
 mod mem_writer;
 mod version;

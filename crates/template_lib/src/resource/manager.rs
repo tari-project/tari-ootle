@@ -70,7 +70,7 @@ use crate::{
         NonFungibleId,
         ResourceAddress,
         ResourceAddressAllocation,
-        StealthOutputStatement,
+        StealthMintStatement,
         VaultId,
     },
     prelude::{AuthHook, ResourceType},
@@ -269,9 +269,9 @@ impl ResourceManager {
     /// # Example
     ///
     /// ```rust,ignore
-    /// let bucket = resource_manager.mint_confidential(statement);
+    /// let bucket = resource_manager.mint_stealth(statement);
     /// ```
-    pub fn mint_stealth(&self, statement: StealthOutputStatement) {
+    pub fn mint_stealth(&self, statement: StealthMintStatement) {
         self.mint_internal(MintResourceArg {
             mint_arg: MintArg::Stealth {
                 statement: Box::new(statement),

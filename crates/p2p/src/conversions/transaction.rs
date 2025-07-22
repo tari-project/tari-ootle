@@ -39,9 +39,9 @@ use tari_template_lib::{
     models::{
         ComponentAddress,
         ConfidentialOutputStatement,
-        ConfidentialStatement,
         ConfidentialWithdrawProof,
         EncryptedData,
+        UnspentOutput,
         ViewableBalanceProof,
     },
     prelude::{AccessRules, Scalar32Bytes},
@@ -196,6 +196,7 @@ impl From<AllocatableAddressType> for proto::transaction::AllocatableAddressType
 impl TryFrom<proto::transaction::Instruction> for Instruction {
     type Error = anyhow::Error;
 
+    #[allow(clippy::too_many_lines)]
     fn try_from(request: proto::transaction::Instruction) -> Result<Self, Self::Error> {
         let substate_type = request.allocatable_address_type();
         let args = request
@@ -294,6 +295,18 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                 workspace_id: WorkspaceId::try_from(request.allocate_address_workspace_id)
                     .context("allocate_address_workspace_id overflowed")?,
             },
+            InstructionType::StealthTransfer => Instruction::StealthTransfer {
+                resource_address: ObjectKey::try_from(request.stealth_transfer_resource_address)?.into(),
+                statement: request
+                    .stealth_transfer_statement
+                    .ok_or_else(|| anyhow!("stealth_transfer_statement not provided"))?
+                    .try_into()
+                    .context("stealth_transfer_statement conversion failed")?,
+                revealed_input_bucket: request
+                    .stealth_transfer_revealed_input_bucket
+                    .map(TryInto::try_into)
+                    .transpose()?,
+            },
         };
 
         Ok(instruction)
@@ -379,6 +392,16 @@ impl From<Instruction> for proto::transaction::Instruction {
                 let substate_type: proto::transaction::AllocatableAddressType = allocatable_type.into();
                 result.allocatable_address_type = substate_type as i32;
                 result.allocate_address_workspace_id = u32::from(workspace_id);
+            },
+            Instruction::StealthTransfer {
+                resource_address,
+                statement,
+                revealed_input_bucket,
+            } => {
+                result.instruction_type = InstructionType::StealthTransfer as i32;
+                result.stealth_transfer_resource_address = resource_address.as_bytes().to_vec();
+                result.stealth_transfer_statement = Some(statement.into());
+                result.stealth_transfer_revealed_input_bucket = revealed_input_bucket.map(Into::into);
             },
         }
         result
@@ -587,7 +610,7 @@ impl TryFrom<proto::transaction::ConfidentialOutputStatement> for ConfidentialOu
 
     fn try_from(val: proto::transaction::ConfidentialOutputStatement) -> Result<Self, Self::Error> {
         Ok(ConfidentialOutputStatement {
-            output_statement: val.output_statement.map(TryInto::try_into).transpose()?,
+            output: val.output_statement.map(TryInto::try_into).transpose()?,
             change_statement: val.change_statement.map(TryInto::try_into).transpose()?,
             range_proof: RangeProofBytes::try_from(val.range_proof).context("Invalid range proof")?,
             output_revealed_amount: val.output_revealed_amount.unwrap_or_default().into(),
@@ -599,7 +622,7 @@ impl TryFrom<proto::transaction::ConfidentialOutputStatement> for ConfidentialOu
 impl From<ConfidentialOutputStatement> for proto::transaction::ConfidentialOutputStatement {
     fn from(val: ConfidentialOutputStatement) -> Self {
         Self {
-            output_statement: val.output_statement.map(Into::into),
+            output_statement: val.output.map(Into::into),
             change_statement: val.change_statement.map(Into::into),
             range_proof: val.range_proof.into_vec(),
             output_revealed_amount: Some(val.output_revealed_amount.into()),
@@ -608,12 +631,12 @@ impl From<ConfidentialOutputStatement> for proto::transaction::ConfidentialOutpu
     }
 }
 
-// -------------------------------- ConfidentialStatement -------------------------------- //
+// -------------------------------- UnspentOutput -------------------------------- //
 
-impl TryFrom<proto::transaction::ConfidentialStatement> for ConfidentialStatement {
+impl TryFrom<proto::transaction::UnspentOutput> for UnspentOutput {
     type Error = anyhow::Error;
 
-    fn try_from(val: proto::transaction::ConfidentialStatement) -> Result<Self, Self::Error> {
+    fn try_from(val: proto::transaction::UnspentOutput) -> Result<Self, Self::Error> {
         let sender_public_nonce = Some(val.sender_public_nonce)
             .filter(|v| !v.is_empty())
             .map(|v| {
@@ -623,7 +646,7 @@ impl TryFrom<proto::transaction::ConfidentialStatement> for ConfidentialStatemen
             .transpose()?
             .ok_or_else(|| anyhow!("sender_public_nonce is missing"))?;
 
-        Ok(ConfidentialStatement {
+        Ok(UnspentOutput {
             commitment: checked_copy_fixed(&val.commitment)
                 .ok_or_else(|| anyhow!("Invalid length of commitment bytes"))?,
             sender_public_nonce,
@@ -635,8 +658,8 @@ impl TryFrom<proto::transaction::ConfidentialStatement> for ConfidentialStatemen
     }
 }
 
-impl From<ConfidentialStatement> for proto::transaction::ConfidentialStatement {
-    fn from(val: ConfidentialStatement) -> Self {
+impl From<UnspentOutput> for proto::transaction::UnspentOutput {
+    fn from(val: UnspentOutput) -> Self {
         Self {
             commitment: val.commitment.to_vec(),
             sender_public_nonce: val.sender_public_nonce.as_bytes().to_vec(),
@@ -677,6 +700,73 @@ impl From<ViewableBalanceProof> for proto::transaction::ViewableBalanceProof {
             s_v: val.s_v.as_bytes().to_vec(),
             s_m: val.s_m.as_bytes().to_vec(),
             s_r: val.s_r.as_bytes().to_vec(),
+        }
+    }
+}
+
+//---------------------------------- StealthTransferStatement --------------------------------------------//
+
+impl TryFrom<proto::transaction::StealthTransferStatement> for tari_template_lib::models::StealthTransferStatement {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::transaction::StealthTransferStatement) -> Result<Self, Self::Error> {
+        let inputs = value
+            .inputs
+            .into_iter()
+            .map(|input| {
+                PedersenCommitmentBytes::from_bytes(&input).map_err(|e| anyhow!("Invalid input commitment bytes: {e}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Self {
+            inputs,
+            outputs_statement: value
+                .outputs_statement
+                .ok_or_else(|| anyhow!("output_statement not provided"))?
+                .try_into()?,
+            balance_proof: BalanceProofSignature::from_bytes(&value.balance_proof)
+                .map_err(|e| anyhow!("Invalid balance proof signature: {}", e.to_error_string()))?,
+        })
+    }
+}
+
+impl From<tari_template_lib::models::StealthTransferStatement> for proto::transaction::StealthTransferStatement {
+    fn from(value: tari_template_lib::models::StealthTransferStatement) -> Self {
+        Self {
+            inputs: value.inputs.iter().map(|v| v.as_bytes().to_vec()).collect(),
+            outputs_statement: Some(value.outputs_statement.into()),
+            balance_proof: value.balance_proof.to_bytes(),
+        }
+    }
+}
+
+//---------------------------------- StealthOutputStatement --------------------------------------------//
+
+impl TryFrom<proto::transaction::StealthOutputsStatement> for tari_template_lib::models::StealthOutputsStatement {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::transaction::StealthOutputsStatement) -> Result<Self, Self::Error> {
+        let outputs = value
+            .outputs
+            .into_iter()
+            .map(|output| UnspentOutput::try_from(output).map_err(|e| anyhow!("Invalid unspent output: {e}")))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Self {
+            outputs,
+            revealed_output_amount: value.revealed_output_amount.unwrap_or_default().into(),
+            agg_range_proof: RangeProofBytes::try_from(value.agg_range_proof)
+                .context("Invalid aggregate range proof")?,
+        })
+    }
+}
+
+impl From<tari_template_lib::models::StealthOutputsStatement> for proto::transaction::StealthOutputsStatement {
+    fn from(value: tari_template_lib::models::StealthOutputsStatement) -> Self {
+        Self {
+            outputs: value.outputs.into_iter().map(Into::into).collect(),
+            revealed_output_amount: Some(value.revealed_output_amount.into()),
+            agg_range_proof: value.agg_range_proof.into_vec(),
         }
     }
 }

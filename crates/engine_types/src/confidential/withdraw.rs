@@ -108,8 +108,8 @@ pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a Pede
     let message = messages::confidential_withdraw64(
         &public_excess,
         balance_proof.get_public_nonce(),
-        input_revealed_amount,
-        total_output_revealed_amount,
+        &input_revealed_amount,
+        &total_output_revealed_amount,
     );
 
     if !balance_proof.verify_raw_uniform(&public_excess, &message) {

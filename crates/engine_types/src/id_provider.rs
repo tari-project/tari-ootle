@@ -24,7 +24,7 @@ pub struct IdProvider<'a> {
 #[derive(Debug, thiserror::Error)]
 pub enum IdProviderError {
     #[error("Maximum ID allocation of {max} exceeded")]
-    MaxIdsExceeded { max: u32 },
+    MaxIdsExceeded { max: usize },
     #[error("Failed to acquire lock")]
     LockingError { operation: String },
 }
@@ -119,14 +119,14 @@ fn generate_output_id(transaction_hash: &Hash, n: u32) -> Hash {
 
 #[derive(Debug)]
 pub struct ObjectIds {
-    max_ids: u32,
+    max_ids: usize,
     current_id: AtomicU32,
     bucket_id: AtomicU32,
     uuid: AtomicU32,
 }
 
 impl ObjectIds {
-    pub fn new(max_ids: u32) -> Self {
+    pub fn new(max_ids: usize) -> Self {
         Self {
             max_ids,
             current_id: AtomicU32::new(0),
@@ -137,7 +137,7 @@ impl ObjectIds {
 
     pub fn next_id(&self) -> Result<u32, IdProviderError> {
         let id = self.current_id.fetch_add(1, atomic::Ordering::SeqCst);
-        if id >= self.max_ids {
+        if id as usize >= self.max_ids {
             return Err(IdProviderError::MaxIdsExceeded { max: self.max_ids });
         }
         Ok(id)

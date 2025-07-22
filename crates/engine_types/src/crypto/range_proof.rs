@@ -1,20 +1,22 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
+use std::iter;
+
 use tari_crypto::{
     extended_range_proof::{ExtendedRangeProofService, Statement},
     ristretto::{bulletproofs_plus::RistrettoAggregatedPublicStatement, pedersen::PedersenCommitment},
     tari_utilities::ByteArray,
 };
-use tari_template_lib::{models::ConfidentialStatement, types::crypto::RangeProofBytes};
+use tari_template_lib::{models::UnspentOutput, types::crypto::RangeProofBytes};
 
-use crate::{crypto::get_range_proof_service, resource_container::ResourceError};
+use crate::{crypto::bullet_proof_service_factory, resource_container::ResourceError};
 
-pub fn validate_bullet_proof<'a, I: IntoIterator<Item = &'a ConfidentialStatement>>(
+pub fn validate_bullet_proof<'a, I: IntoIterator<Item = &'a UnspentOutput>>(
     range_proof: &RangeProofBytes,
     outputs: I,
 ) -> Result<(), ResourceError> {
-    let statements = outputs
+    let mut statements = outputs
         .into_iter()
         .map(|stmt| {
             let commitment = PedersenCommitment::from_canonical_bytes(&*stmt.commitment).map_err(|_| {
@@ -29,7 +31,6 @@ pub fn validate_bullet_proof<'a, I: IntoIterator<Item = &'a ConfidentialStatemen
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    // Either 0, 1 or 2
     let agg_factor = statements.len();
     if agg_factor == 0 {
         // No outputs, so no rangeproof needed (revealed mint)
@@ -40,15 +41,25 @@ pub fn validate_bullet_proof<'a, I: IntoIterator<Item = &'a ConfidentialStatemen
             details: "Range proof is invalid because it was provided but the proof contained no outputs".to_string(),
         });
     }
+    if !agg_factor.is_power_of_two() {
+        let num_to_add = agg_factor.next_power_of_two() - agg_factor;
+        // If the number of statements is not a power of two, we pad with zero statements
+        let default_commitment = PedersenCommitment::default();
+        statements.extend(iter::repeat_n(
+            Statement {
+                commitment: default_commitment,
+                minimum_value_promise: 0,
+            },
+            num_to_add,
+        ));
+    }
 
     let public_statement = RistrettoAggregatedPublicStatement::init(statements).unwrap();
 
     let proofs = vec![range_proof.as_ref()];
-    get_range_proof_service(agg_factor)
+    bullet_proof_service_factory(agg_factor)
         .verify_batch(proofs, vec![&public_statement])
-        .map_err(|e| ResourceError::InvalidConfidentialProof {
-            details: format!("Invalid range proof: {}", e),
-        })?;
+        .map_err(|e| ResourceError::InvalidRangeProof { details: e.to_string() })?;
 
     Ok(())
 }

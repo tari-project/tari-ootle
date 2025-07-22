@@ -41,11 +41,11 @@ use tari_template_abi::rust::fmt::Display;
 
 mod builder;
 mod manager;
-// mod stealth_manager;
+mod stealth_manager;
 
 pub use builder::*;
 pub use manager::*;
-// pub use stealth_manager::*;
+pub use stealth_manager::*;
 
 /// Represents every possible type of resource in the Tari network.
 ///

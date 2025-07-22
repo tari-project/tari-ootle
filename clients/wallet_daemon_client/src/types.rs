@@ -54,7 +54,7 @@ use tari_template_lib::{
     models::{ConfidentialOutputStatement, NonFungibleId, ResourceAddress, VaultId},
     prelude::{ComponentAddress, ConfidentialWithdrawProof, ResourceType, RistrettoPublicKeyBytes},
     types::{
-        crypto::{CommitmentSignatureBytes, PedersenCommitmentBytes},
+        crypto::{CommitmentSignatureBytes, PedersenCommitmentBytes, RangeProofBytes},
         Amount,
         TemplateAddress,
     },
@@ -811,9 +811,7 @@ pub struct ClaimBurnProof {
     pub reciprocal_claim_public_key: RistrettoPublicKeyBytes,
     pub commitment: PedersenCommitmentBytes,
     pub ownership_proof: CommitmentSignatureBytes,
-    #[serde(with = "serde_with::hex")]
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub range_proof: Vec<u8>,
+    pub range_proof: RangeProofBytes,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

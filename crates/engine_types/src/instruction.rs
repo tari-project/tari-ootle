@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tari_template_lib::{
     args::{AllocatableAddressType, InstructionArg, LogLevel, WorkspaceId, WorkspaceOffsetId},
     auth::OwnerRule,
-    models::ResourceAddress,
+    models::{ResourceAddress, StealthTransferStatement},
     prelude::{AccessRules, Amount},
     types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
 };
@@ -70,6 +70,11 @@ pub enum Instruction {
     AllocateAddress {
         allocatable_type: AllocatableAddressType,
         workspace_id: WorkspaceId,
+    },
+    StealthTransfer {
+        resource_address: ResourceAddress,
+        statement: StealthTransferStatement,
+        revealed_input_bucket: Option<WorkspaceOffsetId>,
     },
 }
 
@@ -177,6 +182,20 @@ impl Display for Instruction {
                 write!(
                     f,
                     "AllocateAddress {{ substate_type: {substate_type:?}, workspace ID: {workspace_id} }}"
+                )
+            },
+            Instruction::StealthTransfer {
+                resource_address,
+                statement,
+                revealed_input_bucket: bucket,
+            } => {
+                write!(
+                    f,
+                    "StealthTransfer {{ resource_address: {}, output(s): {}, rp-size: {}, bucket: {:?} }}",
+                    resource_address,
+                    statement.outputs_statement.outputs.len(),
+                    statement.outputs_statement.agg_range_proof.len(),
+                    bucket
                 )
             },
         }

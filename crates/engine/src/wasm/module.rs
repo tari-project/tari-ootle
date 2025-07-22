@@ -22,6 +22,7 @@
 
 use std::{fmt, fmt::Formatter, sync::Arc};
 
+use tari_engine_types::limits;
 use tari_template_abi::{FunctionDef, TemplateDef, ABI_TEMPLATE_DEF_GLOBAL_NAME};
 use wasmer::{
     imports,
@@ -45,7 +46,6 @@ use crate::{
     wasm::{
         environment::WasmEnv,
         limiting_tunable::LimitingTunables,
-        limits,
         metering,
         WasmExecutionError,
         WasmValidationError,
@@ -218,28 +218,28 @@ fn validate_functions(module: &Module) -> Result<(), WasmValidationError> {
         if let ExternType::Function(func) = export.ty() {
             function_count += 1;
             let fn_name = export.name();
-            if fn_name.len() > limits::MAX_FUNCTION_NAME_LENGTH {
+            if fn_name.len() > limits::WASM_LIMITS.max_function_name_length {
                 return Err(WasmValidationError::FunctionNameTooLong {
                     name: format!(
                         "{}...",
                         fn_name
-                            .get(..limits::MAX_FUNCTION_NAME_LENGTH)
+                            .get(..limits::WASM_LIMITS.max_function_name_length)
                             .expect("len > limits::MAX_FUNCTION_NAME_LENGTH")
                     ),
-                    max_length: limits::MAX_FUNCTION_NAME_LENGTH,
+                    max_length: limits::WASM_LIMITS.max_function_name_length,
                 });
             }
-            if func.params().len() > limits::MAX_FUNCTIONS_ARGUMENTS {
+            if func.params().len() > limits::WASM_LIMITS.max_function_arguments {
                 return Err(WasmValidationError::FunctionTooManyArguments {
                     name: fn_name.to_string(),
-                    max_args: limits::MAX_FUNCTIONS_ARGUMENTS,
+                    max_args: limits::WASM_LIMITS.max_function_arguments,
                     num_args: func.params().len(),
                 });
             }
 
-            if function_count > limits::MAX_FUNCTIONS {
+            if function_count > limits::WASM_LIMITS.max_functions {
                 return Err(WasmValidationError::TooManyFunctions {
-                    max_functions: limits::MAX_FUNCTIONS,
+                    max_functions: limits::WASM_LIMITS.max_functions,
                 });
             }
 

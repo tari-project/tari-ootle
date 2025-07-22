@@ -22,7 +22,7 @@
 
 use std::sync::{Arc, Mutex, RwLock};
 
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use log::*;
 use tari_engine_types::{
     commit_result::{FinalizeResult, TransactionResult},
@@ -35,6 +35,7 @@ use tari_engine_types::{
     logs::LogEntry,
     substate::{SubstateId, SubstateValue},
     virtual_substate::VirtualSubstates,
+    UtxoAddress,
 };
 use tari_ootle_common_types::Epoch;
 use tari_template_lib::{
@@ -276,6 +277,7 @@ impl StateTracker {
     pub fn finalize(
         &self,
         mut substates_to_persist: IndexMap<SubstateId, SubstateValue>,
+        downed_utxos: IndexSet<UtxoAddress>,
     ) -> Result<FinalizeResult, RuntimeError> {
         // Finalise will always reset the state
         let mut state = self.take_working_state();
@@ -290,7 +292,8 @@ impl StateTracker {
         let fee_receipt = transaction_receipt.fee_receipt.clone();
 
         let fee_withdrawals = state.take_validator_fee_withdrawals();
-        let result = state.generate_substate_diff(transaction_receipt, substates_to_persist, fee_withdrawals);
+        let result =
+            state.generate_substate_diff(transaction_receipt, substates_to_persist, downed_utxos, fee_withdrawals);
 
         let result = match result {
             Ok(substate_diff) => TransactionResult::Accept(substate_diff),
@@ -335,10 +338,6 @@ impl StateTracker {
 
     fn take_working_state(&self) -> WorkingState {
         self.write_with(|current_state| current_state.take_state())
-    }
-
-    pub fn take_substates_to_persist(&self) -> IndexMap<SubstateId, SubstateValue> {
-        self.write_with(|state| state.take_mutated_substates())
     }
 
     pub fn with_substates_to_persist<F: FnMut(&IndexMap<SubstateId, SubstateValue>) -> R, R>(&self, mut f: F) -> R {

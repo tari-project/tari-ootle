@@ -5,7 +5,7 @@ use super::{IMAGE_URL, TOKEN_SYMBOL};
 use crate::{
     args::MintArg,
     auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
-    models::{Bucket, ComponentAddress, Metadata, ResourceAddress, ResourceAddressAllocation, StealthOutputStatement},
+    models::{Bucket, ComponentAddress, Metadata, ResourceAddress, ResourceAddressAllocation, StealthMintStatement},
     resource::{ResourceManager, ResourceType, DEFAULT_DIVISIBILITY},
     types::crypto::RistrettoPublicKeyBytes,
 };
@@ -191,7 +191,7 @@ impl StealthResourceBuilder {
     /// This builds the resource and mints the initial supply of tokens, returning the address of the resource.
     /// NOTE that stealth resources do not return the bucket of the initial supply since
     /// they are minted as individual UTXO substates and cannot be placed in vault.
-    pub fn initial_supply(self, initial_supply: StealthOutputStatement) -> ResourceAddress {
+    pub fn initial_supply(self, initial_supply: StealthMintStatement) -> ResourceAddress {
         let mint_arg = MintArg::Stealth {
             statement: Box::new(initial_supply),
         };

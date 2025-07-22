@@ -20,7 +20,7 @@ use tari_ootle_common_types::{
     substate_type::SubstateType,
     SubstateRequirement,
 };
-use tari_ootle_wallet_crypto::{ConfidentialOutputMaskAndValue, ConfidentialProofStatement};
+use tari_ootle_wallet_crypto::{MaskAndValue, UnblindedStatement};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
@@ -542,7 +542,7 @@ where
         dest_public_key: &RistrettoPublicKey,
         confidential_amount: Amount,
         resource_view_key: Option<RistrettoPublicKey>,
-    ) -> Result<ConfidentialProofStatement, ConfidentialTransferApiError> {
+    ) -> Result<UnblindedStatement, ConfidentialTransferApiError> {
         let mask = if confidential_amount.is_zero() {
             PrivateKey::default()
         } else {
@@ -564,7 +564,7 @@ where
             &nonce,
         )?;
 
-        Ok(ConfidentialProofStatement {
+        Ok(UnblindedStatement {
             amount: confidential_amount,
             mask,
             sender_public_nonce: public_nonce,
@@ -642,7 +642,7 @@ pub enum ConfidentialTransferInputSelection {
 
 #[derive(Debug)]
 pub struct InputsToSpend {
-    pub confidential: Vec<ConfidentialOutputMaskAndValue>,
+    pub confidential: Vec<MaskAndValue>,
     pub proof_id: ConfidentialProofId,
     pub revealed: Amount,
 }

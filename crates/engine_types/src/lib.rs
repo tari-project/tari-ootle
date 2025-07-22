@@ -13,6 +13,7 @@ pub mod hashing;
 pub mod indexed_value;
 pub mod instruction;
 pub mod instruction_result;
+pub mod limits;
 pub mod lock;
 pub mod logs;
 pub mod non_fungible;
@@ -45,7 +46,8 @@ pub use instruction_call::*;
 pub use template::{calculate_template_binary_hash, parse_template_address};
 pub use utxo::*;
 pub use validator_fee::*;
-
+mod read_only;
+pub use read_only::*;
 pub mod template_lib_models {
     pub use tari_template_lib::models::*;
 }

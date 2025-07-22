@@ -188,7 +188,7 @@ impl LockedSubstate {
         }
     }
 
-    pub fn address(&self) -> &SubstateId {
+    pub fn substate_id(&self) -> &SubstateId {
         &self.address
     }
 

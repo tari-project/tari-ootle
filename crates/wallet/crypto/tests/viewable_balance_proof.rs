@@ -8,13 +8,8 @@ use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_engine_types::confidential::validate_elgamal_verifiable_balance_proof;
-use tari_ootle_wallet_crypto::{
-    create_confidential_output_statement,
-    create_withdraw_proof,
-    AlwaysMissLookupTable,
-    ConfidentialProofStatement,
-};
+use tari_engine_types::crypto::validate_elgamal_verifiable_balance_proof;
+use tari_ootle_wallet_crypto::{confidential, AlwaysMissLookupTable, UnblindedStatement};
 use tari_template_lib::{
     models::EncryptedData,
     template_dependencies::{decode_exact, encode_with_len},
@@ -22,9 +17,9 @@ use tari_template_lib::{
 };
 use tari_utilities::ByteArray;
 
-fn create_output_statement(value: Amount, view_key: &RistrettoPublicKey) -> ConfidentialProofStatement {
+fn create_output_statement(value: Amount, view_key: &RistrettoPublicKey) -> UnblindedStatement {
     let mask = RistrettoSecretKey::random(&mut OsRng);
-    ConfidentialProofStatement {
+    UnblindedStatement {
         amount: value,
         mask,
         sender_public_nonce: Default::default(),
@@ -53,15 +48,9 @@ fn it_errors_no_balance_proof_with_view_key() {
     let output_statement = create_output_statement(123.into(), &view_key);
 
     let proof =
-        create_confidential_output_statement(Some(&output_statement), Amount::zero(), None, Amount::zero()).unwrap();
-    let output_statement = proof.output_statement.as_ref().unwrap();
-    let viewable_balance_proof = proof
-        .output_statement
-        .as_ref()
-        .unwrap()
-        .viewable_balance_proof
-        .as_ref()
-        .unwrap();
+        confidential::create_output_statement(Some(&output_statement), Amount::zero(), None, Amount::zero()).unwrap();
+    let output_statement = proof.output.as_ref().unwrap();
+    let viewable_balance_proof = proof.output.as_ref().unwrap().viewable_balance_proof.as_ref().unwrap();
     let commitment = PedersenCommitment::from_canonical_bytes(output_statement.commitment.as_ref()).unwrap();
     validate_elgamal_verifiable_balance_proof(&commitment, None, Some(viewable_balance_proof)).unwrap_err();
 }
@@ -79,17 +68,11 @@ fn it_generates_a_valid_proof() {
 
     let timer = Instant::now();
     let proof =
-        create_confidential_output_statement(Some(&output_statement), Amount::zero(), None, Amount::zero()).unwrap();
+        confidential::create_output_statement(Some(&output_statement), Amount::zero(), None, Amount::zero()).unwrap();
     let gen_proof_time = timer.elapsed();
 
-    let output_statement = proof.output_statement.as_ref().unwrap();
-    let viewable_balance_proof = proof
-        .output_statement
-        .as_ref()
-        .unwrap()
-        .viewable_balance_proof
-        .as_ref()
-        .unwrap();
+    let output_statement = proof.output.as_ref().unwrap();
+    let viewable_balance_proof = proof.output.as_ref().unwrap().viewable_balance_proof.as_ref().unwrap();
     let commitment = PedersenCommitment::from_canonical_bytes(output_statement.commitment.as_ref()).unwrap();
     let timer = Instant::now();
     let proof = validate_elgamal_verifiable_balance_proof(&commitment, Some(&view_key), Some(viewable_balance_proof))
@@ -115,7 +98,7 @@ fn serialize_deserialize() {
     let output_statement = create_output_statement(123.into(), &view_key);
     let change_statement = create_output_statement(123.into(), &view_key);
 
-    let proof = create_withdraw_proof(
+    let proof = confidential::create_withdraw_proof(
         &[],
         Amount::from(123),
         Some(&output_statement),

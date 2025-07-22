@@ -40,6 +40,10 @@ impl Utxo {
         self.output.as_ref()
     }
 
+    pub fn freeze(&mut self) {
+        self.is_frozen = true;
+    }
+
     pub fn burn(&mut self) {
         self.output = None;
         self.is_frozen = true;
@@ -54,7 +58,9 @@ const TAG: u64 = BinaryTag::Utxo.as_u64();
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
-pub struct UtxoAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<UtxoAddressContents, TAG>);
+pub struct UtxoAddress(
+    #[cfg_attr(feature = "ts", ts(type = "{resource_address: string, id: string}"))] BorTag<UtxoAddressContents, TAG>,
+);
 
 impl UtxoAddress {
     pub fn new(resource_address: ResourceAddress, id: UtxoId) -> Self {
@@ -119,11 +125,21 @@ impl UtxoId {
     pub fn from_hex(hex: &str) -> Result<Self, KeyParseError> {
         from_hex(hex).map(Self::from_array)
     }
+
+    pub fn into_commitment_bytes(self) -> PedersenCommitmentBytes {
+        PedersenCommitmentBytes::from_array(self.0)
+    }
 }
 
 impl From<PedersenCommitmentBytes> for UtxoId {
     fn from(commitment: PedersenCommitmentBytes) -> Self {
         Self::from_array(commitment.into_array())
+    }
+}
+
+impl From<&PedersenCommitmentBytes> for UtxoId {
+    fn from(commitment: &PedersenCommitmentBytes) -> Self {
+        (*commitment).into()
     }
 }
 

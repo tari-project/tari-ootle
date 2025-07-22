@@ -21,6 +21,8 @@ use tari_template_lib_types::crypto::{PedersenCommitmentBytes, RistrettoPublicKe
 ///
 /// It is a sigma protocol for the relation that is complete, $2$-special sound, and special honest-verifier zero
 /// knowledge.
+///
+/// The proof size is static (256 bytes).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(
     feature = "ts",

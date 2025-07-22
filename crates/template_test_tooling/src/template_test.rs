@@ -513,9 +513,7 @@ impl TemplateTest {
             initial_ownership_proofs: proofs,
         };
         let processor = TransactionProcessor::new(
-            TransactionProcessorConfig::builder()
-                .with_network(Network::LocalNet)
-                .build(),
+            TransactionProcessorConfig::new(Network::LocalNet),
             Arc::new(self.package.clone()),
             self.state_store.clone().into_read_only(),
             auth_params,

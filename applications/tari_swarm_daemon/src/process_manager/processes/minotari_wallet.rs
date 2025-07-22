@@ -91,7 +91,10 @@ impl MinoTariWalletProcess {
                 commitment,
                 ownership_proof,
                 reciprocal_claim_public_key,
-                range_proof: resp.range_proof,
+                range_proof: resp
+                    .range_proof
+                    .try_into()
+                    .map_err(|e| anyhow!("range_proof parse error {e}"))?,
             },
         };
 

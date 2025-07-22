@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use tari_template_lib_types::crypto::RangeProofBytes;
 
 use crate::{
-    models::{encrypted_data::EncryptedData, viewable_balance::ViewableBalanceProof},
+    models::unspent_output::UnspentOutput,
     types::{
-        crypto::{BalanceProofSignature, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+        crypto::{BalanceProofSignature, PedersenCommitmentBytes},
         Amount,
     },
 };
@@ -21,10 +21,10 @@ use crate::{
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct ConfidentialOutputStatement {
-    /// Proof of the confidential resources that are going to be transferred to the receiver
-    pub output_statement: Option<ConfidentialStatement>,
-    /// Proof of the transaction change, which goes back to the sender's vault
-    pub change_statement: Option<ConfidentialStatement>,
+    /// Output that is transferred to the receiver account
+    pub output: Option<UnspentOutput>,
+    /// Change output that goes back to the sender's vault
+    pub change_statement: Option<UnspentOutput>,
     /// Bulletproof range proof for the output and change commitments proving that values are in the range
     /// [minimum_value_promise, 2^64)
     pub range_proof: RangeProofBytes,
@@ -38,32 +38,13 @@ impl ConfidentialOutputStatement {
     /// Creates an output proof for minting which only mints a revealed amount.
     pub fn mint_revealed<T: Into<Amount>>(amount: T) -> Self {
         Self {
-            output_statement: None,
+            output: None,
             change_statement: None,
             range_proof: RangeProofBytes::empty(),
             output_revealed_amount: amount.into(),
             change_revealed_amount: Amount::zero(),
         }
     }
-}
-
-/// A zero-knowledge proof that a confidential resource amount is valid
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
-pub struct ConfidentialStatement {
-    pub commitment: PedersenCommitmentBytes,
-    /// Public nonce (R) that was used to generate the commitment mask
-    pub sender_public_nonce: RistrettoPublicKeyBytes,
-    /// Encrypted mask and value for the recipient.
-    pub encrypted_data: EncryptedData,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub minimum_value_promise: u64,
-    /// If the view key is enabled for a given resource, this proof MUST be provided, otherwise it MUST NOT.
-    pub viewable_balance_proof: Option<ViewableBalanceProof>,
 }
 
 /// A confidential proof that defines a confidential and/or revealed withdrawal, e.g. from a vault containing
@@ -137,7 +118,7 @@ impl ConfidentialWithdrawProof {
         self.output_proof.range_proof.is_empty() &&
         // Excess will be zero
         self.inputs.is_empty() &&
-            self.output_proof.output_statement.is_none() &&
+            self.output_proof.output.is_none() &&
             self.output_proof.change_statement.is_none() &&
             // zero balance proof
             self.balance_proof == BalanceProofSignature::zero() &&

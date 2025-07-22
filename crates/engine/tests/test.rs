@@ -239,7 +239,8 @@ fn test_engine_errors() {
     // call returned null for op VaultInvoke)
     assert_eq!(
         reason,
-        "Runtime error: Substate 'resource_7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b' not found"
+        "Runtime error: Substate 'resource_7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b' not \
+         found or is not a transaction input"
     );
 }
 

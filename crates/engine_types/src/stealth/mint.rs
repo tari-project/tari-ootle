@@ -4,20 +4,20 @@
 use std::collections::BTreeMap;
 
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_template_lib::{models::StealthOutputStatement, prelude::PedersenCommitmentBytes};
+use tari_template_lib::{models::StealthOutputsStatement, prelude::PedersenCommitmentBytes};
 
 use crate::{
     crypto::PrivateOutput,
     resource_container::ResourceError,
-    stealth::validation::validate_stealth_statement,
+    stealth::outputs::validate_stealth_outputs_statement,
     ToByteType,
 };
 
 pub fn mint_stealth_outputs(
-    stmt: &StealthOutputStatement,
+    stmt: &StealthOutputsStatement,
     view_key: Option<&RistrettoPublicKey>,
 ) -> Result<StealthResourceContainer, ResourceError> {
-    let validated_proof = validate_stealth_statement(stmt, view_key)?;
+    let validated_proof = validate_stealth_outputs_statement(stmt, view_key)?;
     Ok(StealthResourceContainer {
         outputs: validated_proof
             .outputs

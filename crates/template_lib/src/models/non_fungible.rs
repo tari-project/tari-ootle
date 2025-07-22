@@ -212,7 +212,10 @@ const TAG: u64 = BinaryTag::NonFungibleAddress.as_u64();
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
-pub struct NonFungibleAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<NonFungibleAddressContents, TAG>);
+pub struct NonFungibleAddress(
+    #[cfg_attr(feature = "ts", ts(type = "{resource_address: string, id: string}"))]
+    BorTag<NonFungibleAddressContents, TAG>,
+);
 
 #[cfg(feature = "borsh")]
 mod borsh_impl {

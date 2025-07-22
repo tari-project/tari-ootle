@@ -2,7 +2,9 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 mod mint;
-mod validation;
+mod outputs;
+mod transfer;
 
 pub use mint::*;
-pub use validation::*;
+pub use outputs::*;
+pub use transfer::*;

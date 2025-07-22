@@ -29,7 +29,11 @@ use blake2::{
 use digest::Digest;
 use serde::Serialize;
 use tari_bor::encode_into_std_writer;
-use tari_crypto::hashing::DomainSeparation;
+use tari_crypto::{
+    hashing::DomainSeparation,
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    signatures::SchnorrSignature,
+};
 use tari_hashing::TariEngineHashDomain;
 use tari_template_lib::types::Hash;
 
@@ -56,6 +60,8 @@ pub fn template_hasher32() -> TariHasher32 {
 pub fn hash_template_code(code: &[u8]) -> Hash {
     template_hasher32().chain(&code).result()
 }
+
+pub type EngineSchnorrSignature = SchnorrSignature<RistrettoPublicKey, RistrettoSecretKey, TariEngineHashDomain>;
 
 #[derive(Debug, Clone)]
 pub struct TariHasher32 {
@@ -188,6 +194,8 @@ pub enum EngineHashDomainLabel {
     SubstateValue,
     ViewableBalanceProof,
     UtxoAddress,
+    StealthMint,
+    StealthTransfer,
 }
 
 impl EngineHashDomainLabel {
@@ -212,6 +220,8 @@ impl EngineHashDomainLabel {
             Self::ViewableBalanceProof => "ViewableBalanceProof",
             Self::TemplateAddress => "TemplateAddress",
             Self::UtxoAddress => "UtxoAddress",
+            Self::StealthMint => "StealthMint",
+            Self::StealthTransfer => "StealthTransfer",
         }
     }
 }

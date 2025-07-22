@@ -1,20 +1,21 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-mod error;
+pub mod confidential;
 pub mod kdfs;
-mod proof;
 
-pub use error::ConfidentialProofError;
-pub use proof::*;
+mod error;
+pub use error::*;
 
-mod api;
-pub use api::*;
-mod confidential_output;
-pub use confidential_output::*;
-
-mod confidential_statement;
-pub use confidential_statement::*;
+mod unblinded_statement;
+pub use unblinded_statement::*;
 
 mod value_lookup;
 pub use value_lookup::*;
+
+pub mod stealth;
+
+mod balance_proof;
+mod bullet_proof;
+pub mod encrypted_data;
+pub mod viewable_balance_proof;

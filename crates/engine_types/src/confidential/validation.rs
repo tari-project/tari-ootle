@@ -32,7 +32,7 @@ pub fn validate_confidential_statement(
     }
 
     let maybe_output = proof
-        .output_statement
+        .output
         .as_ref()
         .map(|statement| {
             let output_commitment = PedersenCommitment::try_from_byte_type(&statement.commitment).map_err(|_| {
@@ -54,7 +54,7 @@ pub fn validate_confidential_statement(
                 statement.viewable_balance_proof.as_ref(),
             )?;
 
-            Ok(ValidatedPrivateOutput {
+            Ok::<_, ResourceError>(ValidatedPrivateOutput {
                 commitment: output_commitment,
                 stealth_public_nonce: output_public_nonce,
                 encrypted_data: statement.encrypted_data.clone(),
@@ -105,11 +105,7 @@ pub fn validate_confidential_statement(
     } else {
         validate_bullet_proof(
             &proof.range_proof,
-            proof
-                .output_statement
-                .as_ref()
-                .into_iter()
-                .chain(proof.change_statement.as_ref()),
+            proof.output.as_ref().into_iter().chain(proof.change_statement.as_ref()),
         )?;
     }
 

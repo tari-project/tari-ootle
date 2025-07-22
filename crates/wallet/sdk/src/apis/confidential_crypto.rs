@@ -10,15 +10,12 @@ use tari_engine_types::{
     FromByteType,
 };
 use tari_ootle_wallet_crypto::{
-    create_confidential_output_statement,
-    create_withdraw_proof,
-    encrypt_value_and_mask,
-    extract_value_and_mask,
+    confidential,
+    encrypted_data::{encrypt_value_and_mask, extract_value_and_mask, unblind_output},
     kdfs,
-    unblind_output,
-    ConfidentialOutputMaskAndValue,
     ConfidentialProofError,
-    ConfidentialProofStatement,
+    MaskAndValue,
+    UnblindedStatement,
     WalletCryptoError,
 };
 use tari_template_lib::{
@@ -44,14 +41,14 @@ impl ConfidentialCryptoApi {
 
     pub fn generate_withdraw_proof<A: Into<Amount>>(
         &self,
-        inputs: &[ConfidentialOutputMaskAndValue],
+        inputs: &[MaskAndValue],
         input_revealed_amount: A,
-        output_statement: Option<&ConfidentialProofStatement>,
+        output_statement: Option<&UnblindedStatement>,
         output_revealed_amount: A,
-        change_statement: Option<&ConfidentialProofStatement>,
+        change_statement: Option<&UnblindedStatement>,
         change_revealed_amount: A,
     ) -> Result<ConfidentialWithdrawProof, ConfidentialCryptoApiError> {
-        let proof = create_withdraw_proof(
+        let proof = confidential::create_withdraw_proof(
             inputs,
             input_revealed_amount
                 .into()
@@ -94,10 +91,10 @@ impl ConfidentialCryptoApi {
 
     pub fn generate_output_proof<A: Into<Amount>>(
         &self,
-        statement: &ConfidentialProofStatement,
+        statement: &UnblindedStatement,
         revealed_amount: A,
     ) -> Result<ConfidentialOutputStatement, ConfidentialCryptoApiError> {
-        let proof = create_confidential_output_statement(
+        let proof = confidential::create_output_statement(
             Some(statement).filter(|s| !s.amount.is_zero()),
             revealed_amount.into(),
             None,
@@ -112,7 +109,7 @@ impl ConfidentialCryptoApi {
         output_encrypted_value: &EncryptedData,
         claim_secret: &PrivateKey,
         reciprocal_public_key: &RistrettoPublicKey,
-    ) -> Result<ConfidentialOutputMaskAndValue, ConfidentialCryptoApiError> {
+    ) -> Result<MaskAndValue, ConfidentialCryptoApiError> {
         let unmasked_output = unblind_output(
             output_commitment,
             output_encrypted_value,

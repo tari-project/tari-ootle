@@ -25,3 +25,23 @@ impl From<RangeProofError> for ConfidentialProofError {
         Self::RangeProof(value)
     }
 }
+
+#[derive(Debug, thiserror::Error)]
+pub enum WalletCryptoError {
+    #[error("Confidential proof error: {0}")]
+    ConfidentialProof(#[from] ConfidentialProofError),
+    #[error("Failed to decrypt data: {details}")]
+    FailedDecryptData { details: String },
+    #[error("Unable to open the commitment")]
+    UnableToOpenCommitment,
+    #[error("Invalid argument {name}: {details}")]
+    InvalidArgument { name: &'static str, details: String },
+    #[error("AEAD error: {0}")]
+    AeadError(aead::Error),
+}
+
+impl From<aead::Error> for WalletCryptoError {
+    fn from(err: aead::Error) -> Self {
+        WalletCryptoError::AeadError(err)
+    }
+}

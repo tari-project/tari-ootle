@@ -6,7 +6,7 @@ use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
 use tari_engine_types::{crypto::PrivateOutput, substate::SubstateId, FromByteType, ToByteType};
 use tari_key_manager::key_manager::DerivedKey;
 use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
-use tari_ootle_wallet_crypto::{kdfs, ConfidentialOutputMaskAndValue};
+use tari_ootle_wallet_crypto::{kdfs, MaskAndValue};
 use tari_template_lib::{models::VaultId, prelude::PedersenCommitmentBytes, types::Amount};
 use tari_transaction::TransactionId;
 
@@ -153,7 +153,7 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
         &self,
         outputs: Vec<ConfidentialOutputModel>,
         key_branch: &str,
-    ) -> Result<Vec<ConfidentialOutputMaskAndValue>, ConfidentialOutputsApiError> {
+    ) -> Result<Vec<MaskAndValue>, ConfidentialOutputsApiError> {
         let mut outputs_with_masks = Vec::with_capacity(outputs.len());
         for output in outputs {
             let output_key = self
@@ -187,7 +187,7 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
                 &output.encrypted_data,
             )?;
 
-            outputs_with_masks.push(ConfidentialOutputMaskAndValue {
+            outputs_with_masks.push(MaskAndValue {
                 value: output.value,
                 mask,
             });

@@ -32,7 +32,7 @@ impl SchnorrSignatureBytes {
         }
     }
 
-    pub fn try_from_parts(public_nonce: &[u8], signature: &[u8]) -> Result<Self, InvalidByteLengthError> {
+    pub fn try_from_raw_parts(public_nonce: &[u8], signature: &[u8]) -> Result<Self, InvalidByteLengthError> {
         let public_nonce = RistrettoPublicKeyBytes::from_bytes(public_nonce)?;
         let signature = Scalar32Bytes::from_bytes(signature)?;
         Ok(Self::new(public_nonce, signature))
@@ -46,7 +46,7 @@ impl SchnorrSignatureBytes {
             });
         }
 
-        Self::try_from_parts(
+        Self::try_from_raw_parts(
             bytes
                 .get(..RistrettoPublicKeyBytes::length())
                 .expect("Slice length checked before"),

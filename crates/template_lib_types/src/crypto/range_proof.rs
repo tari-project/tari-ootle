@@ -26,7 +26,9 @@ pub struct RangeProofBytes(
 );
 
 impl RangeProofBytes {
-    pub const MAX_LENGTH: usize = 1024;
+    // TODO: is this sufficiently large? How many outputs can we aggregate before we hit this limit?
+    // observed size for 2 commitments is ~500 bytes. For 500 commitments, it is 1153 bytes.
+    pub const MAX_LENGTH: usize = 1153;
 
     pub const fn empty() -> Self {
         Self(Vec::new())
@@ -34,6 +36,10 @@ impl RangeProofBytes {
 
     pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    pub const fn len(&self) -> usize {
+        self.0.len()
     }
 
     pub fn into_vec(self) -> Vec<u8> {

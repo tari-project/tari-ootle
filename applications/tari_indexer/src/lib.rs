@@ -124,10 +124,8 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
 
     // dry run
     let dry_run_transaction_processor = DryRunTransactionProcessor::new(
-        TransactionProcessorConfig::builder()
-            .with_network(config.network)
-            .with_template_binary_max_size_bytes(consensus_constants.template_binary_max_size_bytes)
-            .build(),
+        TransactionProcessorConfig::new(config.network)
+            .with_template_binary_max_size_bytes(consensus_constants.template_binary_max_size_bytes),
         services.epoch_manager.clone(),
         services.validator_node_client_factory.clone(),
         services.template_manager.clone(),

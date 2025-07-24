@@ -3,4 +3,4 @@
 /**
  * A collection of user-defined data used to describe other types, for example, non-fungible tokens or events
  */
-export type Metadata = Record<string, string>;
+export type Metadata = { [key in string]?: string };

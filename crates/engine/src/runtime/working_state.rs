@@ -971,7 +971,7 @@ impl WorkingState {
         Ok(())
     }
 
-    pub fn authorization(&self) -> Authorization {
+    pub fn authorization(&self) -> Authorization<'_> {
         Authorization::new(self)
     }
 

@@ -10737,6 +10737,7 @@ dependencies = [
  "ciborium-io",
  "serde",
  "serde_json",
+ "ts-rs",
 ]
 
 [[package]]

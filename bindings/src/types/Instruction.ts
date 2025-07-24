@@ -7,6 +7,7 @@ import type { ConfidentialClaim } from "./ConfidentialClaim";
 import type { LogLevel } from "./LogLevel";
 import type { OwnerRule } from "./OwnerRule";
 import type { ResourceAddress } from "./ResourceAddress";
+import type { StealthTransferStatement } from "./StealthTransferStatement";
 import type { WorkspaceOffsetId } from "./WorkspaceOffsetId";
 
 export type Instruction =
@@ -27,4 +28,11 @@ export type Instruction =
   | "DropAllProofsInWorkspace"
   | { AssertBucketContains: { key: WorkspaceOffsetId; resource_address: ResourceAddress; min_amount: Amount } }
   | { PublishTemplate: { binary: Array<number> } }
-  | { AllocateAddress: { allocatable_type: AllocatableAddressType; workspace_id: number } };
+  | { AllocateAddress: { allocatable_type: AllocatableAddressType; workspace_id: number } }
+  | {
+      StealthTransfer: {
+        resource_address: ResourceAddress;
+        statement: StealthTransferStatement;
+        revealed_input_bucket: WorkspaceOffsetId | null;
+      };
+    };

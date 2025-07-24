@@ -58,9 +58,7 @@ const TAG: u64 = BinaryTag::Utxo.as_u64();
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
-pub struct UtxoAddress(
-    #[cfg_attr(feature = "ts", ts(type = "{resource_address: string, id: string}"))] BorTag<UtxoAddressContents, TAG>,
-);
+pub struct UtxoAddress(BorTag<UtxoAddressContents, TAG>);
 
 impl UtxoAddress {
     pub fn new(resource_address: ResourceAddress, id: UtxoId) -> Self {

@@ -35,9 +35,7 @@ const TAG: u64 = BinaryTag::Metadata as u64;
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
-pub struct Metadata(
-    #[cfg_attr(feature = "ts", ts(type = "Record<string, string>"))] BorTag<BTreeMap<String, String>, TAG>,
-);
+pub struct Metadata(BorTag<BTreeMap<String, String>, TAG>);
 
 impl Metadata {
     pub const fn new() -> Self {

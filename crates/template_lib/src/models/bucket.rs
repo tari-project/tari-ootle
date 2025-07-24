@@ -40,7 +40,7 @@ const TAG: u64 = BinaryTag::BucketId.as_u64();
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
-pub struct BucketId(#[cfg_attr(feature = "ts", ts(type = "number"))] BorTag<u32, TAG>);
+pub struct BucketId(BorTag<u32, TAG>);
 
 impl From<u32> for BucketId {
     fn from(value: u32) -> Self {

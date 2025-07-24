@@ -351,7 +351,7 @@ impl VersionedSubstateId {
         Self::new(self.substate_id, self.version + 1)
     }
 
-    pub fn as_ref(&self) -> VersionedSubstateIdRef {
+    pub fn as_ref(&self) -> VersionedSubstateIdRef<'_> {
         VersionedSubstateIdRef {
             substate_id: &self.substate_id,
             version: self.version,

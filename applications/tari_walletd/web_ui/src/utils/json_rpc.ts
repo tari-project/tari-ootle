@@ -90,6 +90,7 @@ import type {
   TransactionWaitResultResponse,
   TransferNftRequest,
   TransferNftResponse,
+  WalletGetInfoResponse,
   WebauthnAlreadyRegisteredResponse,
   WebauthnFinishAuthRequest,
   WebauthnFinishRegisterRequest,
@@ -323,3 +324,6 @@ export const templatesGet = (request: TemplatesGetRequest): Promise<TemplatesGet
 
 export const templatesListAuthored = (request: TemplatesListAuthoredRequest): Promise<TemplatesListAuthoredResponse> =>
   client().then((c) => c.templatesListAuthored(request));
+
+// info
+export const walletGetInfo = (): Promise<WalletGetInfoResponse> => client().then((c) => c.walletGetInfo());

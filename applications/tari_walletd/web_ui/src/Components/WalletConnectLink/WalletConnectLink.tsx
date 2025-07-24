@@ -41,8 +41,10 @@ import { Core } from "@walletconnect/core";
 import { WalletKit } from "@reown/walletkit";
 import {
   accountsCreateFreeTestCoins,
+  accountsGet,
   accountsGetBalances,
   accountsGetDefault,
+  accountsList,
   confidentialViewVaultBalance,
   keysCreate,
   nftList,
@@ -51,6 +53,7 @@ import {
   templatesGet,
   transactionsGetResult,
   transactionsSubmit,
+  walletGetInfo,
 } from "../../utils/json_rpc";
 import useAccountStore from "../../store/accountStore";
 import { buildApprovedNamespaces, getSdkError } from "@walletconnect/utils";
@@ -125,8 +128,12 @@ const ConnectorDialog = () => {
     switch (method) {
       case "tari_getSubstate":
         return substatesGet(params);
+      case "tari_accountsList":
+        return accountsList(params);
       case "tari_getDefaultAccount":
         return accountsGetDefault(params);
+      case "tari_getAccountByAddress":
+        return accountsGet(params);
       case "tari_getAccountBalances":
         return accountsGetBalances(params);
       case "tari_submitTransaction":
@@ -145,6 +152,8 @@ const ConnectorDialog = () => {
         return substatesList(params);
       case "tari_getNftsList":
         return nftList(params);
+      case "tari_getWalletInfo":
+        return walletGetInfo();
       default:
         setError(`Unsupported method ${method}`);
     }

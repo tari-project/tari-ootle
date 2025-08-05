@@ -125,7 +125,6 @@ impl borsh::BorshDeserialize for RistrettoPublicKeyBytes {
 
 #[cfg(test)]
 mod tests {
-    use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 
     use super::*;
 
@@ -151,16 +150,27 @@ mod tests {
         assert_eq!(123, decode.a, "Failed to serialize/deserialize RistrettoPublicKeyBytes",);
     }
 
-    #[test]
-    fn matches_tari_crypto_impl() {
-        let bytes = RistrettoPublicKeyBytes::from([1u8; 32]);
-        let expanded = RistrettoPublicKey::from_canonical_bytes(bytes.as_ref())
-            .expect("RistrettoPublicKeyBytes should be convertible to RistrettoPublicKey");
-        let encoded = borsh::to_vec(&bytes).unwrap();
-        let encoded_expanded = borsh::to_vec(&expanded).unwrap();
-        assert_eq!(
-            encoded_expanded, encoded,
-            "RistrettoPublicKeyBytes should match RistrettoPublicKey borsh encoding"
-        );
+    #[cfg(feature = "borsh")]
+    mod borsh_tests {
+        use tari_crypto::{
+            keys::PublicKey,
+            ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+            tari_utilities::ByteArray,
+        };
+
+        use super::*;
+
+        #[test]
+        fn matches_tari_crypto_impl() {
+            let k = RistrettoSecretKey::from(u64::MAX);
+            let expanded = RistrettoPublicKey::from_secret_key(&k);
+            let bytes = RistrettoPublicKeyBytes::from_bytes(expanded.as_bytes()).unwrap();
+            let encoded = borsh::to_vec(&bytes).unwrap();
+            let encoded_expanded = borsh::to_vec(&expanded).unwrap();
+            assert_eq!(
+                encoded_expanded, encoded,
+                "RistrettoPublicKeyBytes should match RistrettoPublicKey borsh encoding"
+            );
+        }
     }
 }

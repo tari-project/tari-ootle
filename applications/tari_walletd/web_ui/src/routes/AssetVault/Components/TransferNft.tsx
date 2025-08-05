@@ -69,7 +69,7 @@ export interface TransferNftDialogProps {
 }
 
 interface NftListItem {
-  address: NonFungibleAddress;
+  address: string;
   name: string;
 }
 
@@ -119,7 +119,7 @@ function getAccountSelector(account: Account): ComponentAddressOrName {
 export function TransferNftDialog(props: TransferNftDialogProps) {
   const INITIAL_VALUES = {
     payerAccount: "",
-    nfts: new Array<NonFungibleAddress>(),
+    nfts: [] as string[],
     targetAccountPublicKey: "",
     maxFee: "",
   };
@@ -164,7 +164,8 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   const { mutateAsync: calculateFeeEstimate } = useNftsTransfer({
     dry_run: true,
     max_fee: 3000,
-    nfts: transferFormState.nfts,
+    // TODO: fix this
+    nfts: transferFormState.nfts as unknown as string[],
     source_account: getAccountSelector(account),
     target_account_public_key: transferFormState.targetAccountPublicKey,
     fee_payer_account: payerAccount,
@@ -319,7 +320,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
           return nft.name === itemName;
         });
       })
-      .filter((value) => value != undefined);
+      .filter((value) => Boolean(value)) as NftListItem[];
 
     setValidity({
       ...validity,
@@ -328,7 +329,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
 
     setTransferFormState({
       ...transferFormState,
-      nfts: nftsSelected.map((item) => item?.address!),
+      nfts: nftsSelected.map((item) => item.address),
     });
 
     setNfts(nftsSelected.map((item) => item!));

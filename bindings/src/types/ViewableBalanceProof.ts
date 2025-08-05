@@ -21,6 +21,8 @@ import type { Scalar32Bytes } from "./Scalar32Bytes";
  *
  * It is a sigma protocol for the relation that is complete, $2$-special sound, and special honest-verifier zero
  * knowledge.
+ *
+ * The proof size is static (256 bytes).
  */
 export type ViewableBalanceProof = {
   /**

@@ -318,10 +318,8 @@ pub async fn spawn_services(
 
     // Consensus
     let payload_processor = TariTransactionProcessor::new(
-        TransactionProcessorConfig::builder()
-            .with_network(config.network)
-            .with_template_binary_max_size_bytes(consensus_constants.template_binary_max_size_bytes)
-            .build(),
+        TransactionProcessorConfig::new(config.network)
+            .with_template_binary_max_size_bytes(consensus_constants.template_binary_max_size_bytes),
         template_manager.clone(),
         fee_table,
     );

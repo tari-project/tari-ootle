@@ -42,11 +42,11 @@ impl<'a> Authorization<'a> {
 
         let component_address =
             locked
-                .address()
+                .substate_id()
                 .as_component_address()
                 .ok_or_else(|| RuntimeError::InvariantError {
                     function: "check_component_access_rules",
-                    details: format!("Expected a component address, got {}", locked.address()),
+                    details: format!("Expected a component address, got {}", locked.substate_id()),
                 })?;
 
         // Check access rules

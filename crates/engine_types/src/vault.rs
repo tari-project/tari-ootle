@@ -33,7 +33,7 @@ use tari_template_lib::{
 
 use crate::{
     bucket::Bucket,
-    confidential::ConfidentialOutput,
+    crypto::PrivateOutput,
     proof::{ContainerRef, LockedResource, Proof},
     resource_container::{ResourceContainer, ResourceError},
 };
@@ -119,7 +119,7 @@ impl Vault {
         self.resource_container.get_commitment_count()
     }
 
-    pub fn get_confidential_commitments(&self) -> Option<&BTreeMap<PedersenCommitmentBytes, ConfidentialOutput>> {
+    pub fn get_confidential_commitments(&self) -> Option<&BTreeMap<PedersenCommitmentBytes, PrivateOutput>> {
         self.resource_container.get_confidential_commitments()
     }
 

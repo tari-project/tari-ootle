@@ -35,7 +35,7 @@ use tari_engine_types::{
     virtual_substate::VirtualSubstates,
     ComponentCall,
 };
-use tari_ootle_common_types::{services::template_provider::TemplateProvider, Network};
+use tari_ootle_common_types::services::template_provider::TemplateProvider;
 use tari_template_abi::{FunctionDef, Type};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
@@ -51,7 +51,7 @@ use tari_template_lib::{
     call_arg,
     call_args,
     invoke_args,
-    models::{Bucket, NonFungibleAddress},
+    models::{Bucket, NonFungibleAddress, ResourceAddress, StealthTransferStatement},
     types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
 };
 
@@ -62,6 +62,7 @@ use crate::{
         AuthParams,
         AuthorizationScope,
         Runtime,
+        RuntimeError,
         RuntimeInterfaceImpl,
         RuntimeModule,
         StateTracker,
@@ -69,56 +70,13 @@ use crate::{
     state_store::memory::ReadOnlyMemoryStateStore,
     template::LoadedTemplate,
     traits::Invokable,
-    transaction::TransactionError,
+    transaction::{TransactionError, TransactionProcessorConfig},
     wasm::{WasmModule, WasmProcess},
 };
 
 const LOG_TARGET: &str = "tari::ootle::engine::instruction_processor";
 pub const MAX_CALL_DEPTH: usize = 10;
 const ACCOUNT_CONSTRUCTOR_FUNCTION: &str = "create";
-
-#[derive(Clone, Debug)]
-pub struct TransactionProcessorConfig {
-    pub network: Network,
-    pub template_binary_max_size_bytes: usize,
-}
-
-impl TransactionProcessorConfig {
-    pub fn builder() -> TransactionProcessorConfigBuilder {
-        TransactionProcessorConfigBuilder::default()
-    }
-}
-
-pub struct TransactionProcessorConfigBuilder {
-    config: TransactionProcessorConfig,
-}
-
-impl TransactionProcessorConfigBuilder {
-    pub fn with_network(&mut self, network: Network) -> &mut Self {
-        self.config.network = network;
-        self
-    }
-
-    pub fn with_template_binary_max_size_bytes(&mut self, max_size: usize) -> &mut Self {
-        self.config.template_binary_max_size_bytes = max_size;
-        self
-    }
-
-    pub fn build(&self) -> TransactionProcessorConfig {
-        self.config.clone()
-    }
-}
-
-impl Default for TransactionProcessorConfigBuilder {
-    fn default() -> Self {
-        Self {
-            config: TransactionProcessorConfig {
-                network: Network::Esmeralda,
-                template_binary_max_size_bytes: 1000 * 1000 * 5, // 5MB
-            },
-        }
-    }
-}
 
 pub struct TransactionProcessor<TTemplateProvider> {
     config: TransactionProcessorConfig,
@@ -358,7 +316,37 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 allocatable_type: substate_type,
                 workspace_id,
             } => Self::allocate_address(runtime, substate_type, workspace_id),
+            Instruction::StealthTransfer {
+                resource_address,
+                statement,
+                revealed_input_bucket,
+            } => Self::stealth_transfer(runtime, resource_address, statement, revealed_input_bucket),
         }
+    }
+
+    pub fn stealth_transfer(
+        runtime: &Runtime,
+        resource_address: ResourceAddress,
+        statement: StealthTransferStatement,
+        revealed_funds_bucket: Option<WorkspaceOffsetId>,
+    ) -> Result<InstructionResult, TransactionError> {
+        let revealed_funds_bucket = revealed_funds_bucket
+            .map(|id| {
+                runtime.resolve_workspace_id(&id).and_then(|r| {
+                    r.decode().map_err(|e| RuntimeError::InvalidArgument {
+                        argument: "revealed_funds_bucket",
+                        reason: format!("Expected workspace id {id} to be a BucketId: {e}"),
+                    })
+                })
+            })
+            .transpose()?;
+        let maybe_bucket = runtime
+            .interface()
+            .stealth_transfer(resource_address, statement, revealed_funds_bucket)?;
+        runtime
+            .interface()
+            .set_last_instruction_output(IndexedValue::from_type(&maybe_bucket.map(Bucket::from_id))?)?;
+        Ok(InstructionResult::empty())
     }
 
     pub fn put_output_on_workspace_with_name(runtime: &Runtime, key: WorkspaceId) -> Result<(), TransactionError> {

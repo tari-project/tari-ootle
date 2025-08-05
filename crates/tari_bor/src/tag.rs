@@ -7,6 +7,7 @@ use ciborium::tag::Required;
 use serde::{de, ser, Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+
 pub struct BorTag<T, const TAG: u64>(Required<T, TAG>);
 
 impl<T, const TAG: u64> BorTag<T, TAG> {
@@ -68,6 +69,66 @@ impl<T, const TAG: u64> DerefMut for BorTag<T, TAG> {
 impl<T: AsRef<[u8]>, const TAG: u64> AsRef<[u8]> for BorTag<T, TAG> {
     fn as_ref(&self) -> &[u8] {
         self.inner().as_ref()
+    }
+}
+
+#[cfg(all(feature = "std", feature = "ts"))]
+mod ts_impl {
+    use std::path::PathBuf;
+
+    use ts_rs::{TypeVisitor, TS};
+
+    use super::*;
+
+    impl<T: TS, const TAG: u64> TS for BorTag<T, TAG> {
+        type OptionInnerType = T::OptionInnerType;
+        type WithoutGenerics = T::WithoutGenerics;
+
+        fn name() -> String {
+            T::name()
+        }
+
+        fn inline() -> String {
+            T::inline()
+        }
+
+        fn inline_flattened() -> String {
+            T::inline_flattened()
+        }
+
+        fn decl() -> String {
+            T::decl()
+        }
+
+        fn decl_concrete() -> String {
+            T::decl_concrete()
+        }
+
+        fn ident() -> String {
+            T::ident()
+        }
+
+        fn docs() -> Option<String> {
+            T::docs()
+        }
+
+        fn visit_dependencies(v: &mut impl TypeVisitor)
+        where Self: 'static {
+            T::visit_dependencies(v);
+        }
+
+        fn visit_generics(v: &mut impl TypeVisitor)
+        where Self: 'static {
+            T::visit_generics(v);
+        }
+
+        fn output_path() -> Option<PathBuf> {
+            T::output_path()
+        }
+
+        fn default_output_path() -> Option<PathBuf> {
+            T::default_output_path()
+        }
     }
 }
 

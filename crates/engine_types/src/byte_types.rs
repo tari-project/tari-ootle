@@ -8,16 +8,19 @@ use tari_crypto::{
     tari_utilities,
     tari_utilities::ByteArray,
 };
-use tari_template_lib::types::crypto::{
-    CommitmentSignatureBytes,
-    PedersenCommitmentBytes,
-    RistrettoPublicKeyBytes,
-    SchnorrSignatureBytes,
+use tari_template_lib::{
+    prelude::Scalar32Bytes,
+    types::crypto::{
+        CommitmentSignatureBytes,
+        PedersenCommitmentBytes,
+        RistrettoPublicKeyBytes,
+        SchnorrSignatureBytes,
+    },
 };
 
 /// Defines a conversion from a type to its light-weight byte representation.
 pub trait ToByteType {
-    type ByteType: Copy;
+    type ByteType;
     fn to_byte_type(&self) -> Self::ByteType;
 }
 
@@ -68,8 +71,11 @@ impl<H: DomainSeparation> ToByteType for SchnorrSignature<RistrettoPublicKey, Ri
     type ByteType = SchnorrSignatureBytes;
 
     fn to_byte_type(&self) -> Self::ByteType {
-        SchnorrSignatureBytes::try_from_parts(self.get_public_nonce().as_bytes(), self.get_signature().as_bytes())
-            .expect("byte size of SchnorrSignature is not size_of::<SchnorrSignatureBytes>() bytes.")
+        SchnorrSignatureBytes::new(
+            self.get_public_nonce().to_byte_type(),
+            Scalar32Bytes::from_bytes(self.get_signature().as_bytes())
+                .expect("byte size of RistrettoSecretKey is not size_of::<Scalar32Bytes>() bytes."),
+        )
     }
 }
 

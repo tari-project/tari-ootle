@@ -124,6 +124,14 @@ impl Amount {
         }
     }
 
+    pub fn sum_from_positive<I: Iterator<Item = Self>>(iter: I) -> Option<Self> {
+        let mut sum = Self::zero();
+        for amount in iter {
+            sum = sum.checked_add_positive(amount)?;
+        }
+        Some(sum)
+    }
+
     /// Returns the difference of two amounts, saturating at `0` if the result is negative.
     pub const fn saturating_sub(&self, other: Self) -> Self {
         Self::new(self.into_inner_value().saturating_sub(other.into_inner_value()))

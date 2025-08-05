@@ -45,9 +45,9 @@ mod locking;
 pub mod scope;
 pub use locking::{LockError, LockState};
 mod address_allocation;
-mod limits;
 mod state_store;
 mod tracker_auth;
+mod validation;
 mod working_state;
 mod workspace;
 
@@ -59,6 +59,7 @@ use tari_engine_types::{
     component::ComponentHeader,
     confidential::ConfidentialClaim,
     indexed_value::IndexedValue,
+    limits,
     lock::LockFlag,
     substate::SubstateValue,
     ComponentCall,
@@ -89,14 +90,23 @@ use tari_template_lib::{
         VaultAction,
         WorkspaceAction,
         WorkspaceId,
+        WorkspaceOffsetId,
     },
     invoke_args,
-    models::{ComponentAddress, Metadata, NonFungibleAddress, VaultRef},
+    models::{
+        BucketId,
+        ComponentAddress,
+        Metadata,
+        NonFungibleAddress,
+        ResourceAddress,
+        StealthTransferStatement,
+        VaultRef,
+    },
     types::EntityId,
 };
 pub use tracker::StateTracker;
 
-use crate::runtime::{locking::LockedSubstate, scope::PushCallFrame};
+use crate::runtime::{error::ArgumentValidationError, locking::LockedSubstate, scope::PushCallFrame};
 
 pub trait RuntimeInterface: Send + Sync {
     fn next_entity_id(&self) -> Result<EntityId, RuntimeError>;
@@ -195,6 +205,13 @@ pub trait RuntimeInterface: Send + Sync {
         entity_id: EntityId,
         workspace_id: WorkspaceId,
     ) -> Result<AllocateAddressResult, RuntimeError>;
+
+    fn stealth_transfer(
+        &self,
+        resource_address: ResourceAddress,
+        statement: StealthTransferStatement,
+        revealed_funds_bucket: Option<BucketId>,
+    ) -> Result<Option<BucketId>, RuntimeError>;
 }
 
 #[derive(Clone)]
@@ -204,25 +221,29 @@ pub struct Runtime {
 
 impl Runtime {
     pub(crate) fn resolve_args(&self, args: &[InstructionArg]) -> Result<Vec<tari_bor::Value>, RuntimeError> {
-        if args.len() > limits::ENGINE_LIMITS.max_call_args {
-            return Err(RuntimeError::TooManyArguments {
+        if args.len() > limits::WASM_LIMITS.max_function_arguments {
+            return Err(ArgumentValidationError::TooManyArguments {
                 got: args.len(),
-                max: limits::ENGINE_LIMITS.max_call_args,
-            });
+                max: limits::WASM_LIMITS.max_function_arguments,
+            }
+            .into());
         }
         let mut resolved = Vec::with_capacity(args.len());
         for arg in args {
             match arg {
                 InstructionArg::Workspace(key) => {
-                    let value = self
-                        .interface
-                        .workspace_invoke(WorkspaceAction::Get, invoke_args![key].into())?;
-                    resolved.push(value.into_value()?);
+                    let result = self.resolve_workspace_id(key)?;
+                    resolved.push(result.into_value()?);
                 },
                 InstructionArg::Literal(v) => resolved.push(decode_exact(v)?),
             }
         }
         Ok(resolved)
+    }
+
+    pub(crate) fn resolve_workspace_id(&self, workspace_id: &WorkspaceOffsetId) -> Result<InvokeResult, RuntimeError> {
+        self.interface
+            .workspace_invoke(WorkspaceAction::Get, invoke_args![workspace_id].into())
     }
 }
 

@@ -535,7 +535,7 @@ pub fn print_substate_diff(diff: &SubstateDiff) {
             },
             SubstateValue::Utxo(_) => {
                 println!("      ▶ UTXO:");
-                let utxo_address = id.as_utxo().unwrap();
+                let utxo_address = id.as_utxo_address().unwrap();
                 println!("        ▶ Resource: {}", utxo_address.resource_address());
                 println!("        ▶ id: {}", utxo_address.id());
             },

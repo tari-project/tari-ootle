@@ -183,7 +183,7 @@ impl SubstateId {
         }
     }
 
-    pub fn as_utxo(&self) -> Option<UtxoAddress> {
+    pub fn as_utxo_address(&self) -> Option<UtxoAddress> {
         match self {
             Self::Utxo(address) => Some(address.clone()),
             _ => None,
@@ -250,9 +250,9 @@ impl SubstateId {
     }
 
     pub fn is_root(&self) -> bool {
-        // A component is a "root" substate i.e. it may not have a parent node. NOTE: this concept isn't well-defined
-        // right now, this is simply used to prevent components being detected as dangling.
-        matches!(self, Self::Component(_))
+        // A component and utxo are "root" substates i.e. they may not have a parent node. NOTE: this concept isn't
+        // well-defined right now, this is simply used to prevent components being detected as dangling.
+        matches!(self, Self::Component(_) | Self::Utxo(_))
     }
 
     pub fn is_public_key_identity(&self) -> bool {
@@ -824,6 +824,12 @@ impl From<PublishedTemplate> for SubstateValue {
 impl From<ValidatorFeePool> for SubstateValue {
     fn from(value: ValidatorFeePool) -> Self {
         Self::ValidatorFeePool(value)
+    }
+}
+
+impl From<Utxo> for SubstateValue {
+    fn from(utxo: Utxo) -> Self {
+        Self::Utxo(utxo)
     }
 }
 

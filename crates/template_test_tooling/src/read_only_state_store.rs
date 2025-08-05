@@ -1,6 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::collections::HashMap;
+
 use tari_engine::state_store::{memory::MemoryStateStore, StateReader, StateStoreError};
 use tari_engine_types::{
     component::ComponentHeader,
@@ -9,7 +11,7 @@ use tari_engine_types::{
     substate::{Substate, SubstateId},
     vault::Vault,
 };
-use tari_template_lib::models::{ComponentAddress, ResourceAddress, VaultId};
+use tari_template_lib::models::{Account, ComponentAddress, ResourceAddress, VaultId};
 
 pub struct ReadOnlyStateStore<'a> {
     store: &'a MemoryStateStore,
@@ -22,6 +24,25 @@ impl<'a> ReadOnlyStateStore<'a> {
     pub fn get_component(&self, component_address: ComponentAddress) -> Result<ComponentHeader, StateStoreError> {
         let substate = self.get_substate(&SubstateId::Component(component_address))?;
         Ok(substate.into_substate_value().into_component().unwrap())
+    }
+
+    pub fn get_account(&self, account_address: ComponentAddress) -> Result<Account, StateStoreError> {
+        let account = self.get_component(account_address)?;
+        Account::from_value(account.state()).map_err(StateStoreError::custom)
+    }
+
+    pub fn get_vaults_for_account(
+        &self,
+        account_address: ComponentAddress,
+    ) -> Result<HashMap<ResourceAddress, Vault>, StateStoreError> {
+        let account = self.get_account(account_address)?;
+        let mut vaults = HashMap::with_capacity(account.vaults().len());
+        for (resource_addr, vault) in account.vaults() {
+            let vault_id = vault.vault_id();
+            let vault = self.get_vault(&vault_id)?;
+            vaults.insert(*resource_addr, vault);
+        }
+        Ok(vaults)
     }
 
     pub fn get_resource(&self, resource_address: &ResourceAddress) -> Result<Resource, StateStoreError> {

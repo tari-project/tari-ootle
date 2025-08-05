@@ -8,9 +8,13 @@
  *
  * - **Fungible** tokens are interchangeable and divisible (e.g., currency, shares).
  * - **NonFungible** tokens represent unique, indivisible assets (e.g., collectibles).
- * - **Confidential** tokens are fungible tokens with privacy-preserving features.
+ * - **Confidential** A type of fungible resource that uses cryptographic privacy to keep balances confidential. Funds
+ *   are placed in vaults and can therefore be associated with a component that contains them, typically an Account.
+ * - **Stealth** A fungible resource using the highest level of confidentiality. Funds are not kept in vaults, and each
+ *   output is an independent confidential substate (kind of like creating a new unlinked vault for each currency
+ *   note).
  *
  * This enum is serializable/deserializable with `serde` and optionally generates
  * TypeScript bindings when the `ts` feature is enabled.
  */
-export type ResourceType = "Fungible" | "NonFungible" | "Confidential";
+export type ResourceType = "Fungible" | "NonFungible" | "Confidential" | "Stealth";

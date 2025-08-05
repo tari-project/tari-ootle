@@ -23,11 +23,15 @@
 pub mod confidential;
 pub mod fungible;
 pub mod non_fungible;
+pub mod stealth;
 
-use crate::resource::builder::{
-    confidential::ConfidentialResourceBuilder,
-    fungible::FungibleResourceBuilder,
-    non_fungible::NonFungibleResourceBuilder,
+use crate::resource::{
+    builder::{
+        confidential::ConfidentialResourceBuilder,
+        fungible::FungibleResourceBuilder,
+        non_fungible::NonFungibleResourceBuilder,
+    },
+    stealth::StealthResourceBuilder,
 };
 
 /// Metadata key used as convention to represent the symbol (a.k.a. ticker) of a token. Meant as a shorthand,
@@ -70,5 +74,13 @@ impl ResourceBuilder {
     /// vault.
     pub fn confidential() -> ConfidentialResourceBuilder {
         ConfidentialResourceBuilder::new()
+    }
+
+    /// Returns a new stealth resource builder.
+    ///
+    /// The highest level of confidentiality. Funds are not kept in vaults, and each output is a confidential substate
+    /// that lives on the ledger.
+    pub fn stealth() -> StealthResourceBuilder {
+        StealthResourceBuilder::new()
     }
 }

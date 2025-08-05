@@ -38,7 +38,7 @@ use tari_template_lib::{
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
     prelude::{PedersenCommitmentBytes, ResourceAddress, RistrettoPublicKeyBytes},
     resource::TOKEN_SYMBOL,
-    types::Amount,
+    types::{crypto::RangeProofBytes, Amount},
 };
 use tari_transaction::{args, UnsignedTransaction};
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
@@ -81,7 +81,7 @@ pub async fn claim_burn(
     world: &mut TariWorld,
     account_name: String,
     commitment: PedersenCommitmentBytes,
-    range_proof: Vec<u8>,
+    range_proof: RangeProofBytes,
     ownership_proof: CommitmentSignature<RistrettoPublicKey, RistrettoSecretKey>,
     reciprocal_claim_public_key: RistrettoPublicKey,
     wallet_daemon_name: String,

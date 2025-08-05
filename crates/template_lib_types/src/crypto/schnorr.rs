@@ -8,6 +8,11 @@ use crate::crypto::{scalar::Scalar32Bytes, InvalidByteLengthError, RistrettoPubl
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct SchnorrSignatureBytes {
     public_nonce: RistrettoPublicKeyBytes,
     signature: Scalar32Bytes,
@@ -32,7 +37,7 @@ impl SchnorrSignatureBytes {
         }
     }
 
-    pub fn try_from_parts(public_nonce: &[u8], signature: &[u8]) -> Result<Self, InvalidByteLengthError> {
+    pub fn try_from_raw_parts(public_nonce: &[u8], signature: &[u8]) -> Result<Self, InvalidByteLengthError> {
         let public_nonce = RistrettoPublicKeyBytes::from_bytes(public_nonce)?;
         let signature = Scalar32Bytes::from_bytes(signature)?;
         Ok(Self::new(public_nonce, signature))
@@ -46,7 +51,7 @@ impl SchnorrSignatureBytes {
             });
         }
 
-        Self::try_from_parts(
+        Self::try_from_raw_parts(
             bytes
                 .get(..RistrettoPublicKeyBytes::length())
                 .expect("Slice length checked before"),

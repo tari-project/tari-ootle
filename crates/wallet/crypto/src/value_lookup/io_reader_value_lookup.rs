@@ -7,7 +7,7 @@ use std::{
     ops::RangeInclusive,
 };
 
-use tari_engine_types::confidential::ValueLookupTable;
+use tari_engine_types::crypto::ValueLookupTable;
 
 use crate::value_lookup::header::LookupHeader;
 

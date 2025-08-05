@@ -11,11 +11,11 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use tari_bor::{BorTag, Deserialize, Serialize};
 use tari_template_lib::{
     models::{BinaryTag, ResourceAddress},
-    prelude::{from_hex, serde_helpers, KeyParseError},
+    prelude::{from_hex, serde_helpers, KeyParseError, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     types::hex::write_hex_fmt,
 };
 
-use crate::confidential::ConfidentialOutput;
+use crate::crypto::PrivateOutput;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
@@ -24,20 +24,54 @@ use crate::confidential::ConfidentialOutput;
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct Utxo {
-    pub output: ConfidentialOutput,
+    pub output: Option<UtxoOutput>,
     pub is_frozen: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
+pub struct UtxoOutput {
+    pub output: PrivateOutput,
+    /// The public key that must prove ownership of this UTXO. This is typically a one time "stealth" public key but is
+    /// selected by the client.
+    pub owner_public_key: RistrettoPublicKeyBytes,
+}
+
 impl Utxo {
-    pub fn new(output: ConfidentialOutput) -> Self {
+    pub fn new(output: UtxoOutput) -> Self {
         Self {
-            output,
+            output: Some(output),
             is_frozen: false,
         }
     }
 
-    pub fn output(&self) -> &ConfidentialOutput {
-        &self.output
+    pub fn output(&self) -> Option<&UtxoOutput> {
+        self.output.as_ref()
+    }
+
+    pub fn owner_public_key(&self) -> Option<&RistrettoPublicKeyBytes> {
+        self.output().map(|o| &o.owner_public_key)
+    }
+
+    pub fn freeze(&mut self) {
+        self.is_frozen = true;
+    }
+
+    pub fn burn(&mut self) {
+        self.output = None;
+        self.is_frozen = true;
+    }
+
+    pub fn is_frozen(&self) -> bool {
+        self.is_frozen
+    }
+
+    pub fn is_burnt(&self) -> bool {
+        self.output.is_none()
     }
 }
 
@@ -49,7 +83,7 @@ const TAG: u64 = BinaryTag::Utxo.as_u64();
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
-pub struct UtxoAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<UtxoAddressContents, TAG>);
+pub struct UtxoAddress(BorTag<UtxoAddressContents, TAG>);
 
 impl UtxoAddress {
     pub fn new(resource_address: ResourceAddress, id: UtxoId) -> Self {
@@ -113,6 +147,22 @@ impl UtxoId {
 
     pub fn from_hex(hex: &str) -> Result<Self, KeyParseError> {
         from_hex(hex).map(Self::from_array)
+    }
+
+    pub fn into_commitment_bytes(self) -> PedersenCommitmentBytes {
+        PedersenCommitmentBytes::from_array(self.0)
+    }
+}
+
+impl From<PedersenCommitmentBytes> for UtxoId {
+    fn from(commitment: PedersenCommitmentBytes) -> Self {
+        Self::from_array(commitment.into_array())
+    }
+}
+
+impl From<&PedersenCommitmentBytes> for UtxoId {
+    fn from(commitment: &PedersenCommitmentBytes) -> Self {
+        (*commitment).into()
     }
 }
 

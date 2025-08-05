@@ -43,6 +43,10 @@ impl PedersenCommitmentBytes {
         Self(commitment.into_array())
     }
 
+    pub fn from_array(bytes: [u8; Self::length()]) -> Self {
+        Self(bytes)
+    }
+
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, InvalidByteLengthError> {
         if bytes.len() != Self::length() {
             return Err(InvalidByteLengthError {

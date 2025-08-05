@@ -65,9 +65,9 @@ mod faucet_template {
             self.vault.deposit(bucket);
         }
 
-        pub fn mint_revealed_with_range_proof(&mut self, amount: Amount) {
+        pub fn mint_revealed_with_bad_range_proof(&mut self, amount: Amount) {
             let mut proof = ConfidentialOutputStatement::mint_revealed(amount);
-            proof.range_proof = vec![1, 2, 3];
+            proof.range_proof = crypto::RangeProofBytes::try_from(vec![1, 2, 3]).unwrap();
             let bucket = ResourceManager::get(self.vault.resource_address()).mint_confidential(proof);
             self.vault.deposit(bucket);
         }

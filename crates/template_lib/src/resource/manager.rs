@@ -21,7 +21,8 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 //! This module provides the `ResourceManager` struct, a high-level interface for managing
-//! Tari Ootleblockchain resources such as fungible tokens, non-fungible tokens, and confidential assets.
+//! Tari Ootle resources. Resources can be non-private fungible tokens, non-fungible tokens, confidential fungible and
+//! stealth fungible.
 //!
 //! It abstracts common operations like creating resources, minting tokens, recalling tokens from vaults,
 //! querying supply, and updating non-fungible metadata.
@@ -39,7 +40,7 @@
 
 use std::collections::BTreeSet;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tari_bor::to_value;
 use tari_template_abi::{call_engine, rust::collections::BTreeMap, EngineOp};
 
@@ -62,12 +63,14 @@ use crate::{
     auth::{OwnerRule, ResourceAccessRules},
     models::{
         Bucket,
+        BucketId,
         ConfidentialOutputStatement,
         Metadata,
         NonFungible,
         NonFungibleId,
         ResourceAddress,
         ResourceAddressAllocation,
+        StealthMintStatement,
         VaultId,
     },
     prelude::{AuthHook, ResourceType},
@@ -85,36 +88,21 @@ use crate::{
 /// let resource_manager = ResourceManager::get(my_resource_address);
 /// resource_manager.mint_fungible(Amount(1000));
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct ResourceManager {
-    resource_address: Option<ResourceAddress>,
+    resource_address: ResourceAddress,
 }
 
 impl ResourceManager {
-    /// Creates a new `ResourceManager` without an associated resource address.
-    ///
-    /// This is primarily used internally when you need an uninitialized manager.
-    /// Most users should use [`ResourceManager::get`] to get a manager tied to a specific resource.
-    ///
-    /// Note: Because this method is `pub(crate)`, it's only accessible within the crate.
-    pub(crate) fn new() -> Self {
-        ResourceManager { resource_address: None }
-    }
-
     /// Returns the address of the resource that is being managed
-    pub fn get(address: ResourceAddress) -> Self {
-        Self {
-            resource_address: Some(address),
-        }
+    pub fn get(resource_address: ResourceAddress) -> Self {
+        Self { resource_address }
     }
 
-    fn expect_resource_address(&self) -> ResourceRef {
-        let resource_address = self
-            .resource_address
-            .as_ref()
-            .copied()
-            .expect("Resource address not set");
-        ResourceRef::Ref(resource_address)
+    /// Returns the address of the resource that is being managed.
+    pub fn resource_address(&self) -> ResourceAddress {
+        self.resource_address
     }
 
     /// A public function that returns the resource type of the resource being managed.
@@ -125,7 +113,7 @@ impl ResourceManager {
     /// `ResourceManager`.
     pub fn resource_type(&self) -> ResourceType {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
-            resource_ref: self.expect_resource_address(),
+            resource_ref: self.resource_address.into(),
             action: ResourceAction::GetResourceType,
             args: invoke_args![],
         });
@@ -194,7 +182,6 @@ impl ResourceManager {
     /// );
     /// ```
     pub(crate) fn create(
-        &self,
         resource_type: ResourceType,
         owner_rule: OwnerRule,
         access_rules: ResourceAccessRules,
@@ -229,14 +216,14 @@ impl ResourceManager {
 
     /// Mints new tokens for the confidential resource managed by this `ResourceManager`.
     ///
-    /// This method accepts a zero-knowledge proof that authorizes the minting of confidential tokens. The proof
-    /// ensures the confidentiality of the minted amounts while maintaining auditability. Upon success, a
-    /// [`Bucket`] containing the newly minted tokens is returned to the caller.
+    /// This method accepts a zero-knowledge proof that authorizes the minting of confidential tokens.
+    /// Upon success, a [`Bucket`] containing the newly minted tokens is returned to the caller.
     ///
     /// # Arguments
     ///
-    /// * `proof` – A [`ConfidentialOutputStatement`] containing the zero-knowledge proof and associated metadata. This
-    ///   includes the output and change statements, a range proof, and revealed amounts for output and change.
+    /// * `statement` – A [`ConfidentialOutputStatement`] containing the zero-knowledge statement and associated
+    ///   metadata. This includes the output and change statements, a range statement, and revealed amounts for output
+    ///   and change.
     ///
     /// # Returns
     ///
@@ -246,18 +233,50 @@ impl ResourceManager {
     ///
     /// This method will panic if:
     /// - The resource is not of type [`ResourceType::Confidential`]
-    /// - The provided proof is invalid or malformed
+    /// - The provided statement is invalid or malformed
     /// - The caller lacks the required minting permissions, as defined by the resource's [`ResourceAccessRules`]
     ///
     /// # Example
     ///
     /// ```rust,ignore
-    /// let bucket = resource_manager.mint_confidential(proof);
+    /// let bucket = resource_manager.mint_confidential(statement);
     /// ```
-    pub fn mint_confidential(&self, proof: ConfidentialOutputStatement) -> Bucket {
+    pub fn mint_confidential(&self, statement: ConfidentialOutputStatement) -> Bucket {
         self.mint_internal(MintResourceArg {
-            mint_arg: MintArg::Confidential { proof: Box::new(proof) },
+            mint_arg: MintArg::Confidential {
+                statement: Box::new(statement),
+            },
         })
+        .expect("mint_confidential: engine returned None")
+    }
+
+    /// Mints new tokens for the stealth resource managed by this `ResourceManager`.
+    ///
+    /// This method accepts a zero-knowledge proof that authorizes the minting of stealth tokens.
+    ///
+    /// # Arguments
+    ///
+    /// * `statement` – A [`ConfidentialOutputStatement`] containing the outputs to mint. This the outputs to mint, and
+    ///   a range proof.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if:
+    /// - The resource is not of type [`ResourceType::Confidential`]
+    /// - The provided statement is invalid or malformed
+    /// - The caller lacks the required minting permissions, as defined by the resource's [`ResourceAccessRules`]
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let bucket = resource_manager.mint_stealth(statement);
+    /// ```
+    pub fn mint_stealth(&self, statement: StealthMintStatement) {
+        self.mint_internal(MintResourceArg {
+            mint_arg: MintArg::Stealth {
+                statement: Box::new(statement),
+            },
+        });
     }
 
     /// Mints a new non-fungible token (NFT) for the resource managed by this `ResourceManager`.
@@ -315,6 +334,7 @@ impl ResourceManager {
                     .collect(),
             },
         })
+        .expect("mint_non_fungible: engine returned None")
     }
 
     /// Mints multiple non-fungible tokens of the resource being managed, each with the same metadata and mutable data.
@@ -446,6 +466,7 @@ impl ResourceManager {
         self.mint_internal(MintResourceArg {
             mint_arg: MintArg::NonFungible { tokens },
         })
+        .expect("mint_many_non_fungible_with: engine returned None")
     }
 
     /// Mints a specified amount of fungible tokens for the resource managed by this `ResourceManager`.
@@ -460,8 +481,8 @@ impl ResourceManager {
     ///
     /// # Arguments
     ///
-    /// * `amount` – The quantity of tokens to mint, expressed in the smallest unit of the resource (e.g., satoshis,
-    ///   wei).
+    /// * `amount` – The quantity of tokens to mint, expressed in the smallest unit of the resource (e.g. microtari,
+    ///   satoshis, gwei, etc.).
     ///
     /// # Returns
     ///
@@ -484,6 +505,7 @@ impl ResourceManager {
         self.mint_internal(MintResourceArg {
             mint_arg: MintArg::Fungible { amount: amount.into() },
         })
+        .expect("mint_fungible: engine returned None")
     }
 
     /// Recalls all tokens of a fungible resource from the specified vault, returning them in a [`Bucket`].
@@ -709,7 +731,7 @@ impl ResourceManager {
     /// ```
     pub fn total_supply_opt(&self) -> Option<Amount> {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
-            resource_ref: self.expect_resource_address(),
+            resource_ref: self.resource_address.into(),
             action: ResourceAction::GetTotalSupply,
             args: invoke_args![],
         });
@@ -744,7 +766,7 @@ impl ResourceManager {
     /// ```
     pub fn get_non_fungible(&self, id: &NonFungibleId) -> NonFungible {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
-            resource_ref: self.expect_resource_address(),
+            resource_ref: self.resource_address.into(),
             action: ResourceAction::GetNonFungible,
             args: invoke_args![ResourceGetNonFungibleArg { id: id.clone() }],
         });
@@ -756,15 +778,6 @@ impl ResourceManager {
     ///
     /// This method serializes the provided data and sends it to the engine using the
     /// `UpdateNonFungibleData` action. The data is stored in the mutable portion of the NFT.
-    ///
-    /// The data must be serializable (`Serialize`) and will be encoded into a JSON `Value`
-    /// using `to_value(...)`. Internally, the method constructs a `ResourceInvokeArg`
-    /// with:
-    /// - `resource_ref`: from `self.expect_resource_address()`
-    /// - `action`: `ResourceAction::UpdateNonFungibleData`
-    /// - `args`: serialized `ResourceUpdateNonFungibleDataArg` including the NFT ID and new data
-    ///
-    /// The response (`InvokeResult`) is expected to contain a `Value`, though it is typically unused here.
     ///
     /// # Type Parameters
     ///
@@ -778,13 +791,18 @@ impl ResourceManager {
     /// # Panics
     ///
     /// Panics if:
-    /// - Serialization of `data` fails.
-    /// - The engine response cannot be decoded.
+    /// - Serialization of `data` fails,
+    /// - The resource address does not exist,
+    /// - The resource is not of type [`ResourceType::NonFungible`],
+    /// - The engine call fails
     ///
     /// # Example
     ///
     /// ```rust
-    /// #[derive(Serialize)]
+    /// # use tari_template_lib::models::NonFungibleId;
+    /// # use tari_template_lib::prelude::ResourceManager;
+    ///
+    /// #[derive(serde::Serialize)]
     /// struct MyMutableData {
     ///     views: u64,
     /// }
@@ -792,11 +810,11 @@ impl ResourceManager {
     /// let id = NonFungibleId::String("my_unique_nft".into());
     /// let data = MyMutableData { views: 42 };
     ///
-    /// resource_manager.update_non_fungible_data(id, &data);
+    /// ResourceManager::get("resource_xxx".parse().unwrap()).update_non_fungible_data(id, &data);
     /// ```
     pub fn update_non_fungible_data<T: Serialize + ?Sized>(&self, id: NonFungibleId, data: &T) {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
-            resource_ref: self.expect_resource_address(),
+            resource_ref: self.resource_address.into(),
             action: ResourceAction::UpdateNonFungibleData,
             args: invoke_args![ResourceUpdateNonFungibleDataArg {
                 id,
@@ -812,7 +830,7 @@ impl ResourceManager {
     /// The function allows the caller to overwrite the existing [`ResourceAccessRules`] for the resource with a new
     /// set. This will replace the existing access rules entirely.
     ///
-    /// # Arugments
+    /// # Arguments
     ///
     /// * `access_rules` - The new [`ResourceAccessRules`] to set for the resource.
     ///
@@ -829,7 +847,7 @@ impl ResourceManager {
     /// ```
     pub fn set_access_rules(&self, access_rules: ResourceAccessRules) {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
-            resource_ref: self.expect_resource_address(),
+            resource_ref: self.resource_address.into(),
             action: ResourceAction::UpdateAccessRules,
             args: invoke_args![access_rules],
         });
@@ -845,7 +863,7 @@ impl ResourceManager {
     /// Sets the freeze flags for the specified vault.
     pub fn set_freeze(&self, vault_id: VaultId, flags: VaultFreezeFlags) {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
-            resource_ref: self.expect_resource_address(),
+            resource_ref: self.resource_address.into(),
             action: ResourceAction::SetFreeze,
             args: invoke_args![FreezeResourceArg { vault_id, flags }],
         });
@@ -861,7 +879,7 @@ impl ResourceManager {
 
     fn recall_internal(&self, arg: RecallResourceArg) -> Bucket {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
-            resource_ref: self.expect_resource_address(),
+            resource_ref: self.resource_address.into(),
             action: ResourceAction::Recall,
             args: invoke_args![arg],
         });
@@ -870,14 +888,20 @@ impl ResourceManager {
         Bucket::from_id(bucket_id)
     }
 
-    fn mint_internal(&self, arg: MintResourceArg) -> Bucket {
+    fn mint_internal(&self, arg: MintResourceArg) -> Option<Bucket> {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
-            resource_ref: self.expect_resource_address(),
+            resource_ref: self.resource_address.into(),
             action: ResourceAction::Mint,
             args: invoke_args![arg],
         });
 
-        let bucket_id = resp.decode().expect("Failed to decode Bucket");
-        Bucket::from_id(bucket_id)
+        let maybe_bucket_id: Option<BucketId> = resp.decode().expect("Failed to decode Bucket");
+        maybe_bucket_id.map(Bucket::from_id)
+    }
+}
+
+impl From<ResourceAddress> for ResourceManager {
+    fn from(resource_address: ResourceAddress) -> Self {
+        Self::get(resource_address)
     }
 }

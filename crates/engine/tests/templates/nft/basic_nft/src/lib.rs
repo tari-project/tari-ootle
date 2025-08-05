@@ -31,7 +31,7 @@ mod sparkle_nft_template {
     use super::*;
 
     pub struct SparkleNft {
-        address: ResourceAddress,
+        manager: ResourceManager,
         vault: Vault,
     }
 
@@ -51,7 +51,7 @@ mod sparkle_nft_template {
                 .initial_supply(tokens);
 
             Component::new(Self {
-                address: bucket.resource_address(),
+                manager: bucket.resource_address().into(),
                 vault: Vault::from_bucket(bucket),
             })
             .with_access_rules(AccessRules::allow_all())
@@ -73,11 +73,12 @@ mod sparkle_nft_template {
                 .insert("image_url", format!("https://nft.storage/sparkle{}.png", id));
 
             // Mint the NFT, this will fail if the token ID already exists
-            ResourceManager::get(self.address).mint_non_fungible(id, &immutable_data, &Sparkle { brightness: 0 })
+            self.manager
+                .mint_non_fungible(id, &immutable_data, &Sparkle { brightness: 0 })
         }
 
         pub fn total_supply(&self) -> Amount {
-            ResourceManager::get(self.address).total_supply()
+            self.manager.total_supply()
         }
 
         pub fn inc_brightness(&mut self, id: NonFungibleId, brightness: u32) {
@@ -98,8 +99,7 @@ mod sparkle_nft_template {
         }
 
         fn with_sparkle_mut<F: FnOnce(&mut Sparkle)>(&self, id: NonFungibleId, f: F) {
-            let resource_manager = ResourceManager::get(self.address);
-            let mut nft = resource_manager.get_non_fungible(&id);
+            let mut nft = self.manager.get_non_fungible(&id);
             let mut data = nft.get_mutable_data::<Sparkle>();
             f(&mut data);
             nft.set_mutable_data(&data);
@@ -121,7 +121,7 @@ mod sparkle_nft_template {
             );
             assert_eq!(
                 bucket.resource_address(),
-                self.address,
+                self.manager.resource_address(),
                 "Cannot burn bucket not from this collection"
             );
             debug!("Burning bucket {} containing {}", bucket, bucket.amount());

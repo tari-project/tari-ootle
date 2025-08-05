@@ -70,7 +70,7 @@ pub enum RuntimeError {
     StateStoreError(#[from] StateStoreError),
     #[error("Workspace error: {0}")]
     WorkspaceError(#[from] WorkspaceError),
-    #[error("Substate '{id}' not found")]
+    #[error("Substate '{id}' not found or is not a transaction input")]
     SubstateNotFound { id: SubstateId },
     #[error("Root substate '{id}' not found")]
     RootSubstateNotFound { id: SubstateId },
@@ -240,8 +240,8 @@ pub enum RuntimeError {
     CallFrameRemainingOnStack { remaining: usize },
     #[error("Duplicate reference to substate {address}")]
     DuplicateReference { address: SubstateId },
-    #[error("Too many arguments provided. Got {got}, max is {max}")]
-    TooManyArguments { got: usize, max: usize },
+    #[error("Invalid argument: {0}")]
+    ArgumentValidationError(#[from] ArgumentValidationError),
 
     #[error("BUG: [{function}] Invariant error {details}")]
     InvariantError { function: &'static str, details: String },
@@ -355,4 +355,14 @@ pub enum TransactionCommitError {
     StateStoreError(#[from] StateStoreError),
     #[error(transparent)]
     IdProviderError(#[from] IdProviderError),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ArgumentValidationError {
+    #[error("Maximum number of stealth outputs exceeded: max {max_outputs}, got {actual_outputs}")]
+    MaxStealthOutputsExceeded { max_outputs: usize, actual_outputs: usize },
+    #[error("Maximum number of stealth inputs exceeded: max {max_inputs}, got {actual_inputs}")]
+    MaxStealthInputsExceeded { max_inputs: usize, actual_inputs: usize },
+    #[error("Too many arguments provided. Got {got}, max is {max}")]
+    TooManyArguments { got: usize, max: usize },
 }

@@ -8,7 +8,7 @@ mod io_reader_value_lookup;
 use std::convert::Infallible;
 
 pub use io_reader_value_lookup::*;
-use tari_engine_types::confidential::ValueLookupTable;
+use tari_engine_types::crypto::ValueLookupTable;
 
 #[derive(Clone)]
 pub struct AlwaysMissLookupTable;

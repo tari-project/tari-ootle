@@ -1,10 +1,6 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-// Clippy complains about mutable key types in the serde::Deserialize implementation. PublicKey is a safe key type as
-// there is no way to actually mutate the compressed value once it is lazily initialized.
-#![allow(clippy::mutable_key_type)]
-
 use std::{collections::BTreeMap, mem};
 
 use serde::{Deserialize, Serialize};
@@ -25,11 +21,7 @@ use tari_template_lib::{
     types::{crypto::PedersenCommitmentBytes, Amount},
 };
 
-use crate::{
-    confidential::{validate_confidential_proof, validate_confidential_withdraw, ConfidentialOutput},
-    substate::SubstateId,
-    ToByteType,
-};
+use crate::{confidential, crypto::PrivateOutput, substate::SubstateId, ToByteType};
 
 /// Instances of a single resource kept in Buckets and Vaults
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,36 +43,47 @@ pub enum ResourceContainer {
     },
     Confidential {
         address: ResourceAddress,
-        commitments: BTreeMap<PedersenCommitmentBytes, ConfidentialOutput>,
+        commitments: BTreeMap<PedersenCommitmentBytes, PrivateOutput>,
         revealed_amount: Amount,
-        locked_commitments: BTreeMap<PedersenCommitmentBytes, ConfidentialOutput>,
+        locked_commitments: BTreeMap<PedersenCommitmentBytes, PrivateOutput>,
         locked_revealed_amount: Amount,
+    },
+    Stealth {
+        address: ResourceAddress,
+        revealed_amount: Amount,
+        locked_amount: Amount,
     },
 }
 
 impl ResourceContainer {
-    pub fn fungible<T: Into<Amount>>(address: ResourceAddress, amount: T) -> ResourceContainer {
-        ResourceContainer::Fungible {
+    pub fn fungible<T: Into<Amount>>(address: ResourceAddress, amount: T) -> Self {
+        let amount = amount.into();
+        assert!(amount.is_non_negative(), "amount must be non-negative");
+        Self::Fungible {
             address,
-            amount: amount.into(),
+            amount,
             locked_amount: Amount::zero(),
         }
     }
 
-    pub fn non_fungible(address: ResourceAddress, token_ids: BTreeSet<NonFungibleId>) -> ResourceContainer {
-        ResourceContainer::NonFungible {
+    pub fn non_fungible(address: ResourceAddress, token_ids: BTreeSet<NonFungibleId>) -> Self {
+        Self::NonFungible {
             address,
             token_ids,
             locked_token_ids: BTreeSet::new(),
         }
     }
 
-    pub fn confidential<I: IntoIterator<Item = (PedersenCommitmentBytes, ConfidentialOutput)>>(
+    pub fn confidential<I: IntoIterator<Item = (PedersenCommitmentBytes, PrivateOutput)>>(
         address: ResourceAddress,
         commitment: I,
         revealed_amount: Amount,
-    ) -> ResourceContainer {
-        ResourceContainer::Confidential {
+    ) -> Self {
+        assert!(
+            revealed_amount.is_non_negative(),
+            "revealed amount must be non-negative"
+        );
+        Self::Confidential {
             address,
             commitments: commitment.into_iter().collect(),
             revealed_amount,
@@ -89,11 +92,23 @@ impl ResourceContainer {
         }
     }
 
+    pub fn stealth(address: ResourceAddress, revealed_amount: Amount) -> Self {
+        assert!(
+            revealed_amount.is_non_negative(),
+            "revealed amount must be non-negative"
+        );
+        Self::Stealth {
+            address,
+            revealed_amount,
+            locked_amount: Amount::zero(),
+        }
+    }
+
     pub fn mint_confidential(
         address: ResourceAddress,
         proof: ConfidentialOutputStatement,
         view_key: Option<&RistrettoPublicKey>,
-    ) -> Result<ResourceContainer, ResourceError> {
+    ) -> Result<Self, ResourceError> {
         if proof.change_statement.is_some() {
             return Err(ResourceError::InvalidConfidentialMintWithChange);
         }
@@ -102,17 +117,17 @@ impl ResourceContainer {
                 details: "Change revealed amount must be zero for minting".to_string(),
             });
         }
-        let validated_proof = validate_confidential_proof(&proof, view_key)?;
+        let validated_proof = confidential::validate_confidential_statement(&proof, view_key)?;
         assert!(
             validated_proof.change_output.is_none(),
             "invariant failed: validate_confidential_proof returned change with no change in input proof"
         );
-        Ok(ResourceContainer::Confidential {
+        Ok(Self::Confidential {
             address,
             commitments: validated_proof
                 .output
                 .into_iter()
-                .map(|o| (o.commitment.to_byte_type(), o.into()))
+                .map(|o| (o.commitment.to_byte_type(), o.to_private_output()))
                 .collect(),
             revealed_amount: validated_proof.output_revealed_amount,
             locked_commitments: BTreeMap::new(),
@@ -122,15 +137,16 @@ impl ResourceContainer {
 
     pub fn amount(&self) -> Amount {
         match self {
-            ResourceContainer::Fungible { amount, .. } => *amount,
-            ResourceContainer::NonFungible { token_ids, .. } => Amount::new(token_ids.len().into()),
-            ResourceContainer::Confidential { revealed_amount, .. } => *revealed_amount,
+            Self::Fungible { amount, .. } => *amount,
+            Self::NonFungible { token_ids, .. } => Amount::new(token_ids.len().into()),
+            Self::Confidential { revealed_amount, .. } => *revealed_amount,
+            Self::Stealth { revealed_amount, .. } => *revealed_amount,
         }
     }
 
     pub fn number_of_confidential_commitments(&self) -> usize {
         match self {
-            ResourceContainer::Confidential {
+            Self::Confidential {
                 commitments,
                 locked_commitments,
                 ..
@@ -141,49 +157,54 @@ impl ResourceContainer {
 
     pub fn locked_amount(&self) -> Amount {
         match self {
-            ResourceContainer::Fungible { locked_amount, .. } => *locked_amount,
-            ResourceContainer::NonFungible { locked_token_ids, .. } => Amount::new(locked_token_ids.len().into()),
-            ResourceContainer::Confidential {
+            Self::Fungible { locked_amount, .. } => *locked_amount,
+            Self::NonFungible { locked_token_ids, .. } => Amount::new(locked_token_ids.len().into()),
+            Self::Confidential {
                 locked_revealed_amount, ..
             } => *locked_revealed_amount,
+            Self::Stealth { locked_amount, .. } => *locked_amount,
         }
     }
 
     pub fn get_commitment_count(&self) -> u64 {
         match self {
-            ResourceContainer::Fungible { .. } => 0,
-            ResourceContainer::NonFungible { .. } => 0,
-            ResourceContainer::Confidential { commitments, .. } => commitments.len() as u64,
+            Self::Fungible { .. } => 0,
+            Self::NonFungible { .. } => 0,
+            Self::Confidential { commitments, .. } => commitments.len() as u64,
+            // Unknown
+            Self::Stealth { .. } => 0,
         }
     }
 
     pub fn resource_address(&self) -> &ResourceAddress {
         match self {
-            ResourceContainer::Fungible { address, .. } => address,
-            ResourceContainer::NonFungible { address, .. } => address,
-            ResourceContainer::Confidential { address, .. } => address,
+            Self::Fungible { address, .. } => address,
+            Self::NonFungible { address, .. } => address,
+            Self::Confidential { address, .. } => address,
+            Self::Stealth { address, .. } => address,
         }
     }
 
     pub fn resource_type(&self) -> ResourceType {
         match self {
-            ResourceContainer::Fungible { .. } => ResourceType::Fungible,
-            ResourceContainer::NonFungible { .. } => ResourceType::NonFungible,
-            ResourceContainer::Confidential { .. } => ResourceType::Confidential,
+            Self::Fungible { .. } => ResourceType::Fungible,
+            Self::NonFungible { .. } => ResourceType::NonFungible,
+            Self::Confidential { .. } => ResourceType::Confidential,
+            Self::Stealth { .. } => ResourceType::Stealth,
         }
     }
 
     pub fn non_fungible_token_ids(&self) -> &BTreeSet<NonFungibleId> {
         static EMPTY_BTREE_SET: BTreeSet<NonFungibleId> = BTreeSet::new();
         match self {
-            ResourceContainer::NonFungible { token_ids, .. } => token_ids,
+            Self::NonFungible { token_ids, .. } => token_ids,
             _ => &EMPTY_BTREE_SET,
         }
     }
 
     pub fn into_non_fungible_ids(self) -> Option<BTreeSet<NonFungibleId>> {
         match self {
-            ResourceContainer::NonFungible { token_ids, .. } => Some(token_ids),
+            Self::NonFungible { token_ids, .. } => Some(token_ids),
             _ => None,
         }
     }
@@ -248,6 +269,15 @@ impl ResourceContainer {
                 }
                 *revealed_amount += other_amount;
             },
+            (
+                Self::Stealth { revealed_amount, .. },
+                Self::Stealth {
+                    revealed_amount: other_amount,
+                    ..
+                },
+            ) => {
+                *revealed_amount += other_amount;
+            },
             (this, other) => {
                 return Err(ResourceError::ResourceTypeMismatch {
                     operate: "deposit",
@@ -259,14 +289,14 @@ impl ResourceContainer {
         Ok(())
     }
 
-    pub fn withdraw(&mut self, withdraw_amt: Amount) -> Result<ResourceContainer, ResourceError> {
+    pub fn withdraw(&mut self, withdraw_amt: Amount) -> Result<Self, ResourceError> {
         if !withdraw_amt.is_positive() {
             return Err(ResourceError::InvariantError(format!(
                 "Amount must be positive (greater than 0). Got :{withdraw_amt}"
             )));
         }
         match self {
-            ResourceContainer::Fungible { amount, .. } => {
+            Self::Fungible { amount, .. } => {
                 if withdraw_amt > *amount {
                     return Err(ResourceError::InsufficientBalance {
                         details: format!(
@@ -276,9 +306,9 @@ impl ResourceContainer {
                     });
                 }
                 *amount -= withdraw_amt;
-                Ok(ResourceContainer::fungible(*self.resource_address(), withdraw_amt))
+                Ok(Self::fungible(*self.resource_address(), withdraw_amt))
             },
-            ResourceContainer::NonFungible { token_ids, .. } => {
+            Self::NonFungible { token_ids, .. } => {
                 if withdraw_amt > token_ids.len() {
                     return Err(ResourceError::InsufficientBalance {
                         details: format!(
@@ -298,9 +328,9 @@ impl ResourceContainer {
                     })
                     .collect();
 
-                Ok(ResourceContainer::non_fungible(*self.resource_address(), taken_tokens))
+                Ok(Self::non_fungible(*self.resource_address(), taken_tokens))
             },
-            ResourceContainer::Confidential { revealed_amount, .. } => {
+            Self::Confidential { revealed_amount, .. } => {
                 if withdraw_amt > *revealed_amount {
                     return Err(ResourceError::InsufficientBalance {
                         details: format!(
@@ -310,19 +340,27 @@ impl ResourceContainer {
                     });
                 }
                 *revealed_amount -= withdraw_amt;
-                Ok(ResourceContainer::confidential(
-                    *self.resource_address(),
-                    None,
-                    withdraw_amt,
-                ))
+                Ok(Self::confidential(*self.resource_address(), None, withdraw_amt))
+            },
+            Self::Stealth { revealed_amount, .. } => {
+                if withdraw_amt > *revealed_amount {
+                    return Err(ResourceError::InsufficientBalance {
+                        details: format!(
+                            "Bucket contained insufficient revealed funds. Required: {}, Available: {}",
+                            withdraw_amt, revealed_amount
+                        ),
+                    });
+                }
+                *revealed_amount -= withdraw_amt;
+                Ok(Self::stealth(*self.resource_address(), withdraw_amt))
             },
         }
     }
 
-    pub fn recall_all(&mut self) -> Result<ResourceContainer, ResourceError> {
+    pub fn recall_all(&mut self) -> Result<Self, ResourceError> {
         match self {
-            ResourceContainer::Fungible { .. } | ResourceContainer::NonFungible { .. } => self.withdraw(self.amount()),
-            ResourceContainer::Confidential {
+            Self::Fungible { .. } | Self::NonFungible { .. } | Self::Stealth { .. } => self.withdraw(self.amount()),
+            Self::Confidential {
                 commitments,
                 revealed_amount,
                 ..
@@ -330,21 +368,17 @@ impl ResourceContainer {
                 let amount = *revealed_amount;
                 *revealed_amount = Amount::zero();
                 let commitments = mem::take(commitments);
-                Ok(ResourceContainer::confidential(
-                    *self.resource_address(),
-                    commitments,
-                    amount,
-                ))
+                Ok(Self::confidential(*self.resource_address(), commitments, amount))
             },
         }
     }
 
-    pub fn withdraw_by_ids(&mut self, ids: &BTreeSet<NonFungibleId>) -> Result<ResourceContainer, ResourceError> {
+    pub fn withdraw_by_ids(&mut self, ids: &BTreeSet<NonFungibleId>) -> Result<Self, ResourceError> {
         match self {
-            ResourceContainer::Fungible { .. } => Err(ResourceError::OperationNotAllowed(
+            Self::Fungible { .. } => Err(ResourceError::OperationNotAllowed(
                 "Cannot withdraw by NFT token id from a fungible resource".to_string(),
             )),
-            ResourceContainer::NonFungible { token_ids, .. } => {
+            Self::NonFungible { token_ids, .. } => {
                 let taken_tokens = ids
                     .iter()
                     .map(|id| {
@@ -353,10 +387,13 @@ impl ResourceContainer {
                             .ok_or_else(|| ResourceError::NonFungibleTokenIdNotFound { token: id.clone() })
                     })
                     .collect::<Result<_, _>>()?;
-                Ok(ResourceContainer::non_fungible(*self.resource_address(), taken_tokens))
+                Ok(Self::non_fungible(*self.resource_address(), taken_tokens))
             },
-            ResourceContainer::Confidential { .. } => Err(ResourceError::OperationNotAllowed(
+            Self::Confidential { .. } => Err(ResourceError::OperationNotAllowed(
                 "Cannot withdraw by NFT token id from a confidential resource".to_string(),
+            )),
+            Self::Stealth { .. } => Err(ResourceError::OperationNotAllowed(
+                "Cannot withdraw by NFT token id from a stealth resource".to_string(),
             )),
         }
     }
@@ -365,15 +402,19 @@ impl ResourceContainer {
         &mut self,
         proof: ConfidentialWithdrawProof,
         view_key: Option<&RistrettoPublicKey>,
-    ) -> Result<ResourceContainer, ResourceError> {
+    ) -> Result<Self, ResourceError> {
         match self {
-            ResourceContainer::Fungible { .. } => Err(ResourceError::OperationNotAllowed(
-                "Cannot withdraw confidential assets from a fungible resource".to_string(),
+            Self::Fungible { .. } => Err(ResourceError::OperationNotAllowed(
+                "Cannot withdraw confidential assets from a fungible resource (use withdraw)".to_string(),
             )),
-            ResourceContainer::NonFungible { .. } => Err(ResourceError::OperationNotAllowed(
-                "Cannot withdraw confidential assets from a non-fungible resource".to_string(),
+            Self::NonFungible { .. } => Err(ResourceError::OperationNotAllowed(
+                "Cannot withdraw confidential assets from a non-fungible resource (use withdraw_non_fungible)"
+                    .to_string(),
             )),
-            ResourceContainer::Confidential {
+            Self::Stealth { .. } => Err(ResourceError::OperationNotAllowed(
+                "Cannot withdraw confidential assets from a stealth resource (use withdraw)".to_string(),
+            )),
+            Self::Confidential {
                 commitments,
                 revealed_amount,
                 ..
@@ -399,7 +440,7 @@ impl ResourceContainer {
                     })
                     .collect::<Result<Vec<_>, ResourceError>>()?;
 
-                let validated_proof = validate_confidential_withdraw(&inputs, view_key, proof)?;
+                let validated_proof = confidential::validate_confidential_withdraw(&inputs, view_key, proof)?;
 
                 // Withdraw revealed amount
                 if *revealed_amount < validated_proof.input_revealed_amount {
@@ -415,7 +456,7 @@ impl ResourceContainer {
 
                 if let Some(change) = validated_proof.change_output {
                     if commitments
-                        .insert(change.commitment.to_byte_type(), change.into())
+                        .insert(change.commitment.to_byte_type(), change.to_private_output())
                         .is_some()
                     {
                         return Err(ResourceError::InvariantError(
@@ -436,9 +477,11 @@ impl ResourceContainer {
                     *revealed_amount += validated_proof.change_revealed_amount;
                 }
 
-                Ok(ResourceContainer::confidential(
+                Ok(Self::confidential(
                     *self.resource_address(),
-                    validated_proof.output.map(|o| (o.commitment.to_byte_type(), o.into())),
+                    validated_proof
+                        .output
+                        .map(|o| (o.commitment.to_byte_type(), o.to_private_output())),
                     validated_proof.output_revealed_amount,
                 ))
             },
@@ -449,15 +492,18 @@ impl ResourceContainer {
         &mut self,
         commitments: &BTreeSet<PedersenCommitmentBytes>,
         revealed_amount: Amount,
-    ) -> Result<ResourceContainer, ResourceError> {
+    ) -> Result<Self, ResourceError> {
         match self {
-            ResourceContainer::Fungible { .. } => Err(ResourceError::OperationNotAllowed(
-                "Cannot withdraw confidential assets from a fungible resource".to_string(),
+            Self::Fungible { .. } => Err(ResourceError::OperationNotAllowed(
+                "Cannot recall confidential assets from a fungible resource".to_string(),
             )),
-            ResourceContainer::NonFungible { .. } => Err(ResourceError::OperationNotAllowed(
-                "Cannot withdraw confidential assets from a non-fungible resource".to_string(),
+            Self::NonFungible { .. } => Err(ResourceError::OperationNotAllowed(
+                "Cannot recall confidential assets from a non-fungible resource".to_string(),
             )),
-            ResourceContainer::Confidential {
+            Self::Stealth { .. } => Err(ResourceError::OperationNotAllowed(
+                "Cannot recall confidential assets from a stealth resource".to_string(),
+            )),
+            Self::Confidential {
                 commitments: existing_commitments,
                 revealed_amount: existing_revealed_amount,
                 ..
@@ -489,34 +535,30 @@ impl ResourceContainer {
                     })
                     .collect::<Result<Vec<_>, ResourceError>>()?;
 
-                Ok(ResourceContainer::confidential(
-                    *self.resource_address(),
-                    recalled,
-                    revealed_amount,
-                ))
+                Ok(Self::confidential(*self.resource_address(), recalled, revealed_amount))
             },
         }
     }
 
     /// Returns all confidential commitments. If the resource is not confidential, None is returned.
-    pub fn get_confidential_commitments(&self) -> Option<&BTreeMap<PedersenCommitmentBytes, ConfidentialOutput>> {
+    pub fn get_confidential_commitments(&self) -> Option<&BTreeMap<PedersenCommitmentBytes, PrivateOutput>> {
         match self {
-            ResourceContainer::Fungible { .. } | ResourceContainer::NonFungible { .. } => None,
-            ResourceContainer::Confidential { commitments, .. } => Some(commitments),
+            Self::Fungible { .. } | Self::NonFungible { .. } | Self::Stealth { .. } => None,
+            Self::Confidential { commitments, .. } => Some(commitments),
         }
     }
 
-    pub fn into_confidential_commitments(self) -> Option<BTreeMap<PedersenCommitmentBytes, ConfidentialOutput>> {
+    pub fn into_confidential_commitments(self) -> Option<BTreeMap<PedersenCommitmentBytes, PrivateOutput>> {
         match self {
-            ResourceContainer::Fungible { .. } | ResourceContainer::NonFungible { .. } => None,
-            ResourceContainer::Confidential { commitments, .. } => Some(commitments),
+            Self::Fungible { .. } | Self::NonFungible { .. } | Self::Stealth { .. } => None,
+            Self::Confidential { commitments, .. } => Some(commitments),
         }
     }
 
-    pub fn lock_all(&mut self) -> Result<ResourceContainer, ResourceError> {
+    pub fn lock_all(&mut self) -> Result<Self, ResourceError> {
         let resource_address = *self.resource_address();
         match self {
-            ResourceContainer::Fungible {
+            Self::Fungible {
                 amount, locked_amount, ..
             } => {
                 if amount.is_zero() {
@@ -524,11 +566,12 @@ impl ResourceContainer {
                         details: "lock_all: resource container contained no funds".to_string(),
                     });
                 }
+                // Sets to zero and returns the amount
                 let newly_locked_amount = mem::take(amount);
                 *locked_amount += newly_locked_amount;
-                Ok(ResourceContainer::fungible(resource_address, newly_locked_amount))
+                Ok(Self::fungible(resource_address, newly_locked_amount))
             },
-            ResourceContainer::NonFungible {
+            Self::NonFungible {
                 token_ids,
                 locked_token_ids,
                 ..
@@ -541,12 +584,9 @@ impl ResourceContainer {
                 let newly_locked_token_ids = mem::take(token_ids);
                 locked_token_ids.extend(newly_locked_token_ids.iter().cloned());
 
-                Ok(ResourceContainer::non_fungible(
-                    resource_address,
-                    newly_locked_token_ids,
-                ))
+                Ok(Self::non_fungible(resource_address, newly_locked_token_ids))
             },
-            ResourceContainer::Confidential {
+            Self::Confidential {
                 commitments,
                 revealed_amount,
                 locked_commitments,
@@ -563,16 +603,33 @@ impl ResourceContainer {
                 locked_commitments.extend(newly_locked_commitments.iter().map(|(c, o)| (*c, o.clone())));
                 *locked_revealed_amount += newly_locked_revealed_amount;
 
-                Ok(ResourceContainer::confidential(
+                Ok(Self::confidential(
                     resource_address,
                     newly_locked_commitments,
                     newly_locked_revealed_amount,
                 ))
             },
+            Self::Stealth {
+                revealed_amount,
+                locked_amount,
+                ..
+            } => {
+                if revealed_amount.is_zero() {
+                    return Err(ResourceError::InsufficientBalance {
+                        details: "lock_all: resource container contained no funds".to_string(),
+                    });
+                }
+
+                // Sets to zero and returns the amount
+                let newly_locked_amount = mem::take(revealed_amount);
+                *locked_amount += newly_locked_amount;
+                Ok(Self::fungible(resource_address, newly_locked_amount))
+            },
         }
     }
 
-    pub fn unlock(&mut self, container: ResourceContainer) -> Result<(), ResourceError> {
+    #[allow(clippy::too_many_lines)]
+    pub fn unlock(&mut self, container: Self) -> Result<(), ResourceError> {
         if self.resource_type() != container.resource_type() {
             return Err(ResourceError::ResourceTypeMismatch {
                 operate: "unlock",
@@ -588,7 +645,7 @@ impl ResourceContainer {
         }
 
         match self {
-            ResourceContainer::Fungible {
+            Self::Fungible {
                 amount, locked_amount, ..
             } => {
                 if *locked_amount < container.amount() {
@@ -604,7 +661,7 @@ impl ResourceContainer {
                 *amount += container.amount();
                 *locked_amount -= container.amount();
             },
-            ResourceContainer::NonFungible {
+            Self::NonFungible {
                 token_ids,
                 locked_token_ids,
                 ..
@@ -628,7 +685,7 @@ impl ResourceContainer {
                     token_ids.insert(token);
                 }
             },
-            ResourceContainer::Confidential {
+            Self::Confidential {
                 commitments,
                 locked_commitments,
                 revealed_amount,
@@ -670,6 +727,24 @@ impl ResourceContainer {
                 *revealed_amount += container.amount();
                 *locked_revealed_amount -= container.amount();
             },
+            Self::Stealth {
+                revealed_amount,
+                locked_amount,
+                ..
+            } => {
+                if *locked_amount < container.amount() {
+                    return Err(ResourceError::InsufficientBalance {
+                        details: format!(
+                            "unlock: resource container did not contain enough locked funds. Required: {}, Available: \
+                             {}",
+                            container.amount(),
+                            locked_amount
+                        ),
+                    });
+                }
+                *revealed_amount += container.amount();
+                *locked_amount -= container.amount();
+            },
         }
 
         Ok(())
@@ -677,10 +752,10 @@ impl ResourceContainer {
 
     pub fn lock_by_non_fungible_ids(&mut self, ids: BTreeSet<NonFungibleId>) -> Result<Self, ResourceError> {
         match self {
-            ResourceContainer::Fungible { .. } => Err(ResourceError::OperationNotAllowed(
+            Self::Fungible { .. } => Err(ResourceError::OperationNotAllowed(
                 "Cannot lock by NFT token id from a fungible resource".to_string(),
             )),
-            ResourceContainer::NonFungible {
+            Self::NonFungible {
                 token_ids,
                 locked_token_ids,
                 ..
@@ -694,17 +769,20 @@ impl ResourceContainer {
                         return Err(ResourceError::NonFungibleTokenIdNotFound { token: id });
                     }
                 }
-                Ok(ResourceContainer::non_fungible(*self.resource_address(), newly_locked))
+                Ok(Self::non_fungible(*self.resource_address(), newly_locked))
             },
-            ResourceContainer::Confidential { .. } => Err(ResourceError::OperationNotAllowed(
+            Self::Confidential { .. } => Err(ResourceError::OperationNotAllowed(
                 "Cannot lock by NFT token id from a confidential resource".to_string(),
+            )),
+            Self::Stealth { .. } => Err(ResourceError::OperationNotAllowed(
+                "Cannot lock by NFT token id from a stealth resource".to_string(),
             )),
         }
     }
 
     pub fn lock_by_amount(&mut self, amount: Amount) -> Result<Self, ResourceError> {
         match self {
-            ResourceContainer::Fungible {
+            Self::Fungible {
                 amount: available_amount,
                 locked_amount,
                 ..
@@ -720,9 +798,9 @@ impl ResourceContainer {
                 }
                 *available_amount -= amount;
                 *locked_amount += amount;
-                Ok(ResourceContainer::fungible(*self.resource_address(), amount))
+                Ok(Self::fungible(*self.resource_address(), amount))
             },
-            ResourceContainer::NonFungible {
+            Self::NonFungible {
                 token_ids,
                 locked_token_ids,
                 ..
@@ -748,12 +826,9 @@ impl ResourceContainer {
                     .collect::<BTreeSet<_>>();
                 locked_token_ids.extend(newly_locked_token_ids.iter().cloned());
 
-                Ok(ResourceContainer::non_fungible(
-                    *self.resource_address(),
-                    newly_locked_token_ids,
-                ))
+                Ok(Self::non_fungible(*self.resource_address(), newly_locked_token_ids))
             },
-            ResourceContainer::Confidential {
+            Self::Confidential {
                 revealed_amount,
                 locked_revealed_amount,
                 ..
@@ -769,7 +844,25 @@ impl ResourceContainer {
                 }
                 *revealed_amount -= amount;
                 *locked_revealed_amount += amount;
-                Ok(ResourceContainer::confidential(*self.resource_address(), None, amount))
+                Ok(Self::confidential(*self.resource_address(), None, amount))
+            },
+            Self::Stealth {
+                revealed_amount: available_amount,
+                locked_amount,
+                ..
+            } => {
+                if amount > *available_amount {
+                    return Err(ResourceError::InsufficientBalance {
+                        details: format!(
+                            "lock_by_amount: resource container did not contain enough funds. Required: {}, \
+                             Available: {}",
+                            amount, available_amount
+                        ),
+                    });
+                }
+                *available_amount -= amount;
+                *locked_amount += amount;
+                Ok(Self::stealth(*self.resource_address(), amount))
             },
         }
     }
@@ -800,6 +893,10 @@ pub enum ResourceError {
     InvalidBalanceProof { details: String },
     #[error("Invalid confidential proof: {details}")]
     InvalidConfidentialProof { details: String },
+    #[error("Invalid range proof: {details}")]
+    InvalidRangeProof { details: String },
     #[error("Invalid confidential mint, no change should be specified")]
     InvalidConfidentialMintWithChange,
+    #[error("Invalid spend: {details}")]
+    InvalidSpend { details: String },
 }

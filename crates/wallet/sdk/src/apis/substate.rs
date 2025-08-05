@@ -182,7 +182,7 @@ where
                         SubstateValue::UnclaimedConfidentialOutput(_) => {},
                         SubstateValue::Template(_) => {},
                         SubstateValue::Utxo(_) => {
-                            let addr = substate_id.substate_id().as_utxo().ok_or_else(|| {
+                            let addr = substate_id.substate_id().as_utxo_address().ok_or_else(|| {
                                 SubstateApiError::InvalidValidatorNodeResponse(format!(
                                     "Utxo substate does not have a valid address {}",
                                     substate_id

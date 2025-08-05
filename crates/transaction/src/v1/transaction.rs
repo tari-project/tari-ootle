@@ -209,11 +209,19 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::AssertBucketContains { .. } => 1,
         Instruction::PublishTemplate { binary } => binary.len() as u64 / BINARY_WEIGHT_DIVISOR,
         Instruction::AllocateAddress { .. } => 1,
+        Instruction::StealthTransfer { statement, .. } => {
+            // TODO: weight inputs and outputs accordingly
+            statement.inputs.len() as u64 + statement.outputs_statement.outputs.len() as u64
+        },
     }
 }
 
 fn calc_args_weight(args: &[InstructionArg]) -> u64 {
+    const FROM_WORKSPACE_WEIGHT: u64 = 1; // Default weight for args that are not literal bytes
     args.iter()
-        .map(|a| a.as_literal_bytes().map_or(0, |b| b.len() as u64))
+        .map(|a| {
+            a.as_literal_bytes()
+                .map_or(FROM_WORKSPACE_WEIGHT, |b| b.len().min(1) as u64)
+        })
         .sum()
 }

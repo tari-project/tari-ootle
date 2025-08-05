@@ -7,25 +7,31 @@ use std::{
     mem,
 };
 
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use log::*;
 use tari_engine_types::{
     bucket::Bucket,
     component::ComponentHeader,
+    crypto::verify_utxo_spend_permission,
     events::Event,
     fees::FeeReceipt,
     id_provider::{IdProvider, ObjectIds},
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
+    limits,
     lock::LockFlag,
     logs::LogEntry,
     non_fungible::NonFungibleContainer,
     proof::{ContainerRef, LockedResource, Proof},
     resource::Resource,
     resource_container::{ResourceContainer, ResourceError},
+    stealth,
     substate::{Substate, SubstateDiff, SubstateId, SubstateValue},
     transaction_receipt::TransactionReceipt,
     vault::Vault,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
+    ToByteType,
+    Utxo,
+    UtxoAddress,
     ValidatorFeePoolAddress,
     ValidatorFeeWithdrawal,
 };
@@ -39,6 +45,9 @@ use tari_template_lib::{
         ComponentAddress,
         NonFungibleAddress,
         ProofId,
+        ResourceAddress,
+        StealthInput,
+        StealthMintStatement,
         UnclaimedConfidentialOutputAddress,
         VaultId,
     },
@@ -119,7 +128,7 @@ impl WorkingState {
             call_frames: Vec::new(),
             initial_call_scope,
             fee_state: FeeState::new(),
-            object_ids: ObjectIds::new(1000),
+            object_ids: ObjectIds::new(limits::ENGINE_LIMITS.max_substate_outputs),
         }
     }
 
@@ -191,7 +200,7 @@ impl WorkingState {
                     .component_mut()
                     .ok_or_else(|| RuntimeError::LockSubstateMismatch {
                         lock_id: locked.lock_id(),
-                        address: locked.address().clone(),
+                        address: locked.substate_id().clone(),
                         expected_type: "Component",
                     })?;
 
@@ -214,7 +223,7 @@ impl WorkingState {
         // add event to indicate that there is a change in component
         let (template_address, module_name) = self.current_template().map(|(addr, name)| (*addr, name.to_string()))?;
         self.push_event(Event::std(
-            Some(locked.address().clone()),
+            Some(locked.substate_id().clone()),
             template_address,
             self.transaction_hash(),
             "component",
@@ -237,6 +246,31 @@ impl WorkingState {
             })?;
 
         Ok(resource)
+    }
+
+    pub fn spend_stealth_utxos<'a, I: IntoIterator<Item = &'a StealthInput>>(
+        &mut self,
+        resource_address: ResourceAddress,
+        inputs: I,
+    ) -> Result<(), RuntimeError> {
+        for input in inputs {
+            let address = UtxoAddress::new(resource_address, input.commitment.into());
+            let lock_id = self.store.try_lock(&address.clone().into(), LockFlag::Write)?;
+            let utxo = self.store.down_utxo(lock_id)?;
+            if utxo.is_frozen() {
+                return Err(ResourceError::InvalidSpend {
+                    details: format!("Utxo {} is frozen", address),
+                }
+                .into());
+            }
+
+            let output = utxo.output().ok_or_else(|| ResourceError::InvalidSpend {
+                details: format!("Utxo {} is burnt", address),
+            })?;
+
+            verify_utxo_spend_permission(output, input)?;
+        }
+        Ok(())
     }
 
     pub fn get_non_fungible(&self, locked: &LockedSubstate) -> Result<&NonFungibleContainer, RuntimeError> {
@@ -495,12 +529,26 @@ impl WorkingState {
     ) -> Result<ResourceContainer, RuntimeError> {
         let resource_address =
             locked_resource
-                .address()
+                .substate_id()
                 .as_resource_address()
                 .ok_or_else(|| RuntimeError::InvariantError {
                     function: "mint_resource",
                     details: "LockedSubstate substate_id is not a ResourceAddress".to_string(),
                 })?;
+
+        // Validate the resource type in the mint args resource type matches the resource
+        let is_total_supply_tracking_enabled = {
+            let resource = self.get_resource(locked_resource)?;
+            if resource.resource_type() != mint_arg.as_resource_type() {
+                return Err(ResourceError::ResourceTypeMismatch {
+                    operate: "mint",
+                    expected: resource.resource_type(),
+                    given: mint_arg.as_resource_type(),
+                }
+                .into());
+            }
+            resource.is_supply_tracking_enabled()
+        };
 
         let resource_container = match mint_arg {
             MintArg::Fungible { amount } => {
@@ -541,7 +589,7 @@ impl WorkingState {
 
                 ResourceContainer::non_fungible(resource_address, token_ids)
             },
-            MintArg::Confidential { proof } => {
+            MintArg::Confidential { statement } => {
                 let resource = self.get_resource(locked_resource)?;
                 debug!(
                     target: LOG_TARGET,
@@ -553,22 +601,24 @@ impl WorkingState {
                         function: "MintArg::Confidential",
                         details: format!("Resource contained a malformed view key: {e}. This should never happen!",),
                     })?;
-                ResourceContainer::mint_confidential(resource_address, *proof, maybe_view_key.as_ref())?
+                ResourceContainer::mint_confidential(resource_address, *statement, maybe_view_key.as_ref())?
+            },
+            MintArg::Stealth { .. } => {
+                return Err(RuntimeError::InvariantError {
+                    function: "mint_resource",
+                    details: format!(
+                        "Cannot call mint_resource on stealth resources (resource_addr = {})",
+                        locked_resource.substate_id()
+                    ),
+                })
             },
         };
 
-        // Validate the resource type in the mint args resource type matches the resource
-        {
+        // Conditionally increase the total supply of the resource to prevent needless mutation of the resource (adding
+        // to the substate diff)
+        if is_total_supply_tracking_enabled {
             let resource_mut = self.get_resource_mut(locked_resource)?;
-            if resource_mut.resource_type() != resource_container.resource_type() {
-                return Err(ResourceError::ResourceTypeMismatch {
-                    operate: "mint",
-                    expected: resource_mut.resource_type(),
-                    given: resource_container.resource_type(),
-                }
-                .into());
-            }
-            // Increase the total supply of the resource if enabled
+            // Increase the total supply of the resource
             if !resource_mut.increase_total_supply(resource_container.amount()) {
                 return Err(RuntimeError::ResourceSupplyWouldOverflow {
                     resource_address,
@@ -583,6 +633,57 @@ impl WorkingState {
         Ok(resource_container)
     }
 
+    pub fn mint_stealth_substates(
+        &mut self,
+        locked_resource: &LockedSubstate,
+        stmt: &StealthMintStatement,
+    ) -> Result<(), RuntimeError> {
+        let resource_address =
+            locked_resource
+                .substate_id()
+                .as_resource_address()
+                .ok_or_else(|| RuntimeError::InvariantError {
+                    function: "mint_resource",
+                    details: "LockedSubstate substate_id is not a ResourceAddress".to_string(),
+                })?;
+        let resource = self.get_resource(locked_resource)?;
+        debug!(
+            target: LOG_TARGET,
+            "Minting confidential tokens on resource: {}", resource_address
+        );
+        let maybe_view_key = resource
+            .to_view_key_public_key()
+            .map_err(|e| RuntimeError::InvariantError {
+                function: "MintArg::Stealth",
+                details: format!("Resource contained a malformed view key: {e}. This should never happen!"),
+            })?;
+
+        let validated = stealth::validate_stealth_mint_statement(stmt, maybe_view_key.as_ref())?;
+
+        for stealth_output in validated.outputs_statement {
+            let address = UtxoAddress::new(resource_address, stealth_output.output.commitment.to_byte_type().into());
+            self.new_substate(address, Utxo::new(stealth_output.to_utxo_output()))?;
+        }
+
+        // Validate the resource type in the mint args resource type matches the resource
+        let resource = self.get_resource(locked_resource)?;
+        if resource.is_supply_tracking_enabled() {
+            let resource_mut = self.get_resource_mut(locked_resource)?;
+            // Increase the total supply of the resource
+            if !resource_mut.increase_total_supply(validated.total_mint_amount) {
+                return Err(RuntimeError::ResourceSupplyWouldOverflow {
+                    resource_address,
+                    current_supply: resource_mut
+                        .total_supply()
+                        .expect("Resource supply tracking is enabled"),
+                    amount: validated.total_mint_amount,
+                });
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn set_vault_freeze(
         &mut self,
         vault_lock: &LockedSubstate,
@@ -594,7 +695,7 @@ impl WorkingState {
         let template_address = self.current_template().map(|(addr, _)| *addr)?;
         let event = if flags.is_empty() {
             Event::std(
-                Some(vault_lock.address().clone()),
+                Some(vault_lock.substate_id().clone()),
                 template_address,
                 self.transaction_hash(),
                 "vault",
@@ -603,7 +704,7 @@ impl WorkingState {
             )
         } else {
             Event::std(
-                Some(vault_lock.address().clone()),
+                Some(vault_lock.substate_id().clone()),
                 template_address,
                 self.transaction_hash(),
                 "vault",
@@ -622,7 +723,7 @@ impl WorkingState {
         resource_discriminator: &ResourceDiscriminator,
     ) -> Result<ResourceContainer, RuntimeError> {
         let vault_id = vault_lock
-            .address()
+            .substate_id()
             .as_vault_id()
             .ok_or_else(|| RuntimeError::InvariantError {
                 function: "recall_resource_from_vault",
@@ -885,12 +986,16 @@ impl WorkingState {
         Ok(())
     }
 
-    pub fn authorization(&self) -> Authorization {
+    pub fn authorization(&self) -> Authorization<'_> {
         Authorization::new(self)
     }
 
     pub fn take_mutated_substates(&mut self) -> IndexMap<SubstateId, SubstateValue> {
         self.store.take_mutated_substates()
+    }
+
+    pub fn take_downed_utxos(&mut self) -> IndexSet<UtxoAddress> {
+        self.store.take_downed_utxos()
     }
 
     pub fn mutated_substates(&mut self) -> &IndexMap<SubstateId, SubstateValue> {
@@ -1016,7 +1121,7 @@ impl WorkingState {
         Ok(frame
             .scope()
             .get_current_component_lock()
-            .and_then(|lock| lock.address().as_component_address()))
+            .and_then(|lock| lock.substate_id().as_component_address()))
     }
 
     pub fn get_auth_caller(&self) -> Result<AuthHookCaller, RuntimeError> {
@@ -1025,7 +1130,7 @@ impl WorkingState {
         let component = frame
             .scope()
             .get_current_component_lock()
-            .and_then(|lock| lock.address().as_component_address());
+            .and_then(|lock| lock.substate_id().as_component_address());
 
         Ok(AuthHookCaller::new(*template, component))
     }
@@ -1218,6 +1323,7 @@ impl WorkingState {
         &self,
         transaction_receipt: TransactionReceipt,
         substates_to_persist: IndexMap<SubstateId, SubstateValue>,
+        downed_utxos: IndexSet<UtxoAddress>,
         fee_withdrawals: Vec<ValidatorFeeWithdrawal>,
     ) -> Result<SubstateDiff, RuntimeError> {
         let mut substate_diff = SubstateDiff::new();
@@ -1237,6 +1343,10 @@ impl WorkingState {
                 None => Substate::new(0, substate),
             };
             substate_diff.up(id, new_substate);
+        }
+
+        for downed_utxo in downed_utxos {
+            substate_diff.down(SubstateId::Utxo(downed_utxo), 0);
         }
 
         // Special case: unclaimed confidential outputs are downed without being upped if claimed
@@ -1277,12 +1387,12 @@ impl WorkingState {
             warn!(
                 target: LOG_TARGET,
                 "Component {} attempted access to {} that is does not own",
-                component_lock.address(),
+                component_lock.substate_id(),
                 address
             );
             return Err(RuntimeError::SubstateNotOwned {
                 id: address.clone(),
-                requested_owner: Box::new(component_lock.address().clone()),
+                requested_owner: Box::new(component_lock.substate_id().clone()),
             });
         }
 

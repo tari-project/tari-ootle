@@ -7,8 +7,8 @@ use tari_crypto::{
     keys::SecretKey,
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey},
 };
-use tari_engine_types::confidential::commit_amount_checked;
-use tari_ootle_wallet_crypto::{ConfidentialOutputMaskAndValue, ConfidentialProofStatement};
+use tari_engine_types::crypto::commit_amount_checked;
+use tari_ootle_wallet_crypto::{confidential, MaskAndValue, UnblindedOutputStatement};
 use tari_template_lib::{
     models::{ConfidentialOutputStatement, ConfidentialWithdrawProof, EncryptedData},
     types::Amount,
@@ -35,7 +35,7 @@ fn generate_confidential_proof_internal(
     view_key: Option<RistrettoPublicKey>,
 ) -> (ConfidentialOutputStatement, PrivateKey, Option<PrivateKey>) {
     let mask = PrivateKey::random(&mut OsRng);
-    let output_statement = ConfidentialProofStatement {
+    let output_statement = UnblindedOutputStatement {
         amount: output_amount,
         mask: mask.clone(),
         sender_public_nonce: Default::default(),
@@ -45,7 +45,7 @@ fn generate_confidential_proof_internal(
     };
 
     let change_mask = PrivateKey::random(&mut OsRng);
-    let change_statement = change.map(|amount| ConfidentialProofStatement {
+    let change_statement = change.map(|amount| UnblindedOutputStatement {
         amount,
         mask: change_mask.clone(),
         sender_public_nonce: Default::default(),
@@ -54,7 +54,7 @@ fn generate_confidential_proof_internal(
         resource_view_key: view_key,
     });
 
-    let proof = tari_ootle_wallet_crypto::create_confidential_output_statement(
+    let proof = confidential::create_output_statement(
         Some(&output_statement),
         Amount::zero(),
         change_statement.as_ref(),
@@ -64,13 +64,13 @@ fn generate_confidential_proof_internal(
     (proof, mask, change.map(|_| change_mask))
 }
 
-pub struct WithdrawProofOutput {
+pub struct ConfidentialWithdrawProofOutput {
     pub output_mask: PrivateKey,
     pub change_mask: Option<PrivateKey>,
     pub proof: ConfidentialWithdrawProof,
 }
 
-impl WithdrawProofOutput {
+impl ConfidentialWithdrawProofOutput {
     pub fn to_commitment_for_output(&self, amount: Amount) -> Option<PedersenCommitment> {
         commit_amount_checked(&self.output_mask, amount)
     }
@@ -81,7 +81,7 @@ pub fn generate_withdraw_proof<A: Into<Amount>>(
     output_amount: A,
     change_amount: Option<A>,
     revealed_amount: A,
-) -> WithdrawProofOutput {
+) -> ConfidentialWithdrawProofOutput {
     let output_amount = output_amount.into();
     let change_amount = change_amount.map(|a| a.into());
     let revealed_amount = revealed_amount.into();
@@ -104,7 +104,7 @@ pub fn generate_withdraw_proof_with_inputs<A: Into<Amount>>(
     output_amount: A,
     change_amount: Option<A>,
     revealed_output_amount: A,
-) -> WithdrawProofOutput {
+) -> ConfidentialWithdrawProofOutput {
     generate_withdraw_proof_internal(
         inputs,
         input_revealed_amount.into(),
@@ -122,7 +122,7 @@ pub fn generate_withdraw_proof_with_view_key<A: Into<Amount>>(
     change_amount: Option<A>,
     revealed_amount: A,
     view_key: &RistrettoPublicKey,
-) -> WithdrawProofOutput {
+) -> ConfidentialWithdrawProofOutput {
     generate_withdraw_proof_internal(
         &[(input_mask.clone(), input_value.into())],
         Amount::zero(),
@@ -140,7 +140,7 @@ fn generate_withdraw_proof_internal(
     change_amount: Option<Amount>,
     revealed_output_amount: Amount,
     view_key: Option<RistrettoPublicKey>,
-) -> WithdrawProofOutput {
+) -> ConfidentialWithdrawProofOutput {
     // If the amount is zero, we omit the output UTXO, therefore the mask is zero
     let output_mask = if output_amount.is_zero() {
         Default::default()
@@ -149,7 +149,7 @@ fn generate_withdraw_proof_internal(
     };
     let change_mask = change_amount.map(|_| PrivateKey::random(&mut OsRng));
 
-    let output_proof = ConfidentialProofStatement {
+    let output_proof = UnblindedOutputStatement {
         amount: output_amount,
         mask: output_mask.clone(),
         sender_public_nonce: Default::default(),
@@ -157,7 +157,7 @@ fn generate_withdraw_proof_internal(
         encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
         resource_view_key: view_key.clone(),
     };
-    let change_proof = change_amount.map(|amount| ConfidentialProofStatement {
+    let change_proof = change_amount.map(|amount| UnblindedOutputStatement {
         amount,
         mask: change_mask.clone().unwrap(),
         sender_public_nonce: Default::default(),
@@ -166,10 +166,10 @@ fn generate_withdraw_proof_internal(
         resource_view_key: view_key,
     });
 
-    let proof = tari_ootle_wallet_crypto::create_withdraw_proof(
+    let proof = confidential::create_withdraw_proof(
         &inputs
             .iter()
-            .map(|(mask, amount)| ConfidentialOutputMaskAndValue {
+            .map(|(mask, amount)| MaskAndValue {
                 value: *amount,
                 mask: mask.clone(),
             })
@@ -182,7 +182,7 @@ fn generate_withdraw_proof_internal(
     )
     .unwrap();
 
-    WithdrawProofOutput {
+    ConfidentialWithdrawProofOutput {
         output_mask,
         change_mask,
         proof,

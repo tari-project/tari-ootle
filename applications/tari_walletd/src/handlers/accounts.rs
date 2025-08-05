@@ -16,7 +16,7 @@ use tari_engine_types::{
 };
 use tari_key_manager::key_manager::DerivedKey;
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
-use tari_ootle_wallet_crypto::ConfidentialProofStatement;
+use tari_ootle_wallet_crypto::UnblindedOutputStatement;
 use tari_ootle_wallet_sdk::{
     apis::{confidential_transfer::TransferParams, key_manager, substate::ValidatorScanResult},
     models::NewAccountInfo,
@@ -315,7 +315,7 @@ pub async fn handle_reveal_funds(
             &account_key.key,
         )?;
 
-        let output_statement = ConfidentialProofStatement {
+        let output_statement = UnblindedOutputStatement {
             amount: remaining_confidential_amount,
             mask: output_mask.key,
             sender_public_nonce: public_nonce,
@@ -498,7 +498,7 @@ pub async fn handle_claim_burn(
         &nonce,
     )?;
 
-    let output_statement = ConfidentialProofStatement {
+    let output_statement = UnblindedOutputStatement {
         amount: final_amount,
         mask: mask.key,
         sender_public_nonce: output_public_nonce,

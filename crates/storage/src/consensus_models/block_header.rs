@@ -70,7 +70,6 @@ pub struct BlockHeader {
     #[serde(with = "serde_with::hex")]
     command_merkle_root: FixedHash,
     /// Proposer signature that signs the Block ID
-    #[cfg_attr(feature = "ts", ts(type = "{public_nonce : string, signature: string} | null"))]
     signature: Option<SchnorrSignatureBytes>,
     /// The time indicating the creation time of the block. Currently, this can be chosen arbitrarily and is only
     /// informational/used for metrics.

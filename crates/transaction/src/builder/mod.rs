@@ -20,7 +20,7 @@ use tari_template_lib::{
     args::{AllocatableAddressType, InstructionArg, WorkspaceOffsetId},
     auth::OwnerRule,
     call_args,
-    models::{ConfidentialWithdrawProof, ResourceAddress},
+    models::{ConfidentialWithdrawProof, ResourceAddress, StealthTransferStatement},
     prelude::AccessRules,
     types::{crypto::RistrettoPublicKeyBytes, Amount, TemplateAddress},
 };
@@ -176,6 +176,33 @@ impl TransactionBuilder {
             call,
             method: method.into(),
             args,
+        })
+    }
+
+    pub fn stealth_transfer(self, resource_address: ResourceAddress, statement: StealthTransferStatement) -> Self {
+        self.stealth_transfer_with_opt_bucket(resource_address, statement, None::<String>)
+    }
+
+    pub fn stealth_transfer_with_input_bucket<B: Into<String>>(
+        self,
+        resource_address: ResourceAddress,
+        statement: StealthTransferStatement,
+        bucket: B,
+    ) -> Self {
+        self.stealth_transfer_with_opt_bucket(resource_address, statement, Some(bucket.into()))
+    }
+
+    pub fn stealth_transfer_with_opt_bucket<B: Into<String>>(
+        self,
+        resource_address: ResourceAddress,
+        statement: StealthTransferStatement,
+        bucket: Option<B>,
+    ) -> Self {
+        let revealed_input_bucket = bucket.map(|s| self.get_workspace_offset_id_from_named_arg(s));
+        self.add_instruction(Instruction::StealthTransfer {
+            resource_address,
+            statement,
+            revealed_input_bucket,
         })
     }
 
@@ -367,20 +394,22 @@ impl TransactionBuilder {
 
     /// Maps named arguments to the template_lib workspace or literal args.
     fn resolve_args(&self, args: Vec<NamedArg>) -> Result<Vec<InstructionArg>, ParseWorkspaceKeyError> {
-        args.into_iter()
-            .map(|arg| match arg {
-                NamedArg::Literal(bytes) => Ok(InstructionArg::Literal(bytes)),
-                NamedArg::Workspace(key) => {
-                    let parsed = parse_workspace_key(key)?;
+        args.into_iter().map(|arg| self.resolve_arg(arg)).collect()
+    }
 
-                    let id = self.workspace_ids.get(parsed.name.as_ref()).unwrap_or_else(|| {
-                        panic!("Workspace key '{}' not found", parsed.name);
-                    });
-                    let id = WorkspaceOffsetId::new(id).with_offset_opt(parsed.offset);
-                    Ok(InstructionArg::Workspace(id))
-                },
-            })
-            .collect()
+    fn resolve_arg(&self, arg: NamedArg) -> Result<InstructionArg, ParseWorkspaceKeyError> {
+        match arg {
+            NamedArg::Literal(bytes) => Ok(InstructionArg::Literal(bytes)),
+            NamedArg::Workspace(key) => {
+                let parsed = parse_workspace_key(key)?;
+                let id = self.workspace_ids.get(parsed.name.as_ref()).unwrap_or_else(|| {
+                    panic!("Workspace key '{}' not found", parsed.name);
+                });
+                Ok(InstructionArg::Workspace(
+                    WorkspaceOffsetId::new(id).with_offset_opt(parsed.offset),
+                ))
+            },
+        }
     }
 
     pub fn get_workspace_offset_id_from_named_arg<T: Into<String>>(&self, id: T) -> WorkspaceOffsetId {

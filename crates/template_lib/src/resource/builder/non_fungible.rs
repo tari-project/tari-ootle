@@ -215,7 +215,7 @@ impl NonFungibleResourceBuilder {
             self.metadata.insert(TOKEN_SYMBOL, symbol);
         }
 
-        ResourceManager::new().create(
+        ResourceManager::create(
             ResourceType::NonFungible,
             self.owner_rule,
             self.access_rules,

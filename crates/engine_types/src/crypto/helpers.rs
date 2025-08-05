@@ -2,31 +2,59 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use lazy_static::lazy_static;
-use tari_common_types::types::CommitmentFactory;
+use tari_common_types::types::{CommitmentFactory, PrivateKey};
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
-    ristretto::{bulletproofs_plus::BulletproofsPlusService, pedersen::PedersenCommitment, RistrettoSecretKey},
+    ristretto::{
+        bulletproofs_plus::BulletproofsPlusService,
+        pedersen::PedersenCommitment,
+        RistrettoPublicKey,
+        RistrettoSecretKey,
+    },
     tari_utilities::ByteArray,
 };
-use tari_template_lib::types::Amount;
+use tari_template_lib::{prelude::SchnorrSignatureBytes, types::Amount};
+
+use crate::{hashing::EngineSchnorrSignature, FromByteType, ReadOnly};
+
+// TODO RistrettoSecretKey should provide a constant ZERO
+pub const ZERO_SECRET_KEY: RistrettoSecretKey = unsafe { std::mem::transmute([0u8; 32]) };
+
+// Note that the BP-plus implementation currently does not support bit lengths over 64
+const BP_BIT_LENGTH: usize = u64::BITS as usize;
 
 lazy_static! {
     /// Static reference to the default commitment factory. Each instance of CommitmentFactory requires a number of heap allocations.
     static ref COMMITMENT_FACTORY: CommitmentFactory = CommitmentFactory::default();
     /// Static reference to the default range proof service. Each instance of RangeProofService requires a number of heap allocations.
     static ref RANGE_PROOF_AGG_1_SERVICE: BulletproofsPlusService =
-        BulletproofsPlusService::init(64, 1, CommitmentFactory::default()).unwrap();
+        BulletproofsPlusService::init(BP_BIT_LENGTH, 1, CommitmentFactory::default()).unwrap();
     static ref RANGE_PROOF_AGG_2_SERVICE: BulletproofsPlusService =
-        BulletproofsPlusService::init(64, 2, CommitmentFactory::default()).unwrap();
+        BulletproofsPlusService::init(BP_BIT_LENGTH, 2, CommitmentFactory::default()).unwrap();
+    static ref RANGE_PROOF_AGG_4_SERVICE: BulletproofsPlusService =
+        BulletproofsPlusService::init(BP_BIT_LENGTH, 4, CommitmentFactory::default()).unwrap();
 }
 
-pub fn get_range_proof_service(aggregation_factor: usize) -> &'static BulletproofsPlusService {
+pub fn get_static_range_proof_service(aggregation_factor: usize) -> &'static BulletproofsPlusService {
     match aggregation_factor {
         1 => &RANGE_PROOF_AGG_1_SERVICE,
         2 => &RANGE_PROOF_AGG_2_SERVICE,
+        4 => &RANGE_PROOF_AGG_4_SERVICE,
         _ => panic!(
-            "Unsupported BP aggregation factor {}. Expected 1 or 2",
+            "Unsupported BP aggregation factor {}. Expected 1/2/4",
             aggregation_factor
+        ),
+    }
+}
+
+pub fn bullet_proof_service_factory(aggregation_factor: usize) -> ReadOnly<'static, BulletproofsPlusService> {
+    match aggregation_factor.next_power_of_two() {
+        1 => ReadOnly::Borrowed(&RANGE_PROOF_AGG_1_SERVICE),
+        2 => ReadOnly::Borrowed(&RANGE_PROOF_AGG_2_SERVICE),
+        4 => ReadOnly::Borrowed(&RANGE_PROOF_AGG_4_SERVICE),
+        n => ReadOnly::Owned(
+            BulletproofsPlusService::init(BP_BIT_LENGTH, n, CommitmentFactory::default())
+                .expect("Failed to initialize BulletproofsPlusService"),
         ),
     }
 }
@@ -68,37 +96,10 @@ pub fn convert_amount_to_secret(amount: &Amount) -> Option<RistrettoSecretKey> {
     )
 }
 
-pub mod messages {
-    use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
-    use tari_template_lib::{models::ViewableBalanceProofChallengeFields, types::Amount};
-
-    use crate::hashing::{hasher64, EngineHashDomainLabel};
-
-    pub fn confidential_withdraw64(
-        excess: &RistrettoPublicKey,
-        public_nonce: &RistrettoPublicKey,
-        input_revealed_amount: Amount,
-        output_revealed_amount: Amount,
-    ) -> [u8; 64] {
-        hasher64(EngineHashDomainLabel::ConfidentialTransfer)
-            .chain(excess)
-            .chain(public_nonce)
-            .chain(&input_revealed_amount)
-            .chain(&output_revealed_amount)
-            .result()
-    }
-
-    pub fn viewable_balance_proof_challenge64(
-        commitment: &PedersenCommitment,
-        view_key: &RistrettoPublicKey,
-        challenge_fields: ViewableBalanceProofChallengeFields<'_>,
-    ) -> [u8; 64] {
-        hasher64(EngineHashDomainLabel::ViewKey)
-            .chain(commitment)
-            .chain(view_key)
-            .chain(&challenge_fields)
-            .result()
-    }
+pub fn try_decode_to_signature(signature: &SchnorrSignatureBytes) -> Option<EngineSchnorrSignature> {
+    let public_nonce = RistrettoPublicKey::try_from_byte_type(signature.public_nonce()).ok()?;
+    let signature = PrivateKey::from_canonical_bytes(signature.signature().as_bytes()).ok()?;
+    Some(EngineSchnorrSignature::new(public_nonce, signature))
 }
 
 #[cfg(test)]

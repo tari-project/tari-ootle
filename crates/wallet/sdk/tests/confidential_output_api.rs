@@ -6,7 +6,7 @@ use std::{convert::Infallible, str::FromStr};
 use async_trait::async_trait;
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, tari_utilities::SafePassword};
 use tari_engine_types::{
-    confidential::{commit_amount_checked, get_commitment_factory},
+    crypto::{commit_amount_checked, get_commitment_factory},
     substate::SubstateId,
     ToByteType,
 };

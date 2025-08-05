@@ -30,7 +30,6 @@ use tari_consensus_types::{BlockId, Decision};
 use tari_engine_types::{
     commit_result::FinalizeResult,
     fees::FeeCostBreakdown,
-    serde_with,
     substate::{SubstateId, SubstateValue},
 };
 use tari_ootle_common_types::{
@@ -50,13 +49,11 @@ use tari_ootle_storage::{
 use tari_sidechain::QuorumDecision;
 use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 use tari_transaction::{Transaction, TransactionId};
-#[cfg(feature = "ts")]
-use ts_rs::TS;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(
         export,
         export_to = "../../bindings/src/types/validator-node-client/",
@@ -65,8 +62,6 @@ use ts_rs::TS;
 )]
 pub struct GetIdentityResponse {
     pub peer_id: String,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[serde(with = "serde_with::string")]
     pub public_key: RistrettoPublicKeyBytes,
     #[cfg_attr(feature = "ts", ts(type = "Array<string>"))]
     pub public_addresses: Vec<Multiaddr>,
@@ -78,7 +73,7 @@ pub struct GetIdentityResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetTemplateRequest {
@@ -88,7 +83,7 @@ pub struct GetTemplateRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetTemplateResponse {
@@ -99,7 +94,7 @@ pub struct GetTemplateResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct TemplateAbi {
@@ -111,7 +106,7 @@ pub struct TemplateAbi {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(
         export,
         export_to = "../../bindings/src/types/validator-node-client/",
@@ -128,7 +123,7 @@ pub struct FunctionDef {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(
         export,
         export_to = "../../bindings/src/types/validator-node-client/",
@@ -143,7 +138,7 @@ pub struct ArgDef {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetTemplatesRequest {
@@ -154,7 +149,7 @@ pub struct GetTemplatesRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetTemplatesResponse {
@@ -164,7 +159,7 @@ pub struct GetTemplatesResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct TemplateMetadata {
@@ -178,7 +173,7 @@ pub struct TemplateMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(
         export,
         export_to = "../../bindings/src/types/validator-node-client/",
@@ -193,7 +188,7 @@ pub struct SubmitTransactionRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(
         export,
         export_to = "../../bindings/src/types/validator-node-client/",
@@ -209,7 +204,7 @@ pub struct SubmitTransactionResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct DryRunTransactionFinalizeResult {
@@ -222,7 +217,7 @@ pub struct DryRunTransactionFinalizeResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(
         export,
         export_to = "../../bindings/src/types/validator-node-client/",
@@ -236,7 +231,7 @@ pub struct GetAllVnsRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(
         export,
         export_to = "../../bindings/src/types/validator-node-client/",
@@ -250,7 +245,7 @@ pub struct GetAllVnsResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetBaseLayerEpochChangesRequest {
@@ -261,7 +256,7 @@ pub struct GetBaseLayerEpochChangesRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetBaseLayerEpochChangesResponse {
@@ -271,7 +266,7 @@ pub struct GetBaseLayerEpochChangesResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetConsensusStatusResponse {
@@ -283,20 +278,18 @@ pub struct GetConsensusStatusResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 /// Represents a validator node state change
 pub enum ValidatorNodeChange {
     Add {
-        #[cfg_attr(feature = "ts", ts(type = "string"))]
         public_key: RistrettoPublicKeyBytes,
         activation_epoch: Epoch,
         minimum_value_promise: u64,
         shard_key: SubstateAddress,
     },
     Remove {
-        #[cfg_attr(feature = "ts", ts(type = "string"))]
         public_key: RistrettoPublicKeyBytes,
     },
 }
@@ -304,7 +297,7 @@ pub enum ValidatorNodeChange {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetTransactionRequest {
@@ -314,7 +307,7 @@ pub struct GetTransactionRequest {
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetTransactionResponse {
@@ -324,7 +317,7 @@ pub struct GetTransactionResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(
         export,
         export_to = "../../bindings/src/types/validator-node-client/",
@@ -338,7 +331,7 @@ pub struct GetTransactionResultRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(
         export,
         export_to = "../../bindings/src/types/validator-node-client/",
@@ -355,7 +348,7 @@ pub struct GetTransactionResultResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetRecentTransactionsRequest {}
@@ -363,7 +356,7 @@ pub struct GetRecentTransactionsRequest {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetRecentTransactionsResponse {
@@ -373,7 +366,7 @@ pub struct GetRecentTransactionsResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct ListBlocksRequest {
@@ -387,7 +380,7 @@ pub struct ListBlocksRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct ListBlocksResponse {
@@ -397,7 +390,7 @@ pub struct ListBlocksResponse {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetTxPoolResponse {
@@ -407,7 +400,7 @@ pub struct GetTxPoolResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetBlockResponse {
@@ -417,7 +410,7 @@ pub struct GetBlockResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetBlocksResponse {
@@ -427,7 +420,7 @@ pub struct GetBlocksResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetBlocksCountResponse {
@@ -438,7 +431,7 @@ pub struct GetBlocksCountResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(
         export,
         export_to = "../../bindings/src/types/validator-node-client/",
@@ -455,7 +448,7 @@ pub struct LogEntry {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(
         export,
         export_to = "../../bindings/src/types/validator-node-client/",
@@ -472,7 +465,7 @@ pub enum LogLevel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetCommitteeRequest {
@@ -483,7 +476,7 @@ pub struct GetCommitteeRequest {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetCommitteeResponse {
@@ -493,7 +486,7 @@ pub struct GetCommitteeResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetNetworkCommitteeResponse {
@@ -504,7 +497,7 @@ pub struct GetNetworkCommitteeResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(
         export,
         export_to = "../../bindings/src/types/validator-node-client/",
@@ -521,17 +514,15 @@ pub struct CommitteeShardInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct ValidatorNode {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub address: PeerAddress,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub public_key: RistrettoPublicKeyBytes,
     pub shard_key: SubstateAddress,
     pub start_epoch: Epoch,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub fee_claim_public_key: RistrettoPublicKeyBytes,
 }
 
@@ -550,19 +541,18 @@ impl From<models::ValidatorNode<PeerAddress>> for ValidatorNode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetShardKeyRequest {
     pub epoch: Epoch,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub public_key: RistrettoPublicKeyBytes,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetShardKeyResponse {
@@ -572,7 +562,7 @@ pub struct GetShardKeyResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetStateRequest {
@@ -582,7 +572,7 @@ pub struct GetStateRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetStateResponse {
@@ -592,7 +582,7 @@ pub struct GetStateResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(
         export,
         export_to = "../../bindings/src/types/validator-node-client/",
@@ -607,7 +597,7 @@ pub struct GetSubstateRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(
         export,
         export_to = "../../bindings/src/types/validator-node-client/",
@@ -622,7 +612,7 @@ pub struct GetSubstateResponse {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub enum SubstateStatus {
@@ -634,7 +624,7 @@ pub enum SubstateStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(
         export,
         export_to = "../../bindings/src/types/validator-node-client/",
@@ -652,7 +642,7 @@ pub struct AddPeerRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(
         export,
         export_to = "../../bindings/src/types/validator-node-client/",
@@ -664,7 +654,7 @@ pub struct AddPeerResponse {}
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(
         export,
         export_to = "../../bindings/src/types/validator-node-client/",
@@ -678,7 +668,7 @@ pub struct GetCommsStatsResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetEpochManagerStatsResponse {
@@ -696,7 +686,7 @@ pub struct GetEpochManagerStatsResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetBlockRequest {
@@ -707,7 +697,7 @@ pub struct GetBlockRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetBlocksRequest {
@@ -724,7 +714,7 @@ pub struct GetBlocksRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetFilteredBlocksCountRequest {
@@ -735,7 +725,7 @@ pub struct GetFilteredBlocksCountRequest {
 #[derive(Serialize, Debug)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(
         export,
         export_to = "../../bindings/src/types/validator-node-client/",
@@ -758,7 +748,7 @@ pub struct Connection {
 #[derive(Serialize, Debug)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(
         export,
         export_to = "../../bindings/src/types/validator-node-client/",
@@ -773,7 +763,7 @@ pub enum ConnectionDirection {
 #[derive(Serialize, Debug)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(
         export,
         export_to = "../../bindings/src/types/validator-node-client/",
@@ -787,7 +777,7 @@ pub struct GetConnectionsResponse {
 #[derive(Serialize, Debug)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetMempoolStatsResponse {
@@ -797,7 +787,7 @@ pub struct GetMempoolStatsResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct PrepareLayerOneTransactionRequest {
@@ -806,7 +796,7 @@ pub struct PrepareLayerOneTransactionRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub enum LayerOneTransactionParams {
@@ -817,7 +807,7 @@ pub enum LayerOneTransactionParams {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
-    derive(TS),
+    derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct PrepareLayerOneTransactionResponse {

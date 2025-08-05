@@ -77,10 +77,7 @@ impl Resource {
             owner_key,
             access_rules,
             metadata,
-            // Disable total supply tracking if requested and for confidential resources since there is no way for a
-            // validator to track this (depending on the resource access rules, the contract/user is able to)
-            total_supply: Some(0.into())
-                .filter(|_| is_total_supply_tracking_enabled && !resource_type.is_confidential()),
+            total_supply: Some(0.into()).filter(|_| is_total_supply_tracking_enabled),
             divisibility,
             view_key,
             auth_hook,
@@ -110,6 +107,8 @@ impl Resource {
         self.view_key.as_ref()
     }
 
+    /// Converts the view key to a `RistrettoPublicKey`, returning `None` if the view key is not set
+    /// or returning an error if the view key is not a canonical compressed representation of a Ristretto public key.
     pub fn to_view_key_public_key(&self) -> Result<Option<RistrettoPublicKey>, ByteArrayError> {
         match self.view_key.as_ref() {
             Some(view_key) => RistrettoPublicKey::try_from_byte_type(view_key).map(Some),
@@ -127,6 +126,11 @@ impl Resource {
 
     pub fn set_access_rules(&mut self, access_rules: ResourceAccessRules) {
         self.access_rules = access_rules;
+    }
+
+    /// Returns `true` if the resource has enabled supply tracking, otherwise `false`
+    pub fn is_supply_tracking_enabled(&self) -> bool {
+        self.total_supply.is_some()
     }
 
     /// Increases the total supply. This is a no-op if total supply tracking is disabled.

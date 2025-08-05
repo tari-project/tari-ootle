@@ -42,6 +42,7 @@ use crate::{
         ProofId,
         ResourceAddress,
         ResourceAddressAllocation,
+        StealthMintStatement,
         VaultId,
         VaultRef,
     },
@@ -250,7 +251,10 @@ pub enum MintArg {
         tokens: BTreeMap<NonFungibleId, (tari_bor::Value, tari_bor::Value)>,
     },
     Confidential {
-        proof: Box<ConfidentialOutputStatement>,
+        statement: Box<ConfidentialOutputStatement>,
+    },
+    Stealth {
+        statement: Box<StealthMintStatement>,
     },
 }
 
@@ -260,6 +264,16 @@ impl MintArg {
             MintArg::Fungible { .. } => ResourceType::Fungible,
             MintArg::NonFungible { .. } => ResourceType::NonFungible,
             MintArg::Confidential { .. } => ResourceType::Confidential,
+            MintArg::Stealth { .. } => ResourceType::Stealth,
+        }
+    }
+
+    pub fn expect_stealth_mint_statement(self) -> Box<StealthMintStatement> {
+        match self {
+            MintArg::Fungible { .. } | MintArg::NonFungible { .. } | MintArg::Confidential { .. } => {
+                panic!("called expect_stealth on non-stealth MintArg")
+            },
+            MintArg::Stealth { statement } => statement,
         }
     }
 }
@@ -399,6 +413,7 @@ pub enum VaultWithdrawArg {
     Fungible { amount: Amount },
     NonFungible { ids: BTreeSet<NonFungibleId> },
     Confidential { proof: Box<ConfidentialWithdrawProof> },
+    Stealth { amount: Amount },
 }
 
 // -------------------------------- Fees -------------------------------- //

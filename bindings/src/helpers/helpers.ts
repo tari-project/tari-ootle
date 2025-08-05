@@ -6,6 +6,7 @@ import { RejectReason } from "../types/RejectReason";
 import { SubstateDiff } from "../types/SubstateDiff";
 import { SubstateId } from "../types/SubstateId";
 import { TransactionResult } from "../types/TransactionResult";
+import { NonFungibleId } from "../types/NonFungibleId";
 
 export function substateIdToString(substateId: SubstateId | string | null | undefined): string {
   if (substateId === null || substateId === undefined) {
@@ -30,7 +31,10 @@ export function substateIdToString(substateId: SubstateId | string | null | unde
     return substateId.UnclaimedConfidentialOutput;
   }
   if ("NonFungible" in substateId) {
-    return substateId.NonFungible;
+    const nft = substateId.NonFungible;
+    const key = Object.keys(nft.id)[0];
+    const type = key.toLowerCase();
+    return `nft_${nft.resource_address}_${type}_${nft.id[key]}`;
   }
   if ("TransactionReceipt" in substateId) {
     return substateId.TransactionReceipt;
@@ -47,24 +51,45 @@ export function stringToSubstateId(substateId: string): SubstateId {
   if (!parts) {
     throw new Error(`Invalid substate id: ${substateId}`);
   }
+  const [prefix, rest] = parts;
 
-  switch (parts[0]) {
+  switch (prefix) {
     case "component":
-      return { Component: parts[1] };
+      return { Component: rest };
     case "resource":
-      if (parts[1].includes(" nft_")) {
-        return { NonFungible: parts[1] };
+      return { Resource: rest };
+    case "vault":
+      return { Vault: rest };
+    case "commitment":
+      return { UnclaimedConfidentialOutput: rest };
+    case "txreceipt":
+      return { TransactionReceipt: rest };
+    case "vnfp":
+      return { ValidatorFeePool: rest };
+    case "nft":
+      const nftParts = rest.split("_", 3);
+      if (nftParts.length != 3) {
+        throw new Error(`Invalid NFT substate id: ${substateId}`);
       }
 
-      return { Resource: parts[1] };
-    case "vault":
-      return { Vault: parts[1] };
-    case "commitment":
-      return { UnclaimedConfidentialOutput: parts[1] };
-    case "txreceipt":
-      return { TransactionReceipt: parts[1] };
-    case "vnfp":
-      return { ValidatorFeePool: parts[1] };
+      const [resourceAddress, type, id] = nftParts;
+
+      return {
+        NonFungible: {
+          resource_address: resourceAddress,
+          id: { [type]: id } as NonFungibleId,
+        },
+      };
+    case "template":
+      return { Template: rest };
+    case "utxo":
+      const utxoParts = rest.split("_", 2);
+      if (utxoParts.length != 2) {
+        throw new Error(`Invalid UTXO substate id: ${substateId}`);
+      }
+
+      return { Utxo: { resource_address: utxoParts[0], id: utxoParts[1] } };
+
     default:
       throw new Error(`Unknown substate id: ${substateId}`);
   }

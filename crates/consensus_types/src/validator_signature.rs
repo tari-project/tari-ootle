@@ -17,9 +17,7 @@ pub type ValidatorSchnorrSignature = SchnorrSignature<RistrettoPublicKey, Privat
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct ValidatorSignatureBytes {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub public_key: RistrettoPublicKeyBytes,
-    #[cfg_attr(feature = "ts", ts(type = "{public_nonce : string, signature: string}"))]
     pub signature: SchnorrSignatureBytes,
 }
 

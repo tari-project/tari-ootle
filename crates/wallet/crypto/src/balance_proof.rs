@@ -7,7 +7,13 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
 use tari_engine_types::{crypto::messages, hashing::EngineSchnorrSignature, ToByteType};
-use tari_template_lib::prelude::{Amount, BalanceProofSignature};
+use tari_template_lib::prelude::{
+    Amount,
+    BalanceProofSignature,
+    PedersenCommitmentBytes,
+    RistrettoPublicKeyBytes,
+    SchnorrSignatureBytes,
+};
 
 pub(crate) fn generate_confidential_balance_proof(
     input_mask: &RistrettoSecretKey,
@@ -44,5 +50,23 @@ pub(crate) fn generate_stealth_balance_proof_signature(
     let message = messages::stealth_transfer64(&excess, &public_nonce, revealed_input_amount, revealed_output_amount);
 
     let sig = EngineSchnorrSignature::sign_raw_uniform(&secret_excess, nonce, &message).unwrap();
+    sig.to_byte_type()
+}
+
+pub(crate) fn generate_stealth_owner_proof_signature(
+    secret_key: &RistrettoSecretKey,
+    commitment: &PedersenCommitmentBytes,
+    public_output_nonce: &RistrettoPublicKeyBytes,
+) -> SchnorrSignatureBytes {
+    let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
+    let public_key = RistrettoPublicKey::from_secret_key(secret_key);
+    let message = messages::stealth_ownership64(
+        &public_key.to_byte_type(),
+        &public_nonce.to_byte_type(),
+        commitment,
+        public_output_nonce,
+    );
+
+    let sig = EngineSchnorrSignature::sign_raw_uniform(secret_key, nonce, &message).unwrap();
     sig.to_byte_type()
 }

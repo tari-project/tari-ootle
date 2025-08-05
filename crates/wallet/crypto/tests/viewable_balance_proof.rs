@@ -9,7 +9,7 @@ use tari_crypto::{
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey},
 };
 use tari_engine_types::crypto::validate_elgamal_verifiable_balance_proof;
-use tari_ootle_wallet_crypto::{confidential, AlwaysMissLookupTable, UnblindedStatement};
+use tari_ootle_wallet_crypto::{confidential, AlwaysMissLookupTable, UnblindedOutputStatement};
 use tari_template_lib::{
     models::EncryptedData,
     template_dependencies::{decode_exact, encode_with_len},
@@ -17,9 +17,9 @@ use tari_template_lib::{
 };
 use tari_utilities::ByteArray;
 
-fn create_output_statement(value: Amount, view_key: &RistrettoPublicKey) -> UnblindedStatement {
+fn create_output_statement(value: Amount, view_key: &RistrettoPublicKey) -> UnblindedOutputStatement {
     let mask = RistrettoSecretKey::random(&mut OsRng);
-    UnblindedStatement {
+    UnblindedOutputStatement {
         amount: value,
         mask,
         sender_public_nonce: Default::default(),

@@ -18,25 +18,28 @@ use crate::{
     hashing::EngineSchnorrSignature,
     resource_container::ResourceError,
     FromByteType,
+    ToByteType,
+    UtxoOutput,
 };
 
 #[derive(Debug, Clone)]
-pub struct ValidatedStealthOutputs {
-    pub outputs: Vec<ValidatedPrivateOutput>,
+pub struct ValidatedStealthOutput {
+    pub output: ValidatedPrivateOutput,
+    pub owner_public_key: RistrettoPublicKey,
 }
 
-impl IntoIterator for ValidatedStealthOutputs {
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-    type Item = ValidatedPrivateOutput;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.outputs.into_iter()
+impl ValidatedStealthOutput {
+    pub fn to_utxo_output(&self) -> UtxoOutput {
+        UtxoOutput {
+            owner_public_key: self.owner_public_key.to_byte_type(),
+            output: self.output.to_private_output(),
+        }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct ValidatedStealthMintStatement {
-    pub outputs_statement: ValidatedStealthOutputs,
+    pub outputs_statement: Vec<ValidatedStealthOutput>,
     pub total_mint_amount: Amount,
     pub revealed_output_amount: Amount,
 }
@@ -44,48 +47,58 @@ pub struct ValidatedStealthMintStatement {
 pub fn validate_stealth_outputs_statement(
     stmt: &StealthOutputsStatement,
     view_key: Option<&RistrettoPublicKey>,
-) -> Result<ValidatedStealthOutputs, ResourceError> {
+) -> Result<Vec<ValidatedStealthOutput>, ResourceError> {
     if stmt.outputs.is_empty() {
         return Err(ResourceError::InvalidConfidentialProof {
             details: "No outputs provided in the stealth statement".to_string(),
         });
     }
 
-    validate_bullet_proof(&stmt.agg_range_proof, &stmt.outputs)?;
+    validate_bullet_proof(&stmt.agg_range_proof, stmt.outputs.iter().map(|o| &o.output))?;
 
-    let outputs =
-        stmt.outputs
-            .iter()
-            .map(|statement| {
-                let output_commitment =
-                    PedersenCommitment::try_from_byte_type(&statement.commitment).map_err(|_| {
-                        ResourceError::InvalidConfidentialProof {
-                            details: "Invalid commitment".to_string(),
-                        }
-                    })?;
+    let outputs = stmt
+        .outputs
+        .iter()
+        .map(|statement| {
+            let output = &statement.output;
+            let output_commitment = PedersenCommitment::try_from_byte_type(&output.commitment).map_err(|_| {
+                ResourceError::InvalidConfidentialProof {
+                    details: "Invalid commitment".to_string(),
+                }
+            })?;
 
-                let output_public_nonce = RistrettoPublicKey::try_from_byte_type(&statement.sender_public_nonce)
-                    .map_err(|_| ResourceError::InvalidConfidentialProof {
+            let output_public_nonce =
+                RistrettoPublicKey::try_from_byte_type(&output.sender_public_nonce).map_err(|_| {
+                    ResourceError::InvalidConfidentialProof {
                         details: "Invalid sender public nonce".to_string(),
-                    })?;
+                    }
+                })?;
 
-                let viewable_balance = validate_elgamal_verifiable_balance_proof(
-                    &output_commitment,
-                    view_key,
-                    statement.viewable_balance_proof.as_ref(),
-                )?;
+            let viewable_balance = validate_elgamal_verifiable_balance_proof(
+                &output_commitment,
+                view_key,
+                output.viewable_balance_proof.as_ref(),
+            )?;
+            let output = ValidatedPrivateOutput {
+                commitment: output_commitment,
+                public_nonce: output_public_nonce,
+                encrypted_data: output.encrypted_data.clone(),
+                minimum_value_promise: output.minimum_value_promise,
+                viewable_balance,
+            };
 
-                Ok(ValidatedPrivateOutput {
-                    commitment: output_commitment,
-                    stealth_public_nonce: output_public_nonce,
-                    encrypted_data: statement.encrypted_data.clone(),
-                    minimum_value_promise: statement.minimum_value_promise,
-                    viewable_balance,
-                })
+            Ok(ValidatedStealthOutput {
+                output,
+                owner_public_key: RistrettoPublicKey::try_from_byte_type(&statement.owner_public_key).map_err(
+                    |_| ResourceError::InvalidConfidentialProof {
+                        details: "Invalid owner public key".to_string(),
+                    },
+                )?,
             })
-            .collect::<Result<_, ResourceError>>()?;
+        })
+        .collect::<Result<_, ResourceError>>()?;
 
-    Ok(ValidatedStealthOutputs { outputs })
+    Ok(outputs)
 }
 
 pub fn validate_stealth_mint_statement(
@@ -131,8 +144,8 @@ pub fn validate_mint_balance_proof(
     })?;
 
     let mut commitment_sum = RistrettoPublicKey::default();
-    for (i, output) in outputs_statement.outputs.iter().enumerate() {
-        let commitment = PedersenCommitment::try_from_byte_type(&output.commitment).map_err(|_| {
+    for (i, unspent_output) in outputs_statement.outputs.iter().enumerate() {
+        let commitment = PedersenCommitment::try_from_byte_type(&unspent_output.output.commitment).map_err(|_| {
             ResourceError::InvalidConfidentialProof {
                 details: format!("Invalid output commitment at index {i}"),
             }

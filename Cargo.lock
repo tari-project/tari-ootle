@@ -12031,6 +12031,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tari_bor",
+ "tari_crypto",
  "tari_template_abi",
  "ts-rs",
 ]

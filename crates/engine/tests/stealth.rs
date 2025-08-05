@@ -1,20 +1,21 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::BTreeMap, iter, time::Instant};
+use std::collections::BTreeMap;
 
 use rand::rngs::OsRng;
 use tari_common_types::types::PrivateKey;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
-    crypto::{ElgamalVerifiableBalance, PrivateOutput, ValueLookupTable},
+    crypto::{ElgamalVerifiableBalance, ValueLookupTable},
     resource_container::ResourceError,
+    UtxoOutput,
 };
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_template_lib::{
     call_args,
     models::{ComponentAddress, ResourceAddress, StealthMintStatement},
-    prelude::PedersenCommitmentBytes,
+    prelude::{PedersenCommitmentBytes, SchnorrSignatureBytes},
     types::crypto::RistrettoPublicKeyBytes,
 };
 use tari_template_test_tooling::{
@@ -229,6 +230,36 @@ fn transfer_invalid_balance_in_statement() {
 }
 
 #[test]
+fn transfer_invalid_ownership_proof() {
+    let outputs = [100, 1000];
+    let (mint, masks) = stealth::generate_mint_statement(outputs, 0, None);
+    let (mut test, _faucet, faucet_resx) = setup(mint, None);
+
+    let mut transfer_from_faucet = stealth::generate_transfer_data(
+        &[MaskAndValue {
+            mask: masks[0].clone(),
+            value: 100.into(),
+        }],
+        0,
+        [99],
+        0,
+    );
+    // Set an invalid ownership proof
+    transfer_from_faucet.statement.inputs[0].owner_proof = SchnorrSignatureBytes::zero();
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .stealth_transfer(faucet_resx, transfer_from_faucet.statement)
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    assert_reject_reason(reason, ResourceError::InvalidSpend {
+        details: "Invalid ownership proof for input with commitment".to_string(),
+    });
+}
+
+#[test]
 fn transfer_invalid_range_proof_in_statement() {
     let outputs = [100, 1000];
     let (mint, masks) = stealth::generate_mint_statement(outputs, 0, None);
@@ -265,8 +296,12 @@ fn transfer_invalid_range_proof_in_statement() {
     assert_reject_reason(reason, "Invalid range proof");
 }
 
+#[cfg(not(debug_assertions))]
 #[test]
 fn many_outputs() {
+    use std::{iter, time::Instant};
+
+    use tari_engine_types::limits;
     let outputs = [1000];
     let (mint, masks) = stealth::generate_mint_statement(outputs, 0, None);
     let (mut test, _faucet, faucet_resx) = setup(mint, None);
@@ -278,11 +313,15 @@ fn many_outputs() {
             value: 1000.into(),
         }],
         0,
-        iter::repeat_n(2, 500),
+        // 500 max outputs permitted
+        iter::repeat_n(2, limits::STEALTH_LIMITS.max_outputs),
         0,
     );
 
-    // ± 23s on my mac
+    // Release mode: ± 23s on M1 Mac, 3.7s on Ryzen 5950x (single thread, total test time 6.1s)
+    // TODO: verification time (depending on hardware) of 2-10+ seconds is still a problem, determine what the upper
+    // bound for utxos should be. Parts of the verification could be parallelized (helps, assuming some minimum CPU spec
+    // for a VN). Note that generation in Debug mode took 16 minutes on Ryzen 5950x !
     eprintln!("Generated transfer in {:.2?}", timer.elapsed());
 
     let result = test.execute_expect_success(
@@ -301,7 +340,7 @@ fn many_outputs() {
 }
 
 pub fn try_brute_force_stealth_balance<I, TValueLookup>(
-    utxos: &BTreeMap<PedersenCommitmentBytes, PrivateOutput>,
+    utxos: &BTreeMap<PedersenCommitmentBytes, UtxoOutput>,
     secret_view_key: &PrivateKey,
     value_range: I,
     value_lookup: &mut TValueLookup,
@@ -312,7 +351,7 @@ where
 {
     let decompressed_viewable_balances = utxos
         .values()
-        .filter_map(|utxo| utxo.viewable_balance.as_ref().map(|vb| vb.try_into().unwrap()))
+        .filter_map(|utxo| utxo.output.viewable_balance.as_ref().map(|vb| vb.try_into().unwrap()))
         .collect::<Vec<_>>();
 
     let balances = ElgamalVerifiableBalance::batched_brute_force(

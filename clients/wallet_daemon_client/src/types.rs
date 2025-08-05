@@ -374,7 +374,6 @@ pub struct KeysSetActiveRequest {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct KeysSetActiveResponse {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub public_key: RistrettoPublicKeyBytes,
 }
 

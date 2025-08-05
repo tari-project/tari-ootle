@@ -11,7 +11,7 @@ use rand::rngs::OsRng;
 use serde_json::json;
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{crypto::get_commitment_factory, ToByteType};
-use tari_ootle_wallet_crypto::{AlwaysMissLookupTable, IoReaderValueLookup, UnblindedStatement};
+use tari_ootle_wallet_crypto::{AlwaysMissLookupTable, IoReaderValueLookup, UnblindedOutputStatement};
 use tari_ootle_wallet_sdk::{
     apis::key_manager,
     models::{ConfidentialOutputModel, OutputStatus},
@@ -122,7 +122,7 @@ pub async fn handle_create_transfer_proof(
             )
         })?;
 
-    let output_statement = UnblindedStatement {
+    let output_statement = UnblindedOutputStatement {
         amount: req.amount,
         mask: output_mask.key,
         sender_public_nonce: public_nonce,
@@ -176,7 +176,7 @@ pub async fn handle_create_transfer_proof(
             locked_by_proof: Some(proof_id),
         })?;
 
-        Some(UnblindedStatement {
+        Some(UnblindedOutputStatement {
             amount: change_amount,
             mask: change_mask.key,
             sender_public_nonce: public_nonce,
@@ -255,7 +255,7 @@ pub async fn handle_create_output_proof(
         &output_mask.key,
     )?;
 
-    let statement = UnblindedStatement {
+    let statement = UnblindedOutputStatement {
         amount: req.amount,
         mask: output_mask.key,
         sender_public_nonce: public_nonce,

@@ -11,7 +11,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use tari_bor::{BorTag, Deserialize, Serialize};
 use tari_template_lib::{
     models::{BinaryTag, ResourceAddress},
-    prelude::{from_hex, serde_helpers, KeyParseError, PedersenCommitmentBytes},
+    prelude::{from_hex, serde_helpers, KeyParseError, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     types::hex::write_hex_fmt,
 };
 
@@ -24,20 +24,37 @@ use crate::crypto::PrivateOutput;
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct Utxo {
-    pub output: Option<PrivateOutput>,
+    pub output: Option<UtxoOutput>,
     pub is_frozen: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
+pub struct UtxoOutput {
+    pub output: PrivateOutput,
+    /// The public key that must prove ownership of this UTXO. This is typically a one time "stealth" public key but is
+    /// selected by the client.
+    pub owner_public_key: RistrettoPublicKeyBytes,
+}
+
 impl Utxo {
-    pub fn new(output: PrivateOutput) -> Self {
+    pub fn new(output: UtxoOutput) -> Self {
         Self {
             output: Some(output),
             is_frozen: false,
         }
     }
 
-    pub fn output(&self) -> Option<&PrivateOutput> {
+    pub fn output(&self) -> Option<&UtxoOutput> {
         self.output.as_ref()
+    }
+
+    pub fn owner_public_key(&self) -> Option<&RistrettoPublicKeyBytes> {
+        self.output().map(|o| &o.owner_public_key)
     }
 
     pub fn freeze(&mut self) {
@@ -47,6 +64,14 @@ impl Utxo {
     pub fn burn(&mut self) {
         self.output = None;
         self.is_frozen = true;
+    }
+
+    pub fn is_frozen(&self) -> bool {
+        self.is_frozen
+    }
+
+    pub fn is_burnt(&self) -> bool {
+        self.output.is_none()
     }
 }
 

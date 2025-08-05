@@ -13,7 +13,7 @@ use tari_crypto::{
     },
     tari_utilities::ByteArray,
 };
-use tari_template_lib::{prelude::BalanceProofSignature, types::Amount};
+use tari_template_lib::{prelude::SchnorrSignatureBytes, types::Amount};
 
 use crate::{hashing::EngineSchnorrSignature, FromByteType, ReadOnly};
 
@@ -96,9 +96,9 @@ pub fn convert_amount_to_secret(amount: &Amount) -> Option<RistrettoSecretKey> {
     )
 }
 
-pub fn try_decode_to_signature(balance_proof: &BalanceProofSignature) -> Option<EngineSchnorrSignature> {
-    let public_nonce = RistrettoPublicKey::try_from_byte_type(balance_proof.public_nonce()).ok()?;
-    let signature = PrivateKey::from_canonical_bytes(balance_proof.signature().as_bytes()).ok()?;
+pub fn try_decode_to_signature(signature: &SchnorrSignatureBytes) -> Option<EngineSchnorrSignature> {
+    let public_nonce = RistrettoPublicKey::try_from_byte_type(signature.public_nonce()).ok()?;
+    let signature = PrivateKey::from_canonical_bytes(signature.signature().as_bytes()).ok()?;
     Some(EngineSchnorrSignature::new(public_nonce, signature))
 }
 

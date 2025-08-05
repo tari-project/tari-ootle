@@ -127,7 +127,7 @@ impl ResourceContainer {
             commitments: validated_proof
                 .output
                 .into_iter()
-                .map(|o| (o.commitment.to_byte_type(), o.into()))
+                .map(|o| (o.commitment.to_byte_type(), o.to_private_output()))
                 .collect(),
             revealed_amount: validated_proof.output_revealed_amount,
             locked_commitments: BTreeMap::new(),
@@ -456,7 +456,7 @@ impl ResourceContainer {
 
                 if let Some(change) = validated_proof.change_output {
                     if commitments
-                        .insert(change.commitment.to_byte_type(), change.into())
+                        .insert(change.commitment.to_byte_type(), change.to_private_output())
                         .is_some()
                     {
                         return Err(ResourceError::InvariantError(
@@ -479,7 +479,9 @@ impl ResourceContainer {
 
                 Ok(Self::confidential(
                     *self.resource_address(),
-                    validated_proof.output.map(|o| (o.commitment.to_byte_type(), o.into())),
+                    validated_proof
+                        .output
+                        .map(|o| (o.commitment.to_byte_type(), o.to_private_output())),
                     validated_proof.output_revealed_amount,
                 ))
             },
@@ -895,4 +897,6 @@ pub enum ResourceError {
     InvalidRangeProof { details: String },
     #[error("Invalid confidential mint, no change should be specified")]
     InvalidConfidentialMintWithChange,
+    #[error("Invalid spend: {details}")]
+    InvalidSpend { details: String },
 }

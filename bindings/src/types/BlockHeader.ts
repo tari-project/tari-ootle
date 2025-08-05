@@ -2,6 +2,7 @@
 import type { Epoch } from "./Epoch";
 import type { ExtraData } from "./ExtraData";
 import type { NodeHeight } from "./NodeHeight";
+import type { SchnorrSignatureBytes } from "./SchnorrSignatureBytes";
 import type { ShardGroup } from "./ShardGroup";
 
 export type BlockHeader = {
@@ -52,7 +53,7 @@ export type BlockHeader = {
   /**
    * Proposer signature that signs the Block ID
    */
-  signature: { public_nonce: string; signature: string } | null;
+  signature: SchnorrSignatureBytes | null;
   /**
    * The time indicating the creation time of the block. Currently, this can be chosen arbitrarily and is only
    * informational/used for metrics.

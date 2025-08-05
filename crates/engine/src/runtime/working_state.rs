@@ -12,6 +12,7 @@ use log::*;
 use tari_engine_types::{
     bucket::Bucket,
     component::ComponentHeader,
+    crypto::verify_utxo_spend_permission,
     events::Event,
     fees::FeeReceipt,
     id_provider::{IdProvider, ObjectIds},
@@ -44,6 +45,8 @@ use tari_template_lib::{
         ComponentAddress,
         NonFungibleAddress,
         ProofId,
+        ResourceAddress,
+        StealthInput,
         StealthMintStatement,
         UnclaimedConfidentialOutputAddress,
         VaultId,
@@ -245,17 +248,29 @@ impl WorkingState {
         Ok(resource)
     }
 
-    pub fn spend_utxos<I: IntoIterator<Item = UtxoAddress>>(
+    pub fn spend_stealth_utxos<'a, I: IntoIterator<Item = &'a StealthInput>>(
         &mut self,
+        resource_address: ResourceAddress,
         inputs: I,
-    ) -> Result<IndexMap<UtxoAddress, Utxo>, RuntimeError> {
-        let mut spent_utxos = IndexMap::new();
+    ) -> Result<(), RuntimeError> {
         for input in inputs {
-            let lock_id = self.store.try_lock(&input.clone().into(), LockFlag::Write)?;
+            let address = UtxoAddress::new(resource_address, input.commitment.into());
+            let lock_id = self.store.try_lock(&address.clone().into(), LockFlag::Write)?;
             let utxo = self.store.down_utxo(lock_id)?;
-            spent_utxos.insert(input, utxo);
+            if utxo.is_frozen() {
+                return Err(ResourceError::InvalidSpend {
+                    details: format!("Utxo {} is frozen", address),
+                }
+                .into());
+            }
+
+            let output = utxo.output().ok_or_else(|| ResourceError::InvalidSpend {
+                details: format!("Utxo {} is burnt", address),
+            })?;
+
+            verify_utxo_spend_permission(output, input)?;
         }
-        Ok(spent_utxos)
+        Ok(())
     }
 
     pub fn get_non_fungible(&self, locked: &LockedSubstate) -> Result<&NonFungibleContainer, RuntimeError> {
@@ -645,9 +660,9 @@ impl WorkingState {
 
         let validated = stealth::validate_stealth_mint_statement(stmt, maybe_view_key.as_ref())?;
 
-        for output in validated.outputs_statement.outputs {
-            let address = UtxoAddress::new(resource_address, output.commitment.to_byte_type().into());
-            self.new_substate(address, Utxo::new(output.into()))?;
+        for stealth_output in validated.outputs_statement {
+            let address = UtxoAddress::new(resource_address, stealth_output.output.commitment.to_byte_type().into());
+            self.new_substate(address, Utxo::new(stealth_output.to_utxo_output()))?;
         }
 
         // Validate the resource type in the mint args resource type matches the resource

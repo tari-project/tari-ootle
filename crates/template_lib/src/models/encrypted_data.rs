@@ -4,9 +4,10 @@
 use tari_bor::{Deserialize, Serialize};
 use tari_template_lib_types::serde_helpers;
 
-/// Used by the receiver to determine the value component of the commitment, in both confidential transfers and Minotari
-/// burns
+/// Used by the receiver to determine the value and mask of the commitment. Used in stealth and confidential transfers,
+/// as well as Minotari burns
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),

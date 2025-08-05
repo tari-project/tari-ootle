@@ -2361,7 +2361,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         let mut resource = ResourceContainer::confidential(
             CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
             Some((unclaimed_output.commitment, PrivateOutput {
-                stealth_public_nonce: diffie_hellman_public_key,
+                public_nonce: diffie_hellman_public_key,
                 encrypted_data: unclaimed_output.encrypted_data,
                 minimum_value_promise: 0,
                 viewable_balance: None,
@@ -2684,13 +2684,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 }
             }
 
-            let input_substates = statement
-                .inputs
-                .iter()
-                .map(|c| UtxoAddress::new(resource_address, c.into()));
-
-            // TODO: this checks that the inputs exist and downs them, do we need this map that's returned?
-            let _inputs = state_mut.spend_utxos(input_substates)?;
+            state_mut.spend_stealth_utxos(resource_address, &statement.inputs)?;
             let revealed_input_amount = revealed_funds_bucket.as_ref().map(|b| b.amount()).unwrap_or_default();
 
             let resource = state_mut.get_resource(&resource_lock)?;
@@ -2709,8 +2703,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             let valid_transfer = stealth::validate_transfer(&statement, revealed_input_amount, view_key.as_ref())?;
 
             for output in valid_transfer.outputs {
-                let address = UtxoAddress::new(resource_address, output.commitment.to_byte_type().into());
-                let value = Utxo::new(output.into());
+                let address = UtxoAddress::new(resource_address, output.output.commitment.to_byte_type().into());
+                let value = Utxo::new(output.to_utxo_output());
                 state_mut.new_substate(address, value)?;
             }
 

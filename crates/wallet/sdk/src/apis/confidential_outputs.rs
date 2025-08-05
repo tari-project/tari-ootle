@@ -297,10 +297,12 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
             }
         })?;
 
-        let output_stealth_public_nonce = RistrettoPublicKey::try_from_byte_type(&output.stealth_public_nonce)
-            .map_err(|e| ConfidentialOutputsApiError::InvalidParameter {
-                param: "stealth_public_nonce",
-                reason: format!("Failed to parse stealth public nonce: {}", e),
+        let output_stealth_public_nonce =
+            RistrettoPublicKey::try_from_byte_type(&output.public_nonce).map_err(|e| {
+                ConfidentialOutputsApiError::InvalidParameter {
+                    param: "stealth_public_nonce",
+                    reason: format!("Failed to parse stealth public nonce: {}", e),
+                }
             })?;
 
         let unblinded_result = self.crypto_api.unblind_output(

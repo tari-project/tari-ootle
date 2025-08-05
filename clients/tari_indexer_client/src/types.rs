@@ -305,7 +305,6 @@ pub struct GetNonFungiblesResponse {
     ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
 )]
 pub struct NonFungibleSubstate {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub address: NonFungibleAddress,
     pub version: u32,
     pub substate: SubstateValue,
@@ -322,7 +321,6 @@ pub struct NonFungibleSubstate {
     )
 )]
 pub struct AddPeerRequest {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub public_key: RistrettoPublicKeyBytes,
     #[cfg_attr(feature = "ts", ts(type = "Array<string>"))]
     pub addresses: Vec<Multiaddr>,

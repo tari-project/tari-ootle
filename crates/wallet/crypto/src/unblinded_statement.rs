@@ -6,7 +6,7 @@ use tari_engine_types::crypto::commit_amount_checked;
 use tari_template_lib::{models::EncryptedData, types::Amount};
 
 #[derive(Debug, Clone)]
-pub struct UnblindedStatement {
+pub struct UnblindedOutputStatement {
     pub amount: Amount,
     pub mask: RistrettoSecretKey,
     pub sender_public_nonce: RistrettoPublicKey,
@@ -15,10 +15,16 @@ pub struct UnblindedStatement {
     pub resource_view_key: Option<RistrettoPublicKey>,
 }
 
-impl UnblindedStatement {
+impl UnblindedOutputStatement {
     pub fn to_commitment(&self) -> Option<PedersenCommitment> {
         commit_amount_checked(&self.mask, self.amount)
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct UnblindedStealthOutputStatement {
+    pub statement: UnblindedOutputStatement,
+    pub output_owner_public_key: RistrettoPublicKey,
 }
 
 #[derive(Debug, Clone)]
@@ -35,4 +41,11 @@ impl MaskAndValue {
     pub fn to_commitment(&self) -> Option<PedersenCommitment> {
         commit_amount_checked(&self.mask, self.value)
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct UnblindedStealthInputStatement {
+    pub mask_and_value: MaskAndValue,
+    pub owner_secret: RistrettoSecretKey,
+    pub public_nonce: RistrettoPublicKey,
 }

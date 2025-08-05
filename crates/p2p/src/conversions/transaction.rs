@@ -41,6 +41,7 @@ use tari_template_lib::{
         ConfidentialOutputStatement,
         ConfidentialWithdrawProof,
         EncryptedData,
+        StealthInput,
         UnspentOutput,
         ViewableBalanceProof,
     },
@@ -670,6 +671,34 @@ impl From<UnspentOutput> for proto::transaction::UnspentOutput {
     }
 }
 
+// -------------------------------- StealthUnspentOutput -------------------------------- //
+impl TryFrom<proto::transaction::StealthUnspentOutput> for tari_template_lib::models::StealthUnspentOutput {
+    type Error = anyhow::Error;
+
+    fn try_from(val: proto::transaction::StealthUnspentOutput) -> Result<Self, Self::Error> {
+        let output = val
+            .output
+            .ok_or_else(|| anyhow!("stealth unspent output not provided"))?
+            .try_into()?;
+        let owner_public_key = RistrettoPublicKeyBytes::from_bytes(&val.owner_public_key)
+            .map_err(|e| anyhow!("Invalid owner public key: {}", e.to_error_string()))?;
+
+        Ok(tari_template_lib::models::StealthUnspentOutput {
+            output,
+            owner_public_key,
+        })
+    }
+}
+
+impl From<tari_template_lib::models::StealthUnspentOutput> for proto::transaction::StealthUnspentOutput {
+    fn from(val: tari_template_lib::models::StealthUnspentOutput) -> Self {
+        Self {
+            output: Some(val.output.into()),
+            owner_public_key: val.owner_public_key.as_bytes().to_vec(),
+        }
+    }
+}
+
 // -------------------------------- ViewableBalanceProof -------------------------------- //
 
 impl TryFrom<proto::transaction::ViewableBalanceProof> for ViewableBalanceProof {
@@ -713,9 +742,7 @@ impl TryFrom<proto::transaction::StealthTransferStatement> for tari_template_lib
         let inputs = value
             .inputs
             .into_iter()
-            .map(|input| {
-                PedersenCommitmentBytes::from_bytes(&input).map_err(|e| anyhow!("Invalid input commitment bytes: {e}"))
-            })
+            .map(TryInto::try_into)
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Self {
@@ -733,9 +760,39 @@ impl TryFrom<proto::transaction::StealthTransferStatement> for tari_template_lib
 impl From<tari_template_lib::models::StealthTransferStatement> for proto::transaction::StealthTransferStatement {
     fn from(value: tari_template_lib::models::StealthTransferStatement) -> Self {
         Self {
-            inputs: value.inputs.iter().map(|v| v.as_bytes().to_vec()).collect(),
+            inputs: value.inputs.iter().map(Into::into).collect(),
             outputs_statement: Some(value.outputs_statement.into()),
             balance_proof: value.balance_proof.to_bytes(),
+        }
+    }
+}
+
+// -------------------------------- StealthInput -------------------------------- //
+
+impl TryFrom<proto::transaction::StealthInput> for StealthInput {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::transaction::StealthInput) -> Result<Self, Self::Error> {
+        let commitment =
+            PedersenCommitmentBytes::from_bytes(&value.commitment).context("Invalid input commitment bytes")?;
+        let owner_proof = value
+            .owner_proof
+            .ok_or_else(|| anyhow!("owner_proof not provided"))?
+            .try_into()
+            .context("Invalid owner proof commitment signature")?;
+
+        Ok(Self {
+            commitment,
+            owner_proof,
+        })
+    }
+}
+
+impl From<&StealthInput> for proto::transaction::StealthInput {
+    fn from(value: &StealthInput) -> Self {
+        Self {
+            commitment: value.commitment.as_bytes().to_vec(),
+            owner_proof: Some((&value.owner_proof).into()),
         }
     }
 }
@@ -749,7 +806,7 @@ impl TryFrom<proto::transaction::StealthOutputsStatement> for tari_template_lib:
         let outputs = value
             .outputs
             .into_iter()
-            .map(|output| UnspentOutput::try_from(output).map_err(|e| anyhow!("Invalid unspent output: {e}")))
+            .map(|output| output.try_into().context("Invalid unspent output"))
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Self {

@@ -15,9 +15,9 @@ use tari_crypto::{
 use tari_engine_types::crypto::bullet_proof_service_factory;
 use tari_template_lib::types::crypto::RangeProofBytes;
 
-use crate::UnblindedStatement;
+use crate::UnblindedOutputStatement;
 
-pub fn generate_extended_bullet_proof<'a, I: IntoIterator<Item = &'a UnblindedStatement>>(
+pub fn generate_extended_bullet_proof<'a, I: IntoIterator<Item = &'a UnblindedOutputStatement>>(
     statements: I,
 ) -> Result<RangeProofBytes, RangeProofError> {
     let mut extended_witnesses = statements

@@ -56,7 +56,7 @@ pub fn validate_confidential_statement(
 
             Ok::<_, ResourceError>(ValidatedPrivateOutput {
                 commitment: output_commitment,
-                stealth_public_nonce: output_public_nonce,
+                public_nonce: output_public_nonce,
                 encrypted_data: statement.encrypted_data.clone(),
                 minimum_value_promise: statement.minimum_value_promise,
                 viewable_balance,
@@ -86,7 +86,7 @@ pub fn validate_confidential_statement(
 
             Ok(ValidatedPrivateOutput {
                 commitment,
-                stealth_public_nonce,
+                public_nonce: stealth_public_nonce,
                 encrypted_data: stmt.encrypted_data.clone(),
                 minimum_value_promise: stmt.minimum_value_promise,
                 viewable_balance,

@@ -2,7 +2,11 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
-use tari_template_lib::{models::ViewableBalanceProofChallengeFields, types::Amount};
+use tari_template_lib::{
+    models::ViewableBalanceProofChallengeFields,
+    prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    types::Amount,
+};
 
 use crate::hashing::{hasher64, EngineHashDomainLabel};
 
@@ -55,5 +59,19 @@ pub fn stealth_transfer64(
         .chain(public_nonce)
         .chain(input_revealed_amount)
         .chain(output_revealed_amount)
+        .result()
+}
+
+pub fn stealth_ownership64(
+    public_key: &RistrettoPublicKeyBytes,
+    public_nonce: &RistrettoPublicKeyBytes,
+    commitment: &PedersenCommitmentBytes,
+    public_output_nonce: &RistrettoPublicKeyBytes,
+) -> [u8; 64] {
+    hasher64(EngineHashDomainLabel::StealthOwnership)
+        .chain(public_key)
+        .chain(public_nonce)
+        .chain(commitment)
+        .chain(public_output_nonce)
         .result()
 }

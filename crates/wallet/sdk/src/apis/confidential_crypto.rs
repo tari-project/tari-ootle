@@ -15,7 +15,7 @@ use tari_ootle_wallet_crypto::{
     kdfs,
     ConfidentialProofError,
     MaskAndValue,
-    UnblindedStatement,
+    UnblindedOutputStatement,
     WalletCryptoError,
 };
 use tari_template_lib::{
@@ -43,9 +43,9 @@ impl ConfidentialCryptoApi {
         &self,
         inputs: &[MaskAndValue],
         input_revealed_amount: A,
-        output_statement: Option<&UnblindedStatement>,
+        output_statement: Option<&UnblindedOutputStatement>,
         output_revealed_amount: A,
-        change_statement: Option<&UnblindedStatement>,
+        change_statement: Option<&UnblindedOutputStatement>,
         change_revealed_amount: A,
     ) -> Result<ConfidentialWithdrawProof, ConfidentialCryptoApiError> {
         let proof = confidential::create_withdraw_proof(
@@ -91,7 +91,7 @@ impl ConfidentialCryptoApi {
 
     pub fn generate_output_proof<A: Into<Amount>>(
         &self,
-        statement: &UnblindedStatement,
+        statement: &UnblindedOutputStatement,
         revealed_amount: A,
     ) -> Result<ConfidentialOutputStatement, ConfidentialCryptoApiError> {
         let proof = confidential::create_output_statement(

@@ -4,7 +4,7 @@ import type { EncryptedData } from "./EncryptedData";
 import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
 
 export type PrivateOutput = {
-  stealth_public_nonce: RistrettoPublicKeyBytes;
+  public_nonce: RistrettoPublicKeyBytes;
   encrypted_data: EncryptedData;
   minimum_value_promise: number | bigint;
   viewable_balance: CompressedElgamalVerifiableBalance | null;

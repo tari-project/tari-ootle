@@ -11,13 +11,13 @@ use crate::{
     crypto::{commit_amount_checked, messages, try_decode_to_signature},
     resource_container::ResourceError,
     stealth,
-    stealth::ValidatedStealthOutputs,
+    stealth::ValidatedStealthOutput,
     FromByteType,
 };
 
 #[derive(Debug, Clone)]
 pub struct ValidatedStealthTransfer {
-    pub outputs: ValidatedStealthOutputs,
+    pub outputs: Vec<ValidatedStealthOutput>,
     pub revealed_input_amount: Amount,
     pub revealed_output_amount: Amount,
 }
@@ -34,18 +34,15 @@ pub fn validate_transfer(
             details: "Malformed balance proof".to_string(),
         })?;
 
-    let agg_outputs = validated_outputs
-        .outputs
-        .iter()
-        .fold(RistrettoPublicKey::default(), |acc, o| {
-            acc + o.commitment.as_public_key()
-        });
+    let agg_outputs = validated_outputs.iter().fold(RistrettoPublicKey::default(), |acc, o| {
+        acc + o.output.commitment.as_public_key()
+    });
 
     let agg_inputs = transfer
         .inputs
         .iter()
-        .try_fold(RistrettoPublicKey::default(), |sum, commit| {
-            let commit = PedersenCommitment::try_from_byte_type(commit)?;
+        .try_fold(RistrettoPublicKey::default(), |sum, input| {
+            let commit = PedersenCommitment::try_from_byte_type(&input.commitment)?;
             Ok::<_, ByteArrayError>(sum + commit.as_public_key())
         })
         .map_err(|e| ResourceError::InvalidConfidentialProof {

@@ -20,7 +20,7 @@ use tari_template_lib::{
 
 /// Defines a conversion from a type to its light-weight byte representation.
 pub trait ToByteType {
-    type ByteType: Copy;
+    type ByteType;
     fn to_byte_type(&self) -> Self::ByteType;
 }
 

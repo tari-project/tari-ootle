@@ -180,14 +180,14 @@ message AccessRules {
 }
 
 message StealthTransferStatement {
-  repeated bytes inputs = 1;
+  repeated StealthInput inputs = 1;
   StealthOutputsStatement outputs_statement = 2;
   bytes balance_proof = 3;
 }
 
 message StealthOutputsStatement {
   /// Proof of the confidential resources that are going to be transferred to the receiver
-  repeated UnspentOutput outputs = 1;
+  repeated StealthUnspentOutput outputs = 1;
   /// The amount of revealed funds to output. If this is a positive (non-zero) value, a bucket containing the
   /// revealed stealth funds is created.
   tari.ootle.common.Amount revealed_output_amount = 2;
@@ -195,3 +195,14 @@ message StealthOutputsStatement {
   /// [minimum_value_promise, 2^64)
   bytes agg_range_proof = 3;
 }
+
+message StealthUnspentOutput {
+  UnspentOutput output = 1;
+  bytes owner_public_key = 2;
+}
+
+message StealthInput {
+  bytes commitment = 1;
+  tari.ootle.common.Signature owner_proof = 2;
+}
+

@@ -32,3 +32,16 @@ pub struct UnspentOutput {
     /// If the view key is enabled for a given resource, this proof MUST be provided, otherwise it MUST NOT.
     pub viewable_balance_proof: Option<ViewableBalanceProof>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
+pub struct StealthUnspentOutput {
+    pub output: UnspentOutput,
+    /// The public key that must prove ownership of this UTXO. This is typically a one time "stealth" public key
+    /// selected by the client.
+    pub owner_public_key: RistrettoPublicKeyBytes,
+}

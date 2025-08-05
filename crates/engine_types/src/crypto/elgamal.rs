@@ -1,6 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use borsh::BorshSerialize;
 use tari_bor::{Deserialize, Serialize};
 use tari_common_types::types::PrivateKey;
 use tari_crypto::{
@@ -126,7 +127,7 @@ pub fn validate_elgamal_verifiable_balance_proof(
     }))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -239,6 +240,17 @@ impl TryFrom<&CompressedElgamalVerifiableBalance> for ElgamalVerifiableBalance {
             encrypted,
             public_nonce,
         })
+    }
+}
+
+impl ToByteType for ElgamalVerifiableBalance {
+    type ByteType = CompressedElgamalVerifiableBalance;
+
+    fn to_byte_type(&self) -> Self::ByteType {
+        CompressedElgamalVerifiableBalance {
+            encrypted: self.encrypted.to_byte_type(),
+            public_nonce: self.public_nonce.to_byte_type(),
+        }
     }
 }
 

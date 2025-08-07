@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use digest::crypto_common::rand_core::{OsRng, RngCore};
 use log::{info, warn};
 use passwords::PasswordGenerator;
 use tari_crypto::tari_utilities::SafePassword;
@@ -210,26 +211,6 @@ where
         Ok(self.loaded_cipher_seed.clone())
     }
 
-    // Generate a new random password.
-    fn generate_password() -> Result<(Zeroizing<String>, SafePassword), WalletSdkError> {
-        let pg = PasswordGenerator {
-            length: 256,
-            numbers: true,
-            lowercase_letters: true,
-            uppercase_letters: true,
-            symbols: false,
-            spaces: false,
-            exclude_similar_characters: false,
-            strict: true,
-        };
-        let generated_password = pg
-            .generate_one()
-            .map_err(|error| WalletSdkError::PasswordGeneration(error.to_string()))?;
-
-        let safe_password = SafePassword::from(generated_password.clone());
-        Ok((Zeroizing::new(generated_password), safe_password))
-    }
-
     fn create_cipher_seed(&mut self) -> Result<(), WalletSdkError> {
         let cipher_seed = CipherSeed::new();
         let password = self.create_cipher_seed_password()?;
@@ -268,18 +249,50 @@ where
             return Ok(password.clone());
         }
 
-        let entry = self.get_cipher_seed_password_keyring_entry()?;
+        let key = self.config_api().get::<String>(ConfigKey::KeyringPasswordEntryKey)?;
+        let entry = self.get_cipher_seed_password_keyring_entry(&key)?;
         // If get_password fails with NoEntry, it means that the password is not set in the keyring i.e. IsNotFoundError
         // will return true which is what we want.
         let password = entry.get_password()?;
         Ok(SafePassword::from(password))
     }
 
-    fn get_cipher_seed_password_keyring_entry(&self) -> Result<keyring::Entry, WalletSdkError> {
-        let result = keyring::Entry::new(
-            KEYRING_ENTRIES_SERVICE,
-            format!("{}-{}", self.config.network, CIPHER_SEED_PASSWORD_KEYRING_ENTRY_NAME).as_str(),
-        );
+    fn create_cipher_seed_password(&mut self) -> Result<SafePassword, WalletSdkError> {
+        if let Some(ref password) = self.config.override_keyring_password {
+            // If we are overriding the keyring password, we don't need to set it in the keyring.
+            // This is because the password is already set in the config.
+            return Ok(password.clone());
+        }
+
+        let key = match self
+            .config_api()
+            .get::<String>(ConfigKey::KeyringPasswordEntryKey)
+            .optional()?
+        {
+            Some(key) => key,
+            None => {
+                // If the key is not set, we generate a new key and set it in the config.
+                // The nonce is used to differentiate between different password entries in the keyring when running
+                // multiple instances of the wallet on the same network. This nonce is generated once per wallet
+                // database.
+                let nonce = generate_password_entry_key_nonce();
+                let key = format!(
+                    "{}-{}-{}",
+                    CIPHER_SEED_PASSWORD_KEYRING_ENTRY_NAME, self.config.network, nonce
+                );
+                self.config_api().set(ConfigKey::KeyringPasswordEntryKey, &key, false)?;
+                key
+            },
+        };
+
+        let (str_password, safe_password) = generate_password()?;
+        let entry = self.get_cipher_seed_password_keyring_entry(&key)?;
+        entry.set_password(&str_password)?;
+        Ok(safe_password)
+    }
+
+    fn get_cipher_seed_password_keyring_entry(&self, key: &str) -> Result<keyring::Entry, WalletSdkError> {
+        let result = keyring::Entry::new(KEYRING_ENTRIES_SERVICE, key);
 
         match result {
             Ok(entry) => Ok(entry),
@@ -292,19 +305,6 @@ where
             },
             Err(err) => Err(err.into()),
         }
-    }
-
-    fn create_cipher_seed_password(&mut self) -> Result<SafePassword, WalletSdkError> {
-        if let Some(ref password) = self.config.override_keyring_password {
-            // If we are overriding the keyring password, we don't need to set it in the keyring.
-            // This is because the password is already set in the config.
-            return Ok(password.clone());
-        }
-
-        let (str_password, safe_password) = Self::generate_password()?;
-        let entry = self.get_cipher_seed_password_keyring_entry()?;
-        entry.set_password(&str_password)?;
-        Ok(safe_password)
     }
 }
 
@@ -345,4 +345,28 @@ impl IsNotFoundError for WalletSdkError {
             Self::NetworkParseError(_) => false,
         }
     }
+}
+
+// Generate a new random password.
+fn generate_password() -> Result<(Zeroizing<String>, SafePassword), WalletSdkError> {
+    let pg = PasswordGenerator {
+        length: 256,
+        numbers: true,
+        lowercase_letters: true,
+        uppercase_letters: true,
+        symbols: false,
+        spaces: false,
+        exclude_similar_characters: false,
+        strict: true,
+    };
+    let generated_password = pg
+        .generate_one()
+        .map_err(|error| WalletSdkError::PasswordGeneration(error.to_string()))?;
+
+    let safe_password = SafePassword::from(generated_password.clone());
+    Ok((Zeroizing::new(generated_password), safe_password))
+}
+
+fn generate_password_entry_key_nonce() -> u64 {
+    OsRng.next_u64()
 }

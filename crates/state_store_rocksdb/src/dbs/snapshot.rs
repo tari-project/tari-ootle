@@ -21,7 +21,7 @@ impl<DB: DBAccess> RocksReader for SnapshotWithThreadMode<'_, DB> {
         &self,
         cf: &impl AsColumnFamilyRef,
         key: K,
-    ) -> Result<Option<DBPinnableSlice>, Error> {
+    ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
         self.get_pinned_cf(cf, key)
     }
 

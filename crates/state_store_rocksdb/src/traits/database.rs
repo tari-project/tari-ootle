@@ -21,7 +21,7 @@ pub trait RocksReader {
         &self,
         cf: &impl AsColumnFamilyRef,
         key: K,
-    ) -> Result<Option<DBPinnableSlice>, Error>;
+    ) -> Result<Option<DBPinnableSlice<'_>>, Error>;
     fn iterator_cf<'a: 'b, 'b>(
         &'a self,
         cf_handle: &impl AsColumnFamilyRef,

@@ -61,7 +61,7 @@ impl TestEpochManager {
         self
     }
 
-    pub async fn state_lock(&self) -> MutexGuard<TestEpochManagerState> {
+    pub async fn state_lock(&self) -> MutexGuard<'_, TestEpochManagerState> {
         self.inner.lock().await
     }
 

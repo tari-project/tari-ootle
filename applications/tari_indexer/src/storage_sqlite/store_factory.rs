@@ -42,7 +42,6 @@ use tari_ootle_storage::StorageError;
 use tari_ootle_storage_sqlite::{error::SqliteStorageError, SqliteTransaction};
 use tari_template_lib::{models::ResourceAddress, types::TemplateAddress};
 use tari_transaction::{Transaction, TransactionId};
-use thiserror::Error;
 
 use super::models::events::{NewEvent, NewScannedBlockId};
 use crate::storage_sqlite::{
@@ -128,20 +127,6 @@ pub trait IndexerStore {
         let mut tx = self.create_read_tx()?;
         let ret = f(&mut tx)?;
         Ok(ret)
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum StoreError {
-    #[error("Storage error: {details}")]
-    StorageError { details: String },
-}
-
-impl From<StorageError> for StoreError {
-    fn from(err: StorageError) -> Self {
-        Self::StorageError {
-            details: err.to_string(),
-        }
     }
 }
 

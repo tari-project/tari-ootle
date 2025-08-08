@@ -209,7 +209,7 @@ impl SqliteMessageLogger {
         }
     }
 
-    fn connect(&self) -> Option<MutexGuard<SqliteConnection>> {
+    fn connect(&self) -> Option<MutexGuard<'_, SqliteConnection>> {
         Some(self.connection.as_ref()?.lock().unwrap())
     }
 }

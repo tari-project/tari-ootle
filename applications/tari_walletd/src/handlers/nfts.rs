@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashSet, str::FromStr};
+use std::{collections::HashSet, slice, str::FromStr};
 
 use anyhow::anyhow;
 use axum::headers::authorization::Bearer;
@@ -106,7 +106,7 @@ pub async fn handle_mint_faucet_nft(
 
     let inputs = sdk
         .substate_api()
-        .locate_dependent_substates(&[account.address.clone()], true)
+        .locate_dependent_substates(slice::from_ref(&account.address), true)
         .await?;
     let fee = req.max_fee.unwrap_or(DEFAULT_FEE);
     let transaction = transaction_builder(context)

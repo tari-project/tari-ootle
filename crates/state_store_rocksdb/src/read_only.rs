@@ -23,7 +23,7 @@ impl<TX: RocksReader> RocksReader for ReadOnly<TX> {
         &self,
         cf: &impl AsColumnFamilyRef,
         key: K,
-    ) -> Result<Option<DBPinnableSlice>, Error> {
+    ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
         self.inner.get_pinned_cf(cf, key)
     }
 

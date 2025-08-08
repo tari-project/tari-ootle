@@ -1,6 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::slice;
+
 use anyhow::anyhow;
 use axum::headers::authorization::Bearer;
 use log::*;
@@ -103,7 +105,7 @@ pub async fn handle_create(
     let default_account = sdk.accounts_api().get_default()?;
     let inputs = sdk
         .substate_api()
-        .locate_dependent_substates(&[default_account.address.clone()], true)
+        .locate_dependent_substates(slice::from_ref(&default_account.address), true)
         .await?;
 
     let signing_key_index = req.key_id.unwrap_or(default_account.key_index);

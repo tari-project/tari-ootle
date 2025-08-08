@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, VecDeque};
 
 use log::*;
 use tari_consensus_types::Vote;
-use tari_ootle_common_types::{Epoch, NodeAddressable, NodeHeight};
+use tari_ootle_common_types::{Epoch, NodeHeight};
 
 use crate::{
     hotstuff::error::HotStuffError,
@@ -146,16 +146,6 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
     fn push_to_buffer(&mut self, epoch: Epoch, height: NodeHeight, from: TConsensusSpec::Addr, msg: HotstuffMessage) {
         self.buffer.entry((epoch, height)).or_default().push_back((from, msg));
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("Needs sync: local height {local_height} is less than remote QC height {qc_height} from {from}")]
-pub struct NeedsSync<TAddr: NodeAddressable> {
-    pub from: TAddr,
-    pub local_height: NodeHeight,
-    pub qc_height: NodeHeight,
-    pub remote_epoch: Epoch,
-    pub local_epoch: Epoch,
 }
 
 enum MessageRelativeView {

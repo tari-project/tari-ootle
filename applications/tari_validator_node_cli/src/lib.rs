@@ -27,5 +27,4 @@ pub mod key_manager;
 pub mod prompt;
 #[macro_use]
 pub mod table;
-mod cli_range;
 pub mod component_manager;

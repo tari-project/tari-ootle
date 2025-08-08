@@ -32,7 +32,7 @@ impl RocksReader for ReadOnlyDb {
         &self,
         cf: &impl AsColumnFamilyRef,
         key: K,
-    ) -> Result<Option<DBPinnableSlice>, Error> {
+    ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
         self.db.get_pinned_cf(cf, key)
     }
 

@@ -57,6 +57,10 @@ cargo run --bin tari_swarm_daemon --release -- -c data/swarm/config.toml init
 cargo run --bin tari_swarm_daemon --release -- -c data/swarm/config.toml start
 ```
 
+> Note: For subsequent runs, you only need to run the third command with the `-k` argument to avoid trying to re-register the Validator Nodes: `cargo run --bin tari_swarm_daemon --release -- -c data/swarm/config.toml start -k`
+
+```
+
 This will get you an instance of the `tari_swarm_daemon`, starting a Minotari base node, a Minotari console wallet, an Ootle validator node, an Ootle wallet and an Indexer.
 Additionally, it will automatically submit the validator node registration and mine blocks until the validator node is active.
 

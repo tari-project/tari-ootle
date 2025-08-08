@@ -74,15 +74,18 @@ pub enum ConfigKey {
     IndexerUrl,
     /// Indicates whether the wallet needs to be recovered. type: bool
     RecoveryNeeded,
+    /// The keyring key that stored the decryption password
+    KeyringPasswordEntryKey,
 }
 
 impl ConfigKey {
     pub fn as_key_str(&self) -> &'static str {
         match self {
-            ConfigKey::Network => "network",
-            ConfigKey::CipherSeed => "cipher_seed",
-            ConfigKey::IndexerUrl => "indexer_url",
-            ConfigKey::RecoveryNeeded => "recovery_needed",
+            Self::Network => "network",
+            Self::CipherSeed => "cipher_seed",
+            Self::IndexerUrl => "indexer_url",
+            Self::RecoveryNeeded => "recovery_needed",
+            Self::KeyringPasswordEntryKey => "keyring_password_entry_key",
         }
     }
 }

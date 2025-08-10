@@ -70,20 +70,6 @@ For other environments, the "manual" process is as follows:
 
 5. **Copy the claim proof JSON** from the L1 console wallet:  
 
-   ```json
-   {
-       "transaction_id": <transaction_id>,
-       "is_success": <IS_SUCCESS>,
-       "failure_message": <FAILURE_MESSAGE>,
-       "commitment": <COMMITMENT>,
-       "ownership_proof": <OWNERSHIP_PROOF>,
-       "rangeproof": <RANGEPROOF>
-   }
-   
-6. **Wait for the burn to be mined in**.  
-   Validator nodes scan the L1 network for burnt UTXOs with special flags.  
-   Depending on the network configuration, this may require **10–100s of blocks** before the burn is picked up.  
-
 7. **Claim the burn**.  
    Use the Ootle wallet web UI or the `tari_ootle_wallet_cli` tool to claim the burn using the burn proof via the **"Claim Burn"** dialog.  
 

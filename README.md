@@ -59,14 +59,15 @@ For other environments, the "manual" process is as follows:
    Start the Ootle wallet application in your environment.
 
 2. **Generate a claim key**  
-   - Use the Ootle wallet web UI **or** the `tari_ootle_wallet_cli` tool.  
+   - Use the Ootle wallet web UI **or** the `tari_ootle_wallet_cli` tool.
+   - Store the claim private key securely and back it up. Do not share it.
 
 3. **Open the L1 console wallet**  
    - Navigate to the **`burn`** tab.
 
 4. **Burn the desired amount of Tari**  
    - Include the claim public key you generated in step 2.  
-   - ⚠ **WARNING:** If you lose the claim public key, your funds will be permanently unclaimable.
+   - ⚠ **WARNING:** If you lose the claim private key (the secret), your funds will be permanently unclaimable.
 
 5. **Copy the claim proof JSON** from the L1 console wallet:  
 

@@ -212,7 +212,7 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::AllocateAddress { .. } => 1,
         Instruction::StealthTransfer { statement, .. } => {
             // TODO: weight inputs and outputs accordingly - currently outputs cost 2x inputs
-            statement.inputs_statement.inputs.len() as u64 + (statement.outputs_statements.outputs.len() as u64 * 2)
+            statement.inputs_statement.inputs.len() as u64 + (statement.outputs_statement.outputs.len() as u64 * 2)
         },
     }
 }

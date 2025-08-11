@@ -24,10 +24,19 @@ use serde::{Deserialize, Serialize};
 use tari_bor::BorTag;
 use tari_template_abi::{call_engine, rust::fmt, EngineOp};
 
-use super::{BinaryTag, ConfidentialWithdrawProof, NonFungible, NonFungibleId, Proof, ResourceAddress};
+use super::{
+    BinaryTag,
+    ConfidentialWithdrawProof,
+    NonFungible,
+    NonFungibleId,
+    Proof,
+    ResourceAddress,
+    StealthTransferStatement,
+};
 use crate::{
     args::{BucketAction, BucketInvokeArg, BucketRef, InvokeResult},
     prelude::ResourceType,
+    resource::ResourceManager,
     types::Amount,
 };
 
@@ -109,6 +118,23 @@ impl Bucket {
         });
 
         resp.decode().expect("Bucket Take returned invalid bucket")
+    }
+
+    pub fn stealth_transfer(mut self, statement: StealthTransferStatement) -> Self {
+        let manager = ResourceManager::get(self.resource_address());
+        let output_bucket = if statement.inputs_statement.revealed_amount.is_positive() {
+            let revealed_input_funds = self.take(statement.inputs_statement.revealed_amount);
+            manager.stealth_transfer_with_opt_input_bucket(statement, Some(revealed_input_funds))
+        } else {
+            manager.stealth_transfer(statement)
+        };
+
+        if let Some(output_bucket) = output_bucket {
+            // Put the output bucket back into the original bucket
+            return self.join(output_bucket);
+        }
+
+        self
     }
 
     /// Takes (withdraws) confidential resources from the bucket into a new bucket.

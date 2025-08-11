@@ -794,7 +794,7 @@ impl TryFrom<proto::transaction::StealthTransferStatement> for tari_template_lib
                 .inputs_statement
                 .ok_or_else(|| anyhow!("Inputs statement not provided"))?
                 .try_into()?,
-            outputs_statements: value
+            outputs_statement: value
                 .outputs_statement
                 .ok_or_else(|| anyhow!("output_statement not provided"))?
                 .try_into()?,
@@ -808,7 +808,7 @@ impl From<tari_template_lib::models::StealthTransferStatement> for proto::transa
     fn from(value: tari_template_lib::models::StealthTransferStatement) -> Self {
         Self {
             inputs_statement: Some(value.inputs_statement.into()),
-            outputs_statement: Some(value.outputs_statements.into()),
+            outputs_statement: Some(value.outputs_statement.into()),
             balance_proof: value.balance_proof.to_bytes(),
         }
     }

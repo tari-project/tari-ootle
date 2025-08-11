@@ -422,7 +422,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         let addresses = req
             .addresses
             .iter()
-            .map(|raw| TemplateAddress::try_from_vec(raw.clone()))
+            .map(|raw| TemplateAddress::try_from_slice(raw))
             .collect::<Result<Vec<TemplateAddress>, HashParseError>>()
             .map_err(|error| RpcStatus::bad_request(format!("Failed to parse address: {}", error)))?;
 

@@ -65,7 +65,7 @@ pub struct StealthInputsStatement {
 )]
 pub struct StealthTransferStatement {
     pub inputs_statement: StealthInputsStatement,
-    pub outputs_statements: StealthOutputsStatement,
+    pub outputs_statement: StealthOutputsStatement,
     /// Balance proof that proves that no coins were created or destroyed during the transfer (assuming the range proof
     /// is valid).
     #[cfg_attr(feature = "ts", ts(type = "{public_nonce: string, signature: string}"))]

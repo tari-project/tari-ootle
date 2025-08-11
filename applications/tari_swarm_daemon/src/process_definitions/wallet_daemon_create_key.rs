@@ -43,7 +43,9 @@ impl ProcessDefinition for WalletDaemonCreateKey {
         if let Some(override_keyring_password) =
             context.get_setting(wallet_daemon::OVERRIDE_KEYRING_PASSWORD_SETTINGS_KEY)
         {
-            command.arg(format!("--override-keyring-password='{override_keyring_password}'"));
+            command
+                .arg("--override-keyring-password")
+                .arg(override_keyring_password);
         }
 
         Ok(command)

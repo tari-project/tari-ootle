@@ -58,6 +58,7 @@ use crate::{
         ResourceInvokeArg,
         ResourceRef,
         ResourceUpdateNonFungibleDataArg,
+        StealthTransferResourceArg,
         VaultFreezeFlags,
     },
     auth::{OwnerRule, ResourceAccessRules},
@@ -70,6 +71,7 @@ use crate::{
         NonFungibleId,
         ResourceAddress,
         ResourceAddressAllocation,
+        StealthTransferStatement,
         VaultId,
     },
     prelude::{AuthHook, ResourceType},
@@ -248,13 +250,12 @@ impl ResourceManager {
         })
     }
 
-    /// Mints new revealed tokens for the stealth resource managed by this `ResourceManager`, returning a [`Bucket`]
-    /// containing the minted funds.
+    /// Mints new revealed tokens for the stealth resource managed by this `ResourceManager`,
+    /// returning a [`Bucket`] containing the minted funds.
     ///
     /// # Arguments
     ///
-    /// * `amount` – A [`ConfidentialOutputStatement`] containing the outputs to mint. This the outputs to mint, and a
-    ///   range proof.
+    /// * `amount` – The revealed amount to mint.
     ///
     /// # Panics
     ///
@@ -498,6 +499,45 @@ impl ResourceManager {
         self.mint_internal(MintResourceArg {
             mint_arg: MintArg::Fungible { amount: amount.into() },
         })
+    }
+
+    /// Executes a stealth transfer for the resource managed by this [ResourceManager].
+    ///
+    /// If the [StealthTransferStatement] is valid, and contains revealed outputs, this method will return a
+    /// [Bucket] containing the revealed output funds. If the revealed output amount is zero, it will return `None`.
+    pub fn stealth_transfer(&self, transfer: StealthTransferStatement) -> Option<Bucket> {
+        self.stealth_transfer_internal(transfer, None)
+    }
+
+    /// Executes a stealth transfer for the resource managed by this [ResourceManager] consuming the input bucket (if
+    /// provided) containing revealed stealth funds.
+    ///
+    /// If the [StealthTransferStatement] is valid, and contains revealed outputs, this method will return a
+    /// [Bucket] containing the revealed output funds. If the revealed output amount is zero, it will return `None`.
+    pub fn stealth_transfer_with_opt_input_bucket(
+        &self,
+        transfer: StealthTransferStatement,
+        input_bucket: Option<Bucket>,
+    ) -> Option<Bucket> {
+        self.stealth_transfer_internal(transfer, input_bucket)
+    }
+
+    fn stealth_transfer_internal(
+        &self,
+        transfer: StealthTransferStatement,
+        input_bucket: Option<Bucket>,
+    ) -> Option<Bucket> {
+        let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
+            resource_ref: self.resource_address.into(),
+            action: ResourceAction::StealthTransfer,
+            args: invoke_args![StealthTransferResourceArg {
+                transfer,
+                input_bucket: input_bucket.map(|b| b.id())
+            }],
+        });
+
+        resp.decode()
+            .expect("[stealth_transfer] Failed to decode Option<Bucket>")
     }
 
     /// Recalls all tokens of a fungible resource from the specified vault, returning them in a [`Bucket`].

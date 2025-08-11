@@ -25,7 +25,7 @@ pub fn validate_transfer(
     transfer: &StealthTransferStatement,
     view_key: Option<&RistrettoPublicKey>,
 ) -> Result<ValidatedStealthTransfer, ResourceError> {
-    let validated_outputs = stealth::validate_stealth_outputs_statement(&transfer.outputs_statements, view_key)?;
+    let validated_outputs = stealth::validate_stealth_outputs_statement(&transfer.outputs_statement, view_key)?;
 
     let balance_proof =
         try_decode_to_signature(&transfer.balance_proof).ok_or_else(|| ResourceError::InvalidBalanceProof {
@@ -59,7 +59,7 @@ pub fn validate_transfer(
     })?;
     let revealed_output_commit = commit_amount_checked(
         &RistrettoSecretKey::default(),
-        transfer.outputs_statements.revealed_output_amount,
+        transfer.outputs_statement.revealed_output_amount,
     )
     .ok_or_else(|| ResourceError::InvalidBalanceProof {
         details: "Revealed output amount must be non-negative".to_string(),
@@ -72,17 +72,20 @@ pub fn validate_transfer(
         &public_excess,
         balance_proof.get_public_nonce(),
         &transfer.inputs_statement.revealed_amount,
-        &transfer.outputs_statements.revealed_output_amount,
+        &transfer.outputs_statement.revealed_output_amount,
     );
 
     if !balance_proof.verify_raw_uniform(&public_excess, &message) {
         return Err(ResourceError::InvalidBalanceProof {
-            details: "Balance proof signature verification failed".to_string(),
+            details: "Balance proof signature verification failed. This typically indicates that the transfer \
+                      statement total input amount != total output amount. Alternatively, the balance proof signature \
+                      could just be incorrect."
+                .to_string(),
         });
     }
 
     Ok(ValidatedStealthTransfer {
         outputs: validated_outputs,
-        revealed_output_amount: transfer.outputs_statements.revealed_output_amount,
+        revealed_output_amount: transfer.outputs_statement.revealed_output_amount,
     })
 }

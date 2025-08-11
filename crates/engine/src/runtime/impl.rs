@@ -95,6 +95,7 @@ use tari_template_lib::{
         ResourceGetNonFungibleArg,
         ResourceRef,
         ResourceUpdateNonFungibleDataArg,
+        StealthTransferResourceArg,
         VaultAction,
         VaultCreateProofByFungibleAmountArg,
         VaultCreateProofByNonFungiblesArg,
@@ -422,6 +423,122 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         }
 
         Ok(())
+    }
+
+    fn execute_stealth_transfer(
+        &self,
+        resource_address: ResourceAddressRef,
+        statement: StealthTransferStatement,
+        revealed_funds_bucket_id: Option<BucketId>,
+    ) -> Result<Option<BucketId>, RuntimeError> {
+        check_stealth_transfer_limits(&limits::STEALTH_LIMITS, &statement)?;
+
+        self.tracker.write_with(|state_mut| {
+            let resource_address = state_mut.resolve_resource_address_ref(resource_address)?;
+
+            let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(resource_address))?;
+            {
+                let resource = state_mut.get_resource(&resource_lock)?;
+                if !resource.resource_type().is_stealth() {
+                    return Err(ResourceError::OperationNotAllowed(format!(
+                        "Stealth transfer is only allowed for stealth resources: {}",
+                        resource_address
+                    ))
+                    .into());
+                }
+
+                // Authorize transfer
+                state_mut.authorization().check_resource_access_rules(
+                    // TODO: specific auth action for stealth transfer? Technically this is a withdraw and deposit, but
+                    // a separate AccessRule may be excessive/not useful.
+                    ResourceAuthAction::Withdraw,
+                    resource.as_ownership(),
+                    resource.access_rules(),
+                )?;
+            }
+
+            let revealed_funds_bucket = revealed_funds_bucket_id
+                .map(|id| state_mut.take_bucket(id))
+                .transpose()?;
+            if let Some(ref bucket) = revealed_funds_bucket {
+                if *bucket.resource_address() != resource_address {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "revealed_funds_bucket",
+                        reason: format!(
+                            "Revealed funds bucket resource address ({}) does not match the statement's resource \
+                             address ({})",
+                            bucket.resource_address(),
+                            resource_address
+                        ),
+                    });
+                }
+            }
+
+            match revealed_funds_bucket {
+                Some(ref bucket) => {
+                    if bucket.amount() != statement.inputs_statement.revealed_amount {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "revealed_funds_bucket",
+                            reason: format!(
+                                "Revealed funds bucket amount ({}) does not match the statement's revealed input \
+                                 amount ({})",
+                                bucket.amount(),
+                                statement.inputs_statement.revealed_amount
+                            ),
+                        });
+                    }
+                },
+                None => {
+                    if !statement.inputs_statement.revealed_amount.is_zero() {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "revealed_funds_bucket",
+                            reason: format!(
+                                "An input bucket is required but not provided for stealth transfers with revealed \
+                                 input amount ({})",
+                                statement.inputs_statement.revealed_amount
+                            ),
+                        });
+                    }
+                },
+            }
+
+            state_mut.spend_stealth_utxos(resource_address, &statement.inputs_statement)?;
+
+            let resource = state_mut.get_resource(&resource_lock)?;
+            let view_key = resource
+                .view_key()
+                .map(RistrettoPublicKey::try_from_byte_type)
+                .transpose()
+                .map_err(|e| {
+                    warn!(target: LOG_TARGET, "Stealth transfer failed - malformed view key: {}", e);
+                    RuntimeError::InvalidArgument {
+                        argument: "view_key",
+                        reason: "Malformed RistrettoPublicKeyBytes".to_string(),
+                    }
+                })?;
+
+            let valid_transfer = stealth::validate_transfer(&statement, view_key.as_ref())?;
+
+            for output in valid_transfer.outputs {
+                let address = UtxoAddress::new(resource_address, output.output.commitment.to_byte_type().into());
+                let value = Utxo::new(output.to_utxo_output());
+                state_mut.new_substate(address, value)?;
+            }
+
+            state_mut.unlock_substate(resource_lock)?;
+
+            if valid_transfer.revealed_output_amount.is_zero() {
+                return Ok(None);
+            }
+
+            let bucket_id = state_mut.new_bucket_id();
+            state_mut.new_bucket(
+                bucket_id,
+                ResourceContainer::stealth(resource_address, valid_transfer.revealed_output_amount),
+            )?;
+
+            Ok(Some(bucket_id))
+        })
     }
 }
 
@@ -1192,6 +1309,21 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                     Ok(InvokeResult::unit())
                 })
+            },
+            ResourceAction::StealthTransfer => {
+                let resource_address =
+                    resource_ref
+                        .as_resource_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "StealthTransfer resource action requires a resource address".to_string(),
+                        })?;
+                let arg: StealthTransferResourceArg = args.assert_one_arg()?;
+                let maybe_bucket =
+                    self.execute_stealth_transfer(resource_address.into(), arg.transfer, arg.input_bucket)?;
+                Ok(InvokeResult::encode(
+                    &maybe_bucket.map(tari_template_lib::models::Bucket::from_id),
+                )?)
             },
         }
     }
@@ -2638,92 +2770,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         statement: StealthTransferStatement,
         revealed_funds_bucket_id: Option<BucketId>,
     ) -> Result<Option<BucketId>, RuntimeError> {
-        check_stealth_transfer_limits(&limits::STEALTH_LIMITS, &statement)?;
-
-        self.tracker.write_with(|state_mut| {
-            let resource_address = state_mut.resolve_resource_address_ref(resource_address)?;
-            let resource_lock = state_mut.read_lock_substate(&resource_address.into())?;
-
-            let revealed_funds_bucket = revealed_funds_bucket_id
-                .map(|id| state_mut.take_bucket(id))
-                .transpose()?;
-            if let Some(ref bucket) = revealed_funds_bucket {
-                if *bucket.resource_address() != resource_address {
-                    return Err(RuntimeError::InvalidArgument {
-                        argument: "revealed_funds_bucket",
-                        reason: format!(
-                            "Revealed funds bucket resource address ({}) does not match the statement's resource \
-                             address ({})",
-                            bucket.resource_address(),
-                            resource_address
-                        ),
-                    });
-                }
-            }
-
-            match revealed_funds_bucket {
-                Some(ref bucket) => {
-                    if bucket.amount() != statement.inputs_statement.revealed_amount {
-                        return Err(RuntimeError::InvalidArgument {
-                            argument: "revealed_funds_bucket",
-                            reason: format!(
-                                "Revealed funds bucket amount ({}) does not match the statement's revealed input \
-                                 amount ({})",
-                                bucket.amount(),
-                                statement.inputs_statement.revealed_amount
-                            ),
-                        });
-                    }
-                },
-                None => {
-                    if !statement.inputs_statement.revealed_amount.is_zero() {
-                        return Err(RuntimeError::InvalidArgument {
-                            argument: "revealed_funds_bucket",
-                            reason: format!(
-                                "An input bucket is required but not provided for stealth transfers with revealed \
-                                 input amount ({})",
-                                statement.inputs_statement.revealed_amount
-                            ),
-                        });
-                    }
-                },
-            }
-
-            state_mut.spend_stealth_utxos(resource_address, &statement.inputs_statement)?;
-
-            let resource = state_mut.get_resource(&resource_lock)?;
-            let view_key = resource
-                .view_key()
-                .map(RistrettoPublicKey::try_from_byte_type)
-                .transpose()
-                .map_err(|e| {
-                    warn!(target: LOG_TARGET, "Stealth transfer failed - malformed view key: {}", e);
-                    RuntimeError::InvalidArgument {
-                        argument: "view_key",
-                        reason: "Malformed RistrettoPublicKeyBytes".to_string(),
-                    }
-                })?;
-
-            let valid_transfer = stealth::validate_transfer(&statement, view_key.as_ref())?;
-
-            for output in valid_transfer.outputs {
-                let address = UtxoAddress::new(resource_address, output.output.commitment.to_byte_type().into());
-                let value = Utxo::new(output.to_utxo_output());
-                state_mut.new_substate(address, value)?;
-            }
-
-            if valid_transfer.revealed_output_amount.is_zero() {
-                return Ok(None);
-            }
-
-            let bucket_id = state_mut.new_bucket_id();
-            state_mut.new_bucket(
-                bucket_id,
-                ResourceContainer::stealth(resource_address, valid_transfer.revealed_output_amount),
-            )?;
-
-            Ok(Some(bucket_id))
-        })
+        self.execute_stealth_transfer(resource_address, statement, revealed_funds_bucket_id)
     }
 }
 

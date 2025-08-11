@@ -344,7 +344,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                     })?,
                     template_name: t.template_name,
                     expected_hash: t.expected_hash.try_into()?,
-                    template_address: TemplateAddress::try_from_vec(t.template_address)?,
+                    template_address: TemplateAddress::try_from_slice(&t.template_address)?,
                     template_type: t.template_type.parse().expect("DB template type corrupted"),
                     code: t.code,
                     url: t.url,

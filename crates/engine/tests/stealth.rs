@@ -41,28 +41,12 @@ fn setup(
     let template_addr = test.get_template_address(TEMPLATE_NAME);
     let initial_supply = transfer_data.statement.inputs_statement.revealed_amount;
 
-    if transfer_data
-        .statement
-        .outputs_statements
-        .revealed_output_amount
-        .is_positive()
-    {
-        panic!("setup expects no revealed output amount in the transfer data");
-    }
-
     let transaction = Transaction::builder()
-        .allocate_resource_address("resx")
-        .allocate_component_address("faucet")
         .call_function(template_addr, "new", args![
-            Workspace("faucet"),
-            Workspace("resx"),
             initial_supply,
+            transfer_data.statement,
             view_key.map(|vk| vk.to_byte_type())
         ])
-        // Convert initial supply to stealth outputs
-        .call_method("faucet", "take_funds", args![initial_supply])
-        .put_last_instruction_output_on_workspace("funds")
-        .stealth_transfer_with_input_bucket("resx", transfer_data.statement.clone(), "funds")
         .build_and_seal(test.secret_key());
 
     test.execute_expect_success(transaction, vec![]);
@@ -129,6 +113,44 @@ fn basic_transfer() {
         .collect::<Vec<_>>();
     assert_eq!(utxos.len(), 1);
     assert!(utxos[0].output().is_some());
+}
+
+#[test]
+fn programmatic_transfer() {
+    let outputs = vec![100, 1000, 10000];
+    let mint = stealth::generate_mint_statement(outputs, 100, None);
+    let (mut test, faucet, _faucet_resx) = setup(&mint, None);
+
+    let vault_id = test
+        .get_previous_output_address(SubstateType::Vault)
+        .as_vault_id()
+        .unwrap();
+
+    let transfer = stealth::generate_transfer_data(
+        &[MaskAndValue {
+            mask: mint.output_masks[0].clone(),
+            value: 100.into(),
+        }],
+        0,
+        Some(75),
+        25,
+    );
+    let result = test.execute_expect_success(
+        Transaction::builder()
+            .call_method(faucet, "programmatic_transfer", args![transfer.statement])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    let diff = result.finalize.accept().unwrap();
+    let utxos = diff
+        .up_iter()
+        .filter_map(|(_, substate)| substate.substate_value().as_utxo())
+        .collect::<Vec<_>>();
+    assert_eq!(utxos.len(), 1);
+    assert!(utxos[0].output().is_some());
+    let vault = test.read_only_state_store().get_vault(&vault_id).unwrap();
+    assert_eq!(vault.balance(), 125);
 }
 
 #[test]
@@ -300,12 +322,12 @@ fn transfer_invalid_range_proof_in_statement() {
     );
     let mut rp = transfer_from_faucet
         .statement
-        .outputs_statements
+        .outputs_statement
         .agg_range_proof
         .clone()
         .into_vec();
     rp[100] = rp[100].wrapping_add(1); // Corrupt the range proof
-    transfer_from_faucet.statement.outputs_statements.agg_range_proof = rp.try_into().unwrap();
+    transfer_from_faucet.statement.outputs_statement.agg_range_proof = rp.try_into().unwrap();
 
     let reason = test.execute_expect_failure(
         Transaction::builder()

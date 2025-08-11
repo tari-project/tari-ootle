@@ -198,8 +198,8 @@ impl Display for Instruction {
                     f,
                     "StealthTransfer {{ resource_address: {}, output(s): {}, rp-size: {}, bucket: {:?} }}",
                     resource_address,
-                    statement.outputs_statements.outputs.len(),
-                    statement.outputs_statements.agg_range_proof.len(),
+                    statement.outputs_statement.outputs.len(),
+                    statement.outputs_statement.agg_range_proof.len(),
                     bucket
                 )
             },

@@ -88,7 +88,7 @@ pub fn create_transfer_statement(
             inputs: inputs_to_spend,
             revealed_amount: revealed_input_amount,
         },
-        outputs_statements: outputs_statement,
+        outputs_statement,
         balance_proof,
     })
 }

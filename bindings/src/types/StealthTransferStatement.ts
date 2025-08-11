@@ -4,7 +4,7 @@ import type { StealthOutputsStatement } from "./StealthOutputsStatement";
 
 export type StealthTransferStatement = {
   inputs_statement: StealthInputsStatement;
-  outputs_statements: StealthOutputsStatement;
+  outputs_statement: StealthOutputsStatement;
   /**
    * Balance proof that proves that no coins were created or destroyed during the transfer (assuming the range proof
    * is valid).

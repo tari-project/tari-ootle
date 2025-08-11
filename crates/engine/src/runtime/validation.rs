@@ -16,7 +16,7 @@ pub(crate) fn check_stealth_transfer_limits(
             actual_inputs: statement.inputs_statement.inputs.len(),
         });
     }
-    check_stealth_outputs_limits(limits, &statement.outputs_statements)?;
+    check_stealth_outputs_limits(limits, &statement.outputs_statement)?;
     Ok(())
 }
 

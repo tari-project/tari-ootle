@@ -29,22 +29,27 @@ pub fn generate_stealth_output_statement<I: IntoIterator<Item = A>, A: Into<Amou
     )
 }
 
-pub fn generate_mint_statement<I: IntoIterator<Item = A>, A: Into<Amount>>(
+pub fn generate_mint_statement<I: IntoIterator<Item = A>, A: Into<Amount> + Copy>(
     stealth_output_amounts: I,
     revealed_output_amount: A,
     view_key: Option<&RistrettoPublicKey>,
 ) -> StealthUnblindedTransferData {
-    let amounts = stealth_output_amounts.into_iter().map(Into::into).collect::<Vec<_>>();
-    let total_revealed_inputs = amounts.iter().copied().sum::<Amount>();
+    let stealth_output_amounts = stealth_output_amounts.into_iter().map(Into::into).collect::<Vec<_>>();
+    let total_revealed_inputs = stealth_output_amounts.iter().copied().sum::<Amount>() + revealed_output_amount.into();
     match view_key {
         Some(view_key) => generate_transfer_data_with_view_key(
             &[],
             total_revealed_inputs,
-            amounts,
+            stealth_output_amounts,
             revealed_output_amount.into(),
             view_key,
         ),
-        None => generate_transfer_data(&[], total_revealed_inputs, amounts, revealed_output_amount.into()),
+        None => generate_transfer_data(
+            &[],
+            total_revealed_inputs,
+            stealth_output_amounts,
+            revealed_output_amount.into(),
+        ),
     }
 }
 

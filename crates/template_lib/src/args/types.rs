@@ -42,6 +42,7 @@ use crate::{
         ProofId,
         ResourceAddress,
         ResourceAddressAllocation,
+        StealthTransferStatement,
         VaultId,
         VaultRef,
     },
@@ -238,6 +239,8 @@ pub enum ResourceAction {
     UpdateAccessRules,
     /// Sets the freeze flags on a vault of a resource.
     SetFreeze,
+    /// Executes a stealth transfer for the resource
+    StealthTransfer,
 }
 
 /// All the possible minting operation types
@@ -287,6 +290,13 @@ pub struct CreateResourceArg {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MintResourceArg {
     pub mint_arg: MintArg,
+}
+
+/// Stealth transfer operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StealthTransferResourceArg {
+    pub transfer: StealthTransferStatement,
+    pub input_bucket: Option<BucketId>,
 }
 
 /// A resource minting operation argument

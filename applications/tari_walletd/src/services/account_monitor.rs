@@ -478,17 +478,34 @@ where
 
         let mut new_account = None;
         if let Some(account) = self.pending_accounts.remove(&tx_id) {
+            let existing_account = accounts_api.get_account_by_address(&account.address).optional()?;
             // Check that the new account was created in this transaction
-            if !diff.up_iter().any(|(id, _)| *id == account.address) {
-                return Err(AccountMonitorError::ExpectedNewAccount {
+            if diff.up_iter().any(|(id, _)| *id == account.address) {
+                // NOTE: that account must exist by this point
+                self.mark_account_as_on_chain(&account.address)?;
+                new_account = existing_account;
+                debug!(
+                    target: LOG_TARGET,
+                    "👁️‍🗨️ New account {} created in transaction {}",
+                    account.address,
+                    tx_id
+                );
+            } else if existing_account.is_none_or(|acc| !acc.is_confirmed_on_chain()) {
+                warn!(
+                    target: LOG_TARGET,
+                    "⚠️ Transaction {} does not contain the new account {} but the account does not exist or is not on-chain. This should be impossible.",
                     tx_id,
-                    address: account.address,
-                });
+                    account.address,
+                );
+                // Continue anyway
+            } else {
+                info!(
+                    target: LOG_TARGET,
+                    "👁️‍🗨️ Account {} already exists and on-chain (processing transaction result {})",
+                    account.address,
+                    tx_id
+                );
             }
-            // NOTE: that account must exist by this point
-            self.mark_account_as_on_chain(&account.address)?;
-
-            new_account = Some(accounts_api.get_account_by_address(&account.address)?);
         }
 
         let mut vaults = diff
@@ -610,11 +627,24 @@ where
         }
 
         if let Some(account) = new_account {
+            debug!(
+                target: LOG_TARGET,
+                "👁️‍🗨️ Notifying account created for tx {}: {}",
+                tx_id,
+                account
+            );
             self.notify.notify(AccountCreatedEvent {
                 account: account.account,
                 _created_by_tx: tx_id,
             });
-        } else {
+        }
+        if !updated_accounts.is_empty() {
+            debug!(
+                target: LOG_TARGET,
+                "👁️‍🗨️ Notifying {} account(s) changed for tx {}",
+                updated_accounts.len(),
+                tx_id
+            );
             for account_address in updated_accounts {
                 self.notify.notify(AccountChangedEvent { account_address });
             }
@@ -765,12 +795,6 @@ pub enum AccountMonitorError {
     UnexpectedSubstate(String),
     #[error("Monitor service is not running")]
     ServiceShutdown,
-
-    #[error("Expected new account '{address}'to be created in transaction {tx_id}")]
-    ExpectedNewAccount {
-        tx_id: TransactionId,
-        address: ComponentAddress,
-    },
 }
 
 impl IsNotFoundError for AccountMonitorError {

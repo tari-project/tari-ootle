@@ -613,6 +613,7 @@ pub async fn handle_claim_burn(
 }
 
 /// Mints coins into an existing account from the testnet faucet.
+#[allow(clippy::too_many_lines)]
 pub async fn handle_create_free_test_coins(
     context: &HandlerContext,
     token: Option<&Bearer>,
@@ -697,6 +698,13 @@ pub async fn handle_create_free_test_coins(
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .build_and_seal(&account_secret_key.key);
 
+    info!(
+        target: LOG_TARGET,
+        "💰️ create free test coins: Submitting transaction {} for account: {}",
+        transaction.calculate_id(),
+        account.account,
+    );
+
     let mut events = context.notifier().subscribe();
     let tx_id = context
         .transaction_service()
@@ -719,6 +727,14 @@ pub async fn handle_create_free_test_coins(
             reason
         ));
     }
+
+    info!(
+        target: LOG_TARGET,
+        "💰️ create free test coins: Transaction {} finalized for account: {}",
+        tx_id,
+        account.account,
+    );
+
     // Refresh the account
     let account = accounts_api
         .get_account_by_address(account.address())

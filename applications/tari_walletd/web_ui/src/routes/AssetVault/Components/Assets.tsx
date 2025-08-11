@@ -111,6 +111,7 @@ function BalanceRow(props: BalanceRowProps) {
 function ConfidentialBalance(props: { show: boolean; balance: Amount; resourceType: string; divisibility: number }) {
   switch (props.resourceType) {
     case "Confidential":
+    case "Stealth":
       return <>{props.show ? bigintToDecimalString(props.balance, props.divisibility) : "**************"}</>;
     default:
       return <>--</>;

@@ -2,7 +2,7 @@
 import type { CommitteeInfo } from "../CommitteeInfo";
 import type { Epoch } from "../Epoch";
 
-export interface GetEpochManagerStatsResponse {
+export type GetEpochManagerStatsResponse = {
   current_epoch: Epoch;
   current_block_height: number;
   current_block_hash: string;
@@ -10,4 +10,4 @@ export interface GetEpochManagerStatsResponse {
   is_initial_scanning_complete: boolean;
   start_epoch: Epoch | null;
   committee_info: CommitteeInfo | null;
-}
+};

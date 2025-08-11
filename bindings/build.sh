@@ -9,21 +9,29 @@ DIST_DIR="dist"
 HELPERS_DIR="helpers"
 MAIN_INDEX_FILE="index.ts"
 
-if [ -f "$SOURCE_PATH/$TYPES_DIR" ]; then
-  npx shx rm -rf $SOURCE_PATH/$TYPES_DIR
+if [ -d "$SOURCE_PATH/$TYPES_DIR" ]; then
+  echo "Removing $SOURCE_PATH/$TYPES_DIR"
+  npx shx rm -rf $SOURCE_PATH/$TYPES_DIR || true
 fi
-if [ -f "$SOURCE_PATH/$MAIN_INDEX_FILE" ]; then
-  npx shx rm $SOURCE_PATH/$MAIN_INDEX_FILE
-fi
+for file in $(find "$SOURCE_PATH" -name "*.ts" -maxdepth 1); do
+  echo "Removing $file"
+  npx shx rm $file || true
+done
 if [ -f "$SOURCE_PATH/$DIST_DIR" ]; then
-  npx shx rm -rf ./$DIST_DIR
+  echo "Removing $SOURCE_PATH/$DIST_DIR"
+  npx shx rm -rf ./$DIST_DIR || true
 fi
 
+mkdir -p $SOURCE_PATH/$TYPES_DIR
+
 cargo test --workspace --exclude integration_tests export_bindings --features ts
+echo "Moving ../crates/bindings/src to $SOURCE_PATH/$TYPES_DIR"
 npx shx mv ../crates/bindings/src/types/* ./src/types/
 npx shx rm -rf ../crates/bindings/
+echo "Moving ../clients/bindings/src to $SOURCE_PATH/$TYPES_DIR"
 npx shx mv ../clients/bindings/src/types/* ./src/types/
 npx shx rm -rf ../clients/bindings/
+echo "Moving ../crates/wallet/bindings/src to $SOURCE_PATH/$TYPES_DIR"
 npx shx mv ../crates/wallet/bindings/src/types/* ./src/types/
 npx shx rm -rf ../crates/wallet/bindings/
 

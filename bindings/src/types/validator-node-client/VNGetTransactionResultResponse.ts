@@ -2,8 +2,8 @@
 import type { Decision } from "../Decision";
 import type { TransactionExecution } from "../TransactionExecution";
 
-export interface VNGetTransactionResultResponse {
+export type VNGetTransactionResultResponse = {
   transaction_execution: TransactionExecution;
   final_decision: Decision;
   finalize_at: string;
-}
+};

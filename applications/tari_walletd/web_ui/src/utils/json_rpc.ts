@@ -57,8 +57,8 @@ import type {
   KeysListResponse,
   KeysSetActiveRequest,
   KeysSetActiveResponse,
-  ListAccountNftRequest,
-  ListAccountNftResponse,
+  ListNftsRequest,
+  ListNftsResponse,
   MintFaucetNftRequest,
   MintFaucetNftResponse,
   PublishTemplateRequest,
@@ -298,7 +298,7 @@ export const confidentialViewVaultBalance = (
 ): Promise<ConfidentialViewVaultBalanceResponse> => client().then((c) => c.viewVaultBalance(request));
 
 // nfts
-export const nftList = (request: ListAccountNftRequest): Promise<ListAccountNftResponse> =>
+export const nftList = (request: ListNftsRequest): Promise<ListNftsResponse> =>
   client().then((c) => c.nftsList(request));
 
 export const nftTransfer = (request: TransferNftRequest): Promise<TransferNftResponse> =>

@@ -33,7 +33,7 @@ import useAccountStore from "../../../store/accountStore";
 import type {
   Account,
   ComponentAddressOrName,
-  NonFungibleAddress,
+  ResourceAddress,
   NonFungibleId,
   NonFungibleToken,
   TransactionResult,
@@ -73,12 +73,6 @@ interface NftListItem {
   name: string;
 }
 
-function nftIdToString(nftId: NonFungibleId): string {
-  const key = Object.keys(nftId)[0];
-  // @ts-ignore
-  return nftId[key].toString();
-}
-
 function getNftIdTypeAsName(nftId: NonFungibleId): string {
   const key = Object.keys(nftId)[0];
   switch (key) {
@@ -95,15 +89,11 @@ function getNftIdTypeAsName(nftId: NonFungibleId): string {
   }
 }
 
-function getNftAddress(nft: NonFungibleToken): string {
-  return (
-    "nft_" +
-    nft.resource_address.replace("resource_", "") +
-    "_" +
-    getNftIdTypeAsName(nft.nft_id) +
-    "_" +
-    nftIdToString(nft.nft_id)
-  );
+function nftIdToString(nftId: NonFungibleId): string {
+  const key = Object.keys(nftId)[0];
+  // @ts-ignore
+  const id = nftId[key].toString();
+  return getNftIdTypeAsName(nftId) + "_" + id;
 }
 
 function getAccountSelector(account: Account): ComponentAddressOrName {
@@ -119,9 +109,10 @@ function getAccountSelector(account: Account): ComponentAddressOrName {
 export function TransferNftDialog(props: TransferNftDialogProps) {
   const INITIAL_VALUES = {
     payerAccount: "",
-    nfts: [] as string[],
+    nfts: [] as NonFungibleId[],
     targetAccountPublicKey: "",
     maxFee: "",
+    resourceAddress: "" as ResourceAddress,
   };
   const [disabled, setDisabled] = useState(false);
   const [transferFormState, setTransferFormState] = useState(INITIAL_VALUES);
@@ -149,7 +140,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   }, [transferFormState.payerAccount]);
 
   // list NFTs
-  const { data: accountNfts, refetch: refetchNfts } = useListNfts({
+  const { data: loadedNfts, refetch: refetchNfts } = useListNfts({
     account: getAccountSelector(account),
   });
 
@@ -164,11 +155,11 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   const { mutateAsync: calculateFeeEstimate } = useNftsTransfer({
     dry_run: true,
     max_fee: 3000,
-    // TODO: fix this
-    nfts: transferFormState.nfts as unknown as string[],
+    nfts: transferFormState.nfts,
     source_account: getAccountSelector(account),
     target_account_public_key: transferFormState.targetAccountPublicKey,
     fee_payer_account: payerAccount,
+    resource_address: transferFormState.resourceAddress,
   });
 
   const { mutateAsync: sendTransferNftsTx } = useNftsTransfer({
@@ -178,6 +169,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     dry_run: false,
     max_fee: parseInt(transferFormState.maxFee),
     fee_payer_account: payerAccount,
+    resource_address: transferFormState.resourceAddress,
   });
 
   function setFormValue(e: React.ChangeEvent<HTMLInputElement>) {
@@ -216,7 +208,6 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
             });
             return;
           }
-          setNfts([]);
           setTransferFormState(INITIAL_VALUES);
           props.onSendComplete?.();
           setPopup({ title: "NFT transfer transaction", error: false, message: "Sent successfully!" });
@@ -262,7 +253,6 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
 
   const handleClose = () => {
     // rest states
-    setNfts([]);
     setTransferFormState(INITIAL_VALUES);
     setDisabled(false);
     props.handleClose?.();
@@ -272,33 +262,12 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     setAllValid(Object.values(validity).every((v) => v));
   }, [validity]);
 
-  // NFT listing
-  const [nfts, setNfts] = useState<NftListItem[]>([]);
-  const [availableNfts, setAvailableNfts] = useState<NftListItem[]>([]);
+  const [availableNfts, setAvailableNfts] = useState<NonFungibleToken[]>([]);
   useEffect(() => {
-    if (accountNfts !== undefined) {
-      setAvailableNfts(
-        accountNfts.map((nft) => {
-          let nftName = "";
-
-          const nftData = convertCborValue(nft.data);
-          if (nftData) {
-            Object.keys(nftData).forEach((key) => {
-              const value = nftData[key];
-              if (key === "name") {
-                nftName = value;
-                return;
-              }
-            });
-          }
-
-          let nft_address = getNftAddress(nft);
-
-          return { address: nft_address, name: nftName || nft_address };
-        }),
-      );
+    if (loadedNfts !== undefined) {
+      setAvailableNfts(loadedNfts);
     }
-  }, [accountNfts]);
+  }, [loadedNfts]);
 
   useEffect(() => {
     if (transferFormState.payerAccount != "") {
@@ -313,26 +282,30 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     if (typeof event.target.value == "string") {
       return;
     }
-    const nftNamesSelected = event.target.value;
+    const nftNamesSelected = event.target.value.map((s) => JSON.parse(s)) as NonFungibleId[];
     const nftsSelected = nftNamesSelected
-      .map((itemName) => {
+      .map((nftId) => {
         return availableNfts.find((nft) => {
-          return nft.name === itemName;
-        });
+          return nftIdToString(nft.nft_id) === nftIdToString(nftId);
+        })!;
       })
-      .filter((value) => Boolean(value)) as NftListItem[];
+      .filter((value) => Boolean(value));
 
     setValidity({
       ...validity,
       nfts: nftsSelected.length > 0,
     });
+    if (nftsSelected.length === 0) {
+      return;
+    }
 
     setTransferFormState({
       ...transferFormState,
-      nfts: nftsSelected.map((item) => item.address),
+      nfts: nftsSelected.map((item) => item.nft_id),
+      // TODO: for simplicity, this dialog should transfer NFTS from a specific vault/resource -
+      //       not for arbitrary NFTs from various vaults (this is not supported by the backend due to needlessly complexity/performance issues)
+      resourceAddress: nftsSelected[0].resource_address,
     });
-
-    setNfts(nftsSelected.map((item) => item!));
   };
 
   const handlePayerAccountChange = (event: SelectChangeEvent<string[]>) => {
@@ -412,16 +385,18 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
             name="nfts"
             id="nft-select"
             multiple
-            value={nfts.map((value) => value.name)}
+            value={transferFormState.nfts.map((nft) => JSON.stringify(nft))}
             required
             disabled={disabled}
             onChange={handleNftsChange}
             renderValue={(selected) => selected.map((item) => item).join(", ")}
           >
-            {availableNfts.map((nft) => (
-              <MenuItem key={nft.address} value={nft.name}>
-                <Checkbox checked={nfts.includes(nft)} />
-                <ListItemText primary={nft.name} />
+            {availableNfts.map((nft, i) => (
+              <MenuItem key={i} value={JSON.stringify(nft.nft_id)}>
+                <Checkbox
+                  checked={transferFormState.nfts.some((id) => nftIdToString(id) == nftIdToString(nft.nft_id))}
+                />
+                <ListItemText primary={nftIdToString(nft.nft_id)} />
               </MenuItem>
             ))}
           </Select>

@@ -2,7 +2,4 @@
 import type { Substate } from "../Substate";
 import type { WalletSubstateRecord } from "./WalletSubstateRecord";
 
-export interface SubstatesGetResponse {
-  record: WalletSubstateRecord | null;
-  substate: Substate | null;
-}
+export type SubstatesGetResponse = { record: WalletSubstateRecord | null; substate: Substate | null };

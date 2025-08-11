@@ -33,6 +33,8 @@ lazy_static! {
         BulletproofsPlusService::init(BP_BIT_LENGTH, 2, CommitmentFactory::default()).unwrap();
     static ref RANGE_PROOF_AGG_4_SERVICE: BulletproofsPlusService =
         BulletproofsPlusService::init(BP_BIT_LENGTH, 4, CommitmentFactory::default()).unwrap();
+    static ref RANGE_PROOF_AGG_8_SERVICE: BulletproofsPlusService =
+        BulletproofsPlusService::init(BP_BIT_LENGTH, 8, CommitmentFactory::default()).unwrap();
 }
 
 pub fn get_static_range_proof_service(aggregation_factor: usize) -> &'static BulletproofsPlusService {
@@ -40,6 +42,7 @@ pub fn get_static_range_proof_service(aggregation_factor: usize) -> &'static Bul
         1 => &RANGE_PROOF_AGG_1_SERVICE,
         2 => &RANGE_PROOF_AGG_2_SERVICE,
         4 => &RANGE_PROOF_AGG_4_SERVICE,
+        8 => &RANGE_PROOF_AGG_8_SERVICE,
         _ => panic!(
             "Unsupported BP aggregation factor {}. Expected 1/2/4",
             aggregation_factor
@@ -52,6 +55,7 @@ pub fn bullet_proof_service_factory(aggregation_factor: usize) -> ReadOnly<'stat
         1 => ReadOnly::Borrowed(&RANGE_PROOF_AGG_1_SERVICE),
         2 => ReadOnly::Borrowed(&RANGE_PROOF_AGG_2_SERVICE),
         4 => ReadOnly::Borrowed(&RANGE_PROOF_AGG_4_SERVICE),
+        8 => ReadOnly::Borrowed(&RANGE_PROOF_AGG_8_SERVICE),
         n => ReadOnly::Owned(
             BulletproofsPlusService::init(BP_BIT_LENGTH, n, CommitmentFactory::default())
                 .expect("Failed to initialize BulletproofsPlusService"),

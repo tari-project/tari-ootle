@@ -37,7 +37,7 @@ function AddAccount({ open, setOpen }: { open: boolean; setOpen: React.Dispatch<
   const [accountFormState, setAccountFormState] = useState({
     accountName: "",
   });
-  const { mutateAsync: mutateAddAccount } = useAccountsCreate(accountFormState.accountName, null, null, false);
+  const { mutateAsync: mutateAddAccount } = useAccountsCreate();
   const theme = useTheme();
   const [isBusy, setIsBusy] = useState(false);
 
@@ -48,15 +48,18 @@ function AddAccount({ open, setOpen }: { open: boolean; setOpen: React.Dispatch<
   const onSubmitAddAccount = async (e: FormEvent) => {
     e.preventDefault();
     setIsBusy(true);
-    await mutateAddAccount(undefined, {
-      onSettled: () => {
-        setAccountFormState({
-          accountName: "",
-        });
-        setOpen(false);
-        queryClient.invalidateQueries(["accounts"]);
+    await mutateAddAccount(
+      { accountName: accountFormState.accountName },
+      {
+        onSettled: () => {
+          setAccountFormState({
+            accountName: "",
+          });
+          setOpen(false);
+          queryClient.invalidateQueries(["accounts"]);
+        },
       },
-    });
+    );
     setIsBusy(false);
   };
 

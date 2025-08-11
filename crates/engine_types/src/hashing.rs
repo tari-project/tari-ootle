@@ -37,12 +37,12 @@ use tari_crypto::{
 use tari_hashing::TariEngineHashDomain;
 use tari_template_lib::types::Hash;
 
-pub fn hasher64(label: EngineHashDomainLabel) -> TariHasher64 {
+pub fn engine_hasher64(label: EngineHashDomainLabel) -> TariHasher64 {
     TariHasher64::new_with_label::<TariEngineHashDomain>(label.as_label())
 }
 
 pub fn template_hasher64() -> TariHasher64 {
-    hasher64(EngineHashDomainLabel::Template)
+    engine_hasher64(EngineHashDomainLabel::Template)
 }
 
 pub fn substate_value_hasher32() -> TariHasher32 {

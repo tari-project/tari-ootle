@@ -8,8 +8,9 @@ use integration_tests::{wallet_daemon_cli, TariWorld};
 use log::info;
 use tari_core::transactions::transaction_components::payment_id::{PaymentId, TxType};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
+use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
 use tari_template_lib::prelude::Amount;
-use tari_wallet_daemon_client::{types::KeyBranch, ComponentAddressOrName};
+use tari_wallet_daemon_client::ComponentAddressOrName;
 
 #[when(
     expr = "I claim burn {word} with {word}, {word} and {word} and spend it into account {word} via the wallet daemon \
@@ -24,6 +25,8 @@ async fn when_i_claim_burn_via_wallet_daemon(
     account_name: String,
     wallet_daemon_name: String,
 ) {
+    // First create the account with this name
+    wallet_daemon_cli::create_account(world, account_name.clone(), wallet_daemon_name.clone()).await;
     let commitment = world
         .commitments
         .get(&commitment_name)
@@ -40,6 +43,7 @@ async fn when_i_claim_burn_via_wallet_daemon(
         .claim_public_keys
         .get(&claim_pubkey_name)
         .unwrap_or_else(|| panic!("Claim public key {} not found", claim_pubkey_name));
+    // Then burn into the new account
     let claim_burn_resp = wallet_daemon_cli::claim_burn(
         world,
         account_name,
@@ -377,7 +381,7 @@ async fn when_transfer_via_wallet_daemon(
     wallet_daemon_name: String,
     outputs_name: String,
 ) {
-    let (_, destination_public_key) = world.account_keys.get(&destination_public_key).unwrap().clone();
+    let destination_public_key = *world.account_keys.get(&destination_public_key).unwrap();
     let amount = Amount::new(amount.into());
 
     let (resource_input_group, resource_name) = resource_address.split_once('/').unwrap_or_else(|| {
@@ -422,7 +426,7 @@ async fn when_confidential_transfer_via_wallet_daemon(
     wallet_daemon_name: String,
     outputs_name: String,
 ) {
-    let (_, destination_public_key) = world.account_keys.get(&destination_public_key).unwrap().clone();
+    let destination_public_key = *world.account_keys.get(&destination_public_key).unwrap();
 
     wallet_daemon_cli::confidential_transfer(
         world,

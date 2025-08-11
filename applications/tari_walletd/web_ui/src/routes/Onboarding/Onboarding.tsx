@@ -29,11 +29,11 @@ import Grid from "@mui/material/Grid";
 import Typography from "@mui/material/Typography";
 import { useTheme } from "@mui/material/styles";
 import Loading from "../../Components/Loading";
-import { useAccountsCreateFreeTestCoins } from "../../api/hooks/useAccounts";
+import { useAccountsCreate } from "../../api/hooks/useAccounts";
 import useAccountStore from "../../store/accountStore";
 
 function Onboarding() {
-  const { mutate, status } = useAccountsCreateFreeTestCoins();
+  const { mutate, status } = useAccountsCreate();
   const { setAccount, setPublicKey, setPopup } = useAccountStore();
   const theme = useTheme();
 
@@ -45,9 +45,7 @@ function Onboarding() {
     e.preventDefault();
     mutate(
       {
-        account: { Name: accountFormState.accountName },
-        amount: 1_000_000_000,
-        fee: 1000,
+        accountName: accountFormState.accountName,
       },
       {
         onSuccess: (resp) => {

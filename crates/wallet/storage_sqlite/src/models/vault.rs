@@ -4,9 +4,12 @@
 use std::str::FromStr;
 
 use diesel::{Identifiable, Queryable};
-use tari_engine_types::substate::SubstateId;
 use tari_ootle_wallet_sdk::storage::WalletStorageError;
-use tari_template_lib::{models::ResourceAddress, resource::ResourceType, types::Amount};
+use tari_template_lib::{
+    models::{ComponentAddress, ResourceAddress, VaultId},
+    resource::ResourceType,
+    types::Amount,
+};
 use time::PrimitiveDateTime;
 
 use crate::schema::vaults;
@@ -23,19 +26,19 @@ pub struct Vault {
     pub confidential_balance: i64,
     pub locked_revealed_balance: i64,
     pub token_symbol: Option<String>,
+    pub divisibility: i32,
     pub created_at: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
-    pub divisibility: i32,
 }
 
 impl Vault {
     pub(crate) fn try_into_vault(
         self,
-        account_address: SubstateId,
+        account_address: ComponentAddress,
     ) -> Result<tari_ootle_wallet_sdk::models::VaultModel, WalletStorageError> {
         Ok(tari_ootle_wallet_sdk::models::VaultModel {
             account_address,
-            address: SubstateId::from_str(&self.address).map_err(|e| WalletStorageError::DecodingError {
+            id: VaultId::from_str(&self.address).map_err(|e| WalletStorageError::DecodingError {
                 operation: "try_into_vault",
                 item: "vault.address",
                 details: e.to_string(),

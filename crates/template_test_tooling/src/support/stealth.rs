@@ -183,8 +183,8 @@ fn generate_transfer_data_internal<I: IntoIterator<Item = A>, A: Into<Amount>>(
 
     let transfer = stealth::create_transfer_statement(
         &inputs,
-        &outputs,
         revealed_input_amount.into(),
+        &outputs,
         revealed_output_amount.into(),
     )
     .unwrap();

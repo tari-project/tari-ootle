@@ -40,7 +40,7 @@ use crate::{
 ///
 /// This can be used to derive the component address from a public key if the component sets public_key_address in the
 /// component builder.
-pub fn new_component_address_from_public_key(
+pub fn derive_component_address_from_public_key(
     template_address: &TemplateAddress,
     public_key: &RistrettoPublicKeyBytes,
 ) -> ComponentAddress {

@@ -2,29 +2,25 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 mod account;
-pub use account::*;
-
-mod config;
-pub use config::Config;
-
-mod wallet_transaction;
-pub use wallet_transaction::*;
-
-mod proof;
-pub use proof::*;
-
-mod confidential_output;
-pub use confidential_output::*;
-
-mod substate;
-pub use substate::*;
-
-mod vault;
-pub use vault::*;
-
 mod authored_template;
+mod confidential_output;
+mod config;
 mod non_fungible_tokens;
+mod stealth_output;
+mod substate;
+mod vault;
+mod wallet_transaction;
 mod webauthn_registration;
+
+pub use account::*;
 pub use authored_template::*;
+pub use confidential_output::*;
+pub use config::Config;
 pub use non_fungible_tokens::*;
+pub use stealth_output::*;
+pub use substate::*;
+pub use vault::*;
+pub use wallet_transaction::*;
 pub use webauthn_registration::*;
+
+pub type OutputLockId = u64;

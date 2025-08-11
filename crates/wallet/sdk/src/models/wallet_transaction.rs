@@ -10,7 +10,7 @@ use tari_engine_types::commit_result::FinalizeResult;
 use tari_transaction::{Transaction, TransactionId};
 use time::PrimitiveDateTime;
 
-use crate::models::NewAccountInfo;
+use crate::models::NewAccountData;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
@@ -31,7 +31,7 @@ pub struct WalletTransaction {
     pub execution_time: Option<Duration>,
     #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number} | null"))]
     pub finalized_time: Option<Duration>,
-    pub new_account_info: Option<NewAccountInfo>,
+    pub new_account_info: Option<NewAccountData>,
     pub is_dry_run: bool,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub last_update_time: PrimitiveDateTime,

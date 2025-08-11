@@ -10,14 +10,13 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
-    SubstateRequirement,
     VersionedSubstateIdRef,
 };
 use tari_template_lib::{constants::XTR, prelude::ComponentAddress};
 use tari_transaction::{Transaction, TransactionId};
 
 use crate::{
-    models::{NewAccountInfo, TransactionStatus, WalletTransaction, WalletTransactionUpdate},
+    models::{NewAccountData, TransactionStatus, WalletTransaction, WalletTransactionUpdate},
     network::{StatusResponseError, TransactionFinalizedResult, WalletNetworkInterface, WalletQueryErrorStatus},
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
@@ -51,14 +50,12 @@ where
     pub async fn insert_new_transaction(
         &self,
         transaction: Transaction,
-        required_substates: Vec<SubstateRequirement>,
-        new_account_info: Option<NewAccountInfo>,
+        new_account_info: Option<NewAccountData>,
         is_dry_run: bool,
     ) -> Result<TransactionId, TransactionApiError> {
         let tx_id = transaction.calculate_id();
-        self.store.with_write_tx(|tx| {
-            tx.transactions_insert(&transaction, &required_substates, new_account_info.as_ref(), is_dry_run)
-        })?;
+        self.store
+            .with_write_tx(|tx| tx.transactions_insert(&transaction, new_account_info.as_ref(), is_dry_run))?;
 
         Ok(tx_id)
     }
@@ -108,7 +105,7 @@ where
         transaction: Transaction,
     ) -> Result<WalletTransaction, TransactionApiError> {
         self.store
-            .with_write_tx(|tx| tx.transactions_insert(&transaction, &[], None, true))?;
+            .with_write_tx(|tx| tx.transactions_insert(&transaction, None, true))?;
 
         let tx_id = transaction.calculate_id();
         let result = self.network_interface.submit_dry_run_transaction(transaction).await;
@@ -255,9 +252,9 @@ where
                     if transaction.is_dry_run || new_status != TransactionStatus::Accepted {
                         self.release_all_outputs_for_transaction_internal(tx, transaction_id)?;
                     } else {
-                        let proof_ids = tx.proofs_get_by_transaction_id(transaction_id)?;
+                        let proof_ids = tx.output_locks_get_by_transaction_id(transaction_id)?;
                         for proof_id in proof_ids {
-                            tx.outputs_finalize_by_proof_id(proof_id)?;
+                            tx.outputs_finalize_by_lock_id(proof_id)?;
                             tx.vaults_finalized_locked_revealed_funds(proof_id)?;
                         }
                     }
@@ -284,11 +281,11 @@ where
         tx: &mut <TStore as WalletStore>::WriteTransaction<'_>,
         transaction_id: TransactionId,
     ) -> Result<(), TransactionApiError> {
-        let proof_ids = tx.proofs_get_by_transaction_id(transaction_id)?;
+        let proof_ids = tx.output_locks_get_by_transaction_id(transaction_id)?;
 
         debug!(target: LOG_TARGET, "Releasing {} proofs (and associated outputs) for transaction {} that was not committed", proof_ids.len(), transaction_id);
         for proof_id in proof_ids {
-            tx.outputs_release_by_proof_id(proof_id)?;
+            tx.outputs_release_by_lock_id(proof_id)?;
         }
 
         Ok(())
@@ -345,13 +342,13 @@ where
                             // The vault for an account may have been mutated without mutating the account component
                             // If we know this vault, set it as a child of the account
                             tx.substates_upsert_child(
-                                &vault.account_address,
+                                &vault.account_address.into(),
                                 VersionedSubstateIdRef::new(&owned_id, child.version()),
                                 [vault.resource_address.into()].into_iter().collect(),
                             )?;
                             if let Some(resource) = tx.substates_get(&vault.resource_address.into()).optional()? {
                                 tx.substates_upsert_child(
-                                    &vault.account_address,
+                                    &vault.account_address.into(),
                                     resource.substate_id.as_ref(),
                                     HashSet::new(),
                                 )?;
@@ -408,13 +405,13 @@ where
                             // The vault for an account may have been mutated without mutating the account component
                             // If we know this vault, set it as a child of the account
                             tx.substates_upsert_child(
-                                &vault.account_address,
+                                &vault.account_address.into(),
                                 VersionedSubstateIdRef::new(id, substate.version()),
                                 [vault.resource_address.into()].into_iter().collect(),
                             )?;
                             if let Some(resource) = tx.substates_get(&vault.resource_address.into()).optional()? {
                                 tx.substates_upsert_child(
-                                    &vault.account_address,
+                                    &vault.account_address.into(),
                                     resource.substate_id.as_ref(),
                                     HashSet::new(),
                                 )?;

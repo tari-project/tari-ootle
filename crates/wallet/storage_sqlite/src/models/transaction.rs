@@ -40,11 +40,10 @@ pub struct Transaction {
     pub max_epoch: Option<i64>,
     pub executed_time_ms: Option<i64>,
     pub finalized_time: Option<PrimitiveDateTime>,
-    pub _required_substates: String,
     pub new_account_info: Option<String>,
+    pub invalid_reason: Option<String>,
     pub updated_at: PrimitiveDateTime,
     pub created_at: PrimitiveDateTime,
-    pub invalid_reason: Option<String>,
 }
 
 impl Transaction {

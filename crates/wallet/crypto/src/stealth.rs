@@ -32,8 +32,8 @@ use crate::{
 
 pub fn create_transfer_statement(
     inputs: &[UnblindedStealthInputStatement],
-    output_statements: &[UnblindedStealthOutputStatement],
     revealed_input_amount: Amount,
+    output_statements: &[UnblindedStealthOutputStatement],
     revealed_output_amount: Amount,
 ) -> Result<StealthTransferStatement, WalletCryptoError> {
     if revealed_input_amount.is_negative() {

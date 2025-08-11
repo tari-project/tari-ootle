@@ -55,7 +55,6 @@ async fn handle_command(command: Command, client: WalletDaemonClient) -> anyhow:
         Command::Proofs(cmd) => cmd.handle(client).await?,
         Command::WebRtc(cmd) => cmd.handle(client).await?,
         Command::Auth(cmd) => cmd.handle(client).await?,
-        Command::AccountNft(cmd) => cmd.handle(client).await?,
         Command::Validator(cmd) => cmd.handle(client).await?,
     }
 

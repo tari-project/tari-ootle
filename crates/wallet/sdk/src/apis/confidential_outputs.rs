@@ -3,7 +3,7 @@
 
 use log::*;
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
-use tari_engine_types::{crypto::PrivateOutput, substate::SubstateId, FromByteType, ToByteType};
+use tari_engine_types::{crypto::PrivateOutput, FromByteType, ToByteType};
 use tari_key_manager::key_manager::DerivedKey;
 use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 use tari_ootle_wallet_crypto::{kdfs, MaskAndValue};
@@ -12,12 +12,11 @@ use tari_transaction::TransactionId;
 
 use crate::{
     apis::{
-        accounts::{AccountsApi, AccountsApiError},
+        accounts::AccountsApiError,
         confidential_crypto::{ConfidentialCryptoApi, ConfidentialCryptoApiError},
-        key_manager,
         key_manager::{KeyManagerApi, KeyManagerApiError},
     },
-    models::{Account, ConfidentialOutputModel, ConfidentialProofId, OutputStatus},
+    models::{Account, ConfidentialOutputModel, OutputLockId, OutputStatus},
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
@@ -26,30 +25,29 @@ const LOG_TARGET: &str = "tari::ootle::wallet_sdk::apis::confidential_outputs";
 pub struct ConfidentialOutputsApi<'a, TStore> {
     store: &'a TStore,
     key_manager_api: KeyManagerApi<'a, TStore>,
-    accounts_api: AccountsApi<'a, TStore>,
     crypto_api: ConfidentialCryptoApi,
 }
 
-impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
+impl<'a, TStore> ConfidentialOutputsApi<'a, TStore>
+where TStore: WalletStore
+{
     pub fn new(
         store: &'a TStore,
         key_manager_api: KeyManagerApi<'a, TStore>,
-        accounts_api: AccountsApi<'a, TStore>,
         crypto_api: ConfidentialCryptoApi,
     ) -> Self {
         Self {
             store,
             key_manager_api,
-            accounts_api,
             crypto_api,
         }
     }
 
     pub fn lock_outputs_by_amount<A: Into<Amount>>(
         &self,
-        vault_address: &SubstateId,
+        lock_id: OutputLockId,
+        vault_id: &VaultId,
         amount: A,
-        locked_by_proof_id: ConfidentialProofId,
     ) -> Result<(Vec<ConfidentialOutputModel>, Amount), ConfidentialOutputsApiError> {
         let amount =
             amount
@@ -59,39 +57,33 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
                     param: "amount",
                     reason: "Amount must be non-negative".to_string(),
                 })?;
-        let mut tx = self.store.create_write_tx()?;
-        let (outputs, total_output_amount) =
-            self.lock_outputs_internal(&mut tx, vault_address, amount, locked_by_proof_id)?;
+        self.store.with_write_tx(|tx| {
+            let (outputs, total_output_amount) = self.lock_outputs_internal(tx, vault_id, amount, lock_id)?;
 
-        if total_output_amount < amount {
-            tx.rollback()?;
-            return Err(ConfidentialOutputsApiError::InsufficientFunds);
-        }
+            if total_output_amount < amount {
+                return Err(ConfidentialOutputsApiError::InsufficientFunds);
+            }
 
-        tx.commit()?;
-
-        Ok((outputs, total_output_amount))
+            Ok((outputs, total_output_amount))
+        })
     }
 
     pub fn lock_outputs_until_partial_amount(
         &self,
-        vault_address: &SubstateId,
+        vault_id: &VaultId,
         amount: Amount,
-        locked_by_proof_id: ConfidentialProofId,
+        locked_by_proof_id: OutputLockId,
     ) -> Result<(Vec<ConfidentialOutputModel>, Amount), ConfidentialOutputsApiError> {
-        let mut tx = self.store.create_write_tx()?;
-        let (outputs, total_output_amount) =
-            self.lock_outputs_internal(&mut tx, vault_address, amount, locked_by_proof_id)?;
-        tx.commit()?;
-        Ok((outputs, total_output_amount))
+        self.store
+            .with_write_tx(|tx| self.lock_outputs_internal(tx, vault_id, amount, locked_by_proof_id))
     }
 
     fn lock_outputs_internal<TTx: WalletStoreWriter>(
         &self,
         tx: &mut TTx,
-        vault_address: &SubstateId,
+        vault_id: &VaultId,
         amount: Amount,
-        locked_by_proof_id: ConfidentialProofId,
+        locked_by_proof_id: OutputLockId,
     ) -> Result<(Vec<ConfidentialOutputModel>, Amount), ConfidentialOutputsApiError> {
         if amount.is_negative() {
             return Err(ConfidentialOutputsApiError::InvalidParameter {
@@ -103,7 +95,7 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
         let mut outputs = Vec::new();
         while total_output_amount < amount {
             let output = tx
-                .outputs_lock_smallest_amount(vault_address, locked_by_proof_id)
+                .outputs_lock_smallest_amount(vault_id, locked_by_proof_id)
                 .optional()?;
             match output {
                 Some(output) => {
@@ -126,25 +118,25 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
         Ok(())
     }
 
-    pub fn add_proof(&self, vault_address: &SubstateId) -> Result<ConfidentialProofId, ConfidentialOutputsApiError> {
+    pub fn add_output_lock(&self, vault_id: &VaultId) -> Result<OutputLockId, ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
-        let proof_id = tx.proofs_insert(vault_address)?;
+        let proof_id = tx.output_locks_insert_for_vault(vault_id)?;
         tx.commit()?;
         Ok(proof_id)
     }
 
-    pub fn release_proof_outputs(&self, proof_id: ConfidentialProofId) -> Result<(), ConfidentialOutputsApiError> {
+    pub fn release_proof_outputs(&self, proof_id: OutputLockId) -> Result<(), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
-        tx.proofs_delete(proof_id)?;
-        tx.outputs_release_by_proof_id(proof_id)?;
+        tx.output_locks_delete(proof_id)?;
+        tx.outputs_release_by_lock_id(proof_id)?;
         tx.commit()?;
         Ok(())
     }
 
-    pub fn finalize_outputs_for_proof(&self, proof_id: ConfidentialProofId) -> Result<(), ConfidentialOutputsApiError> {
+    pub fn finalize_outputs_for_proof(&self, proof_id: OutputLockId) -> Result<(), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
-        tx.proofs_delete(proof_id)?;
-        tx.outputs_finalize_by_proof_id(proof_id)?;
+        tx.output_locks_delete(proof_id)?;
+        tx.outputs_finalize_by_lock_id(proof_id)?;
         tx.commit()?;
         Ok(())
     }
@@ -152,32 +144,32 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
     pub fn resolve_output_masks(
         &self,
         outputs: Vec<ConfidentialOutputModel>,
-        key_branch: &str,
     ) -> Result<Vec<MaskAndValue>, ConfidentialOutputsApiError> {
         let mut outputs_with_masks = Vec::with_capacity(outputs.len());
         for output in outputs {
-            let output_key = self
+            // Encryption is always done with a DH of the account's public key
+            let encryption_key = self
                 .key_manager_api
-                .derive_key(key_branch, output.encryption_secret_key_index)?;
+                .derive_account_key(output.encryption_secret_key_index)?;
             // Either derive the mask from the sender's public nonce or from the local key manager
             let shared_decrypt_key = match output.sender_public_nonce {
                 Some(nonce) => {
-                    let Ok(nonce) = RistrettoPublicKey::try_from_byte_type(&nonce) else {
-                        return Err(ConfidentialOutputsApiError::InvalidParameter {
-                            param: "sender_public_nonce",
-                            reason: "Failed to parse sender public nonce".to_string(),
-                        });
-                    };
+                    let nonce = RistrettoPublicKey::try_from_byte_type(&nonce).map_err(|_| {
+                        // We stored these outputs in the db, but they are malformed?
+                        ConfidentialOutputsApiError::InvariantError {
+                            details: format!(
+                                "Invalid sender public nonce bytes ({}) for output commitment {}",
+                                nonce, output.commitment
+                            ),
+                        }
+                    })?;
 
                     // Derive shared secret
-                    kdfs::encrypted_data_dh_kdf_aead(&output_key.key, &nonce)
+                    kdfs::encrypted_data_dh_kdf_aead(&encryption_key.key, &nonce)
                 },
                 None => {
-                    // Derive local secret
-                    let output_key = self
-                        .key_manager_api
-                        .derive_key(key_branch, output.encryption_secret_key_index)?;
-                    output_key.key
+                    // Use local secret
+                    encryption_key.key
                 },
             };
 
@@ -197,7 +189,7 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
 
     pub fn lock_revealed_funds(
         &self,
-        proof_id: ConfidentialProofId,
+        proof_id: OutputLockId,
         amount_to_lock: Amount,
     ) -> Result<(), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
@@ -207,10 +199,7 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
         Ok(())
     }
 
-    pub fn finalize_locked_revealed_funds(
-        &self,
-        proof_id: ConfidentialProofId,
-    ) -> Result<(), ConfidentialOutputsApiError> {
+    pub fn finalize_locked_revealed_funds(&self, proof_id: OutputLockId) -> Result<(), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
         tx.vaults_finalized_locked_revealed_funds(proof_id)?;
         tx.commit()?;
@@ -218,7 +207,7 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
         Ok(())
     }
 
-    pub fn release_revealed_funds(&self, proof_id: ConfidentialProofId) -> Result<(), ConfidentialOutputsApiError> {
+    pub fn release_revealed_funds(&self, proof_id: OutputLockId) -> Result<(), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
         tx.vaults_unlock_revealed_funds(proof_id)?;
         tx.commit()?;
@@ -237,19 +226,16 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
         I: IntoIterator<Item = (&'i PedersenCommitmentBytes, &'i PrivateOutput)>,
     >(
         &self,
-        account_addr: &SubstateId,
-        vault_addr: &SubstateId,
+        account: &Account,
+        vault_id: VaultId,
         outputs: I,
     ) -> Result<(), ConfidentialOutputsApiError> {
-        let account = self.accounts_api.get_account_by_address(account_addr)?;
         // We do not support changing of account key at this time
-        let key = self
-            .key_manager_api
-            .derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
+        let key = self.key_manager_api.derive_account_key(account.key_index)?;
         let mut tx = self.store.create_write_tx()?;
 
         for (commitment, output) in outputs {
-            match tx.outputs_get_by_commitment(commitment).optional()? {
+            match tx.outputs_get_by_commitment(&vault_id, commitment).optional()? {
                 Some(_) => {
                     info!(
                         target: LOG_TARGET,
@@ -260,7 +246,7 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
                 },
                 None => {
                     // Output does not exist. Add it to the store
-                    match self.validate_output(&account, &key, vault_addr, *commitment, output) {
+                    match self.validate_output(account, &key, vault_id, *commitment, output) {
                         Ok(output) => {
                             tx.outputs_insert(output)?;
                         },
@@ -285,7 +271,7 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
         &self,
         account: &Account,
         key: &DerivedKey<RistrettoPublicKey>,
-        vault_address: &SubstateId,
+        vault_id: VaultId,
         commitment: PedersenCommitmentBytes,
         output: &PrivateOutput,
     ) -> Result<ConfidentialOutputModel, ConfidentialOutputsApiError> {
@@ -325,26 +311,26 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
         };
 
         Ok(ConfidentialOutputModel {
-            account_address: account.address.clone(),
-            vault_address: vault_address.clone(),
+            account_address: account.address,
+            vault_id,
             commitment,
             value,
             sender_public_nonce: Some(output_stealth_public_nonce.to_byte_type()),
-            encryption_secret_key_index: account.key_index,
+            encryption_secret_key_index: key.key_index,
             encrypted_data: output.encrypted_data.clone(),
             public_asset_tag: None,
             status,
-            locked_by_proof: None,
+            lock_id: None,
         })
     }
 
     pub fn proofs_set_transaction_hash(
         &self,
-        proof_id: ConfidentialProofId,
+        proof_id: OutputLockId,
         transaction_id: TransactionId,
     ) -> Result<(), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
-        tx.proofs_set_transaction_id(proof_id, transaction_id)?;
+        tx.output_locks_set_transaction_id(proof_id, transaction_id)?;
         tx.commit()?;
         Ok(())
     }
@@ -364,6 +350,8 @@ pub enum ConfidentialOutputsApiError {
     Accounts(#[from] AccountsApiError),
     #[error("Invalid parameter `{param}`: {reason}")]
     InvalidParameter { param: &'static str, reason: String },
+    #[error("BUG: Invariant error: {details}")]
+    InvariantError { details: String },
 }
 
 impl IsNotFoundError for ConfidentialOutputsApiError {

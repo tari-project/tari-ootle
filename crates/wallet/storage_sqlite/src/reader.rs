@@ -9,10 +9,14 @@ use std::{
 
 use bigdecimal::{BigDecimal, ToPrimitive};
 use diesel::{
+    dsl,
     dsl::sum,
     sql_query,
+    sql_types,
     BoolExpressionMethods,
+    ExpressionMethods,
     JoinOnDsl,
+    NullableExpressionMethods,
     OptionalExtension,
     QueryDsl,
     RunQueryDsl,
@@ -22,17 +26,19 @@ use diesel::{
 };
 use log::{error, warn};
 use serde::de::DeserializeOwned;
-use tari_engine_types::substate::{InvalidSubstateIdFormat, SubstateId};
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_ootle_wallet_sdk::{
     models::{
         Account,
         AuthoredTemplateModel,
         ConfidentialOutputModel,
-        ConfidentialProofId,
         Config,
         NonFungibleToken,
+        OutputLockId,
         OutputStatus,
+        StealthBalance,
+        StealthOutputModel,
         SubstateModel,
         TransactionStatus,
         VaultModel,
@@ -43,16 +49,16 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_template_lib::{
     models::{ResourceAddress, VaultId},
-    prelude::{ComponentAddress, NonFungibleAddress, NonFungibleId, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    prelude::{ComponentAddress, NonFungibleId, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     types::TemplateAddress,
 };
 use tari_transaction::TransactionId;
 use webauthn_rs::prelude::Passkey;
 
 use crate::{
-    diesel::{ExpressionMethods, NullableExpressionMethods},
     models,
     models::{AuthoredTemplate, WebauthnRegistrationPasskey},
+    schema::accounts,
     serialization::{deserialize_json, serialize_hex},
 };
 
@@ -99,8 +105,6 @@ impl<'a> ReadTransaction<'a> {
 }
 
 impl WalletStoreReader for ReadTransaction<'_> {
-    // -------------------------------- JWT -------------------------------- //
-
     // -------------------------------- KeyManager -------------------------------- //
 
     fn key_manager_get_all(&mut self, branch: &str) -> Result<Vec<(u64, bool)>, WalletStorageError> {
@@ -260,15 +264,16 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
     // -------------------------------- Substates -------------------------------- //
     fn substates_get(&mut self, address: &SubstateId) -> Result<SubstateModel, WalletStorageError> {
+        const OPERATION: &str = "substates_get";
         use crate::schema::substates;
 
         let rec = substates::table
             .filter(substates::address.eq(address.to_string()))
             .first::<models::Substate>(self.connection())
             .optional()
-            .map_err(|e| WalletStorageError::general("substates_get", e))?
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
             .ok_or_else(|| WalletStorageError::NotFound {
-                operation: "substates_get_root",
+                operation: OPERATION,
                 entity: "substate".to_string(),
                 key: address.to_string(),
             })?;
@@ -327,7 +332,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
     }
 
     // -------------------------------- Accounts -------------------------------- //
-    fn accounts_get(&mut self, address: &SubstateId) -> Result<Account, WalletStorageError> {
+    fn accounts_get(&mut self, address: &ComponentAddress) -> Result<Account, WalletStorageError> {
         use crate::schema::accounts;
 
         let row = accounts::table
@@ -341,7 +346,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 key: address.to_string(),
             })?;
 
-        let account = row.try_into().map_err(|e| WalletStorageError::DecodingError {
+        let account = row.try_convert().map_err(|e| WalletStorageError::DecodingError {
             operation: "accounts_get",
             item: "account",
             details: format!("Failed to convert SQL record to Account: {}", e),
@@ -355,31 +360,14 @@ impl WalletStoreReader for ReadTransaction<'_> {
         let rows = accounts::table
             .limit(limit as i64)
             .offset(offset as i64)
-            .load::<models::Account>(self.connection())
+            .get_results::<models::Account>(self.connection())
             .map_err(|e| WalletStorageError::general("accounts_get_many", e))?;
 
         let accs = rows
             .into_iter()
-            .map(|row| {
-                row.try_into().map_err(|e| WalletStorageError::DecodingError {
-                    operation: "accounts_get_many",
-                    item: "account",
-                    details: format!("Failed to convert SQL record to Account: {}", e),
-                })
-            })
+            .map(|row| row.try_convert())
             .collect::<Result<_, _>>()?;
         Ok(accs)
-    }
-
-    fn accounts_count(&mut self) -> Result<u64, WalletStorageError> {
-        use crate::schema::accounts;
-
-        let count = accounts::table
-            .count()
-            .first::<i64>(self.connection())
-            .map_err(|e| WalletStorageError::general("account_count", e))?;
-
-        Ok(count as u64)
     }
 
     fn accounts_get_default(&mut self) -> Result<Account, WalletStorageError> {
@@ -396,12 +384,18 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 key: "default".to_string(),
             })?;
 
-        let account = row.try_into().map_err(|e| WalletStorageError::DecodingError {
-            operation: "accounts_get_default",
-            item: "account",
-            details: format!("Failed to convert SQL record to Account: {}", e),
-        })?;
-        Ok(account)
+        row.try_convert()
+    }
+
+    fn accounts_count(&mut self) -> Result<u64, WalletStorageError> {
+        use crate::schema::accounts;
+
+        let count = accounts::table
+            .count()
+            .first::<i64>(self.connection())
+            .map_err(|e| WalletStorageError::general("account_count", e))?;
+
+        Ok(count as u64)
     }
 
     fn accounts_get_by_name(&mut self, name: &str) -> Result<Account, WalletStorageError> {
@@ -418,29 +412,24 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 key: name.to_string(),
             })?;
 
-        let account = row
-            .try_into()
-            .map_err(|e: InvalidSubstateIdFormat| WalletStorageError::DecodingError {
-                operation: "accounts_get_by_name",
-                item: "account",
-                details: e.to_string(),
-            })?;
+        let account = row.try_convert()?;
+
         Ok(account)
     }
 
-    fn accounts_get_by_vault(&mut self, vault_address: &SubstateId) -> Result<Account, WalletStorageError> {
+    fn accounts_get_by_vault(&mut self, vault_id: &VaultId) -> Result<Account, WalletStorageError> {
         use crate::schema::{accounts, vaults};
 
         let account_id = vaults::table
             .select(vaults::account_id)
-            .filter(vaults::address.eq(vault_address.to_string()))
+            .filter(vaults::address.eq(vault_id.to_string()))
             .first::<i32>(self.connection())
             .optional()
             .map_err(|e| WalletStorageError::general("accounts_get_by_vault", e))?
             .ok_or_else(|| WalletStorageError::NotFound {
                 operation: "accounts_get_by_vault",
                 entity: "vault".to_string(),
-                key: vault_address.to_string(),
+                key: vault_id.to_string(),
             })?;
 
         let row = accounts::table
@@ -451,17 +440,10 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .ok_or_else(|| WalletStorageError::NotFound {
                 operation: "accounts_get_by_vault",
                 entity: "account".to_string(),
-                key: vault_address.to_string(),
+                key: vault_id.to_string(),
             })?;
 
-        let account = row
-            .try_into()
-            .map_err(|e: InvalidSubstateIdFormat| WalletStorageError::DecodingError {
-                operation: "accounts_get_by_vault",
-                item: "account",
-                details: e.to_string(),
-            })?;
-        Ok(account)
+        row.try_convert()
     }
 
     // -------------------------------- Vaults -------------------------------- //
@@ -485,7 +467,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .first::<String>(self.connection())
             .map_err(|e| WalletStorageError::general("vaults_get", e))?;
 
-        let vault = row.try_into_vault(SubstateId::from_str(&account_address).map_err(|e| {
+        let vault = row.try_into_vault(ComponentAddress::from_str(&account_address).map_err(|e| {
             WalletStorageError::DecodingError {
                 operation: "vaults_get",
                 item: "vault",
@@ -509,7 +491,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
     fn vaults_get_by_resource(
         &mut self,
-        account_addr: &SubstateId,
+        account_addr: &ComponentAddress,
         resource_address: &ResourceAddress,
     ) -> Result<VaultModel, WalletStorageError> {
         use crate::schema::{accounts, vaults};
@@ -533,7 +515,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             })?;
 
         let vault = row
-            .try_into_vault(account_addr.clone())
+            .try_into_vault(*account_addr)
             .map_err(|e| WalletStorageError::DecodingError {
                 operation: "vaults_get_by_resource",
                 item: "vault",
@@ -542,7 +524,10 @@ impl WalletStoreReader for ReadTransaction<'_> {
         Ok(vault)
     }
 
-    fn vaults_get_by_account(&mut self, account_addr: &SubstateId) -> Result<Vec<VaultModel>, WalletStorageError> {
+    fn vaults_get_by_account(
+        &mut self,
+        account_addr: &ComponentAddress,
+    ) -> Result<Vec<VaultModel>, WalletStorageError> {
         use crate::schema::{accounts, vaults};
 
         let account_id = accounts::table
@@ -564,7 +549,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
         let vaults = rows
             .into_iter()
-            .map(|row| row.try_into_vault(account_addr.clone()))
+            .map(|row| row.try_into_vault(*account_addr))
             .collect::<Result<_, _>>()?;
 
         Ok(vaults)
@@ -596,16 +581,17 @@ impl WalletStoreReader for ReadTransaction<'_> {
         Ok(balance.map(|v| v.to_u64().expect("overflow")).unwrap_or(0))
     }
 
-    fn outputs_get_locked_by_proof(
+    fn outputs_get_locked_by_lock_id(
         &mut self,
-        proof_id: ConfidentialProofId,
+        lock_id: OutputLockId,
     ) -> Result<Vec<ConfidentialOutputModel>, WalletStorageError> {
+        const OPERATION: &str = "outputs_get_locked_by_lock_id";
         use crate::schema::{accounts, outputs, vaults};
 
         let rows = outputs::table
-            .filter(outputs::locked_by_proof.eq(proof_id as i32))
+            .filter(outputs::lock_id.eq(lock_id as i32))
             .get_results::<models::ConfidentialOutput>(self.connection())
-            .map_err(|e| WalletStorageError::general("outputs_get_locked_by_proof", e))?;
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
         if rows.is_empty() {
             return Ok(vec![]);
@@ -649,11 +635,20 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
     fn outputs_get_by_commitment(
         &mut self,
+        vault_id: &VaultId,
         commitment: &PedersenCommitmentBytes,
     ) -> Result<ConfidentialOutputModel, WalletStorageError> {
         use crate::schema::{accounts, outputs, vaults};
 
         let row = outputs::table
+            .filter(
+                outputs::vault_id.eq(vaults::table
+                    .select(vaults::id)
+                    .filter(vaults::address.eq(vault_id.to_string()))
+                    .limit(1)
+                    .single_value()
+                    .assume_not_null()),
+            )
             .filter(outputs::commitment.eq(serialize_hex(commitment)))
             .first::<models::ConfidentialOutput>(self.connection())
             .optional()
@@ -682,7 +677,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
     fn outputs_get_by_account_and_status(
         &mut self,
-        account_addr: &SubstateId,
+        account_addr: &ComponentAddress,
         status: OutputStatus,
     ) -> Result<Vec<ConfidentialOutputModel>, WalletStorageError> {
         use crate::schema::{accounts, outputs, vaults};
@@ -720,28 +715,118 @@ impl WalletStoreReader for ReadTransaction<'_> {
         Ok(outputs)
     }
 
-    fn proofs_get_by_transaction_id(
+    fn stealth_outputs_get_unspent_balance(
+        &mut self,
+        resource_address: &ResourceAddress,
+    ) -> Result<StealthBalance, WalletStorageError> {
+        const OPERATION: &str = "stealth_outputs_get_unspent_balance";
+        use crate::schema::stealth_outputs;
+
+        let (balance, utxo_count) = stealth_outputs::table
+            .select((
+                dsl::sum(dsl::sql::<sql_types::BigInt>("CAST(value as LONG)")),
+                dsl::count(stealth_outputs::id),
+            ))
+            .filter(stealth_outputs::resource_address.eq(resource_address.to_string()))
+            .filter(stealth_outputs::status.eq(OutputStatus::Unspent.as_key_str()))
+            .first::<(Option<BigDecimal>, i64)>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        let balance = balance
+            .map(|v| v.to_u128().expect("BUG: stealth amount overflow"))
+            .unwrap_or(0)
+            .into();
+
+        Ok(StealthBalance {
+            balance,
+            // Negative count should be impossible
+            utxo_count: usize::try_from(utxo_count)
+                .expect("INVARIANT: negative or utxo count > usize:::MAX should not be possible in SQLite"),
+        })
+    }
+
+    fn stealth_outputs_get_locked_by_lock_id(
+        &mut self,
+        lock_id: OutputLockId,
+    ) -> Result<Vec<StealthOutputModel>, WalletStorageError> {
+        const OPERATION: &str = "stealth_outputs_get_locked_by_lock_id";
+        use crate::schema::{accounts, stealth_outputs};
+
+        let rows = stealth_outputs::table
+            .filter(stealth_outputs::lock_id.eq(lock_id as i32))
+            .get_results::<models::StealthOutput>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        // account_id should be the same in all rows
+        let first_row = rows.first().ok_or_else(|| WalletStorageError::NotFound {
+            operation: OPERATION,
+            entity: "stealth_output".to_string(),
+            key: lock_id.to_string(),
+        })?;
+        let account_address = accounts::table
+            .filter(accounts::id.eq(first_row.owner_account_id))
+            .select(accounts::address)
+            .first::<String>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        rows.into_iter()
+            .map(|row| row.try_convert(&account_address))
+            .collect::<Result<_, _>>()
+    }
+
+    fn stealth_outputs_get_by_commitment(
+        &mut self,
+        resource_address: &ResourceAddress,
+        commitment: &PedersenCommitmentBytes,
+    ) -> Result<StealthOutputModel, WalletStorageError> {
+        const OPERATION: &str = "stealth_outputs_get_by_commitment";
+        use crate::schema::stealth_outputs;
+
+        let row = stealth_outputs::table
+            .filter(stealth_outputs::resource_address.eq(resource_address.to_string()))
+            .filter(stealth_outputs::commitment.eq(serialize_hex(commitment)))
+            .first::<models::StealthOutput>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "output".to_string(),
+                key: serialize_hex(commitment),
+            })?;
+
+        let account_address = accounts::table
+            .filter(accounts::id.eq(row.owner_account_id))
+            .select(accounts::address)
+            .first::<String>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        row.try_convert(&account_address)
+    }
+
+    fn output_locks_get_by_transaction_id(
         &mut self,
         transaction_id: TransactionId,
-    ) -> Result<Vec<ConfidentialProofId>, WalletStorageError> {
-        use crate::schema::proofs;
+    ) -> Result<Vec<OutputLockId>, WalletStorageError> {
+        use crate::schema::output_locks;
 
-        let proof_ids = proofs::table
-            .filter(proofs::transaction_hash.eq(transaction_id.to_string()))
-            .select(proofs::id)
+        let proof_ids = output_locks::table
+            .filter(output_locks::transaction_hash.eq(transaction_id.to_string()))
+            .select(output_locks::id)
             .get_results::<i32>(self.connection())
-            .map_err(|e| WalletStorageError::general("proofs_get_by_transaction_hash", e))?;
+            .map_err(|e| WalletStorageError::general("output_locks_get_by_transaction_id", e))?;
 
         Ok(proof_ids.into_iter().map(|id| id as u64).collect())
     }
 
     fn non_fungible_token_get_by_nft_id(
         &mut self,
+        resource_address: ResourceAddress,
         nft_id: NonFungibleId,
     ) -> Result<NonFungibleToken, WalletStorageError> {
         use crate::schema::{non_fungible_tokens, vaults};
 
         let non_fungible_token = non_fungible_tokens::table
+            .filter(non_fungible_tokens::resource_id.eq(resource_address.to_string()))
             .filter(non_fungible_tokens::nft_id.eq(nft_id.to_string()))
             .first::<crate::models::NonFungibleToken>(self.connection())
             .optional()
@@ -768,44 +853,6 @@ impl WalletStoreReader for ReadTransaction<'_> {
             details: e.to_string(),
             item: "non_fungible_tokens",
             operation: "non_fungible_token_get_by_nft_id",
-        })?;
-        non_fungible_token.try_into_non_fungible_token(vault_address)
-    }
-
-    fn non_fungible_token_get_by_nft_address(
-        &mut self,
-        nft_address: NonFungibleAddress,
-    ) -> Result<NonFungibleToken, WalletStorageError> {
-        use crate::schema::{non_fungible_tokens, vaults};
-
-        let non_fungible_token = non_fungible_tokens::table
-            .filter(non_fungible_tokens::nft_id.eq(nft_address.id().to_string()))
-            .filter(non_fungible_tokens::resource_id.eq(nft_address.resource_address().to_string()))
-            .first::<crate::models::NonFungibleToken>(self.connection())
-            .optional()
-            .map_err(|e| WalletStorageError::general("non_fungible_token_get_by_nft_address", e))?;
-        let non_fungible_token = non_fungible_token.ok_or_else(|| WalletStorageError::NotFound {
-            operation: "non_fungible_token_get_by_nft_address",
-            entity: "non_fungible_tokens".to_string(),
-            key: nft_address.to_string(),
-        })?;
-
-        let vault_id = non_fungible_token.vault_id;
-        let vault_address = vaults::table
-            .select(vaults::address)
-            .filter(vaults::id.eq(vault_id))
-            .first::<String>(self.connection())
-            .optional()
-            .map_err(|e| WalletStorageError::general("accounts_get_by_vault", e))?
-            .ok_or_else(|| WalletStorageError::NotFound {
-                operation: "non_fungible_token_get_by_nft_address",
-                entity: "non_fungible_tokens".to_string(),
-                key: format!("{}", vault_id),
-            })?;
-        let vault_address = VaultId::from_str(&vault_address).map_err(|e| WalletStorageError::DecodingError {
-            details: e.to_string(),
-            item: "non_fungible_tokens",
-            operation: "non_fungible_token_get_by_nft_address",
         })?;
         non_fungible_token.try_into_non_fungible_token(vault_address)
     }

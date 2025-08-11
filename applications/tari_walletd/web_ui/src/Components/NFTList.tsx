@@ -27,7 +27,7 @@ import type { ApiError } from "../api/helpers/types";
 import { DataTableCell } from "./StyledComponents";
 import { renderJson, shortenString, shortenSubstateId, toHexString } from "../utils/helpers";
 import { IoCheckmarkOutline, IoCloseOutline } from "react-icons/io5";
-import type { NonFungibleId, NonFungibleToken, ListAccountNftResponse } from "@tari-project/typescript-bindings";
+import type { NonFungibleId, NonFungibleToken, ListNftsResponse } from "@tari-project/typescript-bindings";
 import { convertCborValue } from "../utils/cbor";
 
 function NftListItem({ nft }: { nft: NonFungibleToken }) {
@@ -69,7 +69,7 @@ export interface NftListProps {
   nftsListIsError: boolean;
   nftsListIsFetching: boolean;
   nftsListError: ApiError | null;
-  nftsListData?: ListAccountNftResponse;
+  nftsListData?: ListNftsResponse;
 }
 
 export default function NFTList(props: NftListProps) {

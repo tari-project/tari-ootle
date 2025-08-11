@@ -12,6 +12,7 @@ use tari_common_types::types::PrivateKey;
 use tari_engine_types::{
     confidential::ConfidentialClaim,
     instruction::Instruction,
+    substate::SubstateId,
     ComponentCall,
     ValidatorFeePoolAddress,
 };
@@ -189,7 +190,7 @@ impl TransactionBuilder {
         statement: StealthTransferStatement,
         bucket: B,
     ) -> Self {
-        self.stealth_transfer_with_opt_bucket(resource_address, statement, Some(bucket.into()))
+        self.stealth_transfer_with_opt_bucket(resource_address, statement, Some(bucket))
     }
 
     pub fn stealth_transfer_with_opt_bucket<B: Into<String>>(
@@ -302,6 +303,10 @@ impl TransactionBuilder {
         // Reset the signatures as they are no longer valid
         self.clear_signatures();
         self
+    }
+
+    pub fn with_unversioned_inputs<I: IntoIterator<Item = S>, S: Into<SubstateId>>(self, inputs: I) -> Self {
+        self.with_inputs(inputs.into_iter().map(|input| SubstateRequirement::unversioned(input)))
     }
 
     pub fn with_min_epoch(mut self, min_epoch: Option<Epoch>) -> Self {

@@ -2,6 +2,7 @@
 import type { Amount } from "./Amount";
 import type { ConfidentialOutputStatement } from "./ConfidentialOutputStatement";
 import type { PedersenCommitmentBytes } from "./PedersenCommitmentBytes";
+import type { SchnorrSignatureBytes } from "./SchnorrSignatureBytes";
 
 /**
  * A confidential proof that defines a confidential and/or revealed withdrawal, e.g. from a vault containing
@@ -25,5 +26,5 @@ export type ConfidentialWithdrawProof = {
   /**
    * Balance proof
    */
-  balance_proof: { public_nonce: string; signature: string };
+  balance_proof: SchnorrSignatureBytes;
 };

@@ -29,6 +29,9 @@ use crate::{
         config::{ConfigApi, ConfigApiError, ConfigKey},
         key_manager::KeyManagerApi,
         non_fungible_tokens::NonFungibleTokensApi,
+        stealth_crypto::StealthCryptoApi,
+        stealth_outputs::StealthOutputsApi,
+        stealth_transfer::StealthTransferApi,
         substate::SubstatesApi,
         template::TemplateApi,
         transaction::TransactionApi,
@@ -97,9 +100,7 @@ where
                 let requires_recovery = self.config_api().get(ConfigKey::RecoveryNeeded).optional()?;
                 // This should have been set - it is an error if it is not
                 requires_recovery.ok_or_else(|| WalletSdkError::InvariantError {
-                    details: "Cipher seed already initialized but recovery_needed not set. This indicates a bug in \
-                              the code."
-                        .to_string(),
+                    details: "Cipher seed already initialized but recovery_needed not set.".to_string(),
                 })
             },
             None => {
@@ -159,8 +160,8 @@ where
         SubstatesApi::new(&self.store, &self.network_interface)
     }
 
-    pub fn accounts_api(&self) -> AccountsApi<'_, TStore> {
-        AccountsApi::new(&self.store)
+    pub fn accounts_api(&self) -> AccountsApi<'_, TStore, TNetworkInterface> {
+        AccountsApi::new(&self.store, self.substate_api(), self.key_manager_api())
     }
 
     pub fn confidential_crypto_api(&self) -> ConfidentialCryptoApi {
@@ -168,12 +169,7 @@ where
     }
 
     pub fn confidential_outputs_api(&self) -> ConfidentialOutputsApi<'_, TStore> {
-        ConfidentialOutputsApi::new(
-            &self.store,
-            self.key_manager_api(),
-            self.accounts_api(),
-            self.confidential_crypto_api(),
-        )
+        ConfidentialOutputsApi::new(&self.store, self.key_manager_api(), self.confidential_crypto_api())
     }
 
     pub fn confidential_transfer_api(&self) -> ConfidentialTransferApi<'_, TStore, TNetworkInterface> {
@@ -182,6 +178,30 @@ where
             self.accounts_api(),
             self.confidential_outputs_api(),
             self.substate_api(),
+            self.confidential_crypto_api(),
+            self.config_api(),
+        )
+    }
+
+    pub fn stealth_crypto_api(&self) -> StealthCryptoApi {
+        StealthCryptoApi::new()
+    }
+
+    pub fn stealth_transfer_api(&self) -> StealthTransferApi<'_, TStore, TNetworkInterface> {
+        StealthTransferApi::new(
+            self.key_manager_api(),
+            self.accounts_api(),
+            self.stealth_outputs_api(),
+            self.substate_api(),
+            self.stealth_crypto_api(),
+            self.config_api(),
+        )
+    }
+
+    pub fn stealth_outputs_api(&self) -> StealthOutputsApi<'_, TStore> {
+        StealthOutputsApi::new(
+            self.store(),
+            self.key_manager_api(),
             self.confidential_crypto_api(),
             self.config_api(),
         )
@@ -327,7 +347,7 @@ pub enum WalletSdkError {
     FailedToAccessKeyRing,
     #[error(transparent)]
     NetworkParseError(#[from] NetworkParseError),
-    #[error("Invariant error: {details}")]
+    #[error("Invariant error: {details}. This indicates a bug in the code.")]
     InvariantError { details: String },
 }
 

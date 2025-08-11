@@ -30,14 +30,12 @@ fn get_key_manager(world: &mut TariWorld) -> KeyManager {
 }
 pub fn create_or_use_key(world: &mut TariWorld, key_name: String) {
     let km = get_key_manager(world);
-    if let Some((_, k)) = world.account_keys.get(&key_name) {
+    if let Some(k) = world.account_keys.get(&key_name) {
         km.set_active_key(&k.to_string()).unwrap();
     } else {
         let key = km.create().expect("Could not create a new key pair");
         km.set_active_key(&key.public_key.to_string()).unwrap();
-        world
-            .account_keys
-            .insert(key_name, (key.secret_key, key.public_key.to_byte_type()));
+        world.account_keys.insert(key_name, key.public_key.to_byte_type());
     }
 }
 pub fn create_key(world: &mut TariWorld, key_name: String) {
@@ -45,19 +43,16 @@ pub fn create_key(world: &mut TariWorld, key_name: String) {
         .create()
         .expect("Could not create a new key pair");
 
-    world
-        .account_keys
-        .insert(key_name, (key.secret_key, key.public_key.to_byte_type()));
+    world.account_keys.insert(key_name, key.public_key.to_byte_type());
 }
 
 pub async fn create_account(world: &mut TariWorld, account_name: String, validator_node_name: String) {
     let data_dir = get_cli_data_dir(world);
     let key = get_key_manager(world).create().expect("Could not create keypair");
     let owner_token = key.to_owner_token();
-    world.account_keys.insert(
-        account_name.clone(),
-        (key.secret_key.clone(), key.public_key.to_byte_type()),
-    );
+    world
+        .account_keys
+        .insert(account_name.clone(), key.public_key.to_byte_type());
     // create an account component
     let instruction = Instruction::CallFunction {
         // The "account" template is builtin in the validator nodes with a constant address
@@ -321,7 +316,7 @@ pub async fn submit_manifest(
     signing_key_name: String,
 ) {
     // HACKY: Sets the active key so that submit_transaction will use it.
-    let (_, key) = world.account_keys.get(&signing_key_name).unwrap();
+    let key = world.account_keys.get(&signing_key_name).unwrap();
     let key_str = key.to_string();
     get_key_manager(world).set_active_key(&key_str).unwrap();
 

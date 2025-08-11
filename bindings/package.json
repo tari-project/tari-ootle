@@ -18,7 +18,7 @@
   "scripts": {
     "build-dist": "tsc --project tsconfig.prod.json",
     "build-dev": "tsc",
-    "build": "sh build.sh && pnpm run fmt &&  tsc --project tsconfig.prod.json",
+    "build": "sh build.sh && pnpm run fmt &&  tsc --project tsconfig.prod.json && echo '✅ Build complete!'",
     "fmt": "pnpm npx prettier --write \"./**/*.{ts,tsx,css,json}\" --log-level=warn"
   },
   "files": [

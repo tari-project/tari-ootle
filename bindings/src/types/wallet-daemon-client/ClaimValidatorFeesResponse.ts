@@ -2,8 +2,4 @@
 import type { FinalizeResult } from "../FinalizeResult";
 import type { TransactionId } from "../TransactionId";
 
-export interface ClaimValidatorFeesResponse {
-  transaction_id: TransactionId;
-  fee: number;
-  result: FinalizeResult;
-}
+export type ClaimValidatorFeesResponse = { transaction_id: TransactionId; fee: number; result: FinalizeResult };

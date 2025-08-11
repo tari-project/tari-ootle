@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::commit_result::ExecuteResult;
-use tari_ootle_wallet_sdk::models::NewAccountInfo;
+use tari_ootle_wallet_sdk::models::NewAccountData;
 use tari_transaction::{Transaction, TransactionId};
 use tokio::sync::{mpsc, oneshot};
 
@@ -13,7 +13,7 @@ use crate::services::Reply;
 pub(super) enum TransactionServiceRequest {
     SubmitTransaction {
         transaction: Transaction,
-        new_account_info: Option<NewAccountInfo>,
+        new_account_info: Option<NewAccountData>,
         reply: Reply<Result<TransactionId, TransactionServiceError>>,
     },
 
@@ -39,15 +39,6 @@ impl TransactionServiceHandle {
         self.submit_transaction_with_opts(transaction, None).await
     }
 
-    pub async fn submit_transaction_with_new_account(
-        &self,
-        transaction: Transaction,
-        new_account_info: NewAccountInfo,
-    ) -> Result<TransactionId, TransactionServiceError> {
-        self.submit_transaction_with_opts(transaction, Some(new_account_info))
-            .await
-    }
-
     pub async fn submit_dry_run_transaction(
         &self,
         transaction: Transaction,
@@ -66,7 +57,7 @@ impl TransactionServiceHandle {
     pub async fn submit_transaction_with_opts(
         &self,
         transaction: Transaction,
-        new_account_info: Option<NewAccountInfo>,
+        new_account_info: Option<NewAccountData>,
     ) -> Result<TransactionId, TransactionServiceError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.sender

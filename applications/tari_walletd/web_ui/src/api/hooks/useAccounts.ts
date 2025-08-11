@@ -40,7 +40,6 @@ import queryClient from "../queryClient";
 import type {
   AccountOrKeyIndex,
   ClaimBurnProof,
-  ComponentAccessRules,
   ComponentAddress,
   ComponentAddressOrName,
   ConfidentialTransferInputSelection,
@@ -54,7 +53,6 @@ export const useAccountsClaimBurn = (account: string, claimProof: ClaimBurnProof
         account: { Name: account },
         claim_proof: claimProof,
         max_fee: fee,
-        key_id: null,
       }),
     {
       onError: (error: ApiError) => {
@@ -67,20 +65,19 @@ export const useAccountsClaimBurn = (account: string, claimProof: ClaimBurnProof
   );
 };
 
-export const useAccountsCreate = (
-  accountName: string | null,
-  customAccessRules: ComponentAccessRules | null,
-  fee: number | null,
-  is_default: boolean,
-) => {
+export type AccountsCreateMutate = {
+  accountName?: string;
+  isDefault?: boolean;
+  keyId?: number | null;
+};
+
+export const useAccountsCreate = () => {
   return useMutation(
-    async () => {
+    async (req: AccountsCreateMutate) => {
       return await accountsCreate({
-        account_name: accountName,
-        custom_access_rules: customAccessRules,
-        max_fee: fee,
-        is_default,
-        key_id: null,
+        account_name: req.accountName || "",
+        is_default: req.isDefault || null,
+        key_id: req.keyId || null,
       });
     },
     {
@@ -152,7 +149,6 @@ export const useAccountsCreateFreeTestCoins = () => {
       account,
       amount,
       max_fee: fee,
-      key_id: null,
     });
 
   return useMutation(createFreeTestCoins, {

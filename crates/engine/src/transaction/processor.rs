@@ -26,7 +26,7 @@ use log::*;
 use tari_bor::to_value;
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
-    component::new_component_address_from_public_key,
+    component::derive_component_address_from_public_key,
     entity_id_provider::EntityIdProvider,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     instruction::Instruction,
@@ -437,7 +437,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 name: ACCOUNT_CONSTRUCTOR_FUNCTION.to_string(),
             })?;
 
-        let account_address = new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, public_key_address);
+        let account_address = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, public_key_address);
 
         // the public key is the first argument of the Account template constructor
         let mut args = call_args![

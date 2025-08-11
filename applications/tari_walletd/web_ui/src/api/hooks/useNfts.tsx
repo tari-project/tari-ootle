@@ -35,8 +35,7 @@ export const useListNfts = (request: ListAccountNftsReq) => {
       }
       return result;
     },
-    retry: true,
-    retryDelay: 200,
+    retry: false,
   });
 };
 

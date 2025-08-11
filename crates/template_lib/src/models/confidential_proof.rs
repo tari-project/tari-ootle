@@ -69,7 +69,6 @@ pub struct ConfidentialWithdrawProof {
     pub input_revealed_amount: Amount,
     pub output_proof: ConfidentialOutputStatement,
     /// Balance proof
-    #[cfg_attr(feature = "ts", ts(type = "{public_nonce: string, signature: string}"))]
     pub balance_proof: BalanceProofSignature,
 }
 

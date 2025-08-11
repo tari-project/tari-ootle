@@ -2,9 +2,21 @@
 import type { Amount } from "../Amount";
 import type { ComponentAddressOrName } from "./ComponentAddressOrName";
 
-export interface RevealFundsRequest {
+export type RevealFundsRequest = {
+  /**
+   * Account with funds to reveal
+   */
   account: ComponentAddressOrName | null;
+  /**
+   * Amount to reveal
+   */
   amount_to_reveal: Amount;
+  /**
+   * Pay fee from revealed funds. If false, previously revealed funds in the account are used.
+   */
   pay_fee_from_reveal: boolean;
+  /**
+   * The amount of fees to add to the transaction. Any fees not charged are refunded.
+   */
   max_fee: number | null;
-}
+};

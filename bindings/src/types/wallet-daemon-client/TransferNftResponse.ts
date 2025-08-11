@@ -2,9 +2,9 @@
 import type { FinalizeResult } from "../FinalizeResult";
 import type { TransactionId } from "../TransactionId";
 
-export interface TransferNftResponse {
+export type TransferNftResponse = {
   transaction_id: TransactionId;
   fee: number;
   fee_refunded: number;
   result: FinalizeResult;
-}
+};

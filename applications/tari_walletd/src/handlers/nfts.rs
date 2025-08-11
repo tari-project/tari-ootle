@@ -1,33 +1,32 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashSet, slice, str::FromStr};
+use std::{collections::HashSet, slice};
 
 use anyhow::anyhow;
 use axum::headers::authorization::Bearer;
 use log::{info, warn};
-use tari_crypto::{keys::PublicKey as PK, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
-    component::new_component_address_from_public_key,
+    component::derive_component_address_from_public_key,
     json_cbor::convert_json_to_cbor,
     substate::SubstateId,
     ToByteType,
 };
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
-use tari_ootle_wallet_sdk::apis::{key_manager, substate::ValidatorScanResult};
+use tari_ootle_wallet_sdk::apis::substate::ValidatorScanResult;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS},
-    models::{ComponentAddress, NonFungibleAddress, ResourceAddress},
+    models::{ComponentAddress, ResourceAddress},
 };
 use tari_transaction::{args, TransactionId};
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{
-        GetAccountNftRequest,
-        GetAccountNftResponse,
-        ListAccountNftRequest,
-        ListAccountNftResponse,
+        GetNftRequest,
+        GetNftResponse,
+        ListNftsRequest,
+        ListNftsResponse,
         MintFaucetNftRequest,
         MintFaucetNftResponse,
         TransferNftRequest,
@@ -38,7 +37,7 @@ use tokio::sync::broadcast;
 
 use super::{context::HandlerContext, helpers::get_account_or_default};
 use crate::{
-    handlers::helpers::{application_error, get_account, get_account_with_inputs, invalid_params, transaction_builder},
+    handlers::helpers::{application_error, get_account, get_account_with_inputs, invalid_params},
     jrpc_server::ApplicationErrorCode,
     services::{TransactionFinalizedEvent, WalletEvent},
     DEFAULT_FEE,
@@ -46,43 +45,44 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::nfts";
 
-pub async fn handle_get_nft(
+pub async fn handle_get(
     context: &HandlerContext,
     token: Option<&Bearer>,
-    req: GetAccountNftRequest,
-) -> Result<GetAccountNftResponse, anyhow::Error> {
+    req: GetNftRequest,
+) -> Result<GetNftResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
 
     let non_fungible_api = sdk.non_fungible_api();
 
     let non_fungible = non_fungible_api
-        .get_by_id(req.nft_id)
+        .get(req.resource_address, req.nft_id)
         .map_err(|e| anyhow!("Failed to get non fungible token, with error: {}", e))?;
 
     Ok(non_fungible)
 }
 
-pub async fn handle_list_nfts(
+pub async fn handle_list(
     context: &HandlerContext,
     token: Option<&Bearer>,
-    req: ListAccountNftRequest,
-) -> Result<ListAccountNftResponse, anyhow::Error> {
-    let ListAccountNftRequest { account, limit, offset } = req;
+    req: ListNftsRequest,
+) -> Result<ListNftsResponse, anyhow::Error> {
+    let ListNftsRequest { account, limit, offset } = req;
     let sdk = context.wallet_sdk();
-    let account = get_account_or_default(account, &sdk.accounts_api())?;
+    let account = get_account_or_default(account.as_ref(), &sdk.accounts_api())?;
+    let account = account.account;
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
 
     let non_fungible_api = sdk.non_fungible_api();
 
     let non_fungibles = non_fungible_api
-        .get_all(account.address.as_component_address().unwrap(), limit, offset)
+        .get_all(account.address, limit, offset)
         .map_err(|e| anyhow!("Failed to list all non fungibles, with error: {}", e))?;
-    Ok(ListAccountNftResponse { nfts: non_fungibles })
+    Ok(ListNftsResponse { nfts: non_fungibles })
 }
 
-pub async fn handle_mint_faucet_nft(
+pub async fn handle_mint_faucet(
     context: &HandlerContext,
     token: Option<&Bearer>,
     req: MintFaucetNftRequest,
@@ -92,9 +92,9 @@ pub async fn handle_mint_faucet_nft(
     context.check_auth(token, &[JrpcPermission::Admin])?;
 
     let account = get_account(&req.account, &sdk.accounts_api())?;
+    let account = account.account;
 
-    let signing_key_index = account.key_index;
-    let signing_key = key_manager_api.derive_key(key_manager::TRANSACTION_BRANCH, signing_key_index)?;
+    let signing_key = key_manager_api.derive_account_key(account.key_index)?;
 
     info!(target: LOG_TARGET, "🎮 Minting new NFT with metadata {}", req.mutable_data);
 
@@ -106,19 +106,18 @@ pub async fn handle_mint_faucet_nft(
 
     let inputs = sdk
         .substate_api()
-        .locate_dependent_substates(slice::from_ref(&account.address), true)
+        .locate_dependent_substates(slice::from_ref(&account.address.into()), true)
         .await?;
     let fee = req.max_fee.unwrap_or(DEFAULT_FEE);
-    let transaction = transaction_builder(context)
-        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), fee)
+    let transaction = context
+        .transaction_builder()
+        .fee_transaction_pay_from_component(account.address, fee)
         .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![
             Amount(req.number_to_mint),
             mutable_data
         ])
         .put_last_instruction_output_on_workspace("tokens")
-        .call_method(account.address.as_component_address().unwrap(), "deposit", args![
-            Workspace("tokens")
-        ])
+        .call_method(account.address, "deposit", args![Workspace("tokens")])
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .add_input(NFT_FAUCET_COMPONENT_ADDRESS)
         .add_input(NFT_FAUCET_RESOURCE_ADDRESS)
@@ -204,6 +203,7 @@ async fn try_find_target_account(
 
                 // Found it
                 found_dest_vault = Some(*vault_id);
+                break;
             },
         }
     }
@@ -216,7 +216,7 @@ async fn try_find_target_account(
 }
 
 #[allow(clippy::too_many_lines)]
-pub async fn handle_transfer_nft(
+pub async fn handle_transfer(
     context: &HandlerContext,
     token: Option<&Bearer>,
     req: TransferNftRequest,
@@ -225,64 +225,63 @@ pub async fn handle_transfer_nft(
     context.check_auth(token, &[JrpcPermission::Admin])?;
 
     // fetch accounts and its inputs
-    let (fee_payer_account, fee_payer_account_inputs) = get_account_with_inputs(Some(req.fee_payer_account), sdk)?;
-    let fee_payer_account_address = fee_payer_account
-        .address
-        .as_component_address()
-        .ok_or(anyhow!("Fee payer account address is not a component address!"))?;
-    let (source_account, mut inputs) = get_account_with_inputs(Some(req.source_account), sdk)?;
+    let (fee_payer_account, fee_payer_account_inputs) = get_account_with_inputs(Some(&req.fee_payer_account), sdk)?;
+    let fee_payer_account = fee_payer_account.account;
+    let fee_payer_account_address = fee_payer_account.address;
+    let (source_account, mut inputs) = get_account_with_inputs(Some(&req.source_account), sdk)?;
     inputs.extend(fee_payer_account_inputs);
-    let source_account_address = source_account
-        .address
-        .as_component_address()
-        .ok_or(anyhow!("Source account address is not a component address!"))?;
+    let source_account_address = *source_account.address();
 
     let target_account_address =
-        new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.target_account_public_key);
+        derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.target_account_public_key);
 
     // TODO: this can be simplified
-    let mut builder = transaction_builder(context);
+    let mut builder = context.transaction_builder();
     // collect all instructions
     let non_fungible_api = sdk.non_fungible_api();
-    for nft_address in req.nfts {
-        let nft_address = NonFungibleAddress::from_str(nft_address.as_str())
-            .map_err(|error| anyhow!("Invalid NFT address: {error}"))?;
-        // get NFT
+
+    if !try_find_target_account(context, &mut inputs, target_account_address, req.resource_address).await? {
+        // We need to create the target account
+        builder = builder.create_account(req.target_account_public_key)
+    }
+    // add the input for the source account vault substate
+    let src_vault = sdk
+        .accounts_api()
+        .get_vault_by_resource(source_account.address(), &req.resource_address)?;
+    let src_vault_substate = sdk.substate_api().get_substate(&src_vault.id.into())?;
+    inputs.insert(src_vault_substate.substate_id.into());
+    inputs.insert(SubstateRequirement::unversioned(src_vault.resource_address));
+
+    for (i, nft_id) in req.nfts.into_iter().enumerate() {
+        // Check if the NFT is owned by this wallet
         let nft = non_fungible_api
-            .get_by_address(nft_address.clone())
-            .map_err(|e| anyhow!("Failed to get non fungible token: {}", e))?;
-
-        // add the input for the source account vault substate
-        let src_vault = sdk
-            .accounts_api()
-            .get_vault_by_resource(&source_account.address, &nft.resource_address)?;
-        let src_vault_substate = sdk.substate_api().get_substate(&src_vault.address)?;
-        inputs.insert(src_vault_substate.substate_id.into());
-        let resource_substate_address = SubstateRequirement::unversioned(src_vault.resource_address);
-        inputs.insert(resource_substate_address.clone());
-
-        if !try_find_target_account(context, &mut inputs, target_account_address, nft.resource_address).await? {
-            // We need to create the target account
-            builder = builder.create_account(req.target_account_public_key)
+            .get(req.resource_address, nft_id.clone())
+            .optional()
+            .map_err(|e| anyhow!("Failed to get non-fungible token: {}", e))?;
+        if nft.is_none() {
+            return Err(invalid_params(
+                "nft_id",
+                Some(format!(
+                    "NFT with ID {} not found for resource {}",
+                    nft_id, req.resource_address
+                )),
+            ));
         }
 
         builder = builder
             .call_method(source_account_address, "withdraw_non_fungible", args![
-                nft.resource_address,
-                nft_address.id()
+                req.resource_address,
+                nft_id,
             ])
-            .put_last_instruction_output_on_workspace("bucket")
-            .call_method(target_account_address, "deposit", args![Workspace("bucket")]);
+            .put_last_instruction_output_on_workspace(format!("b-{i}"))
+            .call_method(target_account_address, "deposit", args![Workspace(format!("b-{i}"))]);
     }
 
-    let fee_payer_account_secret_key = sdk
+    let (fee_payer_account_secret_key, fee_payer_account_public_key) = sdk
         .key_manager_api()
-        .derive_key(key_manager::TRANSACTION_BRANCH, fee_payer_account.key_index)?;
-    let fee_payer_account_public_key = RistrettoPublicKey::from_secret_key(&fee_payer_account_secret_key.key);
+        .derive_account_keypair(fee_payer_account.key_index)?;
 
-    let source_account_secret_key = sdk
-        .key_manager_api()
-        .derive_key(key_manager::TRANSACTION_BRANCH, source_account.key_index)?;
+    let source_account_secret_key = sdk.key_manager_api().derive_account_key(source_account.key_index())?;
 
     let transaction = builder
         .with_dry_run(req.dry_run)

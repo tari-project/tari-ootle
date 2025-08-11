@@ -2,10 +2,10 @@
 import type { Hash } from "../Hash";
 import type { SubstateId } from "../SubstateId";
 
-export interface ListSubstateItem {
+export type ListSubstateItem = {
   substate_id: SubstateId;
   module_name: string | null;
   version: number;
   template_address: Hash | null;
   timestamp: bigint;
-}
+};

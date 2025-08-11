@@ -21,8 +21,9 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use clap::Subcommand;
+use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
-use tari_wallet_daemon_client::{types::KeyBranch, WalletDaemonClient};
+use tari_wallet_daemon_client::WalletDaemonClient;
 
 use crate::{table::Table, table_row};
 

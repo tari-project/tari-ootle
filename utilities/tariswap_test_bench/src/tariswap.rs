@@ -7,7 +7,7 @@ use log::info;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine_types::{indexed_value::decode_value_at_path, ToByteType};
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
-use tari_ootle_wallet_sdk::{apis::key_manager::TRANSACTION_BRANCH, models::Account};
+use tari_ootle_wallet_sdk::models::Account;
 use tari_template_lib::{
     models::{ComponentAddress, VaultId},
     prelude::{ResourceAddress, ResourceType, XTR},
@@ -30,7 +30,7 @@ impl Runner {
         faucet: &Faucet,
         num_tariswaps: usize,
     ) -> anyhow::Result<Vec<TariSwap>> {
-        let key = self.sdk.key_manager_api().derive_key(TRANSACTION_BRANCH, 0)?;
+        let key = self.sdk.key_manager_api().derive_account_key(0)?;
 
         let fee_vault = self
             .sdk
@@ -39,10 +39,7 @@ impl Runner {
 
         let transaction = self
             .new_transaction_builder()
-            .fee_transaction_pay_from_component(
-                in_account.address.as_component_address().unwrap(),
-                1000 * num_tariswaps,
-            )
+            .fee_transaction_pay_from_component(in_account.address, 1000 * num_tariswaps)
             .then(|mut builder| {
                 for _ in 0..num_tariswaps {
                     builder = builder.call_function(self.tariswap_template.address, "new", args![
@@ -54,8 +51,8 @@ impl Runner {
                 builder
             })
             .with_inputs([
-                SubstateRequirement::unversioned(in_account.address.clone()),
-                SubstateRequirement::unversioned(fee_vault.address.clone()),
+                SubstateRequirement::unversioned(in_account.address),
+                SubstateRequirement::unversioned(fee_vault.id),
                 SubstateRequirement::unversioned(XTR),
                 SubstateRequirement::unversioned(faucet.resource_address),
             ])
@@ -98,7 +95,7 @@ impl Runner {
         let primary_account_key = self
             .sdk
             .key_manager_api()
-            .derive_key(TRANSACTION_BRANCH, primary_account.key_index)?;
+            .derive_account_key(primary_account.key_index)?;
         let mut tx_ids = Vec::with_capacity(200);
         let primary_account_pk = RistrettoPublicKey::from_secret_key(&primary_account_key.key).to_byte_type();
 
@@ -108,10 +105,7 @@ impl Runner {
 
             for (i, tariswap) in tariswaps.iter().enumerate().skip(i * 200).take(200) {
                 let account = &accounts[i % accounts.len()];
-                let key = self
-                    .sdk
-                    .key_manager_api()
-                    .derive_key(TRANSACTION_BRANCH, account.key_index)?;
+                let key = self.sdk.key_manager_api().derive_account_key(account.key_index)?;
                 let xtr_vault = self.sdk.accounts_api().get_vault_by_resource(&account.address, &XTR)?;
                 let faucet_vault = self
                     .sdk
@@ -125,35 +119,28 @@ impl Runner {
 
                 let transaction = self
                     .new_transaction_builder()
-                    .with_inputs(maybe_lp_vault.map(|v| SubstateRequirement::unversioned(v.address)))
+                    .with_inputs(maybe_lp_vault.map(|v| SubstateRequirement::unversioned(v.id)))
                     .with_inputs([
-                        SubstateRequirement::unversioned(account.address.clone()),
-                        SubstateRequirement::unversioned(xtr_vault.address),
-                        SubstateRequirement::unversioned(faucet_vault.address),
+                        SubstateRequirement::unversioned(account.address),
+                        SubstateRequirement::unversioned(xtr_vault.id),
+                        SubstateRequirement::unversioned(faucet_vault.id),
                         SubstateRequirement::unversioned(tariswap.component_address),
                         SubstateRequirement::unversioned(tariswap.lp_resource_address),
                         SubstateRequirement::unversioned(faucet.resource_address),
                         SubstateRequirement::unversioned(XTR),
                     ])
                     .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
-                    .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), 2000)
-                    .call_method(account.address.as_component_address().unwrap(), "withdraw", args![
-                        XTR, amount_a
-                    ])
+                    .fee_transaction_pay_from_component(account.address, 2000)
+                    .call_method(account.address, "withdraw", args![XTR, amount_a])
                     .put_last_instruction_output_on_workspace("a")
-                    .call_method(account.address.as_component_address().unwrap(), "withdraw", args![
-                        faucet.resource_address,
-                        amount_b
-                    ])
+                    .call_method(account.address, "withdraw", args![faucet.resource_address, amount_b])
                     .put_last_instruction_output_on_workspace("b")
                     .call_method(tariswap.component_address, "add_liquidity", args![
                         Workspace("a"),
                         Workspace("b")
                     ])
                     .put_last_instruction_output_on_workspace("lp")
-                    .call_method(account.address.as_component_address().unwrap(), "deposit", args![
-                        Workspace("lp")
-                    ])
+                    .call_method(account.address, "deposit", args![Workspace("lp")])
                     .with_authorized_seal_signer()
                     .add_signature(&primary_account_pk, &key.key)
                     .build_and_seal(&primary_account_key.key);
@@ -164,7 +151,7 @@ impl Runner {
                 );
 
                 tx_ids.push((
-                    account.address.clone(),
+                    account.address,
                     tariswap.lp_resource_address,
                     self.submit_transaction(transaction).await?,
                 ));
@@ -193,7 +180,7 @@ impl Runner {
                 .ok_or_else(|| anyhow::anyhow!("LP Vault not found in {tx_id} result"))?;
             self.sdk.accounts_api().add_vault(
                 account,
-                lp_vault.into(),
+                lp_vault,
                 tariswaps[0].lp_resource_address,
                 ResourceType::NonFungible,
                 Some("LP".to_string()),
@@ -217,7 +204,7 @@ impl Runner {
         let primary_account_key = self
             .sdk
             .key_manager_api()
-            .derive_key(TRANSACTION_BRANCH, primary_account.key_index)?;
+            .derive_account_key(primary_account.key_index)?;
         let primary_account_pk = RistrettoPublicKey::from_secret_key(&primary_account_key.key).to_byte_type();
 
         let mut tx_ids = vec![];
@@ -225,10 +212,7 @@ impl Runner {
         for i in 0..5 {
             for (i, account) in accounts.iter().enumerate().skip(i * 200).take(200) {
                 let tariswap = &tariswaps[i % tariswaps.len()];
-                let key = self
-                    .sdk
-                    .key_manager_api()
-                    .derive_key(TRANSACTION_BRANCH, account.key_index)?;
+                let key = self.sdk.key_manager_api().derive_account_key(account.key_index)?;
                 let xtr_vault = self.sdk.accounts_api().get_vault_by_resource(&account.address, &XTR)?;
                 let faucet_vault = self
                     .sdk
@@ -241,18 +225,18 @@ impl Runner {
                     .optional()?;
                 let transaction = self
                     .new_transaction_builder()
-                    .with_inputs(maybe_lp_vault.map(|v| SubstateRequirement::unversioned(v.address)))
+                    .with_inputs(maybe_lp_vault.map(|v| SubstateRequirement::unversioned(v.id)))
                     .with_inputs([
-                        SubstateRequirement::unversioned(account.address.clone()),
-                        SubstateRequirement::unversioned(xtr_vault.address),
-                        SubstateRequirement::unversioned(faucet_vault.address),
+                        SubstateRequirement::unversioned(account.address),
+                        SubstateRequirement::unversioned(xtr_vault.id),
+                        SubstateRequirement::unversioned(faucet_vault.id),
                         SubstateRequirement::unversioned(tariswap.component_address),
                         SubstateRequirement::unversioned(faucet.resource_address),
                         SubstateRequirement::unversioned(XTR),
                         SubstateRequirement::unversioned(tariswap.lp_resource_address),
                     ])
                     .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
-                    .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), 1000)
+                    .fee_transaction_pay_from_component(account.address, 1000)
                     .call_method(tariswap.component_address, "get_pool_balance", args![XTR])
                     .call_method(tariswap.component_address, "get_pool_balance", args![
                         faucet.resource_address,
@@ -262,19 +246,14 @@ impl Runner {
                         faucet.resource_address,
                         Amount(1000)
                     ])
-                    .call_method(account.address.as_component_address().unwrap(), "withdraw", args![
-                        XTR,
-                        amount_a_for_b
-                    ])
+                    .call_method(account.address, "withdraw", args![XTR, amount_a_for_b])
                     .put_last_instruction_output_on_workspace("a")
                     .call_method(tariswap.component_address, "swap", args![
                         Workspace("a"),
                         faucet.resource_address,
                     ])
                     .put_last_instruction_output_on_workspace("swapped")
-                    .call_method(account.address.as_component_address().unwrap(), "deposit", args![
-                        Workspace("swapped")
-                    ])
+                    .call_method(account.address, "deposit", args![Workspace("swapped")])
                     .with_authorized_seal_signer()
                     .add_signature(&primary_account_pk, &key.key)
                     .build_and_seal(&primary_account_key.key);
@@ -301,10 +280,7 @@ impl Runner {
         // Swap faucet for XTR
         for i in 0..5 {
             for (i, account) in accounts.iter().enumerate().skip(i * 200).take(200) {
-                let key = self
-                    .sdk
-                    .key_manager_api()
-                    .derive_key(TRANSACTION_BRANCH, account.key_index)?;
+                let key = self.sdk.key_manager_api().derive_account_key(account.key_index)?;
                 let xtr_vault = self.sdk.accounts_api().get_vault_by_resource(&account.address, &XTR)?;
                 let faucet_vault = self
                     .sdk
@@ -314,16 +290,16 @@ impl Runner {
                 let transaction = self
                     .new_transaction_builder()
                     .with_inputs([
-                        SubstateRequirement::unversioned(account.address.clone()),
-                        SubstateRequirement::unversioned(xtr_vault.address),
-                        SubstateRequirement::unversioned(faucet_vault.address),
+                        SubstateRequirement::unversioned(account.address),
+                        SubstateRequirement::unversioned(xtr_vault.id),
+                        SubstateRequirement::unversioned(faucet_vault.id),
                         SubstateRequirement::unversioned(tariswap.component_address),
                         SubstateRequirement::unversioned(faucet.resource_address),
                         SubstateRequirement::unversioned(XTR),
                         SubstateRequirement::unversioned(tariswap.lp_resource_address),
                     ])
                     .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
-                    .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), 1000)
+                    .fee_transaction_pay_from_component(account.address, 1000)
                     .call_method(tariswap.component_address, "get_pool_balance", args![XTR])
                     .call_method(tariswap.component_address, "get_pool_balance", args![
                         faucet.resource_address
@@ -333,16 +309,14 @@ impl Runner {
                         faucet.resource_address,
                         Amount(1000)
                     ])
-                    .call_method(account.address.as_component_address().unwrap(), "withdraw", args![
+                    .call_method(account.address, "withdraw", args![
                         faucet.resource_address,
                         amount_b_for_a
                     ])
                     .put_last_instruction_output_on_workspace("b")
                     .call_method(tariswap.component_address, "swap", args![Workspace("b"), XTR,])
                     .put_last_instruction_output_on_workspace("swapped")
-                    .call_method(account.address.as_component_address().unwrap(), "deposit", args![
-                        Workspace("swapped")
-                    ])
+                    .call_method(account.address, "deposit", args![Workspace("swapped")])
                     .build_and_seal(&key.key);
 
                 tx_ids.push(self.submit_transaction(transaction).await?);
@@ -356,7 +330,7 @@ impl Runner {
                 let ratio_b = result.execution_results[3].decode::<Amount>()?;
                 let amount_swapped = amount_b_for_a.to_u64_checked().expect("overflow") as f64 *
                     (ratio_a.to_u64_checked().expect("overflow") as f64 / 1000.0);
-                log::info!(
+                info!(
                     "Swap {n} for {amount_b_for_a} FAUCET -> {amount_swapped} XTR @ {ratio_b}:{ratio_a} | pool \
                      liquidity: {balance_a} XTR {balance_b} FAUCET",
                     n = (i + 1) * (j + 1) * 2

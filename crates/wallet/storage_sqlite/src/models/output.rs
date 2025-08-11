@@ -34,7 +34,7 @@ impl ConfidentialOutput {
     pub(crate) fn try_into_output(
         self,
         account_address_str: &str,
-        vault_addr_str: &str,
+        vault_id: &str,
     ) -> Result<ConfidentialOutputModel, WalletStorageError> {
         Ok(ConfidentialOutputModel {
             account_address: account_address_str
@@ -44,10 +44,10 @@ impl ConfidentialOutput {
                     item: "output",
                     details: format!("Corrupt db: invalid account address '{}'", account_address_str),
                 })?,
-            vault_address: vault_addr_str.parse().map_err(|_| WalletStorageError::DecodingError {
+            vault_id: vault_id.parse().map_err(|_| WalletStorageError::DecodingError {
                 operation: "try_into_output",
                 item: "output",
-                details: format!("Corrupt db: invalid vault address '{}'", vault_addr_str),
+                details: format!("Corrupt db: invalid vault address '{}'", self.vault_id),
             })?,
             commitment: PedersenCommitmentBytes::from_hex(&self.commitment).map_err(|_| {
                 WalletStorageError::DecodingError {
@@ -76,7 +76,7 @@ impl ConfidentialOutput {
                 item: "output",
                 details: format!("Corrupt db: invalid output status '{}'", self.status),
             })?,
-            locked_by_proof: self.locked_by_proof.map(|proof| proof as u64),
+            lock_id: self.locked_by_proof.map(|proof| proof as u64),
         })
     }
 }

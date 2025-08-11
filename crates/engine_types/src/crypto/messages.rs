@@ -8,7 +8,7 @@ use tari_template_lib::{
     types::Amount,
 };
 
-use crate::hashing::{hasher64, EngineHashDomainLabel};
+use crate::hashing::{engine_hasher64, EngineHashDomainLabel};
 
 pub fn confidential_withdraw64(
     excess: &RistrettoPublicKey,
@@ -16,7 +16,7 @@ pub fn confidential_withdraw64(
     input_revealed_amount: &Amount,
     output_revealed_amount: &Amount,
 ) -> [u8; 64] {
-    hasher64(EngineHashDomainLabel::ConfidentialTransfer)
+    engine_hasher64(EngineHashDomainLabel::ConfidentialTransfer)
         .chain(excess)
         .chain(public_nonce)
         .chain(input_revealed_amount)
@@ -29,7 +29,7 @@ pub fn viewable_balance_proof64(
     view_key: &RistrettoPublicKey,
     challenge_fields: ViewableBalanceProofChallengeFields<'_>,
 ) -> [u8; 64] {
-    hasher64(EngineHashDomainLabel::ViewableBalanceProof)
+    engine_hasher64(EngineHashDomainLabel::ViewableBalanceProof)
         .chain(commitment)
         .chain(view_key)
         .chain(&challenge_fields)
@@ -41,7 +41,7 @@ pub fn stealth_mint64(
     public_nonce: &RistrettoPublicKey,
     total_amount: Amount,
 ) -> [u8; 64] {
-    hasher64(EngineHashDomainLabel::StealthMint)
+    engine_hasher64(EngineHashDomainLabel::StealthMint)
         .chain(public_excess)
         .chain(public_nonce)
         .chain(&total_amount)
@@ -54,7 +54,7 @@ pub fn stealth_transfer64(
     input_revealed_amount: &Amount,
     output_revealed_amount: &Amount,
 ) -> [u8; 64] {
-    hasher64(EngineHashDomainLabel::StealthTransfer)
+    engine_hasher64(EngineHashDomainLabel::StealthTransfer)
         .chain(public_excess)
         .chain(public_nonce)
         .chain(input_revealed_amount)
@@ -68,7 +68,7 @@ pub fn stealth_ownership64(
     commitment: &PedersenCommitmentBytes,
     public_output_nonce: &RistrettoPublicKeyBytes,
 ) -> [u8; 64] {
-    hasher64(EngineHashDomainLabel::StealthOwnership)
+    engine_hasher64(EngineHashDomainLabel::StealthOwnership)
         .chain(public_key)
         .chain(public_nonce)
         .chain(commitment)

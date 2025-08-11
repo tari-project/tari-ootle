@@ -101,7 +101,7 @@ function Accounts() {
   } = useAccountsList(0, 10);
   const { mutateAsync: mutateCreateFeeTestCoins } = useAccountsCreateFreeTestCoins();
 
-  const { mutateAsync: mutateAddAccount } = useAccountsCreate(accountFormState.accountName, null, null, false);
+  const { mutateAsync: mutateAddAccount } = useAccountsCreate();
 
   const { mutateAsync: mutateClaimBurn } = useAccountsClaimBurn(
     claimBurnFormState.account,
@@ -128,17 +128,22 @@ function Accounts() {
   };
 
   const onSubmitAddAccount = () => {
-    mutateAddAccount(undefined, {
-      onSettled: () => {
-        setAccountFormState({
-          accountName: "",
-          signingKeyIndex: "",
-          fee: "",
-        });
-        setShowAddAccountDialog(false);
-        queryClient.invalidateQueries(["accounts"]);
+    mutateAddAccount(
+      {
+        accountName: accountFormState.accountName,
       },
-    });
+      {
+        onSettled: () => {
+          setAccountFormState({
+            accountName: "",
+            signingKeyIndex: "",
+            fee: "",
+          });
+          setShowAddAccountDialog(false);
+          queryClient.invalidateQueries(["accounts"]);
+        },
+      },
+    );
   };
 
   const onAccountChange = (e: React.ChangeEvent<HTMLInputElement>) => {

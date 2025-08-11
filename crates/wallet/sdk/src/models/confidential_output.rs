@@ -3,19 +3,18 @@
 
 use std::str::FromStr;
 
-use tari_engine_types::substate::SubstateId;
 use tari_template_lib::{
-    models::EncryptedData,
-    prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    models::{EncryptedData, VaultId},
+    prelude::{ComponentAddress, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     types::Amount,
 };
 
-use crate::models::ConfidentialProofId;
+use crate::models::OutputLockId;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConfidentialOutputModel {
-    pub account_address: SubstateId,
-    pub vault_address: SubstateId,
+    pub account_address: ComponentAddress,
+    pub vault_id: VaultId,
     pub commitment: PedersenCommitmentBytes,
     pub value: Amount,
     pub sender_public_nonce: Option<RistrettoPublicKeyBytes>,
@@ -23,7 +22,7 @@ pub struct ConfidentialOutputModel {
     pub encrypted_data: EncryptedData,
     pub public_asset_tag: Option<RistrettoPublicKeyBytes>,
     pub status: OutputStatus,
-    pub locked_by_proof: Option<ConfidentialProofId>,
+    pub lock_id: Option<OutputLockId>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -33,7 +32,7 @@ pub enum OutputStatus {
     /// The output has been spent.
     Spent,
     /// The output is locked for spending. Once the transaction has been accepted, this output becomes Spent.
-    Locked,
+    LockedForSpend,
     /// The output is locked as an unconfirmed output. Once the transaction has been accepted, this output becomes
     /// Unspent.
     LockedUnconfirmed,
@@ -48,7 +47,7 @@ impl OutputStatus {
         match self {
             Self::Unspent => "Unspent",
             Self::Spent => "Spent",
-            Self::Locked => "Locked",
+            Self::LockedForSpend => "LockedForSpend",
             Self::LockedUnconfirmed => "LockedUnconfirmed",
             Self::Invalid => "Invalid",
         }
@@ -62,7 +61,7 @@ impl FromStr for OutputStatus {
         match s {
             "Unspent" => Ok(Self::Unspent),
             "Spent" => Ok(Self::Spent),
-            "Locked" => Ok(Self::Locked),
+            "LockedForSpend" => Ok(Self::LockedForSpend),
             "LockedUnconfirmed" => Ok(Self::LockedUnconfirmed),
             "Invalid" => Ok(Self::Invalid),
             _ => Err(()),

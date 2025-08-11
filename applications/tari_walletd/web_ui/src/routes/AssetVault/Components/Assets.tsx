@@ -60,7 +60,7 @@ interface BalanceRowProps {
   token_symbol: string;
   resource_address: ResourceAddress;
   resource_type: ResourceType;
-  vault_address: VaultId;
+  vault_address?: VaultId;
   balance: Amount;
   confidential_balance: Amount;
   divisibility: number;
@@ -81,9 +81,7 @@ function BalanceRow(props: BalanceRowProps) {
   const { showBalance } = useAccountStore();
   return (
     <TableRow key={token_symbol || resource_address}>
-      <DataTableCell>
-        <CopyAddress address={vault_address} />
-      </DataTableCell>
+      <DataTableCell>{vault_address ? <CopyAddress address={vault_address} /> : "--"}</DataTableCell>
       <DataTableCell>
         <CopyAddress
           address={resource_address}
@@ -181,7 +179,7 @@ function Assets({ account }: { account: Account }) {
         handleClose={() => setResourceToSend(null)}
         onSendComplete={() => setResourceToSend(null)}
         resource_address={resourceToSend?.address}
-        resource_type={resourceToSend?.resource_type}
+        resource_type={resourceToSend?.resource_type!}
       />
       <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
         <Tabs value={value} onChange={handleChange} aria-label="account assets" variant="standard">

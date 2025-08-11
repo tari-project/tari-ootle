@@ -314,7 +314,7 @@ where
                 // This is a hack that addresses the case where input locking fails after the fee transaction. However
                 // any error after this point do not undo locking. This is a limitation of the current
                 // design - the db transaction should be passed in and automatically rolled back on error.
-                if let Err(err) = self.outputs_api.release_proof_outputs(fee_inputs_to_spend.lock_id) {
+                if let Err(err) = self.outputs_api.release_locked_outputs(fee_inputs_to_spend.lock_id) {
                     error!(
                         target: LOG_TARGET,
                         "Failed to release fee inputs for transfer: {}",
@@ -451,14 +451,14 @@ where
 
         let tx_id = transaction.calculate_id();
         self.outputs_api
-            .proofs_set_transaction_hash(inputs_to_spend.lock_id, tx_id)?;
+            .locks_set_transaction_hash(inputs_to_spend.lock_id, tx_id)?;
         self.outputs_api
-            .proofs_set_transaction_hash(fee_inputs_to_spend.lock_id, tx_id)?;
+            .locks_set_transaction_hash(fee_inputs_to_spend.lock_id, tx_id)?;
 
         Ok(TransferOutput {
             transaction,
-            fee_transaction_proof_id: Some(fee_inputs_to_spend.lock_id),
-            transaction_proof_id: Some(inputs_to_spend.lock_id),
+            fee_transaction_proof_id: fee_inputs_to_spend.lock_id,
+            transaction_proof_id: inputs_to_spend.lock_id,
         })
     }
 
@@ -505,8 +505,8 @@ where
 
 pub struct TransferOutput {
     pub transaction: Transaction,
-    pub fee_transaction_proof_id: Option<OutputLockId>,
-    pub transaction_proof_id: Option<OutputLockId>,
+    pub fee_transaction_proof_id: OutputLockId,
+    pub transaction_proof_id: OutputLockId,
 }
 
 #[derive(Debug)]

@@ -52,7 +52,7 @@ import type {
   RevealFundsResponse,
   SettingsGetResponse,
   SettingsSetRequest,
-  SettingsSetResponse,
+  SettingsSetResponse, StealthTransferRequest, StealthTransferResponse,
   stringToSubstateId,
   substateIdToString,
   SubstatesGetRequest,
@@ -196,6 +196,10 @@ export class WalletDaemonClient {
 
   public confidentialTransfer(params: ConfidentialTransferRequest): Promise<ConfidentialTransferResponse> {
     return this.__invokeRpc("accounts.confidential_transfer", params);
+  }
+
+  public stealthTransfer(params: StealthTransferRequest): Promise<StealthTransferResponse> {
+    return this.__invokeRpc("accounts.stealth_transfer", params);
   }
 
   public accountsGetDefault(params: AccountGetDefaultRequest): Promise<AccountGetResponse> {

@@ -5,6 +5,7 @@ use blake2::Blake2b;
 use digest::consts::U64;
 use tari_bor::{Deserialize, Serialize};
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
+use tari_engine_types::ToByteType;
 use tari_key_manager::{
     cipher_seed::CipherSeed,
     key_manager::{DerivedKey, KeyManager},
@@ -12,7 +13,10 @@ use tari_key_manager::{
 use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
-use crate::storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter};
+use crate::{
+    models::WalletKey,
+    storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
+};
 
 pub type WalletKeyManager = KeyManager<RistrettoPublicKey, Blake2b<U64>>;
 
@@ -70,10 +74,7 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         Ok(())
     }
 
-    pub fn get_all_keys<B: AsRef<str>>(
-        &self,
-        branch: B,
-    ) -> Result<Vec<(u64, RistrettoPublicKey, bool)>, KeyManagerApiError> {
+    pub fn get_all_keys<B: AsRef<str>>(&self, branch: B) -> Result<Vec<WalletKey>, KeyManagerApiError> {
         let mut tx = self.store.create_read_tx()?;
         let all_keys = tx.key_manager_get_all(branch.as_ref())?;
         let mut keys = Vec::with_capacity(all_keys.len());
@@ -83,7 +84,12 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
                 .derive_key(index)
                 .map_err(tari_key_manager::error::KeyManagerError::from)?;
             let pk = RistrettoPublicKey::from_secret_key(&key.key);
-            keys.push((index, pk, active));
+            keys.push(WalletKey {
+                branch: branch.as_ref().to_string(),
+                public_key: pk.to_byte_type(),
+                secret_key: key,
+                is_active: active,
+            });
         }
         Ok(keys)
     }

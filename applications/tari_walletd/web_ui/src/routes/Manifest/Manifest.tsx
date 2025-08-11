@@ -79,6 +79,7 @@ function ManifestEditor() {
         }
         if ("Accept" in finalize!.result) {
           setFee(BigInt(finalize!.fee_receipt.total_fees_paid) + 100n);
+          setFinalizeError(null);
           console.log("Dry run successful:", finalize);
         } else if ("Reject" in finalize!.result) {
           setFinalizeError(rejectReasonToString(finalize!.result.Reject));

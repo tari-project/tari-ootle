@@ -784,7 +784,8 @@ impl ProcessManager {
             })
             .await?
             .into_inner();
-        let template_address = TemplateAddress::try_from_slice(&resp.template_address).unwrap();
+        let template_address = TemplateAddress::try_from_slice(&resp.template_address)
+            .map_err(|e| anyhow!("Invalid template_address returned by wallet: {e}"))?;
         info!("🟢 Registered template {template_address}.");
 
         Ok(())

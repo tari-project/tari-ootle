@@ -20,6 +20,7 @@ use tari_ootle_wallet_sdk::{
         accounts::AccountsApiError,
         confidential_outputs::ConfidentialOutputsApiError,
         non_fungible_tokens::NonFungibleTokensApiError,
+        stealth_outputs::StealthOutputsApiError,
         substate::{SubstateApiError, ValidatorScanResult},
         transaction::TransactionApiError,
     },
@@ -154,16 +155,35 @@ where
         let substate_api = self.wallet_sdk.substate_api();
         let accounts_api = self.wallet_sdk.accounts_api();
 
-        if !accounts_api.exists_by_address(&account_address)? {
+        let Some(account) = accounts_api.get_account_by_address(&account_address).optional()? else {
             // This is not our account
             return Ok(false);
-        }
+        };
 
         let mut is_updated = false;
-        let ValidatorScanResult {
+        let maybe_scan_result = substate_api
+            .scan_for_substate(&account_address.into(), None)
+            .await
+            .optional()?;
+
+        let Some(ValidatorScanResult {
             address: account_substate_id,
             substate: account_value,
-        } = substate_api.scan_for_substate(&account_address.into(), None).await?;
+        }) = maybe_scan_result
+        else {
+            if account.is_confirmed_on_chain() {
+                warn!(target: LOG_TARGET, "Account {} does not exist according to indexer", account_address);
+            }
+            // Otherwise, the account is not on-chain, so we wouldn't expect the indexer to have it
+
+            return Ok(false);
+        };
+
+        if !account.is_confirmed_on_chain() {
+            // Mark the account as on-chain if it is not already
+            self.mark_account_as_on_chain(&account_address)?;
+            is_updated = true;
+        }
 
         let indexed_value = IndexedWellKnownTypes::from_value(account_value.component().unwrap().state())?;
         substate_api.save_root(account_substate_id.as_ref(), indexed_value.referenced_substates())?;
@@ -564,7 +584,7 @@ where
             }
         }
 
-        let mut updated_accounts = vec![];
+        let mut updated_accounts = HashSet::new();
         // Process all existing vaults that belong to an account
         for (vault_id, substate) in vaults {
             let vault_addr = SubstateId::Vault(vault_id);
@@ -623,8 +643,21 @@ where
 
             // Update the vault balance / confidential outputs
             self.refresh_vault(account_addr, vault_id, vault, updated_nfts).await?;
-            updated_accounts.push(account_addr);
+            updated_accounts.insert(account_addr);
         }
+
+        // Update UTXOs
+        let stealth_outputs_api = self.wallet_sdk.stealth_outputs_api();
+        let utxos = diff.up_iter().filter(|(id, _)| id.is_utxo_address()).map(|(id, s)| {
+            let utxo = s
+                .substate_value()
+                .as_utxo()
+                .unwrap_or_else(|| panic!("Expected {} to be a UTXO.", id));
+            (id.as_utxo_address().expect("is_utxo checked"), utxo)
+        });
+
+        // TODO: if we submitted this transaction, we could let this part of the code know which outputs are ours
+        stealth_outputs_api.verify_and_update_outputs(utxos)?;
 
         if let Some(account) = new_account {
             debug!(
@@ -787,6 +820,8 @@ pub enum AccountMonitorError {
     Substate(#[from] SubstateApiError),
     #[error("Outputs API error: {0}")]
     ConfidentialOutputs(#[from] ConfidentialOutputsApiError),
+    #[error("Stealth Outputs API error: {0}")]
+    StealthOutputs(#[from] StealthOutputsApiError),
     #[error("Non Fungibles API error: {0}")]
     NonFungibleTokens(#[from] NonFungibleTokensApiError),
     #[error("Failed to decode binary value: {0}")]

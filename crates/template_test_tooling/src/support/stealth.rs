@@ -90,7 +90,7 @@ fn generate_stealth_statement_internal(
         })
         .collect::<Vec<_>>();
 
-    let stmt = stealth::create_output_statement(&output_statements, revealed_output_amount).unwrap();
+    let stmt = stealth::create_outputs_statement(&output_statements, revealed_output_amount).unwrap();
     (stmt, masks)
 }
 

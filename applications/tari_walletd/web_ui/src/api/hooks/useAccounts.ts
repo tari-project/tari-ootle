@@ -30,6 +30,7 @@ import {
   accountsGetBalances,
   accountsGetDefault,
   accountsList,
+  accountsStealthTransfer,
   accountsTransfer,
   mintFaucetNfts,
   nftList,
@@ -43,7 +44,10 @@ import type {
   ComponentAddress,
   ComponentAddressOrName,
   ConfidentialTransferInputSelection,
+  ResourceType,
 } from "@tari-project/typescript-bindings";
+
+const DEFAULT_MAX_FEE = 2000;
 
 //   Fees are passed as strings because Amount is tagged
 export const useAccountsClaimBurn = (account: string, claimProof: ClaimBurnProof, fee: number) => {
@@ -92,35 +96,61 @@ export const useAccountsCreate = () => {
 };
 
 export interface TransferParams {
-  account: ComponentAddressOrName | null;
+  account: ComponentAddress;
   amount: number;
   resource_address: string;
   destination_public_key: string;
   max_fee: number | null;
-  isConfidential: boolean;
+  resourceType: ResourceType;
   output_to_revealed: boolean;
   input_selection: ConfidentialTransferInputSelection;
   badge: string | null;
   dry_run: boolean;
 }
 
-export const useAccountsTransfer = (params: TransferParams) => {
+export const useAccountsTransfer = () => {
   return useMutation(
-    () => {
-      let transferRequest = {
-        account: params.account,
-        amount: params.amount,
-        resource_address: params.resource_address,
-        destination_public_key: params.destination_public_key,
-        max_fee: params.max_fee,
-        proof_from_badge_resource: params.badge,
-        input_selection: params.input_selection,
-        output_to_revealed: params.output_to_revealed,
-        dry_run: params.dry_run,
-      };
-      if (params.isConfidential) {
+    (params: TransferParams) => {
+      const account = { ComponentAddress: params.account };
+      const max_fee = params.max_fee || DEFAULT_MAX_FEE;
+      if (params.resourceType === "Confidential") {
+        let transferRequest = {
+          account,
+          amount: params.amount,
+          resource_address: params.resource_address,
+          destination_public_key: params.destination_public_key,
+          max_fee,
+          proof_from_badge_resource: params.badge,
+          input_selection: params.input_selection,
+          output_to_revealed: params.output_to_revealed,
+          dry_run: params.dry_run,
+        };
         return accountsConfidentialTransfer(transferRequest);
+      } else if (params.resourceType === "Stealth") {
+        let transferRequest = {
+          owner_account: account,
+          input_selection: params.input_selection,
+          resource_address: params.resource_address,
+          destination_public_key: params.destination_public_key,
+          max_fee,
+          blinded_output_amount: params.output_to_revealed ? 0 : params.amount,
+          revealed_output_amount: params.output_to_revealed ? params.amount : 0,
+          dry_run: params.dry_run,
+        };
+        return accountsStealthTransfer(transferRequest);
       } else {
+        // Fungible and NFTs
+        let transferRequest = {
+          account,
+          amount: params.amount,
+          resource_address: params.resource_address,
+          destination_public_key: params.destination_public_key,
+          max_fee,
+          proof_from_badge_resource: params.badge,
+          input_selection: params.input_selection,
+          output_to_revealed: params.output_to_revealed,
+          dry_run: params.dry_run,
+        };
         return accountsTransfer(transferRequest);
       }
     },

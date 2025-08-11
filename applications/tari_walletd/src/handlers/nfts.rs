@@ -67,12 +67,11 @@ pub async fn handle_list(
     token: Option<&Bearer>,
     req: ListNftsRequest,
 ) -> Result<ListNftsResponse, anyhow::Error> {
+    context.check_auth(token, &[JrpcPermission::Admin])?;
     let ListNftsRequest { account, limit, offset } = req;
     let sdk = context.wallet_sdk();
     let account = get_account_or_default(account.as_ref(), &sdk.accounts_api())?;
     let account = account.account;
-    let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::Admin])?;
 
     let non_fungible_api = sdk.non_fungible_api();
 

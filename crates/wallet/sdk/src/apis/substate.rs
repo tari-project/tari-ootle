@@ -227,6 +227,7 @@ where
             version_hint.display()
         );
 
+        // TODO: cache?
         let resp = self
             .network_interface
             .query_substate(address, version_hint, false)
@@ -333,8 +334,9 @@ fn get_dependent_substates<TTx: WalletStoreReader>(
         }
         debug!(
             target: LOG_TARGET,
-            "Adding substate {} to dependent substates",
-            child.substate_id
+            "substate {} owned by {}",
+            child.substate_id,
+            parent.substate_id
         );
         substate_ids.insert(child.substate_id.into());
         for child in child.referenced_substates {
@@ -353,8 +355,8 @@ fn get_dependent_substates_inner<TTx: WalletStoreReader>(
     };
     debug!(
         target: LOG_TARGET,
-        "Adding substate {} to dependent substates",
-        substate.substate_id
+        "Getting dependent substates for {}",
+        substate.substate_id,
     );
     substate_ids.insert(substate.substate_id.into());
 
@@ -362,8 +364,9 @@ fn get_dependent_substates_inner<TTx: WalletStoreReader>(
         if let Some(addr) = child.as_non_fungible_address() {
             debug!(
                 target: LOG_TARGET,
-                "Adding substate {} to dependent substates",
-                child
+                "NonFungible substate {} owned by {}",
+                child,
+                id
             );
             // Ensure that the associated resource is also included
             substate_ids.insert(SubstateRequirement::unversioned(*addr.resource_address()));
@@ -376,8 +379,9 @@ fn get_dependent_substates_inner<TTx: WalletStoreReader>(
         get_dependent_substates_inner(tx, &child, substate_ids)?;
         debug!(
             target: LOG_TARGET,
-            "Adding substate {} to dependent substates",
-            child
+            "Child substate {} owned by {}",
+            child,
+            id
         );
         substate_ids.insert(child.into());
     }

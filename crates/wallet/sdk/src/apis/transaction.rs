@@ -252,10 +252,11 @@ where
                     if transaction.is_dry_run || new_status != TransactionStatus::Accepted {
                         self.release_all_outputs_for_transaction_internal(tx, transaction_id)?;
                     } else {
-                        let proof_ids = tx.output_locks_get_by_transaction_id(transaction_id)?;
-                        for proof_id in proof_ids {
-                            tx.outputs_finalize_by_lock_id(proof_id)?;
-                            tx.vaults_finalized_locked_revealed_funds(proof_id)?;
+                        let lock_ids = tx.output_locks_get_by_transaction_id(transaction_id)?;
+                        for lock_id in lock_ids {
+                            tx.outputs_finalize_by_lock_id(lock_id)?;
+                            tx.stealth_outputs_finalize_by_lock_id(lock_id)?;
+                            tx.vaults_finalized_locked_revealed_funds(lock_id)?;
                         }
                     }
 
@@ -281,11 +282,13 @@ where
         tx: &mut <TStore as WalletStore>::WriteTransaction<'_>,
         transaction_id: TransactionId,
     ) -> Result<(), TransactionApiError> {
-        let proof_ids = tx.output_locks_get_by_transaction_id(transaction_id)?;
+        let lock_ids = tx.output_locks_get_by_transaction_id(transaction_id)?;
 
-        debug!(target: LOG_TARGET, "Releasing {} proofs (and associated outputs) for transaction {} that was not committed", proof_ids.len(), transaction_id);
-        for proof_id in proof_ids {
-            tx.outputs_release_by_lock_id(proof_id)?;
+        debug!(target: LOG_TARGET, "Releasing {} locks (and associated outputs) for transaction {} that was not committed", lock_ids.len(), transaction_id);
+        for lock_id in lock_ids {
+            // Lock could be for confidential outputs or stealth outputs
+            tx.outputs_release_by_lock_id(lock_id)?;
+            tx.stealth_outputs_release_by_lock_id(lock_id)?;
         }
 
         Ok(())

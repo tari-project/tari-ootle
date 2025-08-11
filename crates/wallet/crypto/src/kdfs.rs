@@ -5,7 +5,7 @@ use chacha20poly1305::{aead::generic_array::GenericArray, Key};
 use digest::FixedOutput;
 use tari_crypto::{
     dhke::DiffieHellmanSharedSecret,
-    keys::SecretKey,
+    keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
 use tari_ootle_common_types::{base_layer_hashing::encrypted_data_hasher, Network};
@@ -52,4 +52,23 @@ pub fn owner_stealth_dh_secret(
 
     // c + k
     c + private_key
+}
+pub fn owner_stealth_dh_stealth_address(
+    network: Network,
+    public_key: &RistrettoPublicKey,
+    secret_nonce: &RistrettoSecretKey,
+) -> RistrettoPublicKey {
+    // c = H(r * k.G)
+    let shared_secret = DiffieHellmanSharedSecret::<RistrettoPublicKey>::new(secret_nonce, public_key);
+    let result = stealth_owner_hasher64(network)
+        .chain(shared_secret.as_bytes())
+        .finalize();
+
+    let c = RistrettoSecretKey::from_uniform_bytes(result.as_ref())
+        .expect("key length != RistrettoSecretKey::WIDE_REDUCTION_LEN");
+
+    let c_g = RistrettoPublicKey::from_secret_key(&c);
+
+    // c.G + k.G
+    c_g + public_key
 }

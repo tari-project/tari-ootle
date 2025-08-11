@@ -32,9 +32,7 @@ pub fn validate_stealth_outputs_statement(
     view_key: Option<&RistrettoPublicKey>,
 ) -> Result<Vec<ValidatedStealthOutput>, ResourceError> {
     if stmt.outputs.is_empty() {
-        return Err(ResourceError::InvalidConfidentialProof {
-            details: "No outputs provided in the stealth statement".to_string(),
-        });
+        return Ok(vec![]);
     }
 
     validate_bullet_proof(&stmt.agg_range_proof, stmt.outputs.iter().map(|o| &o.output))?;

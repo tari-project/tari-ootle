@@ -70,7 +70,7 @@ impl ResourceBuilder {
     ///
     /// Vaults containing this resource consist of blinded outputs in addition to a revealed portion that is publicly
     /// visible. A user may transfer funds to and from confidential outputs to the revealed balance. The primary use
-    /// cose of revealed balances is to allow excess funds, previously revealed to pay fees, to be refunded to the
+    /// case of revealed balances is to allow excess funds, previously revealed to pay fees, to be refunded to the
     /// vault.
     pub fn confidential() -> ConfidentialResourceBuilder {
         ConfidentialResourceBuilder::new()

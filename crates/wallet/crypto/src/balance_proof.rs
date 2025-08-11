@@ -45,9 +45,14 @@ pub(crate) fn generate_stealth_balance_proof_signature(
     revealed_output_amount: &Amount,
 ) -> BalanceProofSignature {
     let secret_excess = agg_input_mask - agg_output_mask;
-    let excess = RistrettoPublicKey::from_secret_key(&secret_excess);
+    let public_excess = RistrettoPublicKey::from_secret_key(&secret_excess);
     let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
-    let message = messages::stealth_transfer64(&excess, &public_nonce, revealed_input_amount, revealed_output_amount);
+    let message = messages::stealth_transfer64(
+        &public_excess,
+        &public_nonce,
+        revealed_input_amount,
+        revealed_output_amount,
+    );
 
     let sig = EngineSchnorrSignature::sign_raw_uniform(&secret_excess, nonce, &message).unwrap();
     sig.to_byte_type()

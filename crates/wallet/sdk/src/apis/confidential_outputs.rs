@@ -120,23 +120,23 @@ where TStore: WalletStore
 
     pub fn add_output_lock(&self, vault_id: &VaultId) -> Result<OutputLockId, ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
-        let proof_id = tx.output_locks_insert_for_vault(vault_id)?;
+        let lock_id = tx.output_locks_insert_for_vault(vault_id)?;
         tx.commit()?;
-        Ok(proof_id)
+        Ok(lock_id)
     }
 
-    pub fn release_proof_outputs(&self, proof_id: OutputLockId) -> Result<(), ConfidentialOutputsApiError> {
+    pub fn release_locked_outputs(&self, lock_id: OutputLockId) -> Result<(), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
-        tx.output_locks_delete(proof_id)?;
-        tx.outputs_release_by_lock_id(proof_id)?;
+        tx.output_locks_delete(lock_id)?;
+        tx.outputs_release_by_lock_id(lock_id)?;
         tx.commit()?;
         Ok(())
     }
 
-    pub fn finalize_outputs_for_proof(&self, proof_id: OutputLockId) -> Result<(), ConfidentialOutputsApiError> {
+    pub fn finalize_outputs_for_lock(&self, lock_id: OutputLockId) -> Result<(), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
-        tx.output_locks_delete(proof_id)?;
-        tx.outputs_finalize_by_lock_id(proof_id)?;
+        tx.output_locks_delete(lock_id)?;
+        tx.outputs_finalize_by_lock_id(lock_id)?;
         tx.commit()?;
         Ok(())
     }
@@ -189,27 +189,27 @@ where TStore: WalletStore
 
     pub fn lock_revealed_funds(
         &self,
-        proof_id: OutputLockId,
+        lock_id: OutputLockId,
         amount_to_lock: Amount,
     ) -> Result<(), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
-        tx.vaults_lock_revealed_funds(proof_id, amount_to_lock)?;
+        tx.vaults_lock_revealed_funds(lock_id, amount_to_lock)?;
         tx.commit()?;
 
         Ok(())
     }
 
-    pub fn finalize_locked_revealed_funds(&self, proof_id: OutputLockId) -> Result<(), ConfidentialOutputsApiError> {
+    pub fn finalize_locked_revealed_funds(&self, lock_id: OutputLockId) -> Result<(), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
-        tx.vaults_finalized_locked_revealed_funds(proof_id)?;
+        tx.vaults_finalized_locked_revealed_funds(lock_id)?;
         tx.commit()?;
 
         Ok(())
     }
 
-    pub fn release_revealed_funds(&self, proof_id: OutputLockId) -> Result<(), ConfidentialOutputsApiError> {
+    pub fn release_revealed_funds(&self, lock_id: OutputLockId) -> Result<(), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
-        tx.vaults_unlock_revealed_funds(proof_id)?;
+        tx.vaults_unlock_revealed_funds(lock_id)?;
         tx.commit()?;
 
         Ok(())
@@ -324,13 +324,13 @@ where TStore: WalletStore
         })
     }
 
-    pub fn proofs_set_transaction_hash(
+    pub fn locks_set_transaction_hash(
         &self,
-        proof_id: OutputLockId,
+        lock_id: OutputLockId,
         transaction_id: TransactionId,
     ) -> Result<(), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
-        tx.output_locks_set_transaction_id(proof_id, transaction_id)?;
+        tx.output_locks_set_params(lock_id, Some(transaction_id), None)?;
         tx.commit()?;
         Ok(())
     }

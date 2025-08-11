@@ -112,7 +112,7 @@ pub fn get_account<TStore, TNetworkInterface>(
     accounts_api: &AccountsApi<'_, TStore, TNetworkInterface>,
 ) -> Result<AccountWithPublicKey, AccountsApiError>
 where
-    TStore: tari_ootle_wallet_sdk::storage::WalletStore,
+    TStore: WalletStore,
 {
     match account {
         ComponentAddressOrName::ComponentAddress(address) => Ok(accounts_api.get_account_by_address(address)?),
@@ -140,7 +140,7 @@ pub fn get_account_or_default<TStore, TNetworkInterface>(
     accounts_api: &AccountsApi<'_, TStore, TNetworkInterface>,
 ) -> Result<AccountWithPublicKey, anyhow::Error>
 where
-    TStore: tari_ootle_wallet_sdk::storage::WalletStore,
+    TStore: WalletStore,
 {
     let result;
     if let Some(a) = account {

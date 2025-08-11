@@ -56,7 +56,7 @@ fn outputs_locked_and_released() {
 
     test.sdk
         .confidential_outputs_api()
-        .release_proof_outputs(proof_id)
+        .release_locked_outputs(proof_id)
         .unwrap();
 
     let locked = test
@@ -114,7 +114,7 @@ fn outputs_locked_and_finalized() {
     let balance = test.get_unspent_balance();
     assert_eq!(balance, 100);
 
-    outputs_api.finalize_outputs_for_proof(proof_id).unwrap();
+    outputs_api.finalize_outputs_for_lock(proof_id).unwrap();
 
     {
         let mut tx = test.store().create_read_tx().unwrap();

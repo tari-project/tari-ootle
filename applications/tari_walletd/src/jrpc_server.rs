@@ -24,7 +24,7 @@ use serde_json::json;
 use tokio::task;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
-use super::handlers::{stealth, substates, templates, wallet, webauthn, HandlerContext};
+use super::handlers::{substates, templates, wallet, webauthn, HandlerContext};
 use crate::handlers::{
     accounts,
     auth::jwt::JwtApiError,
@@ -139,6 +139,7 @@ async fn handler(
             "confidential_transfer" => {
                 call_handler(context, value, token, accounts::handle_confidential_transfer).await
             },
+            "stealth_transfer" => call_handler(context, value, token, accounts::handle_stealth_transfer).await,
             "set_default" => call_handler(context, value, token, accounts::handle_set_default).await,
             "create_free_test_coins" => {
                 call_handler(context, value, token, accounts::handle_create_free_test_coins).await
@@ -156,14 +157,6 @@ async fn handler(
             },
             "view_vault_balance" => call_handler(context, value, token, confidential::handle_view_vault_balance).await,
             _ => Ok(value.method_not_found(&value.method)),
-        },
-        Some(("stealth", method)) =>
-        {
-            #[allow(clippy::collapsible_match)]
-            match method {
-                "transfer" => call_handler(context, value, token, stealth::handle_transfer).await,
-                _ => Ok(value.method_not_found(&value.method)),
-            }
         },
         Some(("substates", method)) => match method {
             "get" => call_handler(context, value, token, substates::handle_get).await,

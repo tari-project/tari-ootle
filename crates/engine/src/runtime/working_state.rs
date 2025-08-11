@@ -1334,7 +1334,8 @@ impl WorkingState {
         }
 
         for downed_utxo in downed_utxos {
-            substate_diff.down(SubstateId::Utxo(downed_utxo), 0);
+            let spent_utxo = self.store.get_unmodified_substate(&downed_utxo.clone().into())?;
+            substate_diff.down(SubstateId::Utxo(downed_utxo), spent_utxo.version());
         }
 
         // Special case: unclaimed confidential outputs are downed without being upped if claimed

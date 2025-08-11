@@ -81,7 +81,7 @@ pub fn create_transfer_statement(
         &revealed_output_amount,
     );
 
-    let outputs_statement = create_output_statement(output_statements, revealed_output_amount)?;
+    let outputs_statement = create_outputs_statement(output_statements, revealed_output_amount)?;
 
     Ok(StealthTransferStatement {
         inputs_statement: StealthInputsStatement {
@@ -93,7 +93,7 @@ pub fn create_transfer_statement(
     })
 }
 
-pub fn create_output_statement(
+pub fn create_outputs_statement(
     output_statements: &[UnblindedStealthOutputStatement],
     revealed_output_amount: Amount,
 ) -> Result<StealthOutputsStatement, ConfidentialProofError> {
@@ -151,7 +151,7 @@ mod tests {
 
     fn create_valid_proof(amount: Amount, minimum_value_promise: u64) -> StealthOutputsStatement {
         let mask = RistrettoSecretKey::random(&mut OsRng);
-        create_output_statement(
+        create_outputs_statement(
             &[UnblindedStealthOutputStatement {
                 statement: UnblindedOutputStatement {
                     amount,

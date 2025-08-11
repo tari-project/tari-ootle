@@ -211,8 +211,7 @@ pub async fn handle_finalize_transfer(
 
     sdk.confidential_outputs_api()
         .finalize_locked_revealed_funds(req.proof_id)?;
-    sdk.confidential_outputs_api()
-        .finalize_outputs_for_proof(req.proof_id)?;
+    sdk.confidential_outputs_api().finalize_outputs_for_lock(req.proof_id)?;
     Ok(ProofsCancelResponse {})
 }
 
@@ -223,7 +222,7 @@ pub async fn handle_cancel_transfer(
 ) -> Result<ProofsCancelResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
-    sdk.confidential_outputs_api().release_proof_outputs(req.proof_id)?;
+    sdk.confidential_outputs_api().release_locked_outputs(req.proof_id)?;
     Ok(ProofsCancelResponse {})
 }
 

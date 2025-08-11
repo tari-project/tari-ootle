@@ -38,11 +38,7 @@ use tari_ootle_common_types::{
     SubstateRequirement,
 };
 use tari_ootle_wallet_sdk::{
-    apis::{
-        confidential_transfer::ConfidentialTransferInputSelection,
-        key_manager::KeyBranch,
-        stealth_transfer::StealthTransferInputSelection,
-    },
+    apis::{confidential_transfer::ConfidentialTransferInputSelection, key_manager::KeyBranch},
     models::{Account, AuthoredTemplateModel, NonFungibleToken, OutputLockId, TransactionStatus, WalletTransaction},
 };
 use tari_template_abi::{FunctionDef, TemplateDef};
@@ -517,7 +513,7 @@ pub struct AccountsGetBalancesResponse {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct BalanceEntry {
-    pub vault_address: VaultId,
+    pub vault_address: Option<VaultId>,
     pub resource_address: ResourceAddress,
     pub balance: Amount,
     pub resource_type: ResourceType,
@@ -1549,8 +1545,7 @@ pub struct TransferNftResponse {
 )]
 pub struct StealthTransferRequest {
     pub owner_account: ComponentAddressOrName,
-    pub revealed_to_account: Option<ComponentAddress>,
-    pub input_selection: StealthTransferInputSelection,
+    pub input_selection: ConfidentialTransferInputSelection,
     pub resource_address: ResourceAddress,
     pub destination_public_key: RistrettoPublicKeyBytes,
     #[cfg_attr(feature = "ts", ts(type = "number"))]

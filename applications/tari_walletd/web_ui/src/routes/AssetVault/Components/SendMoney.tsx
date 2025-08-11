@@ -43,10 +43,10 @@ import {
   ResourceType,
   substateIdToString,
   TransactionResult,
+  XTR,
 } from "@tari-project/typescript-bindings";
 import InputLabel from "@mui/material/InputLabel";
-
-const XTR2 = "resource_0101010101010101010101010101010101010101010101010101010101010101";
+import { transactionsWaitResult } from "../../../utils/json_rpc";
 
 export default function SendMoney() {
   const [open, setOpen] = useState(false);
@@ -61,7 +61,7 @@ export default function SendMoney() {
         handleClose={() => setOpen(false)}
         onSendComplete={() => setOpen(false)}
         resource_type="Confidential"
-        resource_address={XTR2}
+        resource_address={XTR}
       />
     </>
   );
@@ -70,7 +70,7 @@ export default function SendMoney() {
 export interface SendMoneyDialogProps {
   open: boolean;
   resource_address?: ResourceAddress;
-  resource_type?: ResourceType;
+  resource_type: ResourceType;
   onSendComplete?: () => void;
   handleClose: () => void;
 }
@@ -85,6 +85,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     badge: null,
   };
   const isConfidential = props.resource_type === "Confidential";
+  const isStealth = props.resource_type === "Stealth";
   const [useBadge, setUseBadge] = useState(false);
   const [disabled, setDisabled] = useState(false);
   const [transferFormState, setTransferFormState] = useState(INITIAL_VALUES);
@@ -106,26 +107,19 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     ?.filter((b: BalanceEntry) => b.resource_type === "NonFungible" && BigInt(b.balance) > 0n)
     .map((b: BalanceEntry) => b.resource_address) as string[];
 
-  // TODO: we should have separate calls for confidential and non-confidential transfers
   const transfer = {
-    account: { ComponentAddress: substateIdToString(account.address) },
+    account: substateIdToString(account.address),
     amount: parseInt(transferFormState.amount),
     // HACK: default to XTR2 because the resource is only set when open==true, and we cannot conditionally call hooks i.e. when props.resource_address is set
-    resource_address: props.resource_address || XTR2,
+    resource_address: props.resource_address || XTR,
     destination_public_key: transferFormState.publicKey,
-    isConfidential: props.resource_type === "Confidential",
+    resourceType: props.resource_type,
     output_to_revealed: !transferFormState.outputToConfidential,
     input_selection: transferFormState.inputSelection as ConfidentialTransferInputSelection,
     badge: transferFormState.badge,
   };
 
-  const { mutateAsync: sendIt } = useAccountsTransfer({
-    ...transfer,
-    dry_run: false,
-    max_fee: parseInt(transferFormState.fee),
-  });
-
-  const { mutateAsync: calculateFeeEstimate } = useAccountsTransfer({ ...transfer, dry_run: true, max_fee: 3000 });
+  const { mutateAsync: sendIt } = useAccountsTransfer();
 
   function setFormValue(e: React.ChangeEvent<HTMLInputElement>) {
     setTransferFormState({
@@ -162,7 +156,11 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
 
     setDisabled(true);
     if (!isNaN(parseInt(transferFormState.fee))) {
-      sendIt?.()
+      sendIt?.({
+        ...transfer,
+        dry_run: false,
+        max_fee: parseInt(transferFormState.fee),
+      })
         .then(() => {
           setTransferFormState(INITIAL_VALUES);
           props.onSendComplete?.();
@@ -175,16 +173,21 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
           setDisabled(false);
         });
     } else {
-      calculateFeeEstimate?.()
-        .then((result) => {
-          if (!("Accept" in result.result.result)) {
+      sendIt?.({ ...transfer, dry_run: true, max_fee: 3000 })
+        .then((result) => transactionsWaitResult({ transaction_id: result.transaction_id, timeout_secs: null }))
+        .then((resp) => {
+          const result = resp.result?.result;
+          if (!result) {
+            throw new Error("No result in response: " + JSON.stringify(resp));
+          }
+          if (!("Accept" in result)) {
             setPopup({
               title: "Fee estimate failed",
               error: true,
               // TODO: fix this
               message: JSON.stringify(
-                unionGet(result.result.result, "Reject" as keyof TransactionResult) ||
-                  unionGet(result.result.result, "AcceptFeeRejectRest" as keyof TransactionResult)?.[1],
+                unionGet(result, "Reject" as keyof TransactionResult) ||
+                  unionGet(result, "AcceptFeeRejectRest" as keyof TransactionResult)?.[1],
               ),
             });
             return;
@@ -194,7 +197,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
           // may differ in length and, therefore in fees. The fees may differ typically by 2/3, this more than
           // accounts for that. See https://github.com/tari-project/tari-ootle/issues/1312
           // TODO: remove once this is no longer an issue
-          const fee = result.fee + 100;
+          const fee = resp.final_fee + 100;
           setTransferFormState({ ...transferFormState, fee: fee.toString() });
         })
         .catch((e) => {
@@ -262,7 +265,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
             style={{ flexGrow: 1 }}
             disabled={disabled}
           />
-          {isConfidential && (
+          {(isConfidential || isStealth) && (
             <>
               <FormControlLabel
                 control={

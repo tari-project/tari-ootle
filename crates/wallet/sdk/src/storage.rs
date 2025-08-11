@@ -6,7 +6,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::{substate::SubstateId, UtxoId};
 use tari_ootle_common_types::{optional::IsNotFoundError, substate_type::SubstateType, VersionedSubstateIdRef};
 use tari_template_lib::{
     models::VaultId,
@@ -195,6 +195,12 @@ pub trait WalletStoreReader {
         &mut self,
         resource_address: &ResourceAddress,
     ) -> Result<StealthBalance, WalletStorageError>;
+
+    fn stealth_outputs_get_all_by_account(
+        &mut self,
+        account_addr: &ComponentAddress,
+    ) -> Result<Vec<StealthOutputModel>, WalletStorageError>;
+
     fn stealth_outputs_get_locked_by_lock_id(
         &mut self,
         lock_id: OutputLockId,
@@ -354,15 +360,20 @@ pub trait WalletStoreWriter {
     fn stealth_outputs_finalize_by_lock_id(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
     /// Release outputs that were locked and remove pending unconfirmed outputs for this lock
     fn stealth_outputs_release_by_lock_id(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
-
+    fn stealth_outputs_mark_burnt(
+        &mut self,
+        resource_address: &ResourceAddress,
+        id: &UtxoId,
+    ) -> Result<(), WalletStorageError>;
     // Output locks
     fn output_locks_insert(&mut self, resource_address: &ResourceAddress) -> Result<OutputLockId, WalletStorageError>;
     fn output_locks_insert_for_vault(&mut self, vault_id: &VaultId) -> Result<OutputLockId, WalletStorageError>;
     fn output_locks_delete(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
-    fn output_locks_set_transaction_id(
+    fn output_locks_set_params(
         &mut self,
         lock_id: OutputLockId,
-        transaction_id: TransactionId,
+        transaction_id: Option<TransactionId>,
+        vault_id: Option<VaultId>,
     ) -> Result<(), WalletStorageError>;
 
     // Non fungible tokens

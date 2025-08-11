@@ -5,7 +5,7 @@ import type { ResourceType } from "../ResourceType";
 import type { VaultId } from "../VaultId";
 
 export type BalanceEntry = {
-  vault_address: VaultId;
+  vault_address: VaultId | null;
   resource_address: ResourceAddress;
   balance: Amount;
   resource_type: ResourceType;

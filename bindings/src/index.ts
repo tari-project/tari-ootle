@@ -100,7 +100,6 @@ export * from "./types/Shard";
 export * from "./types/StealthInputsStatement";
 export * from "./types/StealthInput";
 export * from "./types/StealthOutputsStatement";
-export * from "./types/StealthTransferInputSelection";
 export * from "./types/StealthTransferStatement";
 export * from "./types/StealthUnspentOutput";
 export * from "./types/SubstateAddress";

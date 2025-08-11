@@ -60,22 +60,23 @@ For other environments, the "manual" process is as follows:
 
 2. **Generate a claim key**  
    - Use the Ootle wallet web UI **or** the `tari_ootle_wallet_cli` tool.
-   - Store the claim private key securely and back it up. Do not share it.
+   - If using the Ootle wallet, claim keys are derived from your wallet seed. Ensure you claim from the same seed/account later.
+   - Record which claim public key you used for the burn. Keep your wallet seed/private key secure and never share it.
 
 3. **Open the L1 console wallet**  
    - Navigate to the **`burn`** tab.
 
 4. **Burn the desired amount of Tari**  
-   - Include the claim public key you generated in step 2.  
-   - ⚠ **WARNING:** If you lose the claim public key, you will not be able to claim the funds on the Tari network.
+   - Include the claim public key you generated in step 2.
+   - ⚠ **WARNING:** You must claim using the same claim public key that was included in the burn. If you don’t have access to the wallet/seed that can derive that key, you will not be able to claim the funds.
 
-5. **Copy the claim proof JSON** from the L1 console wallet:
+5. **Copy the claim proof JSON** from the L1 console wallet.
 
-6. **Wait for the burn to be mined in**. 
+6. **Wait for the burn to be mined**. 
    - Validator nodes scan the L1 network for burnt UTXOs with special flags.
-   - Depending on the network configuration, this may require **10–100s of blocks** before the burn is picked up.  
+   - Depending on the network configuration, this may take **tens to hundreds of blocks** before the burn is picked up.
 
-8. **Claim the burn**.  
+7. **Claim the burn**.  
    Use the Ootle wallet web UI or the `tari_ootle_wallet_cli` tool to claim the burn using the burn proof via the **"Claim Burn"** dialog.  
 
 

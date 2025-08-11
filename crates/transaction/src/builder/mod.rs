@@ -3,6 +3,7 @@
 
 pub mod named_args;
 mod named_component_call;
+mod named_resource_ref;
 #[cfg(test)]
 mod tests;
 mod workspace_ids;
@@ -14,6 +15,7 @@ use tari_engine_types::{
     instruction::Instruction,
     substate::SubstateId,
     ComponentCall,
+    ResourceAddressRef,
     ValidatorFeePoolAddress,
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
@@ -29,6 +31,7 @@ use tari_template_lib::{
 use crate::{
     builder::{
         named_args::{parse_workspace_key, BuilderWorkspaceKey, NamedArg, ParseWorkspaceKeyError},
+        named_resource_ref::NamedResourceRef,
         workspace_ids::WorkspaceIds,
     },
     unsigned_transaction::UnsignedTransaction,
@@ -180,28 +183,29 @@ impl TransactionBuilder {
         })
     }
 
-    pub fn stealth_transfer(self, resource_address: ResourceAddress, statement: StealthTransferStatement) -> Self {
-        self.stealth_transfer_with_opt_bucket(resource_address, statement, None::<String>)
+    pub fn stealth_transfer<R: Into<NamedResourceRef>>(self, resource: R, statement: StealthTransferStatement) -> Self {
+        self.stealth_transfer_with_opt_bucket(resource, statement, None::<String>)
     }
 
-    pub fn stealth_transfer_with_input_bucket<B: Into<String>>(
+    pub fn stealth_transfer_with_input_bucket<B: Into<String>, R: Into<NamedResourceRef>>(
         self,
-        resource_address: ResourceAddress,
+        resource_address: R,
         statement: StealthTransferStatement,
         bucket: B,
     ) -> Self {
         self.stealth_transfer_with_opt_bucket(resource_address, statement, Some(bucket))
     }
 
-    pub fn stealth_transfer_with_opt_bucket<B: Into<String>>(
+    pub fn stealth_transfer_with_opt_bucket<B: Into<String>, R: Into<NamedResourceRef>>(
         self,
-        resource_address: ResourceAddress,
+        resource: R,
         statement: StealthTransferStatement,
         bucket: Option<B>,
     ) -> Self {
+        let resource_address = self.resolve_resource_ref(resource.into());
         let revealed_input_bucket = bucket.map(|s| self.get_workspace_offset_id_from_named_arg(s));
         self.add_instruction(Instruction::StealthTransfer {
-            resource_address,
+            resource_address_ref: resource_address,
             statement,
             revealed_input_bucket,
         })
@@ -393,6 +397,18 @@ impl TransactionBuilder {
                     panic!("Workspace key '{}' not found", call.name());
                 });
                 ComponentCall::Workspace(id)
+            },
+        }
+    }
+
+    fn resolve_resource_ref(&self, resx_ref: NamedResourceRef) -> ResourceAddressRef {
+        match resx_ref {
+            NamedResourceRef::Address(addr) => addr.into(),
+            NamedResourceRef::Workspace(id) => {
+                let id = self.workspace_ids.get(id.name()).unwrap_or_else(|| {
+                    panic!("Workspace key '{}' not found", id.name());
+                });
+                WorkspaceOffsetId::new(id).into()
             },
         }
     }

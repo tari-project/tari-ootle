@@ -91,7 +91,7 @@ message Instruction {
   uint32 allocate_address_workspace_id = 25;
 
   // StealthTransfer
-  bytes stealth_transfer_resource_address = 26;
+  ResourceAddressRef stealth_transfer_resource_address = 26;
   StealthTransferStatement stealth_transfer_statement = 27;
   WorkspaceOffsetId stealth_transfer_revealed_input_bucket = 28;
 }
@@ -100,6 +100,13 @@ message ComponentCall {
   oneof call {
     bytes address = 1;
     uint32 allocation = 2;
+  }
+}
+
+message ResourceAddressRef {
+  oneof inner {
+    bytes address = 1;
+    WorkspaceOffsetId workspace = 2;
   }
 }
 
@@ -180,7 +187,7 @@ message AccessRules {
 }
 
 message StealthTransferStatement {
-  repeated StealthInput inputs = 1;
+  StealthInputsStatement inputs_statement = 1;
   StealthOutputsStatement outputs_statement = 2;
   bytes balance_proof = 3;
 }
@@ -204,5 +211,10 @@ message StealthUnspentOutput {
 message StealthInput {
   bytes commitment = 1;
   tari.ootle.common.Signature owner_proof = 2;
+}
+
+message StealthInputsStatement {
+  repeated StealthInput inputs = 1;
+  tari.ootle.common.Amount revealed_amount = 2;
 }
 

@@ -43,34 +43,18 @@ pub struct StealthInput {
     /// output.
     pub owner_proof: SchnorrSignatureBytes,
 }
-
+/// A statement for stealth outputs. A statement must contain confidential outputs
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
-pub struct StealthMintBalanceProof {
-    pub total_mint_amount: Amount,
-    #[cfg_attr(feature = "ts", ts(type = "{public_nonce: string, signature: string}"))]
-    pub excess_signature: BalanceProofSignature,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
-pub struct StealthMintStatement {
-    pub balance_proof: StealthMintBalanceProof,
-    pub outputs_statement: StealthOutputsStatement,
-}
-
-impl StealthMintStatement {
-    pub fn unverified_total_amount(&self) -> Amount {
-        self.balance_proof.total_mint_amount
-    }
+pub struct StealthInputsStatement {
+    /// The stealth inputs that are to be spent
+    pub inputs: Vec<StealthInput>,
+    /// The total amount of revealed funds being spent.
+    pub revealed_amount: Amount,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -80,8 +64,8 @@ impl StealthMintStatement {
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct StealthTransferStatement {
-    pub inputs: Vec<StealthInput>,
-    pub outputs_statement: StealthOutputsStatement,
+    pub inputs_statement: StealthInputsStatement,
+    pub outputs_statements: StealthOutputsStatement,
     /// Balance proof that proves that no coins were created or destroyed during the transfer (assuming the range proof
     /// is valid).
     #[cfg_attr(feature = "ts", ts(type = "{public_nonce: string, signature: string}"))]

@@ -42,7 +42,6 @@ use crate::{
         ProofId,
         ResourceAddress,
         ResourceAddressAllocation,
-        StealthMintStatement,
         VaultId,
         VaultRef,
     },
@@ -254,7 +253,7 @@ pub enum MintArg {
         statement: Box<ConfidentialOutputStatement>,
     },
     Stealth {
-        statement: Box<StealthMintStatement>,
+        amount: Amount,
     },
 }
 
@@ -265,15 +264,6 @@ impl MintArg {
             MintArg::NonFungible { .. } => ResourceType::NonFungible,
             MintArg::Confidential { .. } => ResourceType::Confidential,
             MintArg::Stealth { .. } => ResourceType::Stealth,
-        }
-    }
-
-    pub fn expect_stealth_mint_statement(self) -> Box<StealthMintStatement> {
-        match self {
-            MintArg::Fungible { .. } | MintArg::NonFungible { .. } | MintArg::Confidential { .. } => {
-                panic!("called expect_stealth on non-stealth MintArg")
-            },
-            MintArg::Stealth { statement } => statement,
         }
     }
 }

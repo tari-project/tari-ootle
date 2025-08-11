@@ -9,37 +9,45 @@ mod template {
     use super::*;
 
     pub struct StealthFaucet {
-        stealth_manager: StealthResourceManager,
+        manager: ResourceManager,
+        supply_vault: Vault,
     }
 
     impl StealthFaucet {
-        pub fn new(initial_supply: StealthMintStatement) -> Component<Self> {
-            let resource_address = ResourceBuilder::stealth()
+        pub fn new(
+            component_addr: ComponentAddressAllocation,
+            resource_addr: ResourceAddressAllocation,
+            initial_supply: Amount,
+            view_key: Option<RistrettoPublicKeyBytes>,
+        ) -> Component<Self> {
+            let bucket = ResourceBuilder::stealth()
+                .with_address_allocation(resource_addr)
                 .mintable(rule!(allow_all))
+                .then(|builder| {
+                    if let Some(key) = view_key {
+                        builder.with_view_key(key)
+                    } else {
+                        builder
+                    }
+                })
                 .initial_supply(initial_supply);
 
             Component::new(Self {
-                stealth_manager: resource_address.into(),
+                manager: bucket.resource_address().into(),
+                supply_vault: Vault::from_bucket(bucket),
             })
+            .with_address_allocation(component_addr)
             .with_access_rules(AccessRules::allow_all())
             .create()
         }
 
-        pub fn new_with_view_key(outputs: StealthMintStatement, view_key: RistrettoPublicKeyBytes) -> Component<Self> {
-            let resource_address = ResourceBuilder::stealth()
-                .mintable(rule!(allow_all))
-                .with_view_key(view_key)
-                .initial_supply(outputs);
-
-            Component::new(Self {
-                stealth_manager: resource_address.into(),
-            })
-            .with_access_rules(AccessRules::allow_all())
-            .create()
+        pub fn take_funds(&self, amount: Amount) -> Bucket {
+            self.supply_vault.withdraw(amount)
         }
 
-        pub fn mint(&self, statement: StealthMintStatement) {
-            self.stealth_manager.mint(statement);
+        pub fn mint(&self, amount: Amount) {
+            let bucket = self.manager.mint_stealth(amount);
+            self.supply_vault.deposit(bucket);
         }
     }
 }

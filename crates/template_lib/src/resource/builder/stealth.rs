@@ -1,11 +1,13 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_template_lib_types::Amount;
+
 use super::{IMAGE_URL, TOKEN_SYMBOL};
 use crate::{
     args::MintArg,
     auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
-    models::{Bucket, ComponentAddress, Metadata, ResourceAddress, ResourceAddressAllocation, StealthMintStatement},
+    models::{Bucket, ComponentAddress, Metadata, ResourceAddress, ResourceAddressAllocation},
     resource::{ResourceManager, ResourceType, DEFAULT_DIVISIBILITY},
     types::crypto::RistrettoPublicKeyBytes,
 };
@@ -37,6 +39,28 @@ impl StealthResourceBuilder {
             divisibility: DEFAULT_DIVISIBILITY,
             is_total_supply_tracking_enabled: true,
         }
+    }
+
+    /// Allows for chaining of builder methods even when conditionally applying builder methods.
+    ///
+    /// ## Example
+    ///
+    /// ```ignore
+    /// use tari_template_lib::prelude::*;
+    /// let resource = ResourceBuilder::stealth()
+    ///    .with_owner_rule(rule!(allow_all))
+    ///   .then(|builder| {
+    ///     if some_condition {
+    ///        builder.do_something_on_some_condition(..)
+    ///     } else {
+    ///        // or do nothing
+    ///        builder
+    ///     }
+    ///   })
+    ///   .build();
+    /// ```
+    pub fn then<F: FnOnce(Self) -> Self>(self, f: F) -> Self {
+        f(self)
     }
 
     /// Sets up who will be the owner of the resource.
@@ -103,7 +127,7 @@ impl StealthResourceBuilder {
         self
     }
 
-    /// Sets up who (apart from the owner) can update the access rules of the resource.
+    /// Sets up whom (apart from the owner) can update the access rules of the resource.
     pub fn update_access_rules(mut self, rule: AccessRule) -> Self {
         self.access_rules = self.access_rules.update_access_rules(rule);
         self
@@ -191,13 +215,11 @@ impl StealthResourceBuilder {
     /// This builds the resource and mints the initial supply of tokens, returning the address of the resource.
     /// NOTE that stealth resources do not return the bucket of the initial supply since
     /// they are minted as individual UTXO substates and cannot be placed in vault.
-    pub fn initial_supply(self, initial_supply: StealthMintStatement) -> ResourceAddress {
-        let mint_arg = MintArg::Stealth {
-            statement: Box::new(initial_supply),
-        };
+    pub fn initial_supply(self, initial_supply: Amount) -> Bucket {
+        let mint_arg = MintArg::Stealth { amount: initial_supply };
 
-        let (address, _) = self.build_internal(Some(mint_arg));
-        address
+        let (_, bucket) = self.build_internal(Some(mint_arg));
+        bucket.expect("[initial_supply] Bucket not returned from engine")
     }
 
     fn build_internal(mut self, mint_arg: Option<MintArg>) -> (ResourceAddress, Option<Bucket>) {

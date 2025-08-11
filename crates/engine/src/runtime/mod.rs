@@ -63,6 +63,7 @@ use tari_engine_types::{
     lock::LockFlag,
     substate::SubstateValue,
     ComponentCall,
+    ResourceAddressRef,
     ValidatorFeePoolAddress,
 };
 use tari_template_lib::{
@@ -93,15 +94,7 @@ use tari_template_lib::{
         WorkspaceOffsetId,
     },
     invoke_args,
-    models::{
-        BucketId,
-        ComponentAddress,
-        Metadata,
-        NonFungibleAddress,
-        ResourceAddress,
-        StealthTransferStatement,
-        VaultRef,
-    },
+    models::{BucketId, ComponentAddress, Metadata, NonFungibleAddress, StealthTransferStatement, VaultRef},
     types::EntityId,
 };
 pub use tracker::StateTracker;
@@ -208,7 +201,7 @@ pub trait RuntimeInterface: Send + Sync {
 
     fn stealth_transfer(
         &self,
-        resource_address: ResourceAddress,
+        resource_address: ResourceAddressRef,
         statement: StealthTransferStatement,
         revealed_funds_bucket: Option<BucketId>,
     ) -> Result<Option<BucketId>, RuntimeError>;

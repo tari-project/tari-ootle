@@ -14,7 +14,7 @@ use tari_ootle_wallet_crypto::{
     UnblindedStealthOutputStatement,
 };
 use tari_template_lib::{
-    models::{EncryptedData, StealthMintStatement, StealthOutputsStatement, StealthTransferStatement},
+    models::{EncryptedData, StealthOutputsStatement, StealthTransferStatement},
     types::Amount,
 };
 
@@ -32,12 +32,20 @@ pub fn generate_stealth_output_statement<I: IntoIterator<Item = A>, A: Into<Amou
 pub fn generate_mint_statement<I: IntoIterator<Item = A>, A: Into<Amount>>(
     stealth_output_amounts: I,
     revealed_output_amount: A,
-    view_key: Option<RistrettoPublicKey>,
-) -> (StealthMintStatement, Vec<RistrettoSecretKey>) {
+    view_key: Option<&RistrettoPublicKey>,
+) -> StealthUnblindedTransferData {
     let amounts = stealth_output_amounts.into_iter().map(Into::into).collect::<Vec<_>>();
-    let (stmt, masks) = generate_stealth_statement_internal(&amounts, revealed_output_amount.into(), view_key);
-    let stmt = stealth::create_mint_statement(stmt, &masks, &amounts).unwrap();
-    (stmt, masks)
+    let total_revealed_inputs = amounts.iter().copied().sum::<Amount>();
+    match view_key {
+        Some(view_key) => generate_transfer_data_with_view_key(
+            &[],
+            total_revealed_inputs,
+            amounts,
+            revealed_output_amount.into(),
+            view_key,
+        ),
+        None => generate_transfer_data(&[], total_revealed_inputs, amounts, revealed_output_amount.into()),
+    }
 }
 
 pub fn generate_stealth_statement_with_view_key<I: IntoIterator<Item = A>, A: Into<Amount>>(

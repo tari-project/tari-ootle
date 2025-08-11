@@ -12,7 +12,12 @@ use tari_template_lib::{
     types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
 };
 
-use crate::{confidential::ConfidentialClaim, instruction_call::ComponentCall, ValidatorFeePoolAddress};
+use crate::{
+    component_call::ComponentCall,
+    confidential::ConfidentialClaim,
+    resource_address_ref::ResourceAddressRef,
+    ValidatorFeePoolAddress,
+};
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[cfg_attr(
@@ -72,7 +77,7 @@ pub enum Instruction {
         workspace_id: WorkspaceId,
     },
     StealthTransfer {
-        resource_address: ResourceAddress,
+        resource_address_ref: ResourceAddressRef,
         statement: StealthTransferStatement,
         revealed_input_bucket: Option<WorkspaceOffsetId>,
     },
@@ -185,7 +190,7 @@ impl Display for Instruction {
                 )
             },
             Instruction::StealthTransfer {
-                resource_address,
+                resource_address_ref: resource_address,
                 statement,
                 revealed_input_bucket: bucket,
             } => {
@@ -193,8 +198,8 @@ impl Display for Instruction {
                     f,
                     "StealthTransfer {{ resource_address: {}, output(s): {}, rp-size: {}, bucket: {:?} }}",
                     resource_address,
-                    statement.outputs_statement.outputs.len(),
-                    statement.outputs_statement.agg_range_proof.len(),
+                    statement.outputs_statements.outputs.len(),
+                    statement.outputs_statements.agg_range_proof.len(),
                     bucket
                 )
             },

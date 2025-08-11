@@ -1,17 +1,12 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use rand::rngs::OsRng;
-use tari_crypto::{
-    keys::PublicKey,
-    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
-};
-use tari_engine_types::{crypto::messages, hashing::EngineSchnorrSignature, ToByteType};
+use tari_crypto::ristretto::RistrettoSecretKey;
+use tari_engine_types::ToByteType;
 use tari_template_lib::{
     models::{
         StealthInput,
-        StealthMintBalanceProof,
-        StealthMintStatement,
+        StealthInputsStatement,
         StealthOutputsStatement,
         StealthTransferStatement,
         StealthUnspentOutput,
@@ -89,8 +84,11 @@ pub fn create_transfer_statement(
     let outputs_statement = create_output_statement(output_statements, revealed_output_amount)?;
 
     Ok(StealthTransferStatement {
-        inputs: inputs_to_spend,
-        outputs_statement,
+        inputs_statement: StealthInputsStatement {
+            inputs: inputs_to_spend,
+            revealed_amount: revealed_input_amount,
+        },
+        outputs_statements: outputs_statement,
         balance_proof,
     })
 }
@@ -138,42 +136,13 @@ pub fn create_output_statement(
     })
 }
 
-pub fn create_mint_statement(
-    output_statement: StealthOutputsStatement,
-    masks: &[RistrettoSecretKey],
-    amounts: &[Amount],
-) -> Result<StealthMintStatement, ConfidentialProofError> {
-    let total_amount =
-        Amount::sum_from_positive(amounts.iter().copied()).ok_or(ConfidentialProofError::NegativeAmount)?;
-    let private_excess = masks
-        .iter()
-        .fold(RistrettoSecretKey::default(), |excess, mask| excess + mask);
-
-    let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
-    let public_excess = RistrettoPublicKey::from_secret_key(&private_excess);
-
-    eprintln!(
-        "Sign: public_excess: {public_excess}, total_amount: {total_amount} nonce: {}",
-        public_nonce
-    );
-    let message = messages::stealth_mint64(&public_excess, &public_nonce, total_amount);
-
-    let excess_signature = EngineSchnorrSignature::sign_raw_uniform(&private_excess, nonce, &message)
-        .expect("WIDE_REDUCTION_LEN == 64, failure is a bug");
-
-    Ok(StealthMintStatement {
-        balance_proof: StealthMintBalanceProof {
-            excess_signature: excess_signature.to_byte_type(),
-            total_mint_amount: total_amount,
-        },
-        outputs_statement: output_statement,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use rand::rngs::OsRng;
-    use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
+    use tari_crypto::{
+        keys::SecretKey,
+        ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    };
     use tari_engine_types::stealth::validate_stealth_outputs_statement;
     use tari_template_lib::{models::EncryptedData, types::Amount};
 

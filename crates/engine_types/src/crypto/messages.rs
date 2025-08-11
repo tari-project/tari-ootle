@@ -36,18 +36,6 @@ pub fn viewable_balance_proof64(
         .result()
 }
 
-pub fn stealth_mint64(
-    public_excess: &RistrettoPublicKey,
-    public_nonce: &RistrettoPublicKey,
-    total_amount: Amount,
-) -> [u8; 64] {
-    engine_hasher64(EngineHashDomainLabel::StealthMint)
-        .chain(public_excess)
-        .chain(public_nonce)
-        .chain(&total_amount)
-        .result()
-}
-
 pub fn stealth_transfer64(
     public_excess: &RistrettoPublicKey,
     public_nonce: &RistrettoPublicKey,

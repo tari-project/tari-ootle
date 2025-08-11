@@ -29,7 +29,7 @@
 //!
 //! # Example
 //! ```rust
-//! use your_crate::resource::ResourceType;
+//! use tari_template_lib::resource::ResourceType;
 //!
 //! let resource = ResourceType::Fungible;
 //! assert!(resource.is_fungible());
@@ -41,11 +41,9 @@ use tari_template_abi::rust::fmt::Display;
 
 mod builder;
 mod manager;
-mod stealth_manager;
 
 pub use builder::*;
 pub use manager::*;
-pub use stealth_manager::*;
 
 /// Represents every possible type of resource in the Tari network.
 ///

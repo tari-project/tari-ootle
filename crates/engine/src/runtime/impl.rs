@@ -50,6 +50,7 @@ use tari_engine_types::{
     vault::Vault,
     ComponentCall,
     FromByteType,
+    ResourceAddressRef,
     ToByteType,
     Utxo,
     UtxoAddress,
@@ -842,19 +843,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                     let mut output_bucket = None;
                     if let Some(mint_arg) = arg.mint_arg {
-                        match mint_arg.as_resource_type() {
-                            ResourceType::Fungible | ResourceType::NonFungible | ResourceType::Confidential => {
-                                let container = state_mut.mint_resource(&resource_lock, mint_arg)?;
-                                let bucket_id = state_mut.id_provider()?.new_bucket_id();
-                                state_mut.new_bucket(bucket_id, container)?;
-                                output_bucket = Some(tari_template_lib::models::Bucket::from_id(bucket_id));
-                            },
-                            ResourceType::Stealth => {
-                                // PANIC: checked that this is a stealth resource type
-                                let stmt = mint_arg.expect_stealth_mint_statement();
-                                state_mut.mint_stealth_substates(&resource_lock, &stmt)?;
-                            },
-                        }
+                        let container = state_mut.mint_resource(&resource_lock, mint_arg)?;
+                        let bucket_id = state_mut.id_provider()?.new_bucket_id();
+                        state_mut.new_bucket(bucket_id, container)?;
+                        output_bucket = Some(tari_template_lib::models::Bucket::from_id(bucket_id));
                     }
 
                     state_mut.unlock_substate(resource_lock)?;
@@ -930,38 +922,22 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                 self.tracker.write_with(|state_mut| {
                     let mint_arg = mint_resource.mint_arg;
-                    let mut output_bucket = None;
-                    match mint_arg.as_resource_type() {
-                        ResourceType::Fungible | ResourceType::NonFungible | ResourceType::Confidential => {
-                            let resource = state_mut.mint_resource(&resource_lock, mint_arg)?;
-                            let bucket_id = state_mut.id_provider()?.new_bucket_id();
 
-                            let payload = Metadata::from_iter([
-                                ("resource_type", resource.resource_type().to_string()),
-                                ("amount", resource.amount().to_string()),
-                            ]);
-                            self.emit_std_event("resource", "mint", resource_address.into(), payload, state_mut)?;
+                    let resource = state_mut.mint_resource(&resource_lock, mint_arg)?;
+                    let bucket_id = state_mut.id_provider()?.new_bucket_id();
 
-                            state_mut.new_bucket(bucket_id, resource)?;
-                            output_bucket = Some(tari_template_lib::models::Bucket::from_id(bucket_id));
-                        },
-                        ResourceType::Stealth => {
-                            // PANIC: checked that this is a stealth resource type
-                            let stmt = mint_arg.expect_stealth_mint_statement();
-                            state_mut.mint_stealth_substates(&resource_lock, &stmt)?;
+                    let payload = Metadata::from_iter([
+                        ("resource_type", resource.resource_type().to_string()),
+                        ("amount", resource.amount().to_string()),
+                    ]);
+                    self.emit_std_event("resource", "mint", resource_address.into(), payload, state_mut)?;
 
-                            let payload = Metadata::from_iter([
-                                ("resource_type", ResourceType::Stealth.to_string()),
-                                ("num_outputs", stmt.outputs_statement.outputs.len().to_string()),
-                                ("amount", stmt.balance_proof.total_mint_amount.to_string()),
-                            ]);
-                            self.emit_std_event("resource", "mint", resource_address.into(), payload, state_mut)?;
-                        },
-                    }
+                    state_mut.new_bucket(bucket_id, resource)?;
+                    let bucket = tari_template_lib::models::Bucket::from_id(bucket_id);
 
                     state_mut.unlock_substate(resource_lock)?;
 
-                    Ok(InvokeResult::encode(&output_bucket)?)
+                    Ok(InvokeResult::encode(&bucket)?)
                 })
             },
             ResourceAction::Recall => {
@@ -2658,13 +2634,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
     fn stealth_transfer(
         &self,
-        resource_address: ResourceAddress,
+        resource_address: ResourceAddressRef,
         statement: StealthTransferStatement,
         revealed_funds_bucket_id: Option<BucketId>,
     ) -> Result<Option<BucketId>, RuntimeError> {
         check_stealth_transfer_limits(&limits::STEALTH_LIMITS, &statement)?;
 
         self.tracker.write_with(|state_mut| {
+            let resource_address = state_mut.resolve_resource_address_ref(resource_address)?;
             let resource_lock = state_mut.read_lock_substate(&resource_address.into())?;
 
             let revealed_funds_bucket = revealed_funds_bucket_id
@@ -2684,8 +2661,35 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 }
             }
 
-            state_mut.spend_stealth_utxos(resource_address, &statement.inputs)?;
-            let revealed_input_amount = revealed_funds_bucket.as_ref().map(|b| b.amount()).unwrap_or_default();
+            match revealed_funds_bucket {
+                Some(ref bucket) => {
+                    if bucket.amount() != statement.inputs_statement.revealed_amount {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "revealed_funds_bucket",
+                            reason: format!(
+                                "Revealed funds bucket amount ({}) does not match the statement's revealed input \
+                                 amount ({})",
+                                bucket.amount(),
+                                statement.inputs_statement.revealed_amount
+                            ),
+                        });
+                    }
+                },
+                None => {
+                    if !statement.inputs_statement.revealed_amount.is_zero() {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "revealed_funds_bucket",
+                            reason: format!(
+                                "An input bucket is required but not provided for stealth transfers with revealed \
+                                 input amount ({})",
+                                statement.inputs_statement.revealed_amount
+                            ),
+                        });
+                    }
+                },
+            }
+
+            state_mut.spend_stealth_utxos(resource_address, &statement.inputs_statement)?;
 
             let resource = state_mut.get_resource(&resource_lock)?;
             let view_key = resource
@@ -2700,7 +2704,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     }
                 })?;
 
-            let valid_transfer = stealth::validate_transfer(&statement, revealed_input_amount, view_key.as_ref())?;
+            let valid_transfer = stealth::validate_transfer(&statement, view_key.as_ref())?;
 
             for output in valid_transfer.outputs {
                 let address = UtxoAddress::new(resource_address, output.output.commitment.to_byte_type().into());

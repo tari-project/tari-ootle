@@ -24,13 +24,11 @@ use tari_engine_types::{
     proof::{ContainerRef, LockedResource, Proof},
     resource::Resource,
     resource_container::{ResourceContainer, ResourceError},
-    stealth,
     substate::{Substate, SubstateDiff, SubstateId, SubstateValue},
     transaction_receipt::TransactionReceipt,
     vault::Vault,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
-    ToByteType,
-    Utxo,
+    ResourceAddressRef,
     UtxoAddress,
     ValidatorFeePoolAddress,
     ValidatorFeeWithdrawal,
@@ -46,12 +44,11 @@ use tari_template_lib::{
         NonFungibleAddress,
         ProofId,
         ResourceAddress,
-        StealthInput,
-        StealthMintStatement,
+        StealthInputsStatement,
         UnclaimedConfidentialOutputAddress,
         VaultId,
     },
-    prelude::{AuthHookCaller, PUBLIC_IDENTITY_RESOURCE_ADDRESS},
+    prelude::{AuthHookCaller, ResourceAddressAllocation, PUBLIC_IDENTITY_RESOURCE_ADDRESS},
     types::{Amount, EntityId, Hash, TemplateAddress},
 };
 
@@ -248,12 +245,12 @@ impl WorkingState {
         Ok(resource)
     }
 
-    pub fn spend_stealth_utxos<'a, I: IntoIterator<Item = &'a StealthInput>>(
+    pub fn spend_stealth_utxos(
         &mut self,
         resource_address: ResourceAddress,
-        inputs: I,
+        stmt: &StealthInputsStatement,
     ) -> Result<(), RuntimeError> {
-        for input in inputs {
+        for input in &stmt.inputs {
             let address = UtxoAddress::new(resource_address, input.commitment.into());
             let lock_id = self.store.try_lock(&address.clone().into(), LockFlag::Write)?;
             let utxo = self.store.down_utxo(lock_id)?;
@@ -603,14 +600,20 @@ impl WorkingState {
                     })?;
                 ResourceContainer::mint_confidential(resource_address, *statement, maybe_view_key.as_ref())?
             },
-            MintArg::Stealth { .. } => {
-                return Err(RuntimeError::InvariantError {
-                    function: "mint_resource",
-                    details: format!(
-                        "Cannot call mint_resource on stealth resources (resource_addr = {})",
-                        locked_resource.substate_id()
-                    ),
-                })
+            MintArg::Stealth { amount } => {
+                if amount.is_negative() {
+                    return Err(RuntimeError::InvalidAmount {
+                        amount,
+                        reason: "Stealth mint amount must be positive".to_string(),
+                    });
+                }
+
+                debug!(
+                    target: LOG_TARGET,
+                    "Minting {} revealed stealth tokens on resource: {}", amount, resource_address
+                );
+
+                ResourceContainer::stealth(resource_address, amount)
             },
         };
 
@@ -631,57 +634,6 @@ impl WorkingState {
         }
 
         Ok(resource_container)
-    }
-
-    pub fn mint_stealth_substates(
-        &mut self,
-        locked_resource: &LockedSubstate,
-        stmt: &StealthMintStatement,
-    ) -> Result<(), RuntimeError> {
-        let resource_address =
-            locked_resource
-                .substate_id()
-                .as_resource_address()
-                .ok_or_else(|| RuntimeError::InvariantError {
-                    function: "mint_resource",
-                    details: "LockedSubstate substate_id is not a ResourceAddress".to_string(),
-                })?;
-        let resource = self.get_resource(locked_resource)?;
-        debug!(
-            target: LOG_TARGET,
-            "Minting confidential tokens on resource: {}", resource_address
-        );
-        let maybe_view_key = resource
-            .to_view_key_public_key()
-            .map_err(|e| RuntimeError::InvariantError {
-                function: "MintArg::Stealth",
-                details: format!("Resource contained a malformed view key: {e}. This should never happen!"),
-            })?;
-
-        let validated = stealth::validate_stealth_mint_statement(stmt, maybe_view_key.as_ref())?;
-
-        for stealth_output in validated.outputs_statement {
-            let address = UtxoAddress::new(resource_address, stealth_output.output.commitment.to_byte_type().into());
-            self.new_substate(address, Utxo::new(stealth_output.to_utxo_output()))?;
-        }
-
-        // Validate the resource type in the mint args resource type matches the resource
-        let resource = self.get_resource(locked_resource)?;
-        if resource.is_supply_tracking_enabled() {
-            let resource_mut = self.get_resource_mut(locked_resource)?;
-            // Increase the total supply of the resource
-            if !resource_mut.increase_total_supply(validated.total_mint_amount) {
-                return Err(RuntimeError::ResourceSupplyWouldOverflow {
-                    resource_address,
-                    current_supply: resource_mut
-                        .total_supply()
-                        .expect("Resource supply tracking is enabled"),
-                    amount: validated.total_mint_amount,
-                });
-            }
-        }
-
-        Ok(())
     }
 
     pub fn set_vault_freeze(
@@ -1205,6 +1157,42 @@ impl WorkingState {
 
     pub fn workspace_mut(&mut self) -> &mut Workspace {
         &mut self.workspace
+    }
+
+    pub fn resolve_resource_address_ref(&self, addr_ref: ResourceAddressRef) -> Result<ResourceAddress, RuntimeError> {
+        match addr_ref {
+            ResourceAddressRef::Address(addr) => Ok(addr),
+            ResourceAddressRef::Workspace(id) => {
+                let value = self
+                    .workspace()
+                    .get(id)?
+                    .ok_or_else(|| RuntimeError::ItemNotOnWorkspace {
+                        id,
+                        existing_ids: self.workspace().all_ids_iter().collect(),
+                    })?;
+                let allocation_id: ResourceAddressAllocation =
+                    tari_bor::from_value(value).map_err(|e| RuntimeError::InvalidArgument {
+                        argument: "ResourceAddressRef::Workspace",
+                        reason: format!("Item on workspace at key '{id}' is not a valid ResourceAddressRef: {e}",),
+                    })?;
+                let substate_id = self.get_used_address(allocation_id.id())?;
+                let resource_address = match substate_id {
+                    SubstateId::Resource(addr) => addr,
+                    substate_id => {
+                        let substate_type = tari_ootle_common_types::substate_type::SubstateType::from(&substate_id);
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "ResourceAddressRef::Workspace",
+                            reason: format!(
+                                "Invalid attempt to load resource address with an address allocation ID ({}) with \
+                                 substate type {substate_type}",
+                                allocation_id.id()
+                            ),
+                        });
+                    },
+                };
+                Ok(resource_address)
+            },
+        }
     }
 
     pub fn take_last_instruction_output(&mut self) -> Option<IndexedValue> {

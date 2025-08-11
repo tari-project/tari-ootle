@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use tokio::process::Command;
 
-use crate::process_definitions::{wallet_daemon::WalletDaemon, ProcessContext, ProcessDefinition};
+use crate::process_definitions::{wallet_daemon, wallet_daemon::WalletDaemon, ProcessContext, ProcessDefinition};
 
 #[derive(Debug, Default)]
 pub struct WalletDaemonCreateKey;
@@ -39,6 +39,12 @@ impl ProcessDefinition for WalletDaemonCreateKey {
                     .to_str()
                     .expect("Non-UTF8 output path in WalletDaemonCreateKey"),
             ]);
+
+        if let Some(override_keyring_password) =
+            context.get_setting(wallet_daemon::OVERRIDE_KEYRING_PASSWORD_SETTINGS_KEY)
+        {
+            command.arg(format!("--override-keyring-password='{override_keyring_password}'"));
+        }
 
         Ok(command)
     }

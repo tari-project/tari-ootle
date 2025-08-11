@@ -39,50 +39,35 @@ import useAccountStore from "../../../store/accountStore";
 import { useKeysList } from "../../../api/hooks/useKeys";
 import type { AccountInfo } from "@tari-project/typescript-bindings";
 
+type FormState = {
+  account: string;
+  claimProof: string;
+  fee: string;
+  is_valid_json: boolean;
+  filled: boolean;
+  disabled: boolean;
+};
+
+const INITIAL_FORM_STATE: FormState = {
+  account: "",
+  claimProof: "",
+  fee: "",
+  is_valid_json: false,
+  filled: false,
+  disabled: false,
+};
+
 export default function ClaimBurn() {
   const [open, setOpen] = useState(false);
-  const [claimBurnFormState, setClaimBurnFormState] = useState({
-    account: "",
-    key_index: -1,
-    claimProof: "",
-    fee: "",
-    is_valid_json: false,
-    newAccount: false,
-    filled: false,
-    disabled: false,
-  });
+  const [claimBurnFormState, setClaimBurnFormState] = useState<FormState>(INITIAL_FORM_STATE);
 
-  const { data: dataAccountsList } = useAccountsList(0, 10);
-  const { data: dataKeysList } = useKeysList();
+  const { data: accountsList } = useAccountsList(0, 10);
   const { setPopup } = useAccountStore();
 
-  const onClaimBurnKeyChange = (e: SelectChangeEvent<number>) => {
-    if (dataKeysList === undefined) {
-      return;
-    }
-    let key_index = +e.target.value;
-    let account = claimBurnFormState.account;
-    if (dataAccountsList === undefined) {
-      return;
-    }
-    let selected_account = dataAccountsList.accounts.find(
-      (account: AccountInfo) => account.account.key_index === key_index,
-    );
-    let new_account_name;
-    if (selected_account !== undefined) {
-      account = selected_account.account.name || "";
-      new_account_name = false;
-    } else {
-      if (!claimBurnFormState.newAccount) {
-        account = "";
-      }
-      new_account_name = true;
-    }
+  const onClaimBurnKeyChange = (e: SelectChangeEvent) => {
     setClaimBurnFormState({
       ...claimBurnFormState,
-      key_index: key_index,
-      account: account,
-      newAccount: new_account_name,
+      account: e.target.value,
       filled: claimBurnFormState.is_valid_json && claimBurnFormState.fee !== "" && e.target.value !== "",
     });
   };
@@ -97,7 +82,7 @@ export default function ClaimBurn() {
         ...claimBurnFormState,
         [e.target.name]: e.target.value,
         is_valid_json: true,
-        filled: claimBurnFormState.key_index >= 0 && claimBurnFormState.fee !== "" && e.target.value !== "",
+        filled: claimBurnFormState.fee !== "" && e.target.value !== "",
       });
     } catch {
       setClaimBurnFormState({
@@ -109,19 +94,11 @@ export default function ClaimBurn() {
     }
   };
 
-  const onClaimBurnAccountNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setClaimBurnFormState({
-      ...claimBurnFormState,
-      [e.target.name]: e.target.value,
-      filled: claimBurnFormState.key_index >= 0 && claimBurnFormState.is_valid_json && e.target.value !== "",
-    });
-  };
-
   const onClaimBurnFeeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setClaimBurnFormState({
       ...claimBurnFormState,
       [e.target.name]: e.target.value,
-      filled: claimBurnFormState.key_index >= 0 && claimBurnFormState.is_valid_json && e.target.value !== "",
+      filled: claimBurnFormState.is_valid_json && e.target.value !== "",
     });
   };
 
@@ -132,20 +109,10 @@ export default function ClaimBurn() {
         account: { Name: claimBurnFormState.account },
         claim_proof: JSON.parse(claimBurnFormState.claimProof),
         max_fee: +claimBurnFormState.fee,
-        key_id: +claimBurnFormState.key_index,
       });
       setOpen(false);
       setPopup({ title: "Claimed", error: false });
-      setClaimBurnFormState({
-        key_index: -1,
-        account: "",
-        claimProof: "",
-        fee: "",
-        is_valid_json: false,
-        filled: false,
-        disabled: false,
-        newAccount: false,
-      });
+      setClaimBurnFormState(INITIAL_FORM_STATE);
     } catch (e: any) {
       setClaimBurnFormState({ ...claimBurnFormState, disabled: false });
       setPopup({ title: "Claim burn failed: " + e.message, error: true });
@@ -159,23 +126,6 @@ export default function ClaimBurn() {
 
   const handleClose = () => {
     setOpen(false);
-  };
-
-  const formattedKey = (key: [number, string, boolean]) => {
-    let account = dataAccountsList?.accounts.find((account: AccountInfo) => account.account.key_index === +key[0]);
-    if (account === undefined) {
-      return (
-        <div>
-          <b>{key[0]}</b> {key[1]}
-        </div>
-      );
-    }
-    return (
-      <div>
-        <b>{key[0]}</b> {key[1]}
-        <br></br>Account <i>{account.account.name}</i>
-      </div>
-    );
   };
 
   return (
@@ -193,26 +143,22 @@ export default function ClaimBurn() {
                 labelId="key"
                 name="key"
                 label="Key"
-                value={claimBurnFormState.key_index >= 0 ? claimBurnFormState.key_index : ""}
+                value={claimBurnFormState.account}
                 onChange={onClaimBurnKeyChange}
                 style={{ flexGrow: 1, minWidth: "200px" }}
                 disabled={claimBurnFormState.disabled}
               >
-                {dataKeysList?.keys?.map((key: [number, string, boolean]) => (
-                  <MenuItem key={key[0]} value={key[0]}>
-                    {formattedKey(key)}
+                {accountsList?.accounts?.map((account, i) => (
+                  <MenuItem key={i} value={account.account.address}>
+                    <div>
+                      <i>
+                        {account.account.name} ({account.public_key})
+                      </i>
+                    </div>
                   </MenuItem>
                 ))}
               </Select>
             </FormControl>
-            <TextField
-              name="account"
-              label="Account Name"
-              value={claimBurnFormState.account}
-              onChange={onClaimBurnAccountNameChange}
-              style={{ flexGrow: 1 }}
-              disabled={claimBurnFormState.disabled || !claimBurnFormState.newAccount}
-            ></TextField>
             <TextField
               name="claimProof"
               label="Claim Proof"

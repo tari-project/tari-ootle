@@ -5,7 +5,7 @@ use std::{collections::HashMap, time::Duration};
 
 use log::{error, info, warn};
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
-use tari_engine_types::{component::new_component_address_from_public_key, ToByteType};
+use tari_engine_types::{component::derive_component_address_from_public_key, ToByteType};
 use tari_key_manager::key_manager::DerivedKey;
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
@@ -15,7 +15,7 @@ use tari_ootle_wallet_sdk::{
     apis::{
         accounts::AccountsApiError,
         config::ConfigKey,
-        key_manager::{KeyManagerApiError, TRANSACTION_BRANCH},
+        key_manager::{KeyBranch, KeyManagerApiError},
     },
     network::{StatusResponseError, WalletNetworkInterface},
     storage::{WalletStorageError, WalletStore},
@@ -89,7 +89,7 @@ where
         let mut not_found_accounts_count = 0;
         let mut found_accounts_count = 0;
         let mut owner_key_cache = HashMap::new();
-        let initial_key_index = match key_manager_api.get_active_key(TRANSACTION_BRANCH) {
+        let initial_key_index = match key_manager_api.get_active_key(KeyBranch::Account) {
             Ok((key_index, _)) => key_index,
             Err(err) => {
                 error!(target: LOG_TARGET, "Error getting active key: {err}. Scanning failed...");
@@ -98,7 +98,7 @@ where
         };
         let mut last_found_key = None;
         loop {
-            let key = match key_manager_api.next_key(TRANSACTION_BRANCH) {
+            let key = match key_manager_api.next_key(KeyBranch::Account) {
                 Ok(key) => key,
                 Err(err) => {
                     error!(target: LOG_TARGET, "Error getting next key: {err}. Scanning failed...");
@@ -132,18 +132,18 @@ where
 
         if let Some(last_found_key) = last_found_key {
             info!(target: LOG_TARGET, "Setting active key to {}", last_found_key);
-            if let Err(err) = key_manager_api.reset_key_index_to(TRANSACTION_BRANCH, last_found_key) {
+            if let Err(err) = key_manager_api.reset_key_index_to(KeyBranch::Account, last_found_key) {
                 error!(target: LOG_TARGET, "Error setting active key: {err}");
             }
-            if let Err(err) = key_manager_api.set_active_key(TRANSACTION_BRANCH, last_found_key) {
+            if let Err(err) = key_manager_api.set_active_key(KeyBranch::Account, last_found_key) {
                 error!(target: LOG_TARGET, "Error setting active key: {err}");
             }
         } else {
             info!(target: LOG_TARGET, "No accounts found. Setting active key to {}", initial_key_index);
-            if let Err(err) = key_manager_api.reset_key_index_to(TRANSACTION_BRANCH, initial_key_index) {
+            if let Err(err) = key_manager_api.reset_key_index_to(KeyBranch::Account, initial_key_index) {
                 error!(target: LOG_TARGET, "Error setting active key: {err}");
             }
-            if let Err(err) = key_manager_api.set_active_key(TRANSACTION_BRANCH, initial_key_index) {
+            if let Err(err) = key_manager_api.set_active_key(KeyBranch::Account, initial_key_index) {
                 error!(target: LOG_TARGET, "Error setting active key: {err}");
             }
         }
@@ -171,7 +171,7 @@ where
 
         let public_key = RistrettoPublicKey::from_secret_key(&key.key).to_byte_type();
         // Derive the account address from the public key
-        let account_addr = new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &public_key);
+        let account_addr = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &public_key);
 
         // Attempt to fetch the account substate
         // TODO: perf we should batch these requests e.g. query 10 accounts in one go
@@ -224,16 +224,17 @@ where
             });
 
         // add account
-        let has_default = accounts_api.get_default().optional()?.is_some();
+        let any_exist = accounts_api.any_accounts_exist()?;
         self.wallet_sdk.accounts_api().add_account(
             Some(format!("account-{}", key.key_index).as_str()),
-            &account_addr.into(),
+            &account_addr,
             key_index,
-            !has_default,
+            true,
+            !any_exist,
         )?;
 
         // Update vaults, confidential outputs, nfts etc
-        self.account_monitor_handle.refresh_account(account_addr.into()).await?;
+        self.account_monitor_handle.refresh_account(account_addr).await?;
 
         Ok(())
     }

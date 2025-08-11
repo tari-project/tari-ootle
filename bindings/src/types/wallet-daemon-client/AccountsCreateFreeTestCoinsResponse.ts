@@ -4,11 +4,11 @@ import type { Amount } from "../Amount";
 import type { FinalizeResult } from "../FinalizeResult";
 import type { TransactionId } from "../TransactionId";
 
-export interface AccountsCreateFreeTestCoinsResponse {
+export type AccountsCreateFreeTestCoinsResponse = {
   account: Account;
   transaction_id: TransactionId;
   amount: Amount;
   fee: number;
   result: FinalizeResult;
   public_key: string;
-}
+};

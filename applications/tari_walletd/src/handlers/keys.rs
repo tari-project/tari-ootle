@@ -4,7 +4,7 @@
 use axum::headers::authorization::Bearer;
 use tari_crypto::{keys::PublicKey as PublicKeyTrait, ristretto::RistrettoPublicKey};
 use tari_engine_types::ToByteType;
-use tari_ootle_wallet_sdk::apis::key_manager;
+use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{
@@ -61,8 +61,8 @@ pub async fn handle_set_active(
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
     let km = sdk.key_manager_api();
-    km.set_active_key(key_manager::TRANSACTION_BRANCH, req.index)?;
-    let (_, key) = km.get_active_key(key_manager::TRANSACTION_BRANCH)?;
+    km.set_active_key(KeyBranch::Account, req.index)?;
+    let (_, key) = km.get_active_key(KeyBranch::Account)?;
 
     Ok(KeysSetActiveResponse {
         public_key: RistrettoPublicKey::from_secret_key(&key.key).to_byte_type(),

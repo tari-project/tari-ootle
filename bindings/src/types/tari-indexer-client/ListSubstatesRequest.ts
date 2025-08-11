@@ -2,9 +2,9 @@
 import type { Hash } from "../Hash";
 import type { SubstateType } from "../SubstateType";
 
-export interface ListSubstatesRequest {
+export type ListSubstatesRequest = {
   filter_by_template: Hash | null;
   filter_by_type: SubstateType | null;
   limit: bigint | null;
   offset: bigint | null;
-}
+};

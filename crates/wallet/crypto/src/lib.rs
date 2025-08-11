@@ -18,4 +18,5 @@ pub mod stealth;
 mod balance_proof;
 mod bullet_proof;
 pub mod encrypted_data;
+pub mod hashers;
 pub mod viewable_balance_proof;

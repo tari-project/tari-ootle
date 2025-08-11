@@ -25,10 +25,12 @@ use std::{fs, io, path::PathBuf};
 use anyhow::anyhow;
 use clap::{Args, Subcommand};
 use serde_json as json;
+use tari_ootle_common_types::optional::Optional;
 use tari_wallet_daemon_client::{
     types::{
         AccountInfo,
         AccountsCreateFreeTestCoinsRequest,
+        AccountsCreateOrGetRequest,
         AccountsCreateRequest,
         AccountsGetBalancesRequest,
         ClaimBurnProof,
@@ -63,10 +65,7 @@ pub enum AccountsSubcommand {
 pub struct CreateArgs {
     #[clap(long, alias = "name")]
     pub account_name: Option<String>,
-    #[clap(long, alias = "dry-run")]
-    pub is_dry_run: bool,
     pub is_default: bool,
-    pub fee: Option<u32>,
     #[clap(long, short, alias = "key")]
     pub key_id: Option<u64>,
 }
@@ -150,20 +149,17 @@ impl AccountsSubcommand {
 }
 
 async fn handle_create(args: CreateArgs, client: &mut WalletDaemonClient) -> Result<(), anyhow::Error> {
-    println!("Submitted new account creation transaction...");
     let resp = client
         .create_account(AccountsCreateRequest {
             account_name: args.account_name,
-            custom_access_rules: None,
-            is_default: args.is_default,
-            max_fee: args.fee.map(Into::into),
+            is_default: Some(args.is_default),
             key_id: args.key_id,
         })
         .await?;
 
     println!();
-    println!("✅ Account created");
-    println!("   address: {}", resp.address);
+    println!("✅ Account created (Locally, not on-chain)");
+    println!("   address: {}", resp.account.address);
     println!("   public key (hex): {}", resp.public_key);
     println!("   public key (base64): {}", base64::encode(resp.public_key.as_bytes()));
     Ok(())
@@ -228,12 +224,54 @@ pub async fn handle_claim_burn(args: ClaimBurnArgs, client: &mut WalletDaemonCli
     };
 
     println!("✅ Claim burn submitted");
+    let existing_account = match account {
+        Some(account) => {
+            let account_name = account.name().map(|s| s.to_string());
+            match client.accounts_get(account).await.optional()? {
+                Some(resp) => resp.account,
+                None => {
+                    let resp = client
+                        .create_account(AccountsCreateRequest {
+                            account_name,
+                            is_default: None,
+                            key_id,
+                        })
+                        .await?;
+                    resp.account
+                },
+            }
+        },
+        None => {
+            let existing_for_key = match key_id {
+                Some(id) => client
+                    .accounts_get_by_key_index(id)
+                    .await
+                    .optional()?
+                    .map(|resp| resp.account),
+                None => None,
+            };
+            match existing_for_key {
+                Some(account) => account,
+                None => {
+                    println!("No account found for the provided key_id or key_id is None. Creating a new account...");
+                    let resp = client
+                        .create_account(AccountsCreateRequest {
+                            account_name: None,
+                            is_default: None,
+                            key_id,
+                        })
+                        .await?;
+
+                    resp.account
+                },
+            }
+        },
+    };
 
     let req = ClaimBurnRequest {
-        account,
+        account: existing_account.address.into(),
         claim_proof,
         max_fee: fee.map(Into::into),
-        key_id,
     };
 
     let resp = client
@@ -253,13 +291,36 @@ async fn handle_create_free_test_coins(
     client: &mut WalletDaemonClient,
 ) -> Result<(), anyhow::Error> {
     println!("Creating free test coins...");
+    let account = match args.account {
+        Some(account) => {
+            let resp = client
+                .create_or_get_account(AccountsCreateOrGetRequest {
+                    account: Some(account),
+                    is_default: None,
+                    key_id: args.key_id,
+                })
+                .await?;
+            resp.account
+        },
+        None => {
+            // Create a new account
+            let resp = client
+                .create_account(AccountsCreateRequest {
+                    account_name: None,
+                    is_default: None,
+                    key_id: args.key_id,
+                })
+                .await?;
+            resp.account
+        },
+    };
+
     let resp = client
         .create_free_test_coins(AccountsCreateFreeTestCoinsRequest {
-            account: args.account,
+            account: account.address.into(),
             // Default 1 tXTR
             amount: args.amount.unwrap_or(1_000_000).into(),
             max_fee: args.fee,
-            key_id: args.key_id,
         })
         .await?;
 

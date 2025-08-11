@@ -2,9 +2,8 @@
 import type { Amount } from "../Amount";
 import type { ComponentAddressOrName } from "./ComponentAddressOrName";
 
-export interface AccountsCreateFreeTestCoinsRequest {
-  account: ComponentAddressOrName | null;
+export type AccountsCreateFreeTestCoinsRequest = {
+  account: ComponentAddressOrName;
   amount: Amount;
   max_fee: number | null;
-  key_id: number | null;
-}
+};

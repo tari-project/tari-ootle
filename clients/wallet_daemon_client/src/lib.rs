@@ -37,6 +37,7 @@ use reqwest::{
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json as json;
 use serde_json::json;
+use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
 use types::{
     AccountsCreateFreeTestCoinsRequest,
     AccountsCreateFreeTestCoinsResponse,
@@ -50,10 +51,10 @@ use types::{
     AuthLoginResponse,
     ClaimBurnRequest,
     ClaimBurnResponse,
-    GetAccountNftRequest,
-    GetAccountNftResponse,
-    ListAccountNftRequest,
-    ListAccountNftResponse,
+    GetNftRequest,
+    GetNftResponse,
+    ListNftsRequest,
+    ListNftsResponse,
     MintFaucetNftRequest,
     MintFaucetNftResponse,
     ProofsCancelRequest,
@@ -69,11 +70,14 @@ use types::{
 use crate::{
     error::WalletDaemonClientError,
     types::{
+        AccountGetByKeyIndexRequest,
         AccountGetDefaultRequest,
         AccountGetRequest,
         AccountGetResponse,
         AccountSetDefaultRequest,
         AccountSetDefaultResponse,
+        AccountsCreateOrGetRequest,
+        AccountsCreateOrGetResponse,
         AccountsCreateRequest,
         AccountsCreateResponse,
         AccountsGetBalancesRequest,
@@ -95,7 +99,6 @@ use crate::{
         EncodedJwtString,
         GetValidatorFeesRequest,
         GetValidatorFeesResponse,
-        KeyBranch,
         KeysCreateRequest,
         KeysCreateResponse,
         KeysListRequest,
@@ -237,6 +240,13 @@ impl WalletDaemonClient {
         self.send_request("accounts.create", request.borrow()).await
     }
 
+    pub async fn create_or_get_account<T: Borrow<AccountsCreateOrGetRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<AccountsCreateOrGetResponse, WalletDaemonClientError> {
+        self.send_request("accounts.create_or_get", request.borrow()).await
+    }
+
     pub async fn get_account_balances<T: Borrow<AccountsGetBalancesRequest>>(
         &mut self,
         request: T,
@@ -272,6 +282,14 @@ impl WalletDaemonClient {
         name_or_address: ComponentAddressOrName,
     ) -> Result<AccountGetResponse, WalletDaemonClientError> {
         self.send_request("accounts.get", &AccountGetRequest { name_or_address })
+            .await
+    }
+
+    pub async fn accounts_get_by_key_index(
+        &mut self,
+        key_index: u64,
+    ) -> Result<AccountGetResponse, WalletDaemonClientError> {
+        self.send_request("accounts.get_by_key_index", &AccountGetByKeyIndexRequest { key_index })
             .await
     }
 
@@ -360,17 +378,17 @@ impl WalletDaemonClient {
         self.send_request("nfts.mint_faucet_nft", req.borrow()).await
     }
 
-    pub async fn get_account_nft<T: Borrow<GetAccountNftRequest>>(
+    pub async fn get_account_nft<T: Borrow<GetNftRequest>>(
         &mut self,
         req: T,
-    ) -> Result<GetAccountNftResponse, WalletDaemonClientError> {
+    ) -> Result<GetNftResponse, WalletDaemonClientError> {
         self.send_request("nfts.get", req.borrow()).await
     }
 
-    pub async fn list_account_nfts<T: Borrow<ListAccountNftRequest>>(
+    pub async fn list_account_nfts<T: Borrow<ListNftsRequest>>(
         &mut self,
         req: T,
-    ) -> Result<ListAccountNftResponse, WalletDaemonClientError> {
+    ) -> Result<ListNftsResponse, WalletDaemonClientError> {
         self.send_request("nfts.list", req.borrow()).await
     }
 

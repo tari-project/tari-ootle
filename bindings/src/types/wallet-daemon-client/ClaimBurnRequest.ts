@@ -2,9 +2,4 @@
 import type { ClaimBurnProof } from "./ClaimBurnProof";
 import type { ComponentAddressOrName } from "./ComponentAddressOrName";
 
-export interface ClaimBurnRequest {
-  account: ComponentAddressOrName | null;
-  claim_proof: ClaimBurnProof;
-  max_fee: number | null;
-  key_id: number | null;
-}
+export type ClaimBurnRequest = { account: ComponentAddressOrName; claim_proof: ClaimBurnProof; max_fee: number | null };

@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use tari_ootle_common_types::optional::IsNotFoundError;
 use tari_template_lib::{
     models::{ResourceAddress, VaultId},
-    prelude::{ComponentAddress, NonFungibleAddress, NonFungibleId},
+    prelude::{ComponentAddress, NonFungibleId},
 };
 use thiserror::Error;
 
@@ -40,18 +40,13 @@ where TStore: WalletStore
         Ok(())
     }
 
-    pub fn get_by_id(&self, nft_id: NonFungibleId) -> Result<NonFungibleToken, NonFungibleTokensApiError> {
-        let mut tx = self.store.create_read_tx()?;
-        let non_fungible_token = tx.non_fungible_token_get_by_nft_id(nft_id)?;
-        Ok(non_fungible_token)
-    }
-
-    pub fn get_by_address(
+    pub fn get(
         &self,
-        nft_address: NonFungibleAddress,
+        resource_address: ResourceAddress,
+        nft_id: NonFungibleId,
     ) -> Result<NonFungibleToken, NonFungibleTokensApiError> {
         let mut tx = self.store.create_read_tx()?;
-        let non_fungible_token = tx.non_fungible_token_get_by_nft_address(nft_address)?;
+        let non_fungible_token = tx.non_fungible_token_get_by_nft_id(resource_address, nft_id)?;
         Ok(non_fungible_token)
     }
 

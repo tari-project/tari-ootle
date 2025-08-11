@@ -245,8 +245,8 @@ export default function ClaimFees() {
             {scannedFees?.fees ? (
               <Box>
                 Found fees in {Object.entries(scannedFees.fees).length} shards. Total:{" "}
-                {Object.entries(scannedFees.fees)
-                  .map(([_shard, info]) => info.amount)
+                {Object.values(scannedFees.fees)
+                  .map((info) => info!.amount)
                   .reduce((acc, amt) => acc + amt, 0)}{" "}
                 XTR
               </Box>

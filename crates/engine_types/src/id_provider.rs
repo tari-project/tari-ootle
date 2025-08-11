@@ -10,7 +10,7 @@ use tari_template_lib::{
 };
 
 use crate::{
-    component::new_component_address_from_public_key,
+    component::derive_component_address_from_public_key,
     hashing::{hasher32, EngineHashDomainLabel},
 };
 
@@ -58,7 +58,7 @@ impl<'a> IdProvider<'a> {
         template_address: &TemplateAddress,
         public_key: &RistrettoPublicKeyBytes,
     ) -> Result<ComponentAddress, IdProviderError> {
-        Ok(new_component_address_from_public_key(template_address, public_key))
+        Ok(derive_component_address_from_public_key(template_address, public_key))
     }
 
     pub fn new_vault_id(&self) -> Result<VaultId, IdProviderError> {

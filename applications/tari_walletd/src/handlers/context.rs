@@ -5,6 +5,7 @@ use axum::headers::authorization::Bearer;
 use tari_ootle_wallet_sdk::WalletSdk;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_shutdown::ShutdownSignal;
+use tari_transaction::{Transaction, TransactionBuilder};
 use tari_wallet_daemon_client::permissions::JrpcPermission;
 use webauthn_rs::Webauthn;
 
@@ -99,5 +100,10 @@ impl HandlerContext {
 
     pub fn webauthn(&self) -> Option<&Webauthn> {
         self.authenticator.webauthn()
+    }
+
+    /// Returns a TransactionBuilder with the current network configured.
+    pub fn transaction_builder(&self) -> TransactionBuilder {
+        Transaction::builder().for_network(self.config().network.as_byte())
     }
 }

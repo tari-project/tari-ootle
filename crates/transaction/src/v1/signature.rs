@@ -11,7 +11,7 @@ use tari_crypto::{
     tari_utilities::ByteArray,
 };
 use tari_engine_types::{
-    hashing::{hasher64, EngineHashDomainLabel},
+    hashing::{engine_hasher64, EngineHashDomainLabel},
     instruction::Instruction,
     FromByteType,
     ToByteType,
@@ -28,9 +28,7 @@ use crate::{UnsealedTransactionV1, UnsignedTransactionV1};
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct TransactionSealSignature {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     public_key: RistrettoPublicKeyBytes,
-    #[cfg_attr(feature = "ts", ts(type = "{public_nonce: string, signature: string}"))]
     signature: SchnorrSignatureBytes,
 }
 
@@ -75,7 +73,7 @@ impl TransactionSealSignature {
     }
 
     fn create_message(transaction: &UnsealedTransactionV1) -> [u8; 64] {
-        hasher64(EngineHashDomainLabel::TransactionSignature)
+        engine_hasher64(EngineHashDomainLabel::TransactionSignature)
             .chain(&transaction.schema_version())
             .chain(transaction)
             .result()
@@ -89,9 +87,7 @@ impl TransactionSealSignature {
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct TransactionSignature {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     public_key: RistrettoPublicKeyBytes,
-    #[cfg_attr(feature = "ts", ts(type = "{public_nonce: string, signature: string}"))]
     signature: SchnorrSignatureBytes,
 }
 
@@ -137,7 +133,7 @@ impl TransactionSignature {
 
     fn create_message(seal_signer: &RistrettoPublicKeyBytes, transaction: &UnsignedTransactionV1) -> [u8; 64] {
         let signature_fields = TransactionSignatureFields::from(transaction);
-        hasher64(EngineHashDomainLabel::TransactionSignature)
+        engine_hasher64(EngineHashDomainLabel::TransactionSignature)
             .chain(seal_signer)
             .chain(&signature_fields)
             .result()

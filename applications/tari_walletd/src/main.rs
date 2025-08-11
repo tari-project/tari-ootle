@@ -28,7 +28,7 @@ use serde_json::json;
 use tari_common::initialize_logging;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_ootle_app_utilities::configuration::load_configuration;
-use tari_ootle_wallet_sdk::apis::key_manager;
+use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
 use tari_ootle_walletd::{
     cli::{Cli, Subcommand},
     config::ApplicationConfig,
@@ -61,6 +61,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     match &cli.command {
         Some(Subcommand::Run) | None => run(cli, config).await?,
+        // TODO: rather implement create account and return the key
         Some(Subcommand::CreateKey {
             key_index,
             set_active,
@@ -71,13 +72,13 @@ async fn main() -> Result<(), anyhow::Error> {
             sdk.initialize_cipher_seed(cli.wallet_restore.seed_words.as_ref())?;
             let km = sdk.key_manager_api();
             let secret = if let Some(index) = key_index {
-                km.derive_key(key_manager::TRANSACTION_BRANCH, *index)?
+                km.derive_account_key(*index)?
             } else {
-                km.next_key(key_manager::TRANSACTION_BRANCH)?
+                km.next_account_key()?
             };
 
             if *set_active {
-                km.set_active_key(key_manager::TRANSACTION_BRANCH, secret.key_index)?;
+                km.set_active_key(KeyBranch::Transaction, secret.key_index)?;
             }
 
             let json = json!({

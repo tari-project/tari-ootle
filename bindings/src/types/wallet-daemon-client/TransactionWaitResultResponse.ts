@@ -3,10 +3,10 @@ import type { FinalizeResult } from "../FinalizeResult";
 import type { TransactionId } from "../TransactionId";
 import type { TransactionStatus } from "../TransactionStatus";
 
-export interface TransactionWaitResultResponse {
+export type TransactionWaitResultResponse = {
   transaction_id: TransactionId;
   result: FinalizeResult | null;
   status: TransactionStatus;
   final_fee: number;
   timed_out: boolean;
-}
+};

@@ -1,8 +1,9 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateId};
-use tari_ootle_wallet_sdk::models::{Account, NewAccountInfo, TransactionStatus};
+use tari_engine_types::commit_result::FinalizeResult;
+use tari_ootle_wallet_sdk::models::{Account, NewAccountData, TransactionStatus};
+use tari_template_lib::prelude::ComponentAddress;
 use tari_transaction::TransactionId;
 
 #[derive(Debug, Clone)]
@@ -10,8 +11,8 @@ pub enum WalletEvent {
     TransactionSubmitted(TransactionSubmittedEvent),
     TransactionFinalized(TransactionFinalizedEvent),
     TransactionInvalid(TransactionInvalidEvent),
-    AccountCreated(AccountCreatedEvent),
-    AccountChanged(AccountChangedEvent),
+    AccountCreatedOnChain(AccountCreatedEvent),
+    AccountChangedOnChain(AccountChangedEvent),
     AuthLoginRequest(#[allow(dead_code)] AuthLoginRequestEvent),
 }
 
@@ -29,7 +30,7 @@ impl From<TransactionFinalizedEvent> for WalletEvent {
 
 impl From<AccountChangedEvent> for WalletEvent {
     fn from(value: AccountChangedEvent) -> Self {
-        Self::AccountChanged(value)
+        Self::AccountChangedOnChain(value)
     }
 }
 
@@ -47,7 +48,7 @@ impl From<AuthLoginRequestEvent> for WalletEvent {
 
 impl From<AccountCreatedEvent> for WalletEvent {
     fn from(value: AccountCreatedEvent) -> Self {
-        Self::AccountCreated(value)
+        Self::AccountCreatedOnChain(value)
     }
 }
 
@@ -55,7 +56,7 @@ impl From<AccountCreatedEvent> for WalletEvent {
 pub struct TransactionSubmittedEvent {
     pub transaction_id: TransactionId,
     /// Set to Some if this transaction results in a new account
-    pub new_account: Option<NewAccountInfo>,
+    pub new_account: Option<NewAccountData>,
 }
 
 #[derive(Debug, Clone)]
@@ -69,13 +70,12 @@ pub struct TransactionFinalizedEvent {
 #[derive(Debug, Clone)]
 pub struct AccountCreatedEvent {
     pub account: Account,
-    #[allow(dead_code)]
-    pub created_by_tx: TransactionId,
+    pub _created_by_tx: TransactionId,
 }
 
 #[derive(Debug, Clone)]
 pub struct AccountChangedEvent {
-    pub account_address: SubstateId,
+    pub account_address: ComponentAddress,
 }
 
 #[derive(Debug, Clone)]

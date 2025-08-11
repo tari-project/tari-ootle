@@ -13,7 +13,7 @@ use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey as _
 use tari_engine_types::{crypto::get_commitment_factory, ToByteType};
 use tari_ootle_wallet_crypto::{AlwaysMissLookupTable, IoReaderValueLookup, UnblindedOutputStatement};
 use tari_ootle_wallet_sdk::{
-    apis::key_manager,
+    apis::key_manager::KeyBranch,
     models::{ConfidentialOutputModel, OutputStatus},
 };
 use tari_template_lib::types::Amount;
@@ -55,11 +55,11 @@ pub async fn handle_create_transfer_proof(
         )));
     }
 
-    let account = get_account_or_default(req.account, &sdk.accounts_api())?;
+    let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
     let vault = sdk
         .accounts_api()
-        .get_vault_by_resource(&account.address, &req.resource_address)?;
-    let proof_id = sdk.confidential_outputs_api().add_proof(&vault.address)?;
+        .get_vault_by_resource(account.address(), &req.resource_address)?;
+    let proof_id = sdk.confidential_outputs_api().add_output_lock(&vault.id)?;
     // Lock inputs we're going to spend
 
     let amount_to_transfer = req.amount.checked_add_positive(req.reveal_amount).ok_or_else(|| {
@@ -70,7 +70,7 @@ pub async fn handle_create_transfer_proof(
     })?;
     let (inputs, total_input_value) =
         sdk.confidential_outputs_api()
-            .lock_outputs_by_amount(&vault.address, amount_to_transfer, proof_id)?;
+            .lock_outputs_by_amount(proof_id, &vault.id, amount_to_transfer)?;
 
     info!(
         target: LOG_TARGET,
@@ -83,10 +83,8 @@ pub async fn handle_create_transfer_proof(
     // TODO: Any errors from here need to unlock the outputs, ideally just roll back (refactor required but doable).
 
     // TODO: Wrap up key/encrypted data handling in the wallet SDK
-    let account_secret = sdk
-        .key_manager_api()
-        .derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
-    let output_mask = sdk.key_manager_api().next_key(key_manager::TRANSACTION_BRANCH)?;
+    let account_secret = sdk.key_manager_api().derive_account_key(account.key_index())?;
+    let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMasks)?;
     let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
 
     let amount_u64 = req.amount.to_u64_checked().ok_or_else(|| {
@@ -151,7 +149,7 @@ pub async fn handle_create_transfer_proof(
     })?;
 
     let maybe_change_statement = if change_amount_u64 > 0 {
-        let change_mask = sdk.key_manager_api().next_key(key_manager::TRANSACTION_BRANCH)?;
+        let change_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMasks)?;
         let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
 
         let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
@@ -162,8 +160,8 @@ pub async fn handle_create_transfer_proof(
         )?;
 
         sdk.confidential_outputs_api().add_output(ConfidentialOutputModel {
-            account_address: account.address,
-            vault_address: vault.address,
+            account_address: *account.address(),
+            vault_id: vault.id,
             commitment: get_commitment_factory()
                 .commit_value(&change_mask.key, change_amount_u64)
                 .to_byte_type(),
@@ -173,7 +171,7 @@ pub async fn handle_create_transfer_proof(
             encrypted_data: encrypted_data.clone(),
             public_asset_tag: None,
             status: OutputStatus::LockedUnconfirmed,
-            locked_by_proof: Some(proof_id),
+            lock_id: Some(proof_id),
         })?;
 
         Some(UnblindedOutputStatement {
@@ -188,9 +186,7 @@ pub async fn handle_create_transfer_proof(
         None
     };
 
-    let inputs = sdk
-        .confidential_outputs_api()
-        .resolve_output_masks(inputs, key_manager::TRANSACTION_BRANCH)?;
+    let inputs = sdk.confidential_outputs_api().resolve_output_masks(inputs)?;
 
     let proof = sdk.confidential_crypto_api().generate_withdraw_proof(
         &inputs,
@@ -246,7 +242,7 @@ pub async fn handle_create_output_proof(
         ));
     };
 
-    let output_mask = sdk.key_manager_api().next_key(key_manager::TRANSACTION_BRANCH)?;
+    let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMasks)?;
     let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
     let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
         amount,
@@ -289,9 +285,7 @@ pub async fn handle_view_vault_balance(
         .ok_or_else(|| invalid_params("vault_id", Some("Vault does not contain a confidential resource")))?;
 
     // Get view secret key
-    let view_key = sdk
-        .key_manager_api()
-        .derive_key(key_manager::VIEW_KEY_BRANCH, req.view_key_id)?;
+    let view_key = sdk.key_manager_api().derive_key(KeyBranch::ViewKey, req.view_key_id)?;
 
     let value_range = req.minimum_expected_value.unwrap_or(0)..=req.maximum_expected_value.unwrap_or(10_000_000_000);
 

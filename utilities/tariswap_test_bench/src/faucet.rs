@@ -3,7 +3,7 @@
 
 use log::info;
 use tari_ootle_common_types::SubstateRequirement;
-use tari_ootle_wallet_sdk::{apis::key_manager::TRANSACTION_BRANCH, models::Account};
+use tari_ootle_wallet_sdk::models::Account;
 use tari_template_lib::{
     constants::XTR,
     models::{ComponentAddress, ResourceAddress, VaultId},
@@ -20,7 +20,7 @@ pub struct Faucet {
 
 impl Runner {
     pub async fn create_faucet(&mut self, in_account: &Account) -> anyhow::Result<Faucet> {
-        let key = self.sdk.key_manager_api().derive_key(TRANSACTION_BRANCH, 0)?;
+        let key = self.sdk.key_manager_api().derive_account_key(0)?;
 
         let fee_vault = self
             .sdk
@@ -29,11 +29,11 @@ impl Runner {
 
         let transaction = self
             .new_transaction_builder()
-            .fee_transaction_pay_from_component(in_account.address.as_component_address().unwrap(), 1000)
+            .fee_transaction_pay_from_component(in_account.address, 1000)
             .call_function(self.faucet_template.address, "mint", args![Amount(1_000_000_000)])
             .with_inputs([
-                SubstateRequirement::unversioned(in_account.address.clone()),
-                SubstateRequirement::unversioned(fee_vault.address.clone()),
+                SubstateRequirement::unversioned(in_account.address),
+                SubstateRequirement::unversioned(fee_vault.id),
                 SubstateRequirement::unversioned(fee_vault.resource_address),
             ])
             .with_authorized_seal_signer()
@@ -58,7 +58,7 @@ impl Runner {
         let vault_address = diff
             .up_iter()
             .filter_map(|(addr, _)| addr.as_vault_id())
-            .find(|addr| *addr != fee_vault.address)
+            .find(|addr| *addr != fee_vault.id)
             .ok_or_else(|| anyhow::anyhow!("Faucet Resource address not found"))?;
 
         info!("✅ Faucet {component_address} created with {resource_address} and {vault_address}");

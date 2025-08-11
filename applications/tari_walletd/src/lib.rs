@@ -38,7 +38,7 @@ use tari_ootle_common_types::{optional::Optional, NumPreshards};
 use tari_ootle_wallet_sdk::{
     apis::{
         config::{ConfigApi, ConfigKey},
-        key_manager,
+        key_manager::KeyBranch,
     },
     WalletSdk,
     WalletSdkConfig,
@@ -76,7 +76,7 @@ pub async fn run_tari_ootle_walletd(
 
     wallet_sdk
         .key_manager_api()
-        .get_or_create_initial(key_manager::TRANSACTION_BRANCH)?;
+        .get_or_create_initial(KeyBranch::Transaction)?;
 
     let notify = Notify::new(100);
     let services = spawn_services(shutdown_signal.clone(), notify.clone(), wallet_sdk.clone());

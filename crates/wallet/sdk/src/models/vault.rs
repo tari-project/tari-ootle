@@ -1,13 +1,16 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::substate::SubstateId;
-use tari_template_lib::{models::ResourceAddress, resource::ResourceType, types::Amount};
+use tari_template_lib::{
+    models::{ComponentAddress, ResourceAddress, VaultId},
+    resource::ResourceType,
+    types::Amount,
+};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VaultModel {
-    pub account_address: SubstateId,
-    pub address: SubstateId,
+    pub account_address: ComponentAddress,
+    pub id: VaultId,
     pub resource_address: ResourceAddress,
     pub resource_type: ResourceType,
     pub confidential_balance: Amount,
@@ -27,7 +30,7 @@ impl VaultModel {
 
 #[derive(Debug, Clone)]
 pub struct VaultBalance {
-    pub account: SubstateId,
+    pub account: ComponentAddress,
     pub confidential: Amount,
     pub revealed: Amount,
 }

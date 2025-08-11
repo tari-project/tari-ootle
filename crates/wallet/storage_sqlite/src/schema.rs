@@ -7,6 +7,7 @@ diesel::table! {
         address -> Text,
         owner_key_index -> BigInt,
         is_default -> Bool,
+        is_confirmed_on_chain -> Bool,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }
@@ -72,6 +73,17 @@ diesel::table! {
 }
 
 diesel::table! {
+    output_locks (id) {
+        id -> Integer,
+        resource_address -> Text,
+        vault_id -> Nullable<Integer>,
+        transaction_hash -> Nullable<Text>,
+        locked_revealed_amount -> BigInt,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     outputs (id) {
         id -> Integer,
         account_id -> Integer,
@@ -83,7 +95,7 @@ diesel::table! {
         public_asset_tag -> Nullable<Text>,
         status -> Text,
         locked_at -> Nullable<Timestamp>,
-        locked_by_proof -> Nullable<Integer>,
+        lock_id -> Nullable<Integer>,
         encrypted_data -> Binary,
         created_at -> Timestamp,
         updated_at -> Timestamp,
@@ -91,13 +103,20 @@ diesel::table! {
 }
 
 diesel::table! {
-    proofs (id) {
+    stealth_outputs (id) {
         id -> Integer,
-        account_id -> Integer,
-        vault_id -> Integer,
-        transaction_hash -> Nullable<Text>,
-        locked_revealed_amount -> BigInt,
+        owner_account_id -> Integer,
+        resource_address -> Text,
+        commitment -> Text,
+        value -> Text,
+        sender_public_nonce -> Text,
+        status -> Text,
+        locked_at -> Nullable<Timestamp>,
+        lock_id -> Nullable<Integer>,
+        encryption_secret_key_index -> BigInt,
+        encrypted_data -> Binary,
         created_at -> Timestamp,
+        updated_at -> Timestamp,
     }
 }
 
@@ -134,11 +153,10 @@ diesel::table! {
         max_epoch -> Nullable<BigInt>,
         executed_time_ms -> Nullable<BigInt>,
         finalized_time -> Nullable<Timestamp>,
-        required_substates -> Text,
         new_account_info -> Nullable<Text>,
+        invalid_reason -> Nullable<Text>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
-        invalid_reason -> Nullable<Text>,
     }
 }
 
@@ -153,9 +171,9 @@ diesel::table! {
         confidential_balance -> BigInt,
         locked_revealed_balance -> BigInt,
         token_symbol -> Nullable<Text>,
+        divisibility -> Integer,
         created_at -> Timestamp,
         updated_at -> Timestamp,
-        divisibility -> Integer,
     }
 }
 
@@ -179,10 +197,9 @@ diesel::table! {
 }
 
 diesel::joinable!(non_fungible_tokens -> vaults (vault_id));
+diesel::joinable!(output_locks -> vaults (vault_id));
 diesel::joinable!(outputs -> accounts (account_id));
 diesel::joinable!(outputs -> vaults (vault_id));
-diesel::joinable!(proofs -> accounts (account_id));
-diesel::joinable!(proofs -> vaults (vault_id));
 diesel::joinable!(vaults -> accounts (account_id));
 diesel::joinable!(webauthn_registration_passkeys -> webauthn_registrations (registration_id));
 
@@ -193,8 +210,9 @@ diesel::allow_tables_to_appear_in_same_query!(
     config,
     key_manager_states,
     non_fungible_tokens,
+    output_locks,
     outputs,
-    proofs,
+    stealth_outputs,
     substates,
     transactions,
     vaults,

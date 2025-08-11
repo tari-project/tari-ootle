@@ -39,6 +39,7 @@ use tari_ootle_common_types::{
     layer_one_transaction::{LayerOneTransactionDef, ValidatorRegistrationParams},
     Network,
 };
+use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
 use tari_shutdown::Shutdown;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_validator_node::{run_validator_node, ApplicationConfig, ValidatorNodeConfig};
@@ -46,7 +47,6 @@ use tari_validator_node_client::{
     types::{LayerOneTransactionParams, PrepareLayerOneTransactionRequest},
     ValidatorNodeClient,
 };
-use tari_wallet_daemon_client::types::KeyBranch;
 use tokio::task;
 
 use crate::{

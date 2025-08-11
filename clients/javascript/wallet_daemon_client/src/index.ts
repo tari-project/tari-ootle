@@ -41,8 +41,8 @@ import type {
   KeysListResponse,
   KeysSetActiveRequest,
   KeysSetActiveResponse,
-  ListAccountNftRequest,
-  ListAccountNftResponse,
+  ListNftsRequest,
+  ListNftsResponse,
   MintFaucetNftRequest,
   MintFaucetNftResponse,
   PublishTemplateRequest,
@@ -276,7 +276,7 @@ export class WalletDaemonClient {
     return this.__invokeRpc("confidential.view_vault_balance", params);
   }
 
-  public nftsList(params: ListAccountNftRequest): Promise<ListAccountNftResponse> {
+  public nftsList(params: ListNftsRequest): Promise<ListNftsResponse> {
     return this.__invokeRpc("nfts.list", params);
   }
 

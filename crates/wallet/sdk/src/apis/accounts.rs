@@ -1,46 +1,121 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
+use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
+use tari_engine_types::{
+    component::derive_component_address_from_public_key,
+    indexed_value::IndexedWellKnownTypes,
+    ToByteType,
+};
+use tari_ootle_common_types::{
+    optional::{IsNotFoundError, Optional},
+    substate_type::SubstateType,
+};
+use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    models::{ResourceAddress, VaultId},
-    prelude::ResourceType,
+    models::{ComponentAddress, ResourceAddress, VaultId},
+    prelude::{ResourceType, RistrettoPublicKeyBytes},
     types::Amount,
 };
 
 use crate::{
-    models::{Account, VaultBalance, VaultModel},
+    apis::{
+        confidential_transfer::{ConfidentialTransferApiError, ResolvedAccountDetails},
+        key_manager::{KeyManagerApi, KeyManagerApiError},
+        substate::{SubstatesApi, ValidatorScanResult},
+    },
+    models::{Account, AccountUpdate, AccountWithPublicKey, VaultBalance, VaultModel},
+    network::WalletNetworkInterface,
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
-pub struct AccountsApi<'a, TStore> {
+pub struct AccountsApi<'a, TStore, TNetworkInterface> {
     store: &'a TStore,
+    substates_api: SubstatesApi<'a, TStore, TNetworkInterface>,
+    key_manager_api: KeyManagerApi<'a, TStore>,
 }
 
-impl<'a, TStore: WalletStore> AccountsApi<'a, TStore> {
-    pub fn new(store: &'a TStore) -> Self {
-        Self { store }
+impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetworkInterface> {
+    pub fn new(
+        store: &'a TStore,
+        substates_api: SubstatesApi<'a, TStore, TNetworkInterface>,
+        key_manager_api: KeyManagerApi<'a, TStore>,
+    ) -> Self {
+        Self {
+            store,
+            substates_api,
+            key_manager_api,
+        }
+    }
+
+    pub fn create_account(
+        &self,
+        account_name: Option<&str>,
+        is_default: bool,
+        key_id: Option<u64>,
+    ) -> Result<AccountWithPublicKey, AccountsApiError> {
+        let owner_key = match key_id {
+            Some(id) => self.key_manager_api.derive_account_key(id)?,
+            None => self.key_manager_api.next_account_key()?,
+        };
+        let owner_public_key = RistrettoPublicKey::from_secret_key(&owner_key.key).to_byte_type();
+        let account_address = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &owner_public_key);
+
+        self.store.with_write_tx(|tx| {
+            if let Some(name) = account_name {
+                if tx.accounts_get_by_name(name).optional()?.is_some() {
+                    return Err(AccountsApiError::AccountNameAlreadyExists { name: name.to_string() });
+                }
+            }
+
+            tx.accounts_insert(account_name, &account_address, owner_key.key_index, false, is_default)?;
+            Ok(AccountWithPublicKey {
+                account: Account {
+                    name: account_name.map(String::from),
+                    address: account_address,
+                    key_index: owner_key.key_index,
+                    is_confirmed_on_chain: false,
+                    is_default,
+                },
+                owner_public_key,
+            })
+        })
     }
 
     pub fn add_account(
         &self,
         account_name: Option<&str>,
-        account_address: &SubstateId,
+        account_address: &ComponentAddress,
         owner_key_index: u64,
+        is_confirmed_on_chain: bool,
         is_default: bool,
     ) -> Result<(), AccountsApiError> {
-        let mut tx = self.store.create_write_tx()?;
-        let account_name = account_name.map(|s| s.to_string());
-        if let Some(ref name) = account_name {
-            if tx.accounts_get_by_name(name).optional()?.is_some() {
-                tx.rollback()?;
-                return Err(AccountsApiError::AccountNameAlreadyExists { name: name.clone() });
+        self.store.with_write_tx(|tx| {
+            if let Some(name) = account_name {
+                if tx.accounts_get_by_name(name).optional()?.is_some() {
+                    return Err(AccountsApiError::AccountNameAlreadyExists { name: name.to_string() });
+                }
             }
-        }
-        tx.accounts_insert(account_name.as_deref(), account_address, owner_key_index, is_default)?;
-        tx.commit()?;
-        Ok(())
+            tx.accounts_insert(
+                account_name,
+                account_address,
+                owner_key_index,
+                is_confirmed_on_chain,
+                is_default,
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn update_account(
+        &self,
+        account_address: &ComponentAddress,
+        update: AccountUpdate,
+    ) -> Result<(), AccountsApiError> {
+        self.store.with_write_tx(|tx| {
+            tx.accounts_update(account_address, update)?;
+            Ok(())
+        })
     }
 
     pub fn get_many(&self, offset: u64, limit: u64) -> Result<Vec<Account>, AccountsApiError> {
@@ -55,36 +130,38 @@ impl<'a, TStore: WalletStore> AccountsApi<'a, TStore> {
         Ok(count)
     }
 
-    // pub fn get_account_by_name_or_default(&self, name: Option<&str>) -> Result<Account, AccountsApiError> {
-    //     let mut tx = self.store.create_read_tx()?;
-    //     let account = match name {
-    //         Some(name) => tx.accounts_get_by_name(name)?,
-    //         None => tx.accounts_get_default()?,
-    //     };
-    //     Ok(account)
-    // }
-
-    pub fn get_default(&self) -> Result<Account, AccountsApiError> {
-        let mut tx = self.store.create_read_tx()?;
-        let account = tx.accounts_get_default()?;
-        Ok(account)
+    pub fn any_accounts_exist(&self) -> Result<bool, AccountsApiError> {
+        self.count().map(|count| count > 0)
     }
 
-    pub fn get_account_by_name(&self, name: &str) -> Result<Account, AccountsApiError> {
-        let mut tx = self.store.create_read_tx()?;
-        let account = tx.accounts_get_by_name(name)?;
-        Ok(account)
+    pub fn get_default(&self) -> Result<AccountWithPublicKey, AccountsApiError> {
+        // TODO: be careful not to use the key manager with a read transaction open as this will deadlock. The DB
+        // transaction should be passed into the SDK methods to avoid this.
+        let account = self.store.with_read_tx(|tx| tx.accounts_get_default())?;
+        let (_, pk) = self.key_manager_api.derive_account_keypair(account.key_index)?;
+        Ok(AccountWithPublicKey {
+            account,
+            owner_public_key: pk.to_byte_type(),
+        })
+    }
+
+    pub fn get_account_by_name(&self, name: &str) -> Result<AccountWithPublicKey, AccountsApiError> {
+        let account = self.store.with_read_tx(|tx| tx.accounts_get_by_name(name))?;
+        let (_, pk) = self.key_manager_api.derive_account_keypair(account.key_index)?;
+        Ok(AccountWithPublicKey {
+            account,
+            owner_public_key: pk.to_byte_type(),
+        })
     }
 
     pub fn update_vault_balance(
         &self,
-        vault_address: &SubstateId,
+        vault_address: VaultId,
         revealed_balance: Amount,
         confidential_balance: Amount,
     ) -> Result<(), AccountsApiError> {
-        let mut tx = self.store.create_write_tx()?;
-        tx.vaults_update(vault_address, revealed_balance, confidential_balance)?;
-        tx.commit()?;
+        self.store
+            .with_write_tx(|tx| tx.vaults_update(vault_address, revealed_balance, confidential_balance))?;
         Ok(())
     }
 
@@ -97,27 +174,31 @@ impl<'a, TStore: WalletStore> AccountsApi<'a, TStore> {
         })
     }
 
-    pub fn exists_by_address(&self, address: &SubstateId) -> Result<bool, AccountsApiError> {
+    pub fn exists_by_address(&self, address: &ComponentAddress) -> Result<bool, AccountsApiError> {
         Ok(self.get_account_by_address(address).optional()?.is_some())
     }
 
-    pub fn get_account_by_address(&self, address: &SubstateId) -> Result<Account, AccountsApiError> {
-        let mut tx = self.store.create_read_tx()?;
-        let account = tx.accounts_get(address)?;
-        Ok(account)
+    pub fn get_account_by_address(&self, address: &ComponentAddress) -> Result<AccountWithPublicKey, AccountsApiError> {
+        let account = self.store.with_read_tx(|tx| tx.accounts_get(address))?;
+        let (_, pk) = self.key_manager_api.derive_account_keypair(account.key_index)?;
+        Ok(AccountWithPublicKey {
+            account,
+            owner_public_key: pk.to_byte_type(),
+        })
     }
 
-    pub fn get_account_or_default(&self, address: Option<&SubstateId>) -> Result<Account, AccountsApiError> {
-        let mut tx = self.store.create_read_tx()?;
-        if let Some(address) = address {
-            let account = tx.accounts_get(address)?;
-            return Ok(account);
-        }
-        let account = tx.accounts_get_default()?;
-        Ok(account)
+    pub fn get_account_or_default(&self, address: Option<&ComponentAddress>) -> Result<Account, AccountsApiError> {
+        self.store.with_read_tx(|tx| {
+            if let Some(address) = address {
+                let account = tx.accounts_get(address)?;
+                return Ok(account);
+            }
+            let account = tx.accounts_get_default()?;
+            Ok(account)
+        })
     }
 
-    pub fn get_by_vault(&self, vault_addr: &&SubstateId) -> Result<Account, AccountsApiError> {
+    pub fn get_by_vault(&self, vault_addr: &VaultId) -> Result<Account, AccountsApiError> {
         let mut tx = self.store.create_read_tx()?;
         let account = tx.accounts_get_by_vault(vault_addr)?;
         Ok(account)
@@ -125,7 +206,7 @@ impl<'a, TStore: WalletStore> AccountsApi<'a, TStore> {
 
     pub fn get_vault_by_resource(
         &self,
-        account_addr: &SubstateId,
+        account_addr: &ComponentAddress,
         resource_addr: &ResourceAddress,
     ) -> Result<VaultModel, AccountsApiError> {
         let mut tx = self.store.create_read_tx()?;
@@ -139,7 +220,7 @@ impl<'a, TStore: WalletStore> AccountsApi<'a, TStore> {
         Ok(vault)
     }
 
-    pub fn has_account(&self, addr: &SubstateId) -> Result<bool, AccountsApiError> {
+    pub fn has_account(&self, addr: &ComponentAddress) -> Result<bool, AccountsApiError> {
         let mut tx = self.store.create_read_tx()?;
         // TODO: consider optimising
         let exists = tx.accounts_get(addr).optional()?.is_some();
@@ -152,7 +233,7 @@ impl<'a, TStore: WalletStore> AccountsApi<'a, TStore> {
         Ok(exists)
     }
 
-    pub fn set_default_account(&self, account_addr: &SubstateId) -> Result<(), AccountsApiError> {
+    pub fn set_default_account(&self, account_addr: &ComponentAddress) -> Result<(), AccountsApiError> {
         let mut tx = self.store.create_write_tx()?;
         tx.accounts_set_default(account_addr)?;
         tx.commit()?;
@@ -161,8 +242,8 @@ impl<'a, TStore: WalletStore> AccountsApi<'a, TStore> {
 
     pub fn add_vault(
         &self,
-        account_address: SubstateId,
-        vault_address: SubstateId,
+        account_address: ComponentAddress,
+        vault_address: VaultId,
         resource_address: ResourceAddress,
         resource_type: ResourceType,
         token_symbol: Option<String>,
@@ -171,7 +252,7 @@ impl<'a, TStore: WalletStore> AccountsApi<'a, TStore> {
         let mut tx = self.store.create_write_tx()?;
         tx.vaults_insert(VaultModel {
             account_address,
-            address: vault_address,
+            id: vault_address,
             resource_address,
             resource_type,
             revealed_balance: Amount::zero(),
@@ -184,16 +265,75 @@ impl<'a, TStore: WalletStore> AccountsApi<'a, TStore> {
         Ok(())
     }
 
-    pub fn get_account_by_vault(&self, vault_addr: &&SubstateId) -> Result<Account, AccountsApiError> {
+    pub fn get_account_by_vault(&self, vault_addr: &&VaultId) -> Result<Account, AccountsApiError> {
         let mut tx = self.store.create_read_tx()?;
         let account = tx.accounts_get_by_vault(vault_addr)?;
         Ok(account)
     }
 
-    pub fn get_vaults_by_account(&self, account: &SubstateId) -> Result<Vec<VaultModel>, AccountsApiError> {
+    pub fn get_vaults_by_account(&self, account: &ComponentAddress) -> Result<Vec<VaultModel>, AccountsApiError> {
         let mut tx = self.store.create_read_tx()?;
         let vaults = tx.vaults_get_by_account(account)?;
         Ok(vaults)
+    }
+}
+
+impl<'a, TStore, TNetworkInterface> AccountsApi<'a, TStore, TNetworkInterface>
+where
+    TStore: WalletStore,
+    TNetworkInterface: WalletNetworkInterface,
+    TNetworkInterface::Error: IsNotFoundError,
+{
+    pub async fn resolve_account_by_public_key(
+        &self,
+        destination_pk: &RistrettoPublicKeyBytes,
+    ) -> Result<ResolvedAccountDetails, ConfidentialTransferApiError> {
+        let account_component = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, destination_pk);
+        // Is it an account we own?
+        if let Some(vaults) = self.get_vaults_by_account(&account_component).optional()? {
+            let account = self.get_account_by_address(&account_component)?;
+
+            return Ok(ResolvedAccountDetails {
+                address: account_component,
+                vaults: vaults.into_iter().map(|v| v.id).collect(),
+                exists_on_chain: account.is_confirmed_on_chain(),
+            });
+        }
+
+        match self
+            .substates_api
+            .scan_for_substate(&account_component.into(), None)
+            .await
+            .optional()?
+        {
+            Some(ValidatorScanResult { address, substate, .. }) => {
+                let indexed_component = substate
+                    .component()
+                    .map(|c| IndexedWellKnownTypes::from_value(c.state()))
+                    .transpose()
+                    .map_err(|e| ConfidentialTransferApiError::UnexpectedIndexerResponse {
+                        details: format!("Failed to extract vaults from account component: {e}"),
+                    })?
+                    .ok_or_else(|| ConfidentialTransferApiError::UnexpectedIndexerResponse {
+                        details: format!(
+                            "Expected indexer to return a component for account {} but it returned {} (value type: {})",
+                            account_component,
+                            address,
+                            SubstateType::from(&substate)
+                        ),
+                    })?;
+                Ok(ResolvedAccountDetails {
+                    address: account_component,
+                    vaults: indexed_component.vault_ids().to_vec(),
+                    exists_on_chain: true,
+                })
+            },
+            None => Ok(ResolvedAccountDetails {
+                address: account_component,
+                vaults: vec![],
+                exists_on_chain: false,
+            }),
+        }
     }
 }
 
@@ -201,8 +341,16 @@ impl<'a, TStore: WalletStore> AccountsApi<'a, TStore> {
 pub enum AccountsApiError {
     #[error("Store error: {0}")]
     StoreError(#[from] WalletStorageError),
+    #[error("Key manager API error: {0}")]
+    KeyManagerApiError(#[from] KeyManagerApiError),
     #[error("Account name already exists: {name}")]
     AccountNameAlreadyExists { name: String },
+}
+
+impl AccountsApiError {
+    pub fn is_name_exists_error(&self) -> bool {
+        matches!(self, Self::AccountNameAlreadyExists { .. })
+    }
 }
 
 impl IsNotFoundError for AccountsApiError {

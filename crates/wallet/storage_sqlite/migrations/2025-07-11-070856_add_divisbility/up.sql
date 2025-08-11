@@ -1,2 +1,0 @@
-ALTER TABLE vaults
-    ADD COLUMN divisibility INTEGER NOT NULL DEFAULT 0;

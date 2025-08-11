@@ -241,10 +241,7 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
 
     let mut builder = Transaction::builder()
         .for_network(network.byte)
-        .fee_transaction_pay_from_component(
-            fee_account.address.as_component_address().unwrap(),
-            common.max_fee.unwrap_or(1000),
-        )
+        .fee_transaction_pay_from_component(fee_account.address, common.max_fee.unwrap_or(1000))
         .add_instruction(instruction)
         .with_inputs(common.inputs)
         .with_min_epoch(common.min_epoch.map(Epoch))
@@ -253,11 +250,10 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
     if let Some(dump_account) = common.dump_outputs_into {
         let AccountGetResponse { account, .. } = client.accounts_get(dump_account).await?;
 
-        builder = builder.put_last_instruction_output_on_workspace("bucket").call_method(
-            account.address.as_component_address().unwrap(),
-            "deposit",
-            args![Workspace("bucket")],
-        );
+        builder =
+            builder
+                .put_last_instruction_output_on_workspace("bucket")
+                .call_method(account.address, "deposit", args![Workspace("bucket")]);
     }
 
     let transaction = builder.build_unsigned_transaction();
@@ -311,11 +307,9 @@ async fn handle_submit_manifest(
     let builder = Transaction::builder()
         .for_network(network.byte)
         .with_fee_instructions_builder(|builder| {
-            builder.with_instructions(instructions.fee_instructions).call_method(
-                fee_account.address.as_component_address().unwrap(),
-                "pay_fee",
-                args![common.max_fee.unwrap_or(1000)],
-            )
+            builder
+                .with_instructions(instructions.fee_instructions)
+                .call_method(fee_account.address, "pay_fee", args![common.max_fee.unwrap_or(1000)])
         })
         .with_instructions(instructions.instructions)
         .with_inputs(common.inputs)

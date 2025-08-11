@@ -32,7 +32,7 @@ use tari_engine_types::{substate::SubstateId, ToByteType};
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_ootle_wallet_sdk::{
     apis::confidential_transfer::ConfidentialTransferInputSelection,
-    models::{Account, NonFungibleToken},
+    models::{Account, AccountWithPublicKey, NonFungibleToken},
 };
 use tari_template_lib::{
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
@@ -57,7 +57,7 @@ use tari_wallet_daemon_client::{
         ClaimValidatorFeesRequest,
         ClaimValidatorFeesResponse,
         ConfidentialTransferRequest,
-        ListAccountNftRequest,
+        ListNftsRequest,
         MintFaucetNftRequest,
         ProofsGenerateRequest,
         RevealFundsRequest,
@@ -90,7 +90,7 @@ pub async fn claim_burn(
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
     let claim_burn_request = ClaimBurnRequest {
-        account: Some(ComponentAddressOrName::Name(account_name.clone())),
+        account: ComponentAddressOrName::Name(account_name.clone()),
         claim_proof: ClaimBurnProof {
             commitment,
             ownership_proof: ownership_proof.to_byte_type(),
@@ -98,7 +98,6 @@ pub async fn claim_burn(
             range_proof,
         },
         max_fee: Some(max_fee),
-        key_id: None,
     };
 
     client.claim_burn(claim_burn_request).await
@@ -170,10 +169,7 @@ pub async fn transfer_confidential(
 
     let source_account_name = ComponentAddressOrName::Name(source_account_name);
     let AccountGetResponse { account, .. } = client.accounts_get(source_account_name.clone()).await.unwrap();
-    let source_component_address = account
-        .address
-        .as_component_address()
-        .expect("Invalid component address for source address");
+    let source_component_address = account.address;
 
     let signing_key_index = account.key_index;
 
@@ -183,11 +179,7 @@ pub async fn transfer_confidential(
         .await
         .expect("Failed to retrieve destination account address from its name");
 
-    let destination_account = destination_account_resp
-        .account
-        .address
-        .as_component_address()
-        .expect("Failed to get component address from destination account");
+    let destination_account = destination_account_resp.account.address;
     let destination_public_key = destination_account_resp.public_key;
 
     let resource_address = CONFIDENTIAL_TARI_RESOURCE_ADDRESS;
@@ -245,14 +237,16 @@ pub async fn transfer_confidential(
     submit_resp
 }
 
-pub async fn create_account(world: &mut TariWorld, account_name: String, wallet_daemon_name: String) {
+pub async fn create_account(
+    world: &mut TariWorld,
+    account_name: String,
+    wallet_daemon_name: String,
+) -> AccountWithPublicKey {
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
     let request = AccountsCreateRequest {
         account_name: Some(account_name.clone()),
-        custom_access_rules: None,
-        is_default: false,
-        max_fee: None,
+        is_default: None,
         key_id: None,
     };
 
@@ -261,16 +255,12 @@ pub async fn create_account(world: &mut TariWorld, account_name: String, wallet_
         .unwrap()
         .unwrap();
 
-    // TODO: store the secret key in the world, but we don't have a need for it at the moment
-    world
-        .account_keys
-        .insert(account_name.clone(), (RistrettoSecretKey::default(), resp.public_key));
+    world.account_keys.insert(account_name.clone(), resp.public_key);
 
-    add_substate_ids(
-        world,
-        account_name,
-        &resp.result.result.expect("Failed to obtain substate diffs"),
-    );
+    AccountWithPublicKey {
+        account: resp.account,
+        owner_public_key: resp.public_key,
+    }
 }
 
 pub async fn create_account_with_free_coins(
@@ -288,18 +278,23 @@ pub async fn create_account_with_free_coins(
             .get(&k)
             .unwrap_or_else(|| panic!("Wallet {} not found", wallet_daemon_name))
     });
+    let account = client
+        .create_account(AccountsCreateRequest {
+            account_name: Some(account_name.clone()),
+            is_default: None,
+            key_id: key_index,
+        })
+        .await
+        .unwrap();
+
     let request = AccountsCreateFreeTestCoinsRequest {
-        account: Some(ComponentAddressOrName::Name(account_name.clone())),
+        account: account.account.address.into(),
         amount,
         max_fee: None,
-        key_id: key_index,
     };
 
     let resp = client.create_free_test_coins(request).await.unwrap();
-    // TODO: store the secret key in the world, but we don't have a need for it at the moment
-    world
-        .account_keys
-        .insert(account_name.clone(), (RistrettoSecretKey::default(), resp.public_key));
+    world.account_keys.insert(account_name.clone(), resp.public_key);
     let wait_req = TransactionWaitResultRequest {
         transaction_id: resp.result.transaction_hash.into_array().into(),
         timeout_secs: Some(120),
@@ -365,7 +360,7 @@ pub async fn list_account_nfts(
 ) -> Vec<NonFungibleToken> {
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
-    let request = ListAccountNftRequest {
+    let request = ListNftsRequest {
         account: Some(ComponentAddressOrName::Name(account_name.clone())),
         limit: 100,
         offset: 0,
@@ -459,7 +454,7 @@ pub async fn submit_manifest_with_signing_keys(
     let instructions = parse_manifest(&manifest_content, globals, HashMap::new()).unwrap();
 
     let transaction = transaction_builder()
-        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), 5000)
+        .fee_transaction_pay_from_component(account.address, 5000)
         .with_instructions(instructions.instructions)
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
@@ -544,7 +539,7 @@ pub async fn submit_manifest(
     let AccountGetResponse { account, .. } = client.accounts_get_default().await.unwrap();
 
     let transaction = transaction_builder()
-        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), 5000)
+        .fee_transaction_pay_from_component(account.address, 5000)
         .with_instructions(instructions.instructions)
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
@@ -660,7 +655,7 @@ pub async fn create_component(
         .unwrap();
 
     let transaction = transaction_builder()
-        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), 5000)
+        .fee_transaction_pay_from_component(account.address, 5000)
         .call_function(template_address, &function_call, args)
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
@@ -739,10 +734,7 @@ pub async fn call_component(
         .to_string();
 
     let account = get_account_from_name(&mut client, account_name).await;
-    let account_component_address = account
-        .address
-        .as_component_address()
-        .expect("Failed to get account component address");
+    let account_component_address = account.address;
 
     let inputs = if use_unversioned_inputs {
         [
@@ -810,10 +802,7 @@ pub async fn concurrent_call_component(
         .expect("Failed to get component address from output");
 
     let account = get_account_from_name(&mut client, account_name).await;
-    let account_component_address = account
-        .address
-        .as_component_address()
-        .expect("Failed to get account component address");
+    let account_component_address = account.address;
 
     let mut join_set = JoinSet::new();
     for _ in 0..times {

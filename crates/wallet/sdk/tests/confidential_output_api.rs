@@ -12,7 +12,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{optional::Optional, Network};
 use tari_ootle_wallet_sdk::{
-    models::{ConfidentialOutputModel, ConfidentialProofId, OutputStatus},
+    models::{ConfidentialOutputModel, OutputLockId, OutputStatus},
     network::{SubstateQueryResult, TransactionQueryResult, WalletNetworkInterface},
     storage::{WalletStore, WalletStoreReader},
     WalletSdk,
@@ -22,7 +22,7 @@ use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_abi::TemplateDef;
 use tari_template_lib::{
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-    models::EncryptedData,
+    models::{ComponentAddress, EncryptedData, VaultId},
     resource::ResourceType,
     types::{crypto::PedersenCommitmentBytes, Amount, TemplateAddress},
 };
@@ -40,14 +40,14 @@ fn outputs_locked_and_released() {
     let (inputs, total_value) = test
         .sdk()
         .confidential_outputs_api()
-        .lock_outputs_by_amount(&Test::test_vault_address(), 50, proof_id)
+        .lock_outputs_by_amount(proof_id, &Test::test_vault_address(), 50)
         .unwrap();
     assert_eq!(total_value, 74);
     assert_eq!(inputs.len(), 2);
 
     let locked = test
         .store()
-        .with_read_tx(|tx| tx.outputs_get_locked_by_proof(proof_id))
+        .with_read_tx(|tx| tx.outputs_get_locked_by_lock_id(proof_id))
         .unwrap();
 
     assert!(locked.iter().any(|l| l.commitment == commitment_25));
@@ -61,7 +61,7 @@ fn outputs_locked_and_released() {
 
     let locked = test
         .store()
-        .with_read_tx(|tx| tx.outputs_get_locked_by_proof(proof_id))
+        .with_read_tx(|tx| tx.outputs_get_locked_by_lock_id(proof_id))
         .unwrap();
     assert_eq!(locked.len(), 0);
 }
@@ -78,14 +78,14 @@ fn outputs_locked_and_finalized() {
     let proof_id = test.new_proof();
 
     let (inputs, total_value) = outputs_api
-        .lock_outputs_by_amount(&Test::test_vault_address(), 50, proof_id)
+        .lock_outputs_by_amount(proof_id, &Test::test_vault_address(), 50)
         .unwrap();
     assert_eq!(total_value, 74);
     assert_eq!(inputs.len(), 2);
 
     let locked = test
         .store()
-        .with_read_tx(|tx| tx.outputs_get_locked_by_proof(proof_id))
+        .with_read_tx(|tx| tx.outputs_get_locked_by_lock_id(proof_id))
         .unwrap();
 
     assert!(locked.iter().any(|l| l.commitment == commitment_25));
@@ -99,7 +99,7 @@ fn outputs_locked_and_finalized() {
     outputs_api
         .add_output(ConfidentialOutputModel {
             account_address: Test::test_account_address(),
-            vault_address: Test::test_vault_address(),
+            vault_id: Test::test_vault_address(),
             commitment: commitment_change,
             value: 24.into(),
             sender_public_nonce: None,
@@ -107,7 +107,7 @@ fn outputs_locked_and_finalized() {
             encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
             public_asset_tag: None,
             status: OutputStatus::LockedUnconfirmed,
-            locked_by_proof: Some(proof_id),
+            lock_id: Some(proof_id),
         })
         .unwrap();
 
@@ -118,7 +118,7 @@ fn outputs_locked_and_finalized() {
 
     {
         let mut tx = test.store().create_read_tx().unwrap();
-        let locked = tx.outputs_get_locked_by_proof(proof_id).unwrap();
+        let locked = tx.outputs_get_locked_by_lock_id(proof_id).unwrap();
         assert_eq!(locked.len(), 0);
 
         let unspent = tx
@@ -127,9 +127,7 @@ fn outputs_locked_and_finalized() {
         assert!(unspent.iter().any(|l| l.commitment == commitment_change));
         assert!(unspent.iter().any(|l| l.commitment == commitment_100));
         assert_eq!(unspent.len(), 2);
-        let balance = tx
-            .outputs_get_unspent_balance(&Test::test_vault_address().as_vault_id().unwrap())
-            .unwrap();
+        let balance = tx.outputs_get_unspent_balance(&Test::test_vault_address()).unwrap();
         assert_eq!(balance, 124);
     }
 }
@@ -156,7 +154,7 @@ impl Test {
         sdk.initialize_cipher_seed(None).unwrap();
         let accounts_api = sdk.accounts_api();
         accounts_api
-            .add_account(Some("test"), &Test::test_account_address(), 0, true)
+            .add_account(Some("test"), &Test::test_account_address(), 0, true, true)
             .unwrap();
         accounts_api
             .add_vault(
@@ -176,13 +174,13 @@ impl Test {
         }
     }
 
-    pub fn test_account_address() -> SubstateId {
+    pub fn test_account_address() -> ComponentAddress {
         "component_0dc41b5cc74b36d696c7b140323a40a2f98b71df5d60e5a6bf4c1a07ffffffff"
             .parse()
             .unwrap()
     }
 
-    pub fn test_vault_address() -> SubstateId {
+    pub fn test_vault_address() -> VaultId {
         "vault_0dc41b5cc74b36d696c7b140323a40a2f98b71df5d60e5a6bf4c1a07ffffffff"
             .parse()
             .unwrap()
@@ -198,7 +196,7 @@ impl Test {
         outputs_api
             .add_output(ConfidentialOutputModel {
                 account_address: Self::test_account_address(),
-                vault_address: Self::test_vault_address(),
+                vault_id: Self::test_vault_address(),
                 commitment,
                 value: amount,
                 sender_public_nonce: None,
@@ -206,21 +204,21 @@ impl Test {
                 encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
                 public_asset_tag: None,
                 status: OutputStatus::Unspent,
-                locked_by_proof: None,
+                lock_id: None,
             })
             .unwrap();
         commitment
     }
 
-    pub fn new_proof(&self) -> ConfidentialProofId {
+    pub fn new_proof(&self) -> OutputLockId {
         let outputs_api = self.sdk.confidential_outputs_api();
-        outputs_api.add_proof(&Self::test_vault_address()).unwrap()
+        outputs_api.add_output_lock(&Self::test_vault_address()).unwrap()
     }
 
     pub fn get_unspent_balance(&self) -> Amount {
         let outputs_api = self.sdk.confidential_outputs_api();
         outputs_api
-            .get_unspent_balance(&Test::test_vault_address().as_vault_id().unwrap())
+            .get_unspent_balance(&Test::test_vault_address())
             .optional()
             .unwrap()
             .unwrap_or_default()

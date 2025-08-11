@@ -48,8 +48,8 @@ CREATE TABLE transactions
     max_epoch                 BIGINT   NULL,
     executed_time_ms          BIGINT   NULL,
     finalized_time            DATETIME NULL,
-    required_substates        TEXT     NOT NULL default '[]',
     new_account_info          TEXT     NULL,
+    invalid_reason            TEXT     NULL,
     created_at                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -75,13 +75,14 @@ CREATE UNIQUE INDEX substates_uniq_address ON substates (address);
 -- Accounts
 CREATE TABLE accounts
 (
-    id              INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    name            TEXT     NULL,
-    address         TEXT     NOT NULL,
-    owner_key_index BIGINT   NOT NULL,
-    is_default      BOOLEAN  NOT NULL DEFAULT 0,
-    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id                    INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    name                  TEXT     NULL,
+    address               TEXT     NOT NULL,
+    owner_key_index       BIGINT   NOT NULL,
+    is_default            BOOLEAN  NOT NULL DEFAULT 0,
+    is_confirmed_on_chain BOOLEAN  NOT NULL,
+    created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE UNIQUE INDEX accounts_uniq_address ON accounts (address);
@@ -99,6 +100,7 @@ CREATE TABLE vaults
     confidential_balance    BIGINT   NOT NULL DEFAULT 0,
     locked_revealed_balance BIGINT   NOT NULL DEFAULT 0,
     token_symbol            TEXT     NULL,
+    divisibility            INTEGER  NOT NULL DEFAULT 0,
     created_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -119,7 +121,7 @@ CREATE TABLE outputs
     -- Status can be "Unspent", "Spent", "Locked", "LockedUnconfirmed", "Invalid"
     status                      TEXT     NOT NULL,
     locked_at                   DATETIME NULL,
-    locked_by_proof             INTEGER  NULL,
+    lock_id                     INTEGER  NULL,
     encrypted_data              blob     NOT NULL DEFAULT '',
     created_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -128,12 +130,12 @@ CREATE TABLE outputs
 CREATE UNIQUE INDEX outputs_uniq_commitment ON outputs (commitment);
 CREATE INDEX outputs_idx_account_status ON outputs (account_id, status);
 
--- Proofs
-CREATE TABLE proofs
+-- Output Locks
+CREATE TABLE output_locks
 (
     id                     INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    account_id             INTEGER  NOT NULL REFERENCES accounts (id),
-    vault_id               INTEGER  NOT NULL REFERENCES vaults (id),
+    resource_address       TEXT     NOT NULL,
+    vault_id               INTEGER  NULL REFERENCES vaults (id),
     transaction_hash       TEXT     NULL,
     locked_revealed_amount BIGINT   NOT NULL DEFAULT 0,
     created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -194,3 +196,26 @@ CREATE TABLE webauthn_registration_passkeys
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Stealth Outputs
+CREATE TABLE stealth_outputs
+(
+    id                          INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    owner_account_id            INTEGER  NOT NULL,
+    resource_address            TEXT     NOT NULL,
+    commitment                  TEXT     NOT NULL,
+    value                       TEXT     NOT NULL,
+    sender_public_nonce         TEXT     NOT NULL,
+    -- Status can be "Unspent", "Spent", "Locked", "LockedUnconfirmed", "Invalid"
+    status                      TEXT     NOT NULL,
+    locked_at                   DATETIME NULL,
+    lock_id                     INTEGER  NULL,
+    encryption_secret_key_index BIGINT   NOT NULL,
+    encrypted_data              blob     NOT NULL DEFAULT '',
+    created_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX stealth_outputs_uniq_resource_addr_commitment ON stealth_outputs (resource_address, commitment);
+CREATE INDEX stealth_outputs_idx_resource_status ON stealth_outputs (resource_address, status);
+

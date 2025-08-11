@@ -40,7 +40,7 @@ async fn when_i_burn_on_wallet(
         .get(&wallet_name)
         .unwrap_or_else(|| panic!("Wallet {} not found", wallet_name));
 
-    let (_, public_key) = world
+    let public_key = world
         .account_keys
         .get(&account_name)
         .unwrap_or_else(|| panic!("Account {} not found", account_name));

@@ -7,22 +7,10 @@ use std::{
 };
 
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::{
-    optional::IsNotFoundError,
-    substate_type::SubstateType,
-    SubstateRequirement,
-    VersionedSubstateIdRef,
-};
+use tari_ootle_common_types::{optional::IsNotFoundError, substate_type::SubstateType, VersionedSubstateIdRef};
 use tari_template_lib::{
     models::VaultId,
-    prelude::{
-        ComponentAddress,
-        NonFungibleAddress,
-        NonFungibleId,
-        PedersenCommitmentBytes,
-        ResourceAddress,
-        RistrettoPublicKeyBytes,
-    },
+    prelude::{ComponentAddress, NonFungibleId, PedersenCommitmentBytes, ResourceAddress, RistrettoPublicKeyBytes},
     types::{Amount, TemplateAddress},
 };
 use tari_transaction::{Transaction, TransactionId};
@@ -30,13 +18,16 @@ use webauthn_rs::prelude::Passkey;
 
 use crate::models::{
     Account,
+    AccountUpdate,
     AuthoredTemplateModel,
     ConfidentialOutputModel,
-    ConfidentialProofId,
     Config,
-    NewAccountInfo,
+    NewAccountData,
     NonFungibleToken,
+    OutputLockId,
     OutputStatus,
+    StealthBalance,
+    StealthOutputModel,
     SubstateModel,
     TransactionStatus,
     VaultModel,
@@ -163,55 +154,68 @@ pub trait WalletStoreReader {
     ) -> Result<Vec<SubstateModel>, WalletStorageError>;
     fn substates_get_children(&mut self, parent: &SubstateId) -> Result<Vec<SubstateModel>, WalletStorageError>;
     // Accounts
-    fn accounts_get(&mut self, address: &SubstateId) -> Result<Account, WalletStorageError>;
+    fn accounts_get(&mut self, address: &ComponentAddress) -> Result<Account, WalletStorageError>;
     fn accounts_get_many(&mut self, offset: u64, limit: u64) -> Result<Vec<Account>, WalletStorageError>;
     fn accounts_get_default(&mut self) -> Result<Account, WalletStorageError>;
     fn accounts_count(&mut self) -> Result<u64, WalletStorageError>;
     fn accounts_get_by_name(&mut self, name: &str) -> Result<Account, WalletStorageError>;
-    fn accounts_get_by_vault(&mut self, vault_address: &SubstateId) -> Result<Account, WalletStorageError>;
+    fn accounts_get_by_vault(&mut self, vault_id: &VaultId) -> Result<Account, WalletStorageError>;
 
     // Vaults
     fn vaults_get(&mut self, vault_id: &VaultId) -> Result<VaultModel, WalletStorageError>;
     fn vaults_exists(&mut self, vault_id: &VaultId) -> Result<bool, WalletStorageError>;
     fn vaults_get_by_resource(
         &mut self,
-        account_addr: &SubstateId,
+        account_addr: &ComponentAddress,
         resource_address: &ResourceAddress,
     ) -> Result<VaultModel, WalletStorageError>;
-    fn vaults_get_by_account(&mut self, account_addr: &SubstateId) -> Result<Vec<VaultModel>, WalletStorageError>;
+    fn vaults_get_by_account(&mut self, account_addr: &ComponentAddress)
+        -> Result<Vec<VaultModel>, WalletStorageError>;
 
     // Outputs
     fn outputs_get_unspent_balance(&mut self, vault_id: &VaultId) -> Result<u64, WalletStorageError>;
-    fn outputs_get_locked_by_proof(
+    fn outputs_get_locked_by_lock_id(
         &mut self,
-        proof_id: ConfidentialProofId,
+        lock_id: OutputLockId,
     ) -> Result<Vec<ConfidentialOutputModel>, WalletStorageError>;
     fn outputs_get_by_commitment(
         &mut self,
+        vault_id: &VaultId,
         commitment: &PedersenCommitmentBytes,
     ) -> Result<ConfidentialOutputModel, WalletStorageError>;
 
     fn outputs_get_by_account_and_status(
         &mut self,
-        account_addr: &SubstateId,
+        account_addr: &ComponentAddress,
         status: OutputStatus,
     ) -> Result<Vec<ConfidentialOutputModel>, WalletStorageError>;
 
-    // Proofs
-    fn proofs_get_by_transaction_id(
+    // Stealth outputs
+    fn stealth_outputs_get_unspent_balance(
+        &mut self,
+        resource_address: &ResourceAddress,
+    ) -> Result<StealthBalance, WalletStorageError>;
+    fn stealth_outputs_get_locked_by_lock_id(
+        &mut self,
+        lock_id: OutputLockId,
+    ) -> Result<Vec<StealthOutputModel>, WalletStorageError>;
+    fn stealth_outputs_get_by_commitment(
+        &mut self,
+        resource_address: &ResourceAddress,
+        commitment: &PedersenCommitmentBytes,
+    ) -> Result<StealthOutputModel, WalletStorageError>;
+
+    // Output Locks
+    fn output_locks_get_by_transaction_id(
         &mut self,
         transaction_id: TransactionId,
-    ) -> Result<Vec<ConfidentialProofId>, WalletStorageError>;
+    ) -> Result<Vec<OutputLockId>, WalletStorageError>;
 
     // Non fungible tokens
     fn non_fungible_token_get_by_nft_id(
         &mut self,
+        resource_address: ResourceAddress,
         nft_id: NonFungibleId,
-    ) -> Result<NonFungibleToken, WalletStorageError>;
-
-    fn non_fungible_token_get_by_nft_address(
-        &mut self,
-        nft_address: NonFungibleAddress,
     ) -> Result<NonFungibleToken, WalletStorageError>;
 
     fn non_fungible_token_get_ids_by_vault_id(
@@ -274,8 +278,7 @@ pub trait WalletStoreWriter {
     fn transactions_insert(
         &mut self,
         transaction: &Transaction,
-        required_substates: &[SubstateRequirement],
-        new_account_info: Option<&NewAccountInfo>,
+        new_account_info: Option<&NewAccountData>,
         is_dry_run: bool,
     ) -> Result<(), WalletStorageError>;
     fn transactions_update(&mut self, update: WalletTransactionUpdate<'_>) -> Result<(), WalletStorageError>;
@@ -297,54 +300,68 @@ pub trait WalletStoreWriter {
     fn substates_remove(&mut self, substate: &SubstateId) -> Result<SubstateModel, WalletStorageError>;
 
     // Accounts
-    fn accounts_set_default(&mut self, substate_id: &SubstateId) -> Result<(), WalletStorageError>;
+    fn accounts_set_default(&mut self, account_addr: &ComponentAddress) -> Result<(), WalletStorageError>;
     fn accounts_insert(
         &mut self,
         account_name: Option<&str>,
-        substate_id: &SubstateId,
+        account_addr: &ComponentAddress,
         owner_key_index: u64,
+        is_confirmed_on_chain: bool,
         is_default: bool,
     ) -> Result<(), WalletStorageError>;
 
-    fn accounts_update(&mut self, substate_id: &SubstateId, new_name: Option<&str>) -> Result<(), WalletStorageError>;
+    fn accounts_update(
+        &mut self,
+        account_addr: &ComponentAddress,
+        update: AccountUpdate,
+    ) -> Result<(), WalletStorageError>;
 
     // Vaults
     fn vaults_insert(&mut self, vault: VaultModel) -> Result<(), WalletStorageError>;
     fn vaults_update(
         &mut self,
-        vault_address: &SubstateId,
+        vault_id: VaultId,
         revealed_balance: Amount,
         confidential_balance: Amount,
     ) -> Result<(), WalletStorageError>;
     fn vaults_lock_revealed_funds(
         &mut self,
-        proof_id: ConfidentialProofId,
+        lock_id: OutputLockId,
         amount_to_lock: Amount,
     ) -> Result<(), WalletStorageError>;
-    fn vaults_finalized_locked_revealed_funds(
-        &mut self,
-        proof_id: ConfidentialProofId,
-    ) -> Result<(), WalletStorageError>;
-    fn vaults_unlock_revealed_funds(&mut self, proof_id: ConfidentialProofId) -> Result<(), WalletStorageError>;
+    fn vaults_finalized_locked_revealed_funds(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
+    fn vaults_unlock_revealed_funds(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
 
     // Confidential Outputs
     fn outputs_lock_smallest_amount(
         &mut self,
-        vault_address: &SubstateId,
-        locked_by_proof: ConfidentialProofId,
+        vault_id: &VaultId,
+        lock_id: OutputLockId,
     ) -> Result<ConfidentialOutputModel, WalletStorageError>;
     fn outputs_insert(&mut self, output: ConfidentialOutputModel) -> Result<(), WalletStorageError>;
     /// Mark outputs as finalized
-    fn outputs_finalize_by_proof_id(&mut self, proof_id: ConfidentialProofId) -> Result<(), WalletStorageError>;
+    fn outputs_finalize_by_lock_id(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
     /// Release outputs that were locked and remove pending unconfirmed outputs for this proof
-    fn outputs_release_by_proof_id(&mut self, proof_id: ConfidentialProofId) -> Result<(), WalletStorageError>;
+    fn outputs_release_by_lock_id(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
 
-    // Proofs
-    fn proofs_insert(&mut self, vault_address: &SubstateId) -> Result<ConfidentialProofId, WalletStorageError>;
-    fn proofs_delete(&mut self, proof_id: ConfidentialProofId) -> Result<(), WalletStorageError>;
-    fn proofs_set_transaction_id(
+    // Stealth Outputs
+    fn stealth_outputs_lock_smallest_amount(
         &mut self,
-        proof_id: ConfidentialProofId,
+        lock_id: OutputLockId,
+    ) -> Result<StealthOutputModel, WalletStorageError>;
+    fn stealth_outputs_insert(&mut self, output: StealthOutputModel) -> Result<(), WalletStorageError>;
+    /// Mark outputs locked by this lock id as finalized
+    fn stealth_outputs_finalize_by_lock_id(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
+    /// Release outputs that were locked and remove pending unconfirmed outputs for this lock
+    fn stealth_outputs_release_by_lock_id(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
+
+    // Output locks
+    fn output_locks_insert(&mut self, resource_address: &ResourceAddress) -> Result<OutputLockId, WalletStorageError>;
+    fn output_locks_insert_for_vault(&mut self, vault_id: &VaultId) -> Result<OutputLockId, WalletStorageError>;
+    fn output_locks_delete(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
+    fn output_locks_set_transaction_id(
+        &mut self,
+        lock_id: OutputLockId,
         transaction_id: TransactionId,
     ) -> Result<(), WalletStorageError>;
 

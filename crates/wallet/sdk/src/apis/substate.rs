@@ -46,8 +46,7 @@ where
     }
 
     pub fn get_substate(&self, address: &SubstateId) -> Result<SubstateModel, SubstateApiError> {
-        let mut tx = self.store.create_read_tx()?;
-        let substate = tx.substates_get(address)?;
+        let substate = self.store.with_read_tx(|tx| tx.substates_get(address))?;
         Ok(substate)
     }
 

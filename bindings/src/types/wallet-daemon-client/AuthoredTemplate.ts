@@ -3,10 +3,10 @@ import type { FunctionDef } from "../FunctionDef";
 import type { Hash } from "../Hash";
 import type { RistrettoPublicKeyBytes } from "../RistrettoPublicKeyBytes";
 
-export interface AuthoredTemplate {
+export type AuthoredTemplate = {
   author_public_key: RistrettoPublicKeyBytes;
   address: Hash;
   name: string;
   tari_version: string;
   functions: Array<FunctionDef>;
-}
+};

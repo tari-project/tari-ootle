@@ -2,8 +2,8 @@
 import type { RistrettoPublicKeyBytes } from "../RistrettoPublicKeyBytes";
 import type { SubstateAddress } from "../SubstateAddress";
 
-export interface BaseLayerValidatorNode {
+export type BaseLayerValidatorNode = {
   public_key: RistrettoPublicKeyBytes;
   shard_key: SubstateAddress;
   sidechain_id: RistrettoPublicKeyBytes | null;
-}
+};

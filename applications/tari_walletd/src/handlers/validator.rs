@@ -10,7 +10,6 @@ use log::*;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{substate::SubstateId, ToByteType};
 use tari_ootle_common_types::{derive_fee_pool_address, optional::Optional, SubstateRequirement};
-use tari_ootle_wallet_sdk::apis::key_manager;
 use tari_transaction::args;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
@@ -26,13 +25,7 @@ use tari_wallet_daemon_client::{
 
 use crate::{
     handlers::{
-        helpers::{
-            get_account_or_default,
-            get_account_with_inputs,
-            invalid_params,
-            transaction_builder,
-            wait_for_result,
-        },
+        helpers::{get_account_or_default, get_account_with_inputs, invalid_params, wait_for_result},
         HandlerContext,
     },
     DEFAULT_FEE,
@@ -51,13 +44,10 @@ pub async fn handle_get_validator_fees(
 
     let claim_key = match req.account_or_key {
         AccountOrKeyIndex::Account(acc) => {
-            let account = get_account_or_default(acc, &sdk.accounts_api())?;
-            sdk.key_manager_api()
-                .derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?
+            let account = get_account_or_default(acc.as_ref(), &sdk.accounts_api())?;
+            sdk.key_manager_api().derive_account_key(account.key_index())?
         },
-        AccountOrKeyIndex::KeyIndex(index) => sdk
-            .key_manager_api()
-            .derive_key(key_manager::TRANSACTION_BRANCH, index)?,
+        AccountOrKeyIndex::KeyIndex(index) => sdk.key_manager_api().derive_account_key(index)?,
     };
     let claim_public_key = RistrettoPublicKey::from_secret_key(&claim_key.key);
 
@@ -113,19 +103,14 @@ pub async fn handle_claim_validator_fees(
         return Err(invalid_params("shards", Some("At least one shard must be specified")));
     }
 
-    let (account, inputs) = get_account_with_inputs(req.account, &sdk)?;
-    let account_address = account.address.as_component_address().unwrap();
-    let account_secret_key = sdk
-        .key_manager_api()
-        .derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
-    let account_public_key = RistrettoPublicKey::from_secret_key(&account_secret_key.key);
+    let (account, inputs) = get_account_with_inputs(req.account.as_ref(), &sdk)?;
+    let account_address = *account.address();
+    let (account_secret_key, account_public_key) = sdk.key_manager_api().derive_account_keypair(account.key_index())?;
 
     let (claim_public_key, claim_secret) = match req.claim_key_index {
         Some(index) => {
-            let claim_key = sdk
-                .key_manager_api()
-                .derive_key(key_manager::TRANSACTION_BRANCH, index)?;
-            (RistrettoPublicKey::from_secret_key(&claim_key.key), Some(claim_key))
+            let (claim_key, claim_pk) = sdk.key_manager_api().derive_account_keypair(index)?;
+            (claim_pk, Some(claim_key))
         },
         None => (RistrettoPublicKey::from_secret_key(&account_secret_key.key), None),
     };
@@ -138,7 +123,8 @@ pub async fn handle_claim_validator_fees(
     // build the transaction
     let max_fee = req.max_fee.unwrap_or(DEFAULT_FEE);
 
-    let transaction = transaction_builder(context)
+    let transaction = context
+        .transaction_builder()
         .with_dry_run(req.dry_run)
         .with_fee_instructions_builder(|builder| {
             let mut bucket_names = vec![];

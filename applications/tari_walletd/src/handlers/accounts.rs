@@ -1,42 +1,35 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::slice;
-
 use anyhow::anyhow;
 use axum::headers::authorization::Bearer;
 use log::*;
 use rand::rngs::OsRng;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
-    component::new_component_address_from_public_key,
+    component::derive_component_address_from_public_key,
     confidential::ConfidentialClaim,
-    instruction::Instruction,
-    substate::{Substate, SubstateId},
+    substate::SubstateId,
     FromByteType,
     ToByteType,
 };
-use tari_key_manager::key_manager::DerivedKey;
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
 use tari_ootle_wallet_crypto::UnblindedOutputStatement;
 use tari_ootle_wallet_sdk::{
-    apis::{confidential_transfer::TransferParams, key_manager, substate::ValidatorScanResult},
-    models::NewAccountInfo,
-    storage::WalletStore,
-    WalletSdk,
+    apis::{confidential_transfer::ConfidentialTransferParams, key_manager::KeyBranch, substate::ValidatorScanResult},
+    models::NewAccountData,
 };
-use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    call_args,
     constants::{CONFIDENTIAL_TARI_RESOURCE_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
     models::UnclaimedConfidentialOutputAddress,
-    types::{crypto::RistrettoPublicKeyBytes, Amount},
+    types::Amount,
 };
 use tari_transaction::args;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{
+        AccountGetByKeyIndexRequest,
         AccountGetDefaultRequest,
         AccountGetRequest,
         AccountGetResponse,
@@ -45,6 +38,8 @@ use tari_wallet_daemon_client::{
         AccountSetDefaultResponse,
         AccountsCreateFreeTestCoinsRequest,
         AccountsCreateFreeTestCoinsResponse,
+        AccountsCreateOrGetRequest,
+        AccountsCreateOrGetResponse,
         AccountsCreateRequest,
         AccountsCreateResponse,
         AccountsGetBalancesRequest,
@@ -70,16 +65,18 @@ use super::context::HandlerContext;
 use crate::{
     handlers::helpers::{
         application_error,
+        general_error,
         get_account,
+        get_account_by_key_index,
         get_account_or_default,
         get_account_with_inputs,
         invalid_params,
+        invalid_request,
         not_found,
-        transaction_builder,
+        transaction_rejected,
         wait_for_result,
         wait_for_result_and_account,
     },
-    indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
     jrpc_server::ApplicationErrorCode,
     services::TransactionSubmittedEvent,
     DEFAULT_FEE,
@@ -92,72 +89,102 @@ pub async fn handle_create(
     token: Option<&Bearer>,
     req: AccountsCreateRequest,
 ) -> Result<AccountsCreateResponse, anyhow::Error> {
+    // TODO: fine-grain permissions
     context.check_auth(token, &[JrpcPermission::Admin])?;
     let sdk = context.wallet_sdk();
-    let key_manager_api = sdk.key_manager_api();
+    let accounts_api = sdk.accounts_api();
 
-    if let Some(name) = req.account_name.as_ref() {
-        if sdk.accounts_api().get_account_by_name(name).optional()?.is_some() {
-            return Err(anyhow!("Account name '{}' already exists", name));
-        }
-    }
+    let set_as_default = req
+        .is_default
+        .map(Ok)
+        .unwrap_or_else(|| accounts_api.any_accounts_exist().map(|b| !b))?;
 
-    let default_account = sdk.accounts_api().get_default()?;
-    let inputs = sdk
-        .substate_api()
-        .locate_dependent_substates(slice::from_ref(&default_account.address), true)
-        .await?;
-
-    let signing_key_index = req.key_id.unwrap_or(default_account.key_index);
-    let signing_key = key_manager_api.derive_key(key_manager::TRANSACTION_BRANCH, signing_key_index)?;
-
-    let owner_key = key_manager_api.next_key(key_manager::TRANSACTION_BRANCH)?;
-    let owner_pk = RistrettoPublicKey::from_secret_key(&owner_key.key).to_byte_type();
+    let acc = accounts_api
+        .create_account(req.account_name.as_deref(), set_as_default, req.key_id)
+        .map_err(|e| {
+            if e.is_name_exists_error() {
+                invalid_request(e)
+            } else {
+                general_error(e)
+            }
+        })?;
 
     info!(
         target: LOG_TARGET,
-        "Creating account with owner token {}. Fees are paid using account '{}' {}",
-        owner_pk,
-        default_account.name.as_deref().unwrap_or("<None>"),
-        default_account.address
+        "Created account: {acc}."
     );
 
-    let max_fee = req.max_fee.unwrap_or(DEFAULT_FEE);
-    let transaction = transaction_builder(context)
-        .fee_transaction_pay_from_component(default_account.address.as_component_address().unwrap(), max_fee)
-        .create_account(owner_pk)
-        .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
-        .build_and_seal(&signing_key.key);
+    Ok(AccountsCreateResponse {
+        account: acc.account,
+        public_key: acc.owner_public_key,
+    })
+}
 
-    let mut events = context.notifier().subscribe();
-    let tx_id = context
-        .transaction_service()
-        .submit_transaction_with_new_account(transaction, NewAccountInfo {
-            name: req.account_name,
-            key_index: owner_key.key_index,
-            is_default: req.is_default,
-        })
-        .await?;
+pub async fn handle_create_or_get(
+    context: &HandlerContext,
+    token: Option<&Bearer>,
+    req: AccountsCreateOrGetRequest,
+) -> Result<AccountsCreateOrGetResponse, anyhow::Error> {
+    // TODO: fine-grain permissions
+    context.check_auth(token, &[JrpcPermission::Admin])?;
+    let sdk = context.wallet_sdk();
+    let accounts_api = sdk.accounts_api();
 
-    let event = wait_for_result(&mut events, tx_id).await?;
-    if let Some(reason) = event.finalize.any_reject() {
-        return Err(anyhow!("Create account transaction failed: {}", reason));
+    let existing_account = match req.account {
+        Some(ComponentAddressOrName::ComponentAddress(addr)) => {
+            // In this case, we error if a specific address is specified
+            let account = accounts_api
+                .get_account_by_address(&addr)
+                .optional()?
+                .ok_or_else(|| not_found(format!("Account with address {addr} not found")))?;
+            Some(account)
+        },
+        // If we cannot find an account with this name, we'll create one
+        Some(ComponentAddressOrName::Name(ref name)) => accounts_api.get_account_by_name(name).optional()?,
+        // If we cannot find an account with this key index, we'll create one
+        None => req
+            .key_id
+            .map(|id| get_account_by_key_index(sdk, id).optional())
+            .transpose()?
+            .flatten(),
+    };
+
+    if let Some(account) = existing_account {
+        info!(
+            target: LOG_TARGET,
+            "Account already exists: {account}."
+        );
+        return Ok(AccountsCreateOrGetResponse {
+            account: account.account,
+            public_key: account.owner_public_key,
+            created: false,
+        });
     }
 
-    let address = event
-        .finalize
-        .result
-        .accept()
-        .unwrap()
-        .up_iter()
-        .find(|(_, v)| v.version() == 0 && is_account_substate(v))
-        .map(|(a, _)| a.clone())
-        .ok_or_else(|| anyhow!("Finalize result did not UP any new version 0 component"))?;
+    let set_as_default = req
+        .is_default
+        .map(Ok)
+        .unwrap_or_else(|| accounts_api.any_accounts_exist().map(|b| !b))?;
 
-    Ok(AccountsCreateResponse {
-        address,
-        public_key: owner_pk,
-        result: event.finalize,
+    let acc = accounts_api
+        .create_account(req.account.as_ref().and_then(|a| a.name()), set_as_default, req.key_id)
+        .map_err(|e| {
+            if e.is_name_exists_error() {
+                invalid_request(e)
+            } else {
+                general_error(e)
+            }
+        })?;
+
+    info!(
+        target: LOG_TARGET,
+        "Created account: {acc}."
+    );
+
+    Ok(AccountsCreateOrGetResponse {
+        account: acc.account,
+        public_key: acc.owner_public_key,
+        created: true,
     })
 }
 
@@ -169,7 +196,7 @@ pub async fn handle_set_default(
     context.check_auth(token, &[JrpcPermission::Admin])?;
     let sdk = context.wallet_sdk();
     let account = get_account(&req.account, &sdk.accounts_api())?;
-    sdk.accounts_api().set_default_account(&account.address)?;
+    sdk.accounts_api().set_default_account(account.address())?;
     Ok(AccountSetDefaultResponse {})
 }
 
@@ -186,7 +213,7 @@ pub async fn handle_list(
     let accounts = accounts
         .into_iter()
         .map(|a| {
-            let key = km.derive_key(key_manager::TRANSACTION_BRANCH, a.key_index)?;
+            let key = km.derive_account_key(a.key_index)?;
             let pk = RistrettoPublicKey::from_secret_key(&key.key);
             Ok(AccountInfo {
                 account: a,
@@ -204,20 +231,17 @@ pub async fn handle_get_balances(
     req: AccountsGetBalancesRequest,
 ) -> Result<AccountsGetBalancesResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    let account = get_account_or_default(req.account, &sdk.accounts_api())?;
-    context.check_auth(token, &[JrpcPermission::AccountBalance(account.clone().address)])?;
+    let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
+    context.check_auth(token, &[JrpcPermission::AccountBalance(account.account.address.into())])?;
     if req.refresh {
-        context
-            .account_monitor()
-            .refresh_account(account.address.clone())
-            .await?;
+        context.account_monitor().refresh_account(*account.address()).await?;
     }
-    let vaults = sdk.accounts_api().get_vaults_by_account(&account.address)?;
+    let vaults = sdk.accounts_api().get_vaults_by_account(account.address())?;
 
     let mut balances = Vec::with_capacity(vaults.len());
     for vault in vaults {
         balances.push(BalanceEntry {
-            vault_address: vault.address,
+            vault_address: vault.id,
             resource_address: vault.resource_address,
             balance: vault.revealed_balance,
             resource_type: vault.resource_type,
@@ -228,7 +252,7 @@ pub async fn handle_get_balances(
     }
 
     Ok(AccountsGetBalancesResponse {
-        address: account.address,
+        address: *account.address(),
         balances,
     })
 }
@@ -238,15 +262,27 @@ pub async fn handle_get(
     token: Option<&Bearer>,
     req: AccountGetRequest,
 ) -> Result<AccountGetResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::AccountInfo])?;
     let sdk = context.wallet_sdk();
     let account = get_account(&req.name_or_address, &sdk.accounts_api())?;
-    let km = sdk.key_manager_api();
-    let key = km.derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
-    let public_key = RistrettoPublicKey::from_secret_key(&key.key);
     Ok(AccountGetResponse {
-        account,
-        public_key: public_key.to_byte_type(),
+        account: account.account,
+        public_key: account.owner_public_key,
+    })
+}
+
+pub async fn handle_get_by_key_index(
+    context: &HandlerContext,
+    token: Option<&Bearer>,
+    req: AccountGetByKeyIndexRequest,
+) -> Result<AccountGetResponse, anyhow::Error> {
+    context.check_auth(token, &[JrpcPermission::AccountInfo])?;
+    let sdk = context.wallet_sdk();
+    let account = get_account_by_key_index(sdk, req.key_index).optional()?;
+    let account = account.ok_or_else(|| not_found(format!("Account with key index {} not found", req.key_index)))?;
+    Ok(AccountGetResponse {
+        account: account.account,
+        public_key: account.owner_public_key,
     })
 }
 
@@ -258,12 +294,9 @@ pub async fn handle_get_default(
     context.check_auth(token, &[JrpcPermission::AccountInfo])?;
     let sdk = context.wallet_sdk();
     let account = get_account_or_default(None, &sdk.accounts_api())?;
-    let km = sdk.key_manager_api();
-    let key = km.derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
-    let public_key = RistrettoPublicKey::from_secret_key(&key.key);
     Ok(AccountGetResponse {
-        account,
-        public_key: public_key.to_byte_type(),
+        account: account.account,
+        public_key: account.owner_public_key,
     })
 }
 
@@ -282,11 +315,11 @@ pub async fn handle_reveal_funds(
     // spawn a task that will continue running.
     let ctx = context.clone();
     task::spawn(async move {
-        let account = get_account_or_default(req.account, &sdk.accounts_api())?;
+        let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
 
         let vault = sdk
             .accounts_api()
-            .get_vault_by_resource(&account.address, &CONFIDENTIAL_TARI_RESOURCE_ADDRESS)?;
+            .get_vault_by_resource(account.address(), &CONFIDENTIAL_TARI_RESOURCE_ADDRESS)?;
 
         let max_fee = req.max_fee.unwrap_or(DEFAULT_FEE);
         let amount_to_reveal = req.amount_to_reveal +
@@ -296,17 +329,15 @@ pub async fn handle_reveal_funds(
                 0.into()
             };
 
-        let proof_id = sdk.confidential_outputs_api().add_proof(&vault.address)?;
+        let proof_id = sdk.confidential_outputs_api().add_output_lock(&vault.id)?;
 
         let (inputs, input_amount) =
             sdk.confidential_outputs_api()
-                .lock_outputs_by_amount(&vault.address, amount_to_reveal, proof_id)?;
+                .lock_outputs_by_amount(proof_id, &vault.id, amount_to_reveal)?;
 
-        let account_key = sdk
-            .key_manager_api()
-            .derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
+        let account_key = sdk.key_manager_api().derive_account_key(account.key_index())?;
 
-        let output_mask = sdk.key_manager_api().next_key(key_manager::TRANSACTION_BRANCH)?;
+        let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMasks)?;
         let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
 
         let remaining_confidential_amount = input_amount - amount_to_reveal;
@@ -326,9 +357,7 @@ pub async fn handle_reveal_funds(
             resource_view_key: None,
         };
 
-        let inputs = sdk
-            .confidential_outputs_api()
-            .resolve_output_masks(inputs, key_manager::TRANSACTION_BRANCH)?;
+        let inputs = sdk.confidential_outputs_api().resolve_output_masks(inputs)?;
 
         let reveal_proof = sdk.confidential_crypto_api().generate_withdraw_proof(
             &inputs,
@@ -344,12 +373,12 @@ pub async fn handle_reveal_funds(
             "Locked {} inputs ({}) for reveal funds transaction on account: {}",
             inputs.len(),
             input_amount,
-            account.address
+            account,
         );
 
-        let account_address = account.address.as_component_address().unwrap();
+        let account_address = *account.address();
 
-        let mut builder = transaction_builder(&ctx);
+        let mut builder = ctx.transaction_builder();
         if req.pay_fee_from_reveal {
             builder = builder.with_fee_instructions_builder(|builder| {
                 builder
@@ -373,9 +402,11 @@ pub async fn handle_reveal_funds(
         }
 
         // Add the account component
-        let account_substate = sdk.substate_api().get_substate(&account.address)?;
+        let account_substate = sdk.substate_api().get_substate(&account.account.address.into())?;
         // Add all versioned account child addresses as inputs
-        let child_addresses = sdk.substate_api().load_dependent_substates(&[&account.address])?;
+        let child_addresses = sdk
+            .substate_api()
+            .load_dependent_substates(&[&account.account.address.into()])?;
         let mut inputs = Vec::with_capacity(child_addresses.len() + 1);
         inputs.push(SubstateRequirement::from(account_substate.substate_id));
         inputs.extend(child_addresses);
@@ -415,7 +446,6 @@ pub async fn handle_claim_burn(
         account,
         claim_proof,
         max_fee,
-        key_id,
     } = req;
 
     let max_fee = max_fee.unwrap_or(DEFAULT_FEE);
@@ -430,15 +460,18 @@ pub async fn handle_claim_burn(
     // TODO: validate the proof_of_knowledge from the claim before submitting the transaction
 
     let mut inputs = vec![];
-    let accounts_api = sdk.accounts_api();
-    let (account_address, account_secret_key, new_account_name) =
-        get_or_create_account(&account, &accounts_api, key_id, sdk, &mut inputs)?;
 
-    let account_public_key = RistrettoPublicKey::from_secret_key(&account_secret_key.key);
+    let accounts_api = sdk.accounts_api();
+    let account = get_account(&account, &accounts_api)?;
+
+    let account_substate = sdk.substate_api().get_substate(&(*account.address()).into())?;
+    inputs.push(account_substate.substate_id.into());
+
+    let (account_secret_key, account_public_key) = sdk.key_manager_api().derive_account_keypair(account.key_index())?;
 
     info!(
         target: LOG_TARGET,
-        "Signing claim burn with key {}. This must be the same as the claiming key used in the burn transaction.",
+        "ℹ️ Signing claim burn with key {}. NOTE: This must be the same as the claiming key used in the burn transaction for this to succeed.",
         account_public_key
     );
 
@@ -446,6 +479,11 @@ pub async fn handle_claim_burn(
     // add the commitment substate id as input to the claim burn transaction
     let address = UnclaimedConfidentialOutputAddress::from_commitment(&commitment);
     inputs.push(SubstateRequirement::unversioned(address));
+
+    let child_addresses = sdk
+        .substate_api()
+        .load_dependent_substates(&[&(*account.address()).into()])?;
+    inputs.extend(child_addresses);
 
     info!(
         target: LOG_TARGET,
@@ -473,7 +511,7 @@ pub async fn handle_claim_burn(
         &reciprocal_claim_public_key_expanded,
     )?;
 
-    let mask = sdk.key_manager_api().next_key(key_manager::TRANSACTION_BRANCH)?;
+    let mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMasks)?;
     let (nonce, output_public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
 
     let final_amount = unmasked_output
@@ -518,94 +556,44 @@ pub async fn handle_claim_burn(
         0,
     )?;
 
-    let instructions = vec![Instruction::ClaimBurn {
-        claim: Box::new(ConfidentialClaim {
-            public_key: reciprocal_claim_public_key,
-            output_address: address,
-            range_proof,
-            proof_of_knowledge: ownership_proof,
-            withdraw_proof: Some(reveal_proof),
-        }),
-    }];
-
-    // ------------------------------
-    let (tx_id, finalized) = finish_claiming(
-        instructions,
-        account_address,
-        new_account_name,
-        sdk,
-        inputs,
-        account_public_key.to_byte_type(),
-        max_fee,
-        account_secret_key,
-        &accounts_api,
-        context,
-    )
-    .await?;
-
-    Ok(ClaimBurnResponse {
-        transaction_id: tx_id,
-        fee: finalized.final_fee,
-        result: finalized.finalize,
-    })
-}
-
-async fn finish_claiming<T: WalletStore>(
-    fee_instructions: Vec<Instruction>,
-    account_address: SubstateId,
-    new_account_name: Option<String>,
-    sdk: &WalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>,
-    mut inputs: Vec<SubstateRequirement>,
-    account_public_key: RistrettoPublicKeyBytes,
-    max_fee: u64,
-    account_secret_key: DerivedKey<RistrettoPublicKey>,
-    accounts_api: &tari_ootle_wallet_sdk::apis::accounts::AccountsApi<'_, T>,
-    context: &HandlerContext,
-) -> Result<
-    (
-        tari_transaction::TransactionId,
-        crate::services::TransactionFinalizedEvent,
-    ),
-    anyhow::Error,
-> {
-    let mut fee_builder = transaction_builder(context)
-        .with_instructions(fee_instructions)
-        .put_last_instruction_output_on_workspace("bucket");
-
-    let account_component_address = account_address
-        .as_component_address()
-        .ok_or_else(|| anyhow!("Invalid account address"))?;
-    if new_account_name.is_none() {
-        // Add all versioned account child addresses as inputs unless the account is new
-        let child_addresses = sdk.substate_api().load_dependent_substates(&[&account_address])?;
-        inputs.extend(child_addresses);
-        fee_builder = fee_builder.call_method(account_component_address, "deposit", args![Workspace("bucket")]);
-    } else {
-        fee_builder = fee_builder.create_account_with_bucket(account_public_key, "bucket");
-    }
-
-    fee_builder = fee_builder.call_method(account_component_address, "pay_fee", args![Amount(max_fee)]);
-
-    let transaction = transaction_builder(context)
-        .with_fee_instructions(fee_builder.build_unsigned_transaction().into_instructions())
+    let transaction = context
+        .transaction_builder()
+        .with_fee_instructions_builder(|fee_builder| {
+            fee_builder
+                .claim_burn(ConfidentialClaim {
+                    public_key: reciprocal_claim_public_key,
+                    output_address: address,
+                    range_proof,
+                    proof_of_knowledge: ownership_proof,
+                    withdraw_proof: Some(reveal_proof),
+                })
+                .put_last_instruction_output_on_workspace("bucket")
+                .then(|builder| {
+                    if account.is_confirmed_on_chain() {
+                        builder.call_method(*account.address(), "deposit", args![Workspace("bucket")])
+                    } else {
+                        // If the account is not on-chain yet, we create it
+                        builder.create_account_with_bucket(account_public_key.to_byte_type(), "bucket")
+                    }
+                })
+                .call_method(*account.address(), "pay_fee", args![Amount(max_fee)])
+        })
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .build_and_seal(&account_secret_key.key);
-    let is_first_account = accounts_api.count()? == 0;
+
     let mut events = context.notifier().subscribe();
     let tx_id = context
         .transaction_service()
         .submit_transaction_with_opts(
             transaction,
-            new_account_name.map(|name| NewAccountInfo {
-                name: Some(name),
-                key_index: account_secret_key.key_index,
-                is_default: is_first_account,
+            account.is_confirmed_on_chain().then(|| NewAccountData {
+                address: *account.address(),
             }),
         )
         .await?;
 
     // Wait for the monitor to pick up the new or updated account
-    let (finalized, _) = wait_for_result_and_account(&mut events, &tx_id, &account_address).await?;
+    let finalized = wait_for_result(&mut events, tx_id).await?;
     // let finalized = wait_for_result(&mut events, tx_id).await?;
     if let Some(reject) = finalized.finalize.fee_reject() {
         return Err(anyhow::anyhow!("Fee transaction rejected: {}", reject));
@@ -617,10 +605,14 @@ async fn finish_claiming<T: WalletStore>(
         ));
     }
 
-    Ok((tx_id, finalized))
+    Ok(ClaimBurnResponse {
+        transaction_id: tx_id,
+        fee: finalized.final_fee,
+        result: finalized.finalize,
+    })
 }
 
-/// Mints free test coins into an account. If an account name is provided which does not exist, that account is created
+/// Mints coins into an existing account from the testnet faucet.
 pub async fn handle_create_free_test_coins(
     context: &HandlerContext,
     token: Option<&Bearer>,
@@ -628,107 +620,119 @@ pub async fn handle_create_free_test_coins(
 ) -> Result<AccountsCreateFreeTestCoinsResponse, anyhow::Error> {
     context.check_auth(token, &[JrpcPermission::Admin])?;
     let sdk = context.wallet_sdk();
+    let accounts_api = sdk.accounts_api();
 
     let AccountsCreateFreeTestCoinsRequest {
         account,
         amount,
         max_fee,
-        key_id,
     } = req;
 
     let max_fee = max_fee.unwrap_or(DEFAULT_FEE);
+
+    let account = get_account(&account, &accounts_api)
+        .optional()?
+        .ok_or_else(|| not_found(format!("Account with name or address '{}' not found", account,)))?;
+
+    info!(
+        target: LOG_TARGET,
+        "💰️ Creating free test coins for account: {} with amount: {} and max fee: {}",
+        account.account.address,
+        amount,
+        max_fee
+    );
 
     let mut inputs = vec![
         SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
         SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
     ];
-    let accounts_api = sdk.accounts_api();
-    let (account_address, account_secret_key, new_account_name) =
-        get_or_create_account(&account, &accounts_api, key_id, sdk, &mut inputs)?;
 
-    let account_public_key = RistrettoPublicKey::from_secret_key(&account_secret_key.key).to_byte_type();
+    if account.is_confirmed_on_chain() {
+        info!(
+            target: LOG_TARGET,
+            "💰️ create free test coins: Account {} is on-chain",
+            account.account.address
+        );
+        // Add account inputs
+        let account_substate = sdk.substate_api().get_substate(&account.account.address.into())?;
+        inputs.push(account_substate.substate_id.into());
 
-    let instructions = vec![Instruction::CallMethod {
-        call: XTR_FAUCET_COMPONENT_ADDRESS.into(),
-        method: "take".to_string(),
-        args: call_args![amount],
-    }];
+        // Add all versioned account child addresses as inputs
+        let child_addresses = sdk
+            .substate_api()
+            .load_dependent_substates(&[&account.account.address.into()])?;
+        info!(
+            target: LOG_TARGET,
+            "💰️ create free test coins: Loaded {} vaults for existing account: {}",
+            child_addresses.len(),
+            account
+        );
+        inputs.extend(child_addresses);
+    } else {
+        info!(
+            target: LOG_TARGET,
+            "💰️ create free test coins: Account {} is not on-chain, Will create it",
+            account.account.address
+        );
+    }
 
-    // ------------------------------
-    let (tx_id, finalized) = finish_claiming(
-        instructions,
-        account_address.clone(),
-        new_account_name,
-        sdk,
-        inputs,
-        account_public_key,
-        max_fee,
-        account_secret_key,
-        &accounts_api,
-        context,
-    )
-    .await?;
+    let (account_secret_key, account_public_key) = sdk.key_manager_api().derive_account_keypair(account.key_index())?;
 
-    let account = accounts_api.get_account_by_address(&account_address)?;
+    let transaction = context
+        .transaction_builder()
+        .with_fee_instructions_builder(|fee_builder| {
+            fee_builder
+                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![amount])
+                .put_last_instruction_output_on_workspace("faucet_funds")
+                .then(|builder| {
+                    if account.is_confirmed_on_chain() {
+                        builder.call_method(*account.address(), "deposit", args![Workspace("faucet_funds")])
+                    } else {
+                        // If the account is not on-chain yet, we create it
+                        builder.create_account_with_bucket(account_public_key.to_byte_type(), "faucet_funds")
+                    }
+                })
+                .call_method(*account.address(), "pay_fee", args![Amount(max_fee)])
+        })
+        .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
+        .build_and_seal(&account_secret_key.key);
+
+    let mut events = context.notifier().subscribe();
+    let tx_id = context
+        .transaction_service()
+        .submit_transaction_with_opts(
+            transaction,
+            account.is_confirmed_on_chain().then(|| NewAccountData {
+                address: *account.address(),
+            }),
+        )
+        .await?;
+
+    // Wait for the monitor to pick up the new or updated account
+    let (finalized, _) = wait_for_result_and_account(&mut events, &tx_id, account.address()).await?;
+    if let Some(reject) = finalized.finalize.fee_reject() {
+        return Err(transaction_rejected(format!("Fee transaction rejected: {}", reject)));
+    }
+    if let Some(reason) = finalized.finalize.any_reject() {
+        return Err(anyhow::anyhow!(
+            "Fee transaction succeeded (fees charged) however, the transaction failed: {}",
+            reason
+        ));
+    }
+    // Refresh the account
+    let account = accounts_api
+        .get_account_by_address(account.address())
+        .optional()?
+        .ok_or_else(|| not_found(format!("Account with address '{}' not found", account.address())))?;
 
     Ok(AccountsCreateFreeTestCoinsResponse {
-        account,
+        account: account.account,
         transaction_id: tx_id,
         amount,
         fee: max_fee,
         result: finalized.finalize,
-        public_key: account_public_key,
+        public_key: account.owner_public_key,
     })
-}
-
-fn get_or_create_account<T: WalletStore>(
-    account: &Option<ComponentAddressOrName>,
-    accounts_api: &tari_ootle_wallet_sdk::apis::accounts::AccountsApi<'_, T>,
-    key_id: Option<u64>,
-    sdk: &WalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>,
-    inputs: &mut Vec<SubstateRequirement>,
-) -> Result<(SubstateId, DerivedKey<RistrettoPublicKey>, Option<String>), anyhow::Error> {
-    let maybe_account = match account {
-        Some(ref addr_or_name) => get_account(addr_or_name, accounts_api).optional()?,
-        None => {
-            let account = accounts_api
-                .get_default()
-                .optional()?
-                .ok_or_else(|| not_found("No default account found. Please create or set a default account."))?;
-
-            Some(account)
-        },
-    };
-    let (account_address, account_secret_key, new_account_name) = match maybe_account {
-        Some(account) => {
-            let account_secret_key = sdk
-                .key_manager_api()
-                .derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
-            let account_substate = sdk.substate_api().get_substate(&account.address)?;
-            inputs.push(account_substate.substate_id.into());
-
-            (account.address, account_secret_key, None)
-        },
-        None => {
-            let name = account.as_ref().unwrap().name().ok_or_else(|| {
-                invalid_params(
-                    "account.Name",
-                    Some("Account name must be provided when creating a new account"),
-                )
-            })?;
-            let account_secret_key = key_id
-                .map(|idx| sdk.key_manager_api().derive_key(key_manager::TRANSACTION_BRANCH, idx))
-                .unwrap_or_else(|| sdk.key_manager_api().next_key(key_manager::TRANSACTION_BRANCH))?;
-            let account_pk = RistrettoPublicKey::from_secret_key(&account_secret_key.key);
-
-            let account_address =
-                new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &account_pk.to_byte_type());
-
-            // We have no involved substate addresses, so we need to add an output
-            (account_address.into(), account_secret_key, Some(name.to_string()))
-        },
-    };
-    Ok((account_address, account_secret_key, new_account_name))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -740,33 +744,30 @@ pub async fn handle_transfer(
     context.check_auth(token, &[JrpcPermission::Admin])?;
     let sdk = context.wallet_sdk().clone();
 
-    let (account, mut inputs) = get_account_with_inputs(req.account, &sdk)?;
+    let (account, mut inputs) = get_account_with_inputs(req.account.as_ref(), &sdk)?;
 
     // get the source account component address
-    let source_account_address = account
-        .address
-        .as_component_address()
-        .ok_or_else(|| anyhow!("Invalid account address"))?;
+    let source_account_address = *account.address();
 
     // add the input for the source account vault substate
     let src_vault = sdk
         .accounts_api()
-        .get_vault_by_resource(&account.address, &req.resource_address)?;
-    let src_vault_substate = sdk.substate_api().get_substate(&src_vault.address)?;
+        .get_vault_by_resource(&source_account_address, &req.resource_address)?;
+    let src_vault_substate = sdk.substate_api().get_substate(&src_vault.id.into())?;
     inputs.insert(src_vault_substate.substate_id.into());
 
     let resource_substate_address = SubstateRequirement::unversioned(src_vault.resource_address);
     inputs.insert(resource_substate_address.clone());
 
     let destination_account_address =
-        new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.destination_public_key);
+        derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.destination_public_key);
     let existing_dest_account = sdk
         .substate_api()
         .scan_for_substate(&SubstateId::Component(destination_account_address), None)
         .await
         .optional()?;
 
-    let mut builder = transaction_builder(context);
+    let mut builder = context.transaction_builder();
 
     if let Some(ValidatorScanResult { address, substate }) = existing_dest_account {
         inputs.insert(address.into());
@@ -829,9 +830,7 @@ pub async fn handle_transfer(
 
     // build the transaction
     let max_fee = req.max_fee.unwrap_or(DEFAULT_FEE);
-    let account_secret_key = sdk
-        .key_manager_api()
-        .derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
+    let account_secret_key = sdk.key_manager_api().derive_account_key(account.key_index())?;
 
     let transaction = builder
         .with_dry_run(req.dry_run)
@@ -926,12 +925,12 @@ pub async fn handle_confidential_transfer(
     // Spawn here is to prevent the async block from being aborted if the caller aborts the request early as this can
     // cause funds to remain locked indefinitely.
     task::spawn(async move {
-        let account = get_account_or_default(req.account, &sdk.accounts_api())?;
+        let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
 
         let transfer = sdk
             .confidential_transfer_api()
-            .transfer(TransferParams {
-                from_account: account.address.as_component_address().unwrap(),
+            .transfer(ConfidentialTransferParams {
+                from_account: *account.address(),
                 input_selection: req.input_selection,
                 amount: req.amount,
                 destination_public_key: req.destination_public_key,
@@ -983,12 +982,4 @@ pub async fn handle_confidential_transfer(
         })
     })
     .await?
-}
-
-fn is_account_substate(substate: &Substate) -> bool {
-    substate
-        .substate_value()
-        .component()
-        .filter(|c| c.template_address == ACCOUNT_TEMPLATE_ADDRESS)
-        .is_some()
 }

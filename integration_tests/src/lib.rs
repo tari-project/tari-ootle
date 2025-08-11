@@ -50,7 +50,7 @@ use tari_core::{
 };
 use tari_crypto::{
     keys::SecretKey,
-    ristretto::{RistrettoComSig, RistrettoPublicKey, RistrettoSecretKey},
+    ristretto::{RistrettoComSig, RistrettoPublicKey},
 };
 use tari_ootle_common_types::SubstateRequirement;
 use tari_sidechain::EvictionProof;
@@ -94,7 +94,7 @@ pub struct TariWorld {
     pub rangeproofs: IndexMap<String, Vec<u8>>,
     pub addresses: IndexMap<String, String>,
     pub num_databases_saved: usize,
-    pub account_keys: IndexMap<String, (RistrettoSecretKey, RistrettoPublicKeyBytes)>,
+    pub account_keys: IndexMap<String, RistrettoPublicKeyBytes>,
     pub key_manager: MemoryDbKeyManager,
     /// Key name -> key index
     pub wallet_keys: IndexMap<String, u64>,

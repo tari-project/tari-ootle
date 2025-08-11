@@ -11,7 +11,7 @@ use crate::Network;
 pub type TariBaseLayerHasher64<M> = DomainSeparatedBorshHasher<M, Blake2b<U64>>;
 pub type TariBaseLayerHasher32<M> = DomainSeparatedBorshHasher<M, Blake2b<U32>>;
 fn confidential_hasher64(network: Network, label: &'static str) -> TariBaseLayerHasher64<ConfidentialOutputHashDomain> {
-    DomainSeparatedBorshHasher::<_, Blake2b<U64>>::new_with_label(&format!("{}.n{}", label, network.as_byte()))
+    TariBaseLayerHasher64::new_with_label(&format!("{}.n{}", label, network.as_byte()))
 }
 
 type WalletOutputEncryptionKeysDomainHasher = DomainSeparatedHasher<Blake2b<U64>, WalletOutputEncryptionKeysDomain>;

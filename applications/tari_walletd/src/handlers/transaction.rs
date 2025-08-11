@@ -11,7 +11,7 @@ use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::ToByteType;
 use tari_ootle_common_types::{optional::Optional, Epoch, Network};
 use tari_ootle_wallet_sdk::{
-    apis::{config::ConfigKey, key_manager, transaction::TransactionApiError},
+    apis::{config::ConfigKey, key_manager::KeyBranch, transaction::TransactionApiError},
     network::WalletQueryErrorStatus,
 };
 use tari_transaction::{args, Transaction};
@@ -43,14 +43,7 @@ use tokio::time;
 use super::context::HandlerContext;
 use crate::{
     handlers::{
-        helpers::{
-            get_account,
-            get_account_or_default,
-            invalid_params,
-            not_found,
-            transaction_builder,
-            transaction_rejected,
-        },
+        helpers::{get_account, get_account_or_default, invalid_params, not_found, transaction_rejected},
         wasm_optimizer::optimize_wasm_template,
         HandlerError,
     },
@@ -66,13 +59,13 @@ pub async fn handle_submit_instruction(
 ) -> Result<TransactionSubmitResponse, anyhow::Error> {
     // TODO: fine-grained checks of individual addresses involved (resources, components, etc)
     context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
-    let mut builder = transaction_builder(context).with_instructions(req.instructions);
+    let mut builder = context.transaction_builder().with_instructions(req.instructions);
     let sdk = context.wallet_sdk();
 
     if let Some(ref dump_account) = req.dump_outputs_into {
         let dump_account = get_account(dump_account, &sdk.accounts_api())?;
         builder = builder.put_last_instruction_output_on_workspace("bucket").call_method(
-            dump_account.address.as_component_address().unwrap(),
+            *dump_account.address(),
             "deposit",
             args![Workspace("bucket")],
         );
@@ -80,14 +73,14 @@ pub async fn handle_submit_instruction(
     let fee_account = get_account(&req.fee_account, &sdk.accounts_api())?;
 
     let transaction = builder
-        .fee_transaction_pay_from_component(fee_account.address.as_component_address().unwrap(), req.max_fee)
+        .fee_transaction_pay_from_component(*fee_account.address(), req.max_fee)
         .with_min_epoch(req.min_epoch.map(Epoch))
         .with_max_epoch(req.max_epoch.map(Epoch))
         .build_unsigned_transaction();
 
     let request = TransactionSubmitRequest {
         transaction,
-        signing_key_index: Some(fee_account.key_index),
+        signing_key_index: Some(fee_account.key_index()),
         detect_inputs: req.override_inputs.unwrap_or_default(),
         detect_inputs_use_unversioned: true,
         proof_ids: vec![],
@@ -106,7 +99,7 @@ pub async fn handle_submit(
     let key_api = sdk.key_manager_api();
     // Fetch the key to sign the transaction
     // TODO: Ideally the SDK should take care of signing the transaction internally
-    let (_, key) = key_api.get_key_or_active(key_manager::TRANSACTION_BRANCH, req.signing_key_index)?;
+    let (_, key) = key_api.get_key_or_active(KeyBranch::Account, req.signing_key_index)?;
 
     let detected_inputs = if req.detect_inputs {
         // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
@@ -146,7 +139,8 @@ pub async fn handle_submit(
         req.detect_inputs_use_unversioned,
     );
 
-    let transaction = transaction_builder(context)
+    let transaction = context
+        .transaction_builder()
         .with_unsigned_transaction(req.transaction)
         .with_inputs(detected_inputs)
         .build_and_seal(&key.key);
@@ -213,7 +207,7 @@ pub async fn handle_submit_dry_run(
     let key_api = sdk.key_manager_api();
     // Fetch the key to sign the transaction
     // TODO: Ideally the SDK should take care of signing the transaction internally
-    let (_, key) = key_api.get_key_or_active(key_manager::TRANSACTION_BRANCH, req.signing_key_index)?;
+    let (_, key) = key_api.get_key_or_active(KeyBranch::Account, req.signing_key_index)?;
 
     let detected_inputs = if req.detect_inputs {
         // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
@@ -237,7 +231,8 @@ pub async fn handle_submit_dry_run(
         vec![]
     };
 
-    let transaction = transaction_builder(context)
+    let transaction = context
+        .transaction_builder()
         .with_unsigned_transaction(req.transaction)
         .with_inputs(detected_inputs)
         .with_dry_run(true)
@@ -291,35 +286,29 @@ pub async fn handle_submit_manifest(
 
     let default_account = get_account_or_default(None, &sdk.accounts_api())?;
 
-    let signing_key_index = req.signing_key_index.unwrap_or(default_account.key_index);
+    let signing_key_index = req.signing_key_index.unwrap_or(default_account.key_index());
     let (_, key) = sdk
         .key_manager_api()
-        .get_key_or_active(key_manager::TRANSACTION_BRANCH, Some(signing_key_index))?;
+        .get_key_or_active(KeyBranch::Account, Some(signing_key_index))?;
     let seal_signer_pk = RistrettoPublicKey::from_secret_key(&key.key);
 
     let network = context.wallet_sdk().config_api().get::<Network>(ConfigKey::Network)?;
 
     let fee_amount = req.max_fee;
 
-    let (_, acc_key) = sdk
-        .key_manager_api()
-        .get_key_or_active(key_manager::TRANSACTION_BRANCH, Some(default_account.key_index))?;
+    let acc_key = sdk.key_manager_api().derive_account_key(default_account.key_index())?;
     let builder = Transaction::builder()
         .for_network(network.as_byte())
         .with_fee_instructions_builder(|builder| {
             if instructions.fee_instructions.is_empty() {
-                builder.call_method(
-                    default_account.address.as_component_address().unwrap(),
-                    "pay_fee",
-                    args![Amount(fee_amount)],
-                )
+                builder.call_method(*default_account.address(), "pay_fee", args![Amount(fee_amount)])
             } else {
                 builder.with_instructions(instructions.fee_instructions)
             }
         })
         .with_instructions(instructions.instructions)
         .then(|builder| {
-            if signing_key_index == default_account.key_index {
+            if signing_key_index == default_account.key_index() {
                 builder
             } else {
                 builder.add_signature(&seal_signer_pk.to_byte_type(), &acc_key.key)
@@ -507,7 +496,7 @@ pub async fn handle_publish_template(
     context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
     let sdk = context.wallet_sdk();
 
-    let fee_account = get_account_or_default(req.fee_account, &sdk.accounts_api())?;
+    let fee_account = get_account_or_default(req.fee_account.as_ref(), &sdk.accounts_api())?;
 
     // trying to optimize WASM binary
     let wasm_binary = match optimize_wasm_template(req.binary.as_slice()).await {
@@ -521,15 +510,16 @@ pub async fn handle_publish_template(
         },
     };
 
-    let transaction = transaction_builder(context)
-        .fee_transaction_pay_from_component(fee_account.address.as_component_address().unwrap(), req.max_fee)
+    let transaction = context
+        .transaction_builder()
+        .fee_transaction_pay_from_component(*fee_account.address(), req.max_fee)
         .publish_template(wasm_binary)
         .build_unsigned_transaction();
 
     if req.dry_run {
         let request = TransactionSubmitDryRunRequest {
             transaction,
-            signing_key_index: Some(fee_account.key_index),
+            signing_key_index: Some(fee_account.key_index()),
             detect_inputs: req.detect_inputs,
             detect_inputs_use_unversioned: true,
             proof_ids: vec![],
@@ -550,7 +540,7 @@ pub async fn handle_publish_template(
     }
     let request = TransactionSubmitRequest {
         transaction,
-        signing_key_index: Some(fee_account.key_index),
+        signing_key_index: Some(fee_account.key_index()),
         detect_inputs: req.detect_inputs,
         detect_inputs_use_unversioned: true,
         proof_ids: vec![],

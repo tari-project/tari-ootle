@@ -2,8 +2,8 @@
 import type { FeeCostBreakdown } from "../FeeCostBreakdown";
 import type { FinalizeResult } from "../FinalizeResult";
 
-export interface DryRunTransactionFinalizeResult {
+export type DryRunTransactionFinalizeResult = {
   decision: string;
   finalize: FinalizeResult;
   fee_breakdown: FeeCostBreakdown | null;
-}
+};

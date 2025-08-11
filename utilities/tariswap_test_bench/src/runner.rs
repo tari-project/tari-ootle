@@ -49,7 +49,7 @@ impl Runner {
         let tx_id = self
             .sdk
             .transaction_api()
-            .insert_new_transaction(transaction, vec![], None, false)
+            .insert_new_transaction(transaction, None, false)
             .await?;
 
         self.sdk.transaction_api().submit_transaction(tx_id).await?;

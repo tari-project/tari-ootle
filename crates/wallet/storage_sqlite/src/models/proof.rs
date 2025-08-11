@@ -4,14 +4,14 @@
 use diesel::{Identifiable, Queryable};
 use time::PrimitiveDateTime;
 
-use crate::schema::proofs;
+use crate::schema::output_locks;
 
 #[derive(Debug, Clone, Queryable, Identifiable)]
-#[diesel(table_name = proofs)]
-pub struct Proof {
+#[diesel(table_name = output_locks)]
+pub struct OutputLock {
     pub id: i32,
-    pub account_id: i32,
-    pub vault_id: i32,
+    pub resource_address: String,
+    pub vault_id: Option<i32>,
     pub transaction_hash: Option<String>,
     pub locked_revealed_amount: i64,
     pub created_at: PrimitiveDateTime,

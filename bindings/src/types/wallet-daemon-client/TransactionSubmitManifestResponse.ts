@@ -2,7 +2,4 @@
 import type { ExecuteResult } from "../ExecuteResult";
 import type { TransactionId } from "../TransactionId";
 
-export interface TransactionSubmitManifestResponse {
-  transaction_id: TransactionId;
-  result: ExecuteResult | null;
-}
+export type TransactionSubmitManifestResponse = { transaction_id: TransactionId; result: ExecuteResult | null };

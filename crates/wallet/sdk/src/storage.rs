@@ -200,7 +200,7 @@ pub trait WalletStoreReader {
         resource_address: &ResourceAddress,
     ) -> Result<StealthBalance, WalletStorageError>;
 
-    fn stealth_outputs_get_all_by_account(
+    fn stealth_outputs_get_unspent_by_account(
         &mut self,
         account_addr: &ComponentAddress,
     ) -> Result<Vec<StealthOutputModel>, WalletStorageError>;

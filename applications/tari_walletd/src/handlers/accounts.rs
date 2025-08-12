@@ -247,7 +247,9 @@ pub async fn handle_get_balances(
         context.account_monitor().refresh_account(*account.address()).await?;
     }
     let vaults = sdk.accounts_api().get_vaults_by_account(account.address())?;
-    let stealth_outputs = sdk.stealth_outputs_api().get_outputs_by_account(account.address())?;
+    let stealth_outputs = sdk
+        .stealth_outputs_api()
+        .get_unspent_outputs_by_account(account.address())?;
 
     let mut balances = Vec::with_capacity(vaults.len());
     let mut vaulted_resources = HashSet::new();

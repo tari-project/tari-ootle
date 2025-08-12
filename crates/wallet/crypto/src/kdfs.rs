@@ -97,4 +97,17 @@ mod tests {
         let expected_stealth_address = RistrettoPublicKey::from_secret_key(&stealth_secret);
         assert_eq!(stealth_address, expected_stealth_address);
     }
+
+    #[test]
+    fn it_does_not_produce_the_same_secret_when_switching_params() {
+        let network = Network::LocalNet;
+        let (secret_key, public_key) = create_key_pair_from_seed(123);
+        let (secret_nonce, public_nonce) = create_key_pair_from_seed(234);
+
+        let stealth_address1 = owner_stealth_dh_stealth_address(network, &public_key, &secret_nonce);
+        let stealth_address2 = owner_stealth_dh_stealth_address(network, &public_nonce, &secret_key);
+
+        // Just makes this fact clear if it isn't obvious
+        assert_ne!(stealth_address1, stealth_address2);
+    }
 }

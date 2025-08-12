@@ -766,7 +766,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
         })
     }
 
-    fn stealth_outputs_get_all_by_account(
+    fn stealth_outputs_get_unspent_by_account(
         &mut self,
         account_addr: &ComponentAddress,
     ) -> Result<Vec<StealthOutputModel>, WalletStorageError> {
@@ -782,6 +782,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
                     .single_value()
                     .assume_not_null()),
             )
+            .filter(stealth_outputs::status.eq(OutputStatus::Unspent.as_key_str()))
             .get_results::<models::StealthOutput>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 

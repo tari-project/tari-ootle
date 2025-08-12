@@ -2,7 +2,10 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::{debug, info, warn};
-use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
+use tari_crypto::{
+    keys::PublicKey,
+    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey},
+};
 use tari_engine_types::{
     component::derive_component_address_from_public_key,
     FromByteType,
@@ -239,13 +242,13 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         Ok(())
     }
 
-    pub fn get_outputs_by_account(
+    pub fn get_unspent_outputs_by_account(
         &self,
         account_address: &ComponentAddress,
     ) -> Result<Vec<StealthOutputModel>, StealthOutputsApiError> {
         let balance = self
             .store
-            .with_read_tx(|tx| tx.stealth_outputs_get_all_by_account(account_address))?;
+            .with_read_tx(|tx| tx.stealth_outputs_get_unspent_by_account(account_address))?;
         Ok(balance)
     }
 
@@ -391,11 +394,12 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
             );
             let (value, status) = match unblinded_result {
                 Ok(output) => {
-                    let stealth_address = kdfs::owner_stealth_dh_stealth_address(
+                    let stealth_secret = kdfs::owner_stealth_dh_secret(
                         network,
-                        &output_stealth_public_nonce,
                         &wallet_key.secret_key.key,
+                        &output_stealth_public_nonce,
                     );
+                    let stealth_address = RistrettoPublicKey::from_secret_key(&stealth_secret);
                     if utxo.owner_public_key == stealth_address.to_byte_type() {
                         (output.value, OutputStatus::Unspent)
                     } else {

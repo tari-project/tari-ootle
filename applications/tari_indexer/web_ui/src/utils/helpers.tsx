@@ -54,8 +54,10 @@ const renderJson = (json: any) => {
     );
   } else {
     if (typeof json === "string") return <span className="string">"{json}"</span>;
-    if (typeof json === "boolean") return <span className="boolean">"{json ? "true" : "false"}"</span>;
-    return <span className="other">{json}</span>;
+    if (typeof json === "boolean") return <span className="boolean">{json ? "true" : "false"}</span>;
+    if (json === null) return <span className="null">null</span>;
+    if (typeof json === "undefined") return <span className="undefined">undefined</span>;
+    return <span className="other">{json.toString()}</span>;
   }
 };
 

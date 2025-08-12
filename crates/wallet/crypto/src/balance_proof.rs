@@ -60,13 +60,13 @@ pub(crate) fn generate_stealth_balance_proof_signature(
 
 pub(crate) fn generate_stealth_owner_proof_signature(
     secret_key: &RistrettoSecretKey,
+    stealth_public_key: &RistrettoPublicKeyBytes,
     commitment: &PedersenCommitmentBytes,
     public_output_nonce: &RistrettoPublicKeyBytes,
 ) -> SchnorrSignatureBytes {
     let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
-    let public_key = RistrettoPublicKey::from_secret_key(secret_key);
     let message = messages::stealth_ownership64(
-        &public_key.to_byte_type(),
+        stealth_public_key,
         &public_nonce.to_byte_type(),
         commitment,
         public_output_nonce,

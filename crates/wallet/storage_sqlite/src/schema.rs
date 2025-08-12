@@ -103,6 +103,21 @@ diesel::table! {
 }
 
 diesel::table! {
+    resources (id) {
+        id -> Integer,
+        address -> Text,
+        resource_type -> Text,
+        token_symbol -> Nullable<Text>,
+        divisibility -> Integer,
+        metadata -> Text,
+        access_rules -> Text,
+        total_supply -> Nullable<Text>,
+        updated_at -> Timestamp,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     stealth_outputs (id) {
         id -> Integer,
         owner_account_id -> Integer,
@@ -115,6 +130,7 @@ diesel::table! {
         lock_id -> Nullable<Integer>,
         encryption_secret_key_index -> BigInt,
         encrypted_data -> Binary,
+        tag_byte -> Integer,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }
@@ -212,6 +228,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     non_fungible_tokens,
     output_locks,
     outputs,
+    resources,
     stealth_outputs,
     substates,
     transactions,

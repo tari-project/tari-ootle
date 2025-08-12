@@ -17,3 +17,7 @@ fn wallet_hasher64(network: Network, label: &'static str) -> OotleWalletHasher64
 pub fn stealth_owner_hasher64(network: Network) -> OotleWalletHasher64<OotleWalletHashDomain> {
     wallet_hasher64(network, "stealth_owner")
 }
+
+pub fn stealth_output_tag_hasher64(network: Network) -> OotleWalletHasher64<OotleWalletHashDomain> {
+    wallet_hasher64(network, "output_tag")
+}

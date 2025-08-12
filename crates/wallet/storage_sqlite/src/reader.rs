@@ -37,6 +37,7 @@ use tari_ootle_wallet_sdk::{
         NonFungibleToken,
         OutputLockId,
         OutputStatus,
+        ResourceModel,
         StealthBalance,
         StealthOutputModel,
         SubstateModel,
@@ -553,6 +554,26 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .collect::<Result<_, _>>()?;
 
         Ok(vaults)
+    }
+
+    // -------------------------------- Resources -------------------------------- //
+    fn resources_get(&mut self, resource_address: &ResourceAddress) -> Result<ResourceModel, WalletStorageError> {
+        const OPERATION: &str = "resources_get";
+
+        use crate::schema::resources;
+
+        let row = resources::table
+            .filter(resources::address.eq(resource_address.to_string()))
+            .first::<models::Resource>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "resource".to_string(),
+                key: resource_address.to_string(),
+            })?;
+
+        row.try_convert()
     }
 
     // -------------------------------- Outputs -------------------------------- //

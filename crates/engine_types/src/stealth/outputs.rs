@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
-use tari_template_lib::models::StealthOutputsStatement;
+use tari_template_lib::{models::StealthOutputsStatement, types::crypto::UtxoTagByte};
 
 use crate::{
     crypto::{range_proof::validate_bullet_proof, validate_elgamal_verifiable_balance_proof, ValidatedPrivateOutput},
@@ -16,6 +16,7 @@ use crate::{
 pub struct ValidatedStealthOutput {
     pub output: ValidatedPrivateOutput,
     pub owner_public_key: RistrettoPublicKey,
+    pub tag: UtxoTagByte,
 }
 
 impl ValidatedStealthOutput {
@@ -23,6 +24,7 @@ impl ValidatedStealthOutput {
         UtxoOutput {
             owner_public_key: self.owner_public_key.to_byte_type(),
             output: self.output.to_private_output(),
+            tag: self.tag,
         }
     }
 }
@@ -75,6 +77,7 @@ pub fn validate_stealth_outputs_statement(
                         details: "Invalid owner public key".to_string(),
                     },
                 )?,
+                tag: statement.tag,
             })
         })
         .collect::<Result<_, ResourceError>>()?;

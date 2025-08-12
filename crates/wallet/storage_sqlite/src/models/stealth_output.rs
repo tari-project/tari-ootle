@@ -4,6 +4,7 @@
 use tari_ootle_wallet_sdk::{models::StealthOutputModel, storage::WalletStorageError};
 use tari_template_lib::{
     models::{ComponentAddress, EncryptedData},
+    prelude::crypto::UtxoTagByte,
     types::{amount, crypto::RistrettoPublicKeyBytes},
 };
 use time::PrimitiveDateTime;
@@ -24,6 +25,7 @@ pub struct StealthOutput {
     pub locked_by_proof: Option<i32>,
     pub encryption_secret_key_index: i64,
     pub encrypted_data: Vec<u8>,
+    pub tag_byte: i32,
     pub created_at: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
 }
@@ -64,6 +66,15 @@ impl StealthOutput {
                     details: format!("Corrupt db: invalid encrypted data length {len}"),
                 }
             })?,
+            tag_byte: UtxoTagByte::new(
+                self.tag_byte
+                    .try_into()
+                    .map_err(|_| WalletStorageError::DecodingError {
+                        operation: "try_into_output",
+                        item: "output",
+                        details: format!("Corrupt db: invalid tag byte '{}'", self.tag_byte),
+                    })?,
+            ),
             status: self.status.parse().map_err(|_| WalletStorageError::DecodingError {
                 operation: "try_into_output",
                 item: "output",

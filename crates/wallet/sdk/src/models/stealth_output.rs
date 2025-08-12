@@ -4,7 +4,7 @@
 use tari_template_lib::{
     models::{ComponentAddress, EncryptedData},
     prelude::{PedersenCommitmentBytes, ResourceAddress, RistrettoPublicKeyBytes},
-    types::Amount,
+    types::{crypto::UtxoTagByte, Amount},
 };
 
 use crate::models::{OutputLockId, OutputStatus};
@@ -18,6 +18,7 @@ pub struct StealthOutputModel {
     pub sender_public_nonce: RistrettoPublicKeyBytes,
     pub encryption_secret_key_index: u64,
     pub encrypted_data: EncryptedData,
+    pub tag_byte: UtxoTagByte,
     pub status: OutputStatus,
     pub lock_id: Option<OutputLockId>,
 }

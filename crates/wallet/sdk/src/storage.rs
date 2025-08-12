@@ -26,6 +26,7 @@ use crate::models::{
     NonFungibleToken,
     OutputLockId,
     OutputStatus,
+    ResourceModel,
     StealthBalance,
     StealthOutputModel,
     SubstateModel,
@@ -171,6 +172,9 @@ pub trait WalletStoreReader {
     ) -> Result<VaultModel, WalletStorageError>;
     fn vaults_get_by_account(&mut self, account_addr: &ComponentAddress)
         -> Result<Vec<VaultModel>, WalletStorageError>;
+
+    // Resources
+    fn resources_get(&mut self, resource_address: &ResourceAddress) -> Result<ResourceModel, WalletStorageError>;
 
     // Outputs
     fn outputs_get_unspent_balance(&mut self, vault_id: &VaultId) -> Result<u64, WalletStorageError>;
@@ -337,7 +341,8 @@ pub trait WalletStoreWriter {
     ) -> Result<(), WalletStorageError>;
     fn vaults_finalized_locked_revealed_funds(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
     fn vaults_unlock_revealed_funds(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
-
+    // Resources
+    fn resources_upsert(&mut self, resource: ResourceModel) -> Result<(), WalletStorageError>;
     // Confidential Outputs
     fn outputs_lock_smallest_amount(
         &mut self,

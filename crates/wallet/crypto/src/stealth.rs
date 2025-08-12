@@ -1,7 +1,10 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_crypto::ristretto::RistrettoSecretKey;
+use tari_crypto::{
+    keys::PublicKey,
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+};
 use tari_engine_types::ToByteType;
 use tari_template_lib::{
     models::{
@@ -55,9 +58,11 @@ pub fn create_transfer_statement(
                         name: "input value",
                         details: format!("Input value {} must be non-negative", input.mask_and_value.value),
                     })?;
+            let stealth_public_key = RistrettoPublicKey::from_secret_key(&input.owner_secret).to_byte_type();
 
             let signature = generate_stealth_owner_proof_signature(
                 &input.owner_secret,
+                &stealth_public_key,
                 &commitment.to_byte_type(),
                 &input.public_nonce.to_byte_type(),
             );
@@ -123,6 +128,7 @@ pub fn create_outputs_statement(
             Ok::<_, ConfidentialProofError>(StealthUnspentOutput {
                 output,
                 owner_public_key: output_stmt.output_owner_public_key.to_byte_type(),
+                tag: output_stmt.tag,
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -144,7 +150,10 @@ mod tests {
         ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     };
     use tari_engine_types::stealth::validate_stealth_outputs_statement;
-    use tari_template_lib::{models::EncryptedData, types::Amount};
+    use tari_template_lib::{
+        models::EncryptedData,
+        types::{crypto::UtxoTagByte, Amount},
+    };
 
     use super::*;
     use crate::UnblindedOutputStatement;
@@ -162,6 +171,7 @@ mod tests {
                     resource_view_key: None,
                 },
                 output_owner_public_key: RistrettoPublicKey::default(),
+                tag: UtxoTagByte::new(0),
             }],
             Amount::zero(),
         )

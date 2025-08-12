@@ -7,7 +7,6 @@ use digest::crypto_common::rand_core::OsRng;
 use log::*;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine_types::{substate::SubstateId, FromByteType, ToByteType, UtxoAddress};
-use tari_key_manager::key_manager::DerivedKey;
 use tari_ootle_common_types::{
     displayable::Displayable,
     optional::{IsNotFoundError, Optional},
@@ -173,12 +172,11 @@ where
 
                         self.outputs_api.lock_revealed_funds(lock_id, revealed_to_spend)
                             .inspect_err(|_| {
-                                // TODO: rollback will help with this
+                                // TODO: atomic rollback will help with this
                                 if let Err(err) = self.outputs_api.release_locked_outputs(lock_id) {
                                     error!(target: LOG_TARGET, "Failed to release lock outputs for resource {}: {}", resource_address, err);
                                 }
-                            })
-                            ?;
+                            })?;
 
                         return Ok(InputsToSpend {
                             inputs: vec![],
@@ -207,17 +205,35 @@ where
                     },
                 };
 
-                let (inputs, _) = self.outputs_api.lock_outputs_by_amount(lock_id, utxo_amount_to_spend)?;
+                let (inputs, _) = self.outputs_api.lock_outputs_by_amount(lock_id, utxo_amount_to_spend)
+                    .inspect_err(|_| {
+                        // TODO: atomic rollback will help with this
+                        if let Err(err) = self.outputs_api.release_locked_outputs(lock_id) {
+                            error!(target: LOG_TARGET, "Failed to release lock outputs for resource {}: {}", resource_address, err);
+                        }
+                    })?;
                 let inputs = self
                     .outputs_api
-                    .resolve_output_masks_for_spending(from_account, inputs)?;
+                    .resolve_output_masks_for_spending(from_account, inputs)
+                    .inspect_err(|_| {
+                        // TODO: atomic rollback will help with this
+                        if let Err(err) = self.outputs_api.release_locked_outputs(lock_id) {
+                            error!(target: LOG_TARGET, "Failed to release lock outputs for resource {}: {}", resource_address, err);
+                        }
+                    })?;
 
                 let total_confidential_spent = Amount::sum_from_positive(inputs.iter().map(|i| i.mask_and_value.value))
                     // The wallet has somehow stored a negative amount, which should not happen.
                     .expect("BUG: an unblinded input amount was negative");
 
                 if revealed_to_spend.is_positive() {
-                    self.outputs_api.lock_revealed_funds(lock_id, revealed_to_spend)?;
+                    self.outputs_api.lock_revealed_funds(lock_id, revealed_to_spend)
+                        .inspect_err(|_| {
+                            // TODO: atomic rollback will help with this
+                            if let Err(err) = self.outputs_api.release_locked_outputs(lock_id) {
+                                error!(target: LOG_TARGET, "Failed to release lock outputs for resource {}: {}", resource_address, err);
+                            }
+                        })?;
                 }
 
                 info!(
@@ -295,15 +311,6 @@ where
         let fee_account = self.accounts_api.get_default()?;
 
         let destination_account = derive_account_address_from_public_key(&params.destination_public_key);
-
-        // params.account has been loaded by the caller (e.g. from local db), and is assumed to be trusted.
-        let owner_public_key =
-            RistrettoPublicKey::try_from_byte_type(&params.owner_account.owner_public_key).map_err(|e| {
-                StealthTransferApiError::InvalidParameter {
-                    param: "owner_public_key",
-                    reason: format!("Invalid owner public key: {e}"),
-                }
-            })?;
 
         // Determine Transaction Inputs
         let mut inputs = Vec::new();
@@ -410,8 +417,6 @@ where
             .scan_for_substate(&SubstateId::Resource(params.resource_address), None)
             .await?;
 
-        let fee_account_secret = self.key_manager_api.derive_account_key(fee_account.key_index())?;
-
         // Generate outputs
         let resource_view_key = resource_substate
             .substate
@@ -482,9 +487,7 @@ where
         let result = self.generate_transfer_transaction(
             params,
             fee_account,
-            &owner_public_key,
             inputs,
-            &fee_account_secret,
             resource_view_key,
             output_statement,
             &inputs_to_spend,
@@ -506,19 +509,18 @@ where
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn generate_transfer_transaction(
         &self,
         params: StealthTransferParams,
         fee_account: AccountWithPublicKey,
-        owner_public_key: &RistrettoPublicKey,
         inputs: Vec<SubstateRequirement>,
-        fee_account_secret: &DerivedKey<RistrettoPublicKey>,
         resource_view_key: Option<RistrettoPublicKey>,
         maybe_output_statement: Option<UnblindedStealthOutputStatement>,
         inputs_to_spend: &InputsToSpend,
         need_to_create_account: bool,
     ) -> Result<Transaction, StealthTransferApiError> {
-        let change_confidential_amount = inputs_to_spend
+        let change_amount = inputs_to_spend
             .total_amount()
             .checked_sub_positive(params.total_output_amount())
             .unwrap_or_else(|| {
@@ -531,11 +533,16 @@ where
                 panic!("BUG: total_stealth_input_amount or params.total_amount() are negative after validation");
             });
 
-        let maybe_change_statement = if change_confidential_amount.is_zero() {
+        let maybe_change_statement = if change_amount.is_zero() {
             None
         } else {
-            let change =
-                self.create_output_statement(owner_public_key, change_confidential_amount, resource_view_key)?;
+            let change_public_key = RistrettoPublicKey::try_from_byte_type(&params.owner_account.owner_public_key)
+                .map_err(|e| StealthTransferApiError::InvalidParameter {
+                    param: "owner_public_key",
+                    reason: format!("Invalid owner public key: {e}"),
+                })?;
+
+            let change = self.create_output_statement(&change_public_key, change_amount, resource_view_key)?;
 
             let change_value = change.statement.amount;
 
@@ -553,6 +560,7 @@ where
                     encryption_secret_key_index: params.owner_account.key_index(),
                     encrypted_data: change.statement.encrypted_data.clone(),
                     status: OutputStatus::LockedUnconfirmed,
+                    tag_byte: change.tag,
                     lock_id: Some(inputs_to_spend.lock_id),
                 })?;
             }
@@ -572,6 +580,11 @@ where
             &outputs,
             params.revealed_output_amount,
         )?;
+
+        let fee_account_secret = self.key_manager_api.derive_account_key(fee_account.key_index())?;
+        let src_account_secret = self
+            .key_manager_api
+            .derive_account_key(params.owner_account.key_index())?;
 
         let network = self.config_api.get_network()?;
         let transaction = Transaction::builder()
@@ -597,22 +610,30 @@ where
                 }
 
                 // If the transfer creates revealed outputs, deposit the bucket into the destination account.
-                    builder.put_last_instruction_output_on_workspace("output_bucket").then(|builder| {
-                        if need_to_create_account {
-                            builder.create_account_with_bucket(
-                                params.destination_public_key,
-                                "output_bucket",
-                            )
-                        } else {
-                            builder.call_method(
-                                params.derived_destination_account(),
-                                "deposit",
-                                args![Workspace("output_bucket")],
-                            )
-                        }
-                    })
+                builder.put_last_instruction_output_on_workspace("output_bucket").then(|builder| {
+                    if need_to_create_account {
+                        builder.create_account_with_bucket(
+                            params.destination_public_key,
+                            "output_bucket",
+                        )
+                    } else {
+                        builder.call_method(
+                            params.derived_destination_account(),
+                            "deposit",
+                            args![Workspace("output_bucket")],
+                        )
+                    }
+                })
             })
             .with_inputs(inputs)
+            .then(|builder| {
+                // If the fee account is different from the owner account, we need to add a signature to authorize the revealed funds withdraw.
+                if inputs_to_spend.revealed.is_positive() && params.owner_account.owner_public_key != *fee_account.owner_public_key() {
+                    builder.add_signature(fee_account.owner_public_key(), &src_account_secret.key)
+                } else {
+                    builder
+                }
+            })
             .build_and_seal(&fee_account_secret.key);
 
         let tx_id = transaction.calculate_id();
@@ -655,6 +676,8 @@ where
         // Create stealth address - used during spend time
         let output_owner_public_key = kdfs::owner_stealth_dh_stealth_address(network, dest_public_key, &nonce_secret);
 
+        let derived_tag = kdfs::derive_stealth_output_tag(network, &dest_public_key.to_byte_type());
+
         Ok(UnblindedStealthOutputStatement {
             statement: UnblindedOutputStatement {
                 amount: confidential_amount,
@@ -665,6 +688,7 @@ where
                 resource_view_key,
             },
             output_owner_public_key,
+            tag: derived_tag,
         })
     }
 }

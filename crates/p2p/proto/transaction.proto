@@ -206,6 +206,7 @@ message StealthOutputsStatement {
 message StealthUnspentOutput {
   UnspentOutput output = 1;
   bytes owner_public_key = 2;
+  uint32 tag_byte = 3;
 }
 
 message StealthInput {

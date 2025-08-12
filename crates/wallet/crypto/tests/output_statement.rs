@@ -29,6 +29,8 @@ fn it_create_a_valid_revealed_only_proof() {
 }
 
 mod stealth_tests {
+    use tari_template_lib::types::crypto::UtxoTagByte;
+
     use super::*;
 
     #[test]
@@ -38,7 +40,7 @@ mod stealth_tests {
     }
 
     #[test]
-    fn it_creates_a_valid_balance_proof() {
+    fn it_creates_a_valid_statement() {
         let inputs = make_input_statements(&[(1, 1000), (2, 2000), (3, 3000)]);
         let revealed_input_amount = Amount::zero();
 
@@ -57,7 +59,7 @@ mod stealth_tests {
     }
 
     #[test]
-    fn it_creates_a_valid_balance_proof_with_revealed() {
+    fn it_creates_a_valid_statement_with_revealed() {
         let inputs = make_input_statements(&[(1, 1000), (2, 2000), (3, 3000)]);
         let revealed_input_amount = Amount::from(6000);
 
@@ -76,7 +78,7 @@ mod stealth_tests {
     }
 
     #[test]
-    fn it_creates_a_valid_balance_proof_with_revealed_only() {
+    fn it_creates_a_valid_statement_with_revealed_only() {
         let revealed_input_amount = Amount::from(6000);
         let revealed_output_amount = Amount::from(6000);
         let statement = create_transfer_statement(&[], revealed_input_amount, &[], revealed_output_amount).unwrap();
@@ -128,6 +130,7 @@ mod stealth_tests {
                 UnblindedStealthOutputStatement {
                     statement,
                     output_owner_public_key,
+                    tag: UtxoTagByte::new(0),
                 }
             })
             .collect()

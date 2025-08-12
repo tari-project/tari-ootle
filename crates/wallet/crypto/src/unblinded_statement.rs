@@ -3,7 +3,10 @@
 
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey};
 use tari_engine_types::crypto::commit_amount_checked;
-use tari_template_lib::{models::EncryptedData, types::Amount};
+use tari_template_lib::{
+    models::EncryptedData,
+    types::{crypto::UtxoTagByte, Amount},
+};
 
 #[derive(Debug, Clone)]
 pub struct UnblindedOutputStatement {
@@ -25,6 +28,7 @@ impl UnblindedOutputStatement {
 pub struct UnblindedStealthOutputStatement {
     pub statement: UnblindedOutputStatement,
     pub output_owner_public_key: RistrettoPublicKey,
+    pub tag: UtxoTagByte,
 }
 
 #[derive(Debug, Clone)]

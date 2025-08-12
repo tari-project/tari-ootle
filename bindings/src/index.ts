@@ -139,6 +139,7 @@ export * from "./types/UtxoAddressContents";
 export * from "./types/UtxoAddress";
 export * from "./types/UtxoId";
 export * from "./types/UtxoOutput";
+export * from "./types/UtxoTagByte";
 export * from "./types/Utxo";
 export * from "./types/ValidatorFeePoolAddress";
 export * from "./types/ValidatorFeePool";

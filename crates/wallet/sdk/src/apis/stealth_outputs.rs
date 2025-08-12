@@ -245,7 +245,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
     ) -> Result<Vec<StealthOutputModel>, StealthOutputsApiError> {
         let balance = self
             .store
-            .with_write_tx(|tx| tx.stealth_outputs_get_all_by_account(account_address))?;
+            .with_read_tx(|tx| tx.stealth_outputs_get_all_by_account(account_address))?;
         Ok(balance)
     }
 
@@ -255,7 +255,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
     ) -> Result<StealthBalance, StealthOutputsApiError> {
         let balance = self
             .store
-            .with_write_tx(|tx| tx.stealth_outputs_get_unspent_balance(resource_address))?;
+            .with_read_tx(|tx| tx.stealth_outputs_get_unspent_balance(resource_address))?;
         Ok(balance)
     }
 
@@ -390,7 +390,24 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                 &output_stealth_public_nonce,
             );
             let (value, status) = match unblinded_result {
-                Ok(output) => (output.value, OutputStatus::Unspent),
+                Ok(output) => {
+                    let stealth_address = kdfs::owner_stealth_dh_stealth_address(
+                        network,
+                        &output_stealth_public_nonce,
+                        &wallet_key.secret_key.key,
+                    );
+                    if utxo.owner_public_key == stealth_address.to_byte_type() {
+                        (output.value, OutputStatus::Unspent)
+                    } else {
+                        warn!(
+                            target: LOG_TARGET,
+                            "Output owner public key does not match the expected stealth address. (expected: {}, actual: {}). Utxo cannot be spent by this wallet.",
+                            stealth_address,
+                            utxo.owner_public_key
+                        );
+                        (output.value, OutputStatus::Invalid)
+                    }
+                },
                 Err(e) => {
                     debug!(
                         target: LOG_TARGET,
@@ -405,21 +422,6 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
 
             let owner_account =
                 derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &wallet_key.public_key);
-            let stealth_address = kdfs::owner_stealth_dh_stealth_address(
-                network,
-                &output_stealth_public_nonce,
-                &wallet_key.secret_key.key,
-            );
-            if utxo.owner_public_key != stealth_address.to_byte_type() {
-                warn!(
-                    target: LOG_TARGET,
-                    "Output owner public key does not match the expected stealth address. (expected: {}, actual: {})",
-                    stealth_address,
-                    utxo.owner_public_key
-                );
-                // TODO: maybe mark this output as unspenable?
-            }
-
             info!(
                 target: LOG_TARGET,
                 "🟢 Unblinded output for account {}. (commitment: {}, value: {})",
@@ -438,6 +440,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                 sender_public_nonce: output_stealth_public_nonce.to_byte_type(),
                 encryption_secret_key_index: wallet_key.key_index(),
                 encrypted_data: utxo.output.encrypted_data.clone(),
+                tag_byte: utxo.tag,
                 status,
                 lock_id: None,
             }));

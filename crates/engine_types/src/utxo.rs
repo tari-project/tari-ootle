@@ -12,7 +12,7 @@ use tari_bor::{BorTag, Deserialize, Serialize};
 use tari_template_lib::{
     models::{BinaryTag, ResourceAddress},
     prelude::{from_hex, serde_helpers, KeyParseError, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
-    types::hex::write_hex_fmt,
+    types::{crypto::UtxoTagByte, hex::write_hex_fmt},
 };
 
 use crate::crypto::PrivateOutput;
@@ -39,6 +39,7 @@ pub struct UtxoOutput {
     /// The public key that must prove ownership of this UTXO. This is typically a one time "stealth" public key but is
     /// selected by the client.
     pub owner_public_key: RistrettoPublicKeyBytes,
+    pub tag: UtxoTagByte,
 }
 
 impl Utxo {
@@ -72,6 +73,10 @@ impl Utxo {
 
     pub fn is_burnt(&self) -> bool {
         self.output.is_none()
+    }
+
+    pub fn tag(&self) -> Option<UtxoTagByte> {
+        self.output.as_ref().map(|o| o.tag)
     }
 }
 

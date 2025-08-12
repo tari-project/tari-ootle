@@ -23,6 +23,7 @@ use tari_ootle_wallet_sdk::{
         NonFungibleToken,
         OutputLockId,
         OutputStatus,
+        ResourceModel,
         StealthOutputModel,
         SubstateModel,
         TransactionStatus,
@@ -727,6 +728,40 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
+    // -------------------------------- Resource -------------------------------- //
+    fn resources_upsert(&mut self, resource: ResourceModel) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "resources_insert";
+        use crate::schema::resources;
+
+        let resource_address = resource.address.to_string();
+        let resource_type = resource.resource_type.to_string();
+
+        diesel::insert_into(resources::table)
+            .values((
+                resources::address.eq(resource_address),
+                resources::resource_type.eq(&resource_type),
+                resources::token_symbol.eq(resource.token_symbol.as_ref()),
+                resources::divisibility.eq(i32::from(resource.divisibility)),
+                resources::access_rules.eq(serialize_json(&resource.access_rules)?),
+                resources::metadata.eq(serialize_json(&resource.metadata)?),
+                resources::total_supply.eq(resource.total_supply.as_ref().map(ToString::to_string)),
+            ))
+            .on_conflict(resources::address)
+            .do_update()
+            .set((
+                resources::resource_type.eq(&resource_type),
+                resources::token_symbol.eq(resource.token_symbol.as_ref()),
+                resources::divisibility.eq(i32::from(resource.divisibility)),
+                resources::access_rules.eq(serialize_json(&resource.access_rules)?),
+                resources::metadata.eq(serialize_json(&resource.metadata)?),
+                resources::total_supply.eq(resource.total_supply.as_ref().map(ToString::to_string)),
+                resources::updated_at.eq(diesel::dsl::now),
+            ))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        Ok(())
+    }
+
     // -------------------------------- Outputs -------------------------------- //
 
     fn outputs_lock_smallest_amount(
@@ -980,6 +1015,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 stealth_outputs::sender_public_nonce.eq(serialize_hex(output.sender_public_nonce)),
                 stealth_outputs::encryption_secret_key_index.eq(output.encryption_secret_key_index as i64),
                 stealth_outputs::encrypted_data.eq(output.encrypted_data.as_ref()),
+                stealth_outputs::tag_byte.eq(i32::from(output.tag_byte.as_byte())),
                 stealth_outputs::status.eq(output.status.as_key_str()),
                 stealth_outputs::lock_id.eq(output.lock_id.map(|v| v as i32)),
             ))

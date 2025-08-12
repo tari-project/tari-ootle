@@ -9,6 +9,7 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
 use tari_ootle_common_types::{base_layer_hashing::encrypted_data_hasher, Network};
+use tari_template_lib::{prelude::RistrettoPublicKeyBytes, types::crypto::UtxoTagByte};
 use tari_utilities::{hidden_type, safe_array::SafeArray, Hidden};
 use zeroize::Zeroize;
 
@@ -71,4 +72,29 @@ pub fn owner_stealth_dh_stealth_address(
 
     // c.G + k.G
     c_g + public_key
+}
+
+pub fn derive_stealth_output_tag(network: Network, owner_public_key: &RistrettoPublicKeyBytes) -> UtxoTagByte {
+    let result = stealth_owner_hasher64(network).chain(owner_public_key).finalize();
+
+    UtxoTagByte::new(result[0])
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_common_types::crypto::create_key_pair_from_seed;
+
+    use super::*;
+
+    #[test]
+    fn it_generates_the_correct_private_stealth_address() {
+        let network = Network::LocalNet;
+        let (secret_key, public_key) = create_key_pair_from_seed(123);
+        let (secret_nonce, public_nonce) = create_key_pair_from_seed(234);
+
+        let stealth_address = owner_stealth_dh_stealth_address(network, &public_key, &secret_nonce);
+        let stealth_secret = owner_stealth_dh_secret(network, &secret_key, &public_nonce);
+        let expected_stealth_address = RistrettoPublicKey::from_secret_key(&stealth_secret);
+        assert_eq!(stealth_address, expected_stealth_address);
+    }
 }

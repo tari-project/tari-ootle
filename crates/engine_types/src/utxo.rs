@@ -75,6 +75,7 @@ impl Utxo {
         self.output.is_none()
     }
 
+    /// Returns the UTXO’s tag byte if the UTXO has not been burnt.
     pub fn tag(&self) -> Option<UtxoTagByte> {
         self.output.as_ref().map(|o| o.tag)
     }

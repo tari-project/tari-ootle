@@ -94,6 +94,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     amount: false,
   });
   const [allValid, setAllValid] = useState(false);
+  const { mutateAsync: sendIt } = useAccountsTransfer();
 
   const { account, setPopup } = useAccountStore();
   if (!account) {
@@ -118,8 +119,6 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     input_selection: transferFormState.inputSelection as ConfidentialTransferInputSelection,
     badge: transferFormState.badge,
   };
-
-  const { mutateAsync: sendIt } = useAccountsTransfer();
 
   function setFormValue(e: React.ChangeEvent<HTMLInputElement>) {
     setTransferFormState({

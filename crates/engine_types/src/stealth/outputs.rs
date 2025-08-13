@@ -33,11 +33,11 @@ pub fn validate_stealth_outputs_statement(
     stmt: &StealthOutputsStatement,
     view_key: Option<&RistrettoPublicKey>,
 ) -> Result<Vec<ValidatedStealthOutput>, ResourceError> {
+    // Edge case: Asserts that the bulletproof is 0 bytes if there are no outputs
+    validate_bullet_proof(&stmt.agg_range_proof, stmt.outputs.iter().map(|o| &o.output))?;
     if stmt.outputs.is_empty() {
         return Ok(vec![]);
     }
-
-    validate_bullet_proof(&stmt.agg_range_proof, stmt.outputs.iter().map(|o| &o.output))?;
 
     let outputs = stmt
         .outputs

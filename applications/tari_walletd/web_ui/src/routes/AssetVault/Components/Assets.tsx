@@ -48,7 +48,6 @@ import {
   Amount,
 } from "@tari-project/typescript-bindings";
 import CopyAddress from "../../../Components/CopyAddress";
-import { Refresh } from "@mui/icons-material";
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -225,7 +224,7 @@ function Assets({ account }: { account: Account }) {
                       resource_type={resource_type}
                       balance={balance}
                       confidential_balance={confidential_balance}
-                      vault_address={vault_address as unknown as string}
+                      vault_address={vault_address ?? undefined} // convert null to undefined
                       divisibility={divisibility}
                       onSendClicked={handleSendResourceClicked}
                     />

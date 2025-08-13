@@ -39,6 +39,13 @@ pub fn validate_transfer(
 
     // EDGE CASE: If there are no inputs and no outputs, the public excess will be 0.G
     if transfer.inputs_statement.inputs.is_empty() && validated_outputs.is_empty() {
+        // Ensure that the range proof is empty
+        if !transfer.outputs_statement.agg_range_proof.is_empty() {
+            return Err(ResourceError::InvalidBalanceProof {
+                details: "Range proof must be empty when there are no inputs or outputs".to_string(),
+            });
+        }
+
         // The public excess is 0 (s = r + e.0) so we check s.G ?= r.G + e.0.G - NOTE: normal signature verification
         // explicitly rejects the zero key however since we've checked that the revealed amounts are equal and
         // there are no inputs or outputs (basic_validations), we consider this a valid balance proof.

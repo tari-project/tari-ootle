@@ -43,7 +43,7 @@ impl StealthOutput {
                     details: format!("Corrupt db: invalid resource address '{}'", self.resource_address),
                 })?,
             commitment: deserialize_hex_try_from(&self.commitment).map_err(|_| WalletStorageError::DecodingError {
-                operation: "outputs_lock_smallest_amount",
+                operation: "try_into_output",
                 item: "output commitment",
                 details: "Corrupt db: invalid hex representation".to_string(),
             })?,

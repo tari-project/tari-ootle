@@ -9,13 +9,14 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tari_ootle_common_types::{shard::Shard, Epoch};
-use tari_state_tree::SubstateTreeChange;
+use tari_state_tree::{SubstateTreeChange, Version};
 
 use crate::{consensus_models::SubstateUpdate, StateStoreReadTransaction, StorageError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateTransition {
     pub id: StateTransitionId,
+    pub state_version: Version,
     pub update: SubstateUpdate,
 }
 

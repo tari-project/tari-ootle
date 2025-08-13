@@ -89,29 +89,6 @@ message GetPeersResponse {
   repeated tari.ootle.network.PeerIdentityClaim claims = 2;
 }
 
-message VnStateSyncRequest {
-  tari.ootle.common.SubstateAddress start_address = 1;
-  tari.ootle.common.SubstateAddress end_address = 2;
-  repeated tari.ootle.common.SubstateAddress inventory = 3;
-}
-
-message VnStateSyncResponse {
-  bytes address = 1;
-  uint32 version = 2;
-  bytes substate = 3;
-
-  uint64 created_epoch = 4;
-  uint64 created_height = 5;
-  bytes created_block = 6;
-  bytes created_transaction = 7;
-  bytes created_justify = 8;
-
-  tari.ootle.common.Epoch destroyed_epoch = 9;
-  bytes destroyed_block = 10;
-  bytes destroyed_transaction = 11;
-  bytes destroyed_justify = 12;
-}
-
 message GetSubstateRequest {
   tari.ootle.transaction.SubstateRequirement substate_requirement = 1;
 }
@@ -244,6 +221,7 @@ message SyncStateResponse {
 message StateTransition {
   StateTransitionId id = 1;
   SubstateUpdate update = 2;
+  uint64 state_version = 3;
 }
 
 message StateTransitionId {

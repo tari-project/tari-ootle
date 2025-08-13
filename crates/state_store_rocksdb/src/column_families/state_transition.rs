@@ -23,6 +23,7 @@
 use serde::{Deserialize, Serialize};
 use tari_ootle_common_types::{shard::Shard, SubstateAddress};
 use tari_ootle_storage::consensus_models::StateTransitionId;
+use tari_state_tree::Version;
 
 use crate::{
     codecs::{DefaultCodec, EpochCodec, NumberCodec, ShardCodec, StateTransitionIdCodec},
@@ -33,6 +34,7 @@ use crate::{
 pub struct StateTransitionModelData {
     pub substate_address: SubstateAddress,
     pub transition: StateTransitionType,
+    pub state_version: Version,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

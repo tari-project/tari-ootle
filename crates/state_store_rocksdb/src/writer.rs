@@ -1216,6 +1216,12 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             OPERATION,
         )?;
 
+        let shard_state_version = db
+            .cf(StateTreeShardVersionCf)?
+            .get(&substate.created_by_shard, OPERATION)
+            .optional()?
+            .unwrap_or_default();
+
         let seq_index = db.cf(state_transition::ShardSeqIndex)?;
         let seq = seq_index.get(&substate.created_by_shard, OPERATION).optional()?;
         let next_seq = seq.map(|s| s + 1).unwrap_or(1);
@@ -1223,6 +1229,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let id = StateTransitionId::new(substate.created_at_epoch, substate.created_by_shard, next_seq);
         let transition = StateTransitionModelData {
             substate_address: address,
+            state_version: shard_state_version,
             transition: StateTransitionType::Up,
         };
 
@@ -1269,8 +1276,16 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let next_seq = seq.map(|s| s + 1).unwrap_or(1);
 
         let transitions_cf = db.cf(StateTransitionCf)?;
+
+        let shard_state_version = db
+            .cf(StateTreeShardVersionCf)?
+            .get(&shard, OPERATION)
+            .optional()?
+            .unwrap_or_default();
+
         let data = StateTransitionModelData {
             substate_address: address,
+            state_version: shard_state_version,
             transition: StateTransitionType::Down,
         };
         let id = StateTransitionId::new(epoch, shard, next_seq);

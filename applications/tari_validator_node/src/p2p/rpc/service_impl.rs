@@ -54,7 +54,7 @@ use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
 use tari_template_lib::types::{HashParseError, TemplateAddress};
 use tari_template_manager::interface::TemplateManagerHandle;
 use tari_transaction::{Transaction, TransactionId};
-use tari_validator_node_rpc::rpc_service::ValidatorNodeRpcService;
+use tari_validator_node_rpc::{rpc_service::ValidatorNodeRpcService, STATE_SYNC_MAX_BATCH_SIZE};
 use tokio::{sync::mpsc, task};
 
 use crate::p2p::{
@@ -393,6 +393,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
                 sender,
                 last_state_transition_for_chain,
                 end_epoch,
+                STATE_SYNC_MAX_BATCH_SIZE,
             )
             .run(),
         );

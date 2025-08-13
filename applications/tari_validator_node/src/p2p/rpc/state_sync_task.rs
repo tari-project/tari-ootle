@@ -14,8 +14,6 @@ use tokio::sync::mpsc;
 
 const LOG_TARGET: &str = "tari::ootle::rpc::sync_task";
 
-const BATCH_SIZE: usize = 100;
-
 type UpdateBuffer = Vec<StateTransition>;
 
 pub struct StateSyncTask<TStateStore: StateStore> {
@@ -23,6 +21,7 @@ pub struct StateSyncTask<TStateStore: StateStore> {
     sender: mpsc::Sender<Result<SyncStateResponse, RpcStatus>>,
     start_state_transition_id: StateTransitionId,
     current_epoch: Epoch,
+    batch_size: usize,
 }
 
 impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
@@ -31,17 +30,19 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
         sender: mpsc::Sender<Result<SyncStateResponse, RpcStatus>>,
         start_state_transition_id: StateTransitionId,
         current_epoch: Epoch,
+        batch_size: usize,
     ) -> Self {
         Self {
             store,
             sender,
             start_state_transition_id,
             current_epoch,
+            batch_size,
         }
     }
 
     pub async fn run(mut self) -> Result<(), ()> {
-        let mut buffer = Vec::with_capacity(BATCH_SIZE);
+        let mut buffer = Vec::with_capacity(self.batch_size);
         let mut current_state_transition_id = self.start_state_transition_id;
         let mut counter = 0usize;
         loop {
@@ -93,7 +94,7 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
     ) -> Result<Option<StateTransitionId>, StorageError> {
         self.store.with_read_tx(|tx| {
             let state_transitions =
-                StateTransition::get_n_after(tx, BATCH_SIZE, current_state_transition_id, self.current_epoch)
+                StateTransition::get_n_after(tx, self.batch_size, current_state_transition_id, self.current_epoch)
                     .optional()?
                     .unwrap_or_default();
 

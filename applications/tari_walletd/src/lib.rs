@@ -74,9 +74,7 @@ pub async fn run_tari_ootle_walletd(
 
     let needs_seed_recovery = wallet_sdk.initialize_cipher_seed(cli.wallet_restore.seed_words.as_ref())?;
 
-    wallet_sdk
-        .key_manager_api()
-        .get_or_create_initial(KeyBranch::Transaction)?;
+    wallet_sdk.key_manager_api().get_or_create_initial(KeyBranch::Account)?;
 
     let notify = Notify::new(100);
     let services = spawn_services(shutdown_signal.clone(), notify.clone(), wallet_sdk.clone());

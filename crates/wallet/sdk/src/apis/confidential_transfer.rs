@@ -7,7 +7,7 @@ use digest::crypto_common::rand_core::OsRng;
 use log::*;
 use tari_bor::{Deserialize, Serialize};
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
-use tari_engine_types::{substate::SubstateId, FromByteType, ToByteType};
+use tari_engine_types::{FromByteType, ToByteType};
 use tari_ootle_common_types::{optional::IsNotFoundError, SubstateRequirement};
 use tari_ootle_wallet_crypto::{MaskAndValue, UnblindedOutputStatement};
 use tari_template_lib::{
@@ -236,10 +236,7 @@ where
         inputs.push(SubstateRequirement::unversioned(params.resource_address));
 
         // We need to fetch the resource substate to check if there is a view key present.
-        let resource_substate = self
-            .substate_api
-            .scan_for_substate(&SubstateId::Resource(params.resource_address), None)
-            .await?;
+        let resource = self.substate_api.fetch_resource(params.resource_address).await?;
 
         if let Some(ref resource_address) = params.proof_from_resource {
             inputs.push(SubstateRequirement::unversioned(*resource_address));
@@ -314,7 +311,7 @@ where
                 // This is a hack that addresses the case where input locking fails after the fee transaction. However
                 // any error after this point do not undo locking. This is a limitation of the current
                 // design - the db transaction should be passed in and automatically rolled back on error.
-                if let Err(err) = self.outputs_api.release_proof_outputs(fee_inputs_to_spend.lock_id) {
+                if let Err(err) = self.outputs_api.release_locked_outputs(fee_inputs_to_spend.lock_id) {
                     error!(
                         target: LOG_TARGET,
                         "Failed to release fee inputs for transfer: {}",
@@ -327,15 +324,7 @@ where
         };
 
         // Generate outputs
-        let resource_view_key = resource_substate
-            .substate
-            .as_resource()
-            .ok_or_else(|| ConfidentialTransferApiError::UnexpectedIndexerResponse {
-                details: format!(
-                    "Expected indexer to return resource for address {}. It returned {}",
-                    params.resource_address, resource_substate.address
-                ),
-            })?
+        let resource_view_key = resource
             .view_key()
             .map(RistrettoPublicKey::try_from_byte_type)
             .transpose()
@@ -451,14 +440,14 @@ where
 
         let tx_id = transaction.calculate_id();
         self.outputs_api
-            .proofs_set_transaction_hash(inputs_to_spend.lock_id, tx_id)?;
+            .locks_set_transaction_hash(inputs_to_spend.lock_id, tx_id)?;
         self.outputs_api
-            .proofs_set_transaction_hash(fee_inputs_to_spend.lock_id, tx_id)?;
+            .locks_set_transaction_hash(fee_inputs_to_spend.lock_id, tx_id)?;
 
         Ok(TransferOutput {
             transaction,
-            fee_transaction_proof_id: Some(fee_inputs_to_spend.lock_id),
-            transaction_proof_id: Some(inputs_to_spend.lock_id),
+            fee_transaction_proof_id: fee_inputs_to_spend.lock_id,
+            transaction_proof_id: inputs_to_spend.lock_id,
         })
     }
 
@@ -505,8 +494,8 @@ where
 
 pub struct TransferOutput {
     pub transaction: Transaction,
-    pub fee_transaction_proof_id: Option<OutputLockId>,
-    pub transaction_proof_id: Option<OutputLockId>,
+    pub fee_transaction_proof_id: OutputLockId,
+    pub transaction_proof_id: OutputLockId,
 }
 
 #[derive(Debug)]

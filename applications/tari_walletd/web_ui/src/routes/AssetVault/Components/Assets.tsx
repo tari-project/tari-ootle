@@ -48,7 +48,6 @@ import {
   Amount,
 } from "@tari-project/typescript-bindings";
 import CopyAddress from "../../../Components/CopyAddress";
-import { Refresh } from "@mui/icons-material";
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -60,7 +59,7 @@ interface BalanceRowProps {
   token_symbol: string;
   resource_address: ResourceAddress;
   resource_type: ResourceType;
-  vault_address: VaultId;
+  vault_address?: VaultId;
   balance: Amount;
   confidential_balance: Amount;
   divisibility: number;
@@ -81,9 +80,7 @@ function BalanceRow(props: BalanceRowProps) {
   const { showBalance } = useAccountStore();
   return (
     <TableRow key={token_symbol || resource_address}>
-      <DataTableCell>
-        <CopyAddress address={vault_address} />
-      </DataTableCell>
+      <DataTableCell>{vault_address ? <CopyAddress address={vault_address} /> : "--"}</DataTableCell>
       <DataTableCell>
         <CopyAddress
           address={resource_address}
@@ -111,6 +108,7 @@ function BalanceRow(props: BalanceRowProps) {
 function ConfidentialBalance(props: { show: boolean; balance: Amount; resourceType: string; divisibility: number }) {
   switch (props.resourceType) {
     case "Confidential":
+    case "Stealth":
       return <>{props.show ? bigintToDecimalString(props.balance, props.divisibility) : "**************"}</>;
     default:
       return <>--</>;
@@ -180,7 +178,7 @@ function Assets({ account }: { account: Account }) {
         handleClose={() => setResourceToSend(null)}
         onSendComplete={() => setResourceToSend(null)}
         resource_address={resourceToSend?.address}
-        resource_type={resourceToSend?.resource_type}
+        resource_type={resourceToSend?.resource_type!}
       />
       <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
         <Tabs value={value} onChange={handleChange} aria-label="account assets" variant="standard">
@@ -226,7 +224,7 @@ function Assets({ account }: { account: Account }) {
                       resource_type={resource_type}
                       balance={balance}
                       confidential_balance={confidential_balance}
-                      vault_address={vault_address as unknown as string}
+                      vault_address={vault_address ?? undefined} // convert null to undefined
                       divisibility={divisibility}
                       onSendClicked={handleSendResourceClicked}
                     />

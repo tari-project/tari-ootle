@@ -54,7 +54,10 @@ const renderJson = (json: any) => {
     );
   } else {
     if (typeof json === "string") return <span className="string">"{json}"</span>;
-    return <span className="other">{json}</span>;
+    if (typeof json === "boolean") return <span className="boolean">{json ? "true" : "false"}</span>;
+    if (json === null) return <span className="null">null</span>;
+    if (typeof json === "undefined") return <span className="undefined">undefined</span>;
+    return <span className="other">{json.toString()}</span>;
   }
 };
 
@@ -90,12 +93,12 @@ export { renderJson };
 
 export function truncateText(text: string, length: number) {
   if (!length || !text || text.length <= length) {
-      return text;
+    return text;
   }
   if (text.length <= length) {
-      return text;
+    return text;
   }
-  const leftChars = Math.ceil(length/2);
-  const rightChars = Math.floor(length/2);
-  return text.substring(0, leftChars) + '...' + text.substring(text.length - rightChars);
+  const leftChars = Math.ceil(length / 2);
+  const rightChars = Math.floor(length / 2);
+  return text.substring(0, leftChars) + "..." + text.substring(text.length - rightChars);
 }

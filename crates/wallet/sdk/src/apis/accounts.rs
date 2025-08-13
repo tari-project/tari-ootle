@@ -35,6 +35,10 @@ pub struct AccountsApi<'a, TStore, TNetworkInterface> {
     key_manager_api: KeyManagerApi<'a, TStore>,
 }
 
+pub fn derive_account_address_from_public_key(public_key: &RistrettoPublicKeyBytes) -> ComponentAddress {
+    derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, public_key)
+}
+
 impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetworkInterface> {
     pub fn new(
         store: &'a TStore,
@@ -302,7 +306,7 @@ where
 
         match self
             .substates_api
-            .scan_for_substate(&account_component.into(), None)
+            .fetch_substate_from_network(&account_component.into(), None)
             .await
             .optional()?
         {

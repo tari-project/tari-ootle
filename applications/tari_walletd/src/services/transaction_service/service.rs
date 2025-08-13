@@ -118,11 +118,10 @@ where
             TransactionServiceRequest::SubmitDryRunTransaction { transaction, reply } => {
                 let transaction_id = transaction.calculate_id();
                 let transaction_api = self.wallet_sdk.transaction_api();
+                // Unlock all locks related to the transaction immediately since this is a dry run
+                transaction_api.release_all_outputs_for_transaction(transaction_id)?;
                 match transaction_api.submit_dry_run_transaction(transaction).await {
                     Ok(finalized_transaction) => {
-                        // Unlock all proofs related to the transaction
-                        transaction_api.release_all_outputs_for_transaction(transaction_id)?;
-
                         let finalize = finalized_transaction.finalize.ok_or_else(|| {
                             TransactionServiceError::DryRunTransactionFailed {
                                 details: "Transaction was not finalized".to_string(),
@@ -136,10 +135,6 @@ where
                             .map_err(|_| TransactionServiceError::ServiceShutdown)?;
                     },
                     Err(e) => {
-                        if let Err(err) = transaction_api.release_all_outputs_for_transaction(transaction_id) {
-                            error!(target: LOG_TARGET, "Error releasing outputs for transaction {}: {}", transaction_id, err);
-                        }
-
                         reply
                             .send(Err(e.into()))
                             .map_err(|_| TransactionServiceError::ServiceShutdown)?;

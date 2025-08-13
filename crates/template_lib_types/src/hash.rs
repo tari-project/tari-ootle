@@ -71,8 +71,8 @@ impl Hash {
         Ok(())
     }
 
-    pub fn try_from_vec(data: Vec<u8>) -> Result<Self, HashParseError> {
-        Self::try_from(data.as_slice())
+    pub fn try_from_slice(data: &[u8]) -> Result<Self, HashParseError> {
+        Self::try_from(data)
     }
 
     /// Returns the leading `N` bytes of the hash

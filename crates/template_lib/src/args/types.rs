@@ -42,7 +42,7 @@ use crate::{
         ProofId,
         ResourceAddress,
         ResourceAddressAllocation,
-        StealthMintStatement,
+        StealthTransferStatement,
         VaultId,
         VaultRef,
     },
@@ -239,6 +239,8 @@ pub enum ResourceAction {
     UpdateAccessRules,
     /// Sets the freeze flags on a vault of a resource.
     SetFreeze,
+    /// Executes a stealth transfer for the resource
+    StealthTransfer,
 }
 
 /// All the possible minting operation types
@@ -254,7 +256,7 @@ pub enum MintArg {
         statement: Box<ConfidentialOutputStatement>,
     },
     Stealth {
-        statement: Box<StealthMintStatement>,
+        amount: Amount,
     },
 }
 
@@ -265,15 +267,6 @@ impl MintArg {
             MintArg::NonFungible { .. } => ResourceType::NonFungible,
             MintArg::Confidential { .. } => ResourceType::Confidential,
             MintArg::Stealth { .. } => ResourceType::Stealth,
-        }
-    }
-
-    pub fn expect_stealth_mint_statement(self) -> Box<StealthMintStatement> {
-        match self {
-            MintArg::Fungible { .. } | MintArg::NonFungible { .. } | MintArg::Confidential { .. } => {
-                panic!("called expect_stealth on non-stealth MintArg")
-            },
-            MintArg::Stealth { statement } => statement,
         }
     }
 }
@@ -297,6 +290,13 @@ pub struct CreateResourceArg {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MintResourceArg {
     pub mint_arg: MintArg,
+}
+
+/// Stealth transfer operation argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StealthTransferResourceArg {
+    pub transfer: StealthTransferStatement,
+    pub input_bucket: Option<BucketId>,
 }
 
 /// A resource minting operation argument

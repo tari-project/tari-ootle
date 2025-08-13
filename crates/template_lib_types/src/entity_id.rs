@@ -182,8 +182,8 @@ impl ObjectKey {
         Ok(())
     }
 
-    pub fn try_from_vec(data: Vec<u8>) -> Result<Self, KeyParseError> {
-        Self::try_from(data.as_slice())
+    pub fn try_from_slice(data: &[u8]) -> Result<Self, KeyParseError> {
+        Self::try_from(data)
     }
 
     pub fn as_entity_id(&self) -> EntityId {

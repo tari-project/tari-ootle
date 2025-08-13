@@ -10,6 +10,7 @@ mod range_proof;
 mod ristretto;
 mod scalar;
 mod schnorr;
+mod tag_byte;
 
 pub use balance_proof::*;
 pub use commitment::*;
@@ -18,5 +19,6 @@ pub use range_proof::*;
 pub use ristretto::*;
 pub use scalar::*;
 pub use schnorr::*;
+pub use tag_byte::*;
 
 pub use crate::error::*;

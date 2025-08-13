@@ -78,7 +78,7 @@ async fn main() -> Result<(), anyhow::Error> {
             };
 
             if *set_active {
-                km.set_active_key(KeyBranch::Transaction, secret.key_index)?;
+                km.set_active_key(KeyBranch::Account, secret.key_index)?;
             }
 
             let json = json!({

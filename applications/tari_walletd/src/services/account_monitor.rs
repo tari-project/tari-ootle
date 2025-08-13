@@ -20,6 +20,8 @@ use tari_ootle_wallet_sdk::{
         accounts::AccountsApiError,
         confidential_outputs::ConfidentialOutputsApiError,
         non_fungible_tokens::NonFungibleTokensApiError,
+        resources::ResourcesApiError,
+        stealth_outputs::StealthOutputsApiError,
         substate::{SubstateApiError, ValidatorScanResult},
         transaction::TransactionApiError,
     },
@@ -154,16 +156,35 @@ where
         let substate_api = self.wallet_sdk.substate_api();
         let accounts_api = self.wallet_sdk.accounts_api();
 
-        if !accounts_api.exists_by_address(&account_address)? {
+        let Some(account) = accounts_api.get_account_by_address(&account_address).optional()? else {
             // This is not our account
             return Ok(false);
-        }
+        };
 
         let mut is_updated = false;
-        let ValidatorScanResult {
+        let maybe_scan_result = substate_api
+            .fetch_substate_from_network(&account_address.into(), None)
+            .await
+            .optional()?;
+
+        let Some(ValidatorScanResult {
             address: account_substate_id,
             substate: account_value,
-        } = substate_api.scan_for_substate(&account_address.into(), None).await?;
+        }) = maybe_scan_result
+        else {
+            if account.is_confirmed_on_chain() {
+                warn!(target: LOG_TARGET, "Account {} does not exist according to indexer", account_address);
+            }
+            // Otherwise, the account is not on-chain, so we wouldn't expect the indexer to have it
+
+            return Ok(false);
+        };
+
+        if !account.is_confirmed_on_chain() {
+            // Mark the account as on-chain if it is not already
+            self.mark_account_as_on_chain(&account_address)?;
+            is_updated = true;
+        }
 
         let indexed_value = IndexedWellKnownTypes::from_value(account_value.component().unwrap().state())?;
         substate_api.save_root(account_substate_id.as_ref(), indexed_value.referenced_substates())?;
@@ -183,7 +204,7 @@ where
                 substate,
                 ..
             }) = substate_api
-                .scan_for_substate(&vault_substate_id, None)
+                .fetch_substate_from_network(&vault_substate_id, None)
                 .await
                 .optional()?
             else {
@@ -294,7 +315,7 @@ where
                 );
 
                 let resource = self.fetch_resource(*latest_vault.resource_address()).await?;
-                let token_symbol = resource.metadata().get(TOKEN_SYMBOL).cloned();
+                let token_symbol = resource.token_symbol().map(|s| s.to_string());
                 let divisibility = resource.divisibility();
 
                 accounts_api.add_vault(
@@ -478,17 +499,34 @@ where
 
         let mut new_account = None;
         if let Some(account) = self.pending_accounts.remove(&tx_id) {
+            let existing_account = accounts_api.get_account_by_address(&account.address).optional()?;
             // Check that the new account was created in this transaction
-            if !diff.up_iter().any(|(id, _)| *id == account.address) {
-                return Err(AccountMonitorError::ExpectedNewAccount {
+            if diff.up_iter().any(|(id, _)| *id == account.address) {
+                // NOTE: that account must exist by this point
+                self.mark_account_as_on_chain(&account.address)?;
+                new_account = existing_account;
+                debug!(
+                    target: LOG_TARGET,
+                    "👁️‍🗨️ New account {} created in transaction {}",
+                    account.address,
+                    tx_id
+                );
+            } else if existing_account.is_none_or(|acc| !acc.is_confirmed_on_chain()) {
+                warn!(
+                    target: LOG_TARGET,
+                    "⚠️ Transaction {} does not contain the new account {} but the account does not exist or is not on-chain. This should be impossible.",
                     tx_id,
-                    address: account.address,
-                });
+                    account.address,
+                );
+                // Continue anyway
+            } else {
+                info!(
+                    target: LOG_TARGET,
+                    "👁️‍🗨️ Account {} already exists and on-chain (processing transaction result {})",
+                    account.address,
+                    tx_id
+                );
             }
-            // NOTE: that account must exist by this point
-            self.mark_account_as_on_chain(&account.address)?;
-
-            new_account = Some(accounts_api.get_account_by_address(&account.address)?);
         }
 
         let mut vaults = diff
@@ -547,7 +585,7 @@ where
             }
         }
 
-        let mut updated_accounts = vec![];
+        let mut updated_accounts = HashSet::new();
         // Process all existing vaults that belong to an account
         for (vault_id, substate) in vaults {
             let vault_addr = SubstateId::Vault(vault_id);
@@ -606,15 +644,41 @@ where
 
             // Update the vault balance / confidential outputs
             self.refresh_vault(account_addr, vault_id, vault, updated_nfts).await?;
-            updated_accounts.push(account_addr);
+            updated_accounts.insert(account_addr);
         }
 
+        // Update UTXOs
+        let stealth_outputs_api = self.wallet_sdk.stealth_outputs_api();
+        let utxos = diff.up_iter().filter(|(id, _)| id.is_utxo_address()).map(|(id, s)| {
+            let utxo = s
+                .substate_value()
+                .as_utxo()
+                .unwrap_or_else(|| panic!("Expected {} to be a UTXO.", id));
+            (id.as_utxo_address().expect("is_utxo checked"), utxo)
+        });
+
+        // TODO: if we submitted this transaction, we could let this part of the code know which outputs are ours
+        stealth_outputs_api.verify_and_update_outputs(utxos)?;
+
         if let Some(account) = new_account {
+            debug!(
+                target: LOG_TARGET,
+                "👁️‍🗨️ Notifying account created for tx {}: {}",
+                tx_id,
+                account
+            );
             self.notify.notify(AccountCreatedEvent {
                 account: account.account,
                 _created_by_tx: tx_id,
             });
-        } else {
+        }
+        if !updated_accounts.is_empty() {
+            debug!(
+                target: LOG_TARGET,
+                "👁️‍🗨️ Notifying {} account(s) changed for tx {}",
+                updated_accounts.len(),
+                tx_id
+            );
             for account_address in updated_accounts {
                 self.notify.notify(AccountChangedEvent { account_address });
             }
@@ -628,12 +692,14 @@ where
         let resx = substate.into_substate_value().into_resource().ok_or_else(|| {
             AccountMonitorError::UnexpectedSubstate(format!("Expected {} to be a resource.", resx_addr))
         })?;
+        self.wallet_sdk.resources_api().upsert_resource(&resx_addr, &resx)?;
         Ok(resx)
     }
 
     async fn fetch_substate(&self, substate_id: &SubstateId) -> Result<Substate, AccountMonitorError> {
         let substate_api = self.wallet_sdk.substate_api();
-        let ValidatorScanResult { substate, address } = substate_api.scan_for_substate(substate_id, None).await?;
+        let ValidatorScanResult { substate, address } =
+            substate_api.fetch_substate_from_network(substate_id, None).await?;
         Ok(Substate::new(address.version(), substate))
     }
 
@@ -757,20 +823,18 @@ pub enum AccountMonitorError {
     Substate(#[from] SubstateApiError),
     #[error("Outputs API error: {0}")]
     ConfidentialOutputs(#[from] ConfidentialOutputsApiError),
+    #[error("Stealth Outputs API error: {0}")]
+    StealthOutputs(#[from] StealthOutputsApiError),
     #[error("Non Fungibles API error: {0}")]
     NonFungibleTokens(#[from] NonFungibleTokensApiError),
+    #[error("Resources API error: {0}")]
+    Resources(#[from] ResourcesApiError),
     #[error("Failed to decode binary value: {0}")]
     DecodeValueFailed(#[from] IndexedValueError),
     #[error("Unexpected substate: {0}")]
     UnexpectedSubstate(String),
     #[error("Monitor service is not running")]
     ServiceShutdown,
-
-    #[error("Expected new account '{address}'to be created in transaction {tx_id}")]
-    ExpectedNewAccount {
-        tx_id: TransactionId,
-        address: ComponentAddress,
-    },
 }
 
 impl IsNotFoundError for AccountMonitorError {

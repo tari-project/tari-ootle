@@ -37,6 +37,7 @@ use tari_ootle_wallet_sdk::{
         NonFungibleToken,
         OutputLockId,
         OutputStatus,
+        ResourceModel,
         StealthBalance,
         StealthOutputModel,
         SubstateModel,
@@ -255,7 +256,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             );
         }
         let rows = rows
-            .order(transactions::updated_at.desc())
+            .order(transactions::created_at.desc())
             .load::<models::Transaction>(self.connection())
             .map_err(|e| WalletStorageError::general("transactions_fetch_all", e))?;
 
@@ -555,6 +556,42 @@ impl WalletStoreReader for ReadTransaction<'_> {
         Ok(vaults)
     }
 
+    // -------------------------------- Resources -------------------------------- //
+    fn resources_get(&mut self, resource_address: &ResourceAddress) -> Result<ResourceModel, WalletStorageError> {
+        const OPERATION: &str = "resources_get";
+
+        use crate::schema::resources;
+
+        let row = resources::table
+            .filter(resources::address.eq(resource_address.to_string()))
+            .first::<models::ResourceModel>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "resource".to_string(),
+                key: resource_address.to_string(),
+            })?;
+
+        row.try_convert()
+    }
+
+    fn resources_get_many<'a, I: IntoIterator<Item = &'a ResourceAddress>>(
+        &mut self,
+        addresses: I,
+    ) -> Result<Vec<ResourceModel>, WalletStorageError> {
+        const OPERATION: &str = "resources_get_many";
+
+        use crate::schema::resources;
+
+        let rows = resources::table
+            .filter(resources::address.eq_any(addresses.into_iter().map(|addr| addr.to_string())))
+            .get_results::<models::ResourceModel>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        rows.into_iter().map(|r| r.try_convert()).collect()
+    }
+
     // -------------------------------- Outputs -------------------------------- //
     fn outputs_get_unspent_balance(&mut self, vault_address: &VaultId) -> Result<u64, WalletStorageError> {
         use crate::schema::{outputs, vaults};
@@ -745,6 +782,29 @@ impl WalletStoreReader for ReadTransaction<'_> {
         })
     }
 
+    fn stealth_outputs_get_unspent_by_account(
+        &mut self,
+        account_addr: &ComponentAddress,
+    ) -> Result<Vec<StealthOutputModel>, WalletStorageError> {
+        const OPERATION: &str = "stealth_outputs_get_all_by_account";
+        use crate::schema::{accounts, stealth_outputs};
+
+        let rows = stealth_outputs::table
+            .filter(
+                stealth_outputs::owner_account_id.eq(accounts::table
+                    .select(accounts::id)
+                    .filter(accounts::address.eq(account_addr.to_string()))
+                    .limit(1)
+                    .single_value()
+                    .assume_not_null()),
+            )
+            .filter(stealth_outputs::status.eq(OutputStatus::Unspent.as_key_str()))
+            .get_results::<models::StealthOutput>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        rows.into_iter().map(|row| row.try_convert(*account_addr)).collect()
+    }
+
     fn stealth_outputs_get_locked_by_lock_id(
         &mut self,
         lock_id: OutputLockId,
@@ -769,8 +829,14 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .first::<String>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
+        let account_address = account_address.parse().map_err(|e| WalletStorageError::DecodingError {
+            operation: OPERATION,
+            item: "account",
+            details: format!("Corrupt db: invalid owner account address '{account_address}': {e}"),
+        })?;
+
         rows.into_iter()
-            .map(|row| row.try_convert(&account_address))
+            .map(|row| row.try_convert(account_address))
             .collect::<Result<_, _>>()
     }
 
@@ -798,9 +864,15 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .filter(accounts::id.eq(row.owner_account_id))
             .select(accounts::address)
             .first::<String>(self.connection())
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .parse()
+            .map_err(|e| WalletStorageError::DecodingError {
+                operation: OPERATION,
+                item: "account",
+                details: format!("Corrupt db: invalid owner account address: {e}"),
+            })?;
 
-        row.try_convert(&account_address)
+        row.try_convert(account_address)
     }
 
     fn output_locks_get_by_transaction_id(
@@ -809,13 +881,13 @@ impl WalletStoreReader for ReadTransaction<'_> {
     ) -> Result<Vec<OutputLockId>, WalletStorageError> {
         use crate::schema::output_locks;
 
-        let proof_ids = output_locks::table
+        let lock_ids = output_locks::table
             .filter(output_locks::transaction_hash.eq(transaction_id.to_string()))
             .select(output_locks::id)
             .get_results::<i32>(self.connection())
             .map_err(|e| WalletStorageError::general("output_locks_get_by_transaction_id", e))?;
 
-        Ok(proof_ids.into_iter().map(|id| id as u64).collect())
+        Ok(lock_ids.into_iter().map(|id| id as u64).collect())
     }
 
     fn non_fungible_token_get_by_nft_id(

@@ -5,7 +5,6 @@ use std::cmp;
 
 use digest::crypto_common::rand_core::OsRng;
 use log::*;
-use tari_bor::{Deserialize, Serialize};
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine_types::{substate::SubstateId, FromByteType, ToByteType, UtxoAddress};
 use tari_ootle_common_types::{
@@ -14,13 +13,14 @@ use tari_ootle_common_types::{
     SubstateRequirement,
 };
 use tari_ootle_wallet_crypto::{
+    kdfs,
     MaskAndValue,
     UnblindedOutputStatement,
     UnblindedStealthInputStatement,
     UnblindedStealthOutputStatement,
 };
 use tari_template_lib::{
-    models::{ComponentAddress, ResourceAddress, VaultId},
+    models::{Account, ComponentAddress, ResourceAddress, VaultId},
     prelude::RistrettoPublicKeyBytes,
     types::Amount,
 };
@@ -28,12 +28,13 @@ use tari_transaction::{args, Transaction};
 
 use crate::{
     apis::{
-        accounts::{AccountsApi, AccountsApiError},
+        accounts::{derive_account_address_from_public_key, AccountsApi, AccountsApiError},
+        confidential_transfer::ConfidentialTransferInputSelection,
         config::{ConfigApi, ConfigApiError},
         key_manager::{KeyBranch, KeyManagerApi, KeyManagerApiError},
         stealth_crypto::{StealthCryptoApi, StealthCryptoApiError},
         stealth_outputs::{StealthOutputsApi, StealthOutputsApiError},
-        substate::{SubstateApiError, SubstatesApi},
+        substate::{SubstateApiError, SubstatesApi, ValidatorScanResult},
     },
     models::{AccountWithPublicKey, OutputLockId, OutputStatus, StealthOutputModel},
     network::WalletNetworkInterface,
@@ -81,9 +82,15 @@ where
         from_account: &AccountWithPublicKey,
         resource_address: ResourceAddress,
         spend_amount: Amount,
-        input_selection: StealthTransferInputSelection,
+        input_selection: ConfidentialTransferInputSelection,
     ) -> Result<InputsToSpend, StealthTransferApiError> {
-        let lock_id = self.outputs_api.create_lock_for_resource(&resource_address)?;
+        if !spend_amount.is_positive() {
+            return Err(StealthTransferApiError::InvalidParameter {
+                param: "spend_amount",
+                reason: "Spend amount must be positive".to_string(),
+            });
+        }
+
         let maybe_src_vault = self
             .accounts_api
             .get_vault_by_resource(from_account.address(), &resource_address)
@@ -95,8 +102,13 @@ where
             .unwrap_or_else(Amount::zero);
 
         match input_selection {
-            StealthTransferInputSelection::StealthOnly => {
-                let (input_models, _) = self.outputs_api.lock_outputs_by_amount(lock_id, spend_amount)?;
+            ConfidentialTransferInputSelection::ConfidentialOnly => {
+                let lock_id = self.outputs_api.create_lock_for_resource(&resource_address)?;
+                let (input_models, _) = self.outputs_api.lock_outputs_in_account_by_amount(
+                    from_account.address(),
+                    lock_id,
+                    spend_amount,
+                )?;
                 let inputs = self
                     .outputs_api
                     .resolve_output_masks_for_spending(from_account, input_models)?;
@@ -113,11 +125,23 @@ where
                     revealed: Amount::zero(),
                 })
             },
-            StealthTransferInputSelection::RevealedOnly => {
+            ConfidentialTransferInputSelection::RevealedOnly => {
                 if available_revealed_funds < spend_amount {
                     return Err(StealthTransferApiError::InsufficientFunds);
                 }
 
+                let src_vault =
+                    maybe_src_vault
+                        .as_ref()
+                        .ok_or_else(|| StealthTransferApiError::InsufficientRevealedFunds {
+                            details: format!(
+                                "No vault found for resource {} in account {}",
+                                resource_address,
+                                from_account.address()
+                            ),
+                        })?;
+
+                let lock_id = self.outputs_api.create_lock_for_vault(&src_vault.id)?;
                 self.outputs_api.lock_revealed_funds(lock_id, spend_amount)?;
 
                 info!(
@@ -133,36 +157,88 @@ where
                     revealed: spend_amount,
                 })
             },
-            StealthTransferInputSelection::PreferRevealed => {
+            ConfidentialTransferInputSelection::PreferRevealed => {
+                let maybe_vault_lock_id = maybe_src_vault
+                    .as_ref()
+                    .map(|v| self.outputs_api.create_lock_for_vault(&v.id))
+                    .transpose()?;
                 let revealed_to_spend = cmp::min(available_revealed_funds, spend_amount);
                 let utxo_amount_to_spend = spend_amount - revealed_to_spend;
-                if utxo_amount_to_spend.is_zero() {
-                    info!(
-                        target: LOG_TARGET,
-                        "PreferRevealed: Spending {} revealed balance for transfer from {}",
-                        revealed_to_spend,
-                        maybe_src_vault.as_ref().map(|v| v.id).display()
-                    );
+                if let Some(lock_id) = maybe_vault_lock_id {
+                    if utxo_amount_to_spend.is_zero() {
+                        info!(
+                            target: LOG_TARGET,
+                            "PreferRevealed: Spending {} revealed balance (available: {}) for transfer from {}",
+                            revealed_to_spend,
+                            available_revealed_funds,
+                            maybe_src_vault.as_ref().map(|v| v.id).display()
+                        );
 
-                    self.outputs_api.lock_revealed_funds(lock_id, revealed_to_spend)?;
+                        self.outputs_api.lock_revealed_funds(lock_id, revealed_to_spend)
+                            .inspect_err(|_| {
+                                // TODO: atomic rollback will help with this
+                                if let Err(err) = self.outputs_api.release_locked_outputs(lock_id) {
+                                    error!(target: LOG_TARGET, "Failed to release lock outputs for resource {}: {}", resource_address, err);
+                                }
+                            })?;
 
-                    return Ok(InputsToSpend {
-                        inputs: vec![],
-                        lock_id,
-                        revealed: revealed_to_spend,
-                    });
+                        return Ok(InputsToSpend {
+                            inputs: vec![],
+                            lock_id,
+                            revealed: revealed_to_spend,
+                        });
+                    }
                 }
 
-                let (inputs, _) = self.outputs_api.lock_outputs_by_amount(lock_id, utxo_amount_to_spend)?;
+                let lock_id = match maybe_vault_lock_id {
+                    Some(lock_id) => lock_id,
+                    None => {
+                        if revealed_to_spend.is_positive() {
+                            // No vault containing revealed funds was found
+                            return Err(StealthTransferApiError::InsufficientRevealedFunds {
+                                details: format!(
+                                    "PreferRevealed: No vault found for resource {} in account {}. Need to spend {} \
+                                     revealed funds",
+                                    resource_address,
+                                    from_account.address(),
+                                    revealed_to_spend
+                                ),
+                            });
+                        }
+                        self.outputs_api.create_lock_for_resource(&resource_address)?
+                    },
+                };
+
+                let (inputs, _) = self.outputs_api.lock_outputs_in_account_by_amount(from_account.address(), lock_id, utxo_amount_to_spend)
+                    .inspect_err(|_| {
+                        // TODO: atomic rollback will help with this
+                        if let Err(err) = self.outputs_api.release_locked_outputs(lock_id) {
+                            error!(target: LOG_TARGET, "Failed to release lock outputs for resource {}: {}", resource_address, err);
+                        }
+                    })?;
                 let inputs = self
                     .outputs_api
-                    .resolve_output_masks_for_spending(from_account, inputs)?;
+                    .resolve_output_masks_for_spending(from_account, inputs)
+                    .inspect_err(|_| {
+                        // TODO: atomic rollback will help with this
+                        if let Err(err) = self.outputs_api.release_locked_outputs(lock_id) {
+                            error!(target: LOG_TARGET, "Failed to release lock outputs for resource {}: {}", resource_address, err);
+                        }
+                    })?;
 
                 let total_confidential_spent = Amount::sum_from_positive(inputs.iter().map(|i| i.mask_and_value.value))
                     // The wallet has somehow stored a negative amount, which should not happen.
                     .expect("BUG: an unblinded input amount was negative");
 
-                self.outputs_api.lock_revealed_funds(lock_id, revealed_to_spend)?;
+                if revealed_to_spend.is_positive() {
+                    self.outputs_api.lock_revealed_funds(lock_id, revealed_to_spend)
+                        .inspect_err(|_| {
+                            // TODO: atomic rollback will help with this
+                            if let Err(err) = self.outputs_api.release_locked_outputs(lock_id) {
+                                error!(target: LOG_TARGET, "Failed to release lock outputs for resource {}: {}", resource_address, err);
+                            }
+                        })?;
+                }
 
                 info!(
                     target: LOG_TARGET,
@@ -181,21 +257,45 @@ where
                     revealed: revealed_to_spend,
                 })
             },
-            StealthTransferInputSelection::PreferStealth => {
+            ConfidentialTransferInputSelection::PreferConfidential => {
                 let lock_id = self.outputs_api.create_lock_for_resource(&resource_address)?;
-                let (blinded_inputs, blinded_amount_locked) = self
-                    .outputs_api
-                    .lock_outputs_until_partial_amount(spend_amount, lock_id)?;
+                let (blinded_inputs, blinded_amount_locked) = self.outputs_api.lock_outputs_until_partial_amount(
+                    from_account.address(),
+                    spend_amount,
+                    lock_id,
+                )?;
 
                 let revealed_to_spend = spend_amount
                     .saturating_sub_positive(blinded_amount_locked)
                     .unwrap_or_else(Amount::zero);
 
                 if available_revealed_funds < revealed_to_spend {
+                    self.outputs_api.release_locked_outputs(lock_id)?;
                     return Err(StealthTransferApiError::InsufficientFunds);
                 }
 
-                self.outputs_api.lock_revealed_funds(lock_id, revealed_to_spend)?;
+                if revealed_to_spend.is_positive() {
+                    match maybe_src_vault {
+                        Some(vault) => {
+                            self.outputs_api.set_vault_id_for_lock(lock_id, vault.id)?;
+                            self.outputs_api.lock_revealed_funds(lock_id, revealed_to_spend)?;
+                        },
+                        None => {
+                            if let Err(err) = self.outputs_api.release_locked_outputs(lock_id) {
+                                error!(target: LOG_TARGET, "🚨 Failed to release lock outputs for resource {}: {}", resource_address, err);
+                            }
+                            return Err(StealthTransferApiError::InsufficientRevealedFunds {
+                                details: format!(
+                                    "PreferConfidential: No vault found for resource {} in account {}. Need to spend \
+                                     {} revealed funds",
+                                    resource_address,
+                                    from_account.address(),
+                                    revealed_to_spend
+                                ),
+                            });
+                        },
+                    }
+                }
 
                 let inputs = self
                     .outputs_api
@@ -212,12 +312,11 @@ where
 
     #[allow(clippy::too_many_lines)]
     pub async fn transfer(&self, params: StealthTransferParams) -> Result<TransferOutput, StealthTransferApiError> {
+        params.validate()?;
         // TODO: XTR as a stealth resource
         let fee_account = self.accounts_api.get_default()?;
 
-        let (_, owner_public_key) = self
-            .key_manager_api
-            .derive_account_keypair(params.owner_account.key_index())?;
+        let destination_account = derive_account_address_from_public_key(&params.destination_public_key);
 
         // Determine Transaction Inputs
         let mut inputs = Vec::new();
@@ -240,28 +339,124 @@ where
         // add the input for the resource address to be transferred
         inputs.push(SubstateRequirement::unversioned(params.resource_address));
 
-        // We need to fetch the resource substate to check if there is a view key present.
-        // TODO: cache
-        let resource_substate = self
-            .substate_api
-            .scan_for_substate(&SubstateId::Resource(params.resource_address), None)
-            .await?;
+        let need_to_create_dest_account = if params.revealed_output_amount.is_positive() {
+            match self
+                .accounts_api
+                .get_account_by_address(&destination_account)
+                .optional()?
+            {
+                Some(local_account) => {
+                    if local_account.is_confirmed_on_chain() {
+                        inputs.push(SubstateRequirement::unversioned(destination_account));
+                        if let Some(vault) = self
+                            .accounts_api
+                            .get_vault_by_resource(local_account.address(), &params.resource_address)
+                            .optional()?
+                        {
+                            inputs.push(SubstateRequirement::unversioned(vault.id));
+                        }
 
-        let fee_account_secret = self.key_manager_api.derive_account_key(fee_account.key_index())?;
+                        false
+                    } else {
+                        true
+                    }
+                },
+                None => {
+                    // TODO: we're just determining if the account exists - symptom of a larger problem/missing
+                    // feature where account is created as needed instead of having to be determined by the client
+                    // side
+                    let to_account_substate = self
+                        .substate_api
+                        .fetch_substate_from_network(&SubstateId::Component(destination_account), None)
+                        .await
+                        .optional()?;
+
+                    if let Some(ValidatorScanResult { address, substate }) = to_account_substate {
+                        inputs.push(SubstateRequirement::unversioned(destination_account));
+
+                        let account =
+                            substate
+                                .component()
+                                .ok_or_else(|| StealthTransferApiError::UnexpectedIndexerResponse {
+                                    details: format!(
+                                        "Expected indexer to return component for address {}. It returned {}",
+                                        destination_account, address
+                                    ),
+                                })?;
+                        let dest_account = Account::from_value(account.state()).map_err(|e| {
+                            StealthTransferApiError::UnexpectedIndexerResponse {
+                                details: format!("Failed to convert component substate to account: {e}"),
+                            }
+                        })?;
+                        // If they have an existing vault, we need to add it as an input
+                        if let Some(vault) = dest_account.get_vault_by_resource(&params.resource_address) {
+                            debug!(
+                                target: LOG_TARGET,
+                                "Found existing vault {} for resource {} in destination account {}",
+                                vault.vault_id(),
+                                params.resource_address,
+                                destination_account
+                            );
+                            inputs.push(SubstateRequirement::unversioned(vault.vault_id()));
+                        } else {
+                            debug!(
+                                target: LOG_TARGET,
+                                "No existing vault found for resource {} in destination account {}. It will be created.",
+                                params.resource_address,
+                                destination_account
+                            );
+                        }
+                        false
+                    } else {
+                        // If the account does not exist, we need to create it
+                        true
+                    }
+                },
+            }
+        } else {
+            false
+        };
+
+        // We need to fetch the resource substate to check if there is a view key present.
+        let resource = self.substate_api.fetch_resource(params.resource_address).await?;
+
+        // Generate outputs
+        let resource_view_key = resource
+            .view_key()
+            .map(RistrettoPublicKey::try_from_byte_type)
+            .transpose()
+            .map_err(|e| StealthTransferApiError::InvalidParameter {
+                param: "resource_view_key",
+                reason: format!("Invalid resource view key: {e}"),
+            })?;
+        let destination_pk = RistrettoPublicKey::try_from_byte_type(&params.destination_public_key).map_err(|e| {
+            StealthTransferApiError::InvalidParameter {
+                param: "destination_public_key",
+                reason: format!("Invalid destination public key: {e}"),
+            }
+        })?;
+
+        let output_statement = params
+            .blinded_output_amount
+            .is_positive()
+            .then(|| {
+                self.create_output_statement(&destination_pk, params.blinded_output_amount, resource_view_key.clone())
+            })
+            .transpose()?;
 
         // Reserve and lock input funds
         // TODO: preserve atomicity across api calls - needed in many places
         let inputs_to_spend = match self.resolved_inputs_for_transfer(
             &params.owner_account,
             params.resource_address,
-            params.blinded_output_amount,
+            params.total_output_amount(),
             params.input_selection,
         ) {
             Ok(inputs) => inputs,
             Err(e) => {
                 warn!(target: LOG_TARGET, "Unlocking fee fund locks after error: {}", e);
                 // This is a hack that addresses the case where input locking fails after the fee transaction.
-                // However any error after this point do not undo locking. This is a limitation
+                // However, any error after this point do not undo locking. This is a limitation
                 // of the current design - the db transaction should be passed in and
                 // automatically rolled back on error.
                 // if let Err(err) = self.outputs_api.release_proof_outputs(fee_inputs_to_spend.proof_id) {
@@ -284,43 +479,65 @@ where
                 .map(|i| SubstateRequirement::unversioned(to_utxo_address(params.resource_address, &i.mask_and_value))),
         );
 
-        // Generate outputs
-        let resource_view_key = resource_substate
-            .substate
-            .as_resource()
-            .ok_or_else(|| StealthTransferApiError::UnexpectedIndexerResponse {
-                details: format!(
-                    "Expected indexer to return resource for address {}. It returned {}",
-                    params.resource_address, resource_substate.address
-                ),
-            })?
-            .view_key()
-            .map(RistrettoPublicKey::try_from_byte_type)
-            .transpose()
-            .map_err(|e| StealthTransferApiError::InvalidParameter {
-                param: "resource_view_key",
-                reason: format!("Invalid resource view key: {e}"),
-            })?;
-        let destination_pk = RistrettoPublicKey::try_from_byte_type(&params.destination_public_key).map_err(|e| {
-            StealthTransferApiError::InvalidParameter {
-                param: "destination_public_key",
-                reason: format!("Invalid destination public key: {e}"),
-            }
-        })?;
+        let result = self.generate_transfer_transaction(
+            params,
+            fee_account,
+            inputs,
+            resource_view_key,
+            output_statement,
+            &inputs_to_spend,
+            need_to_create_dest_account,
+        );
 
-        let output_statement =
-            self.create_output_statement(&destination_pk, params.blinded_output_amount, resource_view_key.clone())?;
+        match result {
+            Ok(transaction) => Ok(TransferOutput {
+                transaction,
+                transaction_lock_id: Some(inputs_to_spend.lock_id),
+            }),
+            Err(err) => {
+                // Unlock inputs
+                if let Err(e) = self.outputs_api.release_locked_outputs(inputs_to_spend.lock_id) {
+                    error!(target: LOG_TARGET, "Failed to release inputs lock after error: {}", e);
+                }
+                Err(err)
+            },
+        }
+    }
 
-        let change_confidential_amount = inputs_to_spend
-            .total_stealth_input_amount()
-            .checked_sub_positive(params.blinded_output_amount)
-            .expect("BUG: total_stealth_input_amount or params.blinded_output_amount are negative after validation");
+    #[allow(clippy::too_many_lines)]
+    fn generate_transfer_transaction(
+        &self,
+        params: StealthTransferParams,
+        fee_account: AccountWithPublicKey,
+        inputs: Vec<SubstateRequirement>,
+        resource_view_key: Option<RistrettoPublicKey>,
+        maybe_output_statement: Option<UnblindedStealthOutputStatement>,
+        inputs_to_spend: &InputsToSpend,
+        need_to_create_account: bool,
+    ) -> Result<Transaction, StealthTransferApiError> {
+        let change_amount = inputs_to_spend
+            .total_amount()
+            .checked_sub_positive(params.total_output_amount())
+            .unwrap_or_else(|| {
+                // This is a bug because the wallet chooses inputs based on the required outputs. This function should
+                // not have been called if there are insufficient funds.
+                error!(
+                    target: LOG_TARGET,
+                    "BUG: total_stealth_input_amount or params.total_amount() are negative after validation"
+                );
+                panic!("BUG: total_stealth_input_amount or params.total_amount() are negative after validation");
+            });
 
-        let maybe_change_statement = if change_confidential_amount.is_zero() {
+        let maybe_change_statement = if change_amount.is_zero() {
             None
         } else {
-            let change =
-                self.create_output_statement(&owner_public_key, change_confidential_amount, resource_view_key)?;
+            let change_public_key = RistrettoPublicKey::try_from_byte_type(&params.owner_account.owner_public_key)
+                .map_err(|e| StealthTransferApiError::InvalidParameter {
+                    param: "owner_public_key",
+                    reason: format!("Invalid owner public key: {e}"),
+                })?;
+
+            let change = self.create_output_statement(&change_public_key, change_amount, resource_view_key)?;
 
             let change_value = change.statement.amount;
 
@@ -338,6 +555,7 @@ where
                     encryption_secret_key_index: params.owner_account.key_index(),
                     encrypted_data: change.statement.encrypted_data.clone(),
                     status: OutputStatus::LockedUnconfirmed,
+                    tag_byte: change.tag,
                     lock_id: Some(inputs_to_spend.lock_id),
                 })?;
             }
@@ -345,8 +563,8 @@ where
             Some(change)
         };
 
-        let outputs = Some(output_statement)
-            .filter(|o| !o.statement.amount.is_zero())
+        let outputs = maybe_output_statement
+            .filter(|o| o.statement.amount.is_positive())
             .into_iter()
             .chain(maybe_change_statement)
             .collect::<Vec<_>>();
@@ -358,13 +576,28 @@ where
             params.revealed_output_amount,
         )?;
 
+        let fee_account_secret = self.key_manager_api.derive_account_key(fee_account.key_index())?;
+        let src_account_secret = self
+            .key_manager_api
+            .derive_account_key(params.owner_account.key_index())?;
+
         let network = self.config_api.get_network()?;
         let transaction = Transaction::builder()
             .for_network(network.as_byte())
             .with_dry_run(params.is_dry_run)
             // TODO: pay fees using stealth XTR when that is implemented
             .fee_transaction_pay_from_component(*fee_account.address(), params.max_fee)
-            .stealth_transfer(params.resource_address, transfer_statement)
+            .then(|builder| {
+                if inputs_to_spend.revealed.is_positive() {
+                    builder
+                        .call_method(params.owner_account.account.address, "withdraw", args![params.resource_address, inputs_to_spend.revealed])
+                        .put_last_instruction_output_on_workspace("input_bucket")
+                        .stealth_transfer_with_input_bucket(params.resource_address, transfer_statement, "input_bucket")
+                } else {
+                    builder
+                        .stealth_transfer(params.resource_address, transfer_statement)
+                }
+            })
             .then(|builder| {
                 // revealed_to_account may be Some, but we only use it if revealed_output_amount is greater than zero.
                 if params.revealed_output_amount.is_zero() {
@@ -372,30 +605,36 @@ where
                 }
 
                 // If the transfer creates revealed outputs, deposit the bucket into the destination account.
-                if let Some(address) = params.revealed_to_account {
-                    builder.put_last_instruction_output_on_workspace("bucket").call_method(
-                        address,
-                        "deposit",
-                        args![Workspace("bucket")],
-                    )
+                builder.put_last_instruction_output_on_workspace("output_bucket").then(|builder| {
+                    if need_to_create_account {
+                        builder.create_account_with_bucket(
+                            params.destination_public_key,
+                            "output_bucket",
+                        )
+                    } else {
+                        builder.call_method(
+                            params.derived_destination_account(),
+                            "deposit",
+                            args![Workspace("output_bucket")],
+                        )
+                    }
+                })
+            })
+            .with_inputs(inputs)
+            .then(|builder| {
+                // If the fee account is different from the owner account, we need to add a signature to authorize the revealed funds withdraw.
+                if inputs_to_spend.revealed.is_positive() && params.owner_account.owner_public_key != *fee_account.owner_public_key() {
+                    builder.add_signature(fee_account.owner_public_key(), &src_account_secret.key)
                 } else {
                     builder
                 }
             })
-            .with_inputs(inputs)
             .build_and_seal(&fee_account_secret.key);
 
         let tx_id = transaction.calculate_id();
         self.outputs_api
             .set_transaction_hash_for_lock(inputs_to_spend.lock_id, tx_id)?;
-        // self.outputs_api
-        //     .proofs_set_transaction_hash(fee_inputs_to_spend.proof_id, tx_id)?;
-
-        Ok(TransferOutput {
-            transaction,
-            // fee_transaction_proof_id: Some(fee_inputs_to_spend.proof_id),
-            transaction_proof_id: Some(inputs_to_spend.lock_id),
-        })
+        Ok(transaction)
     }
 
     fn create_output_statement(
@@ -404,6 +643,7 @@ where
         confidential_amount: Amount,
         resource_view_key: Option<RistrettoPublicKey>,
     ) -> Result<UnblindedStealthOutputStatement, StealthTransferApiError> {
+        let network = self.config_api.get_network()?;
         if !confidential_amount.is_positive() {
             return Err(StealthTransferApiError::InvalidParameter {
                 param: "confidential_amount",
@@ -413,7 +653,7 @@ where
 
         let mask = self.key_manager_api.next_key(KeyBranch::StealthMasks)?;
 
-        let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
+        let (nonce_secret, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
         let encrypted_data = self.crypto_api.encrypt_value_and_mask(
             confidential_amount
                 .to_u64_checked()
@@ -425,8 +665,13 @@ where
                 })?,
             &mask.key,
             dest_public_key,
-            &nonce,
+            &nonce_secret,
         )?;
+
+        // Create stealth address - used during spend time
+        let output_owner_public_key = kdfs::owner_stealth_dh_stealth_address(network, dest_public_key, &nonce_secret);
+
+        let derived_tag = kdfs::derive_stealth_output_tag(network, &dest_public_key.to_byte_type());
 
         Ok(UnblindedStealthOutputStatement {
             statement: UnblindedOutputStatement {
@@ -437,39 +682,23 @@ where
                 minimum_value_promise: 0,
                 resource_view_key,
             },
-            output_owner_public_key: dest_public_key.clone(),
+            output_owner_public_key,
+            tag: derived_tag,
         })
     }
 }
 
 pub struct TransferOutput {
     pub transaction: Transaction,
-    // pub fee_transaction_proof_id: Option<OutputLockId>,
-    pub transaction_proof_id: Option<OutputLockId>,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
-pub enum StealthTransferInputSelection {
-    StealthOnly,
-    RevealedOnly,
-    PreferRevealed,
-    PreferStealth,
+    pub transaction_lock_id: Option<OutputLockId>,
 }
 
 #[derive(Debug)]
 pub struct StealthTransferParams {
     /// Address of the owner account. This determines used to derive
     pub owner_account: AccountWithPublicKey,
-    /// Address of the account to transfer revealed funds. This must be Some if `revealed_output_amount` is greater
-    /// than zero.
-    pub revealed_to_account: Option<ComponentAddress>,
     /// Strategy for input selection
-    pub input_selection: StealthTransferInputSelection,
+    pub input_selection: ConfidentialTransferInputSelection,
     /// Amount of the inputs to spend to a blinded output
     pub blinded_output_amount: Amount,
     /// Amount of the inputs to spend to a revealed output
@@ -507,18 +736,15 @@ impl StealthTransferParams {
             });
         }
 
-        if self.revealed_output_amount.is_positive() && self.revealed_to_account.is_none() {
-            return Err(StealthTransferApiError::InvalidParameter {
-                param: "revealed_to_account",
-                reason: "revealed_to_account must be Some if revealed_output_amount is greater than zero".to_string(),
-            });
-        }
-
         Ok(())
     }
 
-    pub fn total_amount(&self) -> Amount {
+    pub fn total_output_amount(&self) -> Amount {
         self.blinded_output_amount + self.revealed_output_amount
+    }
+
+    pub fn derived_destination_account(&self) -> ComponentAddress {
+        derive_account_address_from_public_key(&self.destination_public_key)
     }
 }
 
@@ -563,6 +789,8 @@ pub enum StealthTransferApiError {
     ConfigApi(#[from] ConfigApiError),
     #[error("Amount overflow for parameter `{param}`: {details}")]
     AmountOverflow { param: &'static str, details: String },
+    #[error("Insufficient revealed funds: {details}")]
+    InsufficientRevealedFunds { details: String },
 }
 
 impl IsNotFoundError for StealthTransferApiError {

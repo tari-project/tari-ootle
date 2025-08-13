@@ -3,15 +3,13 @@
 
 use tari_ootle_wallet_sdk::{models::StealthOutputModel, storage::WalletStorageError};
 use tari_template_lib::{
-    models::EncryptedData,
-    types::{
-        amount,
-        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
-    },
+    models::{ComponentAddress, EncryptedData},
+    prelude::crypto::UtxoTagByte,
+    types::{amount, crypto::RistrettoPublicKeyBytes},
 };
 use time::PrimitiveDateTime;
 
-use crate::schema::stealth_outputs;
+use crate::{schema::stealth_outputs, serialization::deserialize_hex_try_from};
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
 #[diesel(table_name = stealth_outputs)]
@@ -27,20 +25,15 @@ pub struct StealthOutput {
     pub locked_by_proof: Option<i32>,
     pub encryption_secret_key_index: i64,
     pub encrypted_data: Vec<u8>,
+    pub tag_byte: i32,
     pub created_at: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
 }
 
 impl StealthOutput {
-    pub(crate) fn try_convert(self, owner_account_str: &str) -> Result<StealthOutputModel, WalletStorageError> {
+    pub(crate) fn try_convert(self, owner_account: ComponentAddress) -> Result<StealthOutputModel, WalletStorageError> {
         Ok(StealthOutputModel {
-            owner_account: owner_account_str
-                .parse()
-                .map_err(|e| WalletStorageError::DecodingError {
-                    operation: "try_into_output",
-                    item: "output",
-                    details: format!("Corrupt db: invalid owner account address '{owner_account_str}': {e}"),
-                })?,
+            owner_account,
             resource_address: self
                 .resource_address
                 .parse()
@@ -49,12 +42,10 @@ impl StealthOutput {
                     item: "output",
                     details: format!("Corrupt db: invalid resource address '{}'", self.resource_address),
                 })?,
-            commitment: PedersenCommitmentBytes::from_hex(&self.commitment).map_err(|_| {
-                WalletStorageError::DecodingError {
-                    operation: "outputs_lock_smallest_amount",
-                    item: "output commitment",
-                    details: "Corrupt db: invalid hex representation".to_string(),
-                }
+            commitment: deserialize_hex_try_from(&self.commitment).map_err(|_| WalletStorageError::DecodingError {
+                operation: "try_into_output",
+                item: "output commitment",
+                details: "Corrupt db: invalid hex representation".to_string(),
             })?,
             value: amount![&self.value],
             sender_public_nonce: RistrettoPublicKeyBytes::from_hex(&self.sender_public_nonce).map_err(|_| {
@@ -75,6 +66,15 @@ impl StealthOutput {
                     details: format!("Corrupt db: invalid encrypted data length {len}"),
                 }
             })?,
+            tag_byte: UtxoTagByte::new(
+                self.tag_byte
+                    .try_into()
+                    .map_err(|_| WalletStorageError::DecodingError {
+                        operation: "try_into_output",
+                        item: "output",
+                        details: format!("Corrupt db: invalid tag byte '{}'", self.tag_byte),
+                    })?,
+            ),
             status: self.status.parse().map_err(|_| WalletStorageError::DecodingError {
                 operation: "try_into_output",
                 item: "output",

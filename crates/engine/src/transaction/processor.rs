@@ -34,6 +34,7 @@ use tari_engine_types::{
     lock::LockFlag,
     virtual_substate::VirtualSubstates,
     ComponentCall,
+    ResourceAddressRef,
 };
 use tari_ootle_common_types::services::template_provider::TemplateProvider;
 use tari_template_abi::{FunctionDef, Type};
@@ -51,7 +52,7 @@ use tari_template_lib::{
     call_arg,
     call_args,
     invoke_args,
-    models::{Bucket, NonFungibleAddress, ResourceAddress, StealthTransferStatement},
+    models::{Bucket, NonFungibleAddress, StealthTransferStatement},
     types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
 };
 
@@ -317,7 +318,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 workspace_id,
             } => Self::allocate_address(runtime, substate_type, workspace_id),
             Instruction::StealthTransfer {
-                resource_address,
+                resource_address_ref: resource_address,
                 statement,
                 revealed_input_bucket,
             } => Self::stealth_transfer(runtime, resource_address, statement, revealed_input_bucket),
@@ -326,7 +327,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
 
     pub fn stealth_transfer(
         runtime: &Runtime,
-        resource_address: ResourceAddress,
+        resource_address: ResourceAddressRef,
         statement: StealthTransferStatement,
         revealed_funds_bucket: Option<WorkspaceOffsetId>,
     ) -> Result<InstructionResult, TransactionError> {

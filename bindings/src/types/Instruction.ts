@@ -7,6 +7,7 @@ import type { ConfidentialClaim } from "./ConfidentialClaim";
 import type { LogLevel } from "./LogLevel";
 import type { OwnerRule } from "./OwnerRule";
 import type { ResourceAddress } from "./ResourceAddress";
+import type { ResourceAddressRef } from "./ResourceAddressRef";
 import type { StealthTransferStatement } from "./StealthTransferStatement";
 import type { WorkspaceOffsetId } from "./WorkspaceOffsetId";
 
@@ -31,7 +32,7 @@ export type Instruction =
   | { AllocateAddress: { allocatable_type: AllocatableAddressType; workspace_id: number } }
   | {
       StealthTransfer: {
-        resource_address: ResourceAddress;
+        resource_address_ref: ResourceAddressRef;
         statement: StealthTransferStatement;
         revealed_input_bucket: WorkspaceOffsetId | null;
       };

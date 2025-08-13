@@ -7,7 +7,6 @@ use indexmap::IndexSet;
 use log::*;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{
-    confidential::ConfidentialClaim,
     hashing::hash_template_code,
     indexed_value::IndexedValueError,
     instruction::Instruction,
@@ -190,6 +189,8 @@ impl Display for TransactionV1 {
 
 fn calc_instruction_weight(instruction: &Instruction) -> u64 {
     const BINARY_WEIGHT_DIVISOR: u64 = 3;
+    // TODO: formalize costing numbers
+    const CLAIM_FIXED_COST: u64 = 1100;
     match instruction {
         Instruction::CreateAccount {
             access_rules,
@@ -203,15 +204,15 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::CallMethod { args, .. } => calc_args_weight(args),
         Instruction::PutLastInstructionOutputOnWorkspace { .. } => 0, // Call already costs
         Instruction::EmitLog { message, .. } => message.len() as u64 / BINARY_WEIGHT_DIVISOR,
-        Instruction::ClaimBurn { .. } => size_of::<ConfidentialClaim>() as u64,
+        Instruction::ClaimBurn { .. } => CLAIM_FIXED_COST,
         Instruction::ClaimValidatorFees { .. } => 1,
         Instruction::DropAllProofsInWorkspace => 1,
         Instruction::AssertBucketContains { .. } => 1,
         Instruction::PublishTemplate { binary } => binary.len() as u64 / BINARY_WEIGHT_DIVISOR,
         Instruction::AllocateAddress { .. } => 1,
         Instruction::StealthTransfer { statement, .. } => {
-            // TODO: weight inputs and outputs accordingly
-            statement.inputs.len() as u64 + statement.outputs_statement.outputs.len() as u64
+            // TODO: weight inputs and outputs accordingly - currently outputs cost 2x inputs
+            statement.inputs_statement.inputs.len() as u64 + (statement.outputs_statement.outputs.len() as u64 * 2)
         },
     }
 }

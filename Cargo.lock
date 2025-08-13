@@ -11136,6 +11136,7 @@ dependencies = [
  "hex",
  "indexmap 2.9.0",
  "lazy_static",
+ "log",
  "rand 0.8.5",
  "serde",
  "serde_json",

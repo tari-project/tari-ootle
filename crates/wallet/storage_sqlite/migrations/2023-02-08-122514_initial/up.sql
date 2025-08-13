@@ -107,6 +107,28 @@ CREATE TABLE vaults
 
 CREATE UNIQUE INDEX vaults_uniq_address ON vaults (address);
 
+-- Resources
+CREATE TABLE resources
+(
+    id            INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    address       TEXT     NOT NULL,
+    resource_type TEXT     NOT NULL,
+    owner_key     TEXT     NULL,
+    owner_rule    TEXT     NOT NULL,
+    access_rules  TEXT     NOT NULL,
+    token_symbol  TEXT     NULL,
+    divisibility  INTEGER  NOT NULL,
+    metadata      TEXT     NOT NULL,
+    total_supply  TEXT     NULL,
+    view_key      TEXT     NULL,
+    auth_hook     TEXT     NULL,
+
+    updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX resources_uniq_address ON resources (address);
+
 -- Outputs
 CREATE TABLE outputs
 (
@@ -212,6 +234,7 @@ CREATE TABLE stealth_outputs
     lock_id                     INTEGER  NULL,
     encryption_secret_key_index BIGINT   NOT NULL,
     encrypted_data              blob     NOT NULL DEFAULT '',
+    tag_byte                    INTEGER  NOT NULL,
     created_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

@@ -29,7 +29,7 @@
 //!
 //! # Example
 //! ```rust
-//! use your_crate::resource::ResourceType;
+//! use tari_template_lib::resource::ResourceType;
 //!
 //! let resource = ResourceType::Fungible;
 //! assert!(resource.is_fungible());
@@ -37,15 +37,13 @@
 //!
 //! The module also re-exports builders and managers for resource creation and lifecycle management.
 
-use tari_template_abi::rust::fmt::Display;
+use tari_template_abi::rust::{fmt, str::FromStr};
 
 mod builder;
 mod manager;
-mod stealth_manager;
 
 pub use builder::*;
 pub use manager::*;
-pub use stealth_manager::*;
 
 /// Represents every possible type of resource in the Tari network.
 ///
@@ -106,8 +104,33 @@ impl ResourceType {
     }
 }
 
-impl Display for ResourceType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(self, f)
+impl fmt::Display for ResourceType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
     }
 }
+
+impl FromStr for ResourceType {
+    type Err = ParseResourceTypeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Fungible" => Ok(ResourceType::Fungible),
+            "NonFungible" | "nft" => Ok(ResourceType::NonFungible),
+            "Confidential" => Ok(ResourceType::Confidential),
+            "Stealth" => Ok(ResourceType::Stealth),
+            _ => Err(ParseResourceTypeError(s.to_string())),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ParseResourceTypeError(String);
+
+impl fmt::Display for ParseResourceTypeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Invalid Resource Type string: '{}'", self.0)
+    }
+}
+
+impl std::error::Error for ParseResourceTypeError {}

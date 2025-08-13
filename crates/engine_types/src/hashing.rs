@@ -194,7 +194,6 @@ pub enum EngineHashDomainLabel {
     SubstateValue,
     ViewableBalanceProof,
     UtxoAddress,
-    StealthMint,
     StealthTransfer,
     StealthOwnership,
 }
@@ -221,7 +220,6 @@ impl EngineHashDomainLabel {
             Self::ViewableBalanceProof => "ViewableBalanceProof",
             Self::TemplateAddress => "TemplateAddress",
             Self::UtxoAddress => "UtxoAddress",
-            Self::StealthMint => "StealthMint",
             Self::StealthTransfer => "StealthTransfer",
             Self::StealthOwnership => "StealthOwnership",
         }

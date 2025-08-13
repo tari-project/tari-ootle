@@ -7,7 +7,7 @@ use diesel::{Identifiable, Queryable};
 use tari_ootle_wallet_sdk::storage::WalletStorageError;
 use tari_template_lib::{
     models::{ComponentAddress, ResourceAddress, VaultId},
-    resource::ResourceType,
+    prelude::ResourceType,
     types::Amount,
 };
 use time::PrimitiveDateTime;
@@ -50,7 +50,13 @@ impl Vault {
                     details: e.to_string(),
                 }
             })?,
-            resource_type: db_str_to_resource_type(&self.resource_type)?,
+            resource_type: ResourceType::from_str(&self.resource_type).map_err(|e| {
+                WalletStorageError::DecodingError {
+                    operation: "try_into_vault",
+                    item: "vault.resource_type",
+                    details: e.to_string(),
+                }
+            })?,
             token_symbol: self.token_symbol,
             revealed_balance: Amount::from(self.revealed_balance),
             locked_revealed_balance: Amount::from(self.locked_revealed_balance),
@@ -61,18 +67,5 @@ impl Vault {
                 details: format!("Invalid divisibility: {}", e),
             })?,
         })
-    }
-}
-
-fn db_str_to_resource_type(s: &str) -> Result<ResourceType, WalletStorageError> {
-    match s {
-        "Fungible" => Ok(ResourceType::Fungible),
-        "NonFungible" => Ok(ResourceType::NonFungible),
-        "Confidential" => Ok(ResourceType::Confidential),
-        _ => Err(WalletStorageError::DecodingError {
-            operation: "db_str_to_resource_type",
-            item: "vault.resource_type",
-            details: format!("Invalid resource type: {}", s),
-        }),
     }
 }

@@ -58,6 +58,7 @@ use crate::{
         ResourceInvokeArg,
         ResourceRef,
         ResourceUpdateNonFungibleDataArg,
+        StealthTransferResourceArg,
         VaultFreezeFlags,
     },
     auth::{OwnerRule, ResourceAccessRules},
@@ -70,7 +71,7 @@ use crate::{
         NonFungibleId,
         ResourceAddress,
         ResourceAddressAllocation,
-        StealthMintStatement,
+        StealthTransferStatement,
         VaultId,
     },
     prelude::{AuthHook, ResourceType},
@@ -247,23 +248,20 @@ impl ResourceManager {
                 statement: Box::new(statement),
             },
         })
-        .expect("mint_confidential: engine returned None")
     }
 
-    /// Mints new tokens for the stealth resource managed by this `ResourceManager`.
-    ///
-    /// This method accepts a zero-knowledge proof that authorizes the minting of stealth tokens.
+    /// Mints new revealed tokens for the stealth resource managed by this `ResourceManager`,
+    /// returning a [`Bucket`] containing the minted funds.
     ///
     /// # Arguments
     ///
-    /// * `statement` – A [`ConfidentialOutputStatement`] containing the outputs to mint. This the outputs to mint, and
-    ///   a range proof.
+    /// * `amount` – The revealed amount to mint.
     ///
     /// # Panics
     ///
     /// This method will panic if:
-    /// - The resource is not of type [`ResourceType::Confidential`]
-    /// - The provided statement is invalid or malformed
+    /// - The resource is not of type [`ResourceType::Stealth`]
+    /// - The provided amount is negative or zero
     /// - The caller lacks the required minting permissions, as defined by the resource's [`ResourceAccessRules`]
     ///
     /// # Example
@@ -271,12 +269,10 @@ impl ResourceManager {
     /// ```rust,ignore
     /// let bucket = resource_manager.mint_stealth(statement);
     /// ```
-    pub fn mint_stealth(&self, statement: StealthMintStatement) {
+    pub fn mint_stealth(&self, amount: Amount) -> Bucket {
         self.mint_internal(MintResourceArg {
-            mint_arg: MintArg::Stealth {
-                statement: Box::new(statement),
-            },
-        });
+            mint_arg: MintArg::Stealth { amount },
+        })
     }
 
     /// Mints a new non-fungible token (NFT) for the resource managed by this `ResourceManager`.
@@ -334,7 +330,6 @@ impl ResourceManager {
                     .collect(),
             },
         })
-        .expect("mint_non_fungible: engine returned None")
     }
 
     /// Mints multiple non-fungible tokens of the resource being managed, each with the same metadata and mutable data.
@@ -466,7 +461,6 @@ impl ResourceManager {
         self.mint_internal(MintResourceArg {
             mint_arg: MintArg::NonFungible { tokens },
         })
-        .expect("mint_many_non_fungible_with: engine returned None")
     }
 
     /// Mints a specified amount of fungible tokens for the resource managed by this `ResourceManager`.
@@ -505,7 +499,45 @@ impl ResourceManager {
         self.mint_internal(MintResourceArg {
             mint_arg: MintArg::Fungible { amount: amount.into() },
         })
-        .expect("mint_fungible: engine returned None")
+    }
+
+    /// Executes a stealth transfer for the resource managed by this [ResourceManager].
+    ///
+    /// If the [StealthTransferStatement] is valid, and contains revealed outputs, this method will return a
+    /// [Bucket] containing the revealed output funds. If the revealed output amount is zero, it will return `None`.
+    pub fn stealth_transfer(&self, transfer: StealthTransferStatement) -> Option<Bucket> {
+        self.stealth_transfer_internal(transfer, None)
+    }
+
+    /// Executes a stealth transfer for the resource managed by this [ResourceManager] consuming the input bucket (if
+    /// provided) containing revealed stealth funds.
+    ///
+    /// If the [StealthTransferStatement] is valid, and contains revealed outputs, this method will return a
+    /// [Bucket] containing the revealed output funds. If the revealed output amount is zero, it will return `None`.
+    pub fn stealth_transfer_with_opt_input_bucket(
+        &self,
+        transfer: StealthTransferStatement,
+        input_bucket: Option<Bucket>,
+    ) -> Option<Bucket> {
+        self.stealth_transfer_internal(transfer, input_bucket)
+    }
+
+    fn stealth_transfer_internal(
+        &self,
+        transfer: StealthTransferStatement,
+        input_bucket: Option<Bucket>,
+    ) -> Option<Bucket> {
+        let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
+            resource_ref: self.resource_address.into(),
+            action: ResourceAction::StealthTransfer,
+            args: invoke_args![StealthTransferResourceArg {
+                transfer,
+                input_bucket: input_bucket.map(|b| b.id())
+            }],
+        });
+
+        resp.decode()
+            .expect("[stealth_transfer] Failed to decode Option<Bucket>")
     }
 
     /// Recalls all tokens of a fungible resource from the specified vault, returning them in a [`Bucket`].
@@ -888,15 +920,15 @@ impl ResourceManager {
         Bucket::from_id(bucket_id)
     }
 
-    fn mint_internal(&self, arg: MintResourceArg) -> Option<Bucket> {
+    fn mint_internal(&self, arg: MintResourceArg) -> Bucket {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
             resource_ref: self.resource_address.into(),
             action: ResourceAction::Mint,
             args: invoke_args![arg],
         });
 
-        let maybe_bucket_id: Option<BucketId> = resp.decode().expect("Failed to decode Bucket");
-        maybe_bucket_id.map(Bucket::from_id)
+        let bucket_id: BucketId = resp.decode().expect("Failed to decode Bucket");
+        Bucket::from_id(bucket_id)
     }
 }
 

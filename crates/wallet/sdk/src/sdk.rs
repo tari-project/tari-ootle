@@ -29,6 +29,7 @@ use crate::{
         config::{ConfigApi, ConfigApiError, ConfigKey},
         key_manager::KeyManagerApi,
         non_fungible_tokens::NonFungibleTokensApi,
+        resources::ResourcesApi,
         stealth_crypto::StealthCryptoApi,
         stealth_outputs::StealthOutputsApi,
         stealth_transfer::StealthTransferApi,
@@ -162,6 +163,10 @@ where
 
     pub fn accounts_api(&self) -> AccountsApi<'_, TStore, TNetworkInterface> {
         AccountsApi::new(&self.store, self.substate_api(), self.key_manager_api())
+    }
+
+    pub fn resources_api(&self) -> ResourcesApi<'_, TStore> {
+        ResourcesApi::new(&self.store)
     }
 
     pub fn confidential_crypto_api(&self) -> ConfidentialCryptoApi {

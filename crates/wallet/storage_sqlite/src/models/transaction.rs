@@ -42,8 +42,8 @@ pub struct Transaction {
     pub finalized_time: Option<PrimitiveDateTime>,
     pub new_account_info: Option<String>,
     pub invalid_reason: Option<String>,
-    pub updated_at: PrimitiveDateTime,
     pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
 }
 
 impl Transaction {
@@ -94,10 +94,7 @@ impl Transaction {
                 .map(Duration::try_from)
                 .transpose()
                 .inspect_err(|e| {
-                    // TODO: in local testing, created_at > finalized_time happens a lot.
-                    // Could be accurate and due to slight delays in inserting in SQLite + super fast finality.
-                    // But we should investigate this further.
-                    debug!(
+                    warn!(
                         target: LOG_TARGET,
                         "Failed to convert finalized time to duration {} - {}: {}",
                         self.finalized_time.display(),

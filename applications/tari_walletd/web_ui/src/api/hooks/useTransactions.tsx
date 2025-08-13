@@ -26,11 +26,13 @@ import {
   transactionsGetAll,
   transactionsPublishTemplate,
   transactionsSubmitManifest,
+  transactionsWaitResult,
+  validatorsGetFees,
 } from "../../utils/json_rpc";
 import { ApiError } from "../helpers/types";
 import queryClient from "../queryClient";
 
-import type { TransactionStatus } from "@tari-project/typescript-bindings";
+import type { AccountOrKeyIndex, TransactionStatus } from "@tari-project/typescript-bindings";
 
 export const useTransactionDetails = (hash: string) => {
   return useQuery({

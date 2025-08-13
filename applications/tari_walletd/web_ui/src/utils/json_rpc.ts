@@ -68,6 +68,8 @@ import type {
   SettingsGetResponse,
   SettingsSetRequest,
   SettingsSetResponse,
+  StealthTransferRequest,
+  StealthTransferResponse,
   SubstatesGetRequest,
   SubstatesGetResponse,
   SubstatesListRequest,
@@ -282,6 +284,8 @@ export const accountsTransfer = (request: AccountsTransferRequest): Promise<Acco
 export const accountsConfidentialTransfer = (
   request: ConfidentialTransferRequest,
 ): Promise<ConfidentialTransferResponse> => client().then((c) => c.confidentialTransfer(request));
+export const accountsStealthTransfer = (request: StealthTransferRequest): Promise<StealthTransferResponse> =>
+  client().then((c) => c.stealthTransfer(request));
 export const accountsSetDefault = (request: AccountSetDefaultRequest): Promise<AccountSetDefaultResponse> =>
   client().then((c) => c.accountsSetDefault(request));
 export const accountsCreateFreeTestCoins = (

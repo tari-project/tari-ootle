@@ -25,7 +25,7 @@ use std::{fs, io, path::PathBuf};
 use anyhow::anyhow;
 use clap::{Args, Subcommand};
 use serde_json as json;
-use tari_ootle_common_types::optional::Optional;
+use tari_ootle_common_types::{displayable::Displayable, optional::Optional};
 use tari_wallet_daemon_client::{
     types::{
         AccountInfo,
@@ -191,7 +191,7 @@ async fn handle_get_balances(args: GetBalancesArgs, client: &mut WalletDaemonCli
     table.set_titles(vec!["VaultId", "Resource", "Balance"]);
     for balance in resp.balances {
         table.add_row(table_row!(
-            balance.vault_address,
+            balance.vault_address.display(),
             format!("{} {:?}", balance.resource_address, balance.resource_type),
             balance.to_balance_string()
         ));

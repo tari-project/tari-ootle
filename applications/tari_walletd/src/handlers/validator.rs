@@ -70,7 +70,7 @@ pub async fn handle_get_validator_fees(
         let Some(result) = context
             .wallet_sdk()
             .substate_api()
-            .scan_for_substate(&SubstateId::from(address), None)
+            .fetch_substate_from_network(&SubstateId::from(address), None)
             .await
             .optional()?
         else {

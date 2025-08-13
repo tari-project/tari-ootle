@@ -1,6 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::collections::{HashMap, HashSet};
+
 use anyhow::anyhow;
 use axum::headers::authorization::Bearer;
 use log::*;
@@ -16,13 +18,19 @@ use tari_engine_types::{
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
 use tari_ootle_wallet_crypto::UnblindedOutputStatement;
 use tari_ootle_wallet_sdk::{
-    apis::{confidential_transfer::ConfidentialTransferParams, key_manager::KeyBranch, substate::ValidatorScanResult},
+    apis::{
+        confidential_transfer::ConfidentialTransferParams,
+        key_manager::KeyBranch,
+        stealth_transfer::StealthTransferParams,
+        substate::ValidatorScanResult,
+    },
     models::NewAccountData,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     constants::{CONFIDENTIAL_TARI_RESOURCE_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
     models::UnclaimedConfidentialOutputAddress,
+    prelude::ResourceType,
     types::Amount,
 };
 use tari_transaction::args;
@@ -56,6 +64,8 @@ use tari_wallet_daemon_client::{
         ConfidentialTransferResponse,
         RevealFundsRequest,
         RevealFundsResponse,
+        StealthTransferRequest,
+        StealthTransferResponse,
     },
     ComponentAddressOrName,
 };
@@ -237,18 +247,66 @@ pub async fn handle_get_balances(
         context.account_monitor().refresh_account(*account.address()).await?;
     }
     let vaults = sdk.accounts_api().get_vaults_by_account(account.address())?;
+    let stealth_outputs = sdk
+        .stealth_outputs_api()
+        .get_unspent_outputs_by_account(account.address())?;
 
     let mut balances = Vec::with_capacity(vaults.len());
+    let mut vaulted_resources = HashSet::new();
     for vault in vaults {
+        let confidential_balance = if vault.resource_type.is_stealth() {
+            let stealth_balance = stealth_outputs
+                .iter()
+                .filter(|o| o.owner_account == *account.address() && o.resource_address == vault.resource_address)
+                .map(|o| o.value)
+                .sum::<Amount>();
+
+            if stealth_balance.is_positive() {
+                // If the vault has a confidential balance, we don't want to add it to the balances list
+                // as it is already included in the vault's revealed balance.
+                vaulted_resources.insert(vault.resource_address);
+            }
+            stealth_balance
+        } else {
+            vault.confidential_balance
+        };
+
         balances.push(BalanceEntry {
-            vault_address: vault.id,
+            vault_address: Some(vault.id),
             resource_address: vault.resource_address,
             balance: vault.revealed_balance,
             resource_type: vault.resource_type,
-            confidential_balance: vault.confidential_balance,
+            confidential_balance,
             token_symbol: vault.token_symbol,
             divisibility: vault.divisibility,
         })
+    }
+
+    let stealth_outputs = stealth_outputs
+        .into_iter()
+        .filter(|o| !vaulted_resources.contains(&o.resource_address))
+        .fold(HashMap::new(), |mut acc, o| {
+            acc.entry(o.resource_address)
+                .and_modify(|v| *v += o.value)
+                .or_insert(o.value);
+            acc
+        });
+
+    let all_resources = sdk.resources_api().get_many(stealth_outputs.keys())?;
+
+    for (resource_address, total_value) in stealth_outputs {
+        let resource = all_resources.get(&resource_address);
+        balances.push(BalanceEntry {
+            vault_address: None,
+            resource_address,
+            balance: Amount::zero(),
+            resource_type: ResourceType::Stealth,
+            confidential_balance: total_value,
+            // It's not guaranteed by the wallet that we know the resource, so instead of erroring, we'll return
+            // something
+            token_symbol: resource.as_ref().and_then(|r| r.token_symbol()).map(|s| s.to_owned()),
+            divisibility: resource.as_ref().map(|r| r.divisibility()).unwrap_or(0),
+        });
     }
 
     Ok(AccountsGetBalancesResponse {
@@ -414,7 +472,7 @@ pub async fn handle_reveal_funds(
         let transaction = builder.with_inputs(inputs).build_and_seal(&account_key.key);
 
         sdk.confidential_outputs_api()
-            .proofs_set_transaction_hash(proof_id, transaction.calculate_id())?;
+            .locks_set_transaction_hash(proof_id, transaction.calculate_id())?;
 
         let mut events = notifier.subscribe();
         let tx_id = transaction_service.submit_transaction(transaction).await?;
@@ -493,8 +551,10 @@ pub async fn handle_claim_burn(
     );
 
     // We have to unmask the commitment to allow us to reveal funds for the fee payment
-    let ValidatorScanResult { substate: output, .. } =
-        sdk.substate_api().scan_for_substate(&address.into(), None).await?;
+    let ValidatorScanResult { substate: output, .. } = sdk
+        .substate_api()
+        .fetch_substate_from_network(&address.into(), None)
+        .await?;
     let output = output.into_unclaimed_confidential_output().ok_or_else(|| {
         anyhow!(
             "Expected the indexer to return an unclaimed confidential output substate for {}, but another substate \
@@ -613,6 +673,7 @@ pub async fn handle_claim_burn(
 }
 
 /// Mints coins into an existing account from the testnet faucet.
+#[allow(clippy::too_many_lines)]
 pub async fn handle_create_free_test_coins(
     context: &HandlerContext,
     token: Option<&Bearer>,
@@ -697,6 +758,13 @@ pub async fn handle_create_free_test_coins(
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .build_and_seal(&account_secret_key.key);
 
+    info!(
+        target: LOG_TARGET,
+        "💰️ create free test coins: Submitting transaction {} for account: {}",
+        transaction.calculate_id(),
+        account.account,
+    );
+
     let mut events = context.notifier().subscribe();
     let tx_id = context
         .transaction_service()
@@ -719,6 +787,14 @@ pub async fn handle_create_free_test_coins(
             reason
         ));
     }
+
+    info!(
+        target: LOG_TARGET,
+        "💰️ create free test coins: Transaction {} finalized for account: {}",
+        tx_id,
+        account.account,
+    );
+
     // Refresh the account
     let account = accounts_api
         .get_account_by_address(account.address())
@@ -763,7 +839,7 @@ pub async fn handle_transfer(
         derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.destination_public_key);
     let existing_dest_account = sdk
         .substate_api()
-        .scan_for_substate(&SubstateId::Component(destination_account_address), None)
+        .fetch_substate_from_network(&SubstateId::Component(destination_account_address), None)
         .await
         .optional()?;
 
@@ -798,7 +874,7 @@ pub async fn handle_transfer(
                     // TODO(perf): slow with lots of vaults
                     let vault = sdk
                         .substate_api()
-                        .scan_for_substate(&SubstateId::Vault(*vault_id), None)
+                        .fetch_substate_from_network(&SubstateId::Vault(*vault_id), None)
                         .await
                         .optional()?;
 
@@ -980,6 +1056,57 @@ pub async fn handle_confidential_transfer(
             fee: finalized.final_fee,
             result: finalized.finalize,
         })
+    })
+    .await?
+}
+
+pub async fn handle_stealth_transfer(
+    context: &HandlerContext,
+    token: Option<&Bearer>,
+    req: StealthTransferRequest,
+) -> Result<StealthTransferResponse, anyhow::Error> {
+    context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
+    let sdk = context.wallet_sdk().clone();
+    let notifier = context.notifier().clone();
+    let owner_account = get_account(&req.owner_account, &sdk.accounts_api())?;
+
+    let params = StealthTransferParams {
+        owner_account,
+        input_selection: req.input_selection,
+        destination_public_key: req.destination_public_key,
+        resource_address: req.resource_address,
+        max_fee: req.max_fee,
+        blinded_output_amount: req.blinded_output_amount,
+        revealed_output_amount: req.revealed_output_amount,
+        is_dry_run: req.dry_run,
+    };
+    if let Err(err) = params.validate() {
+        return Err(invalid_params("params", Some(err)));
+    }
+
+    let transaction_service = context.transaction_service().clone();
+
+    // Spawn here is to prevent the async block from being aborted if the caller aborts the request early as this can
+    // cause funds to remain locked indefinitely.
+    task::spawn(async move {
+        let transfer = sdk.stealth_transfer_api().transfer(params).await?;
+
+        if req.dry_run {
+            let transaction_id = transfer.transaction.calculate_id();
+            transaction_service
+                .submit_dry_run_transaction(transfer.transaction)
+                .await?;
+            return Ok(StealthTransferResponse { transaction_id });
+        }
+
+        let tx_id = transaction_service.submit_transaction(transfer.transaction).await?;
+
+        notifier.notify(TransactionSubmittedEvent {
+            transaction_id: tx_id,
+            new_account: None,
+        });
+
+        Ok(StealthTransferResponse { transaction_id: tx_id })
     })
     .await?
 }

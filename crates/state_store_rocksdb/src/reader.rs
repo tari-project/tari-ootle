@@ -1646,7 +1646,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 }),
             };
 
-            transitions.push(StateTransition { id: key, update });
+            transitions.push(StateTransition {
+                id: key,
+                state_version: value.state_version,
+                update,
+            });
             if transitions.len() == n {
                 break;
             }

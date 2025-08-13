@@ -6,7 +6,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use tari_engine_types::{substate::SubstateId, UtxoId};
+use tari_engine_types::{resource::Resource, substate::SubstateId, UtxoId};
 use tari_ootle_common_types::{optional::IsNotFoundError, substate_type::SubstateType, VersionedSubstateIdRef};
 use tari_template_lib::{
     models::VaultId,
@@ -175,6 +175,10 @@ pub trait WalletStoreReader {
 
     // Resources
     fn resources_get(&mut self, resource_address: &ResourceAddress) -> Result<ResourceModel, WalletStorageError>;
+    fn resources_get_many<'a, I: IntoIterator<Item = &'a ResourceAddress>>(
+        &mut self,
+        addresses: I,
+    ) -> Result<Vec<ResourceModel>, WalletStorageError>;
 
     // Outputs
     fn outputs_get_unspent_balance(&mut self, vault_id: &VaultId) -> Result<u64, WalletStorageError>;
@@ -342,7 +346,7 @@ pub trait WalletStoreWriter {
     fn vaults_finalized_locked_revealed_funds(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
     fn vaults_unlock_revealed_funds(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
     // Resources
-    fn resources_upsert(&mut self, resource: ResourceModel) -> Result<(), WalletStorageError>;
+    fn resources_upsert(&mut self, address: &ResourceAddress, resource: &Resource) -> Result<(), WalletStorageError>;
     // Confidential Outputs
     fn outputs_lock_smallest_amount(
         &mut self,
@@ -358,6 +362,7 @@ pub trait WalletStoreWriter {
     // Stealth Outputs
     fn stealth_outputs_lock_smallest_amount(
         &mut self,
+        account_addr: &ComponentAddress,
         lock_id: OutputLockId,
     ) -> Result<StealthOutputModel, WalletStorageError>;
     fn stealth_outputs_insert(&mut self, output: StealthOutputModel) -> Result<(), WalletStorageError>;

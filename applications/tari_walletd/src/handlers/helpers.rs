@@ -192,12 +192,10 @@ pub(super) fn invalid_request<T: Display>(details: T) -> anyhow::Error {
 }
 
 pub(super) fn transaction_rejected<T: Display>(details: T) -> anyhow::Error {
-    axum_jrpc::error::JsonRpcError::new(
-        axum_jrpc::error::JsonRpcErrorReason::ApplicationError(ApplicationErrorCode::TransactionRejected as i32),
+    application_error(
+        ApplicationErrorCode::TransactionRejected,
         format!("Transaction rejected: {details}"),
-        serde_json::Value::Null,
     )
-    .into()
 }
 
 pub(super) fn general_error<T: Display>(details: T) -> anyhow::Error {

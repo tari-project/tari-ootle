@@ -101,24 +101,14 @@ pub async fn handle_create_transfer_proof(
         &account_secret.key,
     )?;
 
-    let resource = sdk
-        .substate_api()
-        .scan_for_substate(&req.resource_address.into(), None)
-        .await?;
-    let resource_view_key = resource
-        .substate
-        .as_resource()
-        .ok_or_else(|| {
-            anyhow::anyhow!("Indexer returned a non-resource substate when scanning for a resource address")
-        })?
-        .to_view_key_public_key()
-        .map_err(|_| {
-            JsonRpcError::new(
-                JsonRpcErrorReason::InvalidRequest,
-                "Invalid resource address".to_string(),
-                json!({}),
-            )
-        })?;
+    let resource = sdk.substate_api().fetch_resource(req.resource_address).await?;
+    let resource_view_key = resource.to_view_key_public_key().map_err(|_| {
+        JsonRpcError::new(
+            JsonRpcErrorReason::InvalidRequest,
+            "Invalid resource address".to_string(),
+            json!({}),
+        )
+    })?;
 
     let output_statement = UnblindedOutputStatement {
         amount: req.amount,
@@ -273,7 +263,10 @@ pub async fn handle_view_vault_balance(
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
 
-    let substate = sdk.substate_api().scan_for_substate(&req.vault_id.into(), None).await?;
+    let substate = sdk
+        .substate_api()
+        .fetch_substate_from_network(&req.vault_id.into(), None)
+        .await?;
     let vault = substate
         .substate
         .as_vault()

@@ -306,7 +306,7 @@ where
 
         match self
             .substates_api
-            .scan_for_substate(&account_component.into(), None)
+            .fetch_substate_from_network(&account_component.into(), None)
             .await
             .optional()?
         {

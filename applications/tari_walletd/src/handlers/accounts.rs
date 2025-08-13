@@ -292,16 +292,20 @@ pub async fn handle_get_balances(
             acc
         });
 
+    let all_resources = sdk.resources_api().get_many(stealth_outputs.keys())?;
+
     for (resource_address, total_value) in stealth_outputs {
+        let resource = all_resources.get(&resource_address);
         balances.push(BalanceEntry {
             vault_address: None,
             resource_address,
             balance: Amount::zero(),
             resource_type: ResourceType::Stealth,
             confidential_balance: total_value,
-            // TODO
-            token_symbol: None,
-            divisibility: 8,
+            // It's not guaranteed by the wallet that we know the resource, so instead of erroring, we'll return
+            // something
+            token_symbol: resource.as_ref().and_then(|r| r.token_symbol()).map(|s| s.to_owned()),
+            divisibility: resource.as_ref().map(|r| r.divisibility()).unwrap_or(0),
         });
     }
 
@@ -547,8 +551,10 @@ pub async fn handle_claim_burn(
     );
 
     // We have to unmask the commitment to allow us to reveal funds for the fee payment
-    let ValidatorScanResult { substate: output, .. } =
-        sdk.substate_api().scan_for_substate(&address.into(), None).await?;
+    let ValidatorScanResult { substate: output, .. } = sdk
+        .substate_api()
+        .fetch_substate_from_network(&address.into(), None)
+        .await?;
     let output = output.into_unclaimed_confidential_output().ok_or_else(|| {
         anyhow!(
             "Expected the indexer to return an unclaimed confidential output substate for {}, but another substate \
@@ -833,7 +839,7 @@ pub async fn handle_transfer(
         derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.destination_public_key);
     let existing_dest_account = sdk
         .substate_api()
-        .scan_for_substate(&SubstateId::Component(destination_account_address), None)
+        .fetch_substate_from_network(&SubstateId::Component(destination_account_address), None)
         .await
         .optional()?;
 
@@ -868,7 +874,7 @@ pub async fn handle_transfer(
                     // TODO(perf): slow with lots of vaults
                     let vault = sdk
                         .substate_api()
-                        .scan_for_substate(&SubstateId::Vault(*vault_id), None)
+                        .fetch_substate_from_network(&SubstateId::Vault(*vault_id), None)
                         .await
                         .optional()?;
 

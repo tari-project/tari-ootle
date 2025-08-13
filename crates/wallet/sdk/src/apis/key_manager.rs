@@ -28,10 +28,15 @@ pub type WalletKeyManager = KeyManager<RistrettoPublicKey, Blake2b<U64>>;
 )]
 #[serde(rename_all = "snake_case")]
 pub enum KeyBranch {
+    /// The account key branch, used for deriving account keys.
     Account,
+    /// The transaction key branch, used to sign transactions that do not need to be signed with the account key.
     Transaction,
+    /// The view key branch, used to derive a view key for resources.
     ViewKey,
+    /// The stealth masks branch, used to derive masks for stealth addresses.
     StealthMasks,
+    /// The confidential masks branch, used to derive masks for confidential transactions.
     ConfidentialMasks,
 }
 

@@ -82,15 +82,15 @@ pub fn derive_stealth_output_tag(network: Network, owner_public_key: &RistrettoP
 
 #[cfg(test)]
 mod tests {
-    use tari_ootle_common_types::crypto::create_key_pair_from_seed;
+    use tari_ootle_common_types::crypto::create_key_pair;
 
     use super::*;
 
     #[test]
     fn it_generates_the_correct_private_stealth_address() {
         let network = Network::LocalNet;
-        let (secret_key, public_key) = create_key_pair_from_seed(123);
-        let (secret_nonce, public_nonce) = create_key_pair_from_seed(234);
+        let (secret_key, public_key) = create_key_pair();
+        let (secret_nonce, public_nonce) = create_key_pair();
 
         let stealth_address = owner_stealth_dh_stealth_address(network, &public_key, &secret_nonce);
         let stealth_secret = owner_stealth_dh_secret(network, &secret_key, &public_nonce);
@@ -101,12 +101,13 @@ mod tests {
     #[test]
     fn it_does_not_produce_the_same_secret_when_switching_params() {
         let network = Network::LocalNet;
-        let (secret_key, public_key) = create_key_pair_from_seed(123);
-        let (secret_nonce, public_nonce) = create_key_pair_from_seed(234);
+        let (secret_key, public_key) = create_key_pair();
+        let (secret_nonce, public_nonce) = create_key_pair();
 
         let stealth_address1 = owner_stealth_dh_stealth_address(network, &public_key, &secret_nonce);
         let stealth_address2 = owner_stealth_dh_stealth_address(network, &public_nonce, &secret_key);
 
+        // c + k.G != c + r.G
         // Just makes this fact clear if it isn't obvious
         assert_ne!(stealth_address1, stealth_address2);
     }

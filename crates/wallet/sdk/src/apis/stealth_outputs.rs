@@ -62,8 +62,9 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         }
     }
 
-    pub fn lock_outputs_by_amount<A: Into<Amount>>(
+    pub fn lock_outputs_in_account_by_amount<A: Into<Amount>>(
         &self,
+        account_address: &ComponentAddress,
         lock_id: OutputLockId,
         amount: A,
     ) -> Result<(Vec<StealthOutputModel>, Amount), StealthOutputsApiError> {
@@ -75,7 +76,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                 reason: "Amount must be non-negative".to_string(),
             })?;
         self.store.with_write_tx(|tx| {
-            let (outputs, total_output_amount) = self.lock_outputs_internal(tx, amount, lock_id)?;
+            let (outputs, total_output_amount) = self.lock_outputs_internal(tx, account_address, amount, lock_id)?;
 
             if total_output_amount < amount {
                 return Err(StealthOutputsApiError::InsufficientFunds);
@@ -87,16 +88,18 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
 
     pub fn lock_outputs_until_partial_amount(
         &self,
+        account_address: &ComponentAddress,
         amount: Amount,
         locked_by_id: OutputLockId,
     ) -> Result<(Vec<StealthOutputModel>, Amount), StealthOutputsApiError> {
         self.store
-            .with_write_tx(|tx| self.lock_outputs_internal(tx, amount, locked_by_id))
+            .with_write_tx(|tx| self.lock_outputs_internal(tx, account_address, amount, locked_by_id))
     }
 
     fn lock_outputs_internal<TTx: WalletStoreWriter>(
         &self,
         tx: &mut TTx,
+        account_address: &ComponentAddress,
         amount: Amount,
         locked_by_id: OutputLockId,
     ) -> Result<(Vec<StealthOutputModel>, Amount), StealthOutputsApiError> {
@@ -109,7 +112,9 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         let mut total_output_amount = Amount::zero();
         let mut outputs = Vec::new();
         while total_output_amount < amount {
-            let output = tx.stealth_outputs_lock_smallest_amount(locked_by_id).optional()?;
+            let output = tx
+                .stealth_outputs_lock_smallest_amount(account_address, locked_by_id)
+                .optional()?;
             match output {
                 Some(output) => {
                     total_output_amount += output.value;

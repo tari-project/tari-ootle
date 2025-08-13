@@ -190,7 +190,7 @@ async fn when_i_create_account_via_wallet_daemon_with_free_coins(
 #[when(expr = "I create a key named {word} for {word}")]
 async fn when_i_create_a_wallet_key(world: &mut TariWorld, key_name: String, wallet_daemon_name: String) {
     let mut client = world.get_wallet_daemon(&wallet_daemon_name).get_authed_client().await;
-    let key = client.create_key(KeyBranch::Transaction).await.unwrap();
+    let key = client.create_key(KeyBranch::Account).await.unwrap();
     world.wallet_keys.insert(key_name, key.id);
 }
 

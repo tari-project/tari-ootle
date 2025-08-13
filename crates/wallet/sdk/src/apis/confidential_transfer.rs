@@ -7,7 +7,7 @@ use digest::crypto_common::rand_core::OsRng;
 use log::*;
 use tari_bor::{Deserialize, Serialize};
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
-use tari_engine_types::{substate::SubstateId, FromByteType, ToByteType};
+use tari_engine_types::{FromByteType, ToByteType};
 use tari_ootle_common_types::{optional::IsNotFoundError, SubstateRequirement};
 use tari_ootle_wallet_crypto::{MaskAndValue, UnblindedOutputStatement};
 use tari_template_lib::{
@@ -236,10 +236,7 @@ where
         inputs.push(SubstateRequirement::unversioned(params.resource_address));
 
         // We need to fetch the resource substate to check if there is a view key present.
-        let resource_substate = self
-            .substate_api
-            .scan_for_substate(&SubstateId::Resource(params.resource_address), None)
-            .await?;
+        let resource = self.substate_api.fetch_resource(params.resource_address).await?;
 
         if let Some(ref resource_address) = params.proof_from_resource {
             inputs.push(SubstateRequirement::unversioned(*resource_address));
@@ -327,15 +324,7 @@ where
         };
 
         // Generate outputs
-        let resource_view_key = resource_substate
-            .substate
-            .as_resource()
-            .ok_or_else(|| ConfidentialTransferApiError::UnexpectedIndexerResponse {
-                details: format!(
-                    "Expected indexer to return resource for address {}. It returned {}",
-                    params.resource_address, resource_substate.address
-                ),
-            })?
+        let resource_view_key = resource
             .view_key()
             .map(RistrettoPublicKey::try_from_byte_type)
             .transpose()

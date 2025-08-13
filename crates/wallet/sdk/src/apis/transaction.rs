@@ -289,6 +289,8 @@ where
             // Lock could be for confidential outputs or stealth outputs
             tx.outputs_release_by_lock_id(lock_id)?;
             tx.stealth_outputs_release_by_lock_id(lock_id)?;
+            // If the lock locks a vault, we need to release the revealed funds
+            tx.vaults_unlock_revealed_funds(lock_id)?;
         }
 
         Ok(())

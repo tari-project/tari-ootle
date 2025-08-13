@@ -104,7 +104,11 @@ where
         match input_selection {
             ConfidentialTransferInputSelection::ConfidentialOnly => {
                 let lock_id = self.outputs_api.create_lock_for_resource(&resource_address)?;
-                let (input_models, _) = self.outputs_api.lock_outputs_by_amount(lock_id, spend_amount)?;
+                let (input_models, _) = self.outputs_api.lock_outputs_in_account_by_amount(
+                    from_account.address(),
+                    lock_id,
+                    spend_amount,
+                )?;
                 let inputs = self
                     .outputs_api
                     .resolve_output_masks_for_spending(from_account, input_models)?;
@@ -205,7 +209,7 @@ where
                     },
                 };
 
-                let (inputs, _) = self.outputs_api.lock_outputs_by_amount(lock_id, utxo_amount_to_spend)
+                let (inputs, _) = self.outputs_api.lock_outputs_in_account_by_amount(from_account.address(), lock_id, utxo_amount_to_spend)
                     .inspect_err(|_| {
                         // TODO: atomic rollback will help with this
                         if let Err(err) = self.outputs_api.release_locked_outputs(lock_id) {
@@ -255,9 +259,11 @@ where
             },
             ConfidentialTransferInputSelection::PreferConfidential => {
                 let lock_id = self.outputs_api.create_lock_for_resource(&resource_address)?;
-                let (blinded_inputs, blinded_amount_locked) = self
-                    .outputs_api
-                    .lock_outputs_until_partial_amount(spend_amount, lock_id)?;
+                let (blinded_inputs, blinded_amount_locked) = self.outputs_api.lock_outputs_until_partial_amount(
+                    from_account.address(),
+                    spend_amount,
+                    lock_id,
+                )?;
 
                 let revealed_to_spend = spend_amount
                     .saturating_sub_positive(blinded_amount_locked)
@@ -361,7 +367,7 @@ where
                     // side
                     let to_account_substate = self
                         .substate_api
-                        .scan_for_substate(&SubstateId::Component(destination_account), None)
+                        .fetch_substate_from_network(&SubstateId::Component(destination_account), None)
                         .await
                         .optional()?;
 
@@ -412,21 +418,10 @@ where
         };
 
         // We need to fetch the resource substate to check if there is a view key present.
-        let resource_substate = self
-            .substate_api
-            .scan_for_substate(&SubstateId::Resource(params.resource_address), None)
-            .await?;
+        let resource = self.substate_api.fetch_resource(params.resource_address).await?;
 
         // Generate outputs
-        let resource_view_key = resource_substate
-            .substate
-            .as_resource()
-            .ok_or_else(|| StealthTransferApiError::UnexpectedIndexerResponse {
-                details: format!(
-                    "Expected indexer to return resource for address {}. It returned {}",
-                    params.resource_address, resource_substate.address
-                ),
-            })?
+        let resource_view_key = resource
             .view_key()
             .map(RistrettoPublicKey::try_from_byte_type)
             .transpose()

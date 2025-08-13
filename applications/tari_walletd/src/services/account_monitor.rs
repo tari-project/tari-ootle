@@ -20,6 +20,7 @@ use tari_ootle_wallet_sdk::{
         accounts::AccountsApiError,
         confidential_outputs::ConfidentialOutputsApiError,
         non_fungible_tokens::NonFungibleTokensApiError,
+        resources::ResourcesApiError,
         stealth_outputs::StealthOutputsApiError,
         substate::{SubstateApiError, ValidatorScanResult},
         transaction::TransactionApiError,
@@ -162,7 +163,7 @@ where
 
         let mut is_updated = false;
         let maybe_scan_result = substate_api
-            .scan_for_substate(&account_address.into(), None)
+            .fetch_substate_from_network(&account_address.into(), None)
             .await
             .optional()?;
 
@@ -203,7 +204,7 @@ where
                 substate,
                 ..
             }) = substate_api
-                .scan_for_substate(&vault_substate_id, None)
+                .fetch_substate_from_network(&vault_substate_id, None)
                 .await
                 .optional()?
             else {
@@ -314,7 +315,7 @@ where
                 );
 
                 let resource = self.fetch_resource(*latest_vault.resource_address()).await?;
-                let token_symbol = resource.metadata().get(TOKEN_SYMBOL).cloned();
+                let token_symbol = resource.token_symbol().map(|s| s.to_string());
                 let divisibility = resource.divisibility();
 
                 accounts_api.add_vault(
@@ -691,12 +692,14 @@ where
         let resx = substate.into_substate_value().into_resource().ok_or_else(|| {
             AccountMonitorError::UnexpectedSubstate(format!("Expected {} to be a resource.", resx_addr))
         })?;
+        self.wallet_sdk.resources_api().upsert_resource(&resx_addr, &resx)?;
         Ok(resx)
     }
 
     async fn fetch_substate(&self, substate_id: &SubstateId) -> Result<Substate, AccountMonitorError> {
         let substate_api = self.wallet_sdk.substate_api();
-        let ValidatorScanResult { substate, address } = substate_api.scan_for_substate(substate_id, None).await?;
+        let ValidatorScanResult { substate, address } =
+            substate_api.fetch_substate_from_network(substate_id, None).await?;
         Ok(Substate::new(address.version(), substate))
     }
 
@@ -824,6 +827,8 @@ pub enum AccountMonitorError {
     StealthOutputs(#[from] StealthOutputsApiError),
     #[error("Non Fungibles API error: {0}")]
     NonFungibleTokens(#[from] NonFungibleTokensApiError),
+    #[error("Resources API error: {0}")]
+    Resources(#[from] ResourcesApiError),
     #[error("Failed to decode binary value: {0}")]
     DecodeValueFailed(#[from] IndexedValueError),
     #[error("Unexpected substate: {0}")]

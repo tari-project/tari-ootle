@@ -564,7 +564,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
         let row = resources::table
             .filter(resources::address.eq(resource_address.to_string()))
-            .first::<models::Resource>(self.connection())
+            .first::<models::ResourceModel>(self.connection())
             .optional()
             .map_err(|e| WalletStorageError::general(OPERATION, e))?
             .ok_or_else(|| WalletStorageError::NotFound {
@@ -574,6 +574,22 @@ impl WalletStoreReader for ReadTransaction<'_> {
             })?;
 
         row.try_convert()
+    }
+
+    fn resources_get_many<'a, I: IntoIterator<Item = &'a ResourceAddress>>(
+        &mut self,
+        addresses: I,
+    ) -> Result<Vec<ResourceModel>, WalletStorageError> {
+        const OPERATION: &str = "resources_get_many";
+
+        use crate::schema::resources;
+
+        let rows = resources::table
+            .filter(resources::address.eq_any(addresses.into_iter().map(|addr| addr.to_string())))
+            .get_results::<models::ResourceModel>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        rows.into_iter().map(|r| r.try_convert()).collect()
     }
 
     // -------------------------------- Outputs -------------------------------- //

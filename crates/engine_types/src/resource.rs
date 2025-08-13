@@ -84,6 +84,30 @@ impl Resource {
         }
     }
 
+    pub fn load(
+        resource_type: ResourceType,
+        owner_key: Option<RistrettoPublicKeyBytes>,
+        owner_rule: OwnerRule,
+        access_rules: ResourceAccessRules,
+        metadata: Metadata,
+        view_key: Option<RistrettoPublicKeyBytes>,
+        auth_hook: Option<AuthHook>,
+        divisibility: u8,
+        total_supply: Option<Amount>,
+    ) -> Self {
+        Self {
+            resource_type,
+            owner_rule,
+            owner_key,
+            access_rules,
+            metadata,
+            total_supply,
+            view_key,
+            auth_hook,
+            divisibility,
+        }
+    }
+
     pub fn resource_type(&self) -> ResourceType {
         self.resource_type
     }

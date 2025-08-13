@@ -113,11 +113,16 @@ CREATE TABLE resources
     id            INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
     address       TEXT     NOT NULL,
     resource_type TEXT     NOT NULL,
+    owner_key     TEXT     NULL,
+    owner_rule    TEXT     NOT NULL,
+    access_rules  TEXT     NOT NULL,
     token_symbol  TEXT     NULL,
     divisibility  INTEGER  NOT NULL,
     metadata      TEXT     NOT NULL,
-    access_rules  TEXT     NOT NULL,
     total_supply  TEXT     NULL,
+    view_key      TEXT     NULL,
+    auth_hook     TEXT     NULL,
+
     updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

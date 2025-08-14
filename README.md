@@ -8,7 +8,7 @@ If you're looking for the core Tari base layer code, it's in [this repository](h
 
 ## Accessing the Ootle Testnet
 
-The Tari Ootle Wallet Daemon is available from the release page of the Ootle project: https://github.com/tari-project/tari-ootle/releases
+The Tari Ootle Wallet Daemon is available on the project’s [releases page](https://github.com/tari-project/tari-ootle/releases).
 Unzip the binaries, then run:
 
 ```shell
@@ -58,8 +58,6 @@ cargo run --bin tari_swarm_daemon --release -- -c data/swarm/config.toml start
 ```
 
 > Note: For subsequent runs, you only need to run the third command with the `-k` argument to avoid trying to re-register the Validator Nodes: `cargo run --bin tari_swarm_daemon --release -- -c data/swarm/config.toml start -k`
-
-```
 
 This will get you an instance of the `tari_swarm_daemon`, starting a Minotari base node, a Minotari console wallet, an Ootle validator node, an Ootle wallet and an Indexer.
 Additionally, it will automatically submit the validator node registration and mine blocks until the validator node is active.

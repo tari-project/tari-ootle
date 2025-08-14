@@ -4,32 +4,29 @@ import TableCell from '@mui/material/TableCell';
 import TableContainer from '@mui/material/TableContainer';
 import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
+import Chip from '@mui/material/Chip';
 import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
 } from '../../../Components/Accordion';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import Chip from '@mui/material/Chip';
 import { DataTableCell } from '../../../Components/StyledComponents';
 import { Stack } from '@mui/material';
 import { useState, useEffect } from 'react';
+import type { FeeReceipt } from '@tari-project/typescript-bindings';
+import { formatXTM } from '../../../utils/helpers';
 
-interface FeeInformationProps {
-  feeReceipt: {
-    total_fee_payment: any;
-    total_fees_paid: any;
-    cost_breakdown: {
-      breakdown: Record<string, any>;
-    };
-  };
+interface FeeInformationProps extends FeeReceipt {
   expandAllTrigger?: number;
   collapseAllTrigger?: number;
   onExpandedChange?: (expanded: boolean) => void;
 }
 
 function FeeInformation({
-  feeReceipt,
+  total_fee_payment,
+  total_fees_paid,
+  cost_breakdown,
   expandAllTrigger = 0,
   collapseAllTrigger = 0,
   onExpandedChange,
@@ -68,21 +65,17 @@ function FeeInformation({
             <TableBody>
               <TableRow>
                 <TableCell>Total Fee Payment</TableCell>
-                <DataTableCell>
-                  {feeReceipt.total_fee_payment.toString()}
-                </DataTableCell>
+                <DataTableCell>{formatXTM(total_fee_payment)}</DataTableCell>
               </TableRow>
               <TableRow>
                 <TableCell>Total Fees Paid</TableCell>
-                <DataTableCell>
-                  {feeReceipt.total_fees_paid.toString()}
-                </DataTableCell>
+                <DataTableCell>{formatXTM(total_fees_paid)}</DataTableCell>
               </TableRow>
               <TableRow>
                 <TableCell>Cost Breakdown</TableCell>
                 <DataTableCell>
                   <Stack direction="row" spacing={1}>
-                    {Object.entries(feeReceipt.cost_breakdown.breakdown).map(
+                    {Object.entries(cost_breakdown.breakdown).map(
                       ([key, value]) => (
                         <Chip
                           key={key}

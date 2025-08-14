@@ -41,30 +41,17 @@ import Collapse from '@mui/material/Collapse';
 import IconButton from '@mui/material/IconButton';
 import { ChevronRight } from '@mui/icons-material';
 import { TransactionEntry } from '@tari-project/typescript-bindings';
-import {
-  useListRecentTransactions,
-  useGetTransactionResult,
-} from '../../api/hooks/useTransactions';
+import { useListRecentTransactions } from '../../api/hooks/useTransactions';
 import FetchStatusCheck from '../../Components/FetchStatusCheck';
+import TimeChip from './TimeChip';
+import { Stack } from '@mui/material';
 
 function RowData(props: { data: TransactionEntry }) {
   const [open1, setOpen1] = useState(false);
   const [open2, setOpen2] = useState(false);
 
-  const { transaction_id, transaction: tx } = props.data;
+  const { transaction_id, transaction: tx, created_at } = props.data;
   const transaction = tx.V1.body.transaction;
-
-  // Fetch transaction result to get finalized time
-  const { data: resultData, isLoading: resultLoading } =
-    useGetTransactionResult(transaction_id || '');
-
-  // Extract finalized time from result data
-  const finalizedTime =
-    resultData?.result &&
-    typeof resultData.result === 'object' &&
-    'Finalized' in resultData.result
-      ? resultData.result.Finalized.finalized_time
-      : null;
 
   return (
     <>
@@ -74,15 +61,20 @@ function RowData(props: { data: TransactionEntry }) {
             borderBottom: 'none',
           }}
         >
-          <Link
-            to={`/transactions/${transaction_id}`}
-            style={{ textDecoration: 'none', color: 'inherit' }}
+          <Stack
+            direction="row"
+            spacing={2}
+            alignItems="center"
+            sx={{ width: '100%' }}
           >
-            {transaction_id}
-          </Link>
-        </DataTableCell>
-        <DataTableCell sx={{ borderBottom: 'none', textAlign: 'center' }}>
-          {resultLoading ? 'Loading...' : finalizedTime || 'N/A'}
+            <Link
+              to={`/transactions/${transaction_id}`}
+              style={{ textDecoration: 'none', color: 'inherit' }}
+            >
+              {transaction_id}
+            </Link>
+            <TimeChip timestamp={created_at} />
+          </Stack>
         </DataTableCell>
         <DataTableCell sx={{ borderBottom: 'none', textAlign: 'center' }}>
           <AccordionIconButton
@@ -123,7 +115,7 @@ function RowData(props: { data: TransactionEntry }) {
             paddingTop: 0,
             borderBottom: 'none',
           }}
-          colSpan={5}
+          colSpan={4}
         >
           <Collapse in={open1} timeout="auto" unmountOnExit>
             <CodeBlock style={{ marginBottom: '10px' }}>
@@ -133,7 +125,7 @@ function RowData(props: { data: TransactionEntry }) {
         </DataTableCell>
       </TableRow>
       <TableRow>
-        <DataTableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={5}>
+        <DataTableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={4}>
           <Collapse in={open2} timeout="auto" unmountOnExit>
             <CodeBlock style={{ marginBottom: '10px' }}>
               {renderJson(transaction.instructions)}
@@ -187,9 +179,6 @@ function RecentTransactions() {
           <TableHead>
             <TableRow>
               <TableCell>Transaction Hash</TableCell>
-              <TableCell style={{ textAlign: 'center' }}>
-                Finalized Time
-              </TableCell>
               <TableCell style={{ textAlign: 'center' }}>
                 Fee Instructions
               </TableCell>

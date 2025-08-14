@@ -20,34 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useQuery } from '@tanstack/react-query';
-import {
-  listRecentTransactions,
-  getTransactionResult,
-} from '../../utils/json_rpc';
-
-interface UseListRecentTransactionsProps {
-  last_id: string | null;
-  limit: number;
-}
-
-export const useListRecentTransactions = ({
-  last_id,
-  limit,
-}: UseListRecentTransactionsProps) => {
-  return useQuery({
-    queryKey: ['recent_transactions'],
-    queryFn: () => {
-      return listRecentTransactions({ last_id, limit });
-    },
-    refetchInterval: 30 * 1000,
-  });
-};
-
-export const useGetTransactionResult = (transaction_id: string) => {
-  return useQuery({
-    queryKey: ['transaction_result', transaction_id],
-    queryFn: () => getTransactionResult({ transaction_id }),
-    enabled: !!transaction_id,
-  });
-};
+export const CURRENCY = {
+  SYMBOL: 'tXTM',
+  DECIMALS: 6,
+  DIVISOR: 1_000_000,
+} as const;

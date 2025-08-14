@@ -100,10 +100,8 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
                 {data.result.Finalized.execution_result?.finalize
                   ?.fee_receipt && (
                   <FeeInformation
-                    feeReceipt={
-                      data.result.Finalized.execution_result.finalize
-                        .fee_receipt
-                    }
+                    {...data.result.Finalized.execution_result.finalize
+                      .fee_receipt}
                   />
                 )}
 

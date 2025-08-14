@@ -14,8 +14,8 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
 import { DataTableCell } from '../../../Components/StyledComponents';
-import type { Event } from '@tari-project/typescript-bindings';
 import { useState, useEffect } from 'react';
+import type { Event } from '@tari-project/typescript-bindings';
 
 interface EventsProps {
   events: Event[];
@@ -68,7 +68,7 @@ function Events({
             <Accordion key={index}>
               <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                 <Stack direction="row" spacing={1} alignItems="center">
-                  <Chip variant="filled" label={event.topic} color="primary" />
+                  <Chip variant="filled" label={event.topic} color="default" />
                   <Typography variant="subtitle2">
                     {event.substate_id ? String(event.substate_id) : 'N/A'}
                   </Typography>

@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
-import { parseTimestamp } from '../utils/helpers';
+import { useEffect, useState } from "react";
+import { parseTimestamp } from "../utils/helpers";
 
 export function useTimeAgo(rawTimestamp: string | null | undefined): string {
   const getTimeAgo = (timestamp: string | null | undefined): string => {
     const date = parseTimestamp(timestamp);
-    if (!date) return '';
+    if (!date) return "";
 
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
@@ -14,18 +14,18 @@ export function useTimeAgo(rawTimestamp: string | null | undefined): string {
     const diffDays = Math.floor(diffHours / 24);
 
     if (diffSeconds < 60)
-      return `${diffSeconds} sec${diffSeconds !== 1 ? 's' : ''} ago`;
+      return `${diffSeconds} sec${diffSeconds !== 1 ? "s" : ""} ago`;
     if (diffMinutes < 60)
-      return `${diffMinutes} min${diffMinutes !== 1 ? 's' : ''} ago`;
+      return `${diffMinutes} min${diffMinutes !== 1 ? "s" : ""} ago`;
     if (diffHours < 24)
-      return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
-    if (diffDays === 1) return 'yesterday';
-    if (diffDays < 7) return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
+      return `${diffHours} hour${diffHours !== 1 ? "s" : ""} ago`;
+    if (diffDays === 1) return "yesterday";
+    if (diffDays < 7) return `${diffDays} day${diffDays !== 1 ? "s" : ""} ago`;
 
     return date.toLocaleDateString(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
+      year: "numeric",
+      month: "short",
+      day: "numeric",
     });
   };
 

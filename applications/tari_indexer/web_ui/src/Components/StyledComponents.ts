@@ -33,7 +33,8 @@ interface IAccordionIconButton {
 }
 
 export const AccordionIconButton = styled(IconButton)<IAccordionIconButton>`
-  background-color: ${({ open }) => (open ? theme.palette.primary.main : "#fff")};
+  background-color: ${({ open }) =>
+    open ? theme.palette.primary.main : "#fff"};
   color: ${({ open }) => (open ? "#fff" : theme.palette.primary.main)};
   &:hover {
     background-color: ${theme.palette.primary.main};

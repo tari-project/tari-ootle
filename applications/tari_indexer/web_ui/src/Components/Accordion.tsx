@@ -20,15 +20,15 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { styled } from '@mui/material/styles';
-import KeyboardArrowRightRoundedIcon from '@mui/icons-material/KeyboardArrowRightRounded';
-import MuiAccordion, { AccordionProps } from '@mui/material/Accordion';
+import { styled } from "@mui/material/styles";
+import KeyboardArrowRightRoundedIcon from "@mui/icons-material/KeyboardArrowRightRounded";
+import MuiAccordion, { AccordionProps } from "@mui/material/Accordion";
 import MuiAccordionSummary, {
   AccordionSummaryProps,
-} from '@mui/material/AccordionSummary';
+} from "@mui/material/AccordionSummary";
 import MuiAccordionDetails, {
   AccordionDetailsProps,
-} from '@mui/material/AccordionDetails';
+} from "@mui/material/AccordionDetails";
 
 export const Accordion: React.FC<AccordionProps> = styled(
   (props: AccordionProps) => (
@@ -37,13 +37,13 @@ export const Accordion: React.FC<AccordionProps> = styled(
 )(({ theme }) => ({
   borderRadius: 12,
   boxShadow:
-    theme.palette.mode === 'dark' ? 'none' : '3px 3px 12px rgba(0,0,0,0.08)',
-  marginBottom: '8px',
-  '&:not(:last-child)': {
+    theme.palette.mode === "dark" ? "none" : "3px 3px 12px rgba(0,0,0,0.08)",
+  marginBottom: "8px",
+  "&:not(:last-child)": {
     borderBottom: 0,
   },
-  '&:before': {
-    display: 'none',
+  "&:before": {
+    display: "none",
   },
 }));
 
@@ -55,11 +55,11 @@ export const AccordionSummary: React.FC<AccordionSummaryProps> = styled(
     />
   )
 )(({ theme }) => ({
-  flexDirection: 'row',
-  '& .MuiAccordionSummary-expandIconWrapper.Mui-expanded': {
-    transform: 'rotate(90deg)',
+  flexDirection: "row",
+  "& .MuiAccordionSummary-expandIconWrapper.Mui-expanded": {
+    transform: "rotate(90deg)",
   },
-  '& .MuiAccordionSummary-content': {
+  "& .MuiAccordionSummary-content": {
     marginLeft: theme.spacing(1),
   },
 }));

@@ -20,25 +20,25 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import Table from '@mui/material/Table';
-import TableBody from '@mui/material/TableBody';
-import TableCell from '@mui/material/TableCell';
-import TableContainer from '@mui/material/TableContainer';
-import TableRow from '@mui/material/TableRow';
-import Typography from '@mui/material/Typography';
-import Stack from '@mui/material/Stack';
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableRow from "@mui/material/TableRow";
+import Typography from "@mui/material/Typography";
+import Stack from "@mui/material/Stack";
 import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
-} from '../../../Components/Accordion';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import Chip from '@mui/material/Chip';
-import { DataTableCell } from '../../../Components/StyledComponents';
-import { useState, useEffect } from 'react';
-import ArrowCircleUpRoundedIcon from '@mui/icons-material/ArrowCircleUpRounded';
-import ArrowCircleDownRoundedIcon from '@mui/icons-material/ArrowCircleDownRounded';
-import { useTheme } from '@mui/material/styles';
+} from "../../../Components/Accordion";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import Chip from "@mui/material/Chip";
+import { DataTableCell } from "../../../Components/StyledComponents";
+import { useState, useEffect } from "react";
+import ArrowCircleUpRoundedIcon from "@mui/icons-material/ArrowCircleUpRounded";
+import ArrowCircleDownRoundedIcon from "@mui/icons-material/ArrowCircleDownRounded";
+import { useTheme } from "@mui/material/styles";
 
 interface AcceptResult {
   Accept: {
@@ -95,7 +95,7 @@ function SubstateChanges({
             <TableBody>
               {result.Accept.down_substates && (
                 <TableRow>
-                  <TableCell style={{ verticalAlign: 'top' }}>
+                  <TableCell style={{ verticalAlign: "top" }}>
                     Down Substates
                   </TableCell>
                   <DataTableCell>
@@ -132,7 +132,7 @@ function SubstateChanges({
               )}
               {result.Accept.up_substates && (
                 <TableRow>
-                  <TableCell style={{ verticalAlign: 'top' }}>
+                  <TableCell style={{ verticalAlign: "top" }}>
                     Up Substates
                   </TableCell>
                   <DataTableCell>

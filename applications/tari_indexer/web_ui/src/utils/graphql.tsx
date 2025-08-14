@@ -22,8 +22,8 @@
 
 const DEFAULT_GRAPHQL_ADDRESS = new URL(
   import.meta.env.VITE_INDEXER_GRAPHQL_ADDRESS ||
-  import.meta.env.VITE_GRAPHQL_ADDRESS ||
-  "http://localhost:18301",
+    import.meta.env.VITE_GRAPHQL_ADDRESS ||
+    "http://localhost:18301"
 );
 
 export async function getGraphQLAddress(): Promise<URL> {

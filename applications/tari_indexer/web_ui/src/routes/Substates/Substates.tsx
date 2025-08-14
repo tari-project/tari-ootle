@@ -20,9 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import PageHeading from '../../Components/PageHeading';
-import Grid from '@mui/material/Grid';
-import { StyledPaper } from '../../Components/StyledComponents';
+import PageHeading from "../../Components/PageHeading";
+import Grid from "@mui/material/Grid";
+import { StyledPaper } from "../../Components/StyledComponents";
 import {
   Box,
   Button,
@@ -37,32 +37,32 @@ import {
   Typography,
   Select,
   MenuItem,
-} from '@mui/material';
-import React, { useEffect, useState } from 'react';
-import { truncateText } from '../../utils/helpers';
-import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import KeyboardArrowLeftIcon from '@mui/icons-material/KeyboardArrowLeft';
-import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
-import saveAs from 'file-saver';
-import JsonDialog from '../../Components/JsonDialog';
+} from "@mui/material";
+import React, { useEffect, useState } from "react";
+import { truncateText } from "../../utils/helpers";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import KeyboardArrowLeftIcon from "@mui/icons-material/KeyboardArrowLeft";
+import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
+import saveAs from "file-saver";
+import JsonDialog from "../../Components/JsonDialog";
 import {
   ListSubstateItem,
   shortenSubstateId,
   substateIdToString,
-} from '@tari-project/typescript-bindings';
-import { listSubstates, getSubstate } from '../../utils/json_rpc';
-import { Link } from 'react-router-dom';
+} from "@tari-project/typescript-bindings";
+import { listSubstates, getSubstate } from "../../utils/json_rpc";
+import { Link } from "react-router-dom";
 
 const PAGE_SIZE = 10;
 const SUBSTATE_TYPES = [
-  'Component',
-  'Resource',
-  'Vault',
-  'UnclaimedConfidentialOutput',
-  'NonFungible',
-  'TransactionReceipt',
-  'ValidatorFeePool',
-  'Template',
+  "Component",
+  "Resource",
+  "Vault",
+  "UnclaimedConfidentialOutput",
+  "NonFungible",
+  "TransactionReceipt",
+  "ValidatorFeePool",
+  "Template",
 ] as const;
 
 function SubstatesLayout() {
@@ -121,7 +121,7 @@ function SubstatesLayout() {
     });
 
     const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
+    const blob = new Blob([json], { type: "application/json" });
     const filename = `substates-${substate.address}-${substate.version}.json`;
     saveAs(blob, filename);
   };
@@ -181,10 +181,10 @@ function SubstatesLayout() {
 
               return value;
             }}
-            style={{ flexGrow: 1, minWidth: '200px' }}
+            style={{ flexGrow: 1, minWidth: "200px" }}
           >
-            <MenuItem key={'All Types'} value={undefined}>
-              {'All types'}
+            <MenuItem key={"All Types"} value={undefined}>
+              {"All types"}
             </MenuItem>
             {SUBSTATE_TYPES.map((type) => (
               <MenuItem key={type} value={type}>
@@ -210,11 +210,11 @@ function SubstatesLayout() {
               {substates.map((row) => (
                 <TableRow
                   key={substateIdToString(row.substate_id)}
-                  sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
+                  sx={{ "&:last-child td, &:last-child th": { border: 0 } }}
                 >
                   <TableCell>
                     {substateIdToString(row.substate_id).startsWith(
-                      'resource_'
+                      "resource_"
                     ) ? (
                       <Link
                         to={`/resources/${substateIdToString(row.substate_id)}`}

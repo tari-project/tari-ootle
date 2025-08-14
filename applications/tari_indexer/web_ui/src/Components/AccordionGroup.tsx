@@ -28,27 +28,27 @@ import React, {
   useRef,
   useEffect,
   useMemo,
-} from 'react';
-import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
-import Stack from '@mui/material/Stack';
-import { styled } from '@mui/material/styles';
+} from "react";
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import Stack from "@mui/material/Stack";
+import { styled } from "@mui/material/styles";
 
 interface AccordionGroupProps {
   children: React.ReactNode;
 }
 
 const StyledButton = styled(Button)(() => ({
-  minHeight: '30px',
-  boxShadow: 'none',
-  textTransform: 'none',
-  fontSize: '0.8rem',
+  minHeight: "30px",
+  boxShadow: "none",
+  textTransform: "none",
+  fontSize: "0.8rem",
   fontWeight: 500,
   fontFamily: '"AvenirMedium", sans-serif',
-  borderRadius: '32px',
-  padding: '6px 32px',
-  '&:hover': {
-    boxShadow: 'none',
+  borderRadius: "32px",
+  padding: "6px 32px",
+  "&:hover": {
+    boxShadow: "none",
   },
 }));
 
@@ -108,7 +108,7 @@ function AccordionGroup({ children }: AccordionGroupProps) {
     <Box>
       <Stack
         direction="row"
-        justifyContent={'flex-end'}
+        justifyContent={"flex-end"}
         spacing={1}
         sx={{ marginBottom: 2 }}
       >

@@ -20,31 +20,31 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { renderJson } from '../../utils/helpers';
-import Table from '@mui/material/Table';
-import TableBody from '@mui/material/TableBody';
-import TableCell from '@mui/material/TableCell';
-import TableContainer from '@mui/material/TableContainer';
-import TableHead from '@mui/material/TableHead';
-import TableRow from '@mui/material/TableRow';
-import TablePagination from '@mui/material/TablePagination';
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import { renderJson } from "../../utils/helpers";
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableHead from "@mui/material/TableHead";
+import TableRow from "@mui/material/TableRow";
+import TablePagination from "@mui/material/TablePagination";
 import {
   DataTableCell,
   CodeBlock,
   AccordionIconButton,
-} from '../../Components/StyledComponents';
-import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
-import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
-import Collapse from '@mui/material/Collapse';
-import IconButton from '@mui/material/IconButton';
-import { ChevronRight } from '@mui/icons-material';
-import { TransactionEntry } from '@tari-project/typescript-bindings';
-import { useListRecentTransactions } from '../../api/hooks/useTransactions';
-import FetchStatusCheck from '../../Components/FetchStatusCheck';
-import TimeChip from './TimeChip';
-import { Stack } from '@mui/material';
+} from "../../Components/StyledComponents";
+import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
+import Collapse from "@mui/material/Collapse";
+import IconButton from "@mui/material/IconButton";
+import { ChevronRight } from "@mui/icons-material";
+import { TransactionEntry } from "@tari-project/typescript-bindings";
+import { useListRecentTransactions } from "../../api/hooks/useTransactions";
+import FetchStatusCheck from "../../Components/FetchStatusCheck";
+import TimeChip from "./TimeChip";
+import { Stack } from "@mui/material";
 
 function RowData(props: { data: TransactionEntry }) {
   const [open1, setOpen1] = useState(false);
@@ -55,28 +55,28 @@ function RowData(props: { data: TransactionEntry }) {
 
   return (
     <>
-      <TableRow sx={{ borderBottom: 'none' }}>
+      <TableRow sx={{ borderBottom: "none" }}>
         <DataTableCell
           sx={{
-            borderBottom: 'none',
+            borderBottom: "none",
           }}
         >
           <Stack
             direction="row"
             spacing={2}
             alignItems="center"
-            sx={{ width: '100%' }}
+            sx={{ width: "100%" }}
           >
             <Link
               to={`/transactions/${transaction_id}`}
-              style={{ textDecoration: 'none', color: 'inherit' }}
+              style={{ textDecoration: "none", color: "inherit" }}
             >
               {transaction_id}
             </Link>
             <TimeChip timestamp={created_at} />
           </Stack>
         </DataTableCell>
-        <DataTableCell sx={{ borderBottom: 'none', textAlign: 'center' }}>
+        <DataTableCell sx={{ borderBottom: "none", textAlign: "center" }}>
           <AccordionIconButton
             open={open1}
             aria-label="expand row"
@@ -89,7 +89,7 @@ function RowData(props: { data: TransactionEntry }) {
             {open1 ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
           </AccordionIconButton>
         </DataTableCell>
-        <DataTableCell sx={{ borderBottom: 'none', textAlign: 'center' }}>
+        <DataTableCell sx={{ borderBottom: "none", textAlign: "center" }}>
           <AccordionIconButton
             open={open2}
             aria-label="expand row"
@@ -102,7 +102,7 @@ function RowData(props: { data: TransactionEntry }) {
             {open2 ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
           </AccordionIconButton>
         </DataTableCell>
-        <DataTableCell sx={{ borderBottom: 'none', textAlign: 'center' }}>
+        <DataTableCell sx={{ borderBottom: "none", textAlign: "center" }}>
           <IconButton component={Link} to={`/transactions/${transaction_id}`}>
             <ChevronRight color="inherit" />
           </IconButton>
@@ -113,12 +113,12 @@ function RowData(props: { data: TransactionEntry }) {
           style={{
             paddingBottom: 0,
             paddingTop: 0,
-            borderBottom: 'none',
+            borderBottom: "none",
           }}
           colSpan={4}
         >
           <Collapse in={open1} timeout="auto" unmountOnExit>
-            <CodeBlock style={{ marginBottom: '10px' }}>
+            <CodeBlock style={{ marginBottom: "10px" }}>
               {renderJson(transaction.fee_instructions)}
             </CodeBlock>
           </Collapse>
@@ -127,7 +127,7 @@ function RowData(props: { data: TransactionEntry }) {
       <TableRow>
         <DataTableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={4}>
           <Collapse in={open2} timeout="auto" unmountOnExit>
-            <CodeBlock style={{ marginBottom: '10px' }}>
+            <CodeBlock style={{ marginBottom: "10px" }}>
               {renderJson(transaction.instructions)}
             </CodeBlock>
           </Collapse>
@@ -171,7 +171,7 @@ function RecentTransactions() {
       isLoading={isLoading}
       isError={isError}
       errorMessage={
-        error ? error.message : 'Error fetching transaction details.'
+        error ? error.message : "Error fetching transaction details."
       }
     >
       <TableContainer>
@@ -179,13 +179,13 @@ function RecentTransactions() {
           <TableHead>
             <TableRow>
               <TableCell>Transaction Hash</TableCell>
-              <TableCell style={{ textAlign: 'center' }}>
+              <TableCell style={{ textAlign: "center" }}>
                 Fee Instructions
               </TableCell>
-              <TableCell style={{ textAlign: 'center' }}>
+              <TableCell style={{ textAlign: "center" }}>
                 Instructions
               </TableCell>
-              <TableCell style={{ textAlign: 'center' }}>Details</TableCell>
+              <TableCell style={{ textAlign: "center" }}>Details</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>

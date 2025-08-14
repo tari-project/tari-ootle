@@ -20,8 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { toHexString } from '../routes/VN/Components/helpers';
-import { CURRENCY } from './constants';
+import { toHexString } from "../routes/VN/Components/helpers";
+import { CURRENCY } from "./constants";
 
 const renderJson = (json: any) => {
   if (Array.isArray(json)) {
@@ -39,10 +39,10 @@ const renderJson = (json: any) => {
         ],
       </>
     );
-  } else if (typeof json === 'object' && json !== null) {
+  } else if (typeof json === "object" && json !== null) {
     return (
       <>
-        {'{'}
+        {"{"}
         <ul>
           {Object.keys(json).map((key) => (
             <li>
@@ -50,11 +50,11 @@ const renderJson = (json: any) => {
             </li>
           ))}
         </ul>
-        {'}'}
+        {"}"}
       </>
     );
   } else {
-    if (typeof json === 'string')
+    if (typeof json === "string")
       return <span className="string">"{json}"</span>;
     return <span className="other">{json}</span>;
   }
@@ -100,7 +100,7 @@ export function truncateText(text: string, length: number) {
   const rightChars = Math.floor(length / 2);
   return (
     text.substring(0, leftChars) +
-    '...' +
+    "..." +
     text.substring(text.length - rightChars)
   );
 }
@@ -113,36 +113,36 @@ const validateHash = (hash: string): boolean => {
 
 // formatTimestamp.ts
 const formatTimestamp = (rawTimestamp: string | null | undefined): string => {
-  if (!rawTimestamp) return '';
+  if (!rawTimestamp) return "";
 
   let formatted = rawTimestamp;
 
   // If it doesn't already have "T" between date and time, add it
-  if (!formatted.includes('T')) {
-    formatted = formatted.replace(' ', 'T');
+  if (!formatted.includes("T")) {
+    formatted = formatted.replace(" ", "T");
   }
 
   // If it ends with ".0", remove it
-  if (formatted.endsWith('.0')) {
+  if (formatted.endsWith(".0")) {
     formatted = formatted.slice(0, -2);
   }
 
   // If it doesn't already end with "Z" or have a timezone offset, add Z for UTC
   if (!/[Z+\-]\d{2}:?\d{2}$/.test(formatted)) {
-    formatted += 'Z';
+    formatted += "Z";
   }
 
   const date = new Date(formatted);
 
-  if (isNaN(date.getTime())) return '';
+  if (isNaN(date.getTime())) return "";
 
   return date.toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
   });
 };
 
@@ -153,16 +153,16 @@ const parseTimestamp = (
 
   let formatted = rawTimestamp;
 
-  if (!formatted.includes('T')) {
-    formatted = formatted.replace(' ', 'T');
+  if (!formatted.includes("T")) {
+    formatted = formatted.replace(" ", "T");
   }
 
-  if (formatted.endsWith('.0')) {
+  if (formatted.endsWith(".0")) {
     formatted = formatted.slice(0, -2);
   }
 
   if (!/[Z+\-]\d{2}:?\d{2}$/.test(formatted)) {
-    formatted += 'Z';
+    formatted += "Z";
   }
 
   const date = new Date(formatted);
@@ -181,7 +181,7 @@ const isTimestampNew = (timestamp: string | null | undefined): boolean => {
 };
 
 const formatXTM = (amount: number | bigint): string => {
-  if (typeof amount !== 'number' || isNaN(amount)) {
+  if (typeof amount !== "number" || isNaN(amount)) {
     return `0 ${CURRENCY.SYMBOL}`;
   }
   return `${(amount / CURRENCY.DIVISOR).toFixed(CURRENCY.DECIMALS)} ${

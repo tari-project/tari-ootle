@@ -20,10 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Chip, Avatar } from '@mui/material';
-import { IoCheckmarkOutline, IoCloseOutline } from 'react-icons/io5';
-import { useTheme } from '@mui/material/styles';
-import type { Decision } from '@tari-project/typescript-bindings';
+import { Chip, Avatar } from "@mui/material";
+import { IoCheckmarkOutline, IoCloseOutline } from "react-icons/io5";
+import { useTheme } from "@mui/material/styles";
+import type { Decision } from "@tari-project/typescript-bindings";
 
 interface StatusChipProps {
   status: Decision;
@@ -31,8 +31,8 @@ interface StatusChipProps {
 }
 
 const colorList: Record<string, string> = {
-  Commit: '#5F9C91',
-  Abort: '#DB7E7E',
+  Commit: "#5F9C91",
+  Abort: "#DB7E7E",
   // Pending: '#ECA86A',
   // DryRun: '#318EFA',
   // New: '#9D5CF9',
@@ -46,9 +46,9 @@ export default function StatusChip({
 }: StatusChipProps) {
   const theme = useTheme();
 
-  const statusKey = typeof status === 'string' ? status : 'Abort';
+  const statusKey = typeof status === "string" ? status : "Abort";
   const statusLabel =
-    typeof status === 'string' ? status : `Abort: ${status.Abort}`;
+    typeof status === "string" ? status : `Abort: ${status.Abort}`;
 
   const iconList: Record<string, JSX.Element> = {
     Commit: (
@@ -105,8 +105,8 @@ export default function StatusChip({
   let background = null;
 
   if (!showTitle) {
-    let leftColor = colorList['Commit'];
-    let rightColor = colorList['Abort'];
+    let leftColor = colorList["Commit"];
+    let rightColor = colorList["Abort"];
 
     return (
       <Avatar sx={{ bgcolor: bgColor, height: 22, width: 22 }}>

@@ -20,9 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import PageHeading from '../../Components/PageHeading';
-import Grid from '@mui/material/Grid';
-import { StyledPaper } from '../../Components/StyledComponents';
+import PageHeading from "../../Components/PageHeading";
+import Grid from "@mui/material/Grid";
+import { StyledPaper } from "../../Components/StyledComponents";
 import {
   Box,
   Button,
@@ -35,16 +35,16 @@ import {
   TableRow,
   TextField,
   Typography,
-} from '@mui/material';
-import React, { useEffect, useState } from 'react';
-import { toHexString } from '../VN/Components/helpers';
-import { truncateText } from '../../utils/helpers';
-import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import KeyboardArrowLeftIcon from '@mui/icons-material/KeyboardArrowLeft';
-import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
-import saveAs from 'file-saver';
-import JsonDialog from '../../Components/JsonDialog';
-import { getGraphQLAddress } from '../../utils/graphql';
+} from "@mui/material";
+import React, { useEffect, useState } from "react";
+import { toHexString } from "../VN/Components/helpers";
+import { truncateText } from "../../utils/helpers";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import KeyboardArrowLeftIcon from "@mui/icons-material/KeyboardArrowLeft";
+import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
+import saveAs from "file-saver";
+import JsonDialog from "../../Components/JsonDialog";
+import { getGraphQLAddress } from "../../utils/graphql";
 
 const PAGE_SIZE = 10;
 
@@ -63,7 +63,7 @@ function EventsLayout() {
   }, []);
 
   async function get_events(offset: number, limit: number, filter: any) {
-    let graphql_filters = '';
+    let graphql_filters = "";
     if (filter.topic) {
       graphql_filters += `topic:"${filter.topic}", `;
     }
@@ -75,11 +75,11 @@ function EventsLayout() {
     console.log({ indexer_address });
 
     let res = await fetch(indexer_address, {
-      method: 'POST',
+      method: "POST",
 
       headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
+        "Content-Type": "application/json",
+        Accept: "application/json",
       },
 
       body: JSON.stringify({
@@ -118,7 +118,7 @@ function EventsLayout() {
   const handlePayloadDownload = (event: any) => {
     const data = event.payload;
     const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
+    const blob = new Blob([json], { type: "application/json" });
     const filename = `event-${event.tx_hash}-${event.topic}.json`;
     saveAs(blob, filename);
   };
@@ -187,7 +187,7 @@ function EventsLayout() {
             <TableBody>
               {events.map((row: any) => (
                 <TableRow
-                  sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
+                  sx={{ "&:last-child td, &:last-child th": { border: 0 } }}
                 >
                   <TableCell>{row.topic}</TableCell>
                   <TableCell>

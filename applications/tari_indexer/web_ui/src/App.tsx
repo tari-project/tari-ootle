@@ -20,56 +20,56 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Routes, Route } from 'react-router-dom';
-import ValidatorNode from './routes/VN/ValidatorNode';
-import Connections from './routes/Connections/Connections';
-import RecentTransactions from './routes/RecentTransactions/RecentTransactionsLayout';
-import Resources from './routes/Resources/Resources';
-import Events from './routes/Events/Events';
-import Substates from './routes/Substates/Substates';
-import TransactionDetails from './routes/Transaction/TransactionDetails';
-import ErrorPage from './routes/ErrorPage';
-import Layout from './theme/LayoutMain';
+import { Routes, Route } from "react-router-dom";
+import ValidatorNode from "./routes/VN/ValidatorNode";
+import Connections from "./routes/Connections/Connections";
+import RecentTransactions from "./routes/RecentTransactions/RecentTransactionsLayout";
+import Resources from "./routes/Resources/Resources";
+import Events from "./routes/Events/Events";
+import Substates from "./routes/Substates/Substates";
+import TransactionDetails from "./routes/Transaction/TransactionDetails";
+import ErrorPage from "./routes/ErrorPage";
+import Layout from "./theme/LayoutMain";
 
 export const breadcrumbRoutes = [
   {
-    label: 'Home',
-    path: '/',
+    label: "Home",
+    path: "/",
     dynamic: false,
   },
   {
-    label: 'Connections',
-    path: '/connections',
+    label: "Connections",
+    path: "/connections",
     dynamic: false,
   },
   {
-    label: 'Transactions',
-    path: '/transactions',
+    label: "Transactions",
+    path: "/transactions",
     dynamic: false,
   },
   {
-    label: 'Transaction',
-    path: '/transactions/:transaction_id',
+    label: "Transaction",
+    path: "/transactions/:transaction_id",
     dynamic: true,
   },
   {
-    label: 'Resources',
-    path: '/resources/:resourceAddress',
+    label: "Resources",
+    path: "/resources/:resourceAddress",
     dynamic: true,
   },
   {
-    label: 'Events',
-    path: '/events',
+    label: "Events",
+    path: "/events",
     dynamic: false,
   },
   {
-    label: 'Substates',
-    path: '/substates',
+    label: "Substates",
+    path: "/substates",
     dynamic: false,
   },
   {
-    label: 'Error',
-    path: '*',
+    label: "Error",
+    path: "*",
     dynamic: false,
   },
 ];

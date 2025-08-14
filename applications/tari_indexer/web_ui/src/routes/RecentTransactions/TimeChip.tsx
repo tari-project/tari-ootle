@@ -20,9 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Chip, Tooltip, Stack } from '@mui/material';
-import { useTimeAgo } from '../../hooks/useTimeAgo';
-import { formatTimestamp, isTimestampNew } from '../../utils/helpers';
+import { Chip, Tooltip, Stack } from "@mui/material";
+import { useTimeAgo } from "../../hooks/useTimeAgo";
+import { formatTimestamp, isTimestampNew } from "../../utils/helpers";
 
 function TimeChip({ timestamp }: { timestamp: string }) {
   const timeAgo = useTimeAgo(timestamp);
@@ -30,7 +30,7 @@ function TimeChip({ timestamp }: { timestamp: string }) {
 
   return (
     <Tooltip
-      title={`Created at: ${formatTimestamp(timestamp)}` || ''}
+      title={`Created at: ${formatTimestamp(timestamp)}` || ""}
       placement="top"
       arrow
     >
@@ -40,7 +40,7 @@ function TimeChip({ timestamp }: { timestamp: string }) {
           color="default"
           size="small"
           variant="filled"
-          sx={{ padding: '2px 4px 0px 4px', marginTop: '4px' }}
+          sx={{ padding: "2px 4px 0px 4px", marginTop: "4px" }}
         />
         {showNew && (
           <Chip
@@ -48,7 +48,7 @@ function TimeChip({ timestamp }: { timestamp: string }) {
             color="success"
             size="small"
             variant="filled"
-            sx={{ padding: '2px 4px 0px 4px', marginTop: '4px' }}
+            sx={{ padding: "2px 4px 0px 4px", marginTop: "4px" }}
           />
         )}
       </Stack>

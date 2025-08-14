@@ -20,24 +20,24 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import Table from '@mui/material/Table';
-import TableBody from '@mui/material/TableBody';
-import TableCell from '@mui/material/TableCell';
-import TableContainer from '@mui/material/TableContainer';
-import TableRow from '@mui/material/TableRow';
-import Typography from '@mui/material/Typography';
-import Stack from '@mui/material/Stack';
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableRow from "@mui/material/TableRow";
+import Typography from "@mui/material/Typography";
+import Stack from "@mui/material/Stack";
 import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
-} from '../../../Components/Accordion';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import Box from '@mui/material/Box';
-import Chip from '@mui/material/Chip';
-import { DataTableCell } from '../../../Components/StyledComponents';
-import { useState, useEffect } from 'react';
-import type { Event } from '@tari-project/typescript-bindings';
+} from "../../../Components/Accordion";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import Box from "@mui/material/Box";
+import Chip from "@mui/material/Chip";
+import { DataTableCell } from "../../../Components/StyledComponents";
+import { useState, useEffect } from "react";
+import type { Event } from "@tari-project/typescript-bindings";
 
 interface EventsProps {
   events: Event[];
@@ -92,7 +92,7 @@ function Events({
                 <Stack direction="row" spacing={1} alignItems="center">
                   <Chip variant="filled" label={event.topic} color="default" />
                   <Typography variant="subtitle2">
-                    {event.substate_id ? String(event.substate_id) : 'N/A'}
+                    {event.substate_id ? String(event.substate_id) : "N/A"}
                   </Typography>
                 </Stack>
               </AccordionSummary>
@@ -109,7 +109,7 @@ function Events({
                         <DataTableCell>
                           {event.substate_id
                             ? String(event.substate_id)
-                            : 'N/A'}
+                            : "N/A"}
                         </DataTableCell>
                       </TableRow>
                       <TableRow>
@@ -125,9 +125,9 @@ function Events({
                         <DataTableCell>
                           <pre
                             style={{
-                              fontSize: '12px',
+                              fontSize: "12px",
                               margin: 0,
-                              whiteSpace: 'pre-wrap',
+                              whiteSpace: "pre-wrap",
                             }}
                           >
                             {JSON.stringify(event.payload, null, 2)}

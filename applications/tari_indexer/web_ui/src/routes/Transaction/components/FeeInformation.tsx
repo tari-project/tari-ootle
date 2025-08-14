@@ -20,24 +20,24 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import Table from '@mui/material/Table';
-import TableBody from '@mui/material/TableBody';
-import TableCell from '@mui/material/TableCell';
-import TableContainer from '@mui/material/TableContainer';
-import TableRow from '@mui/material/TableRow';
-import Typography from '@mui/material/Typography';
-import Chip from '@mui/material/Chip';
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableRow from "@mui/material/TableRow";
+import Typography from "@mui/material/Typography";
+import Chip from "@mui/material/Chip";
 import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
-} from '../../../Components/Accordion';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import { DataTableCell } from '../../../Components/StyledComponents';
-import { Stack } from '@mui/material';
-import { useState, useEffect } from 'react';
-import type { FeeReceipt } from '@tari-project/typescript-bindings';
-import { formatXTM } from '../../../utils/helpers';
+} from "../../../Components/Accordion";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import { DataTableCell } from "../../../Components/StyledComponents";
+import { Stack } from "@mui/material";
+import { useState, useEffect } from "react";
+import type { FeeReceipt } from "@tari-project/typescript-bindings";
+import { formatXTM } from "../../../utils/helpers";
 
 interface FeeInformationProps extends FeeReceipt {
   expandAllTrigger?: number;

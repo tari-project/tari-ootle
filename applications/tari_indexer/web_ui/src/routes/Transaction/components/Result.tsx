@@ -20,39 +20,39 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import Table from '@mui/material/Table';
-import TableBody from '@mui/material/TableBody';
-import TableCell from '@mui/material/TableCell';
-import TableContainer from '@mui/material/TableContainer';
-import TableRow from '@mui/material/TableRow';
-import Box from '@mui/material/Box';
-import Chip from '@mui/material/Chip';
-import Alert from '@mui/material/Alert';
-import StatusChip from '../../../Components/StatusChip';
-import { DataTableCell } from '../../../Components/StyledComponents';
-import { useGetTransactionResult } from '../../../api/hooks/useTransactions';
-import FetchStatusCheck from '../../../Components/FetchStatusCheck';
-import AccordionGroup from '../../../Components/AccordionGroup';
-import FeeInformation from './FeeInformation';
-import Events from './Events';
-import Logs from './Logs';
-import SubstateChanges from './SubstateChanges';
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableRow from "@mui/material/TableRow";
+import Box from "@mui/material/Box";
+import Chip from "@mui/material/Chip";
+import Alert from "@mui/material/Alert";
+import StatusChip from "../../../Components/StatusChip";
+import { DataTableCell } from "../../../Components/StyledComponents";
+import { useGetTransactionResult } from "../../../api/hooks/useTransactions";
+import FetchStatusCheck from "../../../Components/FetchStatusCheck";
+import AccordionGroup from "../../../Components/AccordionGroup";
+import FeeInformation from "./FeeInformation";
+import Events from "./Events";
+import Logs from "./Logs";
+import SubstateChanges from "./SubstateChanges";
 import type {
   IndexerTransactionFinalizedResult,
   IndexerGetTransactionResultRequest,
-} from '@tari-project/typescript-bindings';
-import { validateHash } from '../../../utils/helpers';
+} from "@tari-project/typescript-bindings";
+import { validateHash } from "../../../utils/helpers";
 
 // Type guard to check if result is finalized
 const isFinalized = (
   result: IndexerTransactionFinalizedResult
 ): result is { Finalized: any } => {
-  return typeof result === 'object' && result !== null && 'Finalized' in result;
+  return typeof result === "object" && result !== null && "Finalized" in result;
 };
 
 // Type guard to check if transaction result is Accept
 const isAcceptResult = (result: any): result is { Accept: any } => {
-  return result && typeof result === 'object' && 'Accept' in result;
+  return result && typeof result === "object" && "Accept" in result;
 };
 
 function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
@@ -72,13 +72,13 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
         isLoading={isLoading}
         isError={isError}
         errorMessage={
-          error ? error.message : 'Error fetching transaction details.'
+          error ? error.message : "Error fetching transaction details."
         }
       >
         <Box>
           {data?.result && isFinalized(data.result) ? (
             <>
-              <TableContainer sx={{ marginBottom: '16px' }}>
+              <TableContainer sx={{ marginBottom: "16px" }}>
                 <Table>
                   <TableBody>
                     <TableRow>
@@ -97,7 +97,7 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
                     <TableRow>
                       <TableCell>Finalized Time</TableCell>
                       <DataTableCell>
-                        {data.result.Finalized.finalized_time || 'N/A'}
+                        {data.result.Finalized.finalized_time || "N/A"}
                       </DataTableCell>
                     </TableRow>
                     <TableRow>
@@ -111,7 +111,7 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
                               data.result.Finalized.execution_result
                                 .execution_time.nanos / 1000000
                             )}ms`
-                          : 'N/A'}
+                          : "N/A"}
                       </DataTableCell>
                     </TableRow>
                   </TableBody>
@@ -161,7 +161,7 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
                     <DataTableCell>
                       <Chip
                         label={
-                          data?.result === 'Pending' ? 'Pending' : 'Unknown'
+                          data?.result === "Pending" ? "Pending" : "Unknown"
                         }
                         color="warning"
                         variant="filled"

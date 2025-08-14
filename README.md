@@ -6,31 +6,69 @@ You can read about the technical specifications of the Ootle in the [RFCs](https
 
 If you're looking for the core Tari base layer code, it's in [this repository](https://github.com/tari-project/tari)
 
-## Tari Validator node
+## Accessing the Ootle Testnet
 
-See the dedicated [README](./applications/tari_validator_node/README.md) for installation and running guides.
+The Tari Ootle Wallet Daemon is available on the project’s [releases page](https://github.com/tari-project/tari-ootle/releases).
+Unzip the binaries, then run:
 
-## Running and testing a validator
+```shell
+tari_ootle_walletd --network igor -b <yourdesiredconfigfolderpath>
+```
+
+This will start a wallet connected to the Igor Testnet. You can view the public Nodes here:
+
+- Validator Node: [http://18.217.22.26:12006]](http://18.217.22.26:12006)
+- Indexer: [http://18.217.22.26:12502](http://18.217.22.26:12502)
+
+Navigate to http://127.0.0.1:5100 to create an account, claim test tokens and start testing features.
+
+## Running the Ootle Locally (Localnet Development Environment)
 
 NOTE: This repo is heavily under development, so these instructions may change without notice.
 
-The easiest way to run a test network is to use `tari_swarm_daemon`.
+The easiest way to test out the Ootle is to use the `tari_swarm_daemon`. This will spin up all necessary MinoTari and Ootle components for a localnet.
+
+Clone both the tari and tari-ootle repositories in the same folder:
+```shell
+mkdir <containerfolder>
+cd <containerfolder>
+git clone https://github.com/tari-project/tari.git
+git clone https://github.com/tari-project/tari-ootle.git ootle
+```
+
+So:
+<Some container folder>
+   | tari
+   | ootle
+
+`cd` into `tari` and change the branch `v4.9.0-pre.1`: 
 
 ```shell
+cd tari
+git fetch origin tag v4.9.0-pre.1
+git checkout v4.9.0-pre.1
+```
+
+Once done, change directory to the `ootle` and run the following from the ootle folder:
+
+```shell
+rustup target add wasm32-unknown-unknown
 cargo run --bin tari_swarm_daemon --release -- -c data/swarm/config.toml init
-# Edit your config. You may need to point it to the path for the tari L1 repo. By default it assumed it's checked out at `../tari`.
 cargo run --bin tari_swarm_daemon --release -- -c data/swarm/config.toml start
 ```
 
-This will start a Minotari base node, a Minotari console wallet, an Ootle validator node, a wallet and an indexer.
-Additionally, it will automatically submit the validator node registration and mine blocks until the validator node is
-active.
+> Note: For subsequent runs, you only need to run the third command with the `-k` argument to avoid trying to re-register the Validator Nodes: `cargo run --bin tari_swarm_daemon --release -- -c data/swarm/config.toml start -k`
 
-Open `http://localhost:8080` where you can administer the running instances, get links to the various web UIs and
-JSON-RPC endpoints, view logs and more.
+This will get you an instance of the `tari_swarm_daemon`, starting a Minotari base node, a Minotari console wallet, an Ootle validator node, an Ootle wallet and an Indexer.
+Additionally, it will automatically submit the validator node registration and mine blocks until the validator node is active.
 
-NOTE: `tari_swarm_daemon` is specifically for development/debugging and runs a complete local test network. Instructions
-for running a wallet, indexer, or validator node, the feature is still in development.
+Open `http://localhost:8080` where you can administer the running instances, get links to the various web UIs and JSON-RPC endpoints, view logs and more.
+
+NOTE: `tari_swarm_daemon` is specifically for development/debugging and runs a complete local test network. Instructions for running a wallet, indexer, or validator node, the feature is still in development.
+
+## Tari Validator node
+
+See the dedicated [README](./applications/tari_validator_node/README.md) for installation and running guides.
 
 #### Creating a smart contract template
 

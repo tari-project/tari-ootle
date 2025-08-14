@@ -11,7 +11,50 @@ use crate::{
     types::crypto::RistrettoPublicKeyBytes,
 };
 
-/// Implements the builder pattern for Confidential resources.
+/// A builder for creating confidential fungible resources (tokens) inside templates.
+///
+/// This builder provides a fluent API to configure and create confidential fungible tokens with
+/// various properties such as ownership rules, access controls, metadata, divisibility,
+/// and authorization hooks.
+///
+/// If values are not set, defaults for the various properties will be used.
+///
+/// # Usage
+///
+/// You typically start by creating a new builder via [`ResourceBuilder::confidential()`],
+/// then chain configuration methods like `.with_owner_rule()`, `.mintable()`, or
+/// `.with_token_symbol()`, and finally call `.build()` or `.initial_supply()` to create
+/// the resource.
+///
+/// # Note
+/// 
+/// The `ConfidentialResourceBuilder` requires you to provide a [`ConfidentialOutputStatement`] if you wish to set an initial supply. 
+/// Additional supply can be minted later using the `mintable` access rule an right right yeahd another provided [`ConfidentialOutputStatement`].
+/// 
+/// # Examples
+///
+/// Basic usage:
+/// ```rust, ignore
+/// use tari_template_lib::resource::builder::ResourceBuilder;
+///
+/// let resource_address = ResourceBuilder::confidential()
+///     .with_token_symbol("CONF_TARI")
+///     .with_divisibility(9)
+///     .mintable(rule!(allow_all))
+///     .build();
+/// ```
+///
+/// Creating a confidential resource with an initial supply:
+/// ```rust, ignore
+/// use tari_template_lib::resource::builder::ResourceBuilder;
+/// use tari_template_lib::prelude::*;
+///
+/// let proof = create_confidential_output_statement(...); // Omitted for brevity
+/// let bucket = ResourceBuilder::confidential()
+///     .with_token_symbol("CONF_TOKEN")
+///     .initial_supply(proof);
+/// ```
+/// 
 pub struct ConfidentialResourceBuilder {
     metadata: Metadata,
     access_rules: ResourceAccessRules,
@@ -39,13 +82,20 @@ impl ConfidentialResourceBuilder {
     }
 
     /// Sets up who will be the owner of the resource.
-    /// Resource owners are the only ones allowed to update the resource's access rules after creation
+    ///
+    /// By default, the owner is the signer of the resource creation transaction ([`OwnerRule::OwnedBySigner`]).
+    ///
+    /// Resource owners are the only ones allowed to update the resource's access rules after creation.
     pub fn with_owner_rule(mut self, rule: OwnerRule) -> Self {
         self.owner_rule = rule;
         self
     }
 
     /// Sets up who can access the resource for each type of action
+    ///
+    /// This allows you to pass the access rules that will be applied to the resource in a single call.
+    ///
+    /// Using this function will override the default access rules defined in [`ResourceAccessRules::new()`].
     pub fn with_access_rules(mut self, rules: ResourceAccessRules) -> Self {
         self.access_rules = rules;
         self
@@ -59,26 +109,72 @@ impl ConfidentialResourceBuilder {
 
     /// Specify a view key for the confidential resource. This allows anyone with the secret key to uncover the balance
     /// of commitments generated for the resource.
-    /// NOTE: it is not currently possible to change the view key after the resource is created.
+    /// 
+    /// Developers can pass a view key of the [`RistrettoPublicKeyBytes`] type.
+    /// 
+    /// # Note
+    /// It is not currently possible to change the view key after the resource is created.
     pub fn with_view_key(mut self, view_key: RistrettoPublicKeyBytes) -> Self {
         self.view_key = Some(view_key);
         self
     }
 
     /// Sets up who can mint new tokens of the resource
+    ///
+    /// Allows you to pass an [`AccessRule`] that defines who can mint new tokens of the resource.
+    ///
+    /// By default, minting is disabled for all users.
+    ///
+    /// #Examples
+    ///
+    /// ```rust, ignore
+    /// use tari_template_lib::auth::AccessRule;
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::confidential()
+    ///     .mintable(rule!(allow_all))
+    ///     .build();
+    /// ```
     pub fn mintable(mut self, rule: AccessRule) -> Self {
         self.access_rules = self.access_rules.mintable(rule);
         self
     }
 
     /// Sets up who can burn (destroy) tokens of the resource
+    ///
+    /// Allows you to pass an [`AccessRule`] that defines who can burn tokens of the resource.
+    /// By default, burning is disabled for all users.
+    ///
+    /// #Examples
+    ///
+    /// ```rust, ignore
+    /// use tari_template_lib::auth::AccessRule;
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::confidential()
+    ///     .burnable(rule!(allow_all))
+    ///     .build();
+    /// ```
     pub fn burnable(mut self, rule: AccessRule) -> Self {
         self.access_rules = self.access_rules.burnable(rule);
         self
     }
 
     /// Sets up who can recall tokens of the resource.
-    /// A recall is the forceful withdrawal of tokens from any external vault
+    ///
+    /// A recall is the forceful withdrawal of **ALL** tokens from any external vault.
+    ///
+    /// Allows you to pass an [`AccessRule`] that defines who can recall tokens from a vault.
+    ///
+    /// By default, recalling is disabled for all users.
+    ///
+    /// # Examples
+    ///
+    /// ```rust, ignore
+    /// use tari_template_lib::auth::AccessRule;
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::confidential()
+    ///    .recallable(rule!(allow_all))
+    ///   .build();
+    /// ```
     pub fn recallable(mut self, rule: AccessRule) -> Self {
         self.access_rules = self.access_rules.recallable(rule);
         self
@@ -91,48 +187,155 @@ impl ConfidentialResourceBuilder {
     }
 
     /// Sets up who can withdraw tokens of the resource from any vault
+    ///
+    /// Allows you to pass an [`AccessRule`] that defines who can withdraw tokens (via a specified amount) from a vault.
+    ///
+    /// By default, withdrawal is allowed for all users.
+    ///
+    /// # Examples
+    ///
+    /// ```rust, ignore
+    /// use tari_template_lib::auth::AccessRule;
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::confidential()
+    ///     .withdrawable(AccessRule::DenyAll)
+    ///     .build();
+    /// ```
     pub fn withdrawable(mut self, rule: AccessRule) -> Self {
         self.access_rules = self.access_rules.withdrawable(rule);
         self
     }
 
     /// Sets up who can deposit tokens of the resource into any vault
+    ///
+    /// Allows you to pass an [`AccessRule`] that defines who can deposit tokens (via a specified amount) into a vault.
+    ///
+    /// By default, deposit is allowed for all users.
+    ///
+    /// # Examples
+    ///
+    /// ```rust, ignore
+    /// use tari_template_lib::auth::AccessRule;
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::confidential()
+    ///    .depositable(rule!(allow_all))
+    ///     .build();
+    /// ```
     pub fn depositable(mut self, rule: AccessRule) -> Self {
         self.access_rules = self.access_rules.depositable(rule);
         self
     }
 
-    /// Sets up who (apart from the owner) can update the access rules of the resource.
+    /// Sets up who can update the access rules of the resource.
+    ///
+    /// Allows you to pass an [`AccessRule`] that defines who can update the access rules of the resource.
+    ///
+    /// By default, the ability to update access rules is denied for all users. If you want to allow the owner to update
+    /// the access rules, you can use `.update_access_rules(AccessRule::require_owner())`
+    ///
+    /// # Examples
+    ///
+    /// ```rust, ignore
+    /// use tari_template_lib::auth::AccessRule;
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::confidential()
+    ///     .update_access_rules(AccessRule::require_owner())
+    ///     .build();
+    /// ```
     pub fn update_access_rules(mut self, rule: AccessRule) -> Self {
         self.access_rules = self.access_rules.update_access_rules(rule);
         self
     }
 
     /// Sets up the specified `symbol` as the token symbol in the metadata of the resource
+    ///
+    /// # Examples
+    /// ```rust, ignore
+    ///  use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::fungible()
+    ///     .with_token_symbol("MY_TOKEN")
+    ///     .build();
+    /// ```
     pub fn with_token_symbol<S: Into<String>>(mut self, symbol: S) -> Self {
         self.token_symbol = Some(symbol.into());
         self
     }
 
     /// Adds a new metadata entry to the resource
+    ///
+    /// Allows you to add a key-value pair to the resource's metadata.
+    ///
+    /// # Notes
+    ///
+    /// `.add_metadata()` will override any existing metadata with the same key.
+    ///
+    /// # Examples
+    /// ```rust, ignore
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::confidential()
+    ///    .add_metadata("CharacterName", "Tari")
+    ///    .add_metadata("CharacterType", "Mascot")
+    ///    .add_metadata("CharacterLvl", "99")
+    /// .build();
+    /// ```
     pub fn add_metadata<K: Into<String>, V: Into<String>>(mut self, key: K, value: V) -> Self {
         self.metadata.insert(key, value);
         self
     }
 
-    /// Sets up all the metadata entries of the resource
+    /// Replaces the resource's metadata with the given [`Metadata`] object.
+    ///
+    /// Note: This will overwrite any existing metadata, including entries added via `.add_metadata()`.
+    ///
+    /// # Examples
+    /// ```rust, ignore
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// use tari_template_lib::models::Metadata;
+    /// let metadata = Metadata::from([
+    ///     ("Type", "NFT"),
+    ///     ("Creator", "Tari Project"),
+    /// ]);
+    /// let address = ResourceBuilder::confidential()
+    ///     .with_metadata(metadata)
+    ///     .build();
+    /// ```
     pub fn with_metadata(mut self, metadata: Metadata) -> Self {
         self.metadata = metadata;
         self
     }
 
     /// Sets up the image URL of the resource
+    ///
+    /// Allows you to set the image URL of the resource, which can be used in user interfaces to display the token's
+    /// logo or image.
+    ///
+    /// # Examples
+    /// ```rust, ignore
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::confidential()
+    ///     .with_image_url("https://example.com/my_token_image.png".to_string())
+    ///     .build();
+    /// ```
     pub fn with_image_url(self, url: String) -> Self {
         self.add_metadata(IMAGE_URL, url)
     }
 
-    /// Sets the divisibility of the resource. i.e. the number of decimal places.
-    /// Panic if the divisibility is greater than 18.
+    /// Sets the divisibility of the resource. i.e. the number of decimal places
+    ///
+    /// The default divisibility is 18, which means the smallest unit of the resource is 0.000000000000000001 of the
+    /// whole unit.
+    ///
+    /// # Panics
+    /// method will panic if:
+    /// * The divisibility is greater than 18.
+    ///
+    /// # Examples
+    /// ```rust, ignore
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::confidential()
+    ///     .with_divisibility(9)
+    ///     .build();
+    /// ```
     pub fn with_divisibility(mut self, divisibility: u8) -> Self {
         if divisibility > 18 {
             panic!("Divisibility cannot be greater than 18");
@@ -172,13 +375,25 @@ impl ConfidentialResourceBuilder {
     }
 
     /// Build the resource, returning the address
+    ///
+    /// Utilises an internal method to create the resource with the specified properties.
+    ///      
     pub fn build(self) -> ResourceAddress {
         let (address, _) = self.build_internal(None);
         address
     }
 
-    /// Sets up how many tokens are going to be minted on resource creation
-    /// This builds the resource and returns a bucket containing the initial supply.
+    /// Sets up how many tokens are going to be minted on resource creation based on the provided [`ConfidentialOutputStatement`]
+    /// and returns a bucket containing the initial supply.
+    /// 
+    /// # Notes
+    /// This function requires a [`ConfidentialOutputStatement`] that includes:
+    /// - A valid range proof proving the output values are in range [minimum_value_promise, 2^64)
+    /// - (Optional) Confidential outputs (as `UnspentOutput`s) for the recipient and change
+    /// - (Optional) Revealed output and change amounts
+    ///
+    /// Use [`ConfidentialOutputStatement::mint_revealed()`] to mint **revealed funds only** (no commitments). 
+    /// 
     pub fn initial_supply(self, initial_supply_proof: ConfidentialOutputStatement) -> Bucket {
         let mint_arg = MintArg::Confidential {
             statement: Box::new(initial_supply_proof),

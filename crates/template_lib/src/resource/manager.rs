@@ -130,6 +130,10 @@ impl ResourceManager {
     /// This method is typically used during component/template initialization to define new tokens or
     /// digital assets with custom access control, metadata, and minting rules.
     ///
+    /// # Note
+    /// 
+    /// This in an internal function that is used by the `ResourceBuilder` to create resources. You cannot publically call it.
+    /// 
     /// # Arguments
     ///
     /// * `resource_type` – The type of resource to create, defined by the [`ResourceType`] enum.

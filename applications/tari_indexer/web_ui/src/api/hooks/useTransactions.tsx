@@ -20,32 +20,33 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import React from 'react';
-import ReactDOM from 'react-dom/client';
-import './theme/theme.css';
-import { createBrowserRouter, RouterProvider } from 'react-router-dom';
-import App from './App';
-import ErrorPage from './routes/ErrorPage';
-import { QueryClientProvider } from '@tanstack/react-query';
-import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
-import queryClient from './api/queryClient';
+import { useQuery } from '@tanstack/react-query';
+import {
+  listRecentTransactions,
+  getTransactionResult,
+} from '../../utils/json_rpc';
 
-const router = createBrowserRouter([
-  {
-    path: '*',
-    element: <App />,
-    errorElement: <ErrorPage />,
-  },
-]);
+interface UseListRecentTransactionsProps {
+  last_id: string | null;
+  limit: number;
+}
 
-const root = ReactDOM.createRoot(
-  document.getElementById('root') as HTMLElement
-);
-root.render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-      <ReactQueryDevtools initialIsOpen={false} />
-    </QueryClientProvider>
-  </React.StrictMode>
-);
+export const useListRecentTransactions = ({
+  last_id,
+  limit,
+}: UseListRecentTransactionsProps) => {
+  return useQuery({
+    queryKey: ['recent_transactions'],
+    queryFn: () => {
+      return listRecentTransactions({ last_id, limit });
+    },
+  });
+};
+
+export const useGetTransactionResult = (transaction_id: string) => {
+  return useQuery({
+    queryKey: ['transaction_result', transaction_id],
+    queryFn: () => getTransactionResult({ transaction_id }),
+    enabled: !!transaction_id,
+  });
+};

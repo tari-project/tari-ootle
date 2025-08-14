@@ -20,19 +20,31 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import PageHeading from "../../Components/PageHeading";
-import Grid from "@mui/material/Grid";
-import { StyledPaper } from "../../Components/StyledComponents";
-import { Box, Button, IconButton, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from "@mui/material";
-import React, { useEffect, useState } from "react";
-import { toHexString } from "../VN/Components/helpers";
-import { truncateText } from "../../utils/helpers";
+import PageHeading from '../../Components/PageHeading';
+import Grid from '@mui/material/Grid';
+import { StyledPaper } from '../../Components/StyledComponents';
+import {
+  Box,
+  Button,
+  IconButton,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  TextField,
+  Typography,
+} from '@mui/material';
+import React, { useEffect, useState } from 'react';
+import { toHexString } from '../VN/Components/helpers';
+import { truncateText } from '../../utils/helpers';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import KeyboardArrowLeftIcon from '@mui/icons-material/KeyboardArrowLeft';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
-import saveAs from "file-saver";
-import JsonDialog from "../../Components/JsonDialog";
-import { getGraphQLAddress } from "../../utils/graphql";
+import saveAs from 'file-saver';
+import JsonDialog from '../../Components/JsonDialog';
+import { getGraphQLAddress } from '../../utils/graphql';
 
 const PAGE_SIZE = 10;
 
@@ -51,7 +63,7 @@ function EventsLayout() {
   }, []);
 
   async function get_events(offset: number, limit: number, filter: any) {
-    let graphql_filters = "";
+    let graphql_filters = '';
     if (filter.topic) {
       graphql_filters += `topic:"${filter.topic}", `;
     }
@@ -60,20 +72,20 @@ function EventsLayout() {
     }
 
     let indexer_address = (await getGraphQLAddress()).toString();
-    console.log({indexer_address});
+    console.log({ indexer_address });
 
     let res = await fetch(indexer_address, {
       method: 'POST',
 
       headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json"
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
       },
 
       body: JSON.stringify({
         query: `{ getEvents(${graphql_filters} offset:${offset}, limit:${limit}) {substateId, templateAddress, txHash, topic, payload } }`,
-        variables: {}
-      })
+        variables: {},
+      }),
     });
 
     let res_json = await res.json();
@@ -87,26 +99,26 @@ function EventsLayout() {
         template_address: toHexString(event.templateAddress),
       };
     });
-    console.log({rows});
+    console.log({ rows });
     setEvents(rows);
   }
 
   async function handleCopyClick(text: string) {
     if (text) {
-        navigator.clipboard.writeText(text);
+      navigator.clipboard.writeText(text);
     }
-  };
+  }
 
-  async function handleChangePage(newPage: number) { 
+  async function handleChangePage(newPage: number) {
     const offset = newPage * PAGE_SIZE;
     await get_events(offset, PAGE_SIZE, filter);
     setPage(newPage);
-  };
+  }
 
   const handlePayloadDownload = (event: any) => {
     const data = event.payload;
     const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
+    const blob = new Blob([json], { type: 'application/json' });
     const filename = `event-${event.tx_hash}-${event.topic}.json`;
     saveAs(blob, filename);
   };
@@ -114,7 +126,7 @@ function EventsLayout() {
   const handlePayloadView = (event: any) => {
     setSelectedPayload(event.payload);
     setJsonDialogOpen(true);
-  };  
+  };
 
   const handleJsonDialogClose = () => {
     setJsonDialogOpen(false);
@@ -144,27 +156,32 @@ function EventsLayout() {
             name="topic"
             label="Topic"
             value={filter.topic}
-            onChange={async (e: React.ChangeEvent<HTMLInputElement>) => onFilterChange(e)}
-            style={{ flexGrow: 1 }} />
+            onChange={async (e: React.ChangeEvent<HTMLInputElement>) =>
+              onFilterChange(e)
+            }
+            style={{ flexGrow: 1 }}
+          />
           <TextField
             name="substate_id"
             label="Substate Id"
             value={filter.substate_id}
-            onChange={async (e: React.ChangeEvent<HTMLInputElement>) => onFilterChange(e)}
+            onChange={async (e: React.ChangeEvent<HTMLInputElement>) =>
+              onFilterChange(e)
+            }
             style={{ flexGrow: 1 }}
           />
-      </Box>
+        </Box>
       </Grid>
       <Grid item sm={12} md={12} xs={12}>
         <StyledPaper>
           <Table sx={{ minWidth: 650 }} aria-label="simple table">
             <TableHead>
               <TableRow>
-                <TableCell><Typography variant="h3">Topic</Typography></TableCell>
-                <TableCell><Typography variant="h3">Transaction</Typography></TableCell>
-                <TableCell><Typography variant="h3">Substate Id</Typography></TableCell>
-                <TableCell><Typography variant="h3">Template</Typography></TableCell>
-                <TableCell><Typography variant="h3">Payload</Typography></TableCell>
+                <TableCell>Topic</TableCell>
+                <TableCell>Transaction</TableCell>
+                <TableCell>Substate Id</TableCell>
+                <TableCell>Template</TableCell>
+                <TableCell>Payload</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -175,43 +192,68 @@ function EventsLayout() {
                   <TableCell>{row.topic}</TableCell>
                   <TableCell>
                     {truncateText(row.tx_hash, 20)}
-                    <IconButton aria-label="copy" onClick={() => handleCopyClick(row.tx_hash)}>
+                    <IconButton
+                      aria-label="copy"
+                      onClick={() => handleCopyClick(row.tx_hash)}
+                    >
                       <ContentCopyIcon />
                     </IconButton>
                   </TableCell>
                   <TableCell>
                     {truncateText(row.substateId, 20)}
-                    <IconButton aria-label="copy" onClick={() => handleCopyClick(row.substateId)}>
+                    <IconButton
+                      aria-label="copy"
+                      onClick={() => handleCopyClick(row.substateId)}
+                    >
                       <ContentCopyIcon />
                     </IconButton>
                   </TableCell>
                   <TableCell>
                     {truncateText(row.template_address, 20)}
-                    <IconButton aria-label="copy" onClick={() => handleCopyClick(row.template_address)}>
+                    <IconButton
+                      aria-label="copy"
+                      onClick={() => handleCopyClick(row.template_address)}
+                    >
                       <ContentCopyIcon />
                     </IconButton>
                   </TableCell>
                   <TableCell>
                     <Stack direction="row" spacing={2} alignItems="left">
-                    <Button variant="outlined" onClick={() => handlePayloadView(row)}>
+                      <Button
+                        variant="outlined"
+                        onClick={() => handlePayloadView(row)}
+                      >
                         View
-                    </Button>
-                    <Button variant="outlined" onClick={() => handlePayloadDownload(row)}>
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        onClick={() => handlePayloadDownload(row)}
+                      >
                         Download
-                    </Button>
+                      </Button>
                     </Stack>
-                    
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-          <Stack direction="row" justifyContent="right" spacing={2} alignItems="center">
-            <IconButton aria-label="copy" onClick={() => handleChangePage(Math.max(page - 1, 0))}>
+          <Stack
+            direction="row"
+            justifyContent="right"
+            spacing={2}
+            alignItems="center"
+          >
+            <IconButton
+              aria-label="copy"
+              onClick={() => handleChangePage(Math.max(page - 1, 0))}
+            >
               <KeyboardArrowLeftIcon />
             </IconButton>
             <Typography sx={{}}>{page}</Typography>
-            <IconButton aria-label="copy" onClick={() => handleChangePage(page + 1)}>
+            <IconButton
+              aria-label="copy"
+              onClick={() => handleChangePage(page + 1)}
+            >
               <KeyboardArrowRightIcon />
             </IconButton>
           </Stack>
@@ -220,7 +262,8 @@ function EventsLayout() {
       <JsonDialog
         open={jsonDialogOpen}
         onClose={handleJsonDialogClose}
-        data={selectedPayload}/>
+        data={selectedPayload}
+      />
     </>
   );
 }

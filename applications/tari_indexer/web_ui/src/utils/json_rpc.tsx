@@ -23,18 +23,18 @@
 import type {
   IndexerAddPeerRequest,
   IndexerAddPeerResponse,
-  IndexerGetAllVnsResponse,
+  // IndexerGetAllVnsResponse,
   IndexerGetCommsStatsResponse,
   IndexerGetConnectionsResponse,
   GetEpochManagerStatsResponse,
   IndexerGetIdentityResponse,
-  GetNonFungibleCollectionsResponse,
-  GetNonFungibleCountRequest,
-  GetNonFungibleCountResponse,
+  // GetNonFungibleCollectionsResponse,
+  // GetNonFungibleCountRequest,
+  // GetNonFungibleCountResponse,
   GetNonFungiblesRequest,
   GetNonFungiblesResponse,
-  GetRelatedTransactionsRequest,
-  GetRelatedTransactionsResponse,
+  // GetRelatedTransactionsRequest,
+  // GetRelatedTransactionsResponse,
   IndexerGetSubstateRequest,
   IndexerGetSubstateResponse,
   IndexerGetTransactionResultRequest,
@@ -46,19 +46,19 @@ import type {
   IndexerSubmitTransactionResponse,
   ListSubstatesRequest,
   ListSubstatesResponse,
-  SubstateType,
-} from "@tari-project/typescript-bindings";
+  // SubstateType,
+} from '@tari-project/typescript-bindings';
 
 const DEFAULT_WALLET_ADDRESS = new URL(
   import.meta.env.VITE_INDEXER_JRPC_ADDRESS ||
     import.meta.env.VITE_JSON_RPC_ADDRESS ||
     import.meta.env.VITE_JRPC_ADDRESS ||
-    "http://localhost:9000",
+    'http://localhost:9000'
 );
 
 export async function getClientAddress(): Promise<URL> {
   try {
-    const resp = await fetch("/json_rpc_address");
+    const resp = await fetch('/json_rpc_address');
     if (resp.status === 200) {
       const url = await resp.text();
       try {
@@ -79,15 +79,15 @@ async function jsonRpc(method: string, params: any = null) {
   id += 1;
   let address = await getClientAddress();
   let response = await fetch(address, {
-    method: "POST",
+    method: 'POST',
     body: JSON.stringify({
       method: method,
-      jsonrpc: "2.0",
+      jsonrpc: '2.0',
       id: id,
       params: params,
     }),
     headers: {
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
     },
   });
   let json = await response.json();
@@ -97,29 +97,44 @@ async function jsonRpc(method: string, params: any = null) {
   return json.result;
 }
 
-export const getOpenRpcSchema = (): Promise<string> => jsonRpc("rpc.discover");
-export const getIdentity = (): Promise<IndexerGetIdentityResponse> => jsonRpc("get_identity");
-export const addPeer = (request: IndexerAddPeerRequest): Promise<IndexerAddPeerResponse> =>
-  jsonRpc("add_peer", request);
-export const getCommsStats = (): Promise<IndexerGetCommsStatsResponse> => jsonRpc("get_comms_stats");
-export const getSubstate = (request: IndexerGetSubstateRequest): Promise<IndexerGetSubstateResponse> =>
-  jsonRpc("get_substate", request);
-export const inspectSubstate = (request: InspectSubstateRequest): Promise<InspectSubstateResponse> =>
-  jsonRpc("inspect_substate", request);
-export const listSubstates = (request: ListSubstatesRequest): Promise<ListSubstatesResponse> =>
-  jsonRpc("list_substates", request);
-export const getConnections = (): Promise<IndexerGetConnectionsResponse> => jsonRpc("get_connections");
-export const getNonFungibleCount = (request: GetNonFungibleCountRequest): Promise<GetNonFungibleCountResponse> =>
-  jsonRpc("get_non_fungible_count", request);
-export const getNonFungibles = (request: GetNonFungiblesRequest): Promise<GetNonFungiblesResponse> =>
-  jsonRpc("get_non_fungibles", request);
-export const submitTransaction = (request: GetNonFungiblesRequest): Promise<IndexerSubmitTransactionResponse> =>
-  jsonRpc("submit_transaction", request);
+export const getOpenRpcSchema = (): Promise<string> => jsonRpc('rpc.discover');
+export const getIdentity = (): Promise<IndexerGetIdentityResponse> =>
+  jsonRpc('get_identity');
+export const addPeer = (
+  request: IndexerAddPeerRequest
+): Promise<IndexerAddPeerResponse> => jsonRpc('add_peer', request);
+export const getCommsStats = (): Promise<IndexerGetCommsStatsResponse> =>
+  jsonRpc('get_comms_stats');
+export const getSubstate = (
+  request: IndexerGetSubstateRequest
+): Promise<IndexerGetSubstateResponse> => jsonRpc('get_substate', request);
+export const inspectSubstate = (
+  request: InspectSubstateRequest
+): Promise<InspectSubstateResponse> => jsonRpc('inspect_substate', request);
+export const listSubstates = (
+  request: ListSubstatesRequest
+): Promise<ListSubstatesResponse> => jsonRpc('list_substates', request);
+export const getConnections = (): Promise<IndexerGetConnectionsResponse> =>
+  jsonRpc('get_connections');
+// export const getNonFungibleCount = (
+//   request: GetNonFungibleCountRequest
+// ): Promise<GetNonFungibleCountResponse> =>
+//   jsonRpc('get_non_fungible_count', request);
+export const getNonFungibles = (
+  request: GetNonFungiblesRequest
+): Promise<GetNonFungiblesResponse> => jsonRpc('get_non_fungibles', request);
+export const submitTransaction = (
+  request: GetNonFungiblesRequest
+): Promise<IndexerSubmitTransactionResponse> =>
+  jsonRpc('submit_transaction', request);
 export const getTransactionResult = (
-  request: IndexerGetTransactionResultRequest,
-): Promise<IndexerGetTransactionResultResponse> => jsonRpc("get_transaction_result", request);
+  request: IndexerGetTransactionResultRequest
+): Promise<IndexerGetTransactionResultResponse> =>
+  jsonRpc('get_transaction_result', request);
 
-export const getEpochManagerStats = (): Promise<GetEpochManagerStatsResponse> => jsonRpc("get_epoch_manager_stats");
+export const getEpochManagerStats = (): Promise<GetEpochManagerStatsResponse> =>
+  jsonRpc('get_epoch_manager_stats');
 export const listRecentTransactions = (
-  request: ListRecentTransactionsRequest,
-): Promise<ListRecentTransactionsResponse> => jsonRpc("list_recent_transactions", request);
+  request: ListRecentTransactionsRequest
+): Promise<ListRecentTransactionsResponse> =>
+  jsonRpc('list_recent_transactions', request);

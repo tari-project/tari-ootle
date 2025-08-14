@@ -74,7 +74,8 @@ function Resources() {
         if (nftData) {
           console.log(nftData);
           let { image_url, name } = nftData;
-          let address = substateIdToString(nft.address).split("_", 4);
+          const nftSubstateId = { NonFungible: nft.address };
+          let address = substateIdToString(nftSubstateId).split("_", 4);
           nfts.push({ img: image_url, title: name, address: `${address[2]}_${address[3]}`, version: nft.version });
         }
 

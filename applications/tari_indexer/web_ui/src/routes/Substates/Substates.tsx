@@ -20,9 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import PageHeading from "../../Components/PageHeading";
-import Grid from "@mui/material/Grid";
-import { StyledPaper } from "../../Components/StyledComponents";
+import PageHeading from '../../Components/PageHeading';
+import Grid from '@mui/material/Grid';
+import { StyledPaper } from '../../Components/StyledComponents';
 import {
   Box,
   Button,
@@ -37,25 +37,36 @@ import {
   Typography,
   Select,
   MenuItem,
-  InputLabel,
-} from "@mui/material";
-import React, { useEffect, useState } from "react";
-import { toHexString } from "../VN/Components/helpers";
-import { truncateText } from "../../utils/helpers";
-import ContentCopyIcon from "@mui/icons-material/ContentCopy";
-import KeyboardArrowLeftIcon from "@mui/icons-material/KeyboardArrowLeft";
-import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
-import saveAs from "file-saver";
-import JsonDialog from "../../Components/JsonDialog";
-import { ListSubstateItem, shortenSubstateId, substateIdToString } from "@tari-project/typescript-bindings";
-import { listSubstates, getSubstate } from "../../utils/json_rpc";
-import { Link } from "react-router-dom";
+} from '@mui/material';
+import React, { useEffect, useState } from 'react';
+import { truncateText } from '../../utils/helpers';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import KeyboardArrowLeftIcon from '@mui/icons-material/KeyboardArrowLeft';
+import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
+import saveAs from 'file-saver';
+import JsonDialog from '../../Components/JsonDialog';
+import {
+  ListSubstateItem,
+  shortenSubstateId,
+  substateIdToString,
+} from '@tari-project/typescript-bindings';
+import { listSubstates, getSubstate } from '../../utils/json_rpc';
+import { Link } from 'react-router-dom';
 
 const PAGE_SIZE = 10;
-const SUBSTATE_TYPES = ["Component", "Resource", "Vault", "UnclaimedConfidentialOutput", "NonFungible", "TransactionReceipt", "ValidatorFeePool", "Template"] as const;
+const SUBSTATE_TYPES = [
+  'Component',
+  'Resource',
+  'Vault',
+  'UnclaimedConfidentialOutput',
+  'NonFungible',
+  'TransactionReceipt',
+  'ValidatorFeePool',
+  'Template',
+] as const;
 
 function SubstatesLayout() {
-  const [substates, setSubstates] = useState<ListSubstateItem []>([]);
+  const [substates, setSubstates] = useState<ListSubstateItem[]>([]);
   const [page, setPage] = useState(0);
   const [jsonDialogOpen, setJsonDialogOpen] = React.useState(false);
   const [selectedContent, setSelectedContent] = useState({});
@@ -86,7 +97,6 @@ function SubstatesLayout() {
     // @ts-ignore
     let resp = await listSubstates(params);
 
-
     console.log(resp);
     setSubstates(resp.substates);
   }
@@ -95,13 +105,13 @@ function SubstatesLayout() {
     if (text) {
       navigator.clipboard.writeText(text);
     }
-  };
+  }
 
   async function handleChangePage(newPage: number) {
     const offset = newPage * PAGE_SIZE;
     await get_substates(offset, PAGE_SIZE, filter);
     setPage(newPage);
-  };
+  }
 
   const handleContentDownload = async (substate: any) => {
     const data = await getSubstate({
@@ -111,7 +121,7 @@ function SubstatesLayout() {
     });
 
     const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
+    const blob = new Blob([json], { type: 'application/json' });
     const filename = `substates-${substate.address}-${substate.version}.json`;
     saveAs(blob, filename);
   };
@@ -155,7 +165,8 @@ function SubstatesLayout() {
             label="Template"
             value={filter.filter_by_template}
             onChange={async (e: any) => onFilterChange(e)}
-            style={{ flexGrow: 1 }} />
+            style={{ flexGrow: 1 }}
+          />
           <Select
             name="filter_by_type"
             label="Type"
@@ -170,9 +181,10 @@ function SubstatesLayout() {
 
               return value;
             }}
-            style={{ flexGrow: 1, minWidth: "200px" }}>
-            <MenuItem key={"All Types"} value={undefined}>
-              {"All types"}
+            style={{ flexGrow: 1, minWidth: '200px' }}
+          >
+            <MenuItem key={'All Types'} value={undefined}>
+              {'All types'}
             </MenuItem>
             {SUBSTATE_TYPES.map((type) => (
               <MenuItem key={type} value={type}>
@@ -187,26 +199,37 @@ function SubstatesLayout() {
           <Table sx={{ minWidth: 650 }} aria-label="simple table">
             <TableHead>
               <TableRow>
-                <TableCell><Typography variant="h3">Address</Typography></TableCell>
-                <TableCell><Typography variant="h3">Version</Typography></TableCell>
-                <TableCell><Typography variant="h3">Template</Typography></TableCell>
-                <TableCell><Typography variant="h3">Timestamp</Typography></TableCell>
-                <TableCell><Typography variant="h3">Content</Typography></TableCell>
+                <TableCell>Address</TableCell>
+                <TableCell>Version</TableCell>
+                <TableCell>Template</TableCell>
+                <TableCell>Timestamp</TableCell>
+                <TableCell>Content</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {substates.map((row) => (
                 <TableRow
                   key={substateIdToString(row.substate_id)}
-                  sx={{ "&:last-child td, &:last-child th": { border: 0 } }}
+                  sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
                 >
                   <TableCell>
-                    {substateIdToString(row.substate_id).startsWith("resource_") ?
+                    {substateIdToString(row.substate_id).startsWith(
+                      'resource_'
+                    ) ? (
                       <Link
-                        to={`/resources/${substateIdToString(row.substate_id)}`}>{shortenSubstateId(row.substate_id)}</Link> :
+                        to={`/resources/${substateIdToString(row.substate_id)}`}
+                      >
+                        {shortenSubstateId(row.substate_id)}
+                      </Link>
+                    ) : (
                       shortenSubstateId(row.substate_id)
-                    }
-                    <IconButton aria-label="copy" onClick={() => handleCopyClick(substateIdToString(row.substate_id))}>
+                    )}
+                    <IconButton
+                      aria-label="copy"
+                      onClick={() =>
+                        handleCopyClick(substateIdToString(row.substate_id))
+                      }
+                    >
                       <ContentCopyIcon />
                     </IconButton>
                   </TableCell>
@@ -214,39 +237,60 @@ function SubstatesLayout() {
                   <TableCell>{row.version}</TableCell>
 
                   <TableCell>
-                    {row.template_address !== null &&
+                    {row.template_address !== null && (
                       <>
                         {truncateText(row.template_address, 20)}
-                        <IconButton aria-label="copy" onClick={() => handleCopyClick(row.template_address!)}>
+                        <IconButton
+                          aria-label="copy"
+                          onClick={() => handleCopyClick(row.template_address!)}
+                        >
                           <ContentCopyIcon />
                         </IconButton>
                       </>
-                    }
+                    )}
                   </TableCell>
 
-                  <TableCell>{new Date(Number(row.timestamp) * 1000).toDateString()}</TableCell>
+                  <TableCell>
+                    {new Date(Number(row.timestamp) * 1000).toDateString()}
+                  </TableCell>
 
                   <TableCell>
                     <Stack direction="row" spacing={2} alignItems="left">
-                      <Button variant="outlined" onClick={() => handleContentView(row)}>
+                      <Button
+                        variant="outlined"
+                        onClick={() => handleContentView(row)}
+                      >
                         View
                       </Button>
-                      <Button variant="outlined" onClick={() => handleContentDownload(row)}>
+                      <Button
+                        variant="outlined"
+                        onClick={() => handleContentDownload(row)}
+                      >
                         Download
                       </Button>
                     </Stack>
-
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-          <Stack direction="row" justifyContent="right" spacing={2} alignItems="center">
-            <IconButton aria-label="copy" onClick={() => handleChangePage(Math.max(page - 1, 0))}>
+          <Stack
+            direction="row"
+            justifyContent="right"
+            spacing={2}
+            alignItems="center"
+          >
+            <IconButton
+              aria-label="copy"
+              onClick={() => handleChangePage(Math.max(page - 1, 0))}
+            >
               <KeyboardArrowLeftIcon />
             </IconButton>
             <Typography sx={{}}>{page}</Typography>
-            <IconButton aria-label="copy" onClick={() => handleChangePage(page + 1)}>
+            <IconButton
+              aria-label="copy"
+              onClick={() => handleChangePage(page + 1)}
+            >
               <KeyboardArrowRightIcon />
             </IconButton>
           </Stack>
@@ -255,7 +299,8 @@ function SubstatesLayout() {
       <JsonDialog
         open={jsonDialogOpen}
         onClose={handleJsonDialogClose}
-        data={selectedContent} />
+        data={selectedContent}
+      />
     </>
   );
 }

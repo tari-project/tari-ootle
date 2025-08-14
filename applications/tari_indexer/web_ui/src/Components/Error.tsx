@@ -20,32 +20,14 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import React from 'react';
-import ReactDOM from 'react-dom/client';
-import './theme/theme.css';
-import { createBrowserRouter, RouterProvider } from 'react-router-dom';
-import App from './App';
-import ErrorPage from './routes/ErrorPage';
-import { QueryClientProvider } from '@tanstack/react-query';
-import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
-import queryClient from './api/queryClient';
+import Alert from "@mui/material/Alert";
 
-const router = createBrowserRouter([
-  {
-    path: '*',
-    element: <App />,
-    errorElement: <ErrorPage />,
-  },
-]);
+function Error({ message }: { message: String }) {
+  return (
+    <Alert severity="error" variant="standard">
+      {message}
+    </Alert>
+  );
+}
 
-const root = ReactDOM.createRoot(
-  document.getElementById('root') as HTMLElement
-);
-root.render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-      <ReactQueryDevtools initialIsOpen={false} />
-    </QueryClientProvider>
-  </React.StrictMode>
-);
+export default Error;

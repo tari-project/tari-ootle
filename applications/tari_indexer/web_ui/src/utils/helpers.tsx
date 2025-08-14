@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { toHexString } from "../routes/VN/Components/helpers";
+import { toHexString } from '../routes/VN/Components/helpers';
 
 const renderJson = (json: any) => {
   if (Array.isArray(json)) {
@@ -38,10 +38,10 @@ const renderJson = (json: any) => {
         ],
       </>
     );
-  } else if (typeof json === "object" && json !== null) {
+  } else if (typeof json === 'object' && json !== null) {
     return (
       <>
-        {"{"}
+        {'{'}
         <ul>
           {Object.keys(json).map((key) => (
             <li>
@@ -49,15 +49,13 @@ const renderJson = (json: any) => {
             </li>
           ))}
         </ul>
-        {"}"}
+        {'}'}
       </>
     );
   } else {
-    if (typeof json === "string") return <span className="string">"{json}"</span>;
-    if (typeof json === "boolean") return <span className="boolean">{json ? "true" : "false"}</span>;
-    if (json === null) return <span className="null">null</span>;
-    if (typeof json === "undefined") return <span className="undefined">undefined</span>;
-    return <span className="other">{json.toString()}</span>;
+    if (typeof json === 'string')
+      return <span className="string">"{json}"</span>;
+    return <span className="other">{json}</span>;
   }
 };
 
@@ -77,8 +75,11 @@ export function displayDuration(duration: Duration) {
     return `${duration.nanos}ns`;
   }
   if (duration.secs >= 60 * 60) {
-    const minutes_secs = duration.secs - Math.floor(duration.secs / 60 / 60) * 60 * 60;
-    return `${(duration.secs / 60 / 60).toFixed(0)}h${Math.floor(minutes_secs / 60)}m`;
+    const minutes_secs =
+      duration.secs - Math.floor(duration.secs / 60 / 60) * 60 * 60;
+    return `${(duration.secs / 60 / 60).toFixed(0)}h${Math.floor(
+      minutes_secs / 60
+    )}m`;
   }
   if (duration.secs >= 60) {
     const secs = duration.secs - Math.floor(duration.secs / 60) * 60;
@@ -87,9 +88,7 @@ export function displayDuration(duration: Duration) {
   return `${duration.secs}s`;
 }
 
-
 export { renderJson };
-
 
 export function truncateText(text: string, length: number) {
   if (!length || !text || text.length <= length) {
@@ -100,5 +99,17 @@ export function truncateText(text: string, length: number) {
   }
   const leftChars = Math.ceil(length / 2);
   const rightChars = Math.floor(length / 2);
-  return text.substring(0, leftChars) + "..." + text.substring(text.length - rightChars);
+  return (
+    text.substring(0, leftChars) +
+    '...' +
+    text.substring(text.length - rightChars)
+  );
 }
+
+const validateHash = (hash: string): boolean => {
+  // Hash should be exactly 64 characters long and contain only hexadecimal characters
+  const hashRegex = /^[a-fA-F0-9]{64}$/;
+  return hashRegex.test(hash);
+};
+
+export { validateHash };

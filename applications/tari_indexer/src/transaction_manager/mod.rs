@@ -23,6 +23,7 @@
 pub(crate) mod error;
 
 use tari_epoch_manager::EpochManagerReader;
+use tari_indexer_client::types::TransactionEntry;
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
     NodeAddressable,
@@ -101,7 +102,7 @@ where
         &self,
         last_id: Option<TransactionId>,
         limit: usize,
-    ) -> Result<Vec<Transaction>, TransactionManagerError> {
+    ) -> Result<Vec<TransactionEntry>, TransactionManagerError> {
         let transactions = self
             .store
             .with_read_tx(|tx| tx.list_recent_transactions(last_id, limit))?;

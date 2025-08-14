@@ -35,10 +35,10 @@ use log::*;
 use tari_consensus_types::BlockId;
 use tari_crypto::tari_utilities::hex::to_hex;
 use tari_engine_types::substate::{SubstateId, SubstateValue};
-use tari_indexer_client::types::ListSubstateItem;
+use tari_indexer_client::types::{ListSubstateItem, TransactionEntry};
 use tari_indexer_lib::NonFungibleSubstate;
 use tari_ootle_common_types::{substate_type::SubstateType, Epoch, ShardGroup};
-use tari_ootle_storage::StorageError;
+use tari_ootle_storage::{time::PrimitiveDateTime, StorageError};
 use tari_ootle_storage_sqlite::{error::SqliteStorageError, SqliteTransaction};
 use tari_template_lib::{models::ResourceAddress, types::TemplateAddress};
 use tari_transaction::{Transaction, TransactionId};
@@ -194,7 +194,7 @@ pub trait IndexerStoreReadTransaction {
         &mut self,
         last_transaction_id: Option<TransactionId>,
         limit: usize,
-    ) -> Result<Vec<Transaction>, StorageError>;
+    ) -> Result<Vec<TransactionEntry>, StorageError>;
 }
 
 impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
@@ -440,7 +440,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         &mut self,
         last_transaction_id: Option<TransactionId>,
         limit: usize,
-    ) -> Result<Vec<Transaction>, StorageError> {
+    ) -> Result<Vec<TransactionEntry>, StorageError> {
         use crate::storage_sqlite::schema::transactions;
 
         let start_id = if let Some(last_id) = last_transaction_id {
@@ -456,7 +456,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         };
 
         let rows = transactions::table
-            .select(transactions::body)
+            .select((transactions::body, transactions::created_at))
             .filter(transactions::id.lt(start_id))
             .order_by(transactions::id.desc())
             .limit(limit as i64)
@@ -469,7 +469,14 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             r.map_err(|e| StorageError::QueryError {
                 reason: format!("get_last_scanned_block_id: {}", e),
             })
-            .and_then(|s: String| deserialize_json(&s))
+            .and_then(|(body, created_at): (String, PrimitiveDateTime)| {
+                let transaction: Transaction = deserialize_json(&body)?;
+                Ok(TransactionEntry {
+                    transaction_id: transaction.calculate_id(),
+                    created_at,
+                    transaction,
+                })
+            })
         })
         .collect()
     }

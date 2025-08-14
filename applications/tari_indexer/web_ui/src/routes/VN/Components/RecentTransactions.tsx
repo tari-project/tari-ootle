@@ -21,7 +21,6 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { renderJson } from "../../../utils/helpers";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
@@ -41,7 +40,7 @@ function RowData(props: { data: TransactionEntry }) {
   const [open1, setOpen1] = useState(false);
   const [open2, setOpen2] = useState(false);
 
-  const { transaction_id, transaction: tx } = props.data;
+  const { transaction_id, transaction: tx, created_at } = props.data;
   const transaction = tx.V1.body.transaction;
 
   return (
@@ -52,7 +51,7 @@ function RowData(props: { data: TransactionEntry }) {
             borderBottom: "none",
           }}
         >
-          {transaction_id}
+          {transaction_id} ({created_at})
         </DataTableCell>
         <DataTableCell sx={{ borderBottom: "none", textAlign: "center" }}>
           <AccordionIconButton
@@ -116,7 +115,6 @@ function RecentTransactions() {
     }).then((resp) => {
       console.log("Response: ", resp);
       setRecentTransactions(
-        // Display from newest to oldest by reversing
         resp.transactions,
       );
     });

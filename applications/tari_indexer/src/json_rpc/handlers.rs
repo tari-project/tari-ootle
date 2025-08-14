@@ -68,7 +68,6 @@ use tari_indexer_client::types::{
     SubmitTransactionRequest,
     SubmitTransactionResponse,
     TemplateMetadata,
-    TransactionEntry,
 };
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
 use tari_ootle_app_utilities::keypair::RistrettoKeypair;
@@ -636,15 +635,7 @@ impl JsonRpcHandlers {
             .list_recent_transactions(req.last_id, limit as usize)
             .map_err(|e| Self::internal_error(answer_id, e))?;
 
-        let resp = ListRecentTransactionsResponse {
-            transactions: transactions
-                .into_iter()
-                .map(|t| TransactionEntry {
-                    transaction_id: t.calculate_id(),
-                    transaction: t,
-                })
-                .collect(),
-        };
+        let resp = ListRecentTransactionsResponse { transactions };
         Ok(JsonRpcResponse::success(answer_id, resp))
     }
 

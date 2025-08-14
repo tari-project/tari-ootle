@@ -96,6 +96,7 @@ pub struct GetSubstateResponse {
     ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
 )]
 pub struct InspectSubstateRequest {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub address: SubstateId,
     pub version: Option<u32>,
 }
@@ -211,7 +212,6 @@ pub struct GetTransactionResultResponse {
 )]
 pub struct ListRecentTransactionsRequest {
     pub limit: Option<u32>,
-    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     #[serde(default)]
     pub last_id: Option<TransactionId>,
 }
@@ -233,9 +233,10 @@ pub struct ListRecentTransactionsResponse {
     ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
 )]
 pub struct TransactionEntry {
-    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     pub transaction_id: TransactionId,
     pub transaction: Transaction,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub created_at: PrimitiveDateTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

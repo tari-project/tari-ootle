@@ -34,10 +34,17 @@ import TemplateFunctions from "./routes/VN/Components/TemplateFunctions";
 import Layout from "./theme/LayoutMain";
 import CommitteeMembers from "./routes/Committees/CommitteeMembers";
 import { createContext, useState, useEffect } from "react";
-import { getEpochManagerStats, getIdentity, getShardKey } from "./utils/json_rpc";
+import {
+  getEpochManagerStats,
+  getIdentity,
+  getShardKey,
+} from "./utils/json_rpc";
 import TransactionDetails from "./routes/Transactions/TransactionDetails";
 import BlockDetails from "./routes/Blocks/BlockDetails";
-import type { GetEpochManagerStatsResponse, VNGetIdentityResponse } from "@tari-project/typescript-bindings";
+import type {
+  GetEpochManagerStatsResponse,
+  VNGetIdentityResponse,
+} from "@tari-project/typescript-bindings";
 
 interface IContext {
   epoch?: GetEpochManagerStatsResponse;
@@ -122,8 +129,12 @@ export const breadcrumbRoutes = [
 ];
 
 export default function App() {
-  const [epoch, setEpoch] = useState<GetEpochManagerStatsResponse | undefined>(undefined);
-  const [identity, setIdentity] = useState<VNGetIdentityResponse | undefined>(undefined);
+  const [epoch, setEpoch] = useState<GetEpochManagerStatsResponse | undefined>(
+    undefined
+  );
+  const [identity, setIdentity] = useState<VNGetIdentityResponse | undefined>(
+    undefined
+  );
   const [shardKey, setShardKey] = useState<string | null>(null);
   const [error, setError] = useState("");
 
@@ -163,7 +174,10 @@ export default function App() {
   useEffect(() => {
     if (epoch !== undefined && identity !== undefined) {
       // The *10 is from the hardcoded constant in VN.
-      getShardKey({ epoch: epoch.current_epoch, public_key: identity.public_key }).then((response) => {
+      getShardKey({
+        epoch: epoch.current_epoch,
+        public_key: identity.public_key,
+      }).then((response) => {
         setShardKey(response.shard_key);
       });
     }
@@ -182,7 +196,10 @@ export default function App() {
             <Route path="templates" element={<Templates />} />
             <Route path="vns" element={<ValidatorNodes />} />
             <Route path="mempool" element={<Mempool />} />
-            <Route path="transactions/:transactionHash" element={<TransactionDetails />} />
+            <Route
+              path="transactions/:transactionHash"
+              element={<TransactionDetails />}
+            />
             <Route path="blocks/:blockId" element={<BlockDetails />} />
             <Route path="templates/:address" element={<TemplateFunctions />} />
             <Route path="committees/:address" element={<CommitteeMembers />} />

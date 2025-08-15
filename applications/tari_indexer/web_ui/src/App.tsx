@@ -82,10 +82,7 @@ export default function App() {
           <Route path="connections" element={<Connections />} />
           <Route path="resources/:resourceAddress" element={<Resources />} />
           <Route path="transactions" element={<RecentTransactions />} />
-          <Route
-            path="transactions/:transaction_id"
-            element={<TransactionDetails />}
-          />
+          <Route path="transactions/:transaction_id" element={<TransactionDetails />} />
           <Route path="events" element={<Events />} />
           <Route path="substates" element={<Substates />} />
           <Route path="*" element={<ErrorPage />} />

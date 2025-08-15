@@ -275,6 +275,7 @@ pub trait StateStoreReadTransaction: Sized {
         block_id: &BlockId,
     ) -> Result<HashMap<Shard, Vec<PendingShardStateTreeDiff>>, StorageError>;
 
+    // -------------------------------- State transitions -------------------------------- //
     fn state_transitions_get_n_after(
         &self,
         n: usize,

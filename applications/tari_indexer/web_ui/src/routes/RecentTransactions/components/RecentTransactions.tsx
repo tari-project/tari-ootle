@@ -20,9 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
-import { renderJson } from "../../utils/helpers";
+import { renderJson } from "../../../utils/helpers";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
@@ -30,21 +30,20 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TablePagination from "@mui/material/TablePagination";
-import {
-  DataTableCell,
-  CodeBlock,
-  AccordionIconButton,
-} from "../../Components/StyledComponents";
+import { DataTableCell, CodeBlock, AccordionIconButton } from "../../../Components/StyledComponents";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import Collapse from "@mui/material/Collapse";
 import IconButton from "@mui/material/IconButton";
 import { ChevronRight } from "@mui/icons-material";
 import { TransactionEntry } from "@tari-project/typescript-bindings";
-import { useListRecentTransactions } from "../../api/hooks/useTransactions";
-import FetchStatusCheck from "../../Components/FetchStatusCheck";
+
+type ExtendedTransactionEntry = TransactionEntry & { id: string; show?: boolean };
+import { useListRecentTransactions } from "../../../api/hooks/useTransactions";
+import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import TimeChip from "./TimeChip";
 import { Stack } from "@mui/material";
+import TransactionFilter from "./SearchFilter";
 
 function RowData(props: { data: TransactionEntry }) {
   const [open1, setOpen1] = useState(false);
@@ -61,16 +60,8 @@ function RowData(props: { data: TransactionEntry }) {
             borderBottom: "none",
           }}
         >
-          <Stack
-            direction="row"
-            spacing={2}
-            alignItems="center"
-            sx={{ width: "100%" }}
-          >
-            <Link
-              to={`/transactions/${transaction_id}`}
-              style={{ textDecoration: "none", color: "inherit" }}
-            >
+          <Stack direction="row" spacing={2} alignItems="center" sx={{ width: "100%" }}>
+            <Link to={`/transactions/${transaction_id}`} style={{ textDecoration: "none", color: "inherit" }}>
               {transaction_id}
             </Link>
             <TimeChip timestamp={created_at} />
@@ -118,18 +109,14 @@ function RowData(props: { data: TransactionEntry }) {
           colSpan={4}
         >
           <Collapse in={open1} timeout="auto" unmountOnExit>
-            <CodeBlock style={{ marginBottom: "10px" }}>
-              {renderJson(transaction.fee_instructions)}
-            </CodeBlock>
+            <CodeBlock style={{ marginBottom: "10px" }}>{renderJson(transaction.fee_instructions)}</CodeBlock>
           </Collapse>
         </DataTableCell>
       </TableRow>
       <TableRow>
         <DataTableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={4}>
           <Collapse in={open2} timeout="auto" unmountOnExit>
-            <CodeBlock style={{ marginBottom: "10px" }}>
-              {renderJson(transaction.instructions)}
-            </CodeBlock>
+            <CodeBlock style={{ marginBottom: "10px" }}>{renderJson(transaction.instructions)}</CodeBlock>
           </Collapse>
         </DataTableCell>
       </TableRow>
@@ -140,28 +127,30 @@ function RowData(props: { data: TransactionEntry }) {
 function RecentTransactions() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [filteredTransactions, setFilteredTransactions] = useState<ExtendedTransactionEntry[]>([]);
 
   const { data, isLoading, isError, error } = useListRecentTransactions({
     last_id: null,
     limit: 50,
   });
 
-  const transactions = data?.transactions || [];
-  const paginatedTransactions = transactions.slice(
-    page * rowsPerPage,
-    page * rowsPerPage + rowsPerPage
+  const transactions = useMemo(
+    () => (data?.transactions || []).map((tx) => ({ ...tx, id: tx.transaction_id })),
+    [data?.transactions]
   );
 
-  const handleChangePage = (
-    _event: React.MouseEvent<HTMLButtonElement> | null,
-    newPage: number
-  ) => {
+  const visibleTransactions = filteredTransactions.filter((tx) => tx.show !== false);
+  const paginatedTransactions = visibleTransactions.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+
+  useEffect(() => {
+    setFilteredTransactions(transactions);
+  }, [transactions]);
+
+  const handleChangePage = (_event: React.MouseEvent<HTMLButtonElement> | null, newPage: number) => {
     setPage(newPage);
   };
 
-  const handleChangeRowsPerPage = (
-    event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
-  ) => {
+  const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setRowsPerPage(parseInt(event.target.value, 10));
     setPage(0);
   };
@@ -170,40 +159,50 @@ function RecentTransactions() {
     <FetchStatusCheck
       isLoading={isLoading}
       isError={isError}
-      errorMessage={
-        error ? error.message : "Error fetching transaction details."
-      }
+      errorMessage={error ? error.message : "Error fetching transaction details."}
     >
-      <TableContainer>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Transaction Hash</TableCell>
-              <TableCell style={{ textAlign: "center" }}>
-                Fee Instructions
-              </TableCell>
-              <TableCell style={{ textAlign: "center" }}>
-                Instructions
-              </TableCell>
-              <TableCell style={{ textAlign: "center" }}>Details</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {paginatedTransactions.map((data, i) => (
-              <RowData key={i} data={data} />
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
-      <TablePagination
-        component="div"
-        count={transactions.length}
-        page={page}
-        onPageChange={handleChangePage}
-        rowsPerPage={rowsPerPage}
-        onRowsPerPageChange={handleChangeRowsPerPage}
-        rowsPerPageOptions={[5, 10, 25, 50]}
-      />
+      <Stack spacing={1}>
+        <TransactionFilter
+          setPage={setPage}
+          stateObject={transactions}
+          setStateObject={setFilteredTransactions}
+          filterItems={[
+            {
+              title: "Transaction ID",
+              value: "id",
+              filterFn: (value, row) => row.transaction_id.toLowerCase().includes(value.toLowerCase()),
+            },
+          ]}
+          placeholder="Search transactions"
+          defaultSearch="id"
+        />
+        <TableContainer>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>Transaction Hash</TableCell>
+                <TableCell style={{ textAlign: "center" }}>Fee Instructions</TableCell>
+                <TableCell style={{ textAlign: "center" }}>Instructions</TableCell>
+                <TableCell style={{ textAlign: "center" }}>Details</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {paginatedTransactions.map((data, i) => (
+                <RowData key={i} data={data} />
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        <TablePagination
+          component="div"
+          count={visibleTransactions.length}
+          page={page}
+          onPageChange={handleChangePage}
+          rowsPerPage={rowsPerPage}
+          onRowsPerPageChange={handleChangeRowsPerPage}
+          rowsPerPageOptions={[5, 10, 25, 50]}
+        />
+      </Stack>
     </FetchStatusCheck>
   );
 }

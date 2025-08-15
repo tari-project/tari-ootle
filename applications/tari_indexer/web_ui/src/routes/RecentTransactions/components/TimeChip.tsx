@@ -21,19 +21,15 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { Chip, Tooltip, Stack } from "@mui/material";
-import { useTimeAgo } from "../../hooks/useTimeAgo";
-import { formatTimestamp, isTimestampNew } from "../../utils/helpers";
+import { useTimeAgo } from "../../../hooks/useTimeAgo";
+import { formatTimestamp, isTimestampNew } from "../../../utils/helpers";
 
 function TimeChip({ timestamp }: { timestamp: string }) {
   const timeAgo = useTimeAgo(timestamp);
   const showNew = isTimestampNew(timestamp);
 
   return (
-    <Tooltip
-      title={`Created at: ${formatTimestamp(timestamp)}` || ""}
-      placement="top"
-      arrow
-    >
+    <Tooltip title={`Created at: ${formatTimestamp(timestamp)}` || ""} placement="top" arrow>
       <Stack direction="row" spacing={1} alignItems="center">
         <Chip
           label={timeAgo}

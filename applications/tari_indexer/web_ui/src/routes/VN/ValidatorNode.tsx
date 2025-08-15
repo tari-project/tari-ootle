@@ -24,7 +24,7 @@ import { useEffect, useState } from "react";
 import Connections from "./Components/Connections";
 import Info from "./Components/Info";
 import { getIdentity } from "../../utils/json_rpc";
-import RecentTransactions from "../RecentTransactions/RecentTransactions";
+import RecentTransactions from "../RecentTransactions/components/RecentTransactions";
 import "./ValidatorNode.css";
 import { StyledPaper } from "../../Components/StyledComponents";
 import Grid from "@mui/material/Grid";

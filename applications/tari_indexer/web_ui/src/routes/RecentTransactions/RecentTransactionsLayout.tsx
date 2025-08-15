@@ -23,7 +23,7 @@
 import PageHeading from "../../Components/PageHeading";
 import Grid from "@mui/material/Grid";
 import { StyledPaper } from "../../Components/StyledComponents";
-import RecentTransactions from "./RecentTransactions";
+import RecentTransactions from "./components/RecentTransactions";
 
 function RecentTransactionsLayout() {
   return (

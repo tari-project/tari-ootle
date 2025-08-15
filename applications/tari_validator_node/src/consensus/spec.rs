@@ -9,6 +9,8 @@ use tari_ootle_app_utilities::transaction_executor::TariTransactionProcessor;
 use tari_ootle_common_types::PeerAddress;
 use tari_rpc_state_sync::RpcStateSyncClientProtocol;
 use tari_template_manager::implementation::TemplateManager;
+// Remove the SQLite import since we need RocksDB for consensus
+// use tari_ootle_storage_sqlite::SqliteStateStore;
 
 #[cfg(feature = "metrics")]
 use crate::consensus::metrics::PrometheusConsensusMetrics;

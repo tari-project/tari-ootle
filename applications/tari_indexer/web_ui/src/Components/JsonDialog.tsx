@@ -25,8 +25,8 @@ import IconButton from "@mui/material/IconButton";
 import DialogContent from "@mui/material/DialogContent";
 import CloseIcon from "@mui/icons-material/Close";
 import Box from "@mui/material/Box";
-import theme from "../theme/theme";
 import { renderJson } from "../utils/helpers";
+import { useTheme } from "@mui/material/styles";
 
 interface JsonDialogProps {
   open: boolean;
@@ -35,6 +35,7 @@ interface JsonDialogProps {
 }
 
 function JsonDialog(props: JsonDialogProps) {
+  const theme = useTheme();
   return (
     <Dialog
       open={props.open}

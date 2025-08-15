@@ -38,6 +38,10 @@ export const Accordion: React.FC<AccordionProps> = styled(
   borderRadius: 12,
   boxShadow:
     theme.palette.mode === "dark" ? "none" : "3px 3px 12px rgba(0,0,0,0.08)",
+  backgroundColor:
+    theme.palette.mode === "dark"
+      ? theme.palette.divider
+      : theme.palette.background.paper,
   marginBottom: "8px",
   "&:not(:last-child)": {
     borderBottom: 0,

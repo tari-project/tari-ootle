@@ -20,33 +20,24 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useTheme } from "@mui/material/styles";
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
-interface Props {
-  children: string;
+interface Store {
+  themeMode: "light" | "dark";
+  setThemeMode: (mode: "light" | "dark") => void;
 }
 
-function PageHeading({ children }: Props) {
-  const theme = useTheme();
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        width: "100%",
-      }}
-    >
-      <h1>{children}</h1>
-      <div
-        style={{
-          background: theme.palette.primary.main,
-          width: "100px",
-          height: "3px",
-        }}
-      ></div>
-    </div>
-  );
-}
+const useThemeStore = create<Store>()(
+  persist<Store>(
+    (set) => ({
+      themeMode: "light",
+      setThemeMode: (mode) => set({ themeMode: mode }),
+    }),
+    {
+      name: "tari-theme",
+    }
+  )
+);
 
-export default PageHeading;
+export default useThemeStore;

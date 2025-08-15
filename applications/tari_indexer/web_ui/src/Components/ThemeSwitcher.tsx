@@ -20,33 +20,32 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import { Button, Typography } from "@mui/material";
+import { IoMoonOutline, IoSunny } from "react-icons/io5";
+import useThemeStore from "../store/themeStore";
 import { useTheme } from "@mui/material/styles";
 
-interface Props {
-  children: string;
-}
-
-function PageHeading({ children }: Props) {
+const ThemeSwitcher = () => {
+  const { themeMode, setThemeMode } = useThemeStore();
   const theme = useTheme();
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        width: "100%",
-      }}
-    >
-      <h1>{children}</h1>
-      <div
-        style={{
-          background: theme.palette.primary.main,
-          width: "100px",
-          height: "3px",
-        }}
-      ></div>
-    </div>
-  );
-}
 
-export default PageHeading;
+  return (
+    <Button
+      onClick={() => setThemeMode(themeMode === "light" ? "dark" : "light")}
+      style={{
+        borderRadius: 0,
+        color: theme.palette.text.secondary,
+        padding: "0.8rem 28px",
+        width: "100%",
+        justifyContent: "flex-start",
+      }}
+      startIcon={themeMode === "light" ? <IoMoonOutline /> : <IoSunny />}
+    >
+      <Typography variant="body1" ml={2}>
+        {themeMode === "light" ? "Dark Mode" : "Light Mode"}
+      </Typography>
+    </Button>
+  );
+};
+
+export default ThemeSwitcher;

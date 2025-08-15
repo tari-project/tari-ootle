@@ -27,19 +27,23 @@ import MuiDrawer from "@mui/material/Drawer";
 import Box from "@mui/material/Box";
 import MuiAppBar, { AppBarProps as MuiAppBarProps } from "@mui/material/AppBar";
 import Toolbar from "@mui/material/Toolbar";
+import Stack from "@mui/material/Stack";
 import List from "@mui/material/List";
 import IconButton from "@mui/material/IconButton";
 import MenuOpenOutlinedIcon from "@mui/icons-material/MenuOpenOutlined";
 import MenuOutlinedIcon from "@mui/icons-material/MenuOutlined";
 import { mainListItems } from "../Components/MenuItems";
 import { ThemeProvider } from "@mui/material";
-import theme from "./theme";
+// import theme from "./theme";
 import { Outlet, Link } from "react-router-dom";
 import Logo from "../assets/Logo";
 import Container from "@mui/material/Container";
 import Breadcrumbs from "../Components/Breadcrumbs";
 import { breadcrumbRoutes } from "../App";
 import Grid from "@mui/material/Grid";
+import { createTheme } from "@mui/material/styles";
+import { light, dark, componentSettings } from "./theme";
+import useThemeStore from "../store/themeStore";
 
 const drawerWidth = 300;
 
@@ -71,7 +75,7 @@ const Drawer = styled(MuiDrawer, {
   "& .MuiDrawer-paper": {
     position: "relative",
     whiteSpace: "nowrap",
-    borderRight: "1px solid #F5F5F5",
+    borderRight: `1px solid ${theme.palette.divider}`,
     boxShadow: "10px 14px 28px rgb(35 11 73 / 5%)",
     width: drawerWidth,
     transition: theme.transitions.create("width", {
@@ -94,10 +98,20 @@ const Drawer = styled(MuiDrawer, {
 }));
 
 export default function Layout() {
+  const { themeMode } = useThemeStore();
   const [open, setOpen] = useState(false);
   const toggleDrawer = () => {
     setOpen(!open);
   };
+  const themeOptions = (mode: string) => {
+    return mode === "light" ? light : dark;
+  };
+
+  const theme = createTheme({
+    ...themeOptions(themeMode),
+    ...componentSettings,
+  });
+
   return (
     <ThemeProvider theme={theme}>
       <Box sx={{ display: "flex" }}>
@@ -108,7 +122,7 @@ export default function Layout() {
           color="secondary"
           elevation={0}
           sx={{
-            backgroundColor: "#FFF",
+            backgroundColor: theme.palette.background.paper,
             boxShadow: "10px 14px 28px rgb(35 11 73 / 5%)",
           }}
         >
@@ -124,14 +138,16 @@ export default function Layout() {
               onClick={toggleDrawer}
               sx={{
                 marginRight: "36px",
-                color: "#757575",
+                color: (theme) => theme.palette.text.secondary,
                 ...(open && { display: "none" }),
               }}
             >
               <MenuOutlinedIcon />
             </IconButton>
             <Link to="/">
-              <Logo />
+              <Stack direction="row" alignItems="center" height="100%">
+                <Logo fill={theme.palette.text.primary} />
+              </Stack>
             </Link>
           </Toolbar>
         </AppBar>
@@ -148,15 +164,18 @@ export default function Layout() {
               <MenuOpenOutlinedIcon />
             </IconButton>
           </Toolbar>
-          <List component="nav">{mainListItems}</List>
+          <List
+            component="nav"
+            style={{
+              height: "100%",
+            }}
+          >
+            {mainListItems}
+          </List>
         </Drawer>
         <Box
           component="main"
           sx={{
-            backgroundColor: (theme) =>
-              theme.palette.mode === "light"
-                ? theme.palette.grey[100]
-                : theme.palette.grey[900],
             flexGrow: 1,
             height: "100vh",
             overflow: "auto",
@@ -177,7 +196,7 @@ export default function Layout() {
                     display: "flex",
                     justifyContent: "space-between",
                     alignItems: "center",
-                    borderBottom: `1px solid #EAEAEA`,
+                    borderBottom: `1px solid ${theme.palette.divider}`,
                   }}
                 >
                   <Breadcrumbs items={breadcrumbRoutes} />

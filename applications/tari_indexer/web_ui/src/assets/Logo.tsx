@@ -27,8 +27,8 @@ interface LogoProps {
 }
 
 const Logo: React.FC<LogoProps> = ({
-  width = "100%",
-  height = "auto",
+  width = "210px",
+  height = "45px",
   fill = "black",
 }) => (
   <svg

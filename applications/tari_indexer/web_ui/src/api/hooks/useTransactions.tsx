@@ -1,4 +1,4 @@
-//  Copyright 2025. The Tari Project
+//  Copyright 2022. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,26 +20,34 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-const DEFAULT_GRAPHQL_ADDRESS = new URL(
-  import.meta.env.VITE_INDEXER_GRAPHQL_ADDRESS ||
-    import.meta.env.VITE_GRAPHQL_ADDRESS ||
-    "http://localhost:18301"
-);
+import { useQuery } from "@tanstack/react-query";
+import {
+  listRecentTransactions,
+  getTransactionResult,
+} from "../../utils/json_rpc";
 
-export async function getGraphQLAddress(): Promise<URL> {
-  try {
-    const resp = await fetch("/graphql_address");
-    if (resp.status === 200) {
-      const url = await resp.text();
-      try {
-        return new URL(url);
-      } catch (e) {
-        throw new Error(`Invalid URL: ${url} : ${e}`);
-      }
-    }
-  } catch (e) {
-    console.warn(e);
-  }
-
-  return DEFAULT_GRAPHQL_ADDRESS;
+interface UseListRecentTransactionsProps {
+  last_id: string | null;
+  limit: number;
 }
+
+export const useListRecentTransactions = ({
+  last_id,
+  limit,
+}: UseListRecentTransactionsProps) => {
+  return useQuery({
+    queryKey: ["recent_transactions"],
+    queryFn: () => {
+      return listRecentTransactions({ last_id, limit });
+    },
+    refetchInterval: 30 * 1000,
+  });
+};
+
+export const useGetTransactionResult = (transaction_id: string) => {
+  return useQuery({
+    queryKey: ["transaction_result", transaction_id],
+    queryFn: () => getTransactionResult({ transaction_id }),
+    enabled: !!transaction_id,
+  });
+};

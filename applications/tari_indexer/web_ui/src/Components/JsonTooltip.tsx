@@ -23,14 +23,22 @@
 import React from "react";
 import { renderJson } from "../utils/helpers";
 
-export default function JsonTooltip({ jsonText, children }: { jsonText: string; children: string }) {
+export default function JsonTooltip({
+  jsonText,
+  children,
+}: {
+  jsonText: string;
+  children: string;
+}) {
   if (jsonText === null) {
     return <>No data</>;
   }
   return (
     <div className="tooltip">
       {children}
-      <span className="tooltiptext json">{renderJson(JSON.parse(jsonText))}</span>
+      <span className="tooltiptext json">
+        {renderJson(JSON.parse(jsonText))}
+      </span>
     </div>
   );
 }

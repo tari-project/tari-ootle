@@ -20,26 +20,26 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-const DEFAULT_GRAPHQL_ADDRESS = new URL(
-  import.meta.env.VITE_INDEXER_GRAPHQL_ADDRESS ||
-    import.meta.env.VITE_GRAPHQL_ADDRESS ||
-    "http://localhost:18301"
-);
+import { Chip, Tooltip, Stack } from "@mui/material";
+import { useTimeAgo } from "../../../hooks/useTimeAgo";
+import { formatTimestamp } from "../../../utils/helpers";
 
-export async function getGraphQLAddress(): Promise<URL> {
-  try {
-    const resp = await fetch("/graphql_address");
-    if (resp.status === 200) {
-      const url = await resp.text();
-      try {
-        return new URL(url);
-      } catch (e) {
-        throw new Error(`Invalid URL: ${url} : ${e}`);
-      }
-    }
-  } catch (e) {
-    console.warn(e);
-  }
+function TimeChip({ timestamp }: { timestamp: string }) {
+  const timeAgo = useTimeAgo(timestamp);
 
-  return DEFAULT_GRAPHQL_ADDRESS;
+  return (
+    <Tooltip title={`Created at: ${formatTimestamp(timestamp)}` || ""} placement="top" arrow>
+      <Stack direction="row" spacing={1} alignItems="center">
+        <Chip
+          label={timeAgo}
+          color="default"
+          size="small"
+          variant="filled"
+          sx={{ padding: "2px 4px 0px 4px", marginTop: "4px" }}
+        />
+      </Stack>
+    </Tooltip>
+  );
 }
+
+export default TimeChip;

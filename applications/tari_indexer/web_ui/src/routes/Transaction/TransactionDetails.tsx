@@ -20,26 +20,26 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-const DEFAULT_GRAPHQL_ADDRESS = new URL(
-  import.meta.env.VITE_INDEXER_GRAPHQL_ADDRESS ||
-    import.meta.env.VITE_GRAPHQL_ADDRESS ||
-    "http://localhost:18301"
-);
+import PageHeading from "../../Components/PageHeading";
+import Grid from "@mui/material/Grid";
+import { StyledPaper } from "../../Components/StyledComponents";
+import { useParams } from "react-router-dom";
+import Result from "./components/Result";
 
-export async function getGraphQLAddress(): Promise<URL> {
-  try {
-    const resp = await fetch("/graphql_address");
-    if (resp.status === 200) {
-      const url = await resp.text();
-      try {
-        return new URL(url);
-      } catch (e) {
-        throw new Error(`Invalid URL: ${url} : ${e}`);
-      }
-    }
-  } catch (e) {
-    console.warn(e);
-  }
-
-  return DEFAULT_GRAPHQL_ADDRESS;
+function TransactionDetailsLayout() {
+  const { transaction_id } = useParams();
+  return (
+    <>
+      <Grid item sm={12} md={12} xs={12}>
+        <PageHeading>Transaction Details</PageHeading>
+      </Grid>
+      <Grid item sm={12} md={12} xs={12}>
+        <StyledPaper>
+          <Result transaction_id={transaction_id || "0"} />
+        </StyledPaper>
+      </Grid>
+    </>
+  );
 }
+
+export default TransactionDetailsLayout;

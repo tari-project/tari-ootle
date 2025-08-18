@@ -20,33 +20,56 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useTheme } from "@mui/material/styles";
+import { styled } from "@mui/material/styles";
+import KeyboardArrowRightRoundedIcon from "@mui/icons-material/KeyboardArrowRightRounded";
+import MuiAccordion, { AccordionProps } from "@mui/material/Accordion";
+import MuiAccordionSummary, {
+  AccordionSummaryProps,
+} from "@mui/material/AccordionSummary";
+import MuiAccordionDetails, {
+  AccordionDetailsProps,
+} from "@mui/material/AccordionDetails";
 
-interface Props {
-  children: string;
-}
+export const Accordion: React.FC<AccordionProps> = styled(
+  (props: AccordionProps) => (
+    <MuiAccordion disableGutters elevation={0} {...props} />
+  )
+)(({ theme }) => ({
+  borderRadius: 12,
+  boxShadow:
+    theme.palette.mode === "dark" ? "none" : "3px 3px 12px rgba(0,0,0,0.08)",
+  backgroundColor:
+    theme.palette.mode === "dark"
+      ? theme.palette.divider
+      : theme.palette.background.paper,
+  marginBottom: "8px",
+  "&:not(:last-child)": {
+    borderBottom: 0,
+  },
+  "&:before": {
+    display: "none",
+  },
+}));
 
-function PageHeading({ children }: Props) {
-  const theme = useTheme();
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        width: "100%",
-      }}
-    >
-      <h1>{children}</h1>
-      <div
-        style={{
-          background: theme.palette.primary.main,
-          width: "100px",
-          height: "3px",
-        }}
-      ></div>
-    </div>
-  );
-}
+export const AccordionSummary: React.FC<AccordionSummaryProps> = styled(
+  (props: AccordionSummaryProps) => (
+    <MuiAccordionSummary
+      expandIcon={<KeyboardArrowRightRoundedIcon />}
+      {...props}
+    />
+  )
+)(({ theme }) => ({
+  flexDirection: "row",
+  "& .MuiAccordionSummary-expandIconWrapper.Mui-expanded": {
+    transform: "rotate(90deg)",
+  },
+  "& .MuiAccordionSummary-content": {
+    marginLeft: theme.spacing(1),
+  },
+}));
 
-export default PageHeading;
+export const AccordionDetails: React.FC<AccordionDetailsProps> = styled(
+  MuiAccordionDetails
+)(({ theme }) => ({
+  padding: theme.spacing(2),
+}));

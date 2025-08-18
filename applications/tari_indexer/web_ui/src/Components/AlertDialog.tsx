@@ -69,7 +69,9 @@ export function ConfirmDialog({
       >
         <DialogTitle id="alert-dialog-title">{dialogTitle}</DialogTitle>
         <DialogContent>
-          <DialogContentText id="alert-dialog-description">{dialogDescription}</DialogContentText>
+          <DialogContentText id="alert-dialog-description">
+            {dialogDescription}
+          </DialogContentText>
         </DialogContent>
         <DialogActions>
           <Button variant="outlined" onClick={handleClose}>

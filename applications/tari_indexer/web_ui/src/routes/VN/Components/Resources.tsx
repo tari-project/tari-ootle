@@ -23,8 +23,17 @@
 import { useEffect, useState } from "react";
 import { getNonFungibles, getSubstate } from "../../../utils/json_rpc";
 import { useParams } from "react-router-dom";
-import { Grid, ImageList, ImageListItem, ImageListItemBar } from "@mui/material";
-import { NonFungibleSubstate, ResourceAddress, substateIdToString } from "@tari-project/typescript-bindings";
+import {
+  Grid,
+  ImageList,
+  ImageListItem,
+  ImageListItemBar,
+} from "@mui/material";
+import {
+  NonFungibleSubstate,
+  ResourceAddress,
+  substateIdToString,
+} from "@tari-project/typescript-bindings";
 import { convertCborValue } from "../../../utils/cbor";
 import { Resource } from "@tari-project/typescript-bindings/dist/types/Resource";
 
@@ -56,7 +65,11 @@ function Resources() {
     setResource(resource);
 
     if (resource.resource_type === "NonFungible") {
-      const resp = await getNonFungibles({ address: resourceAddress, start_index: 0, end_index: 10 });
+      const resp = await getNonFungibles({
+        address: resourceAddress,
+        start_index: 0,
+        end_index: 10,
+      });
       let nfts: NftData[] = [];
       resp.non_fungibles.forEach((nft: NonFungibleSubstate) => {
         console.log(nft);
@@ -74,8 +87,14 @@ function Resources() {
         if (nftData) {
           console.log(nftData);
           let { image_url, name } = nftData;
-          let address = substateIdToString(nft.address).split("_", 4);
-          nfts.push({ img: image_url, title: name, address: `${address[2]}_${address[3]}`, version: nft.version });
+          const nftSubstateId = { NonFungible: nft.address };
+          let address = substateIdToString(nftSubstateId).split("_", 4);
+          nfts.push({
+            img: image_url,
+            title: name,
+            address: `${address[2]}_${address[3]}`,
+            version: nft.version,
+          });
         }
 
         setNfts(nfts);
@@ -97,7 +116,8 @@ function Resources() {
     <Grid container spacing={2} direction="column" alignItems="left">
       <Grid item>
         <p>
-          {resourceAddress} Token Symbol: {resource?.metadata?.SYMBOL || "<none>"}
+          {resourceAddress} Token Symbol:{" "}
+          {resource?.metadata?.SYMBOL || "<none>"}
         </p>
         <p>Resource Type: {resource?.resource_type}</p>
         <p>Total Supply: {resource?.total_supply}</p>
@@ -136,7 +156,7 @@ function Resources() {
                   position="below"
                 />
               </ImageListItem>
-            ),
+            )
           )}
         </ImageList>
       )}

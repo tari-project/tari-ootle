@@ -1,4 +1,4 @@
-//  Copyright 2025. The Tari Project
+//  Copyright 2022. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,26 +20,32 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-const DEFAULT_GRAPHQL_ADDRESS = new URL(
-  import.meta.env.VITE_INDEXER_GRAPHQL_ADDRESS ||
-    import.meta.env.VITE_GRAPHQL_ADDRESS ||
-    "http://localhost:18301"
-);
+import { Button, Typography } from "@mui/material";
+import { IoMoonOutline, IoSunny } from "react-icons/io5";
+import useThemeStore from "../store/themeStore";
+import { useTheme } from "@mui/material/styles";
 
-export async function getGraphQLAddress(): Promise<URL> {
-  try {
-    const resp = await fetch("/graphql_address");
-    if (resp.status === 200) {
-      const url = await resp.text();
-      try {
-        return new URL(url);
-      } catch (e) {
-        throw new Error(`Invalid URL: ${url} : ${e}`);
-      }
-    }
-  } catch (e) {
-    console.warn(e);
-  }
+const ThemeSwitcher = () => {
+  const { themeMode, setThemeMode } = useThemeStore();
+  const theme = useTheme();
 
-  return DEFAULT_GRAPHQL_ADDRESS;
-}
+  return (
+    <Button
+      onClick={() => setThemeMode(themeMode === "light" ? "dark" : "light")}
+      style={{
+        borderRadius: 0,
+        color: theme.palette.text.secondary,
+        padding: "0.8rem 28px",
+        width: "100%",
+        justifyContent: "flex-start",
+      }}
+      startIcon={themeMode === "light" ? <IoMoonOutline /> : <IoSunny />}
+    >
+      <Typography variant="body1" ml={2}>
+        {themeMode === "light" ? "Dark Mode" : "Light Mode"}
+      </Typography>
+    </Button>
+  );
+};
+
+export default ThemeSwitcher;

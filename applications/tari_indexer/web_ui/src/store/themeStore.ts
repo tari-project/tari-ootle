@@ -20,24 +20,24 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import PageHeading from "../../Components/PageHeading";
-import Grid from "@mui/material/Grid";
-import { StyledPaper } from "../../Components/StyledComponents";
-import RecentTransactions from "../VN/Components/RecentTransactions";
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
-function RecentTransactionsLayout() {
-  return (
-    <>
-      <Grid item sm={12} md={12} xs={12}>
-        <PageHeading>Recent Transactions</PageHeading>
-      </Grid>
-      <Grid item sm={12} md={12} xs={12}>
-        <StyledPaper>
-          <RecentTransactions />
-        </StyledPaper>
-      </Grid>
-    </>
-  );
+interface Store {
+  themeMode: "light" | "dark";
+  setThemeMode: (mode: "light" | "dark") => void;
 }
 
-export default RecentTransactionsLayout;
+const useThemeStore = create<Store>()(
+  persist<Store>(
+    (set) => ({
+      themeMode: "light",
+      setThemeMode: (mode) => set({ themeMode: mode }),
+    }),
+    {
+      name: "tari-theme",
+    }
+  )
+);
+
+export default useThemeStore;

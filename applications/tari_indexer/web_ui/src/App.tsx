@@ -23,10 +23,11 @@
 import { Routes, Route } from "react-router-dom";
 import ValidatorNode from "./routes/VN/ValidatorNode";
 import Connections from "./routes/Connections/Connections";
-import RecentTransactions from "./routes/RecentTransactions/RecentTransactions";
+import RecentTransactions from "./routes/RecentTransactions/RecentTransactionsLayout";
 import Resources from "./routes/Resources/Resources";
 import Events from "./routes/Events/Events";
 import Substates from "./routes/Substates/Substates";
+import TransactionDetails from "./routes/Transaction/TransactionDetails";
 import ErrorPage from "./routes/ErrorPage";
 import Layout from "./theme/LayoutMain";
 
@@ -45,6 +46,11 @@ export const breadcrumbRoutes = [
     label: "Transactions",
     path: "/transactions",
     dynamic: false,
+  },
+  {
+    label: "Transaction",
+    path: "/transactions/:transaction_id",
+    dynamic: true,
   },
   {
     label: "Resources",
@@ -76,6 +82,7 @@ export default function App() {
           <Route path="connections" element={<Connections />} />
           <Route path="resources/:resourceAddress" element={<Resources />} />
           <Route path="transactions" element={<RecentTransactions />} />
+          <Route path="transactions/:transaction_id" element={<TransactionDetails />} />
           <Route path="events" element={<Events />} />
           <Route path="substates" element={<Substates />} />
           <Route path="*" element={<ErrorPage />} />

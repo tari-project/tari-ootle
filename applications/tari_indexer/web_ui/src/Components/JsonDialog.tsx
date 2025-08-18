@@ -25,19 +25,24 @@ import IconButton from "@mui/material/IconButton";
 import DialogContent from "@mui/material/DialogContent";
 import CloseIcon from "@mui/icons-material/Close";
 import Box from "@mui/material/Box";
-import theme from "../theme/theme";
 import { renderJson } from "../utils/helpers";
+import { useTheme } from "@mui/material/styles";
 
 interface JsonDialogProps {
   open: boolean;
-  data: object,
+  data: object;
   onClose: () => void;
 }
 
 function JsonDialog(props: JsonDialogProps) {
-
+  const theme = useTheme();
   return (
-    <Dialog open={props.open} onClose={props.onClose} fullWidth={true} maxWidth="lg">
+    <Dialog
+      open={props.open}
+      onClose={props.onClose}
+      fullWidth={true}
+      maxWidth="lg"
+    >
       <Box sx={{ paddingX: 4, borderRadius: 4 }}>
         <Box>
           <DialogTitle sx={{ display: "flex", justifyContent: "right" }}>

@@ -25,50 +25,25 @@ import ReactDOM from "react-dom/client";
 import "./theme/theme.css";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import App from "./App";
-import Connections from "./routes/Connections/Connections";
-import RecentTransactions from "./routes/RecentTransactions/RecentTransactions";
 import ErrorPage from "./routes/ErrorPage";
-import Events from "./routes/Events/Events";
-import Substates from "./routes/Substates/Substates";
-import ResourcesLayout from "./routes/Resources/Resources";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
+import queryClient from "./api/queryClient";
 
 const router = createBrowserRouter([
   {
     path: "*",
     element: <App />,
     errorElement: <ErrorPage />,
-    children: [
-      {
-        path: "connections",
-        element: <Connections />,
-      },
-      {
-        path: "transactions",
-        element: <RecentTransactions />,
-      },
-      {
-        path: "events",
-        element: <Events />,
-      },
-      {
-        path: "substates",
-        element: <Substates />,
-      },
-      {
-        path: "resources",
-        element: <ResourcesLayout />,
-      },
-      {
-        path: "app",
-        element: <App />,
-      },
-    ],
   },
 ]);
 
 const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement);
 root.render(
   <React.StrictMode>
-    <RouterProvider router={router} />
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+      <ReactQueryDevtools initialIsOpen={false} />
+    </QueryClientProvider>
   </React.StrictMode>,
 );

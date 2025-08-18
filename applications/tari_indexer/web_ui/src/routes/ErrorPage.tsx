@@ -46,7 +46,9 @@ export default function ErrorPage() {
               <Typography variant="h3">Oops!</Typography>
               <Typography>Sorry, an unexpected error has occurred.</Typography>
               <Typography>
-                {isRouteErrorResponse(error) ? "Invalid page" : "Unexpected Error:"}
+                {isRouteErrorResponse(error)
+                  ? "Invalid page"
+                  : "Unexpected Error:"}
                 <br />
                 <i>{error?.statusText || error?.message || error}</i>
               </Typography>{" "}

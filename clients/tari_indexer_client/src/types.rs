@@ -95,6 +95,26 @@ pub struct GetSubstateResponse {
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
 )]
+pub struct GetSubstatesRequest {
+    pub requests: Vec<GetSubstateRequest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
+)]
+pub struct GetSubstatesResponse {
+    pub responses: Vec<Option<GetSubstateResponse>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
+)]
 pub struct InspectSubstateRequest {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub address: SubstateId,

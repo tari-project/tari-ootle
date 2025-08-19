@@ -5,7 +5,6 @@ use std::{collections::HashMap, time::Instant};
 
 use anyhow::anyhow;
 use futures::StreamExt;
-use indexmap::IndexMap;
 use log::*;
 use tari_consensus::{
     hotstuff::substate_store::{ShardScopedTreeStoreReader, ShardScopedTreeStoreWriter},

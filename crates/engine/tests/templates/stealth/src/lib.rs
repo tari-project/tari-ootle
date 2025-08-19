@@ -20,13 +20,7 @@ mod template {
         ) -> Component<Self> {
             let bucket = ResourceBuilder::stealth()
                 .mintable(rule!(allow_all))
-                .then(|builder| {
-                    if let Some(key) = view_key {
-                        builder.with_view_key(key)
-                    } else {
-                        builder
-                    }
-                })
+                .with_view_key_opt(view_key)
                 .initial_supply(initial_supply);
 
             let resource_address = bucket.resource_address();

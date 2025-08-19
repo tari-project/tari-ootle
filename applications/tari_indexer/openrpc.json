@@ -308,7 +308,10 @@
                     "name": "requests",
                     "required": true,
                     "schema": {
-                        "$ref": "#/components/schemas/GetSubstatesRequest"
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/GetSubstateRequest"
+                        }
                     }
                 }
             ],

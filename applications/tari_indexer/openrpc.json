@@ -279,106 +279,74 @@
           }
         }
       ]
-    }
-    ,
+    },
     {
       "name": "get_substates",
-      "summary": "Fetch multiple substates in a single call",
+      "summary": "Fetch multiple substates in a single request",
       "tags": [],
       "params": [
         {
           "name": "requests",
-          "description": "Array of substate requests",
           "required": true,
           "schema": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "address": { "type": "string" },
-                "version": { "type": ["integer", "null"] },
-                "local_search_only": { "type": ["boolean", "null"] }
-              },
-              "required": ["address"]
-            }
+            "$ref": "#/components/schemas/GetSubstatesRequest"
           }
         }
       ],
       "result": {
-        "name": "responses",
-        "description": "Responses for each request, aligned by index",
+        "name": "get_substates_response",
+        "description": "Batch substate fetch response",
         "schema": {
-          "type": "array",
-          "items": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "address": { "type": "string" },
-                  "version": { "type": "integer" },
-                  "substate": { "type": "object" }
-                },
-                "required": ["address", "version", "substate"]
-              },
-              { "type": "null" }
-            ]
-          }
+          "$ref": "#/components/schemas/GetSubstatesResponse"
         }
       },
       "errors": [],
-      "examples": []
-    }
-    ,
-    {
-      "name": "fetch_substates",
-      "summary": "Alias of get_substates",
-      "tags": [],
-      "params": [
+      "examples": [
         {
-          "name": "requests",
-          "description": "Array of substate requests",
-          "required": true,
-          "schema": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "address": { "type": "string" },
-                "version": { "type": ["integer", "null"] },
-                "local_search_only": { "type": ["boolean", "null"] }
-              },
-              "required": ["address"]
+          "name": "default",
+          "description": "",
+          "params": [
+            {
+              "name": "requests",
+              "value": {
+                "requests": [
+                  {
+                    "address": [
+                      "component_e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd",
+                      0
+                    ]
+                  },
+                  {
+                    "address": [
+                      "component_7c45d28ffa167b10d2fa700ce29343de692b97422a65485d0a00e8e7578d692e",
+                      0
+                    ]
+                  }
+                ]
+              }
             }
-          }
-        }
-      ],
-      "result": {
-        "name": "responses",
-        "description": "Responses for each request, aligned by index",
-        "schema": {
-          "type": "array",
-          "items": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "address": { "type": "string" },
-                  "version": { "type": "integer" },
-                  "substate": { "type": "object" }
+          ],
+          "result": {
+            "name": "example1",
+            "value": {
+              "items": [
+                {
+                  "address": [
+                    "component_e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd",
+                    0
+                  ],
+                  "substate": {
+                    "Component": {
+                      "module_name": "Account",
+                      "state": {
+                        "state": [
+                          0,
+                          0,
+                          0,
+                          0
+                        ]
+                      }
+                    }
+                  },
+                  "version": 0
                 },
-                "required": ["address", "version", "substate"]
-              },
-              { "type": "null" }
-            ]
-          }
-        }
-      },
-      "errors": [],
-      "examples": []
-    }
-  ],
-  "components": {
-    "contentDescriptors": {},
-    "schemas": {}
-  }
-}

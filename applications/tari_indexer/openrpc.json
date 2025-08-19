@@ -132,8 +132,9 @@
                     "name": "address",
                     "required": true,
                     "schema": {
-                        "type": "array",
-                        "items": {}
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]+$",
+                        "description": "Hex-encoded SubstateId as expected by the JSON API"
                     }
                 },
                 {
@@ -321,7 +322,7 @@
                 "schema": {
                     "$ref": "#/components/schemas/GetSubstatesResponse"
                 }
-            },
+            ],
             "errors": [],
             "examples": [
                 {
@@ -333,16 +334,10 @@
                             "value": {
                                 "requests": [
                                     {
-                                        "address": [
-                                            "component_e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd",
-                                            0
-                                        ]
+                                        "address": "e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd"
                                     },
                                     {
-                                        "address": [
-                                            "component_7c45d28ffa167b10d2fa700ce29343de692b97422a65485d0a00e8e7578d692e",
-                                            0
-                                        ]
+                                        "address": "7c45d28ffa167b10d2fa700ce29343de692b97422a65485d0a00e8e7578d692e"
                                     }
                                 ]
                             }
@@ -353,10 +348,7 @@
                         "value": {
                             "responses": [
                                 {
-                                    "address": [
-                                        "component_e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd",
-                                        0
-                                    ],
+                                    "address": "e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd",
                                     "substate": {
                                         "Component": {
                                             "module_name": "Account",
@@ -402,16 +394,10 @@
                             "value": {
                                 "requests": [
                                     {
-                                        "address": [
-                                            "component_e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd",
-                                            0
-                                        ]
+                                        "address": "e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd"
                                     },
                                     {
-                                        "address": [
-                                            "component_7c45d28ffa167b10d2fa700ce29343de692b97422a65485d0a00e8e7578d692e",
-                                            0
-                                        ]
+                                        "address": "7c45d28ffa167b10d2fa700ce29343de692b97422a65485d0a00e8e7578d692e"
                                     }
                                 ]
                             }
@@ -422,10 +408,7 @@
                         "value": {
                             "responses": [
                                 {
-                                    "address": [
-                                        "component_e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd",
-                                        0
-                                    ],
+                                    "address": "e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd",
                                     "substate": {
                                         "Component": {
                                             "module_name": "Account",
@@ -454,8 +437,9 @@
                 "type": "object",
                 "properties": {
                     "address": {
-                        "type": "array",
-                        "items": {}
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]+$",
+                        "description": "Hex-encoded SubstateId as expected by the JSON API"
                     }
                 },
                 "required": [
@@ -466,8 +450,9 @@
                 "type": "object",
                 "properties": {
                     "address": {
-                        "type": "array",
-                        "items": {}
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]+$",
+                        "description": "Hex-encoded SubstateId as returned by the JSON API"
                     },
                     "substate": {
                         "type": "object"

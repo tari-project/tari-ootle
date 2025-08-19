@@ -147,6 +147,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 
         // We start at 1 because bootstrapped state is at 0
         let start_state_version = maybe_persisted_state_version.unwrap_or(1);
+        let mut last_state_version = start_state_version;
         info!(
             target: LOG_TARGET,
             "🛜Syncing from v{start_state_version}",
@@ -197,12 +198,22 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                 )));
             }
 
+            let state_version = msg.state_version;
+            if state_version < last_state_version {
+                return Err(RpcStateSyncError::InvalidResponse(anyhow!(
+                    "Received state version {} that is less than the last state version {}.",
+                    state_version,
+                    last_state_version
+                )));
+            }
+
+            last_state_version = state_version;
+
             self.stats.total_transitions += msg.updates.len() as u64;
 
             tree_changes.reserve_exact(msg.updates.len());
             updates.reserve_exact(msg.updates.len());
 
-            let state_version = msg.state_version;
             let updates_for_state_version = msg
                 .updates
                 .into_iter()

@@ -38,7 +38,7 @@ fn block_diffs_operations(db: impl StateStore) {
     let block_id9 = *block9.id();
     let substate_id = create_random_substate_id();
     let version = 0;
-    let substate_record = build_substate_record(&substate_id, version);
+    let substate_record = build_substate_record(&substate_id, version, 1);
     let change = SubstateChange::Up {
         id: substate_id.clone(),
         shard: block9.shard_group().start(),
@@ -64,7 +64,7 @@ fn block_diffs_operations(db: impl StateStore) {
 
     // block_diffs_get
     let res = tx.block_diffs_get(&block_id9).unwrap();
-    assert_eq!(res.changes.len(), 2);
+    assert_eq!(res.changes().len(), 2);
 
     let change = tx
         .block_diffs_get_last_change_for_substate(&block_id9, &substate_id)
@@ -82,7 +82,7 @@ fn block_diffs_operations(db: impl StateStore) {
     // block_diffs_remove
     tx.block_diffs_remove(&block_id9).unwrap();
     let res = tx.block_diffs_get(&block_id9).unwrap();
-    assert_eq!(res.changes.len(), 0);
+    assert_eq!(res.changes().len(), 0);
 
     tx.rollback().unwrap();
 }

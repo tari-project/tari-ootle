@@ -5,8 +5,6 @@ use std::ops::Deref;
 
 use serde::Serialize;
 use tari_bor::cbor;
-use tari_common_types::types::FixedHash;
-use tari_consensus_types::BlockId;
 use tari_engine_types::{
     component::{ComponentBody, ComponentHeader},
     resource::Resource,
@@ -19,16 +17,16 @@ use tari_ootle_common_types::{
     Network,
     NodeAddressable,
     NumPreshards,
-    ShardGroup,
-    ToSubstateAddress,
     VersionedSubstateId,
+    VersionedSubstateIdRef,
 };
 use tari_ootle_storage::{
-    consensus_models::{Block, SubstateRecord},
+    consensus_models::{SubstateRecord, SubstateTransition, SubstateUpdateBatch},
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
 };
+use tari_state_tree::Version;
 use tari_template_lib::{
     auth::{ComponentAccessRules, OwnerRule, ResourceAccessRules},
     constants::{
@@ -40,11 +38,13 @@ use tari_template_lib::{
         XTR_FAUCET_VAULT_ADDRESS,
     },
     models::Metadata,
-    prelude::{ResourceType, RistrettoPublicKeyBytes},
+    prelude::ResourceType,
     resource::TOKEN_SYMBOL,
     rule,
     types::EntityId,
 };
+
+const INITIAL_STATE_VERSION: Version = 0;
 
 pub fn has_bootstrapped<TTx: StateStoreReadTransaction>(tx: &TTx) -> Result<bool, StorageError> {
     // Assume that if the public identity resource exists, then the rest of the state has been bootstrapped
@@ -54,12 +54,7 @@ pub fn has_bootstrapped<TTx: StateStoreReadTransaction>(tx: &TTx) -> Result<bool
     )
 }
 
-pub fn bootstrap_state<TTx>(
-    tx: &mut TTx,
-    network: Network,
-    num_preshards: NumPreshards,
-    sidechain_id: Option<RistrettoPublicKeyBytes>,
-) -> Result<(), StorageError>
+pub fn bootstrap_state<TTx>(tx: &mut TTx, network: Network, num_preshards: NumPreshards) -> Result<(), StorageError>
 where
     TTx: StateStoreWriteTransaction + Deref,
     TTx::Target: StateStoreReadTransaction,
@@ -80,14 +75,7 @@ where
         0,
         false,
     );
-    create_substate(
-        tx,
-        network,
-        num_preshards,
-        sidechain_id,
-        PUBLIC_IDENTITY_RESOURCE_ADDRESS,
-        value,
-    )?;
+    create_substate(tx, num_preshards, PUBLIC_IDENTITY_RESOURCE_ADDRESS, value)?;
 
     let is_testnet = !matches!(network, Network::MainNet);
     let symbol = if is_testnet { "tXTR" } else { "XTR" };
@@ -105,29 +93,17 @@ where
 
     if is_testnet {
         // Create tXTR faucet
-        create_xtr_faucet(tx, network, num_preshards, sidechain_id)?;
+        create_xtr_faucet(tx, num_preshards)?;
         // Create NFT faucet
-        create_nft_faucet(tx, network, num_preshards, sidechain_id)?;
+        create_nft_faucet(tx, num_preshards)?;
     }
 
-    create_substate(
-        tx,
-        network,
-        num_preshards,
-        sidechain_id,
-        CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-        xtr_resource,
-    )?;
+    create_substate(tx, num_preshards, CONFIDENTIAL_TARI_RESOURCE_ADDRESS, xtr_resource)?;
 
     Ok(())
 }
 
-fn create_xtr_faucet<TTx>(
-    tx: &mut TTx,
-    network: Network,
-    num_preshards: NumPreshards,
-    sidechain_id: Option<RistrettoPublicKeyBytes>,
-) -> Result<(), StorageError>
+fn create_xtr_faucet<TTx>(tx: &mut TTx, num_preshards: NumPreshards) -> Result<(), StorageError>
 where
     TTx: StateStoreWriteTransaction + Deref,
     TTx::Target: StateStoreReadTransaction,
@@ -144,14 +120,7 @@ where
             state: cbor!({"vault" => XTR_FAUCET_VAULT_ADDRESS}).unwrap(),
         },
     };
-    create_substate(
-        tx,
-        network,
-        num_preshards,
-        sidechain_id,
-        XTR_FAUCET_COMPONENT_ADDRESS,
-        value,
-    )?;
+    create_substate(tx, num_preshards, XTR_FAUCET_COMPONENT_ADDRESS, value)?;
 
     let value = Vault::new(ResourceContainer::Confidential {
         address: CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
@@ -162,23 +131,11 @@ where
         locked_revealed_amount: Default::default(),
     });
 
-    create_substate(
-        tx,
-        network,
-        num_preshards,
-        sidechain_id,
-        XTR_FAUCET_VAULT_ADDRESS,
-        value,
-    )?;
+    create_substate(tx, num_preshards, XTR_FAUCET_VAULT_ADDRESS, value)?;
     Ok(())
 }
 
-fn create_nft_faucet<TTx>(
-    tx: &mut TTx,
-    network: Network,
-    num_preshards: NumPreshards,
-    sidechain_id: Option<RistrettoPublicKeyBytes>,
-) -> Result<(), StorageError>
+fn create_nft_faucet<TTx>(tx: &mut TTx, num_preshards: NumPreshards) -> Result<(), StorageError>
 where
     TTx: StateStoreWriteTransaction + Deref,
     TTx::Target: StateStoreReadTransaction,
@@ -195,14 +152,7 @@ where
             state: cbor!({"serial_number" => 0u64}).unwrap(),
         },
     };
-    create_substate(
-        tx,
-        network,
-        num_preshards,
-        sidechain_id,
-        NFT_FAUCET_COMPONENT_ADDRESS,
-        value,
-    )?;
+    create_substate(tx, num_preshards, NFT_FAUCET_COMPONENT_ADDRESS, value)?;
 
     let metadata = Metadata::from([("name", "NFT Faucet"), (TOKEN_SYMBOL, "TNFT")]);
 
@@ -219,22 +169,13 @@ where
         true,
     );
 
-    create_substate(
-        tx,
-        network,
-        num_preshards,
-        sidechain_id,
-        NFT_FAUCET_RESOURCE_ADDRESS,
-        value,
-    )?;
+    create_substate(tx, num_preshards, NFT_FAUCET_RESOURCE_ADDRESS, value)?;
     Ok(())
 }
 
 fn create_substate<TTx, TId, TVal>(
     tx: &mut TTx,
-    network: Network,
     num_preshards: NumPreshards,
-    sidechain_id: Option<RistrettoPublicKeyBytes>,
     substate_id: TId,
     value: TVal,
 ) -> Result<(), StorageError>
@@ -245,29 +186,16 @@ where
     TId: Into<SubstateId>,
     TVal: Into<SubstateValue>,
 {
-    let genesis_block = Block::genesis(
-        network,
-        Epoch(0),
-        FixedHash::zero(),
-        ShardGroup::all_shards(num_preshards),
-        FixedHash::default(),
-        sidechain_id,
-    );
     let substate_id = substate_id.into();
-    let id = VersionedSubstateId::new(substate_id, 0);
-    let shard = id.to_substate_address().to_shard(num_preshards);
-    SubstateRecord {
-        version: id.version(),
-        substate_id: id.into_substate_id(),
-        substate_value: Some(value.into()),
-        state_hash: Default::default(),
-        created_justify: genesis_block.justify().calculate_id(),
-        created_block: BlockId::zero(),
-        created_by_shard: shard,
-        created_at_epoch: Epoch(0),
-        destroyed: None,
-    }
-    .create(tx)?;
+    let shard = VersionedSubstateIdRef::new(&substate_id, 0).to_shard(num_preshards);
+    let mut batch = SubstateUpdateBatch::new(Epoch::zero());
+    batch.add_transition(shard, INITIAL_STATE_VERSION, SubstateTransition::Up {
+        id: substate_id,
+        version: 0,
+        substate_or_hash: value.into().into(),
+    });
+
+    SubstateRecord::commit_batch(tx, batch)?;
 
     Ok(())
 }

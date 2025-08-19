@@ -219,16 +219,9 @@ pub async fn spawn_services(
 
     info!(target: LOG_TARGET, "State store initializing");
 
-    let sidechain_id = config
-        .validator_node
-        .validator_node_sidechain_id
-        .as_ref()
-        .map(|pk| pk.to_byte_type());
-
     let state_store = ValidatorNodeStateStore::open(&config.validator_node.state_db_path, DatabaseOptions::default())?;
 
-    state_store
-        .with_write_tx(|tx| bootstrap_state(tx, config.network, consensus_constants.num_preshards, sidechain_id))?;
+    state_store.with_write_tx(|tx| bootstrap_state(tx, config.network, consensus_constants.num_preshards))?;
 
     info!(target: LOG_TARGET, "Epoch manager initializing");
     let epoch_manager_config = EpochManagerConfig {
@@ -334,6 +327,12 @@ pub async fn spawn_services(
     let metrics = PrometheusConsensusMetrics::register(tari_metrics_registry);
     #[cfg(not(feature = "metrics"))]
     let metrics = NoopHooks;
+
+    let sidechain_id = config
+        .validator_node
+        .validator_node_sidechain_id
+        .as_ref()
+        .map(|pk| pk.to_byte_type());
 
     let signing_service = consensus::TariSignatureService::new(keypair.clone());
     let (consensus_join_handle, consensus_handle) = consensus::spawn(

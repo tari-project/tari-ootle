@@ -52,7 +52,6 @@ use tari_ootle_common_types::{
     NumPreshards,
     ShardGroup,
     ToSubstateAddress,
-    VersionedSubstateId,
 };
 use tari_ootle_storage::{
     consensus_models::{
@@ -60,7 +59,6 @@ use tari_ootle_storage::{
         BlockTransactionExecution,
         BurntUtxo,
         EpochCheckpoint,
-        EpochStateRoot,
         Evidence,
         ForeignParkedProposal,
         ForeignProposal,
@@ -69,12 +67,14 @@ use tari_ootle_storage::{
         LockConflict,
         NoVoteReason,
         PendingShardStateTreeDiff,
-        StateTransitionId,
         SubstateChange,
+        SubstateCreated,
         SubstateDestroyed,
         SubstateLock,
         SubstatePledges,
         SubstateRecord,
+        SubstateTransition,
+        SubstateUpdateBatch,
         TransactionPoolRecord,
         TransactionPoolStage,
         TransactionPoolStatusUpdate,
@@ -87,7 +87,7 @@ use tari_ootle_storage::{
     StateStoreWriteTransaction,
     StorageError,
 };
-use tari_state_tree::{Child, Nibble, Node, NodeKey, NodeType, StaleTreeNode, Version};
+use tari_state_tree::{Child, Nibble, Node, NodeKey, NodeType, StaleTreeNode, StateTreePayload, Version};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 
@@ -114,7 +114,6 @@ use crate::{
             LastVotedCf,
             LeafBlockCf,
             LockedBlockCf,
-            PreviousEpochStateRootCf,
         },
         burnt_utxo,
         burnt_utxo::BurntUtxoCf,
@@ -138,8 +137,12 @@ use crate::{
         parked_block::{ParkedBlockCf, ParkedBlockDataRef, ParkedBlockModelRef},
         pending_state_tree_diff,
         pending_state_tree_diff::PendingStateTreeDiffCf,
-        state_transition,
-        state_transition::{StateTransitionCf, StateTransitionModelData, StateTransitionType},
+        state_transition::{
+            StateTransitionCf,
+            StateTransitionModelDataV1,
+            StateTransitionRecordData,
+            StateTransitionType,
+        },
         state_tree,
         state_tree::{StateTreeCf, StateTreeStaleNodesModel},
         state_tree_shard_versions::StateTreeShardVersionCf,
@@ -1191,108 +1194,74 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
-    fn substates_create(&mut self, substate: &SubstateRecord) -> Result<(), StorageError> {
-        const OPERATION: &str = "substates_create";
-        if substate.is_destroyed() {
-            return Err(StorageError::QueryError {
-                reason: format!(
-                    "{OPERATION} calling substates_create with a destroyed SubstateRecord is not valid. substate_id = \
-                     {}",
-                    substate.substate_id
-                ),
-            });
-        }
+    fn substates_commit_batch(&mut self, update_batch: SubstateUpdateBatch) -> Result<(), StorageError> {
+        const OPERATION: &str = "substates_commit_batch";
 
         let db = self.db();
 
-        let address = substate.to_substate_address();
-        db.cf(SubstateCf)?.put(&address, substate, OPERATION)?;
-        db.cf(substate::HeadIndex)?.put(
-            &substate.substate_id,
-            &SubstateHeadData {
-                version: substate.version(),
-                is_up: true,
-            },
-            OPERATION,
-        )?;
-
-        let shard_state_version = db
-            .cf(StateTreeShardVersionCf)?
-            .get(&substate.created_by_shard, OPERATION)
-            .optional()?
-            .unwrap_or_default();
-
-        let seq_index = db.cf(state_transition::ShardSeqIndex)?;
-        let seq = seq_index.get(&substate.created_by_shard, OPERATION).optional()?;
-        let next_seq = seq.map(|s| s + 1).unwrap_or(1);
-
-        let id = StateTransitionId::new(substate.created_at_epoch, substate.created_by_shard, next_seq);
-        let transition = StateTransitionModelData {
-            substate_address: address,
-            state_version: shard_state_version,
-            transition: StateTransitionType::Up,
-        };
-
-        db.cf(StateTransitionCf)?.put(&id, &transition, OPERATION)?;
-
-        seq_index.put(&substate.created_by_shard, &next_seq, OPERATION)?;
-
-        Ok(())
-    }
-
-    fn substates_down(
-        &mut self,
-        versioned_substate_id: VersionedSubstateId,
-        shard: Shard,
-        epoch: Epoch,
-        destroyed_block_height: NodeHeight,
-        destroyed_qc_id: &QcId,
-    ) -> Result<(), StorageError> {
-        const OPERATION: &str = "substates_down";
-
-        let db = self.db();
         let cf = db.cf(SubstateCf)?;
+        let head_cf = db.cf(substate::HeadIndex)?;
 
-        let address = versioned_substate_id.to_substate_address();
-        let mut substate = cf.get(&address, OPERATION)?;
-        substate.destroyed = Some(SubstateDestroyed {
-            justify: *destroyed_qc_id,
-            by_block: destroyed_block_height,
-            at_epoch: epoch,
-            by_shard: shard,
-        });
-        cf.put(&address, &substate, OPERATION)?;
-        db.cf(substate::HeadIndex)?.put(
-            &substate.substate_id,
-            &SubstateHeadData {
-                version: substate.version(),
-                is_up: false,
-            },
-            OPERATION,
-        )?;
+        for (shard, update) in update_batch.updates {
+            let mut transitions = Vec::with_capacity(update.transitions.len());
 
-        let seq_index = db.cf(state_transition::ShardSeqIndex)?;
-        let seq = seq_index.get(&substate.created_by_shard, OPERATION).optional()?;
-        let next_seq = seq.map(|s| s + 1).unwrap_or(1);
+            for transition in update.transitions {
+                match transition {
+                    SubstateTransition::Up {
+                        id,
+                        version,
+                        substate_or_hash,
+                    } => {
+                        let rec = SubstateRecord::new(id, version, substate_or_hash, SubstateCreated {
+                            at_epoch: update_batch.epoch,
+                            in_shard: shard,
+                            at_state_version: update.state_version,
+                        });
 
-        let transitions_cf = db.cf(StateTransitionCf)?;
+                        let address = rec.to_substate_address();
+                        cf.put(&address, &rec, OPERATION)?;
+                        head_cf.put(rec.substate_id(), &SubstateHeadData { version, is_up: true }, OPERATION)?;
 
-        let shard_state_version = db
-            .cf(StateTreeShardVersionCf)?
-            .get(&shard, OPERATION)
-            .optional()?
-            .unwrap_or_default();
+                        transitions.push(StateTransitionRecordData {
+                            substate_address: address,
+                            transition: StateTransitionType::Up,
+                        });
+                    },
+                    SubstateTransition::Down { id } => {
+                        let address = id.to_substate_address();
 
-        let data = StateTransitionModelData {
-            substate_address: address,
-            state_version: shard_state_version,
-            transition: StateTransitionType::Down,
-        };
-        let id = StateTransitionId::new(epoch, shard, next_seq);
-        transitions_cf.put(&id, &data, OPERATION)?;
-        let unpruned_cf = db.cf(substate::UnprunedDownedValuesIndex)?;
-        unpruned_cf.put(&(id.epoch(), id.shard(), id.seq()), &address, OPERATION)?;
-        seq_index.put(&shard, &next_seq, OPERATION)?;
+                        let mut substate = cf.get(&address, OPERATION)?;
+                        substate.destroyed = Some(SubstateDestroyed {
+                            at_epoch: update_batch.epoch,
+                            at_state_version: update.state_version,
+                        });
+                        cf.put(&address, &substate, OPERATION)?;
+                        db.cf(substate::HeadIndex)?.put(
+                            &substate.substate_id,
+                            &SubstateHeadData {
+                                version: substate.version(),
+                                is_up: false,
+                            },
+                            OPERATION,
+                        )?;
+
+                        transitions.push(StateTransitionRecordData {
+                            substate_address: address,
+                            transition: StateTransitionType::Down,
+                        });
+                    },
+                }
+            }
+
+            let transition = StateTransitionModelDataV1 {
+                epoch: update_batch.epoch,
+                state_version: update.state_version,
+                transitions,
+            };
+
+            db.cf(StateTransitionCf)?
+                .put(&(shard, update.state_version), &transition, OPERATION)?;
+        }
 
         Ok(())
     }
@@ -1416,7 +1385,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     fn state_tree_nodes_batch_insert(
         &mut self,
         shard: Shard,
-        nodes: Vec<(NodeKey, Node<Version>)>,
+        nodes: Vec<(NodeKey, Node<StateTreePayload>)>,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "state_tree_nodes_insert";
         let cf = self.db().cf(StateTreeCf)?;
@@ -1551,14 +1520,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             .cf(EpochCheckpointCf)?
             .put(&checkpoint.epoch(), checkpoint, OPERATION)?;
 
-        Ok(())
-    }
-
-    fn previous_epoch_state_root_set(&mut self, epoch_state_root: &EpochStateRoot) -> Result<(), StorageError> {
-        const OPERATION: &str = "epoch_state_root_set";
-        self.db()
-            .cf(PreviousEpochStateRootCf)?
-            .put(&ByteColumn, epoch_state_root, OPERATION)?;
         Ok(())
     }
 

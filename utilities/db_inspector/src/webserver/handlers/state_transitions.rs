@@ -29,11 +29,10 @@ pub async fn list(
     let mut table = TableResponse::new([
         Column::new("epoch", "Epoch"),
         Column::new("shard", "Shard"),
-        Column::new("seq", "Seq"),
+        Column::new("state_version", "State Version"),
         Column::new("substate_id", "Substate ID"),
         Column::new("version", "Version"),
         Column::new("transition", "Transition"),
-        Column::new("substate_address", "Substate Address"),
     ]);
     let tx = db.read_only_context();
 
@@ -56,19 +55,20 @@ pub async fn list(
     let page_size = req.limit.unwrap_or(1_000);
     let skip = req.page.unwrap_or(0) * page_size;
     for result in iter.skip(skip).take(page_size) {
-        let (id, data) = result?;
-        let encoded_key = cf.encode_key(&id);
-        let substate = substate_cf.get(&data.substate_address, OPERATION).optional()?;
-        table.add_row(json!({
-            "id": hex::encode(encoded_key),
-            "epoch": id.epoch(),
-            "shard": id.shard(),
-            "seq": id.seq(),
-            "substate_id": substate.as_ref().map(|s| s.substate_id()),
-            "version": substate.as_ref().map(|s| s.version()),
-            "transition": data.transition,
-            "substate_address": data.substate_address,
-        }));
+        let ((shard, state_version), data) = result?;
+        let encoded_key = cf.encode_key(&(shard, state_version));
+        for (i, transition) in data.transitions.into_iter().enumerate() {
+            let substate = substate_cf.get(&transition.substate_address, OPERATION).optional()?;
+            table.add_row(json!({
+                "id": hex::encode(&encoded_key) + &format!("-{}", i),
+                "epoch": data.epoch,
+                "shard": shard,
+                "state_version": state_version,
+                "substate_id": substate.as_ref().map(|s| s.substate_id()),
+                "version": substate.as_ref().map(|s| s.version()),
+                "transition": transition.transition,
+            }));
+        }
     }
     let total = cf.count(OPERATION)?;
     table.set_total_entries(total);

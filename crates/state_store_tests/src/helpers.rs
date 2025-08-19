@@ -28,9 +28,18 @@ use tari_common_types::types::FixedHash;
 use tari_consensus_types::{BlockId, Decision, LeafBlock, ProposalCertificate, QcId};
 use tari_engine_types::{
     component::{ComponentBody, ComponentHeader},
-    substate::{hash_substate, Substate, SubstateId, SubstateValue},
+    substate::{hash_substate, SubstateId, SubstateValue},
 };
-use tari_ootle_common_types::{shard::Shard, Epoch, ExtraData, Network, NodeHeight, NumPreshards, ShardGroup};
+use tari_ootle_common_types::{
+    Epoch,
+    ExtraData,
+    Network,
+    NodeHeight,
+    NumPreshards,
+    ShardGroup,
+    VersionedSubstateId,
+    VersionedSubstateIdRef,
+};
 use tari_ootle_storage::{
     consensus_models::{
         Block,
@@ -40,7 +49,9 @@ use tari_ootle_storage::{
         CommandsCommitProof,
         ForeignProposal,
         ForeignProposalRecord,
+        SubstateCreated,
         SubstateRecord,
+        SubstateUpdateBatch,
         TransactionAtom,
     },
     StateStoreReadTransaction,
@@ -48,6 +59,7 @@ use tari_ootle_storage::{
 };
 use tari_sidechain::{CommitProofElement, QuorumDecision, SidechainBlockCommitProof, SidechainBlockHeader};
 use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
+use tari_state_tree::Version;
 use tari_template_lib::{
     auth::OwnerRule,
     models::ComponentAddress,
@@ -113,7 +125,7 @@ pub fn transaction_id_from_seed(seed: u32) -> TransactionId {
     TransactionId::new(buf)
 }
 
-pub fn build_substate_record(substate_id: &SubstateId, version: u32) -> SubstateRecord {
+pub fn build_substate_record(substate_id: &SubstateId, version: u32, state_version: Version) -> SubstateRecord {
     let entity_id = substate_id.to_object_key().as_entity_id();
     let value = build_substate_value(Some(entity_id));
     SubstateRecord {
@@ -121,10 +133,11 @@ pub fn build_substate_record(substate_id: &SubstateId, version: u32) -> Substate
         version,
         state_hash: hash_substate(&value, version),
         substate_value: Some(value),
-        created_justify: QcId::zero(),
-        created_block: BlockId::zero(),
-        created_by_shard: Shard::first(),
-        created_at_epoch: Epoch::zero(),
+        created: SubstateCreated {
+            at_epoch: Epoch::zero(),
+            in_shard: VersionedSubstateIdRef::new(substate_id, version).to_shard(TEST_NUM_PRESHARDS),
+            at_state_version: state_version,
+        },
         destroyed: None,
     }
 }
@@ -147,6 +160,35 @@ pub fn build_substate_value(entity_id: Option<EntityId>) -> SubstateValue {
             .unwrap(),
         },
     })
+}
+
+pub fn create_substate_update_batch<'a, I: IntoIterator<Item = &'a SubstateRecord>>(
+    epoch: Epoch,
+    substates: I,
+) -> SubstateUpdateBatch {
+    let mut batch = SubstateUpdateBatch::new(epoch);
+    for substate in substates {
+        if let Some(destroyed) = &substate.destroyed {
+            batch.add_transition(
+                substate.to_versioned_substate_id().to_shard(TEST_NUM_PRESHARDS),
+                destroyed.at_state_version,
+                tari_ootle_storage::consensus_models::SubstateTransition::Down {
+                    id: VersionedSubstateId::new(substate.substate_id.clone(), substate.version),
+                },
+            );
+        } else {
+            batch.add_transition(
+                substate.to_versioned_substate_id().to_shard(TEST_NUM_PRESHARDS),
+                substate.created().at_state_version,
+                tari_ootle_storage::consensus_models::SubstateTransition::Up {
+                    id: substate.substate_id.clone(),
+                    version: substate.version,
+                    substate_or_hash: substate.clone().into_substate_value_or_hash(),
+                },
+            );
+        }
+    }
+    batch
 }
 
 pub fn substate_id_tx_seed(transaction_id: TransactionId, seed: u32) -> SubstateId {
@@ -188,19 +230,28 @@ pub fn substate_value_for_entity(entity_id: EntityId) -> SubstateValue {
 }
 
 pub fn gen_substates(
+    epoch: Epoch,
+    state_version: Version,
     range: impl IntoIterator<Item = u32>,
     version: u32,
-) -> impl Iterator<Item = (SubstateId, Substate)> {
+) -> impl Iterator<Item = SubstateRecord> {
     range.into_iter().map(move |i| {
         let substate_id = substate_id_seed(i);
         let value = substate_value_for_entity(substate_id.to_object_key().as_entity_id());
-        (substate_id, Substate::new(version, value))
+        let shard = VersionedSubstateIdRef::new(&substate_id, version).to_shard(TEST_NUM_PRESHARDS);
+        SubstateRecord::new(substate_id, version, value, SubstateCreated {
+            at_epoch: epoch,
+            in_shard: shard,
+            at_state_version: state_version,
+        })
     })
 }
 
+// track_caller allows a panic to include the caller's location in the error message
+#[track_caller]
 pub fn assert_eq_debug<T>(a: &T, b: &T)
 where T: std::fmt::Debug {
-    assert_eq!(format!("{:?}", a), format!("{:?}", b),);
+    assert_eq!(format!("{:?}", a), format!("{:?}", b));
 }
 
 pub fn create_random_block_id() -> BlockId {
@@ -223,6 +274,7 @@ pub fn create_block(parent: Option<&Block>) -> Block {
 
     // This prevents all blocks to have the same hash/id
     let random_merkle_root = create_random_hash();
+    let shard_group = ShardGroup::all_shards(num_preshards());
 
     Block::create(
         network,
@@ -231,7 +283,7 @@ pub fn create_block(parent: Option<&Block>) -> Block {
         None,
         NodeHeight(1),
         Epoch(0),
-        ShardGroup::all_shards(num_preshards()),
+        shard_group,
         Default::default(),
         // Need to have a command in, otherwise this block will not be included internally in the query because it
         // cannot cause a state change without any commands
@@ -255,6 +307,7 @@ pub fn create_block_with_qc(parent: &LeafBlock) -> Block {
     let random_merkle_root = create_random_hash();
 
     let qc = create_qc(parent);
+    let shard_group = parent.shard_group();
 
     Block::create(
         network,
@@ -263,7 +316,7 @@ pub fn create_block_with_qc(parent: &LeafBlock) -> Block {
         None,
         parent.height() + NodeHeight(1),
         parent.epoch(),
-        ShardGroup::all_shards(num_preshards()),
+        shard_group,
         Default::default(),
         // Need to have a command in, otherwise this block will not be included internally in the query because it
         // cannot cause a state change without any commands

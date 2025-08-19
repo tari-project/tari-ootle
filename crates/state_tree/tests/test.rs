@@ -5,6 +5,7 @@
 use std::collections::{BTreeSet, HashSet};
 
 use tari_jellyfish::{StaleTreeNode, Version, SPARSE_MERKLE_PLACEHOLDER_HASH};
+use tari_ootle_common_types::ToSubstateAddress;
 use tari_state_tree::memory_store::MemoryTreeStore;
 
 use crate::support::{change, hash_value_from_seed, make_value, HashTreeTester};
@@ -191,15 +192,15 @@ fn proofs() {
     let tree = tester.create_state_tree();
     let (key, proof_value, proof) = tree.get_proof(3, &make_value(1)).unwrap();
     let hash = hash_value_from_seed(30);
-    assert_eq!(proof_value, Some((hash, 1, 1)));
+    assert_eq!(proof_value, Some((hash, make_value(1).to_substate_address(), 1)));
     proof.verify_inclusion(&root_hash, &key, &hash).unwrap();
     let (key, proof_value, proof) = tree.get_proof(3, &make_value(2)).unwrap();
     let hash = hash_value_from_seed(40);
-    assert_eq!(proof_value, Some((hash, 2, 2)));
+    assert_eq!(proof_value, Some((hash, make_value(2).to_substate_address(), 2)));
     proof.verify_inclusion(&root_hash, &key, &hash).unwrap();
     let (key, proof_value, proof) = tree.get_proof(3, &make_value(3)).unwrap();
     let hash = hash_value_from_seed(50);
-    assert_eq!(proof_value, Some((hash, 3, 3)));
+    assert_eq!(proof_value, Some((hash, make_value(3).to_substate_address(), 3)));
     proof.verify_inclusion(&root_hash, &key, &hash).unwrap();
     let (key, proof_value, proof) = tree.get_proof(3, &make_value(3)).unwrap();
     proof

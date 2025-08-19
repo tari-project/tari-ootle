@@ -107,6 +107,7 @@ mod block_parent_operations {
         let zero_block = Block::zero_block(network, NumPreshards::P64);
         zero_block.insert(&mut tx).unwrap();
 
+        let shard_group = ShardGroup::all_shards(NumPreshards::P64);
         let block1 = Block::create(
             network,
             *zero_block.id(),
@@ -114,7 +115,7 @@ mod block_parent_operations {
             None,
             NodeHeight(1),
             Epoch(0),
-            ShardGroup::all_shards(NumPreshards::P64),
+            shard_group,
             Default::default(),
             // Need to have a command in, otherwise this block will not be included internally in the query because it
             // cannot cause a state change without any commands
@@ -136,7 +137,7 @@ mod block_parent_operations {
             None,
             NodeHeight(1),
             Epoch(0),
-            ShardGroup::all_shards(NumPreshards::P64),
+            shard_group,
             Default::default(),
             // Need to have a command in, otherwise this block will not be included internally in the query because it
             // cannot cause a state change without any commands
@@ -237,6 +238,7 @@ mod block_query_operations {
         tx.blocks_set_qcs(zero_block.id(), Some(&QcId::zero()), Some(&QcId::zero()))
             .unwrap();
 
+        let shard_group = ShardGroup::all_shards(NumPreshards::P64);
         let block1 = Block::create(
             network,
             *zero_block.id(),
@@ -244,7 +246,7 @@ mod block_query_operations {
             None,
             NodeHeight(1),
             Epoch(0),
-            ShardGroup::all_shards(NumPreshards::P64),
+            shard_group,
             Default::default(),
             // Need to have a command in, otherwise this block will not be included internally in the query because it
             // cannot cause a state change without any commands
@@ -269,7 +271,7 @@ mod block_query_operations {
             None,
             NodeHeight(2),
             Epoch(0),
-            ShardGroup::all_shards(NumPreshards::P64),
+            shard_group,
             Default::default(),
             // Need to have a command in, otherwise this block will not be included internally in the query because it
             // cannot cause a state change without any commands
@@ -301,7 +303,7 @@ mod block_query_operations {
             // Height 2 to test forks
             NodeHeight(2),
             Epoch(0),
-            ShardGroup::all_shards(NumPreshards::P64),
+            shard_group,
             Default::default(),
             // Need to have a command in, otherwise this block will not be included internally in the query because it
             // cannot cause a state change without any commands

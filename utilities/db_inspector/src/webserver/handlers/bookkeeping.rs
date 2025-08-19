@@ -85,14 +85,14 @@ pub async fn list(
     )?;
     add_item(
         &tx,
-        "commit_block",
-        column_families::bookkeeping::CommitBlockCf,
+        "highest_seen_block",
+        column_families::bookkeeping::HighestSeenBlockCf,
         &mut table,
     )?;
     add_item(
         &tx,
-        "previous_epoch_root",
-        column_families::bookkeeping::PreviousEpochStateRootCf,
+        "commit_block",
+        column_families::bookkeeping::CommitBlockCf,
         &mut table,
     )?;
     add_item(

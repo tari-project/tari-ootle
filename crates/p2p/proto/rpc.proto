@@ -99,7 +99,9 @@ message GetSubstateResponse {
   // Encoded Substate
   bytes substate = 3;
   SubstateStatus status = 4;
-  repeated tari.ootle.consensus.QuorumCertificate quorum_certificates = 5;
+  uint64 created_at_state_version = 5;
+  // Optional (i.e. 0 if not destroyed)
+  uint64 destroyed_at_state_version = 6;
 }
 
 enum SubstateStatus {
@@ -202,32 +204,25 @@ message GetCheckpointResponse {
 
 message EpochCheckpoint {
   bytes proof = 1;
-  map<uint32, bytes> shard_roots = 2;
+  map<uint32, TreeRootSummary> shard_tree_summary = 2;
+}
+
+message TreeRootSummary {
+  bytes root_hash = 1;
+  uint64 state_version = 2;
 }
 
 message SyncStateRequest {
-  uint64 start_epoch = 1;
-  uint32 start_shard = 2;
-  uint64 start_seq = 3;
-  // The shard in the current shard-epoch that is requested.
-  // This will limit the state transitions returned to those that fall within this shard-epoch.
-  uint64 current_epoch = 4;
+  uint64 start_state_version = 1;
+  uint32 shard = 2;
+  uint64 until_epoch = 3;
 }
 
 message SyncStateResponse {
-  repeated StateTransition transitions = 1;
-}
-
-message StateTransition {
-  StateTransitionId id = 1;
-  SubstateUpdate update = 2;
-  uint64 state_version = 3;
-}
-
-message StateTransitionId {
-  uint64 epoch = 1;
-  uint32 shard = 2;
-  uint64 seq = 3;
+  uint64 state_version = 1;
+  repeated SubstateUpdate updates = 2;
+  bool has_more = 3;
+  tari.ootle.common.Epoch Epoch = 4;
 }
 
 enum TemplateType {

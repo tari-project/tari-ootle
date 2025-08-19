@@ -22,10 +22,8 @@ use tari_ootle_common_types::{optional::Optional, Epoch, NodeHeight, ShardGroup}
 use tari_ootle_storage::{
     consensus_models::{
         Block,
-        BlockDiff,
         BookkeepingModel,
         BurntUtxo,
-        EpochStateRoot,
         ForeignProposalRecord,
         NoVoteReason,
         TransactionPool,
@@ -34,7 +32,6 @@ use tari_ootle_storage::{
     StateStore,
 };
 use tari_shutdown::ShutdownSignal;
-use tari_state_tree::SPARSE_MERKLE_PLACEHOLDER_HASH;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::{Transaction, TransactionId};
 use tokio::sync::{broadcast, mpsc};
@@ -66,6 +63,7 @@ use crate::{
         pacemaker::PaceMaker,
         pacemaker_handle::PaceMakerHandle,
         state_tree_gc::StateTreeGc,
+        substate_store::ShardedStateTree,
         transaction_manager::ConsensusTransactionManager,
         vote_collector::{ProposalVoteCollector, TimeoutVoteCollector},
     },
@@ -1003,7 +1001,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         };
 
         if remote_epoch > local_epoch_state.epoch() {
-            // We are in a future epoch, so we cannot justify this block
+            // Valid remote certificate is in a future epoch, so we are behind
             warn!(
                 target: LOG_TARGET,
                 "❌ Justify block {remote_epoch}/{remote_height} is in a future epoch > current epoch {}. State sync required.",
@@ -1054,17 +1052,11 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 zero_block.justify().save(tx)?;
                 zero_block.insert(tx)?;
                 zero_block.add_justify_qc(tx, &QcId::zero())?;
-                zero_block.commit_diff(
-                    tx,
-                    &zero_block.justify().calculate_id(),
-                    BlockDiff::empty(*zero_block.id()),
-                )?;
+                zero_block.commit_block_without_state_changes(tx, &zero_block.justify().calculate_id())?;
             }
 
-            let checkpoint = EpochStateRoot::get(&**tx).optional()?;
-            let state_merkle_root = checkpoint
-                .map(|cp| cp.state_root)
-                .unwrap_or_else(|| SPARSE_MERKLE_PLACEHOLDER_HASH);
+            let state_merkle_root = ShardedStateTree::new(&**tx).calculate_state_root(shard_group)?;
+
             let mut genesis = Block::genesis(
                 self.config.network,
                 epoch,
@@ -1084,7 +1076,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 genesis.as_last_executed().set(tx)?;
                 genesis.as_last_voted().set(tx)?;
                 genesis.justify().as_high_pc().set(tx)?;
-                genesis.commit_diff(tx, &genesis.justify().calculate_id(), BlockDiff::empty(*genesis.id()))?;
+                genesis.commit_block_without_state_changes(tx, &genesis.justify().calculate_id())?;
             }
 
             Ok(())

@@ -15,7 +15,7 @@ use tari_consensus::{
     consensus_constants::ConsensusConstants,
     hotstuff::{HotstuffConfig, HotstuffEvent},
 };
-use tari_consensus_types::{BlockId, Decision, QcId};
+use tari_consensus_types::{BlockId, Decision};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::{substate::SubstateId, ToByteType};
 use tari_epoch_manager::EpochManagerReader;
@@ -34,7 +34,7 @@ use tari_ootle_common_types::{
     VotePower,
 };
 use tari_ootle_storage::{
-    consensus_models::{SubstateRecord, TransactionExecution, TransactionRecord},
+    consensus_models::{SubstateCreated, SubstateRecord, SubstateUpdateBatch, TransactionExecution, TransactionRecord},
     StateStore,
     StateStoreReadTransaction,
     StorageError,
@@ -179,30 +179,29 @@ impl Test {
             .iter()
             .map(|id| {
                 let value = make_test_component(id.substate_id().as_component_address().unwrap().entity_id());
-                SubstateRecord::new(
-                    id.substate_id().clone(),
-                    id.version(),
-                    value,
-                    Shard::first(),
-                    Epoch(0),
-                    BlockId::zero(),
-                    QcId::zero(),
-                )
+                SubstateRecord::new(id.substate_id().clone(), id.version(), value, SubstateCreated {
+                    at_epoch: Epoch::zero(),
+                    in_shard: Shard::first(),
+                    at_state_version: 0,
+                })
             })
             .collect::<Vec<_>>();
 
         self.validators.values().filter(|vn| dest.is_for_vn(vn)).for_each(|v| {
+            let mut batch = SubstateUpdateBatch::new(Epoch::zero());
+            for substate in &substates {
+                let shard = substate.to_versioned_substate_id().to_shard(TEST_NUM_PRESHARDS);
+                if v.shard_group.contains(&shard) {
+                    batch.add_transition(
+                        shard,
+                        substate.created().at_state_version,
+                        substate.clone().into_transition(),
+                    );
+                }
+            }
+
             v.state_store
-                .with_write_tx(|tx| {
-                    for substate in &substates {
-                        if v.shard_group
-                            .contains(&substate.to_substate_address().to_shard(TEST_NUM_PRESHARDS))
-                        {
-                            substate.create(tx).unwrap();
-                        }
-                    }
-                    Ok::<_, StorageError>(())
-                })
+                .with_write_tx(|tx| SubstateRecord::commit_batch(tx, batch))
                 .unwrap();
         });
 
@@ -227,6 +226,7 @@ impl Test {
         TEST_NUM_PRESHARDS
     }
 
+    #[allow(dead_code)]
     pub fn num_committees(&self) -> u32 {
         self.num_committees
     }

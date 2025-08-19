@@ -76,6 +76,9 @@ impl SubstateRequirement {
     /// A shard is a fixed division of the 256-bit shard space.
     /// If the substate version is not known, None is returned.
     pub fn to_shard(&self, num_shards: NumPreshards) -> Option<Shard> {
+        if self.substate_id.is_global() {
+            return Some(Shard::global());
+        }
         self.to_substate_address().map(|a| a.to_shard(num_shards))
     }
 
@@ -428,6 +431,13 @@ pub struct VersionedSubstateIdRef<'a> {
 impl<'a> VersionedSubstateIdRef<'a> {
     pub fn new(substate_id: &'a SubstateId, version: u32) -> Self {
         Self { substate_id, version }
+    }
+
+    pub fn to_shard(&self, num_preshards: NumPreshards) -> Shard {
+        if self.substate_id.is_global() {
+            return Shard::global();
+        }
+        self.to_substate_address().to_shard(num_preshards)
     }
 
     pub fn substate_id(&self) -> &SubstateId {

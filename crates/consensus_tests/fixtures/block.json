@@ -7,7 +7,7 @@
     "height": 66,
     "epoch": 5,
     "shard_group": {
-      "start": 0,
+      "start": 1,
       "end_inclusive": 255
     },
     "proposed_by": "5e13c16840aa8d2e7e68390d0eb1b45c86bc363db0419f7ec5daa534e63bdb35",

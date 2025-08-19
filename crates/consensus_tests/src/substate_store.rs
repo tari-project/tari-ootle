@@ -5,7 +5,7 @@ use tari_consensus::{
     hotstuff::substate_store::{LockFailedError, PendingSubstateStore, SubstateStoreError},
     traits::{CertificateStore, ReadableSubstateStore, WriteableSubstateStore},
 };
-use tari_consensus_types::{BlockId, LeafBlock, QcId};
+use tari_consensus_types::{BlockId, LeafBlock};
 use tari_engine_types::{
     component::{ComponentBody, ComponentHeader},
     substate::{Substate, SubstateId, SubstateValue},
@@ -22,7 +22,14 @@ use tari_ootle_common_types::{
     VersionedSubstateId,
 };
 use tari_ootle_storage::{
-    consensus_models::{Block, RequireLockIntentRef, SubstateChange, SubstateRecord},
+    consensus_models::{
+        Block,
+        RequireLockIntentRef,
+        SubstateChange,
+        SubstateRecord,
+        SubstateTransition,
+        SubstateUpdateBatch,
+    },
     StateStore,
 };
 use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
@@ -207,22 +214,15 @@ fn it_allows_requesting_the_same_lock_within_one_transaction() {
 fn add_substate(store: &TestStore, seed: u8, version: u32) -> VersionedSubstateId {
     let id = new_substate_id(seed);
     let value = new_substate_value(seed);
+    let mut batch = SubstateUpdateBatch::new(Epoch::zero());
+    batch.add_transition(Shard::first(), 0, SubstateTransition::Up {
+        id: id.clone(),
+        version,
+        substate_or_hash: value.into(),
+    });
 
     store
-        .with_write_tx(|tx| {
-            SubstateRecord {
-                substate_id: id.clone(),
-                version,
-                substate_value: Some(value),
-                state_hash: [seed; 32].into(),
-                created_justify: QcId::zero(),
-                created_block: BlockId::zero(),
-                created_by_shard: Shard::first(),
-                created_at_epoch: 0.into(),
-                destroyed: None,
-            }
-            .create(tx)
-        })
+        .with_write_tx(|tx| SubstateRecord::commit_batch(tx, batch))
         .unwrap();
 
     VersionedSubstateId::new(id, version)

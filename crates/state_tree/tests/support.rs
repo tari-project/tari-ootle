@@ -5,7 +5,13 @@ use tari_common_types::types::FixedHash;
 use tari_engine_types::{hashing::substate_value_hasher32, substate::SubstateId};
 use tari_jellyfish::{LeafKey, TreeHash, TreeStore, Version};
 use tari_ootle_common_types::VersionedSubstateId;
-use tari_state_tree::{key_mapper::DbKeyMapper, memory_store::MemoryTreeStore, StateTree, SubstateTreeChange};
+use tari_state_tree::{
+    key_mapper::DbKeyMapper,
+    memory_store::MemoryTreeStore,
+    StateTree,
+    StateTreePayload,
+    SubstateTreeChange,
+};
 use tari_template_lib::{models::ComponentAddress, types::ObjectKey};
 
 pub fn make_value(seed: u8) -> VersionedSubstateId {
@@ -45,7 +51,7 @@ pub struct HashTreeTester<S> {
     pub current_version: Option<Version>,
 }
 
-impl<S: TreeStore<Version>> HashTreeTester<S> {
+impl<S: TreeStore<StateTreePayload>> HashTreeTester<S> {
     pub fn new(tree_store: S, current_version: Option<Version>) -> Self {
         Self {
             tree_store,
@@ -79,7 +85,7 @@ impl<S: TreeStore<Version>> HashTreeTester<S> {
     }
 }
 
-impl HashTreeTester<MemoryTreeStore<Version>> {
+impl HashTreeTester<MemoryTreeStore<StateTreePayload>> {
     pub fn new_empty() -> Self {
         Self::new(MemoryTreeStore::new(), None)
     }

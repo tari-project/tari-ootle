@@ -38,5 +38,5 @@ pub trait DbCodec<T> {
 }
 
 pub type DefaultCodec<T> = Bincode<T>;
-pub type DefaultVersionedCodec<T> = VersionedCodec<Bincode<T>, T>;
+pub type DefaultVersionedCodec<T> = VersionedCodec<DefaultCodec<T>, T>;
 pub type DefaultCodecRef<T> = BincodeRef<T>;

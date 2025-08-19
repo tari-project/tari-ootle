@@ -25,17 +25,18 @@ use crate::support::{load_json_fixture, RoundRobinLeaderStrategy};
 
 #[test]
 fn dummy_blocks() {
+    let shard_group = ShardGroup::new(1, 127);
     let genesis = Block::genesis(
         Network::LocalNet,
         Epoch(1),
         FixedHash::zero(),
-        ShardGroup::new(0, 127),
+        shard_group,
         FixedHash::zero(),
         None,
     );
     let committee = (0u8..2)
-        .map(|i| create_key_pair_from_seed(i).1)
-        .map(|pk| CommitteeMember {
+        .map(create_key_pair_from_seed)
+        .map(|(_, pk)| CommitteeMember {
             address: PeerAddress::derive_from_public_key(&pk),
             public_key: pk.to_byte_type(),
             vote_power: VotePower::of(1),
@@ -47,7 +48,7 @@ fn dummy_blocks() {
         NodeHeight(30),
         Network::LocalNet,
         Epoch(1),
-        ShardGroup::new(0, 127),
+        shard_group,
         *genesis.id(),
         genesis.justify(),
         genesis.id(),
@@ -62,7 +63,7 @@ fn dummy_blocks() {
         NodeHeight(30),
         Network::LocalNet,
         Epoch(1),
-        ShardGroup::new(0, 127),
+        shard_group,
         *genesis.id(),
         genesis.justify(),
         FixedHash::zero(),

@@ -1,10 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    collections::{BTreeMap, HashMap},
-    time::Instant,
-};
+use std::{collections::HashMap, time::Instant};
 
 use anyhow::anyhow;
 use futures::StreamExt;
@@ -14,7 +11,7 @@ use tari_consensus::{
     hotstuff::substate_store::{ShardScopedTreeStoreReader, ShardScopedTreeStoreWriter},
     traits::{ConsensusSpec, SyncManager, SyncStatus},
 };
-use tari_consensus_types::{BlockId, LeafBlock, QcId};
+use tari_consensus_types::LeafBlock;
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     committee::Committee,
@@ -32,13 +29,12 @@ use tari_ootle_storage::{
     consensus_models::{
         BookkeepingModel,
         EpochCheckpoint,
-        EpochStateRoot,
-        StateTransition,
-        StateTransitionId,
         SubstateCreatedProof,
-        SubstateDestroyedProof,
         SubstateRecord,
-        SubstateUpdate,
+        SubstateTransition,
+        SubstateTransitionData,
+        SubstateUpdateBatch,
+        SubstateUpdateProof,
     },
     StateStore,
     StateStoreReadTransaction,
@@ -46,14 +42,7 @@ use tari_ootle_storage::{
     StorageError,
 };
 use tari_rpc_framework::RpcError;
-use tari_state_tree::{
-    compute_merkle_root_for_hashes,
-    SpreadPrefixStateTree,
-    SubstateTreeChange,
-    TreeHash,
-    Version,
-    SPARSE_MERKLE_PLACEHOLDER_HASH,
-};
+use tari_state_tree::{SpreadPrefixStateTree, SubstateTreeChange, TreeHash, Version, SPARSE_MERKLE_PLACEHOLDER_HASH};
 use tari_template_manager::interface::{TemplateChange, TemplateManagerHandle};
 use tari_validator_node_rpc::{
     client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory},
@@ -125,6 +114,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                 Ok(checkpoint) => {
                     info!(target: LOG_TARGET, "🛜 Checkpoint: {checkpoint}");
                     self.validate_checkpoint(&checkpoint, prev_committee, prev_epoch)?;
+                    self.state_store.with_write_tx(|tx| checkpoint.save(tx))?;
                     self.valid_checkpoints.insert(for_shard_group, checkpoint.clone());
                     Ok(Some(checkpoint))
                 },
@@ -143,268 +133,224 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         client: &mut ValidatorNodeRpcClient,
         shard: Shard,
         checkpoint: &EpochCheckpoint,
-        template_changes_mut: &mut Vec<TemplateChange>,
-    ) -> Result<Option<Version>, RpcStateSyncError> {
-        let checkpoint_state_root = checkpoint.get_shard_root(shard);
-        if checkpoint_state_root == SPARSE_MERKLE_PLACEHOLDER_HASH {
-            info!(target: LOG_TARGET, "Checkpoint state root indicates no state changes. Nothing to sync for {shard}");
-            return Ok(None);
+        mut maybe_persisted_state_version: Option<Version>,
+    ) -> Result<(Option<Version>, Vec<TemplateChange>), RpcStateSyncError> {
+        let mut template_changes = vec![];
+        let checkpoint_shard_root = checkpoint.get_shard_root(shard);
+        let checkpoint_state_version = checkpoint.get_shard_state_version(shard);
+
+        let initial_local_state_root = self
+            .state_store
+            .with_read_tx(|tx| self.calculate_state_root_for_shard(tx, shard, maybe_persisted_state_version))?;
+        if checkpoint_shard_root == initial_local_state_root {
+            info!(target: LOG_TARGET, "Checkpoint state root indicates no further state changes. Nothing to sync for {shard}");
+            return Ok((None, vec![]));
         }
 
-        let checkpoint_block_id = BlockId::new(checkpoint.header().calculate_block_id());
-
-        let current_epoch = self.epoch_manager.current_epoch().await?;
-
-        let last_state_transition_id = self
-            .state_store
-            .with_read_tx(|tx| StateTransition::get_last_id(tx, shard))
-            .optional()?
-            .unwrap_or_else(|| StateTransitionId::initial(shard));
-
-        let mut maybe_persisted_state_version = self
-            .state_store
-            .with_read_tx(|tx| tx.state_tree_versions_get_latest(shard))?;
-
-        if current_epoch == last_state_transition_id.epoch() {
-            info!(target: LOG_TARGET, "🛜Already up to date. No need to sync.");
-            return Ok(maybe_persisted_state_version);
-        }
-
+        // We start at 1 because bootstrapped state is at 0
+        let start_state_version = maybe_persisted_state_version.unwrap_or(1);
         info!(
             target: LOG_TARGET,
-            "🛜Syncing from v{} to state transition {last_state_transition_id}",
-            maybe_persisted_state_version.unwrap_or(0)
+            "🛜Syncing from v{start_state_version}",
         );
 
         self.stats.total_requests += 1;
         let mut state_stream = client
             .sync_state(SyncStateRequest {
-                start_epoch: last_state_transition_id.epoch().as_u64(),
-                start_shard: last_state_transition_id.shard().as_u32(),
-                start_seq: last_state_transition_id.seq(),
-                current_epoch: current_epoch.as_u64(),
+                start_state_version,
+                shard: shard.as_u32(),
+                until_epoch: checkpoint.epoch().as_u64(),
             })
             .await?;
 
         let mut tree_changes = vec![];
+        let mut updates = vec![];
+        let mut expected_state_version = None;
 
         // syncing states
         while let Some(result) = state_stream.next().await {
-            let msg = match result {
-                Ok(msg) => msg,
-                Err(err) if err.is_not_found() => {
-                    return Ok(maybe_persisted_state_version);
-                },
-                Err(err) => {
-                    return Err(err.into());
-                },
-            };
+            let msg = result?;
 
-            if msg.transitions.is_empty() {
+            if msg.updates.is_empty() {
                 return Err(RpcStateSyncError::InvalidResponse(anyhow!(
                     "Received empty state transition batch."
                 )));
             }
-            if msg.transitions.len() > STATE_SYNC_MAX_BATCH_SIZE {
+            if msg.updates.len() > STATE_SYNC_MAX_BATCH_SIZE {
                 return Err(RpcStateSyncError::InvalidResponse(anyhow!(
-                    "Received too many state transitions in a batch: {}. Expected at most {}.",
-                    msg.transitions.len(),
+                    "Received too many state updates in a batch: {}. Expected at most {}.",
+                    msg.updates.len(),
                     STATE_SYNC_MAX_BATCH_SIZE
                 )));
             }
-
-            self.stats.total_transitions += msg.transitions.len() as u64;
-
-            // Batch the response into a state_version -> Vec<StateTransition> map
-            let mut transitions =
-                msg.transitions
-                    .into_iter()
-                    .try_fold(BTreeMap::<_, Vec<_>>::new(), |mut acc, transition| {
-                        let transition =
-                            StateTransition::try_from(transition).map_err(RpcStateSyncError::InvalidResponse)?;
-                        acc.entry(transition.state_version).or_default().push(transition);
-                        Ok::<_, RpcStateSyncError>(acc)
-                    })?;
-
-            loop {
-                let Some((state_version, transitions_for_state_version)) = transitions.pop_first() else {
-                    info!(target: LOG_TARGET, "🛜 No more state transitions to process for shard {shard}");
-                    break;
-                };
-
-                tree_changes.reserve_exact(transitions_for_state_version.len());
-
-                self.state_store.with_write_tx(|tx| {
-                    info!(
-                        target: LOG_TARGET,
-                        "🛜 Next state updates batch of size {} from v{}",
-                        transitions_for_state_version.len(),
-                        state_version
-                    );
-
-                    let mut store = ShardScopedTreeStoreWriter::new(tx, shard);
-
-                    for transition in transitions_for_state_version {
-                        if transition.id.shard() != shard {
-                            return Err(RpcStateSyncError::InvalidResponse(anyhow!(
-                                "Received state transition for shard {} which is not the expected shard {}.",
-                                transition.id.shard(),
-                                shard
-                            )));
-                        }
-
-                        if transition.id.epoch().is_zero() {
-                            return Err(RpcStateSyncError::InvalidResponse(anyhow!(
-                                "Received state transition with epoch 0."
-                            )));
-                        }
-
-                        if transition.id.epoch() >= current_epoch {
-                            return Err(RpcStateSyncError::InvalidResponse(anyhow!(
-                                "Received state transition for epoch {} which is at or ahead of our current epoch {}.",
-                                transition.id.epoch(),
-                                current_epoch
-                            )));
-                        }
-
-                        let change = match &transition.update {
-                            SubstateUpdate::Create(create) => {
-                                let id = create.substate.as_versioned_substate_id_ref();
-                                if let Some(template_address) = create.substate.substate_id.as_template() {
-                                    match create
-                                        .substate
-                                        .value
-                                        .value() {
-                                        Some(value) => {
-                                            let template = value.as_template()
-                                                .ok_or_else(|| RpcStateSyncError::InvalidResponse(
-                                                    anyhow!("Validator returned a template address {} but substate value was not a template", id.substate_id())
-                                                ))?;
-
-                                            info!(target: LOG_TARGET, "🛜 Add template {id}");
-                                            template_changes_mut.push(TemplateChange::Add {
-                                                template_address,
-                                                author_public_key: template.author,
-                                                binary_hash: template.binary_hash.into_array().into(),
-                                                epoch: transition.id.epoch(),
-                                            });
-                                        }
-                                        None => {
-                                            // TODO: currently you cannot DOWN a template. If we were to allow deprecations, it would likely be marking the template as deprecated rather than DOWNing it, and not permitting any template (non-component) calls to the template.
-                                            // We could still handle this case by requesting the template by address and verifying the template address hash i.e. peers send author and binary.
-                                            warn!(target: LOG_TARGET, "❗️ NEVER HAPPEN: Validator sent us a template {} that has no value, indicating it will be DOWNed later. We are not able to sync it", id);
-                                        }
-                                    };
-                                }
-
-                                SubstateTreeChange::Up {
-                                    id: id.to_owned(),
-                                    value_hash: create.substate.to_value_hash(),
-                                }
-                            }
-                            SubstateUpdate::Destroy(destroy) => {
-                                if let Some(template_address) = destroy.substate_id.as_template() {
-                                    info!(target: LOG_TARGET, "🛜 Deprecate template {}", template_address);
-                                    template_changes_mut.push(TemplateChange::Deprecate { template_address });
-                                }
-
-                                SubstateTreeChange::Down {
-                                    id: destroy.to_versioned_substate_id()
-                                }
-                            }
-                        };
-
-                        info!(target: LOG_TARGET, "🛜 Applying state update (v{}) {}", state_version, transition);
-                        self.commit_update(store.transaction(), checkpoint, checkpoint_block_id, transition)?;
-
-                        tree_changes.push(change);
-                    }
-
-                    info!(target: LOG_TARGET, "🛜 {} state update(s) for v{}", tree_changes.len(), state_version);
-
-                    if !tree_changes.is_empty() {
-                        let mut state_tree = SpreadPrefixStateTree::new(&mut store);
-                        info!(target: LOG_TARGET, "🛜 Committing {} state tree changes batch v{}", tree_changes.len(), state_version);
-                        state_tree.batch_put_substate_changes(maybe_persisted_state_version, state_version, tree_changes.drain(..))?;
-                        maybe_persisted_state_version = Some(state_version);
-                        store.set_version(state_version)?;
-                    }
-
-                    Ok::<_, RpcStateSyncError>(())
-                })?;
+            if msg.state_version < start_state_version {
+                return Err(RpcStateSyncError::InvalidResponse(anyhow!(
+                    "Received state version {} that is less than the persisted state version {}.",
+                    msg.state_version,
+                    start_state_version
+                )));
             }
+
+            if expected_state_version.is_some_and(|v| v != msg.state_version) {
+                return Err(RpcStateSyncError::InvalidResponse(anyhow!(
+                    "Received state version {} that is not the expected state version {}.",
+                    msg.state_version,
+                    expected_state_version.unwrap()
+                )));
+            }
+
+            self.stats.total_transitions += msg.updates.len() as u64;
+
+            tree_changes.reserve_exact(msg.updates.len());
+            updates.reserve_exact(msg.updates.len());
+
+            let state_version = msg.state_version;
+            let updates_for_state_version = msg
+                .updates
+                .into_iter()
+                .map(|t| SubstateUpdateProof::try_from(t).map_err(RpcStateSyncError::InvalidResponse));
+            let msg_epoch = msg.epoch.map(Epoch::from).ok_or_else(|| {
+                RpcStateSyncError::InvalidResponse(anyhow!("Received state transition with no epoch"))
+            })?;
+
+            info!(target: LOG_TARGET, "🛜 Buffering {} state update(s) (state version: v{})", updates_for_state_version.len(), state_version);
+            for result in updates_for_state_version {
+                let update = result?;
+                let (tree_change, template_change) = extract_tree_change(msg_epoch, &update)?;
+
+                debug!(target: LOG_TARGET, "🛜 -> state update (v{}) {}", state_version, update);
+                template_changes.extend(template_change);
+                tree_changes.push(tree_change);
+                updates.push(update);
+            }
+
+            info!(target: LOG_TARGET, "🛜 Sync: {} state update(s), {} new template(s) (state version: v{})", updates.len(), template_changes.len(), state_version);
+
+            if msg.has_more {
+                info!(
+                    target: LOG_TARGET,
+                    "🛜 Received more state updates for v{}. Continuing to buffer...",
+                    state_version
+                );
+                // Continue buffering
+                // TODO: maximum possible state transitions within a single state version?
+                expected_state_version = Some(state_version);
+                continue;
+            }
+
+            expected_state_version = None;
+
+            // Verify and commit changes
+            self.state_store.with_write_tx(|tx| {
+                info!(
+                    target: LOG_TARGET,
+                    "🛜 Next state updates batch of size {} from v{}",
+                    updates.len(),
+                    state_version
+                );
+
+                let mut store = ShardScopedTreeStoreWriter::new(tx, shard);
+
+                info!(target: LOG_TARGET, "🛜 {} state update(s) for v{}", updates.len(), state_version);
+                self.commit_updates(
+                    store.transaction(),
+                    shard,
+                    msg_epoch,
+                    msg.state_version,
+                    updates.drain(..),
+                )?;
+
+                // Persist tree changes
+                if !tree_changes.is_empty() {
+                    let mut state_tree = SpreadPrefixStateTree::new(&mut store);
+                    info!(target: LOG_TARGET, "🛜 Committing {} state tree changes batch v{}", tree_changes.len(), state_version);
+                    let local_state_root = state_tree.batch_put_substate_changes(maybe_persisted_state_version, state_version, tree_changes.drain(..))?;
+                    // Only check the state root once we have reached the checkpoint state version
+                    // TODO: we should sync to multiple checkpoints to catch misbehaviour earlier
+                    if state_version == checkpoint_state_version {
+                        if local_state_root != checkpoint_shard_root {
+                            error!(
+                                target: LOG_TARGET,
+                                "❌ State root mismatch for {shard}. Checkpoint {expected} but got {actual}. Rolling back.",
+                                expected = checkpoint_shard_root,
+                                actual = local_state_root,
+                            );
+
+                            // rollback!
+                            return Err(RpcStateSyncError::StateRootMismatch {
+                                expected: checkpoint_shard_root,
+                                actual: local_state_root,
+                            });
+                        }
+                        info!(
+                            target: LOG_TARGET,
+                            "🛜 ✅ State root for {shard} matches checkpoint: {local_state_root} (v{state_version})",
+                        );
+
+                        maybe_persisted_state_version = Some(state_version);
+                        store.set_state_version(state_version)?;
+                        // Done
+                        return Ok(());
+                    }
+
+                    maybe_persisted_state_version = Some(state_version);
+                    store.set_state_version(state_version)?;
+                }
+
+                Ok::<_, RpcStateSyncError>(())
+            })?;
         }
 
-        let local_state_root = self.calculate_state_root_for_shard(shard, maybe_persisted_state_version)?;
-        if local_state_root != checkpoint_state_root {
-            error!(
-                target: LOG_TARGET,
-                "❌State root mismatch for {shard}. Checkpoint {expected} but got {actual}. Rolling back.",
-                expected = checkpoint_state_root,
-                actual = local_state_root,
-            );
+        info!(target: LOG_TARGET, "🛜 Synced state for {shard} to v{}", maybe_persisted_state_version.unwrap_or(1));
 
-            // TODO: rollback
-            return Err(RpcStateSyncError::StateRootMismatch {
-                expected: checkpoint_state_root,
-                actual: local_state_root,
-            });
-        }
-
-        info!(target: LOG_TARGET, "🛜 Synced state for {shard} to v{} with root {local_state_root}", maybe_persisted_state_version.unwrap_or(0));
-
-        Ok(maybe_persisted_state_version)
+        Ok((maybe_persisted_state_version, template_changes))
     }
 
     fn calculate_state_root_for_shard(
         &self,
+        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         shard: Shard,
         version: Option<Version>,
     ) -> Result<TreeHash, RpcStateSyncError> {
         let Some(version) = version else {
             return Ok(SPARSE_MERKLE_PLACEHOLDER_HASH);
         };
-        self.state_store.with_read_tx(|tx| {
-            let mut store = ShardScopedTreeStoreReader::new(tx, shard);
-            let state_tree = SpreadPrefixStateTree::new(&mut store);
-            let root = state_tree.get_root_hash(version)?;
-            Ok(root)
-        })
+        let mut store = ShardScopedTreeStoreReader::new(tx, shard);
+        let state_tree = SpreadPrefixStateTree::new(&mut store);
+        let root = state_tree.get_root_hash(version)?;
+        Ok(root)
     }
 
-    pub fn commit_update<TTx: StateStoreWriteTransaction>(
+    pub fn commit_updates<TTx: StateStoreWriteTransaction, I: IntoIterator<Item = SubstateUpdateProof>>(
         &self,
         tx: &mut TTx,
-        checkpoint: &EpochCheckpoint,
-        checkpoint_block_id: BlockId,
-        transition: StateTransition,
+        shard: Shard,
+        epoch: Epoch,
+        state_version: Version,
+        updates: I,
     ) -> Result<(), StorageError> {
-        match transition.update {
-            SubstateUpdate::Create(SubstateCreatedProof { substate }) => {
-                SubstateRecord::new(
-                    substate.substate_id,
-                    substate.version,
-                    substate.value,
-                    transition.id.shard(),
-                    transition.id.epoch(),
-                    checkpoint_block_id,
-                    // TODO: correct QC ID
-                    QcId::zero(),
-                )
-                .create(tx)?;
-            },
-            SubstateUpdate::Destroy(SubstateDestroyedProof { substate_id, version }) => {
-                SubstateRecord::destroy(
-                    tx,
-                    VersionedSubstateId::new(substate_id, version),
-                    transition.id.shard(),
-                    transition.id.epoch(),
-                    checkpoint.header().height.into(),
-                    // TODO
-                    &QcId::zero(),
-                )?;
-            },
-        }
+        let batch_updates = IndexMap::from_iter([(shard, SubstateTransitionData {
+            state_version,
+            transitions: updates
+                .into_iter()
+                .map(|update| match update {
+                    SubstateUpdateProof::Create(create) => SubstateTransition::Up {
+                        id: create.substate.substate_id,
+                        version: create.substate.version,
+                        substate_or_hash: create.substate.value,
+                    },
+                    SubstateUpdateProof::Destroy(destroy) => SubstateTransition::Down {
+                        id: VersionedSubstateId::new(destroy.substate_id, destroy.version),
+                    },
+                })
+                .collect(),
+        })]);
+        let batch = SubstateUpdateBatch {
+            epoch,
+            updates: batch_updates,
+        };
+
+        SubstateRecord::commit_batch(tx, batch)?;
 
         Ok(())
     }
@@ -523,13 +469,15 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                 },
             };
 
-            let mut template_changes = vec![];
+            let maybe_persisted_state_version = self
+                .state_store
+                .with_read_tx(|tx| tx.state_tree_versions_get_latest(shard))?;
 
             match self
-                .start_state_sync(&mut client, shard, &checkpoint, &mut template_changes)
+                .start_state_sync(&mut client, shard, &checkpoint, maybe_persisted_state_version)
                 .await
             {
-                Ok(maybe_version) => {
+                Ok((maybe_version, template_changes)) => {
                     // We only enqueue these if state sync succeeds and the state root matches
                     if !template_changes.is_empty() {
                         self.template_manager.enqueue_template_changes(template_changes).await?;
@@ -628,18 +576,13 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 
         let local_shard_group = local_info.shard_group();
 
-        let mut shard_state_roots = IndexMap::with_capacity(local_shard_group.len() + 1);
-
-        let maybe_version = self
-            .sync_global_shard(
-                current_epoch,
-                ShardGroup::all_shards(local_info.num_preshards()),
-                &prev_epoch_committees,
-                &our_vn.address,
-            )
-            .await?;
-        let local_state_root = self.calculate_state_root_for_shard(Shard::global(), maybe_version)?;
-        shard_state_roots.insert(Shard::global(), local_state_root);
+        self.sync_global_shard(
+            current_epoch,
+            ShardGroup::all_shards(local_info.num_preshards()),
+            &prev_epoch_committees,
+            &our_vn.address,
+        )
+        .await?;
 
         // Sync data from each committee in range of the committee we're joining.
         // NOTE: we don't have to worry about substates in address range because shard boundaries are fixed.
@@ -652,18 +595,10 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                 continue;
             };
             for shard in intersect_shard_group.shard_iter() {
-                let maybe_current_version = self
-                    .sync_shard(shard, shard_group, current_epoch, &committee, &our_vn.address)
+                self.sync_shard(shard, shard_group, current_epoch, &committee, &our_vn.address)
                     .await?;
-                let local_state_root = self.calculate_state_root_for_shard(shard, maybe_current_version)?;
-                shard_state_roots.insert_sorted(shard, local_state_root);
             }
         }
-
-        // Calculate the shard group merkle root and save it for the next genesis
-        let final_state_root = compute_merkle_root_for_hashes(shard_state_roots.into_values())?;
-        self.state_store
-            .with_write_tx(|tx| EpochStateRoot::new(current_epoch, local_shard_group, final_state_root).set(tx))?;
 
         self.stats.total_time = timer.elapsed();
         Ok(())
@@ -693,17 +628,89 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
 
     async fn sync(&mut self) -> Result<(), Self::Error> {
         if let Err(err) = self.sync_inner().await {
-            warn!(target: LOG_TARGET, "🛜State sync failed: {err}");
+            warn!(target: LOG_TARGET, "🛜State sync failed: {err} (stats: {})", self.stats);
             // Clear the valid checkpoints cache
             self.valid_checkpoints = HashMap::new();
+            self.stats = StateSyncStats::default();
             return Err(err);
         }
 
+        info!(target: LOG_TARGET, "🛜State sync completed successfully: {}", self.stats);
+
         // Clear the valid checkpoints cache
         self.valid_checkpoints = HashMap::new();
-
-        info!(target: LOG_TARGET, "🛜State sync complete: {}", self.stats);
         self.stats = StateSyncStats::default();
         Ok(())
+    }
+}
+
+fn extract_template_change(
+    // Extra data required by the template db - necessary?
+    epoch: Epoch,
+    create: &SubstateCreatedProof,
+) -> Result<Option<TemplateChange>, RpcStateSyncError> {
+    let Some(template_address) = create.substate.substate_id.as_template() else {
+        return Ok(None);
+    };
+    match create.substate.value.value() {
+        Some(value) => {
+            let template = value.as_template().ok_or_else(|| {
+                // This is possible if the VN is malicious
+                RpcStateSyncError::InvalidResponse(anyhow!(
+                    "Validator returned a template address {} but substate value was not a template",
+                    create.substate.substate_id()
+                ))
+            })?;
+
+            info!(target: LOG_TARGET, "🛜 Add template {}", create.substate.substate_id);
+            Ok(Some(TemplateChange::Add {
+                template_address,
+                author_public_key: template.author,
+                binary_hash: template.binary_hash.into_array().into(),
+                epoch,
+            }))
+        },
+        None => {
+            // TODO: currently you cannot DOWN a template. If we were to allow deprecations, it would likely be
+            // marking the template as deprecated rather than DOWNing it, and not permitting any template
+            // (non-component) calls to the template. We could still handle this case by requesting
+            // the template by address and verifying the template address hash i.e. peers send author and binary.
+            warn!(target: LOG_TARGET, "❗️ NEVER HAPPEN: Validator sent us a template {} that has no value, indicating it was DOWNed later. We are not able to sync it", create.substate.substate_id);
+            Ok(None)
+        },
+    }
+}
+
+fn extract_tree_change(
+    epoch: Epoch,
+    update: &SubstateUpdateProof,
+) -> Result<(SubstateTreeChange, Option<TemplateChange>), RpcStateSyncError> {
+    match update {
+        SubstateUpdateProof::Create(create) => {
+            let id = create.substate.as_versioned_substate_id_ref();
+            let template_change = extract_template_change(epoch, create)?;
+
+            Ok((
+                SubstateTreeChange::Up {
+                    id: id.to_owned(),
+                    value_hash: create.substate.to_value_hash(),
+                },
+                template_change,
+            ))
+        },
+        SubstateUpdateProof::Destroy(destroy) => {
+            let template_change = destroy.substate_id.as_template().map(|template_address| {
+                // TODO: Currently not possible to down a template
+                info!(target: LOG_TARGET, "🛜 Deprecate template {}", template_address);
+                TemplateChange::Deprecate { template_address }
+            });
+
+            Ok((
+                SubstateTreeChange::Down {
+                    id: destroy.to_versioned_substate_id(),
+                },
+                template_change,
+            ))
+        },
     }
 }

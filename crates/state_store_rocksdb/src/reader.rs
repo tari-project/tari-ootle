@@ -57,6 +57,8 @@ use tari_ootle_common_types::{
     Epoch,
     NodeAddressable,
     NodeHeight,
+    ShardGroup,
+    ShardStateVersions,
     SubstateAddress,
     ToSubstateAddress,
     VersionedSubstateIdRef,
@@ -67,12 +69,10 @@ use tari_ootle_storage::{
         BlockDiff,
         BlockTransactionExecution,
         EpochCheckpoint,
-        EpochStateRoot,
         ForeignProposalRecord,
         LockedSubstateValue,
         PendingShardStateTreeDiff,
-        StateTransition,
-        StateTransitionId,
+        StateVersionTransitions,
         SubstateChange,
         SubstateCreatedProof,
         SubstateData,
@@ -80,7 +80,7 @@ use tari_ootle_storage::{
         SubstateLock,
         SubstatePledges,
         SubstateRecord,
-        SubstateUpdate,
+        SubstateUpdateProof,
         SubstateValueOrHash,
         TransactionExecution,
         TransactionPoolRecord,
@@ -93,7 +93,7 @@ use tari_ootle_storage::{
     StateStoreReadTransaction,
     StorageError,
 };
-use tari_state_tree::{Node, NodeKey, Version};
+use tari_state_tree::{Node, NodeKey, StateTreePayload, Version};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 
@@ -119,7 +119,6 @@ use crate::{
             LastVotedCf,
             LeafBlockCf,
             LockedBlockCf,
-            PreviousEpochStateRootCf,
         },
         burnt_utxo,
         burnt_utxo::BurntUtxoCf,
@@ -137,8 +136,10 @@ use crate::{
         lock_conflict,
         pending_state_tree_diff,
         state_transition,
-        state_transition::{StateTransitionCf, StateTransitionType},
+        state_transition::StateTransitionType,
+        state_tree,
         state_tree::StateTreeCfRef,
+        state_tree_shard_versions,
         state_tree_shard_versions::StateTreeShardVersionCf,
         substate,
         substate::SubstateCf,
@@ -189,7 +190,7 @@ impl<'a, TAddr> RocksDbStateStoreReadTransaction<'a, TAddr> {
 impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStateStoreReadTransaction<'a, TAddr> {
     /// Returns the blocks until the end_block (inclusive). NOTE: there is no specific order in the returned blocks
     /// (HashSet) so this should only be used to determine ex/inclusion in the set. The end_block should be a block
-    /// in the pending chain, if not an empty list is returned.
+    /// in the pending chain if not an empty list is returned.
     fn get_pending_chain_until(&self, end_block: &BlockId) -> Result<HashSet<BlockId>, RocksDbStorageError> {
         const OPERATION: &str = "get_pending_chain_until";
         trace!(target: LOG_TARGET, "{OPERATION}: end: {end_block}");
@@ -1588,51 +1589,47 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(diffs)
     }
 
-    fn state_transitions_get_n_after(
+    fn state_transitions_get_after(
         &self,
-        n: usize,
-        id: StateTransitionId,
-        end_epoch: Epoch,
-    ) -> Result<Vec<StateTransition>, StorageError> {
+        req_shard: Shard,
+        state_version: Version,
+        include_values: bool,
+    ) -> Result<StateVersionTransitions, StorageError> {
         const OPERATION: &str = "state_transitions_get_n_after";
-        // The StateTransitionId may not exist and is used to find subsequent state transitions
 
-        let cf = self.db().cf(StateTransitionCf)?;
-        let query = self.db().cf(state_transition::ByShardAndIdQuery)?;
-        let iter = query.query_start_range_key_iterator(Ordering::Ascending, &(id.shard(), id.seq() + 1));
+        let query = self.db().cf(state_transition::ByShardAndStateVersionQuery)?;
+        let mut iter = query.query_range_iterator(Ordering::Ascending, (req_shard, state_version)..);
         let substate_cf = self.db().cf(SubstateCf)?;
 
-        let mut transitions = Vec::with_capacity(n);
-        // TODO: this loads and searches a lot of keys which are not applicable to the end epoch. We'll need to use an
-        // epoch prefixed index (maybe only tracking the last transition with a (shard, epoch) key), or figure out some
-        // other way to get state transitions (e.g can we iterate the JMT?)
-        for result in iter {
-            let key = result?;
+        // NOTE: The state version may not have any transitions
+        let result = iter.next().ok_or_else(|| StorageError::NotFound {
+            item: "StateTransition",
+            key: format!("shard {} and state version {}", req_shard, state_version),
+        })?;
+        let ((shard, version), data) = result?;
 
-            if key.shard() > id.shard() {
-                // We're done when we move to the next shard
-                break;
-            }
+        // If we've scanned onto the next shard, we couldn't find the requested shard
+        if shard != req_shard {
+            return Err(StorageError::NotFound {
+                item: "StateTransition",
+                key: format!("shard {} and state version {}", req_shard, state_version),
+            });
+        }
 
-            if key.epoch() >= end_epoch {
-                // We are not ordering by Epoch, so subsequent epochs could be in range, so we have to continue.
-                // TODO(perf): consider an epoch ordered index
-                continue;
-            }
+        // TODO(perf): if include_values is false, we still have to load the whole substate for the id and version - not
+        // ideal
+        let substates = substate_cf.multi_get(data.transitions.iter().map(|t| t.substate_address), OPERATION)?;
 
-            // We could also get this from the iterator - if this doesn't require a drive seek then it seems better to
-            // only deserialize when needed
-            let value = cf.get(&key, OPERATION)?;
-
-            let substate = substate_cf.get(&value.substate_address, OPERATION)?;
-
-            let update = match value.transition {
+        let mut updates = Vec::with_capacity(data.transitions.len());
+        // multi_get returns the substates in the same order as queried, so ordered by transitions
+        for (data, substate) in data.transitions.iter().zip(substates) {
+            let update = match data.transition {
                 StateTransitionType::Up => {
-                    let value = substate.substate_value.map_or_else(
+                    let value = include_values.then_some(substate.substate_value).flatten().map_or_else(
                         || SubstateValueOrHash::Hash(substate.state_hash),
                         |v| SubstateValueOrHash::Value(Box::new(v)),
                     );
-                    SubstateUpdate::Create(SubstateCreatedProof {
+                    SubstateUpdateProof::Create(SubstateCreatedProof {
                         substate: SubstateData {
                             substate_id: substate.substate_id,
                             version: substate.version,
@@ -1640,50 +1637,86 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                         },
                     })
                 },
-                StateTransitionType::Down => SubstateUpdate::Destroy(SubstateDestroyedProof {
+                StateTransitionType::Down => SubstateUpdateProof::Destroy(SubstateDestroyedProof {
                     substate_id: substate.substate_id,
                     version: substate.version,
                 }),
             };
 
-            transitions.push(StateTransition {
-                id: key,
-                state_version: value.state_version,
-                update,
-            });
-            if transitions.len() == n {
-                break;
-            }
+            updates.push(update);
         }
 
-        Ok(transitions)
+        Ok(StateVersionTransitions {
+            epoch: data.epoch,
+            shard,
+            state_version: version,
+            updates,
+        })
     }
 
-    fn state_transitions_get_last_id(&self, shard: Shard) -> Result<StateTransitionId, StorageError> {
-        // const OPERATION: &str = "state_transitions_get_last_id";
-        let query = self.db().cf(state_transition::ByShardQuery)?;
-        let mut iter = query.query_prefix_range_key_iterator(Ordering::Descending, &shard);
-
-        let key = iter.next().transpose()?.ok_or_else(|| StorageError::NotFound {
-            item: "StateTransition",
-            key: format!("last id in shard {}", shard),
-        })?;
-
-        Ok(key)
-    }
-
-    fn state_tree_nodes_get(&self, shard: Shard, key: &NodeKey) -> Result<Node<Version>, StorageError> {
+    fn state_tree_nodes_get(&self, shard: Shard, key: &NodeKey) -> Result<Node<StateTreePayload>, StorageError> {
         const OPERATION: &str = "state_tree_nodes_get";
         let cf = self.db().cf(StateTreeCfRef::default())?;
         let node = cf.get(&(shard, key), OPERATION)?;
         Ok(node)
     }
 
+    fn state_tree_nodes_get_all_by_state_version(
+        &self,
+        shard: Shard,
+        state_version: Version,
+    ) -> Result<Vec<(NodeKey, Node<StateTreePayload>)>, StorageError> {
+        let cf = self.db().cf(state_tree::ByShardStateVersionQuery)?;
+        let iter = cf.query_prefix_range_iterator(Ordering::default(), &(shard, state_version));
+        let nodes = iter
+            .map(|result| result.map(|((_, key), value)| (key, value)))
+            .collect::<Result<_, _>>()?;
+        Ok(nodes)
+    }
+
     fn state_tree_versions_get_latest(&self, shard: Shard) -> Result<Option<Version>, StorageError> {
         const OPERATION: &str = "state_tree_versions_get_latest";
-        let query = self.db().cf(StateTreeShardVersionCf)?;
-        let version = query.get(&shard, OPERATION).optional()?;
+        let cf = self.db().cf(StateTreeShardVersionCf)?;
+        let version = cf.get(&shard, OPERATION).optional()?;
         Ok(version)
+    }
+
+    fn state_tree_versions_get_latest_for_shard_group(
+        &self,
+        shard_group: ShardGroup,
+    ) -> Result<ShardStateVersions, StorageError> {
+        const OPERATION: &str = "state_tree_versions_get_latest_for_shard_group";
+        let mut shard_tree_versions = vec![0; shard_group.len() + 1];
+
+        let cf = self.db().cf(state_tree_shard_versions::ByShard)?;
+        let global = cf.get(&Shard::global(), OPERATION).optional()?.unwrap_or_default();
+        shard_tree_versions[0] = global;
+        let sg_range = shard_group.start()..Shard::from(shard_group.end().as_u32() + 1);
+        let iter = cf.query_range_iterator(Ordering::Ascending, sg_range);
+        let mut shards_iter = shard_group.shard_iter();
+        for result in iter {
+            let (shard, version) = result?;
+
+            // Fill in the gaps with 0s for shard versions that are not yet set
+            for sg_shard in shards_iter.by_ref() {
+                if shard == sg_shard {
+                    break;
+                }
+
+                let index =
+                    ShardStateVersions::shard_to_index(shard_group, sg_shard).expect("sg_shard must be in shard group");
+                shard_tree_versions[index] = 0;
+            }
+
+            let index = ShardStateVersions::shard_to_index(shard_group, shard)
+                .expect("BUG: we checked the end of the shard group, so shard must be in shard group");
+
+            shard_tree_versions[index] = version;
+        }
+
+        let shard_tree_versions =
+            ShardStateVersions::from_vec(shard_tree_versions).expect("BUG: more shard tree versions than shards");
+        Ok(shard_tree_versions)
     }
 
     fn epoch_checkpoint_get(&self, epoch: Epoch) -> Result<EpochCheckpoint, StorageError> {
@@ -1691,13 +1724,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let cf = self.db().cf(EpochCheckpointCf)?;
         let checkpoint = cf.get(&epoch, OPERATION)?;
         Ok(checkpoint)
-    }
-
-    fn previous_epoch_state_root_get(&self) -> Result<EpochStateRoot, StorageError> {
-        const OPERATION: &str = "previous_epoch_state_root_get";
-        let cf = self.db().cf(PreviousEpochStateRootCf)?;
-        let data = cf.get_by_default_key(OPERATION)?;
-        Ok(data)
     }
 
     fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(

@@ -12,7 +12,7 @@ use tari_ootle_p2p::{
     proto::rpc::{sync_blocks_response::SyncData, QuorumCertificates, SyncBlocksResponse},
 };
 use tari_ootle_storage::{
-    consensus_models::{Block, SubstateCreatedProof, SubstateUpdate, TransactionRecord},
+    consensus_models::{Block, SubstateCreatedProof, SubstateUpdateProof, TransactionRecord},
     StateStore,
     StateStoreReadTransaction,
     StorageError,
@@ -27,7 +27,7 @@ const BLOCK_BUFFER_SIZE: usize = 15;
 struct BlockData {
     block: Block,
     qcs: Vec<ProposalCertificate>,
-    substates: Vec<SubstateUpdate>,
+    substates: Vec<SubstateUpdateProof>,
     transactions: Vec<TransactionRecord>,
     transaction_receipts: Vec<SubstateCreatedProof>,
 }

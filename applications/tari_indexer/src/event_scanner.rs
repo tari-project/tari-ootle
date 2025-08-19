@@ -33,7 +33,7 @@ use tari_engine_types::{
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_ootle_common_types::{committee::Committee, Epoch, PeerAddress, ShardGroup};
 use tari_ootle_p2p::{proto, proto::rpc::SyncBlocksRequest};
-use tari_ootle_storage::consensus_models::{Block, SubstateUpdate};
+use tari_ootle_storage::consensus_models::{Block, SubstateUpdateProof};
 use tari_template_lib::types::{EntityId, TemplateAddress};
 use tari_template_manager::interface::{TemplateChange, TemplateManagerHandle};
 use tari_validator_node_rpc::client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory};
@@ -309,7 +309,7 @@ impl EventScanner {
         Ok(())
     }
 
-    fn store_substates_in_db(&self, updates: &[SubstateUpdate], timestamp: u64) -> Result<(), anyhow::Error> {
+    fn store_substates_in_db(&self, updates: &[SubstateUpdateProof], timestamp: u64) -> Result<(), anyhow::Error> {
         let mut tx = self.substate_store.create_write_tx()?;
         // store/update up substates if any
         for create in updates.iter().filter_map(|up| up.as_create()) {
@@ -527,7 +527,7 @@ impl EventScanner {
                 let update = msg
                     .into_substate_update()
                     .ok_or_else(|| anyhow::anyhow!("Expected a substate"))?;
-                let update = SubstateUpdate::try_from(update)?;
+                let update = SubstateUpdateProof::try_from(update)?;
                 diff.push(update);
             }
 

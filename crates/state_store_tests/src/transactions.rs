@@ -10,7 +10,7 @@ use tari_engine_types::{
     fees::{FeeBreakdown, FeeReceipt},
     substate::SubstateDiff,
 };
-use tari_ootle_common_types::{Epoch, ExtraData, NodeHeight, ShardGroup, SubstateRequirement};
+use tari_ootle_common_types::{Epoch, ExtraData, NodeHeight, SubstateRequirement};
 use tari_ootle_storage::{
     consensus_models::{
         Block,
@@ -60,7 +60,7 @@ mod confirm_all_transitions {
         tx.blocks_set_qcs(zero_block.id(), Some(&QcId::zero()), Some(&QcId::zero()))
             .unwrap();
 
-        let shard_group = ShardGroup::all_shards(TEST_NUM_PRESHARDS);
+        let shard_group = zero_block.shard_group();
 
         let block1 = Block::create(
             network,

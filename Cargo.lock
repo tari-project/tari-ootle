@@ -11778,7 +11778,6 @@ version = "0.11.2"
 dependencies = [
  "anyhow",
  "futures 0.3.31",
- "indexmap 2.9.0",
  "log",
  "tari_consensus",
  "tari_consensus_types",

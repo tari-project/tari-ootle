@@ -45,6 +45,6 @@ impl StateTransition {
         state_version: Version,
         include_values: bool,
     ) -> Result<StateVersionTransitions, StorageError> {
-        tx.state_transitions_get_after(shard, state_version, include_values)
+        tx.state_transitions_get_starting_at(shard, state_version, include_values)
     }
 }

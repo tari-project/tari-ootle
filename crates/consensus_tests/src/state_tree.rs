@@ -66,7 +66,7 @@ async fn check_state_transitions() {
                 let mut all_transitions = vec![];
                 let mut next_state_version = 1;
                 while let Some(transitions) = tx
-                    .state_transitions_get_after(shard, next_state_version, false)
+                    .state_transitions_get_starting_at(shard, next_state_version, false)
                     .optional()
                     .unwrap()
                 {

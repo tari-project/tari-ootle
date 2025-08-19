@@ -276,7 +276,7 @@ pub trait StateStoreReadTransaction: Sized {
     ) -> Result<HashMap<Shard, Vec<PendingShardStateTreeDiff>>, StorageError>;
 
     // -------------------------------- State transitions -------------------------------- //
-    fn state_transitions_get_after(
+    fn state_transitions_get_starting_at(
         &self,
         shard: Shard,
         state_version: Version,

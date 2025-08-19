@@ -1589,7 +1589,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(diffs)
     }
 
-    fn state_transitions_get_after(
+    fn state_transitions_get_starting_at(
         &self,
         req_shard: Shard,
         state_version: Version,

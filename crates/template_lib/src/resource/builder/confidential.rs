@@ -29,8 +29,9 @@ use crate::{
 /// # Note
 /// 
 /// The `ConfidentialResourceBuilder` requires you to provide a [`ConfidentialOutputStatement`] if you wish to set an initial supply. 
-/// Additional supply can be minted later using the `mintable` access rule an right right yeahd another provided [`ConfidentialOutputStatement`].
-/// 
+/// Additional supply can be minted later using the `mintable` access rule via another provided [`ConfidentialOutputStatement`]. Generation
+/// of the `ConfidentialOutputStatement`] is non-trivial; examples of creation of the statement can be found in the test cases for the
+/// `ConfidentialResourceBuilder`.
 /// # Examples
 ///
 /// Basic usage:

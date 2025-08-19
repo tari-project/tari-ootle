@@ -376,25 +376,18 @@
             ]
         },
         {
-            "name": "fetch_substates",
-            "summary": "Fetch multiple substates in a single request",
-            "tags": [],
             "params": [
                 {
                     "name": "requests",
                     "required": true,
                     "schema": {
-                        "$ref": "#/components/schemas/GetSubstatesRequest"
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/GetSubstateRequest"
+                        }
                     }
                 }
             ],
-            "result": {
-                "name": "fetch_substates_response",
-                "description": "Batch substate fetch response",
-                "schema": {
-                    "$ref": "#/components/schemas/GetSubstatesResponse"
-                }
-            },
             "errors": [],
             "examples": [
                 {

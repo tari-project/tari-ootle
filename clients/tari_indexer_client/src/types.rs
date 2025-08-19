@@ -22,7 +22,11 @@ use tari_transaction::{Transaction, TransactionId};
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
+    ts(
+       export,
+       export_to = "../../bindings/src/types/tari-indexer-client/",
+       rename = "IndexerGetSubstatesRequest"
+   )
 )]
 pub struct ListSubstatesRequest {
     pub filter_by_template: Option<TemplateAddress>,
@@ -46,6 +50,11 @@ pub struct ListSubstatesResponse {
     feature = "ts",
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
+    ts(
+        export,
+        export_to = "../../bindings/src/types/tari-indexer-client/",
+        rename = "IndexerGetSubstatesResponse"
+    )
 )]
 pub struct ListSubstateItem {
     pub substate_id: SubstateId,

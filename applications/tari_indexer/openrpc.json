@@ -279,320 +279,102 @@
           }
         }
       ]
-    },
+    }
+    ,
     {
       "name": "get_substates",
-      "summary": "",
+      "summary": "Fetch multiple substates in a single call",
       "tags": [],
-      "params": [],
-      "result": {
-        "name": "epoch_stats",
-        "description": "",
-        "schema": {}
-      },
-      "errors": [],
-      "examples": [
+      "params": [
         {
-          "name": "default",
-          "description": "",
-          "params": [],
-          "result": {
-            "name": "example1",
-            "value": {
-              "substate": {
-                "Component": {
-                  "access_rules": {
-                    "default": {
-                      "Restricted": {
-                        "Require": {
-                          "id": {
-                            "U256": [
-                              242,
-                              92,
-                              64,
-                              223,
-                              207,
-                              57,
-                              225,
-                              163,
-                              175,
-                              11,
-                              109,
-                              189,
-                              230,
-                              209,
-                              24,
-                              78,
-                              225,
-                              250,
-                              171,
-                              247,
-                              14,
-                              102,
-                              246,
-                              15,
-                              193,
-                              145,
-                              233,
-                              156,
-                              24,
-                              197,
-                              147,
-                              116
-                            ]
-                          },
-                          "resource_address": [
-                            1,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0
-                          ]
-                        }
-                      }
-                    },
-                    "method_access": {
-                      "balance": "AllowAll",
-                      "deposit": "AllowAll",
-                      "deposit_all": "AllowAll",
-                      "get_balances": "AllowAll",
-                      "get_non_fungible_ids": "AllowAll"
-                    },
-                    "native_method_access": {}
-                  },
-                  "module_name": "Account",
-                  "state": {
-                    "state": [
-                      0,
-                      0,
-                      0,
-                      0
-                    ]
-                  },
-                  "template_address": [
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0
-                  ]
-                }
-              }
+          "name": "requests",
+          "description": "Array of substate requests",
+          "required": true,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "address": { "type": "string" },
+                "version": { "type": ["integer", "null"] },
+                "local_search_only": { "type": ["boolean", "null"] }
+              },
+              "required": ["address"]
             }
           }
         }
-      ]
-    },
+      ],
+      "result": {
+        "name": "responses",
+        "description": "Responses for each request, aligned by index",
+        "schema": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "address": { "type": "string" },
+                  "version": { "type": "integer" },
+                  "substate": { "type": "object" }
+                },
+                "required": ["address", "version", "substate"]
+              },
+              { "type": "null" }
+            ]
+          }
+        }
+      },
+      "errors": [],
+      "examples": []
+    }
+    ,
     {
       "name": "fetch_substates",
-      "summary": "",
+      "summary": "Alias of get_substates",
       "tags": [],
-      "params": [],
-      "result": {
-        "name": "epoch_stats",
-        "description": "",
-        "schema": {}
-      },
-      "errors": [],
-      "examples": [
+      "params": [
         {
-          "name": "default",
-          "description": "",
-          "params": [],
-          "result": {
-            "name": "example1",
-            "value": {
-              "substate": {
-                "Component": {
-                  "access_rules": {
-                    "default": {
-                      "Restricted": {
-                        "Require": {
-                          "id": {
-                            "U256": [
-                              242,
-                              92,
-                              64,
-                              223,
-                              207,
-                              57,
-                              225,
-                              163,
-                              175,
-                              11,
-                              109,
-                              189,
-                              230,
-                              209,
-                              24,
-                              78,
-                              225,
-                              250,
-                              171,
-                              247,
-                              14,
-                              102,
-                              246,
-                              15,
-                              193,
-                              145,
-                              233,
-                              156,
-                              24,
-                              197,
-                              147,
-                              116
-                            ]
-                          },
-                          "resource_address": [
-                            1,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0
-                          ]
-                        }
-                      }
-                    },
-                    "method_access": {
-                      "balance": "AllowAll",
-                      "deposit": "AllowAll",
-                      "deposit_all": "AllowAll",
-                      "get_balances": "AllowAll",
-                      "get_non_fungible_ids": "AllowAll"
-                    },
-                    "native_method_access": {}
-                  },
-                  "module_name": "Account",
-                  "state": {
-                    "state": [
-                      0,
-                      0,
-                      0,
-                      0
-                    ]
-                  },
-                  "template_address": [
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0
-                  ]
-                }
-              }
+          "name": "requests",
+          "description": "Array of substate requests",
+          "required": true,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "address": { "type": "string" },
+                "version": { "type": ["integer", "null"] },
+                "local_search_only": { "type": ["boolean", "null"] }
+              },
+              "required": ["address"]
             }
           }
         }
-      ]
+      ],
+      "result": {
+        "name": "responses",
+        "description": "Responses for each request, aligned by index",
+        "schema": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "address": { "type": "string" },
+                  "version": { "type": "integer" },
+                  "substate": { "type": "object" }
+                },
+                "required": ["address", "version", "substate"]
+              },
+              { "type": "null" }
+            ]
+          }
+        }
+      },
+      "errors": [],
+      "examples": []
     }
   ],
   "components": {

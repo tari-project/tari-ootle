@@ -169,23 +169,25 @@ pub fn create_substate_update_batch<'a, I: IntoIterator<Item = &'a SubstateRecor
     let mut batch = SubstateUpdateBatch::new(epoch);
     for substate in substates {
         if let Some(destroyed) = &substate.destroyed {
-            batch.add_transition(
-                substate.to_versioned_substate_id().to_shard(TEST_NUM_PRESHARDS),
-                destroyed.at_state_version,
-                tari_ootle_storage::consensus_models::SubstateTransition::Down {
+            batch
+                .with_transition(
+                    substate.to_versioned_substate_id().to_shard(TEST_NUM_PRESHARDS),
+                    destroyed.at_state_version,
+                )
+                .push(tari_ootle_storage::consensus_models::SubstateTransition::Down {
                     id: VersionedSubstateId::new(substate.substate_id.clone(), substate.version),
-                },
-            );
+                });
         } else {
-            batch.add_transition(
-                substate.to_versioned_substate_id().to_shard(TEST_NUM_PRESHARDS),
-                substate.created().at_state_version,
-                tari_ootle_storage::consensus_models::SubstateTransition::Up {
+            batch
+                .with_transition(
+                    substate.to_versioned_substate_id().to_shard(TEST_NUM_PRESHARDS),
+                    substate.created().at_state_version,
+                )
+                .push(tari_ootle_storage::consensus_models::SubstateTransition::Up {
                     id: substate.substate_id.clone(),
                     version: substate.version,
                     substate_or_hash: substate.clone().into_substate_value_or_hash(),
-                },
-            );
+                });
         }
     }
     batch

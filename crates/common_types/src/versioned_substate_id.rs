@@ -72,9 +72,10 @@ impl SubstateRequirement {
         SubstateAddress::from_substate_id(self.substate_id(), 0)
     }
 
-    /// Calculates and returns the shard number that this SubstateAddress belongs.
+    /// Calculates and returns the shard number that this SubstateAddress belongs to.
     /// A shard is a fixed division of the 256-bit shard space.
-    /// If the substate version is not known, None is returned.
+    /// If the substate is global, returns `Some(Shard::global())` regardless of version.
+    /// For non-global substates, returns `None` if the version is not known.
     pub fn to_shard(&self, num_shards: NumPreshards) -> Option<Shard> {
         if self.substate_id.is_global() {
             return Some(Shard::global());

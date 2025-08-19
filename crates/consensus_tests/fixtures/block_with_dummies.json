@@ -30,7 +30,7 @@
     "height": 0,
     "epoch": 5,
     "shard_group": {
-      "start": 0,
+      "start": 1,
       "end_inclusive": 127
     },
     "signatures": [],

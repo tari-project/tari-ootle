@@ -10,7 +10,7 @@ use crate::consensus_models::SubstateValueOrHash;
 
 pub struct SubstateUpdateBatch {
     pub epoch: Epoch,
-    pub updates: IndexMap<Shard, SubstateTransitionData>,
+    pub updates: IndexMap<Shard, IndexMap<Version, Vec<SubstateTransition>>>,
 }
 
 impl SubstateUpdateBatch {
@@ -21,28 +21,11 @@ impl SubstateUpdateBatch {
         }
     }
 
-    pub fn add_transition(
-        &mut self,
-        shard: Shard,
-        state_version: Version,
-        transition: SubstateTransition,
-    ) -> &mut Self {
-        self.updates
-            .entry(shard)
-            .or_insert_with(|| SubstateTransitionData {
-                state_version,
-                transitions: Vec::new(),
-            })
-            .transitions
-            .push(transition);
-        self
+    pub fn with_transition(&mut self, shard: Shard, state_version: Version) -> &mut Vec<SubstateTransition> {
+        self.updates.entry(shard).or_default().entry(state_version).or_default()
     }
 }
 
-pub struct SubstateTransitionData {
-    pub state_version: Version,
-    pub transitions: Vec<SubstateTransition>,
-}
 pub enum SubstateTransition {
     Up {
         id: SubstateId,

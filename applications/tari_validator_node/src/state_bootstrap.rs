@@ -189,11 +189,13 @@ where
     let substate_id = substate_id.into();
     let shard = VersionedSubstateIdRef::new(&substate_id, 0).to_shard(num_preshards);
     let mut batch = SubstateUpdateBatch::new(Epoch::zero());
-    batch.add_transition(shard, INITIAL_STATE_VERSION, SubstateTransition::Up {
-        id: substate_id,
-        version: 0,
-        substate_or_hash: value.into().into(),
-    });
+    batch
+        .with_transition(shard, INITIAL_STATE_VERSION)
+        .push(SubstateTransition::Up {
+            id: substate_id,
+            version: 0,
+            substate_or_hash: value.into().into(),
+        });
 
     SubstateRecord::commit_batch(tx, batch)?;
 

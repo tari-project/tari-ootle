@@ -215,7 +215,7 @@ fn add_substate(store: &TestStore, seed: u8, version: u32) -> VersionedSubstateI
     let id = new_substate_id(seed);
     let value = new_substate_value(seed);
     let mut batch = SubstateUpdateBatch::new(Epoch::zero());
-    batch.add_transition(Shard::first(), 0, SubstateTransition::Up {
+    batch.with_transition(Shard::first(), 0).push(SubstateTransition::Up {
         id: id.clone(),
         version,
         substate_or_hash: value.into(),

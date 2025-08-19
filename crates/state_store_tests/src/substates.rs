@@ -133,13 +133,11 @@ fn operations(db: impl StateStore) {
     let epoch = Epoch::zero();
 
     let mut batch = SubstateUpdateBatch::new(epoch);
-    batch.add_transition(
-        shard,
-        2,
-        tari_ootle_storage::consensus_models::SubstateTransition::Down {
+    batch
+        .with_transition(shard, 2)
+        .push(tari_ootle_storage::consensus_models::SubstateTransition::Down {
             id: versioned_substate_id.clone(),
-        },
-    );
+        });
     tx.substates_commit_batch(batch).unwrap();
     let res = tx.substates_get(&substate2_address).unwrap();
     assert!(res.destroyed.is_some());

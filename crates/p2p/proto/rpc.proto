@@ -222,7 +222,7 @@ message SyncStateResponse {
   uint64 state_version = 1;
   repeated SubstateUpdate updates = 2;
   bool has_more = 3;
-  tari.ootle.common.Epoch Epoch = 4;
+  tari.ootle.common.Epoch epoch = 4;
 }
 
 enum TemplateType {

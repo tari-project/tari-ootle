@@ -1201,66 +1201,79 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         let cf = db.cf(SubstateCf)?;
         let head_cf = db.cf(substate::HeadIndex)?;
+        let unpruned_cf = db.cf(substate::UnprunedDownedValuesIndex)?;
 
-        for (shard, update) in update_batch.updates {
-            let mut transitions = Vec::with_capacity(update.transitions.len());
+        for (shard, updates) in update_batch.updates {
+            for (state_version, updates) in updates {
+                let mut transitions = Vec::with_capacity(updates.len());
+                let mut downed_substate_addresses = vec![];
 
-            for transition in update.transitions {
-                match transition {
-                    SubstateTransition::Up {
-                        id,
-                        version,
-                        substate_or_hash,
-                    } => {
-                        let rec = SubstateRecord::new(id, version, substate_or_hash, SubstateCreated {
-                            at_epoch: update_batch.epoch,
-                            in_shard: shard,
-                            at_state_version: update.state_version,
-                        });
+                for transition in updates {
+                    match transition {
+                        SubstateTransition::Up {
+                            id,
+                            version,
+                            substate_or_hash,
+                        } => {
+                            let rec = SubstateRecord::new(id, version, substate_or_hash, SubstateCreated {
+                                at_epoch: update_batch.epoch,
+                                in_shard: shard,
+                                at_state_version: state_version,
+                            });
 
-                        let address = rec.to_substate_address();
-                        cf.put(&address, &rec, OPERATION)?;
-                        head_cf.put(rec.substate_id(), &SubstateHeadData { version, is_up: true }, OPERATION)?;
+                            let address = rec.to_substate_address();
+                            cf.put(&address, &rec, OPERATION)?;
+                            head_cf.put(rec.substate_id(), &SubstateHeadData { version, is_up: true }, OPERATION)?;
 
-                        transitions.push(StateTransitionRecordData {
-                            substate_address: address,
-                            transition: StateTransitionType::Up,
-                        });
-                    },
-                    SubstateTransition::Down { id } => {
-                        let address = id.to_substate_address();
+                            transitions.push(StateTransitionRecordData {
+                                substate_address: address,
+                                transition: StateTransitionType::Up,
+                            });
+                        },
+                        SubstateTransition::Down { id } => {
+                            let address = id.to_substate_address();
 
-                        let mut substate = cf.get(&address, OPERATION)?;
-                        substate.destroyed = Some(SubstateDestroyed {
-                            at_epoch: update_batch.epoch,
-                            at_state_version: update.state_version,
-                        });
-                        cf.put(&address, &substate, OPERATION)?;
-                        db.cf(substate::HeadIndex)?.put(
-                            &substate.substate_id,
-                            &SubstateHeadData {
-                                version: substate.version(),
-                                is_up: false,
-                            },
-                            OPERATION,
-                        )?;
+                            let mut substate = cf.get(&address, OPERATION)?;
+                            substate.destroyed = Some(SubstateDestroyed {
+                                at_epoch: update_batch.epoch,
+                                at_state_version: state_version,
+                            });
+                            cf.put(&address, &substate, OPERATION)?;
+                            head_cf.put(
+                                &substate.substate_id,
+                                &SubstateHeadData {
+                                    version: substate.version(),
+                                    is_up: false,
+                                },
+                                OPERATION,
+                            )?;
+                            downed_substate_addresses.push(address);
 
-                        transitions.push(StateTransitionRecordData {
-                            substate_address: address,
-                            transition: StateTransitionType::Down,
-                        });
-                    },
+                            transitions.push(StateTransitionRecordData {
+                                substate_address: address,
+                                transition: StateTransitionType::Down,
+                            });
+                        },
+                    }
                 }
+
+                if !downed_substate_addresses.is_empty() {
+                    unpruned_cf.put(
+                        &(update_batch.epoch, shard, state_version),
+                        &downed_substate_addresses,
+                        OPERATION,
+                    )?;
+                }
+
+                let transition = StateTransitionModelDataV1 {
+                    epoch: update_batch.epoch,
+                    state_version,
+                    transitions,
+                };
+
+                db.cf(StateTransitionCf)?
+                    .put(&(shard, state_version), &transition, OPERATION)?;
             }
-
-            let transition = StateTransitionModelDataV1 {
-                epoch: update_batch.epoch,
-                state_version: update.state_version,
-                transitions,
-            };
-
-            db.cf(StateTransitionCf)?
-                .put(&(shard, update.state_version), &transition, OPERATION)?;
         }
 
         Ok(())
@@ -1275,12 +1288,14 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let substates_cf = db.cf(SubstateCf)?;
         let mut count = 0usize;
         for result in iter {
-            let (key, substate_addr) = result?;
+            let (key, addresses) = result?;
 
-            // TODO: store the actual values in a separate column family
-            let mut substate = substates_cf.get(&substate_addr, OPERATION)?;
-            substate.clear_substate_value();
-            substates_cf.put(&substate_addr, &substate, OPERATION)?;
+            // TODO(perf): consider storing the actual values in a separate column family to avoid get/set
+            for substate_addr in addresses {
+                let mut substate = substates_cf.get(&substate_addr, OPERATION)?;
+                substate.clear_substate_value();
+                substates_cf.put(&substate_addr, &substate, OPERATION)?;
+            }
             unpruned_index.delete(&key, OPERATION)?;
             count += 1;
         }

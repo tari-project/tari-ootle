@@ -417,7 +417,7 @@ impl SubstateUpdateProof {
     }
 
     pub fn is_destroy(&self) -> bool {
-        matches!(self, Self::Destroy { .. })
+        matches!(self, Self::Destroy(_))
     }
 
     pub fn substate_id(&self) -> &SubstateId {

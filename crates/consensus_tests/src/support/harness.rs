@@ -179,9 +179,10 @@ impl Test {
             .iter()
             .map(|id| {
                 let value = make_test_component(id.substate_id().as_component_address().unwrap().entity_id());
+                let shard = id.to_shard(TEST_NUM_PRESHARDS);
                 SubstateRecord::new(id.substate_id().clone(), id.version(), value, SubstateCreated {
                     at_epoch: Epoch::zero(),
-                    in_shard: Shard::first(),
+                    in_shard: shard,
                     at_state_version: 0,
                 })
             })
@@ -192,11 +193,9 @@ impl Test {
             for substate in &substates {
                 let shard = substate.to_versioned_substate_id().to_shard(TEST_NUM_PRESHARDS);
                 if v.shard_group.contains(&shard) {
-                    batch.add_transition(
-                        shard,
-                        substate.created().at_state_version,
-                        substate.clone().into_transition(),
-                    );
+                    batch
+                        .with_transition(shard, substate.created().at_state_version)
+                        .push(substate.clone().into_transition());
                 }
             }
 

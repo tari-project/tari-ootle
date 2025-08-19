@@ -30,8 +30,8 @@
     "height": 65,
     "epoch": 5,
     "shard_group": {
-      "start": 0,
-      "end_inclusive": 255
+      "start": 1,
+      "end_inclusive": 256
     },
     "signatures": [
       {

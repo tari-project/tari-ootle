@@ -280,7 +280,7 @@ pub trait StateStoreReadTransaction: Sized {
         &self,
         shard: Shard,
         state_version: Version,
-        include_values: bool
+        include_values: bool,
     ) -> Result<StateVersionTransitions, StorageError>;
 
     // -------------------------------- State Tree -------------------------------- //

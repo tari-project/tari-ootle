@@ -32,7 +32,6 @@ use tari_ootle_storage::{
         SubstateCreatedProof,
         SubstateRecord,
         SubstateTransition,
-        SubstateTransitionData,
         SubstateUpdateBatch,
         SubstateUpdateProof,
     },
@@ -329,26 +328,20 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         state_version: Version,
         updates: I,
     ) -> Result<(), StorageError> {
-        let batch_updates = IndexMap::from_iter([(shard, SubstateTransitionData {
-            state_version,
-            transitions: updates
-                .into_iter()
-                .map(|update| match update {
-                    SubstateUpdateProof::Create(create) => SubstateTransition::Up {
-                        id: create.substate.substate_id,
-                        version: create.substate.version,
-                        substate_or_hash: create.substate.value,
-                    },
-                    SubstateUpdateProof::Destroy(destroy) => SubstateTransition::Down {
-                        id: VersionedSubstateId::new(destroy.substate_id, destroy.version),
-                    },
-                })
-                .collect(),
-        })]);
-        let batch = SubstateUpdateBatch {
-            epoch,
-            updates: batch_updates,
-        };
+        let mut batch = SubstateUpdateBatch::new(epoch);
+
+        batch
+            .with_transition(shard, state_version)
+            .extend(updates.into_iter().map(|update| match update {
+                SubstateUpdateProof::Create(create) => SubstateTransition::Up {
+                    id: create.substate.substate_id,
+                    version: create.substate.version,
+                    substate_or_hash: create.substate.value,
+                },
+                SubstateUpdateProof::Destroy(destroy) => SubstateTransition::Down {
+                    id: VersionedSubstateId::new(destroy.substate_id, destroy.version),
+                },
+            }));
 
         SubstateRecord::commit_batch(tx, batch)?;
 

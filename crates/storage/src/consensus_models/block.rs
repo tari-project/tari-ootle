@@ -56,7 +56,6 @@ use super::{
     PendingShardStateTreeDiff,
     SubstateDestroyedProof,
     SubstateRecord,
-    SubstateTransitionData,
     TransactionAtom,
     ValidatorStatsUpdate,
 };
@@ -634,7 +633,7 @@ impl Block {
 
         let changes = block_diff.into_changes();
 
-        let updates = changes.into_iter()
+        let batch = changes.into_iter()
             .filter(|change| {
                 if self.shard_group().contains_or_global(&change.shard()) {
                     true
@@ -652,7 +651,7 @@ impl Block {
                 }
             })
             // Group by shard
-            .try_fold(IndexMap::new(), |mut acc, change| {
+            .try_fold(SubstateUpdateBatch::new(self.epoch()), |mut batch, change| {
                 let Some(state_version) =
                     version_updates
                         .get(&change.shard())
@@ -667,22 +666,11 @@ impl Block {
                     });
                 };
 
-                let data_mut = acc.entry(change.shard())
-                    .or_insert_with(|| {
-                        SubstateTransitionData {
-                            state_version,
-                            transitions: vec![],
-                        }
-                    });
-                data_mut.transitions.push(change.into_transition());
+                batch.with_transition(change.shard(), state_version)
+                    .push(change.into_transition());
 
-                Ok(acc)
+                Ok(batch)
             })?;
-
-        let batch = SubstateUpdateBatch {
-            epoch: self.epoch(),
-            updates,
-        };
 
         SubstateRecord::commit_batch(tx, batch)?;
 

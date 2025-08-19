@@ -108,7 +108,7 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
     }
 
     async fn send_responses(&mut self, transitions: StateVersionTransitions) -> Result<(), ()> {
-        let chunks = transitions.into_chunks(self.batch_size.get());
+        let chunks = transitions.into_chunks(self.batch_size);
         let num_chunks = chunks.len();
 
         for (i, chunk) in chunks.into_iter().enumerate() {

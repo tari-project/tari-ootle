@@ -95,6 +95,13 @@ impl IndexerJsonRpcClient {
         self.send_request("get_substates", req).await
     }
 
+    pub async fn fetch_substates(
+        &mut self,
+        req: GetSubstatesRequest,
+    ) -> Result<GetSubstatesResponse, IndexerClientError> {
+        self.send_request("fetch_substates", req).await
+    }
+
     pub async fn list_substates(
         &mut self,
         req: ListSubstatesRequest,

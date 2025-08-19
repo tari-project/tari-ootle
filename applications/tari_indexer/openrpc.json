@@ -127,11 +127,30 @@
             "name": "get_substate",
             "summary": "",
             "tags": [],
-            "params": [],
+            "params": [
+                {
+                    "name": "address",
+                    "required": true,
+                    "schema": {
+                        "type": "array",
+                        "items": {}
+                    }
+                },
+                {
+                    "name": "version",
+                    "required": false,
+                    "schema": { "type": "integer" }
+                },
+                {
+                    "name": "local_search_only",
+                    "required": false,
+                    "schema": { "type": "boolean", "default": false }
+                }
+            ],
             "result": {
-                "name": "epoch_stats",
+                "name": "get_substate_response",
                 "description": "",
-                "schema": {}
+                "schema": { "$ref": "#/components/schemas/GetSubstateResponse" }
             },
             "errors": [],
             "examples": [

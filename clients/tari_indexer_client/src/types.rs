@@ -25,7 +25,7 @@ use tari_transaction::{Transaction, TransactionId};
     ts(
        export,
        export_to = "../../bindings/src/types/tari-indexer-client/",
-       rename = "IndexerGetSubstatesRequest"
+       rename = "IndexerListSubstatesRequest"
    )
 )]
 pub struct ListSubstatesRequest {
@@ -50,11 +50,6 @@ pub struct ListSubstatesResponse {
     feature = "ts",
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
-    ts(
-        export,
-        export_to = "../../bindings/src/types/tari-indexer-client/",
-        rename = "IndexerGetSubstatesResponse"
-    )
 )]
 pub struct ListSubstateItem {
     pub substate_id: SubstateId,
@@ -102,7 +97,11 @@ pub struct GetSubstateResponse {
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
+    ts(
+       export,
+       export_to = "../../bindings/src/types/tari-indexer-client/",
+       rename = "IndexerGetSubstatesRequest"
+    )
 )]
 pub struct GetSubstatesRequest {
     pub requests: Vec<GetSubstateRequest>,
@@ -112,7 +111,11 @@ pub struct GetSubstatesRequest {
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
+    ts(
+        export,
+        export_to = "../../bindings/src/types/tari-indexer-client/",
+        rename = "IndexerGetSubstatesResponse"
+    )
 )]
 pub struct GetSubstatesResponse {
     pub responses: Vec<Option<GetSubstateResponse>>,

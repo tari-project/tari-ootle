@@ -1,159 +1,50 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    fmt::{Display, Formatter},
-    io::{Read, Write},
-    mem,
-};
+use std::num::NonZeroUsize;
 
 use serde::{Deserialize, Serialize};
 use tari_ootle_common_types::{shard::Shard, Epoch};
-use tari_state_tree::{SubstateTreeChange, Version};
+use tari_state_tree::Version;
 
-use crate::{consensus_models::SubstateUpdate, StateStoreReadTransaction, StorageError};
+use crate::{consensus_models::SubstateUpdateProof, StateStoreReadTransaction, StorageError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateTransition {
-    pub id: StateTransitionId,
+pub struct StateVersionTransitions {
+    pub epoch: Epoch,
+    pub shard: Shard,
     pub state_version: Version,
-    pub update: SubstateUpdate,
+    pub updates: Vec<SubstateUpdateProof>,
 }
 
-impl StateTransition {
-    pub fn to_tree_change(&self) -> SubstateTreeChange {
-        match &self.update {
-            SubstateUpdate::Create(create) => {
-                let id = create.substate.as_versioned_substate_id_ref();
-                SubstateTreeChange::Up {
-                    id: id.to_owned(),
-                    value_hash: create.substate.to_value_hash(),
-                }
-            },
-            SubstateUpdate::Destroy(destroy) => SubstateTreeChange::Down {
-                id: destroy.to_versioned_substate_id(),
-            },
+impl StateVersionTransitions {
+    pub fn into_chunks(self, size: NonZeroUsize) -> Vec<Self> {
+        let num_chunks = self.updates.len().div_ceil(size.get());
+        let mut chunks = Vec::with_capacity(num_chunks);
+        let mut updates = self.updates;
+        while !updates.is_empty() {
+            let take = updates.len().min(size.get());
+            let chunk_updates: Vec<_> = updates.drain(..take).collect();
+            chunks.push(Self {
+                epoch: self.epoch,
+                shard: self.shard,
+                state_version: self.state_version,
+                updates: chunk_updates,
+            });
         }
+        chunks
     }
 }
 
-impl StateTransition {
-    pub fn get_n_after<TTx: StateStoreReadTransaction>(
-        tx: &TTx,
-        n: usize,
-        after_id: StateTransitionId,
-        end_epoch: Epoch,
-    ) -> Result<Vec<Self>, StorageError> {
-        tx.state_transitions_get_n_after(n, after_id, end_epoch)
-    }
+pub struct StateTransition;
 
-    pub fn get_last_id<TTx: StateStoreReadTransaction>(
+impl StateTransition {
+    pub fn get_for_shard<TTx: StateStoreReadTransaction>(
         tx: &TTx,
         shard: Shard,
-    ) -> Result<StateTransitionId, StorageError> {
-        tx.state_transitions_get_last_id(shard)
-    }
-}
-
-impl Display for StateTransition {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.id, self.update)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StateTransitionId {
-    epoch: Epoch,
-    shard: Shard,
-    seq: u64,
-}
-impl StateTransitionId {
-    const BYTE_SIZE: usize = mem::size_of::<Self>();
-
-    pub fn new(epoch: Epoch, shard: Shard, seq: u64) -> Self {
-        Self { epoch, shard, seq }
-    }
-
-    pub fn initial(shard: Shard) -> Self {
-        Self::new(Epoch(1), shard, 0)
-    }
-
-    pub fn from_bytes(mut bytes: &[u8]) -> Option<Self> {
-        if bytes.len() < Self::BYTE_SIZE {
-            return None;
-        }
-        let bytes_mut = &mut bytes;
-        let epoch = Epoch(u64::from_be_bytes(copy_fixed(bytes_mut)));
-        let shard = Shard::from(u32::from_be_bytes(copy_fixed(bytes_mut)));
-        let seq = u64::from_be_bytes(copy_fixed(bytes_mut));
-        Some(Self::new(epoch, shard, seq))
-    }
-
-    pub fn as_bytes(&self) -> [u8; Self::BYTE_SIZE] {
-        let mut buf = [0u8; Self::BYTE_SIZE];
-        let buf_mut = &mut buf.as_mut_slice();
-        write_fixed(self.epoch.to_be_bytes(), buf_mut);
-        write_fixed(self.shard.as_u32().to_be_bytes(), buf_mut);
-        write_fixed(self.seq.to_be_bytes(), buf_mut);
-        buf
-    }
-
-    pub fn epoch(&self) -> Epoch {
-        self.epoch
-    }
-
-    pub fn shard(&self) -> Shard {
-        self.shard
-    }
-
-    pub fn seq(self) -> u64 {
-        self.seq
-    }
-}
-
-impl Display for StateTransitionId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "state transition ({}, seq = {}, {})",
-            self.shard(),
-            self.seq(),
-            self.epoch(),
-        )
-    }
-}
-
-/// Copies bytes into a fixed byte array.
-///
-/// ## Panics
-/// Caller must ensure that sufficient bytes remain on the mut ref to the input slice.
-fn copy_fixed<const SZ: usize>(bytes: &mut &[u8]) -> [u8; SZ] {
-    let mut buf = [0u8; SZ];
-    bytes
-        .read_exact(&mut buf)
-        .expect("copy_fixed: Expected enough bytes to read");
-    buf
-}
-
-/// Writes fixed bytes into a buffer.
-/// ## Panics
-/// Caller must ensure that the buffer has sufficient space for the fixed bytes.
-fn write_fixed<const SZ: usize>(buf: [u8; SZ], out: &mut &mut [u8]) {
-    out.write_all(&buf)
-        .expect("write_fixed: Expected buffer to have sufficient space for fixed bytes");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn to_and_from_bytes() {
-        let id = StateTransitionId::new(Epoch(1), Shard::from(2), 3);
-        let bytes = id.as_bytes();
-        let id2 = StateTransitionId::from_bytes(&bytes).unwrap();
-        assert_eq!(id, id2);
-
-        assert_eq!(StateTransitionId::from_bytes(&[1, 2, 3]), None);
+        state_version: Version,
+        include_values: bool,
+    ) -> Result<StateVersionTransitions, StorageError> {
+        tx.state_transitions_get_starting_at(shard, state_version, include_values)
     }
 }

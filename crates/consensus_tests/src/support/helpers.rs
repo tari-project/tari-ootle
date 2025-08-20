@@ -32,6 +32,7 @@ pub(crate) fn random_substate_in_shard_group(shard_group: ShardGroup, num_shards
     SubstateId::Component(ComponentAddress::new(ObjectKey::new(entity_id, component_key)))
 }
 
+// TODO: this biases the start of the shard group
 fn random_substate_address_range(range: RangeInclusive<SubstateAddress>) -> SubstateAddress {
     let start = range.start();
     let mut bytes = [0u8; 16];

@@ -1240,6 +1240,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bounded-vec"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09dc0086e469182132244e9b8d313a0742e1132da43a08c24b9dd3c18e0faf3a"
+dependencies = [
+ "serde",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "bs58"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11453,6 +11463,7 @@ version = "0.11.2"
 dependencies = [
  "blake2",
  "borsh",
+ "bounded-vec",
  "digest",
  "ethnum",
  "indexmap 2.9.0",
@@ -11767,7 +11778,6 @@ version = "0.11.2"
 dependencies = [
  "anyhow",
  "futures 0.3.31",
- "indexmap 2.9.0",
  "log",
  "tari_consensus",
  "tari_consensus_types",
@@ -12217,6 +12227,7 @@ dependencies = [
  "tari_shutdown",
  "tari_sidechain",
  "tari_state_store_rocksdb",
+ "tari_state_tree",
  "tari_swarm",
  "tari_template_builtin",
  "tari_template_lib",

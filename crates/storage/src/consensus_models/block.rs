@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap},
     fmt::{Debug, Display, Formatter},
     iter,
     ops::Deref,
@@ -37,11 +37,10 @@ use tari_ootle_common_types::{
     NodeHeight,
     NumPreshards,
     ShardGroup,
-    ToSubstateAddress,
     VersionedSubstateId,
     VersionedSubstateIdRef,
 };
-use tari_state_tree::{compute_proof_for_hashes, SparseMerkleProofExt, StateTreeError, TreeHash};
+use tari_state_tree::{compute_proof_for_hashes, SparseMerkleProofExt, StateTreeError, TreeHash, Version};
 use tari_template_lib::{prelude::SchnorrSignatureBytes, types::crypto::RistrettoPublicKeyBytes};
 use tari_transaction::TransactionId;
 use time::PrimitiveDateTime;
@@ -55,14 +54,20 @@ use super::{
     ForeignProposalRecord,
     MintConfidentialOutputAtom,
     PendingShardStateTreeDiff,
-    SubstateChange,
     SubstateDestroyedProof,
     SubstateRecord,
     TransactionAtom,
     ValidatorStatsUpdate,
 };
 use crate::{
-    consensus_models::{block_header::BlockHeader, Command, SubstateCreatedProof, SubstateUpdate, TransactionRecord},
+    consensus_models::{
+        block_header::BlockHeader,
+        substate_update_batch::SubstateUpdateBatch,
+        Command,
+        SubstateCreatedProof,
+        SubstateUpdateProof,
+        TransactionRecord,
+    },
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
@@ -74,6 +79,8 @@ const LOG_TARGET: &str = "tari::ootle::storage::consensus_models::block";
 pub enum BlockError {
     #[error("Error computing command merkle hash: {0}")]
     StateTreeError(#[from] StateTreeError),
+    #[error("Invalid shard state versions: {details}")]
+    InvalidShardStateVersions { details: String },
     #[error("Merke proof generation command index out of bounds: {index}/{len}")]
     MerkleProofGenerationCommandIndexOutOfBounds { index: usize, len: usize },
 }
@@ -577,61 +584,96 @@ impl Block {
         tx.blocks_delete(block_id)
     }
 
-    pub fn commit_diff<TTx>(&self, tx: &mut TTx, commit_qc_id: &QcId, block_diff: BlockDiff) -> Result<(), StorageError>
+    pub fn commit_block_without_state_changes<TTx>(&self, tx: &mut TTx, commit_qc_id: &QcId) -> Result<(), StorageError>
     where
         TTx: StateStoreWriteTransaction + Deref,
         TTx::Target: StateStoreReadTransaction,
     {
-        if block_diff.block_id() != self.id() {
-            return Err(StorageError::QueryError {
-                reason: format!(
-                    "[commit_diff] Block ID mismatch. Expected: {}, got: {}",
-                    self.id(),
-                    block_diff.block_id()
-                ),
-            });
-        }
+        self.commit_block(tx, commit_qc_id, &HashMap::new())
+    }
 
-        if self.is_dummy() && !block_diff.is_empty() {
-            return Err(StorageError::QueryError {
-                reason: format!(
-                    "[commit_diff] Dummy block cannot have any substate changes. Block ID: {}",
-                    self.id()
-                ),
-            });
-        }
-
-        if !self.is_dummy() {
-            block_diff.remove(tx)?;
-        }
-
-        let BlockDiff { changes, .. } = block_diff;
-
-        let justify_qc_id = self.justify().calculate_id();
-
-        for change in changes {
-            match change {
-                SubstateChange::Up { id, shard, substate } => {
-                    let version = substate.version();
-                    SubstateRecord::new(
-                        id,
-                        version,
-                        substate.into_substate_value(),
-                        shard,
-                        self.epoch(),
-                        *self.id(),
-                        justify_qc_id,
-                    )
-                    .create(tx)?;
-                },
-                SubstateChange::Down { id, shard } => {
-                    SubstateRecord::destroy(tx, id, shard, self.epoch(), self.height(), &justify_qc_id)?;
-                },
-            }
-        }
-
+    pub fn commit_block<TTx>(
+        &self,
+        tx: &mut TTx,
+        commit_qc_id: &QcId,
+        version_updates: &HashMap<Shard, Version>,
+    ) -> Result<(), StorageError>
+    where
+        TTx: StateStoreWriteTransaction + Deref,
+        TTx::Target: StateStoreReadTransaction,
+    {
         // Set the QC that caused this block to be committed, marking it as committed
         tx.blocks_set_qcs(self.id(), Some(commit_qc_id), None)?;
+
+        if self.is_dummy() {
+            info!(
+                target: LOG_TARGET,
+                "🍼 COMMIT dummy block {}", self
+            );
+            return Ok(());
+        }
+
+        let Some(block_diff) = self.get_diff(&**tx).optional()? else {
+            info!(
+                target: LOG_TARGET,
+                "🌳 COMMIT block {} with no substate change(s)", self
+            );
+
+            // No diff to commit
+            return Ok(());
+        };
+
+        // Consume the block diff
+        block_diff.remove(tx)?;
+
+        info!(
+            target: LOG_TARGET,
+            "🌳 COMMIT block {} with {} substate change(s)", self, block_diff.len()
+        );
+
+        let changes = block_diff.into_changes();
+
+        let batch = changes.into_iter()
+            .filter(|change| {
+                if self.shard_group().contains_or_global(&change.shard()) {
+                    true
+                } else {
+                    // This should have been filtered out already, but just in case
+                    warn!(
+                    target: LOG_TARGET,
+                    "❓️ Skipping substate change {} for shard {} in block {} because it is not in the shard group {}",
+                    change.as_change_string(),
+                    change.shard(),
+                    self.id(),
+                    self.shard_group()
+                );
+                    false
+                }
+            })
+            // Group by shard
+            .try_fold(SubstateUpdateBatch::new(self.epoch()), |mut batch, change| {
+                let Some(state_version) =
+                    version_updates
+                        .get(&change.shard())
+                        .copied() else {
+                    // A panic may be more appropriate here, this should never happen
+                    return Err(StorageError::DataInconsistency {
+                        details: format!(
+                            "NEVER HAPPEN: Shard state version for shard {} not found in block {}",
+                            change.shard(),
+                            self.id()
+                        ),
+                    });
+                };
+
+                batch.with_transition(change.shard(), state_version)
+                    .push(change.into_transition());
+
+                Ok(batch)
+            })?;
+
+        SubstateRecord::commit_batch(tx, batch)?;
+
         Ok(())
     }
 
@@ -732,7 +774,7 @@ impl Block {
         &self,
         tx: &TTx,
         num_preshards: NumPreshards,
-    ) -> Result<Vec<SubstateUpdate>, StorageError> {
+    ) -> Result<Vec<SubstateUpdateProof>, StorageError> {
         let committed = self
             .commands()
             .iter()
@@ -752,10 +794,7 @@ impl Block {
             let outputs = outputs
                 .iter()
                 .map(|lock| lock.versioned_substate_id().as_ref())
-                .filter(|id| {
-                    self.shard_group()
-                        .contains_or_global(&id.to_substate_address().to_shard(num_preshards))
-                });
+                .filter(|id| self.shard_group().contains_or_global(&id.to_shard(num_preshards)));
 
             let substates = SubstateRecord::get_all(tx, outputs)?;
             for substate in substates {
@@ -773,13 +812,13 @@ impl Block {
                     //         substate: substate.try_into()?,
                     //     }));
                     // } else {
-                    updates.push(SubstateUpdate::Destroy(SubstateDestroyedProof {
+                    updates.push(SubstateUpdateProof::Destroy(SubstateDestroyedProof {
                         substate_id: substate.substate_id.clone(),
                         version: substate.version,
                         // justify: ProposalCertificate::get(tx, &destroyed.justify)?,
                     }));
                 } else {
-                    updates.push(SubstateUpdate::Create(SubstateCreatedProof {
+                    updates.push(SubstateUpdateProof::Create(SubstateCreatedProof {
                         // created_qc: substate.get_created_quorum_certificate(tx)?,
                         substate: substate.into(),
                     }));

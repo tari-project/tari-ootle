@@ -98,7 +98,6 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         column_families::substate::HeadIndex,
         column_families::substate::UnprunedDownedValuesIndex,
         // column_families::state_transition::StateTransitionModel,
-        column_families::state_transition::ShardSeqIndex,
         // column_families::foreign_substate_pledge::ForeignSubstatePledgeModel,
         column_families::pending_state_tree_diff::PendingStateTreeDiffCf,
         column_families::state_tree::StateTreeCf,

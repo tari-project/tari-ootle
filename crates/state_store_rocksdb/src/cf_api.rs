@@ -15,6 +15,7 @@ use tari_ootle_storage::Ordering;
 use crate::{
     codecs::{DbCodec, EncodeVec, UnitCodec},
     error::RocksDbStorageError,
+    range::QueryRange,
     traits::{Cf, QueryCf, RocksReader, RocksWriter},
 };
 
@@ -162,7 +163,7 @@ impl<CF: Cf, DB: RocksReader> CfContext<'_, DB, CF> {
         }
 
         let keys = keys.map(|k| {
-            // We don't support key encoding failing here for mem allocation reasons. Generally key encoding is
+            // We don't support key encoding failing here for mem allocation reasons. Generally, key encoding is
             // infallible so we should evaluate whether to change the codec to be infallible. If key encoding on the
             // database level ever fails a crash is reasonable.
             let key = self.key_codec.encode(k.borrow()).expect("Failed to encode key");
@@ -428,7 +429,7 @@ impl<TQuery: QueryCf, DB: RocksReader> CfContext<'_, DB, TQuery> {
         prefix: &TQuery::Key,
     ) -> impl Iterator<Item = Result<<<TQuery as QueryCf>::Cf as Cf>::Value, RocksDbStorageError>> + 'a {
         let key = self.encode_key(prefix);
-        let iter = self.range_iterator_with_codecs::<UnitCodec, <<TQuery as QueryCf>::Cf as Cf>::ValueCodec, (), <<TQuery as QueryCf>::Cf as Cf>::Value, >( ordering, rocksdb::PrefixRange(key) );
+        let iter = self.range_iterator_with_codecs::<UnitCodec, <<TQuery as QueryCf>::Cf as Cf>::ValueCodec, (), <<TQuery as QueryCf>::Cf as Cf>::Value, >(ordering, rocksdb::PrefixRange(key));
         iter.map(|res| {
             let (_, v) = res?;
             Ok::<_, RocksDbStorageError>(v)
@@ -450,6 +451,46 @@ impl<TQuery: QueryCf, DB: RocksReader> CfContext<'_, DB, TQuery> {
             let (k, _) = res?;
             Ok::<_, RocksDbStorageError>(k)
         })
+    }
+
+    /// Returns a decoded key value iterator over the range of keys (exclusive).
+    pub fn query_range_iterator<B: Borrow<TQuery::Key>, R: Into<QueryRange<B>>>(
+        &self,
+        ordering: Ordering,
+        range: R,
+    ) -> impl Iterator<Item = Result<QueryCfKv<TQuery>, RocksDbStorageError>> + '_ {
+        let iter: Box<dyn Iterator<Item = _>> = match range.into() {
+            QueryRange::Exclusive { start, end } => {
+                let start = self.encode_key(start.borrow());
+                let end = self.encode_key(end.borrow());
+                Box::new(self.range_iterator_with_codecs::<
+                    <TQuery::Cf as Cf>::KeyCodec,
+                    <TQuery::Cf as Cf>::ValueCodec,
+                    <TQuery::Cf as Cf>::Key,
+                    <TQuery::Cf as Cf>::Value
+                >(ordering, start..end))
+            },
+            QueryRange::From { start } => {
+                let start = self.encode_key(start.borrow());
+                Box::new(self.range_iterator_with_codecs::<
+                    <TQuery::Cf as Cf>::KeyCodec,
+                    <TQuery::Cf as Cf>::ValueCodec,
+                    <TQuery::Cf as Cf>::Key,
+                    <TQuery::Cf as Cf>::Value
+                >(ordering, start..))
+            },
+            QueryRange::To { end } => {
+                let end = self.encode_key(end.borrow());
+                Box::new(self.range_iterator_with_codecs::<
+                    <TQuery::Cf as Cf>::KeyCodec,
+                    <TQuery::Cf as Cf>::ValueCodec,
+                    <TQuery::Cf as Cf>::Key,
+                    <TQuery::Cf as Cf>::Value
+                >(ordering, ..end))
+            },
+        };
+
+        iter
     }
 
     /// Returns an iterator over the range of keys (exclusive).

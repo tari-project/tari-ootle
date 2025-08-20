@@ -10,22 +10,22 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::BlockId;
 use tari_ootle_common_types::shard::Shard;
-use tari_state_tree::{StateHashTreeDiff, Version};
+use tari_state_tree::{StateHashTreeDiff, StateTreePayload, Version};
 
 use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingShardStateTreeDiff {
     pub version: Version,
-    pub diff: StateHashTreeDiff<Version>,
+    pub diff: StateHashTreeDiff<StateTreePayload>,
 }
 
 impl PendingShardStateTreeDiff {
-    pub fn new(version: Version, diff: StateHashTreeDiff<Version>) -> Self {
+    pub fn new(version: Version, diff: StateHashTreeDiff<StateTreePayload>) -> Self {
         Self { version, diff }
     }
 
-    pub fn load(version: Version, diff: StateHashTreeDiff<Version>) -> Self {
+    pub fn load(version: Version, diff: StateHashTreeDiff<StateTreePayload>) -> Self {
         Self { version, diff }
     }
 }

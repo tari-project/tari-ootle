@@ -27,6 +27,7 @@ pub enum NumPreshards {
 
 impl NumPreshards {
     pub const MAX: Self = Self::P256;
+    pub const MAX_SHARD: Shard = Shard::from_u32(Self::MAX.as_u32());
 
     pub const fn as_u32(self) -> u32 {
         self as u32

@@ -25,7 +25,7 @@ use tari_state_tree::Version;
 
 use crate::{
     codecs::{NumberCodec, ShardCodec},
-    traits::Cf,
+    traits::{Cf, QueryCf},
 };
 
 pub struct StateTreeShardVersionCf;
@@ -39,4 +39,12 @@ impl Cf for StateTreeShardVersionCf {
     fn name() -> &'static str {
         "state_tree_shard_versions"
     }
+}
+
+pub struct ByShard;
+
+impl QueryCf for ByShard {
+    type Cf = StateTreeShardVersionCf;
+    type Key = Shard;
+    type KeyCodec = ShardCodec;
 }

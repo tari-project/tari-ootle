@@ -16,7 +16,7 @@ use tari_consensus_types::{
 };
 use tari_ootle_common_types::{optional::Optional, Epoch, Network, NodeHeight, ShardGroup};
 use tari_ootle_storage::{
-    consensus_models::{Block, EndOfEpochCommand, EpochCheckpoint},
+    consensus_models::{Block, EndOfEpochCommand, EpochCheckpoint, TreeRootSummary},
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
@@ -166,8 +166,11 @@ fn miscellaneous_operations(db: impl StateStore) {
     // epoch checkpoints
     let shard_group = ShardGroup::all_shards(TEST_NUM_PRESHARDS);
     let block = Block::zero_block(Network::LocalNet, TEST_NUM_PRESHARDS);
-    let mut shard_roots = IndexMap::new();
-    shard_roots.insert(shard_group.start(), TreeHash::zero());
+    let mut shard_summary = IndexMap::new();
+    shard_summary.insert(shard_group.start(), TreeRootSummary {
+        root_hash: TreeHash::zero(),
+        state_version: 0,
+    });
     let key = TreeHash::new([1; 32]);
     let (_, inclusion_proof) = compute_proof_for_hashes([key].into_iter(), key).unwrap();
     let commit_proof = SidechainBlockCommitProof {
@@ -190,7 +193,7 @@ fn miscellaneous_operations(db: impl StateStore) {
         proof_elements: vec![],
     };
     let proof = CommandCommitProof::new(EndOfEpochCommand, commit_proof, inclusion_proof);
-    let epoch_checkpoint = EpochCheckpoint::new(proof, shard_roots);
+    let epoch_checkpoint = EpochCheckpoint::new(proof, shard_summary);
 
     tx.epoch_checkpoint_save(&epoch_checkpoint).unwrap();
     let res = tx.epoch_checkpoint_get(block.epoch()).unwrap();

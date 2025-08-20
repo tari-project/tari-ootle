@@ -82,11 +82,19 @@ impl StealthResourceBuilder {
         self
     }
 
-    /// Specify a view key for the confidential resource. This allows anyone with the secret key to uncover the balance
+    /// Specify a view key for the stealth resource. This allows anyone with the secret key to uncover the balance
     /// of commitments generated for the resource.
     /// NOTE: it is not currently possible to change the view key after the resource is created.
-    pub fn with_view_key(mut self, view_key: RistrettoPublicKeyBytes) -> Self {
-        self.view_key = Some(view_key);
+    /// Equivalent to calling `with_view_key_opt(Some(view_key))`.
+    pub fn with_view_key(self, view_key: RistrettoPublicKeyBytes) -> Self {
+        self.with_view_key_opt(Some(view_key))
+    }
+
+    /// Optionally, specify a view key for the stealth resource. This allows anyone with the secret key to uncover the
+    /// balance of commitments generated for the resource.
+    /// NOTE: it is not currently possible to change the view key after the resource is created.
+    pub fn with_view_key_opt(mut self, view_key: Option<RistrettoPublicKeyBytes>) -> Self {
+        self.view_key = view_key;
         self
     }
 

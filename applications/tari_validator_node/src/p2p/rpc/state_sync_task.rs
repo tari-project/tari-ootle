@@ -1,64 +1,79 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::num::NonZeroUsize;
+
 use log::*;
-use tari_ootle_common_types::{optional::Optional, Epoch};
+use tari_ootle_common_types::{optional::Optional, shard::Shard, Epoch};
 use tari_ootle_p2p::proto::rpc::SyncStateResponse;
 use tari_ootle_storage::{
-    consensus_models::{StateTransition, StateTransitionId},
+    consensus_models::{StateTransition, StateVersionTransitions},
     StateStore,
     StorageError,
 };
 use tari_rpc_framework::RpcStatus;
+use tari_state_tree::Version;
 use tokio::sync::mpsc;
 
 const LOG_TARGET: &str = "tari::ootle::rpc::sync_task";
 
-type UpdateBuffer = Vec<StateTransition>;
-
 pub struct StateSyncTask<TStateStore: StateStore> {
     store: TStateStore,
     sender: mpsc::Sender<Result<SyncStateResponse, RpcStatus>>,
-    start_state_transition_id: StateTransitionId,
-    current_epoch: Epoch,
-    batch_size: usize,
+    shard: Shard,
+    start_state_version: Version,
+    end_epoch: Option<Epoch>,
+    batch_size: NonZeroUsize,
 }
 
 impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
     pub fn new(
         store: TStateStore,
         sender: mpsc::Sender<Result<SyncStateResponse, RpcStatus>>,
-        start_state_transition_id: StateTransitionId,
-        current_epoch: Epoch,
-        batch_size: usize,
+        shard: Shard,
+        start_state_version: Version,
+        end_epoch: Option<Epoch>,
+        batch_size: NonZeroUsize,
     ) -> Self {
         Self {
             store,
             sender,
-            start_state_transition_id,
-            current_epoch,
+            shard,
+            start_state_version,
+            end_epoch,
             batch_size,
         }
     }
 
     pub async fn run(mut self) -> Result<(), ()> {
-        let mut buffer = Vec::with_capacity(self.batch_size);
-        let mut current_state_transition_id = self.start_state_transition_id;
+        let mut current_state_version = self.start_state_version;
         let mut counter = 0usize;
         loop {
-            match self.fetch_next_batch(&mut buffer, current_state_transition_id) {
-                Ok(Some(last_state_transition_id)) => {
-                    info!(target: LOG_TARGET, "🌍Fetched {} state transitions up to transition {}", buffer.len(), last_state_transition_id);
-                    current_state_transition_id = last_state_transition_id;
+            match self.fetch_next_batch(current_state_version) {
+                Ok(Some(transitions)) => {
+                    info!(target: LOG_TARGET, "🌍 Fetched {} state transition(s) up to v{}", transitions.updates.len(), transitions.state_version);
+                    if let Some(end_epoch) = self.end_epoch {
+                        // TODO(perf): might be better to not load in the first place, however also might incur the cost
+                        // of a db index or loading from db anyway
+                        if transitions.epoch > end_epoch {
+                            info!(target: LOG_TARGET, "🌍 Reached end of requested epoch: {}", end_epoch);
+                            return Ok(());
+                        }
+                    }
+
+                    current_state_version = transitions.state_version + 1;
+                    counter += transitions.updates.len();
+
+                    self.send_responses(transitions).await?;
                 },
                 Ok(None) => {
                     // TODO: differentiate between not found and end of stream
                     // self.send(Err(RpcStatus::not_found(format!(
-                    //     "State transition not found with id={current_state_transition_id}"
+                    //     "State transition not found with id={current_state_version}"
                     // ))))
                     // .await?;
 
-                    info!(target: LOG_TARGET, "🌍sync complete ({}). {} update(s) sent.", current_state_transition_id, counter);
+                    info!(target: LOG_TARGET, "🌍sync complete ({}). {} update(s) sent.", current_state_version, counter);
                     // Finished
                     return Ok(());
                 },
@@ -67,46 +82,18 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
                     return Err(());
                 },
             }
-
-            let num_items = buffer.len();
-            debug!(
-                target: LOG_TARGET,
-                "Sending {num_items} state updates to peer. Current transition id: {current_state_transition_id}",
-            );
-
-            counter += buffer.len();
-            self.send_state_transitions(buffer.drain(..)).await?;
-
-            // If we didn't fill up the buffer, so we're done
-            if num_items < buffer.capacity() {
-                debug!( target: LOG_TARGET, "Sync to last commit complete. Streamed {} item(s)", counter);
-                break;
-            }
         }
-
-        Ok(())
     }
 
     fn fetch_next_batch(
         &self,
-        buffer: &mut UpdateBuffer,
-        current_state_transition_id: StateTransitionId,
-    ) -> Result<Option<StateTransitionId>, StorageError> {
-        self.store.with_read_tx(|tx| {
-            let state_transitions =
-                StateTransition::get_n_after(tx, self.batch_size, current_state_transition_id, self.current_epoch)
-                    .optional()?
-                    .unwrap_or_default();
-
-            let Some(last) = state_transitions.last() else {
-                return Ok(None);
-            };
-
-            let last_state_transition_id = last.id;
-            buffer.extend(state_transitions);
-
-            Ok::<_, StorageError>(Some(last_state_transition_id))
-        })
+        current_state_version: Version,
+    ) -> Result<Option<StateVersionTransitions>, StorageError> {
+        let transitions = self.store.with_read_tx(|tx| {
+            // TODO: make it optional for the client to request values
+            StateTransition::get_for_shard(tx, self.shard, current_state_version, true).optional()
+        })?;
+        Ok(transitions)
     }
 
     async fn send(&mut self, result: Result<SyncStateResponse, RpcStatus>) -> Result<(), ()> {
@@ -120,14 +107,21 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
         Ok(())
     }
 
-    async fn send_state_transitions<I: IntoIterator<Item = StateTransition>>(
-        &mut self,
-        state_transitions: I,
-    ) -> Result<(), ()> {
-        self.send(Ok(SyncStateResponse {
-            transitions: state_transitions.into_iter().map(Into::into).collect(),
-        }))
-        .await?;
+    async fn send_responses(&mut self, transitions: StateVersionTransitions) -> Result<(), ()> {
+        let chunks = transitions.into_chunks(self.batch_size);
+        let num_chunks = chunks.len();
+
+        for (i, chunk) in chunks.into_iter().enumerate() {
+            let updates = chunk.updates.into_iter().map(Into::into).collect();
+
+            self.send(Ok(SyncStateResponse {
+                state_version: chunk.state_version,
+                updates,
+                has_more: i < num_chunks - 1,
+                epoch: Some(chunk.epoch.into()),
+            }))
+            .await?;
+        }
 
         Ok(())
     }

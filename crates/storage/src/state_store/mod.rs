@@ -31,12 +31,12 @@ use tari_ootle_common_types::{
     NodeHeight,
     NumPreshards,
     ShardGroup,
+    ShardStateVersions,
     SubstateAddress,
     ToSubstateAddress,
-    VersionedSubstateId,
     VersionedSubstateIdRef,
 };
-use tari_state_tree::{Node, NodeKey, StaleTreeNode, Version};
+use tari_state_tree::{Node, NodeKey, StaleTreeNode, StateTreePayload, Version};
 use tari_template_lib::{models::UnclaimedConfidentialOutputAddress, types::crypto::RistrettoPublicKeyBytes};
 use tari_transaction::TransactionId;
 use time::PrimitiveDateTime;
@@ -48,7 +48,6 @@ use crate::{
         BlockTransactionExecution,
         BurntUtxo,
         EpochCheckpoint,
-        EpochStateRoot,
         Evidence,
         ForeignParkedProposal,
         ForeignProposal,
@@ -58,12 +57,12 @@ use crate::{
         LockedSubstateValue,
         NoVoteReason,
         PendingShardStateTreeDiff,
-        StateTransition,
-        StateTransitionId,
+        StateVersionTransitions,
         SubstateChange,
         SubstateLock,
         SubstatePledges,
         SubstateRecord,
+        SubstateUpdateBatch,
         TransactionExecution,
         TransactionPoolRecord,
         TransactionPoolStage,
@@ -190,6 +189,7 @@ pub trait StateStoreReadTransaction: Sized {
     ) -> Result<u64, StorageError>;
 
     fn block_diffs_get(&self, block_id: &BlockId) -> Result<BlockDiff, StorageError>;
+
     fn block_diffs_get_last_change_for_substate(
         &self,
         block_id: &BlockId,
@@ -275,22 +275,30 @@ pub trait StateStoreReadTransaction: Sized {
         block_id: &BlockId,
     ) -> Result<HashMap<Shard, Vec<PendingShardStateTreeDiff>>, StorageError>;
 
-    fn state_transitions_get_n_after(
+    // -------------------------------- State transitions -------------------------------- //
+    fn state_transitions_get_starting_at(
         &self,
-        n: usize,
-        id: StateTransitionId,
-        end_epoch: Epoch,
-    ) -> Result<Vec<StateTransition>, StorageError>;
+        shard: Shard,
+        state_version: Version,
+        include_values: bool,
+    ) -> Result<StateVersionTransitions, StorageError>;
 
-    fn state_transitions_get_last_id(&self, shard: Shard) -> Result<StateTransitionId, StorageError>;
+    // -------------------------------- State Tree -------------------------------- //
 
-    fn state_tree_nodes_get(&self, shard: Shard, key: &NodeKey) -> Result<Node<Version>, StorageError>;
+    fn state_tree_nodes_get(&self, shard: Shard, key: &NodeKey) -> Result<Node<StateTreePayload>, StorageError>;
+    fn state_tree_nodes_get_all_by_state_version(
+        &self,
+        shard: Shard,
+        state_version: Version,
+    ) -> Result<Vec<(NodeKey, Node<StateTreePayload>)>, StorageError>;
     fn state_tree_versions_get_latest(&self, shard: Shard) -> Result<Option<Version>, StorageError>;
+    fn state_tree_versions_get_latest_for_shard_group(
+        &self,
+        shard_group: ShardGroup,
+    ) -> Result<ShardStateVersions, StorageError>;
 
     // -------------------------------- Epoch checkpoint -------------------------------- //
     fn epoch_checkpoint_get(&self, epoch: Epoch) -> Result<EpochCheckpoint, StorageError>;
-
-    fn previous_epoch_state_root_get(&self) -> Result<EpochStateRoot, StorageError>;
 
     // -------------------------------- Foreign Substate Pledges -------------------------------- //
     fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(
@@ -480,15 +488,9 @@ pub trait StateStoreWriteTransaction {
 
     fn substate_locks_remove_any_by_block_id(&mut self, block_id: &BlockId) -> Result<(), StorageError>;
 
-    fn substates_create(&mut self, substate: &SubstateRecord) -> Result<(), StorageError>;
-    fn substates_down(
-        &mut self,
-        versioned_substate_id: VersionedSubstateId,
-        shard: Shard,
-        epoch: Epoch,
-        destroyed_block_height: NodeHeight,
-        destroyed_qc_id: &QcId,
-    ) -> Result<(), StorageError>;
+    // -------------------------------- Substates -------------------------------- //
+
+    fn substates_commit_batch(&mut self, update_batch: SubstateUpdateBatch) -> Result<(), StorageError>;
     fn substates_prune_downed_values(&mut self, epoch: Epoch) -> Result<(), StorageError>;
 
     // -------------------------------- Foreign pledges -------------------------------- //
@@ -522,7 +524,7 @@ pub trait StateStoreWriteTransaction {
     fn state_tree_nodes_batch_insert(
         &mut self,
         shard: Shard,
-        nodes: Vec<(NodeKey, Node<Version>)>,
+        nodes: Vec<(NodeKey, Node<StateTreePayload>)>,
     ) -> Result<(), StorageError>;
 
     fn state_tree_nodes_record_stale_tree_nodes(
@@ -537,9 +539,6 @@ pub trait StateStoreWriteTransaction {
 
     // -------------------------------- Epoch checkpoint -------------------------------- //
     fn epoch_checkpoint_save(&mut self, checkpoint: &EpochCheckpoint) -> Result<(), StorageError>;
-
-    // -------------------------------- Epoch state root -------------------------------- //
-    fn previous_epoch_state_root_set(&mut self, epoch_state_root: &EpochStateRoot) -> Result<(), StorageError>;
 
     // -------------------------------- BurntUtxo -------------------------------- //
     fn burnt_utxos_insert(&mut self, burnt_utxo: &BurntUtxo) -> Result<(), StorageError>;

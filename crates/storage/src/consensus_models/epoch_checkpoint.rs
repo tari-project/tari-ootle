@@ -11,7 +11,13 @@ use tari_common_types::types::{CompressedPublicKey, FixedHash};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_ootle_common_types::{shard::Shard, Epoch, ShardGroup, VotePower};
 use tari_sidechain::{CommandCommitProof, SidechainBlockHeader, SidechainProofValidationError, ToCommand};
-use tari_state_tree::{compute_merkle_root_for_hashes, StateTreeError, TreeHash, SPARSE_MERKLE_PLACEHOLDER_HASH};
+use tari_state_tree::{
+    compute_merkle_root_for_hashes,
+    StateTreeError,
+    TreeHash,
+    Version,
+    SPARSE_MERKLE_PLACEHOLDER_HASH,
+};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 
 use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
@@ -19,12 +25,24 @@ use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EpochCheckpoint {
     proof: CommandCommitProof<EndOfEpochCommand>,
-    shard_roots: IndexMap<Shard, TreeHash>,
+    shard_tree_summary: IndexMap<Shard, TreeRootSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TreeRootSummary {
+    pub root_hash: TreeHash,
+    pub state_version: Version,
 }
 
 impl EpochCheckpoint {
-    pub fn new(proof: CommandCommitProof<EndOfEpochCommand>, shard_roots: IndexMap<Shard, TreeHash>) -> Self {
-        Self { proof, shard_roots }
+    pub fn new(
+        proof: CommandCommitProof<EndOfEpochCommand>,
+        shard_tree_summary: IndexMap<Shard, TreeRootSummary>,
+    ) -> Self {
+        Self {
+            proof,
+            shard_tree_summary,
+        }
     }
 
     pub fn proof(&self) -> &CommandCommitProof<EndOfEpochCommand> {
@@ -43,15 +61,22 @@ impl EpochCheckpoint {
         Epoch(self.proof.header().epoch)
     }
 
-    pub fn shard_roots(&self) -> &IndexMap<Shard, TreeHash> {
-        &self.shard_roots
+    pub fn shard_tree_summary(&self) -> &IndexMap<Shard, TreeRootSummary> {
+        &self.shard_tree_summary
     }
 
     pub fn get_shard_root(&self, shard: Shard) -> TreeHash {
-        self.shard_roots
+        self.shard_tree_summary
             .get(&shard)
-            .copied()
+            .map(|summary| summary.root_hash)
             .unwrap_or(SPARSE_MERKLE_PLACEHOLDER_HASH)
+    }
+
+    pub fn get_shard_state_version(&self, shard: Shard) -> Version {
+        self.shard_tree_summary
+            .get(&shard)
+            .map(|summary| summary.state_version)
+            .unwrap_or_default()
     }
 
     pub fn compute_state_merkle_root(&self) -> Result<TreeHash, EpochCheckpointValidationError> {
@@ -114,10 +139,10 @@ impl EpochCheckpoint {
         }
 
         // 1 + for global shard
-        if self.shard_roots().len() > num_shards + 1 {
+        if self.shard_tree_summary.len() > num_shards + 1 {
             return Err(
                 EpochCheckpointValidationError::NumberOfShardStateRootsExceedsNumberOfShards {
-                    num_shard_state_roots: self.shard_roots().len(),
+                    num_shard_state_roots: self.shard_tree_summary.len(),
                     num_shards,
                 },
             );
@@ -154,7 +179,7 @@ impl Display for EpochCheckpoint {
             "EpochCheckpoint: block_id={}, epoch={}, count(shard_roots)={}",
             self.proof.header().calculate_block_id(),
             self.proof.header().epoch,
-            self.shard_roots.len()
+            self.shard_tree_summary.len()
         )
     }
 }

@@ -5,7 +5,7 @@ use std::fmt::Debug;
 
 use tari_consensus_types::BlockId;
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::{committee::CommitteeInfo, VersionedSubstateIdRef};
+use tari_ootle_common_types::{ShardGroup, VersionedSubstateIdRef};
 
 use crate::{
     consensus_models::substate_change::SubstateChange,
@@ -16,7 +16,7 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct BlockDiff {
-    pub block_id: BlockId,
+    block_id: BlockId,
     pub changes: Vec<SubstateChange>,
 }
 
@@ -37,13 +37,13 @@ impl BlockDiff {
         self.changes.is_empty()
     }
 
-    pub fn into_filtered(self, committee: &CommitteeInfo) -> Self {
+    pub fn into_filtered(self, shard_group: ShardGroup) -> Self {
         Self {
             block_id: self.block_id,
             changes: self
                 .changes
                 .into_iter()
-                .filter(|change| committee.shard_group().contains_or_global(&change.shard()))
+                .filter(|change| shard_group.contains_or_global(&change.shard()))
                 .collect(),
         }
     }

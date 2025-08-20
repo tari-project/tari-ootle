@@ -550,56 +550,56 @@ mod tests {
         #[test]
         fn it_returns_the_correct_shard_group() {
             let group = SubstateAddress::zero().to_shard_group(NumPreshards::P4, 2);
-            assert_eq!(group.as_range(), Shard::from(1)..=Shard::from(2));
+            assert_eq!(group.as_range_inclusive(), Shard::from(1)..=Shard::from(2));
 
             let group = plus_one(address_at(0, 4)).to_shard_group(NumPreshards::P4, 2);
-            assert_eq!(group.as_range(), Shard::from(1)..=Shard::from(2));
+            assert_eq!(group.as_range_inclusive(), Shard::from(1)..=Shard::from(2));
 
             let group = address_at(1, 4).to_shard_group(NumPreshards::P4, 2);
-            assert_eq!(group.as_range(), Shard::from(1)..=Shard::from(2));
+            assert_eq!(group.as_range_inclusive(), Shard::from(1)..=Shard::from(2));
 
             let group = address_at(2, 4).to_shard_group(NumPreshards::P4, 2);
-            assert_eq!(group.as_range(), Shard::from(3)..=Shard::from(4));
+            assert_eq!(group.as_range_inclusive(), Shard::from(3)..=Shard::from(4));
 
             let group = address_at(3, 4).to_shard_group(NumPreshards::P4, 2);
-            assert_eq!(group.as_range(), Shard::from(3)..=Shard::from(4));
+            assert_eq!(group.as_range_inclusive(), Shard::from(3)..=Shard::from(4));
 
             let group = SubstateAddress::max().to_shard_group(NumPreshards::P4, 2);
-            assert_eq!(group.as_range(), Shard::from(3)..=Shard::from(4));
+            assert_eq!(group.as_range_inclusive(), Shard::from(3)..=Shard::from(4));
 
             let group = minus_one(address_at(1, 64)).to_shard_group(NumPreshards::P64, 16);
-            assert_eq!(group.as_range(), Shard::from(1)..=Shard::from(4));
+            assert_eq!(group.as_range_inclusive(), Shard::from(1)..=Shard::from(4));
             let group = address_at(4, 64).to_shard_group(NumPreshards::P64, 16);
-            assert_eq!(group.as_range(), Shard::from(5)..=Shard::from(8));
+            assert_eq!(group.as_range_inclusive(), Shard::from(5)..=Shard::from(8));
 
             let group = address_at(8, 64).to_shard_group(NumPreshards::P64, 2);
-            assert_eq!(group.as_range(), Shard::from(1)..=Shard::from(32));
+            assert_eq!(group.as_range_inclusive(), Shard::from(1)..=Shard::from(32));
             let group = address_at(5, 8).to_shard_group(NumPreshards::P64, 2);
-            assert_eq!(group.as_range(), Shard::from(33)..=Shard::from(64));
+            assert_eq!(group.as_range_inclusive(), Shard::from(33)..=Shard::from(64));
 
             // On boundary
             let group = address_at(0, 8).to_shard_group(NumPreshards::P64, 2);
-            assert_eq!(group.as_range(), Shard::from(1)..=Shard::from(32));
+            assert_eq!(group.as_range_inclusive(), Shard::from(1)..=Shard::from(32));
             let group = address_at(4, 8).to_shard_group(NumPreshards::P64, 2);
-            assert_eq!(group.as_range(), Shard::from(33)..=Shard::from(64));
+            assert_eq!(group.as_range_inclusive(), Shard::from(33)..=Shard::from(64));
 
             let group = address_at(8, 8).to_shard_group(NumPreshards::P64, 2);
-            assert_eq!(group.as_range(), Shard::from(33)..=Shard::from(64));
+            assert_eq!(group.as_range_inclusive(), Shard::from(33)..=Shard::from(64));
 
             let group = plus_one(address_at(3, 64)).to_shard_group(NumPreshards::P64, 32);
-            assert_eq!(group.as_range(), Shard::from(3)..=Shard::from(4));
+            assert_eq!(group.as_range_inclusive(), Shard::from(3)..=Shard::from(4));
 
             let group = plus_one(address_at(3, 64)).to_shard_group(NumPreshards::P64, 32);
-            assert_eq!(group.as_range(), Shard::from(3)..=Shard::from(4));
+            assert_eq!(group.as_range_inclusive(), Shard::from(3)..=Shard::from(4));
 
             let group = address_at(16, 64).to_shard_group(NumPreshards::P64, 32);
-            assert_eq!(group.as_range(), Shard::from(17)..=Shard::from(18));
+            assert_eq!(group.as_range_inclusive(), Shard::from(17)..=Shard::from(18));
 
             let group = minus_one(address_at(1, 4)).to_shard_group(NumPreshards::P64, 64);
-            assert_eq!(group.as_range(), Shard::from(17)..=Shard::from(17));
+            assert_eq!(group.as_range_inclusive(), Shard::from(17)..=Shard::from(17));
 
             let group = address_at(66, 256).to_shard_group(NumPreshards::P64, 16);
-            assert_eq!(group.as_range(), Shard::from(17)..=Shard::from(20));
+            assert_eq!(group.as_range_inclusive(), Shard::from(17)..=Shard::from(20));
         }
 
         #[test]
@@ -615,14 +615,18 @@ mod tests {
                     let group = address_at(at, num_shards.as_u32()).to_shard_group(num_shards, NUM_COMMITTEES);
                     if at < num_shards.as_u32() / NUM_COMMITTEES {
                         assert_eq!(
-                            group.as_range(),
+                            group.as_range_inclusive(),
                             Shard::from(1)..=Shard::from(num_shards.as_u32() / NUM_COMMITTEES),
                             "Failed at {at} for num_shards={num_shards}"
                         );
                     } else {
                         let range =
                             Shard::from(num_shards.as_u32() / NUM_COMMITTEES + 1)..=Shard::from(num_shards.as_u32());
-                        assert_eq!(group.as_range(), range, "Failed at {at} for num_shards={num_shards}");
+                        assert_eq!(
+                            group.as_range_inclusive(),
+                            range,
+                            "Failed at {at} for num_shards={num_shards}"
+                        );
                     }
                 }
             }
@@ -650,65 +654,65 @@ mod tests {
 
             let group = address_at(0, 64).to_shard_group(NumPreshards::P64, 3);
             // First shard group gets an extra shard to cover the remainder
-            assert_eq!(group.as_range(), Shard::from(1)..=Shard::from(22));
+            assert_eq!(group.as_range_inclusive(), Shard::from(1)..=Shard::from(22));
             assert_eq!(group.len(), 22);
             let group = address_at(31, 64).to_shard_group(NumPreshards::P64, 3);
-            assert_eq!(group.as_range(), Shard::from(23)..=Shard::from(43));
+            assert_eq!(group.as_range_inclusive(), Shard::from(23)..=Shard::from(43));
             assert_eq!(group.len(), 21);
             let group = address_at(50, 64).to_shard_group(NumPreshards::P64, 3);
-            assert_eq!(group.as_range(), Shard::from(44)..=Shard::from(64));
+            assert_eq!(group.as_range_inclusive(), Shard::from(44)..=Shard::from(64));
             assert_eq!(group.len(), 21);
 
             let group = address_at(3, 64).to_shard_group(NumPreshards::P64, 7);
-            assert_eq!(group.as_range(), Shard::from(1)..=Shard::from(10));
+            assert_eq!(group.as_range_inclusive(), Shard::from(1)..=Shard::from(10));
             assert_eq!(group.len(), 10);
             let group = address_at(11, 64).to_shard_group(NumPreshards::P64, 7);
-            assert_eq!(group.as_range(), Shard::from(11)..=Shard::from(19));
+            assert_eq!(group.as_range_inclusive(), Shard::from(11)..=Shard::from(19));
             assert_eq!(group.len(), 9);
             let group = address_at(22, 64).to_shard_group(NumPreshards::P64, 7);
-            assert_eq!(group.as_range(), Shard::from(20)..=Shard::from(28));
+            assert_eq!(group.as_range_inclusive(), Shard::from(20)..=Shard::from(28));
             assert_eq!(group.len(), 9);
             let group = address_at(60, 64).to_shard_group(NumPreshards::P64, 7);
-            assert_eq!(group.as_range(), Shard::from(56)..=Shard::from(64));
+            assert_eq!(group.as_range_inclusive(), Shard::from(56)..=Shard::from(64));
             assert_eq!(group.len(), 9);
             let group = address_at(64, 64).to_shard_group(NumPreshards::P64, 7);
-            assert_eq!(group.as_range(), Shard::from(56)..=Shard::from(64));
+            assert_eq!(group.as_range_inclusive(), Shard::from(56)..=Shard::from(64));
             assert_eq!(group.len(), 9);
             let group = SubstateAddress::zero().to_shard_group(NumPreshards::P8, 3);
-            assert_eq!(group.as_range(), Shard::from(1)..=Shard::from(3));
+            assert_eq!(group.as_range_inclusive(), Shard::from(1)..=Shard::from(3));
 
             let group = address_at(1, 8).to_shard_group(NumPreshards::P8, 3);
-            assert_eq!(group.as_range(), Shard::from(1)..=Shard::from(3));
+            assert_eq!(group.as_range_inclusive(), Shard::from(1)..=Shard::from(3));
 
             let group = address_at(1, 8).to_shard_group(NumPreshards::P8, 3);
-            assert_eq!(group.as_range(), Shard::from(1)..=Shard::from(3));
+            assert_eq!(group.as_range_inclusive(), Shard::from(1)..=Shard::from(3));
 
             let group = address_at(3, 8).to_shard_group(NumPreshards::P8, 3);
-            assert_eq!(group.as_range(), Shard::from(4)..=Shard::from(6));
+            assert_eq!(group.as_range_inclusive(), Shard::from(4)..=Shard::from(6));
 
             let group = address_at(4, 8).to_shard_group(NumPreshards::P8, 3);
-            assert_eq!(group.as_range(), Shard::from(4)..=Shard::from(6));
+            assert_eq!(group.as_range_inclusive(), Shard::from(4)..=Shard::from(6));
 
             let group = address_at(5, 8).to_shard_group(NumPreshards::P8, 3);
-            assert_eq!(group.as_range(), Shard::from(4)..=Shard::from(6));
+            assert_eq!(group.as_range_inclusive(), Shard::from(4)..=Shard::from(6));
             //
             let group = address_at(6, 8).to_shard_group(NumPreshards::P8, 3);
-            assert_eq!(group.as_range(), Shard::from(7)..=Shard::from(8));
+            assert_eq!(group.as_range_inclusive(), Shard::from(7)..=Shard::from(8));
 
             let group = address_at(7, 8).to_shard_group(NumPreshards::P8, 3);
-            assert_eq!(group.as_range(), Shard::from(7)..=Shard::from(8));
+            assert_eq!(group.as_range_inclusive(), Shard::from(7)..=Shard::from(8));
             let group = address_at(8, 8).to_shard_group(NumPreshards::P8, 3);
-            assert_eq!(group.as_range(), Shard::from(7)..=Shard::from(8));
+            assert_eq!(group.as_range_inclusive(), Shard::from(7)..=Shard::from(8));
 
             // Committee = 5
             let group = address_at(4, 8).to_shard_group(NumPreshards::P8, 5);
-            assert_eq!(group.as_range(), Shard::from(5)..=Shard::from(6));
+            assert_eq!(group.as_range_inclusive(), Shard::from(5)..=Shard::from(6));
 
             let group = address_at(7, 8).to_shard_group(NumPreshards::P8, 5);
-            assert_eq!(group.as_range(), Shard::from(8)..=Shard::from(8));
+            assert_eq!(group.as_range_inclusive(), Shard::from(8)..=Shard::from(8));
 
             let group = address_at(8, 8).to_shard_group(NumPreshards::P8, 5);
-            assert_eq!(group.as_range(), Shard::from(8)..=Shard::from(8));
+            assert_eq!(group.as_range_inclusive(), Shard::from(8)..=Shard::from(8));
         }
     }
 

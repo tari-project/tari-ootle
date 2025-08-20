@@ -26,7 +26,16 @@ use log::*;
 use tari_bor::encode;
 use tari_consensus_types::BlockId;
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
-use tari_ootle_common_types::{optional::Optional, shard::Shard, Epoch, NodeHeight, PeerAddress, SubstateRequirement};
+use tari_ootle_common_types::{
+    displayable::Displayable,
+    optional::Optional,
+    shard::Shard,
+    Epoch,
+    NodeHeight,
+    NumPreshards,
+    PeerAddress,
+    SubstateRequirement,
+};
 use tari_ootle_p2p::{
     proto,
     proto::rpc::{
@@ -47,7 +56,7 @@ use tari_ootle_p2p::{
     },
 };
 use tari_ootle_storage::{
-    consensus_models::{Block, EpochCheckpoint, StateTransitionId, SubstateRecord, TransactionRecord},
+    consensus_models::{Block, EpochCheckpoint, SubstateRecord, TransactionRecord},
     StateStore,
 };
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
@@ -171,27 +180,14 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             }));
         };
 
-        let created_qc = substate
-            .get_created_proposal_certificate(&tx)
-            // TODO: We may not have this... We dont sync PCs. Hmm...
-            // This does not actually prove this substate was committed anyhow.
-            .optional()
-            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-
-        let resp = if substate.is_destroyed() {
-            let destroyed_qc = substate
-                .get_destroyed_proposal_certificate(&tx)
-                .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+        let resp = if let Some(destroyed) = substate.destroyed() {
             GetSubstateResponse {
                 status: SubstateStatus::Down as i32,
                 address: substate.substate_id().to_bytes(),
+                substate: vec![],
                 version: substate.version(),
-                quorum_certificates: created_qc
-                    .into_iter()
-                    .chain(destroyed_qc)
-                    .map(|qc| (&qc).into())
-                    .collect(),
-                ..Default::default()
+                created_at_state_version: substate.created().at_state_version,
+                destroyed_at_state_version: destroyed.at_state_version,
             }
         } else {
             GetSubstateResponse {
@@ -202,7 +198,8 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
                     .substate_value()
                     .map(|v| v.to_bytes())
                     .ok_or_else(|| RpcStatus::general("NEVER HAPPEN: UP substate has no value"))?,
-                quorum_certificates: created_qc.iter().map(Into::into).collect(),
+                created_at_state_version: substate.created().at_state_version,
+                destroyed_at_state_version: Default::default(),
             }
         };
 
@@ -380,20 +377,31 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
 
         let (sender, receiver) = mpsc::channel(10);
 
-        let start_epoch = Epoch(req.start_epoch);
-        let start_shard = Shard::from(req.start_shard);
-        let last_state_transition_for_chain = StateTransitionId::new(start_epoch, start_shard, req.start_seq);
+        let shard = Shard::from_u32(req.shard);
+        if shard > NumPreshards::MAX_SHARD {
+            return Err(RpcStatus::bad_request(format!(
+                "Shard {} out of range. Maximum shard is {}",
+                shard,
+                NumPreshards::MAX_SHARD
+            )));
+        }
 
-        let end_epoch = Epoch(req.current_epoch);
-        info!(target: LOG_TARGET, "🌍peer initiated sync with this node ({}, {}, seq={}) to {}", start_epoch, start_shard, req.start_seq, end_epoch);
+        let end_epoch = Some(req.until_epoch).filter(|e| *e > 0).map(Epoch::from);
+        info!(target: LOG_TARGET, "🌍peer initiated sync with this node (start: v{}, {}) to {}", req.start_state_version, shard, end_epoch.display());
+        if req.start_state_version == 0 {
+            return Err(RpcStatus::bad_request("start_state_version must be greater than 0"));
+        }
 
         task::spawn(
             StateSyncTask::new(
                 self.state_store.clone(),
                 sender,
-                last_state_transition_for_chain,
+                shard,
+                req.start_state_version,
                 end_epoch,
-                STATE_SYNC_MAX_BATCH_SIZE,
+                STATE_SYNC_MAX_BATCH_SIZE
+                    .try_into()
+                    .expect("STATE_SYNC_MAX_BATCH_SIZE is not zero"),
             )
             .run(),
         );

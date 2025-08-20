@@ -100,7 +100,7 @@ impl BlockDecision {
 pub struct ProposedBlockChangeSet {
     block: LeafBlock,
     quorum_decision: Option<QuorumDecision>,
-    substate_changes: Vec<SubstateChange>,
+    local_substate_changes: Vec<SubstateChange>,
     state_tree_diffs: IndexMap<Shard, PendingShardStateTreeDiff>,
     substate_locks: IndexMap<SubstateId, Vec<SubstateLock>>,
     transaction_changes: IndexMap<TransactionId, TransactionChangeSet>,
@@ -116,7 +116,7 @@ impl ProposedBlockChangeSet {
         Self {
             block,
             quorum_decision: None,
-            substate_changes: Vec::new(),
+            local_substate_changes: Vec::new(),
             substate_locks: IndexMap::new(),
             transaction_changes: IndexMap::new(),
             new_transactions_to_sequence: Vec::new(),
@@ -145,15 +145,15 @@ impl ProposedBlockChangeSet {
     pub fn clear(&mut self) {
         self.quorum_decision = None;
 
-        self.substate_changes.clear();
-        if self.substate_changes.capacity() > MEM_MAX_BLOCK_DIFF_CHANGES {
+        self.local_substate_changes.clear();
+        if self.local_substate_changes.capacity() > MEM_MAX_BLOCK_DIFF_CHANGES {
             debug!(
                 target: LOG_TARGET,
                 "Shrinking block_diff from {} to {}",
-                self.substate_changes.capacity(),
+                self.local_substate_changes.capacity(),
                 MEM_MAX_BLOCK_DIFF_CHANGES
             );
-            self.substate_changes.shrink_to(MEM_MAX_BLOCK_DIFF_CHANGES);
+            self.local_substate_changes.shrink_to(MEM_MAX_BLOCK_DIFF_CHANGES);
         }
         self.transaction_changes.clear();
         if self.transaction_changes.capacity() > MEM_MAX_TRANSACTION_CHANGE_SIZE {
@@ -232,8 +232,8 @@ impl ProposedBlockChangeSet {
         self
     }
 
-    pub fn set_substate_changes(&mut self, diff: Vec<SubstateChange>) -> &mut Self {
-        self.substate_changes = diff;
+    pub fn set_block_diff_to_commit(&mut self, diff: BlockDiff) -> &mut Self {
+        self.local_substate_changes = diff.into_changes();
         self
     }
 
@@ -447,7 +447,7 @@ impl ProposedBlockChangeSet {
 
         let _timer = TraceTimer::debug(LOG_TARGET, "ProposedBlockChangeSet::save");
         // Store the block diff
-        BlockDiff::insert(tx, &self.block.block_id, &self.substate_changes)?;
+        BlockDiff::insert(tx, &self.block.block_id, &self.local_substate_changes)?;
 
         // Store the tree diffs for each affected shard
         for (shard, diff) in &self.state_tree_diffs {
@@ -542,7 +542,7 @@ impl ProposedBlockChangeSet {
         let _timer = TraceTimer::debug(LOG_TARGET, "ProposedBlockChangeSet::save_for_debug");
         // TODO: consider persisting this data somewhere
 
-        for change in &self.substate_changes {
+        for change in &self.local_substate_changes {
             debug!(target: LOG_TARGET, "[drop] SubstateChange: {}", change);
         }
 
@@ -599,8 +599,8 @@ impl Display for ProposedBlockChangeSet {
             Some(decision) => write!(f, " Decision: {},", decision)?,
             None => write!(f, " Decision: NO VOTE, ")?,
         }
-        if !self.substate_changes.is_empty() {
-            write!(f, " BlockDiff: {} change(s), ", self.substate_changes.len())?;
+        if !self.local_substate_changes.is_empty() {
+            write!(f, " BlockDiff: {} change(s), ", self.local_substate_changes.len())?;
         }
         if !self.state_tree_diffs.is_empty() {
             write!(f, " StateTreeDiff: {} change(s), ", self.state_tree_diffs.len())?;

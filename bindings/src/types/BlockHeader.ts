@@ -2,12 +2,13 @@
 import type { Epoch } from "./Epoch";
 import type { ExtraData } from "./ExtraData";
 import type { NodeHeight } from "./NodeHeight";
+import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
 import type { SchnorrSignatureBytes } from "./SchnorrSignatureBytes";
 import type { ShardGroup } from "./ShardGroup";
 
 export type BlockHeader = {
   /**
-   * "Cached" block ID/hash. This can be computed from the contents of the block header,
+   * "Cached" block ID/hash. This is computed from the contents of the block header.
    */
   id: string;
   /**
@@ -37,7 +38,7 @@ export type BlockHeader = {
   /**
    * The public key of the proposer.
    */
-  proposed_by: string;
+  proposed_by: RistrettoPublicKeyBytes;
   /**
    * The total leader fee for this block. This should match the sum of the leader fees in the block's body.
    */

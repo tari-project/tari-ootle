@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tari_ootle_common_types::shard::Shard;
-use tari_state_tree::{Node, NodeKey, StaleTreeNode, Version};
+use tari_state_tree::{Node, NodeKey, StaleTreeNode, StateTreePayload, Version};
 
 use crate::{
     codecs::{DefaultCodec, NodeKeyCodec, NumberCodec, ShardCodec},
@@ -33,7 +33,7 @@ pub struct StateTreeCf;
 impl Cf for StateTreeCf {
     type Key = (Shard, NodeKey);
     type KeyCodec = (ShardCodec, NodeKeyCodec);
-    type Value = Node<Version>;
+    type Value = Node<StateTreePayload>;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
@@ -48,7 +48,7 @@ pub struct StateTreeCfRef<'a> {
 impl<'a> Cf for StateTreeCfRef<'a> {
     type Key = (Shard, &'a NodeKey);
     type KeyCodec = (ShardCodec, NodeKeyCodec);
-    type Value = Node<Version>;
+    type Value = Node<StateTreePayload>;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
@@ -64,12 +64,13 @@ impl Default for StateTreeCfRef<'_> {
     }
 }
 
-pub struct ByShardQuery;
+pub struct ByShardStateVersionQuery;
 
-impl QueryCf for ByShardQuery {
+impl QueryCf for ByShardStateVersionQuery {
     type Cf = StateTreeCf;
-    type Key = Shard;
-    type KeyCodec = ShardCodec;
+    type Key = (Shard, Version);
+    // Depends on NodeKeyCodec first serializing the Shard, then the Version.
+    type KeyCodec = (ShardCodec, NumberCodec<Version>);
 }
 
 pub struct StateTreeStaleNodesModel;

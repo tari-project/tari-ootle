@@ -23,6 +23,7 @@
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{shard::Shard, Epoch, SubstateAddress};
+use tari_state_tree::Version;
 
 use crate::{
     codecs::{
@@ -73,10 +74,10 @@ impl Cf for HeadIndex {
 pub struct UnprunedDownedValuesIndex;
 
 impl Cf for UnprunedDownedValuesIndex {
-    type Key = (Epoch, Shard, u64);
-    type KeyCodec = (EpochCodec, ShardCodec, NumberCodec<u64>);
-    type Value = <SubstateCf as Cf>::Key;
-    type ValueCodec = <SubstateCf as Cf>::KeyCodec;
+    type Key = (Epoch, Shard, Version);
+    type KeyCodec = (EpochCodec, ShardCodec, NumberCodec<Version>);
+    type Value = Vec<SubstateAddress>;
+    type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
         "substates_unpruned_idx"

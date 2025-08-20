@@ -4,12 +4,12 @@
 use anyhow::anyhow;
 use tari_consensus_types::BlockId;
 use tari_ootle_common_types::{shard::Shard, Epoch, NodeHeight};
-use tari_ootle_storage::consensus_models::{ForeignProposalStatus, StateTransitionId};
+use tari_ootle_storage::consensus_models::ForeignProposalStatus;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 
 use crate::{
-    codecs::{Column, DbCodec, EncodeVec, EpochCodec, NumberCodec, ShardCodec},
+    codecs::{Column, DbCodec, EncodeVec},
     error::RocksDbStorageError,
 };
 
@@ -140,34 +140,6 @@ where
         let a = self.0.decode(a_bytes)?;
         let b = self.1.decode(b_bytes)?;
         Ok((a, b))
-    }
-}
-
-/// Encodes in (A, B, C) order. (Shard, Seq, Epoch) and (Epoch, Shard, Seq) keys are supported.
-#[derive(Default)]
-pub struct StateTransitionIdCodec<A, B, C> {
-    codec: (A, B, C),
-}
-
-impl DbCodec<StateTransitionId> for StateTransitionIdCodec<ShardCodec, NumberCodec<u64>, EpochCodec> {
-    fn encode(&self, id: &StateTransitionId) -> Result<EncodeVec, RocksDbStorageError> {
-        self.codec.encode(&(id.shard(), id.seq(), id.epoch()))
-    }
-
-    fn decode(&self, bytes: &[u8]) -> Result<StateTransitionId, RocksDbStorageError> {
-        let (shard, seq, epoch) = self.codec.decode(bytes)?;
-        Ok(StateTransitionId::new(epoch, shard, seq))
-    }
-}
-
-impl DbCodec<StateTransitionId> for StateTransitionIdCodec<EpochCodec, ShardCodec, NumberCodec<u64>> {
-    fn encode(&self, id: &StateTransitionId) -> Result<EncodeVec, RocksDbStorageError> {
-        self.codec.encode(&(id.epoch(), id.shard(), id.seq()))
-    }
-
-    fn decode(&self, bytes: &[u8]) -> Result<StateTransitionId, RocksDbStorageError> {
-        let (epoch, shard, seq) = self.codec.decode(bytes)?;
-        Ok(StateTransitionId::new(epoch, shard, seq))
     }
 }
 

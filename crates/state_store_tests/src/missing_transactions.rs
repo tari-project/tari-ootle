@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_common_types::types::FixedHash;
-use tari_ootle_common_types::{Epoch, ExtraData, Network, NodeHeight, NumPreshards, ShardGroup};
+use tari_ootle_common_types::{Epoch, ExtraData, Network, NodeHeight};
 use tari_ootle_storage::{
     consensus_models::{Block, Command},
     StateStore,
@@ -36,7 +36,7 @@ fn missing_transactions_operations(db: impl StateStore) {
         None,
         NodeHeight(1),
         Epoch(0),
-        ShardGroup::all_shards(NumPreshards::P64),
+        genesis.shard_group(),
         Default::default(),
         // Need to have a command in, otherwise this block will not be included internally in the query because it
         // cannot cause a state change without any commands

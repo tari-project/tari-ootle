@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import { useState } from "react";
 import PageHeading from "../../Components/PageHeading";
 import Grid from "@mui/material/Grid";
 import { StyledPaper } from "../../Components/StyledComponents";
@@ -33,9 +34,10 @@ import { useAccountsGetBalances, useAccountNFTsList } from "../../api/hooks/useA
 import { DataTableCell } from "../../Components/StyledComponents";
 import FetchStatusCheck from "../../Components/FetchStatusCheck";
 import { BalanceEntry, substateIdToString } from "@tari-project/typescript-bindings";
-import NFTList from "../../Components/NFTList";
+import NFTList from "../AssetVault/NFTs/NFTList";
 import CopyAddress from "../../Components/CopyAddress";
 import useAccountStore from "../../store/accountStore";
+import { handleChangePage, handleChangeRowsPerPage } from "../../utils/helpers";
 
 function BalanceRow(props: BalanceEntry) {
   return (
@@ -52,6 +54,8 @@ function BalanceRow(props: BalanceEntry) {
 
 function AccountDetailsLayout() {
   const { account, publicKey } = useAccountStore();
+  const [nftPage, setNftPage] = useState(0);
+  const [nftRowsPerPage, setNftRowsPerPage] = useState(12);
 
   if (!account) {
     return <>No Account</>;
@@ -76,7 +80,12 @@ function AccountDetailsLayout() {
     isLoading: nftsListIsFetching,
     isError: nftsListIsError,
     error: nftsListError,
-  } = useAccountNFTsList(substateIdToString(account.address), 0, 10);
+  } = useAccountNFTsList(substateIdToString(account.address), nftPage * nftRowsPerPage, nftRowsPerPage);
+
+  const currentNfts = nftsListData?.nfts || [];
+  const hasMore = currentNfts.length === nftRowsPerPage;
+  const estimatedTotal = hasMore ? (nftPage + 1) * nftRowsPerPage + 1 : nftPage * nftRowsPerPage + currentNfts.length;
+
   return (
     <>
       <Grid item xs={12} md={12} lg={12}>
@@ -140,6 +149,11 @@ function AccountDetailsLayout() {
             nftsListIsFetching={nftsListIsFetching}
             nftsListError={nftsListError}
             nftsListData={nftsListData}
+            totalCount={estimatedTotal}
+            page={nftPage}
+            rowsPerPage={nftRowsPerPage}
+            onPageChange={(event, newPage) => handleChangePage(event, newPage, setNftPage)}
+            onRowsPerPageChange={(event) => handleChangeRowsPerPage(event, setNftRowsPerPage, setNftPage)}
           />
         </StyledPaper>
       </Grid>

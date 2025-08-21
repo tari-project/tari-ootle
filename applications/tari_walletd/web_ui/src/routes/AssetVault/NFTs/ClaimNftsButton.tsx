@@ -1,4 +1,4 @@
-//  Copyright 2022. The Tari Project
+//  Copyright 2025. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,42 +20,19 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import { useTheme } from "@mui/material/styles";
-import { useMintTestnetFaucetNfts, useAccountsCreateFreeTestCoins } from "../../../api/hooks/useAccounts";
-import ClaimBurn from "./ClaimBurn";
+import { useMintTestnetFaucetNfts } from "../../../api/hooks/useAccounts";
 import useAccountStore from "../../../store/accountStore";
-import SendMoney from "./SendMoney";
-import ClaimFees from "./ClaimFees";
-import PublishTemplate from "./PublishTemplate";
 import { substateIdToString } from "@tari-project/typescript-bindings";
-import TransferNft from "./TransferNft";
 
-function ActionMenu() {
-  const { mutate: claimTestnetFaucetFunds } = useAccountsCreateFreeTestCoins();
+function ClaimNftsButton() {
   const { mutate: claimTestnetFaucetNfts } = useMintTestnetFaucetNfts();
-  const { account, setAccount, setPublicKey } = useAccountStore();
-  const theme = useTheme();
+  const account = useAccountStore((state) => state.account);
+
   if (!account) {
-    return null;
+    return <></>;
   }
 
-  const onClaimFreeCoins = () => {
-    claimTestnetFaucetFunds(
-      {
-        account: { ComponentAddress: substateIdToString(account.address) },
-        amount: 1_000_000_000,
-        fee: 1000,
-      },
-      {
-        onSuccess: (resp) => {
-          setAccount(resp.account);
-          setPublicKey(resp.public_key);
-        },
-      },
-    );
-  };
   const onClaimTestnetNfts = () => {
     claimTestnetFaucetNfts(
       {
@@ -75,26 +52,10 @@ function ActionMenu() {
   };
 
   return (
-    <Box
-      style={{
-        display: "flex",
-        gap: theme.spacing(1),
-        marginBottom: theme.spacing(2),
-      }}
-    >
-      <SendMoney />
-      <TransferNft />
-      <ClaimFees />
-      <Button variant="outlined" onClick={onClaimFreeCoins}>
-        Claim Testnet Coins
-      </Button>
-      <ClaimBurn />
-      <PublishTemplate />
-      <Button variant="outlined" onClick={() => onClaimTestnetNfts()}>
-        Claim Testnet NFTs
-      </Button>
-    </Box>
+    <Button variant="outlined" onClick={() => onClaimTestnetNfts()}>
+      Claim Testnet NFTs
+    </Button>
   );
 }
 
-export default ActionMenu;
+export default ClaimNftsButton;

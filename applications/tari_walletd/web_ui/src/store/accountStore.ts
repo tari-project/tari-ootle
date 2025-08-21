@@ -34,6 +34,8 @@ interface Store {
   setIndexer: (indexer: string) => void;
   popup: any;
   setPopup: (popup: any) => void;
+  assetTab: number;
+  setAssetTab: (tab: number) => void;
 }
 
 const useAccountStore = create<Store>()((set) => ({
@@ -47,6 +49,8 @@ const useAccountStore = create<Store>()((set) => ({
   setIndexer: (indexer) => set({ indexer: indexer }),
   popup: { visible: false },
   setPopup: (popup) => set({ popup: { visible: true, ...popup } }),
+  assetTab: 0,
+  setAssetTab: (tab) => set({ assetTab: tab }),
 }));
 
 export default useAccountStore;

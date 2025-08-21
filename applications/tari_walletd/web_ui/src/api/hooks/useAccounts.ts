@@ -273,11 +273,12 @@ export const useAccountsGet = (account: ComponentAddress) => {
 
 export const useAccountNFTsList = (account: ComponentAddress, offset: number, limit: number) => {
   return useQuery({
-    queryKey: ["nfts_list_" + account],
+    queryKey: ["nfts_list_" + account + "_" + offset + "_" + limit],
     queryFn: () => nftList({ account: { ComponentAddress: account }, offset, limit }),
     onError: (_error: ApiError) => {},
   });
 };
+
 
 export const useValidatorFees = (accountOrKeyIndex: AccountOrKeyIndex, shardGroup = null) => {
   return useQuery({

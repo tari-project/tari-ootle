@@ -70,8 +70,8 @@ pub struct BlockHeader {
     command_merkle_root: FixedHash,
     /// Proposer signature that signs the Block ID
     signature: Option<SchnorrSignatureBytes>,
-    /// The time indicating the creation time of the block. Currently, this can be chosen arbitrarily and is only
-    /// informational/used for metrics.
+    /// The Unix Epoch timestamp indicating the creation time of the block. Currently, this can be chosen arbitrarily
+    /// and is only informational/used for metrics.
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     timestamp: u64,
     /// The epoch hash is a hash given by the epoch oracle. E.g. the base layer epoch oracle gives the first block hash

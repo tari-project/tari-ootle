@@ -48,6 +48,7 @@ use crate::{
         foreign_proposal,
         foreign_proposal::ForeignProposalCf,
         foreign_substate_pledge::ForeignSubstatePledgeCf,
+        lock_conflict,
         lock_conflict::LockConflictCf,
         missing_transactions::MissingTransactionCf,
         parked_block::ParkedBlockCf,
@@ -123,6 +124,7 @@ pub fn all_column_families_iter() -> impl Iterator<Item = &'static str> {
         BurntUtxoCf::name(),
         burnt_utxo::ProposedInBlockIndex::name(),
         LockConflictCf::name(),
+        lock_conflict::LockConflictBlockIdIndex::name(),
         EvictedNodeCf::name(),
         ValidatorNodeEpochStatsCf::name(),
     ]

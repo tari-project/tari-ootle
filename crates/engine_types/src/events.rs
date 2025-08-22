@@ -27,10 +27,8 @@ use tari_template_lib::{
     models::Metadata,
     types::{Hash, TemplateAddress},
 };
-#[cfg(feature = "ts")]
-use ts_rs::TS;
 
-use crate::{serde_with, substate::SubstateId};
+use crate::substate::SubstateId;
 
 // Topics for builtin events emitted by the engine
 const STANDARD_TOPIC_PREFIX: &str = "std.";
@@ -40,14 +38,14 @@ fn std_event(object_name: &str, action_name: &str) -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct Event {
     substate_id: Option<SubstateId>,
-    #[serde(with = "serde_with::hex")]
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     template_address: TemplateAddress,
-    #[serde(with = "serde_with::hex")]
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     tx_hash: Hash,
     topic: String,
     payload: Metadata,

@@ -4,7 +4,12 @@
 use std::collections::{HashMap, HashSet};
 
 use tari_ootle_common_types::{Epoch, Network};
-use tari_ootle_storage::{consensus_models::Block, StateStore, StateStoreReadTransaction, StateStoreWriteTransaction};
+use tari_ootle_storage::{
+    consensus_models::{Block, SubstateValueFilterFlags},
+    StateStore,
+    StateStoreReadTransaction,
+    StateStoreWriteTransaction,
+};
 use tari_state_tree::Version;
 
 use crate::{
@@ -64,7 +69,7 @@ fn operations(db: impl StateStore) {
     for (state_version, (num_substates, shards)) in &shards {
         for shard in shards {
             let transitions = tx
-                .state_transitions_get_starting_at(*shard, *state_version, false)
+                .state_transitions_get_starting_at(*shard, *state_version, SubstateValueFilterFlags::empty())
                 .unwrap();
             assert_eq!(transitions.epoch, EPOCH);
             assert_eq!(transitions.state_version, *state_version);

@@ -34,7 +34,7 @@ use tari_common::{
 use tari_crypto::tari_utilities::{hex::Hex, message_format::MessageFormat};
 use tari_engine_types::substate::SubstateId;
 use tari_indexer::{
-    config::{ApplicationConfig, EventFilterConfig, IndexerConfig},
+    config::{ApplicationConfig, IndexerConfig},
     run_indexer,
 };
 use tari_indexer_client::{
@@ -192,12 +192,7 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
         config.indexer.graphql_address = Some(format!("127.0.0.1:{}", graphql_port).parse().unwrap());
 
         // store all events in the database using an empty filter
-        config.indexer.event_filters = vec![EventFilterConfig {
-            topic: None,
-            entity_id: None,
-            substate_id: None,
-            template_address: None,
-        }];
+        config.indexer.event_filters = vec![];
 
         // Add all other VNs as peer seeds
         config.peer_seeds.peer_seeds = StringList::from(peer_seeds);

@@ -96,6 +96,6 @@ impl From<&Substate> for SubstateType {
 
 impl Display for SubstateType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_prefix_str())
+        write!(f, "{:?}", self)
     }
 }

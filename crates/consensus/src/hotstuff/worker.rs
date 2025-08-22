@@ -1055,6 +1055,10 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 zero_block.commit_block_without_state_changes(tx, &zero_block.justify().calculate_id())?;
             }
 
+            if !Block::get_ids_by_epoch_and_height(&**tx, epoch, NodeHeight::zero())?.is_empty() {
+                return Ok(());
+            }
+
             let state_merkle_root = ShardedStateTree::new(&**tx).calculate_state_root(shard_group)?;
 
             let mut genesis = Block::genesis(
@@ -1065,19 +1069,19 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 FixedHash::new(state_merkle_root.into_array()),
                 self.config.sidechain_id,
             );
-            if !genesis.exists(&**tx)? {
-                info!(target: LOG_TARGET, "✨Creating genesis block {genesis}");
-                genesis.justify().save(tx)?;
-                genesis.insert(tx)?;
-                genesis.add_justify_qc(tx, &QcId::zero())?;
-                genesis.as_locked().set(tx)?;
-                genesis.as_leaf().set(tx)?;
-                genesis.as_highest_seen().set(tx)?;
-                genesis.as_last_executed().set(tx)?;
-                genesis.as_last_voted().set(tx)?;
-                genesis.justify().as_high_pc().set(tx)?;
-                genesis.commit_block_without_state_changes(tx, &genesis.justify().calculate_id())?;
-            }
+            // Warn: you cannot use genesis.exists(tx) here, because we're calculating the current state merkle root,
+            // not the merkle root at height = 0.
+            info!(target: LOG_TARGET, "✨Creating genesis block {genesis}");
+            genesis.justify().save(tx)?;
+            genesis.insert(tx)?;
+            genesis.add_justify_qc(tx, &QcId::zero())?;
+            genesis.as_locked().set(tx)?;
+            genesis.as_leaf().set(tx)?;
+            genesis.as_highest_seen().set(tx)?;
+            genesis.as_last_executed().set(tx)?;
+            genesis.as_last_voted().set(tx)?;
+            genesis.justify().as_high_pc().set(tx)?;
+            genesis.commit_block_without_state_changes(tx, &genesis.justify().calculate_id())?;
 
             Ok(())
         })

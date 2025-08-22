@@ -1,21 +1,29 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::time::Duration;
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, Seq};
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::Decision;
 use tari_engine_types::{
     commit_result::ExecuteResult,
     substate::{SubstateId, SubstateValue},
     template_lib_models::{NonFungibleAddress, ResourceAddress},
+    Utxo,
 };
-use tari_ootle_common_types::{substate_type::SubstateType, Epoch};
+use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, StateVersion, VersionedSubstateId};
 use tari_ootle_storage::time::PrimitiveDateTime;
 use tari_template_abi::TemplateDef;
-use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
+use tari_template_lib_types::{
+    crypto::{RistrettoPublicKeyBytes, UtxoTagByte},
+    TemplateAddress,
+};
 use tari_transaction::{Transaction, TransactionId};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -52,7 +60,8 @@ pub struct ListSubstateItem {
     pub module_name: Option<String>,
     pub version: u32,
     pub template_address: Option<TemplateAddress>,
-    pub timestamp: u64,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub timestamp: PrimitiveDateTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -452,3 +461,64 @@ pub struct GetTemplateDefinitionResponse {
     ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
 )]
 pub struct IndexerReadyResponse {}
+
+#[serde_as]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
+)]
+pub struct GetUtxoUpdatesRequest {
+    #[cfg_attr(feature = "ts", ts(type = "[[Shard, [StateVersion, UtxoTagByte]]]"))]
+    #[serde_as(as = "Seq<(_, _)>")]
+    pub shard_state_versions: HashMap<Shard, StateVersion>,
+    pub filter_tag_bytes: HashSet<UtxoTagByte>,
+    pub resource_address: ResourceAddress,
+    pub per_shard_limit: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
+)]
+pub struct GetUtxoUpdatesResponse {
+    pub utxo_updates: Vec<UtxoUpdate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
+)]
+pub enum UtxoUpdate {
+    Unspent(UtxoUnspent),
+    Spent(UtxoSpent),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
+)]
+pub struct UtxoUnspent {
+    pub versioned_substate_id: VersionedSubstateId,
+    pub shard: Shard,
+    pub state_version: StateVersion,
+    pub utxo: Utxo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
+)]
+pub struct UtxoSpent {
+    pub versioned_substate_id: VersionedSubstateId,
+    pub state_version: StateVersion,
+}

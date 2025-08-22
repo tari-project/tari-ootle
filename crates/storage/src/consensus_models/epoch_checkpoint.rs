@@ -127,7 +127,14 @@ impl EpochCheckpoint {
         Ok(())
     }
 
-    fn validate_well_formed(&self) -> Result<(), EpochCheckpointValidationError> {
+    /// Validates that the epoch checkpoint is well-formed.
+    /// This includes basic sanity checks such as:
+    /// - The shard group is valid (start < end + 1)
+    /// - The number of shard state roots does not exceed the number of shards in the group
+    /// - The state root matches the provided header
+    ///
+    /// Use EpochCheckpoint::validate() to validate the entire proof (including well-formedness).
+    pub fn validate_well_formed(&self) -> Result<(), EpochCheckpointValidationError> {
         // Basic sanity checks
         let header_shard_group = convert_sidechain_shard_group_to_shard_group(self.header().shard_group)?;
         let num_shards = header_shard_group.len();
@@ -163,8 +170,20 @@ impl EpochCheckpoint {
 }
 
 impl EpochCheckpoint {
-    pub fn get<TTx: StateStoreReadTransaction>(tx: &TTx, epoch: Epoch) -> Result<Self, StorageError> {
-        tx.epoch_checkpoint_get(epoch)
+    pub fn get_all_from_epoch<TTx: StateStoreReadTransaction>(
+        tx: &TTx,
+        from_epoch: Epoch,
+        limit: usize,
+    ) -> Result<Vec<Self>, StorageError> {
+        tx.epoch_checkpoint_get_all_from_epoch(from_epoch, limit)
+    }
+
+    pub fn get_by_shard_group<TTx: StateStoreReadTransaction>(
+        tx: &TTx,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> Result<Self, StorageError> {
+        tx.epoch_checkpoint_get_by_shard_group(epoch, shard_group)
     }
 
     pub fn save<TTx: StateStoreWriteTransaction>(&self, tx: &mut TTx) -> Result<(), StorageError> {

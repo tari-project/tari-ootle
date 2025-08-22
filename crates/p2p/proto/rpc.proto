@@ -173,7 +173,7 @@ message SyncBlocksRequest {
 // Clippy complains about too many bools and prefers an enum
 enum StreamSubstateSelection {
   No = 0;
-  All = 1;
+  AllSubstates = 1;
   TransactionReceiptsOnly = 2;
 }
 
@@ -194,12 +194,13 @@ message QuorumCertificates {
   repeated tari.ootle.consensus.QuorumCertificate quorum_certificates = 1;
 }
 
-message GetCheckpointRequest {
-  uint64 epoch = 1;
+message GetCheckpointsRequest {
+  tari.ootle.common.Epoch from_epoch = 1;
+  uint32 num_to_return = 2;
 }
 
-message GetCheckpointResponse {
-  EpochCheckpoint checkpoint = 1;
+message GetCheckpointsResponse {
+  repeated EpochCheckpoint checkpoints = 1;
 }
 
 message EpochCheckpoint {
@@ -215,7 +216,31 @@ message TreeRootSummary {
 message SyncStateRequest {
   uint64 start_state_version = 1;
   uint32 shard = 2;
-  uint64 until_epoch = 3;
+  // Optional - If not provided, state will be streamed until the current epoch
+  tari.ootle.common.Epoch until_epoch = 3;
+  // Bitflags representing which substates to return.
+  // enum StateSyncValueFilterFlags {
+  //  // Includes all substates
+  //  None = 0;
+  //  All = 0x0001;
+  //  // Includes Components
+  //  Component = 0x0002;
+  //  // Includes resources
+  //  Resource = 0x0004;
+  //  // Includes vaults
+  //  Vault = 0x0008;
+  //  // Includes fungible and non-fungible assets
+  //  NonFungible = 0x0010;
+  //  // Includes transaction receipts
+  //  TransactionReceipt = 0x0020;
+  //  // Includes published template metadata
+  //  Template = 0x0040;
+  //  // Includes validator fee pool substates
+  //  ValidatorFeePool = 0x0080;
+  //  // Includes UTXOs
+  //  Utxo = 0x0100;
+  //}
+  uint32 value_filters = 4;
 }
 
 message SyncStateResponse {
@@ -241,3 +266,5 @@ message SyncTemplatesResponse {
   string template_name = 4;
   bytes binary = 5;
 }
+
+message GetChainSummary {}

@@ -20,17 +20,26 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{convert::TryInto, sync::Arc};
+use std::{collections::HashSet, convert::TryInto};
 
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_epoch_manager::service::EpochManagerHandle;
-use tari_indexer_client::types::ListSubstateItem;
+use tari_indexer_client::types::{ListSubstateItem, UtxoUpdate};
 use tari_indexer_lib::{substate_scanner::SubstateScanner, NonFungibleSubstate};
 use tari_ootle_app_utilities::substate_file_cache::SubstateFileCache;
-use tari_ootle_common_types::{substate_type::SubstateType, PeerAddress, VersionedSubstateIdRef};
-use tari_template_lib::{models::ResourceAddress, types::TemplateAddress};
+use tari_ootle_common_types::{
+    shard::Shard,
+    substate_type::SubstateType,
+    PeerAddress,
+    StateVersion,
+    VersionedSubstateIdRef,
+};
+use tari_template_lib::{
+    models::ResourceAddress,
+    types::{crypto::UtxoTagByte, TemplateAddress},
+};
 use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClientFactory};
 
 use crate::storage_sqlite::store_factory::{IndexerStore, IndexerStoreReadTransaction, SqliteIndexerStore};
@@ -48,16 +57,19 @@ pub struct EventResponse {
     pub created_by_transaction: FixedHash,
 }
 
+#[derive(Debug, Clone)]
 pub struct SubstateManager {
     substate_scanner:
-        Arc<SubstateScanner<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SubstateFileCache>>,
+        SubstateScanner<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SubstateFileCache>,
     substate_store: SqliteIndexerStore,
 }
 
 impl SubstateManager {
     pub fn new(
-        substate_scanner: Arc<
-            SubstateScanner<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SubstateFileCache>,
+        substate_scanner: SubstateScanner<
+            EpochManagerHandle<PeerAddress>,
+            TariValidatorNodeRpcClientFactory,
+            SubstateFileCache,
         >,
         substate_store: SqliteIndexerStore,
     ) -> Self {
@@ -67,16 +79,31 @@ impl SubstateManager {
         }
     }
 
-    pub async fn list_substates(
+    pub fn get_stored_substates_by_filters(
         &self,
         filter_by_type: Option<SubstateType>,
         filter_by_template: Option<TemplateAddress>,
         limit: Option<u64>,
         offset: Option<u64>,
     ) -> Result<Vec<ListSubstateItem>, anyhow::Error> {
-        let mut tx = self.substate_store.create_read_tx()?;
-        let substates = tx.list_substates(filter_by_type, filter_by_template, limit, offset)?;
+        let substates = self
+            .substate_store
+            .with_read_tx(|tx| tx.list_substates(filter_by_type, filter_by_template, limit, offset))?;
         Ok(substates)
+    }
+
+    pub fn get_utxo_updates(
+        &self,
+        resource_address: ResourceAddress,
+        shard: Shard,
+        from_state_version: StateVersion,
+        filter_tag_bytes: &HashSet<UtxoTagByte>,
+        limit: u32,
+    ) -> Result<Vec<UtxoUpdate>, anyhow::Error> {
+        let utxos = self.substate_store.with_read_tx(|tx| {
+            tx.get_utxo_updates(resource_address, shard, from_state_version, filter_tag_bytes, limit)
+        })?;
+        Ok(utxos)
     }
 
     pub async fn get_substate(

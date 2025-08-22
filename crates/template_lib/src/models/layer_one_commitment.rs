@@ -66,6 +66,12 @@ impl TryFrom<&[u8]> for UnclaimedConfidentialOutputAddress {
     }
 }
 
+impl From<[u8; ObjectKey::LENGTH]> for UnclaimedConfidentialOutputAddress {
+    fn from(value: [u8; ObjectKey::LENGTH]) -> Self {
+        Self(BorTag::new(ObjectKey::from_array(value)))
+    }
+}
+
 impl Display for UnclaimedConfidentialOutputAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "commitment_{}", self.0.inner())

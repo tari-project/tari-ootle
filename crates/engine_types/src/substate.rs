@@ -287,7 +287,7 @@ impl SubstateId {
         matches!(self, Self::ValidatorFeePool(_))
     }
 
-    pub fn is_utxo_address(&self) -> bool {
+    pub fn is_utxo(&self) -> bool {
         matches!(self, Self::Utxo(_))
     }
 

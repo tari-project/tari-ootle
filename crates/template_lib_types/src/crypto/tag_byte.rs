@@ -2,8 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Serialize};
+use tari_template_abi::rust::fmt;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Hash, PartialEq, Eq)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -18,5 +19,11 @@ impl UtxoTagByte {
 
     pub const fn as_byte(&self) -> u8 {
         self.0
+    }
+}
+
+impl fmt::Display for UtxoTagByte {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "TagByte({})", self.0)
     }
 }

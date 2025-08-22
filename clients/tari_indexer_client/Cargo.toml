@@ -17,13 +17,16 @@ tari_template_abi = { workspace = true }
 tari_template_lib_types = { workspace = true }
 tari_consensus_types = { workspace = true }
 
-anyhow = { workspace = true }
-reqwest = { workspace = true, features = ["json"] }
+anyhow = { workspace = true, optional = true }
+reqwest = { workspace = true, features = ["json"], optional = true }
 multiaddr = { workspace = true }
 serde = { workspace = true, default-features = true }
 serde_json = { workspace = true }
-thiserror = { workspace = true }
+serde_with = { workspace = true }
+thiserror = { workspace = true, optional = true }
 ts-rs = { workspace = true, optional = true }
 
 [features]
+default = ["client"]
 ts = ["ts-rs"]
+client = ["dep:reqwest", "dep:anyhow", "dep:thiserror"]

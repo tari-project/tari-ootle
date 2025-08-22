@@ -649,7 +649,7 @@ where
 
         // Update UTXOs
         let stealth_outputs_api = self.wallet_sdk.stealth_outputs_api();
-        let utxos = diff.up_iter().filter(|(id, _)| id.is_utxo_address()).map(|(id, s)| {
+        let utxos = diff.up_iter().filter(|(id, _)| id.is_utxo()).map(|(id, s)| {
             let utxo = s
                 .substate_value()
                 .as_utxo()

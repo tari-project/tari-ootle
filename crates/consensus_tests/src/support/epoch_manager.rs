@@ -390,6 +390,32 @@ impl EpochManagerReader for TestEpochManager {
 
         Ok(vn.clone())
     }
+
+    async fn get_committee_info(
+        &self,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> Result<CommitteeInfo, EpochManagerError> {
+        let state = self.state_lock().await;
+        let committee = state.committees.get(&shard_group).ok_or_else(|| {
+            EpochManagerError::StorageError(StorageError::NotFound {
+                item: "committee",
+                key: format!("for shard group {shard_group}"),
+            })
+        })?;
+
+        let num_members = committee.len();
+        let total_power = committee.total_power();
+
+        Ok(CommitteeInfo::new(
+            TEST_NUM_PRESHARDS,
+            num_members as u32,
+            state.committees.len() as u32,
+            shard_group,
+            epoch,
+            total_power,
+        ))
+    }
 }
 
 #[derive(Debug, Clone)]

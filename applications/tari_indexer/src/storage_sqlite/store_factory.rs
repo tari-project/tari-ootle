@@ -21,7 +21,8 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
-    collections::BTreeMap,
+    collections::HashSet,
+    fmt::Debug,
     fs::create_dir_all,
     ops::{Deref, DerefMut},
     path::PathBuf,
@@ -32,24 +33,34 @@ use std::{
 use diesel::{prelude::*, sql_query, SqliteConnection};
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
 use log::*;
+use serde::{de::DeserializeOwned, Serialize};
 use tari_consensus_types::BlockId;
 use tari_crypto::tari_utilities::hex::to_hex;
-use tari_engine_types::substate::{SubstateId, SubstateValue};
-use tari_indexer_client::types::{ListSubstateItem, TransactionEntry};
+use tari_engine_types::{
+    events::Event,
+    substate::{SubstateId, SubstateValue},
+};
+use tari_indexer_client::types::{ListSubstateItem, TransactionEntry, UtxoUpdate};
 use tari_indexer_lib::NonFungibleSubstate;
-use tari_ootle_common_types::{substate_type::SubstateType, Epoch, ShardGroup};
-use tari_ootle_storage::{time::PrimitiveDateTime, StorageError};
+use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, ShardGroup, StateVersion};
+use tari_ootle_storage::{
+    consensus_models::{EpochCheckpoint, SubstateUpdateProof},
+    time::PrimitiveDateTime,
+    StorageError,
+};
 use tari_ootle_storage_sqlite::{error::SqliteStorageError, SqliteTransaction};
-use tari_template_lib::{models::ResourceAddress, types::TemplateAddress};
+use tari_template_lib::{
+    models::ResourceAddress,
+    types::{crypto::UtxoTagByte, TemplateAddress},
+};
 use tari_transaction::{Transaction, TransactionId};
 
-use super::models::events::{NewEvent, NewScannedBlockId};
+use super::models::{NewEvent, NewScannedBlockId, UtxoRecordInsert, UtxoRecordUpdate};
 use crate::storage_sqlite::{
-    models::{
-        events::{Event, NewEventPayloadField, ScannedBlockId},
-        substate::{NewSubstate, Substate},
-    },
-    serialization::{deserialize_json, serialize_hex, serialize_json},
+    models,
+    models::{EventDb, KeyValue, NewSubstate, ScannedBlockId, Substate},
+    schema,
+    serialization::{deserialize_hex_try_from, deserialize_json, serialize_hex, serialize_json},
 };
 
 const LOG_TARGET: &str = "tari::indexer::storage_sqlite";
@@ -81,25 +92,16 @@ impl SqliteIndexerStore {
             connection: Arc::new(Mutex::new(connection)),
         })
     }
-
-    pub fn find_by_address(address: String, conn: &mut SqliteConnection) -> Result<Option<Substate>, StorageError> {
-        use crate::storage_sqlite::schema::substates;
-
-        let substate_option = substates::table
-            .filter(substates::address.eq(address))
-            .first(&mut *conn)
-            .optional()
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("find_by_address: {}", e),
-            })?;
-
-        Ok(substate_option)
+}
+impl Debug for SqliteIndexerStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SqliteIndexerStore {{ connection: ... }}")
     }
 }
 pub trait IndexerStore {
     type ReadTransaction<'a>: IndexerStoreReadTransaction
     where Self: 'a;
-    type WriteTransaction<'a>: IndexerStoreWriteTransaction + Deref<Target = Self::ReadTransaction<'a>>
+    type WriteTransaction<'a>: IndexerStoreWriteTransaction + Deref<Target = Self::ReadTransaction<'a>> + DerefMut
     where Self: 'a;
 
     fn create_read_tx(&self) -> Result<Self::ReadTransaction<'_>, StorageError>;
@@ -182,8 +184,7 @@ pub trait IndexerStoreReadTransaction {
         topic_filter: Option<String>,
         offset: u32,
         limit: u32,
-    ) -> Result<Vec<Event>, StorageError>;
-    fn event_exists(&mut self, event: &NewEvent) -> Result<bool, StorageError>;
+    ) -> Result<Vec<EventDb>, StorageError>;
     fn get_oldest_scanned_epoch(&mut self) -> Result<Option<Epoch>, StorageError>;
     fn get_last_scanned_block_id(
         &mut self,
@@ -195,6 +196,19 @@ pub trait IndexerStoreReadTransaction {
         last_transaction_id: Option<TransactionId>,
         limit: usize,
     ) -> Result<Vec<TransactionEntry>, StorageError>;
+
+    // -------------------------------- KeyValues -------------------------------- //
+    fn key_value_get_value<K: AsRef<str>, T: DeserializeOwned>(&mut self, key: K) -> Result<T, StorageError>;
+    fn key_value_get_raw<K: AsRef<str>>(&mut self, key: K) -> Result<KeyValue<String>, StorageError>;
+
+    fn get_utxo_updates(
+        &mut self,
+        resource_address: ResourceAddress,
+        shard: Shard,
+        from_state_version: StateVersion,
+        filter_tag_bytes: &HashSet<UtxoTagByte>,
+        limit: u32,
+    ) -> Result<Vec<UtxoUpdate>, StorageError>;
 }
 
 impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
@@ -236,9 +250,9 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             .into_iter()
             .map(|s| {
                 let substate_id = SubstateId::from_str(&s.address)?;
-                let version = u32::try_from(s.version)?;
-                let template_address = s.template_address.map(|h| TemplateAddress::from_hex(&h)).transpose()?;
-                let timestamp = u64::try_from(s.timestamp)?;
+                let version = s.version as u32;
+                let template_address = s.template_address.map(|h| deserialize_hex_try_from(&h)).transpose()?;
+                let timestamp = s.timestamp;
                 Ok(ListSubstateItem {
                     substate_id,
                     module_name: s.module_name,
@@ -333,7 +347,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         topic_filter: Option<String>,
         offset: u32,
         limit: u32,
-    ) -> Result<Vec<Event>, StorageError> {
+    ) -> Result<Vec<EventDb>, StorageError> {
         // TODO: allow to query by payload as well, unifying all event methods into one
         info!(
             target: LOG_TARGET,
@@ -361,35 +375,12 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
 
         let events = query
             .order(events::id.desc())
-            .get_results::<Event>(self.connection())
+            .get_results::<EventDb>(self.connection())
             .map_err(|e| StorageError::QueryError {
                 reason: format!("get_events: {}", e),
             })?;
 
         Ok(events)
-    }
-
-    fn event_exists(&mut self, value: &NewEvent) -> Result<bool, StorageError> {
-        use crate::storage_sqlite::schema::events;
-
-        let count = events::table
-            .filter(
-                events::substate_id
-                    .eq(&value.substate_id)
-                    .and(events::template_address.eq(&value.template_address))
-                    .and(events::topic.eq(&value.topic))
-                    .and(events::version.eq(&value.version))
-                    .and(events::payload.eq(&value.payload))
-                    .and(events::tx_hash.eq(&value.tx_hash)),
-            )
-            .count()
-            .get_result::<i64>(self.connection())
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("event_exists: {}", e),
-            })?;
-        let exists = count > 0;
-
-        Ok(exists)
     }
 
     fn get_oldest_scanned_epoch(&mut self) -> Result<Option<Epoch>, StorageError> {
@@ -480,6 +471,73 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         })
         .collect()
     }
+
+    // -------------------------------- KeyValues -------------------------------- //
+    fn key_value_get_value<K: AsRef<str>, T: DeserializeOwned>(&mut self, key: K) -> Result<T, StorageError> {
+        let key_value = self.key_value_get_raw(key)?;
+        deserialize_json(&key_value.value)
+    }
+
+    fn key_value_get_raw<K: AsRef<str>>(&mut self, key: K) -> Result<KeyValue<String>, StorageError> {
+        const OPERATION: &str = "key_value_get_json";
+        use schema::key_values;
+
+        let key_value = key_values::table
+            .filter(key_values::key.eq(key.as_ref()))
+            .first::<models::KeyValueEntry>(self.connection())
+            .optional()
+            .map_err(|e| StorageError::general(OPERATION, e))?
+            .ok_or_else(|| StorageError::NotFound {
+                item: "key_value",
+                key: key.as_ref().to_string(),
+            })?;
+
+        Ok(key_value.into())
+    }
+
+    fn get_utxo_updates(
+        &mut self,
+        resource_address: ResourceAddress,
+        shard: Shard,
+        from_state_version: StateVersion,
+        filter_tag_bytes: &HashSet<UtxoTagByte>,
+        limit: u32,
+    ) -> Result<Vec<UtxoUpdate>, StorageError> {
+        const OPERATION: &str = "get_utxo_updates";
+        use crate::storage_sqlite::schema::utxos;
+
+        let mut query = utxos::table
+            .filter(utxos::resource_address.eq(resource_address.to_string()))
+            .filter(utxos::state_version.gt(from_state_version.as_u64() as i64))
+            .filter(utxos::shard.eq(shard.as_u32() as i32))
+            .into_boxed();
+
+        if !filter_tag_bytes.is_empty() {
+            query = query.filter(utxos::utxo_tag_byte.eq_any(filter_tag_bytes.iter().map(|b| i32::from(b.as_byte()))));
+        }
+
+        let rows = query
+            .limit(i64::from(limit))
+            .order_by(utxos::state_version.asc())
+            .load_iter::<models::UtxoRecord, _>(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?;
+
+        // NOTE: I doubt the size hint > 0
+        let (lower, upper) = rows.size_hint();
+        let size_hint = upper.unwrap_or(lower);
+        let mut updates = Vec::with_capacity(size_hint);
+        for row in rows {
+            let row = row.map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?;
+
+            updates.push(row.try_convert()?);
+        }
+
+        Ok(updates)
+    }
 }
 
 pub struct SqliteStoreWriteTransaction<'a> {
@@ -503,15 +561,21 @@ impl<'a> SqliteStoreWriteTransaction<'a> {
 pub trait IndexerStoreWriteTransaction {
     fn commit(self) -> Result<(), StorageError>;
     fn rollback(self) -> Result<(), StorageError>;
-    fn insert_substate(&mut self, new_substate: NewSubstate) -> Result<(), StorageError>;
-    #[allow(dead_code)]
-    fn delete_substate(&mut self, address: String) -> Result<(), StorageError>;
-    #[allow(dead_code)]
-    fn clear_substates(&mut self) -> Result<(), StorageError>;
-    fn save_event(&mut self, new_event: NewEvent) -> Result<(), StorageError>;
+    fn key_value_set<K: AsRef<str>, V: Serialize>(&mut self, key: K, value: V) -> Result<(), StorageError>;
+    fn batch_insert_substate_transitions<I: IntoIterator<Item = (Epoch, SubstateUpdateProof)>>(
+        &mut self,
+        shard: Shard,
+        state_version: StateVersion,
+        updates: I,
+    ) -> Result<(), StorageError>;
+    fn batch_insert_utxo_updates<I: IntoIterator<Item = UtxoUpdate>>(&mut self, updates: I)
+        -> Result<(), StorageError>;
+    fn upsert_substate(&mut self, new_substate: NewSubstate) -> Result<(), StorageError>;
+    fn batch_insert_events<I: IntoIterator<Item = Event>>(&mut self, events: I) -> Result<(), StorageError>;
     fn save_scanned_block_id(&mut self, new_scanned_block_id: NewScannedBlockId) -> Result<(), StorageError>;
     fn delete_scanned_epochs_older_than(&mut self, epoch: Epoch) -> Result<(), StorageError>;
     fn insert_or_ignore_transaction(&mut self, transaction: &Transaction) -> Result<(), StorageError>;
+    fn insert_or_ignore_epoch_checkpoint(&mut self, epoch_checkpoint: &EpochCheckpoint) -> Result<(), StorageError>;
 }
 
 impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
@@ -525,19 +589,175 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         Ok(())
     }
 
-    fn insert_substate(&mut self, new_substate: NewSubstate) -> Result<(), StorageError> {
+    fn key_value_set<K: AsRef<str>, V: Serialize>(&mut self, key: K, value: V) -> Result<(), StorageError> {
+        const OPERATION: &str = "key_value_set";
+        use schema::key_values;
+        let json = serialize_json(&value)?;
+
+        diesel::insert_into(key_values::table)
+            .values((key_values::key.eq(key.as_ref()), key_values::value.eq(&json)))
+            .on_conflict(key_values::key)
+            .do_update()
+            .set(key_values::value.eq(&json))
+            .execute(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))?;
+
+        Ok(())
+    }
+
+    fn batch_insert_substate_transitions<I: IntoIterator<Item = (Epoch, SubstateUpdateProof)>>(
+        &mut self,
+        shard: Shard,
+        state_version: StateVersion,
+        updates: I,
+    ) -> Result<(), StorageError> {
+        const OPERATION: &str = "batch_insert_substate_transitions";
+        use schema::substate_transitions;
+
+        diesel::insert_into(substate_transitions::table)
+            .values(
+                updates
+                    .into_iter()
+                    .map(|(epoch, proof)| {
+                        (
+                            substate_transitions::shard.eq(shard.as_u32() as i32),
+                            substate_transitions::state_version.eq(state_version.as_u64() as i64),
+                            substate_transitions::epoch.eq(epoch.as_u64() as i64),
+                            substate_transitions::substate_id.eq(proof.substate_id().to_string()),
+                            substate_transitions::substate_type.eq(SubstateType::from(proof.substate_id()).to_string()),
+                            substate_transitions::version.eq(proof.version() as i32),
+                            substate_transitions::is_up.eq(proof.is_create()),
+                            substate_transitions::value_hash.eq(proof
+                                .as_create()
+                                .map(|v| serialize_hex(v.substate.value.to_value_hash(proof.version())))),
+                            // substate_transitions::utxo_tag_byte.eq(proof
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .execute(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))?;
+
+        Ok(())
+    }
+
+    fn batch_insert_utxo_updates<I: IntoIterator<Item = UtxoUpdate>>(
+        &mut self,
+        updates: I,
+    ) -> Result<(), StorageError> {
+        const OPERATION: &str = "batch_insert_utxo_updates";
+        use crate::storage_sqlite::schema::utxos;
+
+        fn utxo_exists(connection: &mut SqliteConnection, substate_id: &str) -> Result<bool, StorageError> {
+            use crate::storage_sqlite::schema::utxos;
+
+            let count = utxos::table
+                .filter(utxos::substate_id.eq(substate_id))
+                .count()
+                .limit(1)
+                .get_result::<i64>(connection)
+                .map_err(|e| StorageError::QueryError {
+                    reason: format!("utxo_exists: {}", e),
+                })?;
+            Ok(count > 0)
+        }
+
+        let (inserts, updates) =
+            updates
+                .into_iter()
+                .try_fold((Vec::new(), Vec::new()), |(mut inserts, mut updates), update| {
+                    match update {
+                        UtxoUpdate::Unspent(unspent) => {
+                            let substate_id = unspent.versioned_substate_id.substate_id().to_string();
+                            if utxo_exists(self.connection(), &substate_id)? {
+                                // If the UTXO already exists, we update it instead of inserting a new one
+                                let update = UtxoRecordUpdate {
+                                    version: Some(unspent.versioned_substate_id.version() as i32),
+                                    output: Some(unspent.utxo.output().map(serialize_json).transpose()?),
+                                    state_version: Some(unspent.state_version.as_u64() as i64),
+                                    is_spent: Some(false),
+                                    is_burnt: Some(unspent.utxo.is_burnt()),
+                                    is_frozen: Some(unspent.utxo.is_frozen()),
+                                };
+                                updates.push((substate_id, update));
+                            } else {
+                                inserts.push(UtxoRecordInsert {
+                                    substate_id,
+                                    version: unspent.versioned_substate_id.version() as i32,
+                                    output: unspent.utxo.output().map(serialize_json).transpose()?,
+                                    shard: unspent.shard.as_u32() as i32,
+                                    resource_address: unspent
+                                        .versioned_substate_id
+                                        .substate_id()
+                                        .as_utxo_address()
+                                        .map(|a| a.resource_address().to_string())
+                                        .ok_or_else(|| StorageError::QueryError {
+                                            reason: format!(
+                                                "[{OPERATION}] Substate ID {} is not a valid UTXO address",
+                                                unspent.versioned_substate_id.substate_id()
+                                            ),
+                                        })?,
+                                    state_version: unspent.state_version.as_u64() as i64,
+                                    utxo_tag_byte: unspent.utxo.output().map(|o| i32::from(o.tag.as_byte())),
+                                    is_spent: false,
+                                    is_burnt: unspent.utxo.is_burnt(),
+                                    is_frozen: unspent.utxo.is_frozen(),
+                                });
+                            }
+                        },
+                        UtxoUpdate::Spent(spent) => {
+                            let update = UtxoRecordUpdate {
+                                version: Some(spent.versioned_substate_id.version() as i32),
+                                // Prune the UTXO data for spent outputs
+                                output: Some(None),
+                                // Update to deleted state version
+                                state_version: Some(spent.state_version.as_u64() as i64),
+                                is_spent: Some(true),
+                                ..Default::default()
+                            };
+                            updates.push((spent.versioned_substate_id.substate_id().to_string(), update));
+                        },
+                    }
+
+                    Ok::<_, StorageError>((inserts, updates))
+                })?;
+
+        for insert in inserts {
+            // batch insert results in "cannot start a transaction within a transaction" error
+            diesel::insert_into(utxos::table)
+                .values(insert)
+                .execute(self.connection())
+                .map_err(|e| StorageError::general(OPERATION, format!("insert error: {e}")))?;
+        }
+
+        for (substate_id, update) in updates {
+            diesel::update(utxos::table.filter(utxos::substate_id.eq(substate_id.to_string())))
+                .set(update)
+                .execute(self.connection())
+                .map_err(|e| StorageError::general(OPERATION, format!("update error: {e}")))?;
+        }
+
+        Ok(())
+    }
+
+    fn upsert_substate(&mut self, new_substate: NewSubstate) -> Result<(), StorageError> {
         use crate::storage_sqlite::schema::substates;
 
         let address = &new_substate.address;
-        let conn = self.connection();
-        let current_substate = SqliteIndexerStore::find_by_address(address.clone(), conn)?;
+        let current_substate = substates::table
+            .filter(substates::address.eq(address))
+            .first::<Substate>(self.connection())
+            .optional()
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("find_by_address: {}", e),
+            })?;
 
         match current_substate {
             Some(_) => {
                 diesel::update(substates::table)
                     .set(&new_substate)
                     .filter(substates::address.eq(address))
-                    .execute(&mut *conn)
+                    .execute(self.connection())
                     .map_err(|e| StorageError::QueryError {
                         reason: format!("Update leaf node: {}", e),
                     })?;
@@ -549,7 +769,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             None => {
                 diesel::insert_into(substates::table)
                     .values(&new_substate)
-                    .execute(&mut *conn)
+                    .execute(self.connection())
                     .map_err(|e| StorageError::QueryError {
                         reason: format!("Update substate error: {}", e),
                     })?;
@@ -563,75 +783,30 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         Ok(())
     }
 
-    fn delete_substate(&mut self, address: String) -> Result<(), StorageError> {
-        use crate::storage_sqlite::schema::substates;
+    fn batch_insert_events<I: IntoIterator<Item = Event>>(&mut self, events: I) -> Result<(), StorageError> {
+        const OPERATION: &str = "batch_insert_events";
+        use crate::storage_sqlite::schema::events;
 
-        diesel::delete(substates::table)
-            .filter(substates::address.eq(address))
-            .execute(&mut *self.connection())
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("delete substate error: {}", e),
-            })?;
-
-        Ok(())
-    }
-
-    fn clear_substates(&mut self) -> Result<(), StorageError> {
-        use crate::storage_sqlite::schema::substates;
-
-        diesel::delete(substates::table)
-            .execute(&mut *self.connection())
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("clear_substates error: {}", e),
-            })?;
-
-        Ok(())
-    }
-
-    fn save_event(&mut self, new_event: NewEvent) -> Result<(), StorageError> {
-        use crate::storage_sqlite::schema::{event_payloads, events};
-
-        // Save the event into the database
-        let event_row: Event = diesel::insert_into(events::table)
-            .values(&new_event)
-            .get_result::<Event>(self.connection())
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("save_event: {}", e),
-            })?;
-
-        // Save all the key-value pairs of the payload to be able to query them later
-        let payload: BTreeMap<String, String> =
-            serde_json::from_str(new_event.payload.as_str()).map_err(|e| StorageError::QueryError {
-                reason: format!("save_event: {}", e),
-            })?;
-        let new_payload_fields = payload
-            .into_iter()
-            .map(|(key, value)| NewEventPayloadField {
-                payload_key: key,
-                payload_value: value,
-                event_id: event_row.id,
+        let events = events.into_iter().map(|event| {
+            Ok::<_, StorageError>(NewEvent {
+                template_address: event.template_address().to_string(),
+                tx_hash: event.tx_hash().to_string(),
+                topic: event.topic(),
+                payload: serialize_json(event.payload())?,
+                substate_id: event.substate_id().map(|s| s.to_string()),
             })
-            .collect::<Vec<_>>();
-        // diesel fails if we try to pass all the new rows in a single insert
-        // so the workaround is to loop over them
-        // TODO: make diesel work with a single insert instruction instead of looping
-        for field in new_payload_fields {
-            diesel::insert_into(event_payloads::table)
-                .values(&field)
+        });
+
+        for result in events {
+            let event = result?;
+
+            diesel::insert_into(events::table)
+                .values(event)
                 .execute(self.connection())
                 .map_err(|e| StorageError::QueryError {
-                    reason: format!("save_event: {}", e),
+                    reason: format!("{OPERATION}: {}", e),
                 })?;
         }
-        debug!(
-            target: LOG_TARGET,
-            "Added new event to the database with substate_id = {:?}, template_address = {} and for transaction \
-             hash = {}, version = {}",
-            new_event.substate_id,
-            new_event.template_address,
-            new_event.tx_hash,
-            new_event.version,
-        );
 
         Ok(())
     }
@@ -683,6 +858,27 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             .map_err(|e| StorageError::QueryError {
                 reason: format!("insert_transaction: {e}"),
             })?;
+
+        Ok(())
+    }
+
+    fn insert_or_ignore_epoch_checkpoint(&mut self, epoch_checkpoint: &EpochCheckpoint) -> Result<(), StorageError> {
+        const OPERATION: &str = "insert_or_ignore_epoch_checkpoint";
+        use crate::storage_sqlite::schema::epoch_checkpoints;
+
+        diesel::insert_into(epoch_checkpoints::table)
+            .values((
+                epoch_checkpoints::epoch.eq(epoch_checkpoint.epoch().as_u64() as i64),
+                epoch_checkpoints::shard_group.eq(epoch_checkpoint
+                    .checked_shard_group()
+                    .expect("shard group should be valid")
+                    .to_parsable_string()),
+                epoch_checkpoints::json_data.eq(serialize_json(epoch_checkpoint)?),
+            ))
+            .on_conflict((epoch_checkpoints::epoch, epoch_checkpoints::shard_group))
+            .do_nothing()
+            .execute(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))?;
 
         Ok(())
     }

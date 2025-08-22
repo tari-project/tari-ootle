@@ -25,7 +25,7 @@ use tari_ootle_storage::consensus_models::LockConflict;
 use tari_transaction::TransactionId;
 
 use crate::{
-    codecs::{BlockIdCodec, DefaultCodec, TransactionIdCodec, TupleBytesCodec, UnitCodec},
+    codecs::{BlockIdCodec, DefaultCodec, TransactionIdCodec, UnitCodec},
     traits::{Cf, QueryCf},
 };
 
@@ -34,7 +34,7 @@ pub struct LockConflictCf;
 impl Cf for LockConflictCf {
     // (transaction id, Block, depends_on_tx_id)
     type Key = (TransactionId, BlockId, TransactionId);
-    type KeyCodec = TupleBytesCodec<Self::Key>;
+    type KeyCodec = (TransactionIdCodec, BlockIdCodec, TransactionIdCodec);
     type Value = LockConflict;
     type ValueCodec = DefaultCodec<Self::Value>;
 
@@ -56,12 +56,12 @@ pub struct LockConflictBlockIdIndex;
 impl Cf for LockConflictBlockIdIndex {
     // (block id, transaction id, depends_on_tx_id)
     type Key = (BlockId, TransactionId, TransactionId);
-    type KeyCodec = TupleBytesCodec<Self::Key>;
+    type KeyCodec = (BlockIdCodec, TransactionIdCodec, TransactionIdCodec);
     type Value = ();
     type ValueCodec = UnitCodec;
 
     fn name() -> &'static str {
-        "lockconflicts"
+        "lockconflicts_block_id_index"
     }
 }
 

@@ -196,7 +196,11 @@ fn miscellaneous_operations(db: impl StateStore) {
     let epoch_checkpoint = EpochCheckpoint::new(proof, shard_summary);
 
     tx.epoch_checkpoint_save(&epoch_checkpoint).unwrap();
-    let res = tx.epoch_checkpoint_get(block.epoch()).unwrap();
+    let res = tx
+        .epoch_checkpoint_get_all_from_epoch(block.epoch(), 1)
+        .unwrap()
+        .pop()
+        .unwrap();
     assert_eq_debug(&res, &epoch_checkpoint);
 
     // foreign parked blocks

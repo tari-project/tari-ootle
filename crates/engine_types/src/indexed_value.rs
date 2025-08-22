@@ -34,11 +34,7 @@ use crate::{
 const MAX_VISITOR_DEPTH: usize = 50;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct IndexedValue {
     indexed: IndexedWellKnownTypes,
     #[serde(with = "serde_with::cbor_value")]
@@ -143,11 +139,7 @@ impl Default for IndexedValue {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct IndexedWellKnownTypes {
     bucket_ids: Vec<BucketId>,
     proof_ids: Vec<ProofId>,

@@ -53,11 +53,7 @@ pub fn derive_component_address_from_public_key(
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ComponentHeader {
     pub template_address: TemplateAddress,
     pub module_name: String,
@@ -105,11 +101,7 @@ impl ComponentHeader {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ComponentBody {
     #[serde(with = "serde_with::cbor_value")]
     #[cfg_attr(feature = "ts", ts(type = "any"))]

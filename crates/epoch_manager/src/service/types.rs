@@ -16,7 +16,7 @@ use tari_sidechain::EvictionProof;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::sync::oneshot;
 
-use crate::error::EpochManagerError;
+use crate::{error::EpochManagerError, service::NetworkDescription};
 
 type Reply<T> = oneshot::Sender<Result<T, EpochManagerError>>;
 
@@ -79,13 +79,18 @@ pub enum EpochManagerRequest<TAddr> {
         epoch: Epoch,
         reply: Reply<ValidatorNode<TAddr>>,
     },
-    GetCommitteeInfo {
+    GetCommitteeInfoForSubstate {
         epoch: Epoch,
         substate_address: SubstateAddress,
         reply: Reply<CommitteeInfo>,
     },
     GetLocalCommitteeInfo {
         epoch: Epoch,
+        reply: Reply<CommitteeInfo>,
+    },
+    GetCommitteeInfo {
+        epoch: Epoch,
+        shard_group: ShardGroup,
         reply: Reply<CommitteeInfo>,
     },
     GetNumCommittees {
@@ -115,5 +120,8 @@ pub enum EpochManagerRequest<TAddr> {
         shard_group: Option<ShardGroup>,
         excluding: Vec<TAddr>,
         reply: Reply<ValidatorNode<TAddr>>,
+    },
+    GetNetworkDescription {
+        reply: Reply<NetworkDescription>,
     },
 }

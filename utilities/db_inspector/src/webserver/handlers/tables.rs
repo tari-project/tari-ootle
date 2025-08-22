@@ -197,8 +197,7 @@ fn create_table_for_cf(cf_name: &str) -> TableResponse {
                 Column::new("version", "Version"),
                 Column::new("substate_value", "Substate Value"),
                 Column::new("state_hash", "State Hash"),
-                Column::new("created_by_shard", "Created By Shard"),
-                Column::new("created_at_epoch", "Created At Epoch"),
+                Column::new("created", "Created"),
                 Column::new("destroyed", "Destroyed"),
             ]);
         },

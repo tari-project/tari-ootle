@@ -23,7 +23,7 @@ tari_ootle_storage = { workspace = true }
 tari_ootle_storage_sqlite = { workspace = true }
 tari_epoch_manager = { workspace = true }
 tari_engine_types = { workspace = true }
-tari_indexer_client = { workspace = true }
+tari_indexer_client = { workspace = true, default-features = false }
 tari_indexer_lib = { workspace = true }
 tari_template_lib = { workspace = true }
 tari_template_manager = { workspace = true }
@@ -44,7 +44,7 @@ config = { workspace = true }
 diesel = { workspace = true, default-features = false, features = [
     "sqlite",
     "returning_clauses_for_sqlite_3_35",
-    "chrono",
+    "time",
 ] }
 diesel_migrations = { workspace = true }
 futures = { workspace = true }
@@ -61,6 +61,7 @@ log4rs = { workspace = true, features = [
 mime_guess = { workspace = true }
 serde = { workspace = true, features = ["default", "derive"] }
 serde_json = { workspace = true }
+serde_with = { workspace = true, features = ["indexmap"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = [
     "default",

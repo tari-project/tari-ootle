@@ -21,11 +21,7 @@ use crate::{
 
 /// The unique identification of a non-fungible token inside it's parent resource
 #[derive(Debug, Clone, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize, Hash)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub enum NonFungibleId {
     U256(
@@ -207,11 +203,7 @@ const TAG: u64 = BinaryTag::NonFungibleAddress.as_u64();
 
 /// The unique identifier of a non-fungible index in the Tari network
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct NonFungibleAddress(BorTag<NonFungibleAddressContents, TAG>);
 
 #[cfg(feature = "borsh")]
@@ -235,11 +227,7 @@ mod borsh_impl {
 
 /// A NonFungibleId namespaced by a ResourceAddress.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct NonFungibleAddressContents {
     resource_address: ResourceAddress,

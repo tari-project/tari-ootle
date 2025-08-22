@@ -22,6 +22,7 @@ tari_crypto = { workspace = true }
 tari_state_tree = { workspace = true }
 
 anyhow = { workspace = true }
+bitflags = { workspace = true }
 borsh = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 log = { workspace = true }

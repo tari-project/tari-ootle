@@ -43,12 +43,12 @@ import SearchFilter from "../../../Components/SearchFilter";
 import Typography from "@mui/material/Typography";
 import Fade from "@mui/material/Fade";
 import { emptyRows } from "../../../utils/helpers";
-import type { TemplateMetadata } from "@tari-project/typescript-bindings";
+import type { VNTemplateMetadata } from "@tari-project/typescript-bindings";
 
-type ColumnKey = keyof TemplateMetadata;
+type ColumnKey = keyof VNTemplateMetadata;
 
 function Templates() {
-  const [templates, setTemplates] = useState<TemplateMetadata[]>([]);
+  const [templates, setTemplates] = useState<VNTemplateMetadata[]>([]);
   const [lastSort, setLastSort] = useState({ column: "", order: -1 });
 
   useEffect(() => {
@@ -98,7 +98,7 @@ function Templates() {
             {
               title: "Template Address",
               value: "id",
-              filterFn: (value: string, row: TemplateMetadata) =>
+              filterFn: (value: string, row: VNTemplateMetadata) =>
                 row.address.toLowerCase().includes(value.toLowerCase()),
             },
           ]}

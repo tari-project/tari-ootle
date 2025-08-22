@@ -63,6 +63,7 @@ use crate::{
         SubstatePledges,
         SubstateRecord,
         SubstateUpdateBatch,
+        SubstateValueFilterFlags,
         TransactionExecution,
         TransactionPoolRecord,
         TransactionPoolStage,
@@ -280,7 +281,7 @@ pub trait StateStoreReadTransaction: Sized {
         &self,
         shard: Shard,
         state_version: Version,
-        include_values: bool,
+        value_filters: SubstateValueFilterFlags,
     ) -> Result<StateVersionTransitions, StorageError>;
 
     // -------------------------------- State Tree -------------------------------- //
@@ -298,7 +299,16 @@ pub trait StateStoreReadTransaction: Sized {
     ) -> Result<ShardStateVersions, StorageError>;
 
     // -------------------------------- Epoch checkpoint -------------------------------- //
-    fn epoch_checkpoint_get(&self, epoch: Epoch) -> Result<EpochCheckpoint, StorageError>;
+    fn epoch_checkpoint_get_all_from_epoch(
+        &self,
+        epoch: Epoch,
+        limit: usize,
+    ) -> Result<Vec<EpochCheckpoint>, StorageError>;
+    fn epoch_checkpoint_get_by_shard_group(
+        &self,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> Result<EpochCheckpoint, StorageError>;
 
     // -------------------------------- Foreign Substate Pledges -------------------------------- //
     fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(
@@ -596,11 +606,7 @@ pub trait StateStoreWriteTransaction {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Ordering {
     #[default]
     Ascending,

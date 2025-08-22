@@ -336,7 +336,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
             EpochManagerRequest::GetOurValidatorNode { epoch, reply } => {
                 handle(reply, self.inner.get_our_validator_node(epoch), context)
             },
-            EpochManagerRequest::GetCommitteeInfo {
+            EpochManagerRequest::GetCommitteeInfoForSubstate {
                 epoch,
                 substate_address,
                 reply,
@@ -348,6 +348,11 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
             EpochManagerRequest::GetLocalCommitteeInfo { epoch, reply } => {
                 handle(reply, self.inner.get_local_committee_info(epoch), context)
             },
+            EpochManagerRequest::GetCommitteeInfo {
+                epoch,
+                shard_group,
+                reply,
+            } => handle(reply, self.inner.get_committee_info(epoch, shard_group), context),
             EpochManagerRequest::GetNumCommittees { epoch, reply } => {
                 handle(reply, self.inner.get_num_committees(epoch), context)
             },
@@ -389,6 +394,9 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     .get_random_committee_member_from_shard_group(epoch, shard_group, excluding),
                 context,
             ),
+            EpochManagerRequest::GetNetworkDescription { reply } => {
+                handle(reply, self.inner.get_network_description(), context)
+            },
         }
     }
 }

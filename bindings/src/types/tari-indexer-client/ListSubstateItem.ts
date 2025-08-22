@@ -7,5 +7,5 @@ export type ListSubstateItem = {
   module_name: string | null;
   version: number;
   template_address: Hash | null;
-  timestamp: bigint;
+  timestamp: string;
 };

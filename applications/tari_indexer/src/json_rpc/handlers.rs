@@ -20,7 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashMap, fmt::Display, ops::Deref, sync::Arc};
+use std::{collections::HashMap, fmt::Display, ops::Deref};
 
 use axum_jrpc::{
     error::{JsonRpcError, JsonRpcErrorReason},
@@ -54,6 +54,8 @@ use tari_indexer_client::types::{
     GetTemplateDefinitionResponse,
     GetTransactionResultRequest,
     GetTransactionResultResponse,
+    GetUtxoUpdatesRequest,
+    GetUtxoUpdatesResponse,
     IndexerReadyResponse,
     IndexerTransactionFinalizedResult,
     InspectSubstateRequest,
@@ -71,7 +73,13 @@ use tari_indexer_client::types::{
 };
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
 use tari_ootle_app_utilities::keypair::RistrettoKeypair;
-use tari_ootle_common_types::{optional::Optional, public_key_to_peer_id, PeerAddress, SubstateRequirement};
+use tari_ootle_common_types::{
+    optional::Optional,
+    public_key_to_peer_id,
+    NumPreshards,
+    PeerAddress,
+    SubstateRequirement,
+};
 use tari_ootle_p2p::TariMessagingSpec;
 use tari_ootle_storage::{
     global::GlobalDb,
@@ -96,7 +104,7 @@ const LOG_TARGET: &str = "tari::indexer::json_rpc::handlers";
 pub struct JsonRpcHandlers {
     keypair: RistrettoKeypair,
     networking: NetworkingHandle<TariMessagingSpec>,
-    substate_manager: Arc<SubstateManager>,
+    substate_manager: SubstateManager,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     transaction_manager:
         TransactionManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SqliteIndexerStore>,
@@ -108,7 +116,7 @@ pub struct JsonRpcHandlers {
 impl JsonRpcHandlers {
     pub fn new(
         services: &Services,
-        substate_manager: Arc<SubstateManager>,
+        substate_manager: SubstateManager,
         transaction_manager: TransactionManager<
             EpochManagerHandle<PeerAddress>,
             TariValidatorNodeRpcClientFactory,
@@ -265,8 +273,7 @@ impl JsonRpcHandlers {
 
         let substates = self
             .substate_manager
-            .list_substates(filter_by_type, filter_by_template, limit, offset)
-            .await
+            .get_stored_substates_by_filters(filter_by_type, filter_by_template, limit, offset)
             .map_err(|e| {
                 warn!(target: LOG_TARGET, "Error getting substate: {}", e);
                 Self::internal_error(answer_id, format!("Error getting substate: {}", e))
@@ -436,6 +443,81 @@ impl JsonRpcHandlers {
                     substate: v.substate,
                 })
                 .collect(),
+        }))
+    }
+
+    pub async fn get_utxo_updates(&self, value: JsonRpcExtractor) -> JrpcResult {
+        let answer_id = value.get_answer_id();
+        let req: GetUtxoUpdatesRequest = value.parse_params()?;
+        if req.per_shard_limit > 1000 {
+            return Err(JsonRpcResponse::error(
+                answer_id,
+                JsonRpcError::new(
+                    JsonRpcErrorReason::InvalidParams,
+                    "per_shard_limit cannot be greater than 1000".to_string(),
+                    json::Value::Null,
+                ),
+            ));
+        }
+
+        if req.shard_state_versions.len() > NumPreshards::MAX_SHARD.as_u32() as usize {
+            return Err(JsonRpcResponse::error(
+                answer_id,
+                JsonRpcError::new(
+                    JsonRpcErrorReason::InvalidParams,
+                    format!(
+                        "shard_state_versions cannot contain more than {} entries",
+                        NumPreshards::MAX_SHARD.as_u32()
+                    ),
+                    Value::Null,
+                ),
+            ));
+        }
+
+        if req
+            .shard_state_versions
+            .keys()
+            .any(|shard| shard.is_global() || *shard > NumPreshards::MAX_SHARD)
+        {
+            return Err(JsonRpcResponse::error(
+                answer_id,
+                JsonRpcError::new(
+                    JsonRpcErrorReason::InvalidParams,
+                    format!(
+                        "shard_state_versions contains invalid shard. Cannot query UTXOs in global shard or greater \
+                         than max shard {} exceeded",
+                        NumPreshards::MAX_SHARD.as_u32()
+                    ),
+                    Value::Null,
+                ),
+            ));
+        }
+
+        let mut utxo_updates = Vec::new();
+        for (shard, state_version) in req.shard_state_versions {
+            let updates = self
+                .substate_manager
+                .get_utxo_updates(
+                    req.resource_address,
+                    shard,
+                    state_version,
+                    &req.filter_tag_bytes,
+                    req.per_shard_limit,
+                )
+                .map_err(|e| {
+                    Self::internal_error(
+                        answer_id,
+                        format!(
+                            "Error getting UTXO updates for resource_address {}, shard {}, state_version {}: {}",
+                            req.resource_address, shard, state_version, e
+                        ),
+                    )
+                })?;
+            utxo_updates.extend(updates);
+        }
+
+        Ok(JsonRpcResponse::success(answer_id, GetUtxoUpdatesResponse {
+            utxo_updates,
         }))
     }
 

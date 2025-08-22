@@ -28,7 +28,7 @@ pub use tari_template_lib::args::LogLevel;
 use ts_rs::TS;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(feature = "ts", derive(TS), ts(export))]
 pub struct LogEntry {
     pub message: String,
     pub level: LogLevel,

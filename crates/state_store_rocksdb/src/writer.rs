@@ -1531,9 +1531,16 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn epoch_checkpoint_save(&mut self, checkpoint: &EpochCheckpoint) -> Result<(), StorageError> {
         const OPERATION: &str = "epoch_checkpoint_save";
+        let shard_group = checkpoint.checked_shard_group().map_err(|e| StorageError::QueryError {
+            reason: format!(
+                "{OPERATION}: Invalid shard group for epoch {}: {}",
+                checkpoint.epoch(),
+                e
+            ),
+        })?;
         self.db()
             .cf(EpochCheckpointCf)?
-            .put(&checkpoint.epoch(), checkpoint, OPERATION)?;
+            .put(&(checkpoint.epoch(), shard_group), checkpoint, OPERATION)?;
 
         Ok(())
     }

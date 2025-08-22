@@ -178,7 +178,7 @@ impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
                         }
                     })?;
 
-                let updates = matches!(substates_selection, proto::rpc::StreamSubstateSelection::All)
+                let updates = matches!(substates_selection, proto::rpc::StreamSubstateSelection::AllSubstates)
                     .then(|| child.get_substate_updates(tx, self.num_preshards))
                     .transpose()?
                     .unwrap_or_default();
@@ -299,7 +299,7 @@ impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
 
         match proto::rpc::StreamSubstateSelection::try_from(req.stream_substates).map_err(|_| ())? {
             proto::rpc::StreamSubstateSelection::No => {},
-            proto::rpc::StreamSubstateSelection::All => {
+            proto::rpc::StreamSubstateSelection::AllSubstates => {
                 match u32::try_from(updates.len()) {
                     Ok(count) => {
                         self.send(Ok(SyncBlocksResponse {

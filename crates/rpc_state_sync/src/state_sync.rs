@@ -23,7 +23,7 @@ use tari_ootle_common_types::{
     VersionedSubstateId,
     VotePower,
 };
-use tari_ootle_p2p::proto::rpc::{GetCheckpointRequest, GetCheckpointResponse, SyncStateRequest};
+use tari_ootle_p2p::proto::rpc::{GetCheckpointsRequest, GetCheckpointsResponse, SyncStateRequest};
 use tari_ootle_storage::{
     consensus_models::{
         BookkeepingModel,
@@ -33,6 +33,7 @@ use tari_ootle_storage::{
         SubstateTransition,
         SubstateUpdateBatch,
         SubstateUpdateProof,
+        SubstateValueFilterFlags,
     },
     StateStore,
     StateStoreReadTransaction,
@@ -81,7 +82,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
     }
 
     async fn establish_rpc_session(&self, addr: &PeerAddress) -> Result<ValidatorNodeRpcClient, RpcStateSyncError> {
-        let mut rpc_client = self.client_factory.create_client(addr);
+        let rpc_client = self.client_factory.create_client(addr);
         let client = rpc_client.client_connection().await?;
         Ok(client)
     }
@@ -93,33 +94,38 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         prev_committee: &Committee<PeerAddress>,
         prev_epoch: Epoch,
     ) -> Result<Option<EpochCheckpoint>, RpcStateSyncError> {
-        if let Some(cp) = self.valid_checkpoints.get(&for_shard_group) {
+        let valid_checkpoint = self
+            .state_store
+            .with_read_tx(|tx| EpochCheckpoint::get_by_shard_group(tx, prev_epoch, for_shard_group))
+            .optional()?;
+
+        if let Some(cp) = valid_checkpoint {
             info!(target: LOG_TARGET, "🛜 Checkpoint already fetched and valid: {cp}");
-            return Ok(Some(cp.clone()));
+            return Ok(Some(cp));
         }
 
         self.stats.total_requests += 1;
 
         match client
-            .get_checkpoint(GetCheckpointRequest {
-                epoch: prev_epoch.as_u64(),
+            .get_checkpoints(GetCheckpointsRequest {
+                from_epoch: Some(prev_epoch.into()),
+                num_to_return: 1,
             })
             .await
         {
-            Ok(GetCheckpointResponse {
-                checkpoint: Some(checkpoint),
-            }) => match EpochCheckpoint::try_from(checkpoint) {
-                Ok(checkpoint) => {
-                    info!(target: LOG_TARGET, "🛜 Checkpoint: {checkpoint}");
-                    self.validate_checkpoint(&checkpoint, prev_committee, prev_epoch)?;
-                    self.state_store.with_write_tx(|tx| checkpoint.save(tx))?;
-                    self.valid_checkpoints.insert(for_shard_group, checkpoint.clone());
-                    Ok(Some(checkpoint))
-                },
-                Err(err) => Err(RpcStateSyncError::InvalidResponse(err)),
+            Ok(GetCheckpointsResponse { checkpoints }) if checkpoints.is_empty() => Ok(None),
+            Ok(GetCheckpointsResponse { mut checkpoints }) => {
+                match EpochCheckpoint::try_from(checkpoints.pop().expect("checked is_empty")) {
+                    Ok(checkpoint) => {
+                        info!(target: LOG_TARGET, "🛜 Checkpoint: {checkpoint}");
+                        self.validate_checkpoint(&checkpoint, prev_committee, prev_epoch)?;
+                        self.state_store.with_write_tx(|tx| checkpoint.save(tx))?;
+                        self.valid_checkpoints.insert(for_shard_group, checkpoint.clone());
+                        Ok(Some(checkpoint))
+                    },
+                    Err(err) => Err(RpcStateSyncError::InvalidResponse(err)),
+                }
             },
-            Err(RpcError::RequestFailed(err)) if err.is_not_found() => Ok(None),
-            Ok(GetCheckpointResponse { checkpoint: None }) => Ok(None),
             Err(RpcError::RequestFailed(err)) if err.is_not_found() => Ok(None),
             Err(err) => Err(err.into()),
         }
@@ -158,7 +164,8 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             .sync_state(SyncStateRequest {
                 start_state_version,
                 shard: shard.as_u32(),
-                until_epoch: checkpoint.epoch().as_u64(),
+                until_epoch: Some(checkpoint.epoch().into()),
+                value_filters: SubstateValueFilterFlags::all().bits(),
             })
             .await?;
 
@@ -225,7 +232,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             info!(target: LOG_TARGET, "🛜 Buffering {} state update(s) (state version: v{})", updates_for_state_version.len(), state_version);
             for result in updates_for_state_version {
                 let update = result?;
-                let (tree_change, template_change) = extract_tree_change(msg_epoch, &update)?;
+                let (tree_change, template_change) = extract_tree_and_template_changes(msg_epoch, &update)?;
 
                 debug!(target: LOG_TARGET, "🛜 -> state update (v{}) {}", state_version, update);
                 template_changes.extend(template_change);
@@ -408,7 +415,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
     }
 
     /// Synchronizes the given [`Shard`].
-    pub async fn sync_shard(
+    async fn sync_shard(
         &mut self,
         shard: Shard,
         shard_group: ShardGroup,
@@ -439,8 +446,6 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             };
 
             // fetch checkpoint
-            // TODO: NB refactor to fetch the checkpoint once for the shard group - instead of for each shard and each
-            // attempt - once it's validated, there is no need to fetch it again
             let prev_epoch = epoch
                 .checked_sub(Epoch(1))
                 .ok_or_else(|| RpcStateSyncError::InvalidResponse(anyhow!("Epoch is zero")))?;
@@ -453,7 +458,8 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     // TODO: we should check with f + 1 validators in this case. If a single validator reports
                     // this falsely, this will prevent us from continuing with consensus for a long time (state
                     // root will mismatch).
-                    // TODO: we should instead ask the epoch manager if this is the first epoch in the network
+                    // TODO: we should instead ask the epoch manager if this is the first epoch in the network (NOTE:
+                    // first epoch is not 0 but the first epoch where validators become active).
                     warn!(
                         target: LOG_TARGET,
                         "❓No checkpoint for epoch {epoch}. This may mean that this is the first epoch in the network"
@@ -516,6 +522,9 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         let mut last_error = None;
 
         for (sg, prev_committee) in prev_committees {
+            // TODO: any checkpoint for the previous epoch will justify the global shard sync.
+            //       Currently we'll fetch the checkpoint again even if we already have it if there are more than one
+            // shard groups.
             let result = self
                 .sync_shard(
                     Shard::global(),
@@ -684,7 +693,7 @@ fn extract_template_change(
     }
 }
 
-fn extract_tree_change(
+fn extract_tree_and_template_changes(
     epoch: Epoch,
     update: &SubstateUpdateProof,
 ) -> Result<(SubstateTreeChange, Option<TemplateChange>), RpcStateSyncError> {

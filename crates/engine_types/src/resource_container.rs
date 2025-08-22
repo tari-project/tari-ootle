@@ -25,11 +25,7 @@ use crate::{confidential, crypto::PrivateOutput, substate::SubstateId, ToByteTyp
 
 /// Instances of a single resource kept in Buckets and Vaults
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum ResourceContainer {
     Fungible {
         address: ResourceAddress,

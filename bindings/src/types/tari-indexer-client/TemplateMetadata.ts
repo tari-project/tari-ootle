@@ -7,5 +7,5 @@ export type TemplateMetadata = {
   /**
    * SHA hash of binary
    */
-  binary_sha: Array<number>;
+  binary_sha: string;
 };

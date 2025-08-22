@@ -81,6 +81,7 @@ use tari_ootle_storage::{
         SubstatePledges,
         SubstateRecord,
         SubstateUpdateProof,
+        SubstateValueFilterFlags,
         SubstateValueOrHash,
         TransactionExecution,
         TransactionPoolRecord,
@@ -124,6 +125,7 @@ use crate::{
         burnt_utxo::BurntUtxoCf,
         certificates::{proposal::ProposalCertificateCf, timeout::TimeoutCertificateCf},
         chain,
+        epoch_checkpoint,
         epoch_checkpoint::EpochCheckpointCf,
         evicted_node,
         evicted_node::EvictedNodeCf,
@@ -1593,7 +1595,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         &self,
         req_shard: Shard,
         state_version: Version,
-        include_values: bool,
+        value_filter: SubstateValueFilterFlags,
     ) -> Result<StateVersionTransitions, StorageError> {
         const OPERATION: &str = "state_transitions_get_n_after";
 
@@ -1616,7 +1618,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             });
         }
 
-        // TODO(perf): if include_values is false, we still have to load the whole substate for the id and version - not
+        // TODO(perf): we still have to load all substates for the id and version regardless of the value filters - not
         // ideal
         let substates = substate_cf.multi_get(data.transitions.iter().map(|t| t.substate_address), OPERATION)?;
 
@@ -1625,10 +1627,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         for (data, substate) in data.transitions.iter().zip(substates) {
             let update = match data.transition {
                 StateTransitionType::Up => {
-                    let value = include_values.then_some(substate.substate_value).flatten().map_or_else(
-                        || SubstateValueOrHash::Hash(substate.state_hash),
-                        |v| SubstateValueOrHash::Value(Box::new(v)),
-                    );
+                    let value = value_filter
+                        .contains_substate(&substate.substate_id)
+                        .then_some(substate.substate_value)
+                        .flatten()
+                        .map_or_else(
+                            || SubstateValueOrHash::Hash(substate.state_hash),
+                            |v| SubstateValueOrHash::Value(Box::new(v)),
+                        );
                     SubstateUpdateProof::Create(SubstateCreatedProof {
                         substate: SubstateData {
                             substate_id: substate.substate_id,
@@ -1719,10 +1725,29 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(shard_tree_versions)
     }
 
-    fn epoch_checkpoint_get(&self, epoch: Epoch) -> Result<EpochCheckpoint, StorageError> {
-        const OPERATION: &str = "epoch_checkpoint_get";
+    fn epoch_checkpoint_get_all_from_epoch(
+        &self,
+        from_epoch: Epoch,
+        limit: usize,
+    ) -> Result<Vec<EpochCheckpoint>, StorageError> {
+        // const OPERATION: &str = "epoch_checkpoint_get_all";
+        let query = self.db().cf(epoch_checkpoint::ByEpochQuery)?;
+        let iter = query.query_range_iterator(Ordering::Ascending, from_epoch..);
+        let epoch_checkpoints = iter
+            .map(|result| result.map(|(_, checkpoint)| checkpoint))
+            .take(limit)
+            .collect::<Result<_, _>>()?;
+        Ok(epoch_checkpoints)
+    }
+
+    fn epoch_checkpoint_get_by_shard_group(
+        &self,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> Result<EpochCheckpoint, StorageError> {
+        const OPERATION: &str = "epoch_checkpoint_get_by_shard_group";
         let cf = self.db().cf(EpochCheckpointCf)?;
-        let checkpoint = cf.get(&epoch, OPERATION)?;
+        let checkpoint = cf.get(&(epoch, shard_group), OPERATION)?;
         Ok(checkpoint)
     }
 

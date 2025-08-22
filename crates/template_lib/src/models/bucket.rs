@@ -44,11 +44,7 @@ const TAG: u64 = BinaryTag::BucketId.as_u64();
 
 /// A bucket identifier. This identifier is assigned at runtime.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Ord, PartialOrd, Hash)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct BucketId(BorTag<u32, TAG>);
 
 impl From<u32> for BucketId {

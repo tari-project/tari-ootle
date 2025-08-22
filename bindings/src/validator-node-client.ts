@@ -3,7 +3,6 @@
 
 export * from "./types/validator-node-client/ValidatorNodeChange";
 export * from "./types/validator-node-client/VNSubmitTransactionRequest";
-export * from "./types/validator-node-client/TemplateMetadata";
 export * from "./types/validator-node-client/GetFilteredBlocksCountRequest";
 export * from "./types/validator-node-client/VNLogEntry";
 export * from "./types/validator-node-client/GetShardKeyRequest";
@@ -40,6 +39,7 @@ export * from "./types/validator-node-client/ListBlocksResponse";
 export * from "./types/validator-node-client/GetBlockRequest";
 export * from "./types/validator-node-client/VNGetTransactionResultRequest";
 export * from "./types/validator-node-client/GetRecentTransactionsRequest";
+export * from "./types/validator-node-client/VNTemplateMetadata";
 export * from "./types/validator-node-client/VNLogLevel";
 export * from "./types/validator-node-client/GetRecentTransactionsResponse";
 export * from "./types/validator-node-client/VNAddPeerResponse";
@@ -55,7 +55,6 @@ export * from "./types/validator-node-client/TemplateAbi";
 export * from "./types/validator-node-client/GetTemplatesRequest";
 export * from "./types/validator-node-client/VNGetSubstateResponse";
 export * from "./types/validator-node-client/VNGetAllVnsResponse";
-export * from "./types/validator-node-client/VNArgDef";
 export * from "./types/validator-node-client/GetEpochManagerStatsResponse";
 export * from "./types/validator-node-client/GetBlockResponse";
 export * from "./types/validator-node-client/VNCommitteeShardInfo";

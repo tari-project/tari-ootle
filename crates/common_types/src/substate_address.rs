@@ -26,11 +26,7 @@ pub trait ToSubstateAddress {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, BorshSerialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SubstateAddress(
     #[serde(with = "serde_with::hex")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]

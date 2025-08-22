@@ -5,9 +5,9 @@ use std::num::NonZeroUsize;
 
 use log::*;
 use tari_ootle_common_types::{optional::Optional, shard::Shard, Epoch};
-use tari_ootle_p2p::proto::rpc::SyncStateResponse;
+use tari_ootle_p2p::proto::rpc;
 use tari_ootle_storage::{
-    consensus_models::{StateTransition, StateVersionTransitions},
+    consensus_models::{StateTransition, StateVersionTransitions, SubstateValueFilterFlags},
     StateStore,
     StorageError,
 };
@@ -19,21 +19,23 @@ const LOG_TARGET: &str = "tari::ootle::rpc::sync_task";
 
 pub struct StateSyncTask<TStateStore: StateStore> {
     store: TStateStore,
-    sender: mpsc::Sender<Result<SyncStateResponse, RpcStatus>>,
+    sender: mpsc::Sender<Result<rpc::SyncStateResponse, RpcStatus>>,
     shard: Shard,
     start_state_version: Version,
     end_epoch: Option<Epoch>,
     batch_size: NonZeroUsize,
+    value_filters: SubstateValueFilterFlags,
 }
 
 impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
     pub fn new(
         store: TStateStore,
-        sender: mpsc::Sender<Result<SyncStateResponse, RpcStatus>>,
+        sender: mpsc::Sender<Result<rpc::SyncStateResponse, RpcStatus>>,
         shard: Shard,
         start_state_version: Version,
         end_epoch: Option<Epoch>,
         batch_size: NonZeroUsize,
+        value_filters: SubstateValueFilterFlags,
     ) -> Self {
         Self {
             store,
@@ -42,6 +44,7 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
             start_state_version,
             end_epoch,
             batch_size,
+            value_filters,
         }
     }
 
@@ -54,7 +57,7 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
                     info!(target: LOG_TARGET, "🌍 Fetched {} state transition(s) up to v{}", transitions.updates.len(), transitions.state_version);
                     if let Some(end_epoch) = self.end_epoch {
                         // TODO(perf): might be better to not load in the first place, however also might incur the cost
-                        // of a db index or loading from db anyway
+                        // of a db index, more complex keys or loading from db anyway
                         if transitions.epoch > end_epoch {
                             info!(target: LOG_TARGET, "🌍 Reached end of requested epoch: {}", end_epoch);
                             return Ok(());
@@ -90,13 +93,12 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
         current_state_version: Version,
     ) -> Result<Option<StateVersionTransitions>, StorageError> {
         let transitions = self.store.with_read_tx(|tx| {
-            // TODO: make it optional for the client to request values
-            StateTransition::get_for_shard(tx, self.shard, current_state_version, true).optional()
+            StateTransition::get_for_shard(tx, self.shard, current_state_version, self.value_filters).optional()
         })?;
         Ok(transitions)
     }
 
-    async fn send(&mut self, result: Result<SyncStateResponse, RpcStatus>) -> Result<(), ()> {
+    async fn send(&mut self, result: Result<rpc::SyncStateResponse, RpcStatus>) -> Result<(), ()> {
         if self.sender.send(result).await.is_err() {
             debug!(
                 target: LOG_TARGET,
@@ -114,7 +116,7 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
         for (i, chunk) in chunks.into_iter().enumerate() {
             let updates = chunk.updates.into_iter().map(Into::into).collect();
 
-            self.send(Ok(SyncStateResponse {
+            self.send(Ok(rpc::SyncStateResponse {
                 state_version: chunk.state_version,
                 updates,
                 has_more: i < num_chunks - 1,

@@ -16,7 +16,7 @@ use reqwest::{header, StatusCode};
 use tari_state_store_rocksdb::{column_families, traits::Cf};
 use tower_http::cors::CorsLayer;
 
-use crate::webserver::{context::HandlerContext, either_cf::EitherCf, handlers};
+use crate::webserver::{context::HandlerContext, handlers};
 
 const LOG_TARGET: &str = "tari::ootle::swarm::webserver";
 
@@ -106,10 +106,8 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         column_families::epoch_checkpoint::EpochCheckpointCf,
         column_families::burnt_utxo::BurntUtxoCf,
         column_families::burnt_utxo::ProposedInBlockIndex,
-        EitherCf::<
-            column_families::lock_conflict::LockConflictCf,
-            column_families::lock_conflict::LockConflictBlockIdIndex,
-        >::new(),
+        column_families::lock_conflict::LockConflictCf,
+        column_families::lock_conflict::LockConflictBlockIdIndex,
         column_families::evicted_node::EvictedNodeCf,
         column_families::validator_node_epoch_stats::ValidatorNodeEpochStatsCf
     );

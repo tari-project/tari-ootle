@@ -6,7 +6,7 @@ use std::time::Duration;
 use tari_consensus::hotstuff::HotStuffError;
 use tari_consensus_types::Decision;
 use tari_ootle_common_types::{optional::Optional, Epoch, NodeHeight};
-use tari_ootle_storage::{StateStore, StateStoreReadTransaction};
+use tari_ootle_storage::{consensus_models::SubstateValueFilterFlags, StateStore, StateStoreReadTransaction};
 use tari_state_tree::{
     key_mapper::SpreadPrefixKeyMapper,
     memory_store::MemoryTreeStore,
@@ -60,13 +60,17 @@ async fn check_state_transitions() {
     test.get_validator(&TestAddress::new("1"))
         .state_store
         .with_read_tx(|tx| {
-            let checkpoint = tx.epoch_checkpoint_get(Epoch(1)).unwrap();
+            let checkpoint = tx
+                .epoch_checkpoint_get_all_from_epoch(Epoch(1), 1)
+                .unwrap()
+                .pop()
+                .unwrap();
 
             for shard in TEST_NUM_PRESHARDS.all_shards_iter() {
                 let mut all_transitions = vec![];
                 let mut next_state_version = 1;
                 while let Some(transitions) = tx
-                    .state_transitions_get_starting_at(shard, next_state_version, false)
+                    .state_transitions_get_starting_at(shard, next_state_version, SubstateValueFilterFlags::empty())
                     .optional()
                     .unwrap()
                 {

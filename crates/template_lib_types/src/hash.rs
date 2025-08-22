@@ -33,11 +33,7 @@ use crate::{hex::fixed_bytes_from_hex, serde_helpers};
 /// Representation of a 32-byte hash value
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, Serialize, Deserialize)]
 #[serde(transparent)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Hash(
     #[serde(with = "serde_helpers::fixed_hex")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]

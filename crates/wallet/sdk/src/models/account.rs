@@ -7,11 +7,7 @@ use tari_bor::{Deserialize, Serialize};
 use tari_template_lib::{models::ComponentAddress, prelude::RistrettoPublicKeyBytes};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Account {
     pub name: Option<String>,
     pub address: ComponentAddress,
@@ -31,11 +27,7 @@ impl Display for Account {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct AccountWithPublicKey {
     pub account: Account,
     pub owner_public_key: RistrettoPublicKeyBytes,
@@ -70,11 +62,7 @@ impl Display for AccountWithPublicKey {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct NewAccountData {
     pub address: ComponentAddress,
 }

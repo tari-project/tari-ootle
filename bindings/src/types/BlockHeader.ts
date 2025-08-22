@@ -56,8 +56,8 @@ export type BlockHeader = {
    */
   signature: SchnorrSignatureBytes | null;
   /**
-   * The time indicating the creation time of the block. Currently, this can be chosen arbitrarily and is only
-   * informational/used for metrics.
+   * The Unix Epoch timestamp indicating the creation time of the block. Currently, this can be chosen arbitrarily
+   * and is only informational/used for metrics.
    */
   timestamp: number;
   /**

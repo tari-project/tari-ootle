@@ -20,6 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::fmt::Display;
+
 use tari_common_types::types::FixedHashSizeError;
 use tari_ootle_common_types::optional::IsNotFoundError;
 
@@ -62,6 +64,14 @@ pub enum StorageError {
     General { details: String },
     #[error("Block creation error: {0}")]
     BlockError(#[from] BlockError),
+}
+
+impl StorageError {
+    pub fn general<T: Display>(operation: &'static str, details: T) -> Self {
+        Self::General {
+            details: format!("{}: {}", operation, details),
+        }
+    }
 }
 
 impl IsNotFoundError for StorageError {

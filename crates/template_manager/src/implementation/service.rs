@@ -29,7 +29,7 @@ use tari_ootle_p2p::proto::rpc::TemplateType;
 use tari_ootle_storage::global::{DbTemplateType, DbTemplateUpdate, TemplateStatus};
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, Hash, TemplateAddress};
-use tari_validator_node_client::types::{ArgDef, FunctionDef, TemplateAbi};
+use tari_validator_node_client::types::{FunctionDef, TemplateAbi};
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 use tokio::{
     sync::{mpsc, oneshot},
@@ -265,14 +265,7 @@ where
                 .iter()
                 .map(|f| FunctionDef {
                     name: f.name.clone(),
-                    arguments: f
-                        .arguments
-                        .iter()
-                        .map(|a| ArgDef {
-                            name: a.name.to_string(),
-                            arg_type: a.arg_type.to_string(),
-                        })
-                        .collect(),
+                    arguments: f.arguments.iter().cloned().collect(),
                     output: f.output.to_string(),
                     is_mut: f.is_mut,
                 })

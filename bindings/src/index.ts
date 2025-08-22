@@ -98,6 +98,7 @@ export * from "./types/ShardGroupEvidence";
 export * from "./types/ShardGroup";
 export * from "./types/ShardStateVersions";
 export * from "./types/Shard";
+export * from "./types/StateVersion";
 export * from "./types/StealthInputsStatement";
 export * from "./types/StealthInput";
 export * from "./types/StealthOutputsStatement";

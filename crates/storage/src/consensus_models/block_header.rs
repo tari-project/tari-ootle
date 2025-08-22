@@ -31,11 +31,7 @@ use super::BlockError;
 use crate::consensus_models::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct BlockHeader {
     /// "Cached" block ID/hash. This is computed from the contents of the block header.
     #[cfg_attr(feature = "ts", ts(type = "string"))]

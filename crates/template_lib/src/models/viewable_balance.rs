@@ -24,11 +24,7 @@ use tari_template_lib_types::crypto::{PedersenCommitmentBytes, RistrettoPublicKe
 ///
 /// The proof size is static (256 bytes).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ViewableBalanceProof {
     /// The encrypted value that takes the form: E = v.G + r.P
     /// where v is the value, G is the generator, r is the secret_nonce and P is the view key

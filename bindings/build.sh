@@ -25,15 +25,6 @@ fi
 mkdir -p $SOURCE_PATH/$TYPES_DIR
 
 cargo test --workspace --exclude integration_tests export_bindings --features ts
-echo "Moving ../crates/bindings/src to $SOURCE_PATH/$TYPES_DIR"
-npx shx mv ../crates/bindings/src/types/* ./src/types/
-npx shx rm -rf ../crates/bindings/
-echo "Moving ../clients/bindings/src to $SOURCE_PATH/$TYPES_DIR"
-npx shx mv ../clients/bindings/src/types/* ./src/types/
-npx shx rm -rf ../clients/bindings/
-echo "Moving ../crates/wallet/bindings/src to $SOURCE_PATH/$TYPES_DIR"
-npx shx mv ../crates/wallet/bindings/src/types/* ./src/types/
-npx shx rm -rf ../crates/wallet/bindings/
 
 # Add the license header
 echo "//   Copyright $(date +%Y) The Tari Project" >> $SOURCE_PATH/$MAIN_INDEX_FILE

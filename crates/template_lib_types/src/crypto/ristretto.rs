@@ -12,11 +12,7 @@ use crate::{crypto::InvalidByteLengthError, hex::fixed_bytes_from_hex, serde_hel
 
 /// A Ristretto public key byte contents
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct RistrettoPublicKeyBytes(
     #[serde(with = "serde_helpers::fixed_hex")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]

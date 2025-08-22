@@ -8,11 +8,7 @@ use tari_bor::{Deserialize, Serialize};
 // TODO: use this new-type where appropriate in the codebase
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize, Serialize)]
 #[serde(transparent)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct StateVersion(#[cfg_attr(feature = "ts", ts(type = "number | bigint"))] u64);
 
 impl StateVersion {

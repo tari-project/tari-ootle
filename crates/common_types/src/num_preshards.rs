@@ -7,11 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{shard::Shard, ShardGroup};
 
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NumPreshards {
     P1 = 1,

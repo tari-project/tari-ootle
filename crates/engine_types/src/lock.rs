@@ -9,7 +9,7 @@ use ts_rs::TS;
 
 pub type LockId = u32;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(feature = "ts", derive(TS), ts(export))]
 pub enum LockFlag {
     Read = 0x01,
     Write = 0x02,

@@ -9,11 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::{uint::U256, NumPreshards, ShardGroup, SubstateAddress};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, BorshSerialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(transparent)]
 pub struct Shard(#[cfg_attr(feature = "ts", ts(type = "number"))] u32);
 

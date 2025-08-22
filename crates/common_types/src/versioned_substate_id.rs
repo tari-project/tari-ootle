@@ -10,11 +10,7 @@ use tari_engine_types::{substate::SubstateId, transaction_receipt::TransactionRe
 use crate::{displayable::Displayable, shard::Shard, NumPreshards, ShardGroup, SubstateAddress, ToSubstateAddress};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SubstateRequirement {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub substate_id: SubstateId,
@@ -300,11 +296,7 @@ impl Display for SubstateRequirementRef<'_> {
 pub struct SubstateRequirementParseError(String);
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize, BorshSerialize, BorshDeserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct VersionedSubstateId {
     substate_id: SubstateId,
     version: u32,

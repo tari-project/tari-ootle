@@ -11,11 +11,7 @@ use serde::{Deserialize, Serialize};
 use tari_engine_types::commit_result::{AbortReason, TransactionResult};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize, BorshSerialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Decision {
     /// Decision to COMMIT the transaction
     Commit,

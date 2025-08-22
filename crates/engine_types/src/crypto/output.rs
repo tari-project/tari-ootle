@@ -12,11 +12,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PrivateOutput {
     pub public_nonce: RistrettoPublicKeyBytes,
     pub encrypted_data: EncryptedData,

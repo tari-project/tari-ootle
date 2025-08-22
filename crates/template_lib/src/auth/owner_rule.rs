@@ -15,11 +15,7 @@ pub struct Ownership<'a> {
 
 /// An enum for all possible ways to specify ownership of values
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum OwnerRule {
     /// The owner is the signer of the transaction that created the value
     #[default]

@@ -5,11 +5,7 @@ use serde::{Deserialize, Serialize};
 use tari_template_abi::rust::fmt;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Hash, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UtxoTagByte(u8);
 
 impl UtxoTagByte {

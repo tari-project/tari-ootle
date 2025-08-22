@@ -18,11 +18,7 @@ const TAG: u64 = BinaryTag::UnclaimedConfidentialOutputAddress.as_u64();
 /// This substate is created when a L1 UTXO is detected as burnt, and consumed when a user submits a valid claim burn
 /// transaction.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(transparent)]
 pub struct UnclaimedConfidentialOutputAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 

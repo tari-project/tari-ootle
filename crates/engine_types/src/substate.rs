@@ -53,11 +53,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Substate {
     substate: SubstateValue,
     version: u32,
@@ -116,11 +112,7 @@ pub fn hash_substate(substate: &SubstateValue, version: u32) -> FixedHash {
 // BorshDeserialize is implemented for this struct because we de/encode keys in the database using this format
 /// Base object address, version tuples
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, BorshSerialize, BorshDeserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum SubstateId {
     Component(ComponentAddress),
     Resource(ResourceAddress),
@@ -563,11 +555,7 @@ impl_partial_eq!(ValidatorFeePoolAddress, ValidatorFeePool);
 impl_partial_eq!(UtxoAddress, Utxo);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum SubstateValue {
     Component(ComponentHeader),
     Resource(Box<Resource>),
@@ -834,11 +822,7 @@ impl From<Utxo> for SubstateValue {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SubstateDiff {
     up_substates: Vec<(SubstateId, Substate)>,
     down_substates: Vec<(SubstateId, u32)>,

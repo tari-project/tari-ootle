@@ -28,11 +28,7 @@ use tari_template_lib::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UnclaimedConfidentialOutput {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub commitment: PedersenCommitmentBytes,

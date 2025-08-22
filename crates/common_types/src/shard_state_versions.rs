@@ -19,11 +19,7 @@ type BoundedVersionVec = BoundedVec<u64, 1, MAX_SHARDS>;
 /// elements. The first element is always the global shard (shard 0) version. The second element is the state
 /// version for shard 1, third is shard 2, and forth is shard 3.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(transparent)]
 pub struct ShardStateVersions {
     #[cfg_attr(feature = "ts", ts(type = "number[]"))]

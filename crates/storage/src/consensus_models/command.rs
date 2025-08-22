@@ -24,11 +24,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionAtom {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub id: TransactionId,
@@ -65,11 +61,7 @@ impl Display for TransactionAtom {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Command {
     // Transaction Commands
     /// Request validators to prepare a local-only transaction
@@ -263,11 +255,7 @@ impl Display for Command {
     }
 }
 
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
 pub struct EvictNodeAtom {
     #[cfg_attr(feature = "ts", ts(type = "string"))]

@@ -38,11 +38,7 @@ fn std_event(object_name: &str, action_name: &str) -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Event {
     substate_id: Option<SubstateId>,
     template_address: TemplateAddress,

@@ -35,11 +35,7 @@ use serde::{Deserialize, Serialize};
 /// Represents the available Tari networks. The variants and assigned byte needs to match the L1 network enum.
 #[repr(u8)]
 #[derive(Clone, Debug, PartialEq, Eq, Copy, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(rename_all = "lowercase")]
 pub enum Network {
     MainNet = 0x00,

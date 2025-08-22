@@ -40,7 +40,7 @@ pub enum ExtraFieldKey {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Default, BorshSerialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(feature = "ts", derive(TS), ts(export))]
 pub struct ExtraData(#[cfg_attr(feature = "ts", ts(type = "string"))] BTreeMap<ExtraFieldKey, ExtraFieldValue>);
 
 impl ExtraData {

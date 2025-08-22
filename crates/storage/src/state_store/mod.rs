@@ -606,11 +606,7 @@ pub trait StateStoreWriteTransaction {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Ordering {
     #[default]
     Ascending,

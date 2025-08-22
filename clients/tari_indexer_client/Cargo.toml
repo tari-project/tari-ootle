@@ -28,5 +28,5 @@ ts-rs = { workspace = true, optional = true }
 
 [features]
 default = ["client"]
-ts = ["ts-rs"]
+ts = ["ts-rs", "tari_ootle_common_types/ts", "tari_engine_types/ts", "tari_template_abi/ts", "tari_template_lib_types/ts", "tari_consensus_types/ts", "tari_transaction/ts"]
 client = ["dep:reqwest", "dep:anyhow", "dep:thiserror"]

@@ -18,22 +18,14 @@ use tari_template_lib::{
 use crate::crypto::PrivateOutput;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Utxo {
     pub output: Option<UtxoOutput>,
     pub is_frozen: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UtxoOutput {
     pub output: PrivateOutput,
     /// The public key that must prove ownership of this UTXO. This is typically a one time "stealth" public key but is
@@ -84,11 +76,7 @@ impl Utxo {
 const TAG: u64 = BinaryTag::Utxo.as_u64();
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UtxoAddress(BorTag<UtxoAddressContents, TAG>);
 
 impl UtxoAddress {
@@ -133,11 +121,7 @@ impl From<UtxoAddressContents> for UtxoAddress {
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
 )]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UtxoId(
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "serde_helpers::fixed_hex")]
@@ -182,11 +166,7 @@ impl Display for UtxoId {
 #[derive(
     Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord, BorshSerialize, BorshDeserialize,
 )]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UtxoAddressContents {
     resource_address: ResourceAddress,
     id: UtxoId,

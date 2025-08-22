@@ -13,9 +13,54 @@
   font-family: "AvenirHeavy";
 }
 
+@font-face {
+  src: url("./fonts/avenir/AvenirLTStd-Book.otf");
+  font-family: "AvenirRegular";
+}
+
+@font-face {
+  src: url("./fonts/avenir/AvenirLTStd-Medium.otf");
+  font-family: "AvenirMedium";
+}
+
+@font-face {
+  src: url("./fonts/avenir/AvenirLTStd-Heavy.otf");
+  font-family: "AvenirHeavy";
+}
+
+@font-face {
+  src: url("./fonts/poppins/Poppins-Regular.ttf");
+  font-family: "PoppinsRegular";
+}
+
+@font-face {
+  src: url("./fonts/poppins/Poppins-Medium.ttf");
+  font-family: "PoppinsMedium";
+}
+
+@font-face {
+  src: url("./fonts/poppins/Poppins-SemiBold.ttf");
+  font-family: "PoppinsSemiBold";
+}
+
+@font-face {
+  src: url("./fonts/druk/DrukLCG-Medium.ttf");
+  font-family: "DrukMedium";
+}
+
+@font-face {
+  src: url("./fonts/druk/DrukLCG-Bold.ttf");
+  font-family: "DrukBold";
+}
+
+@font-face {
+  src: url("./fonts/druk/DrukLCG-Heavy.ttf");
+  font-family: "DrukHeavy";
+}
+
 body {
   margin: 0;
-  font-family: "AvenirMedium", sans-serif;
+  font-family: "PoppinsRegular", sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background-color: #f5f5f7;

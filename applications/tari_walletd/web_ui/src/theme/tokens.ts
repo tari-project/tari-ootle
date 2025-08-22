@@ -29,19 +29,23 @@ export const componentSettings: ThemeOptions = {
   },
   spacing: 8,
   typography: {
-    fontFamily: '"AvenirMedium", sans-serif',
-    fontSize: 14,
-    body1: {},
+    fontFamily: '"PoppinsRegular", sans-serif',
+    fontSize: 12,
+    body1: {
+      letterSpacing: "0.5px",
+    },
     body2: {
       lineHeight: "1.5rem",
     },
     h1: {
       fontSize: "2.2rem",
       lineHeight: "3.2rem",
+      fontFamily: '"DrukHeavy", sans-serif',
     },
     h2: {
       fontSize: "1.9rem",
       lineHeight: "2.9rem",
+      fontFamily: '"DrukHeavy", sans-serif',
     },
     h3: {
       fontSize: "1.6rem",
@@ -52,12 +56,14 @@ export const componentSettings: ThemeOptions = {
       lineHeight: "2.3rem",
     },
     h5: {
-      fontSize: "1rem",
-      lineHeight: "2em",
+      fontSize: "14px",
+      fontFamily: '"PoppinsSemiBold", sans-serif',
+      lineHeight: "1.4rem",
     },
     h6: {
-      fontSize: "0.875rem",
+      fontSize: "0.75rem",
       lineHeight: "1.8rem",
+      fontFamily: '"PoppinsSemiBold", sans-serif',
     },
   },
   transitions: {
@@ -112,6 +118,16 @@ export const componentSettings: ThemeOptions = {
         thickness: 4,
         sx: {
           color: (theme) => theme.palette.primary.main,
+        },
+      },
+    },
+    MuiCard: {
+      defaultProps: {
+        elevation: 0,
+        sx: {
+          background: (theme) =>
+            theme.palette.mode === "light" ? theme.palette.background.paper : theme.palette.divider,
+          boxShadow: (theme) => (theme.palette.mode === "light" ? "5px 10px 25px rgba(0, 0, 0, 0.07)" : "none"),
         },
       },
     },

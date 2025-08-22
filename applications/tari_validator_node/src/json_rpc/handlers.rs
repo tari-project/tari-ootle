@@ -71,6 +71,7 @@ use tari_validator_node_client::types::{
     AddPeerResponse,
     ConnectionDirection,
     DryRunTransactionFinalizeResult,
+    FunctionDef,
     GetAllVnsRequest,
     GetAllVnsResponse,
     GetBlockRequest,
@@ -108,6 +109,7 @@ use tari_validator_node_client::types::{
     SubmitTransactionRequest,
     SubmitTransactionResponse,
     SubstateStatus,
+    TemplateAbi,
     TemplateMetadata,
 };
 
@@ -507,11 +509,26 @@ impl JsonRpcHandlers {
             .await
             .map_err(internal_error(answer_id))?;
 
-        let abi = self
+        let loaded = self
             .template_manager
             .load_template_abi(req.template_address)
             .await
             .map_err(internal_error(answer_id))?;
+        let abi = TemplateAbi {
+            template_name: loaded.template_def().template_name().to_string(),
+            functions: loaded
+                .template_def()
+                .functions()
+                .iter()
+                .map(|f| FunctionDef {
+                    name: f.name.clone(),
+                    arguments: f.arguments.to_vec(),
+                    output: f.output.to_string(),
+                    is_mut: f.is_mut,
+                })
+                .collect(),
+            version: loaded.template_def().tari_version().to_string(),
+        };
 
         Ok(JsonRpcResponse::success(answer_id, GetTemplateResponse {
             registration_metadata: TemplateMetadata {

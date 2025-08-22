@@ -23,7 +23,6 @@
 import React, { useState } from "react";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import {
-  Card,
   CardContent,
   CardMedia,
   Grid,
@@ -44,9 +43,9 @@ import {
 } from "@mui/material";
 import type { ApiError } from "../../../api/helpers/types";
 import { shortenString, shortenSubstateId, toHexString } from "../../../utils/helpers";
-import type { NonFungibleId, NonFungibleToken, ListNftsResponse, Account } from "@tari-project/typescript-bindings";
+import type { NonFungibleId, NonFungibleToken, ListNftsResponse } from "@tari-project/typescript-bindings";
 import { convertCborValue } from "../../../utils/cbor";
-import { DataTableCell } from "../../../Components/StyledComponents";
+import { DataTableCell, NftCard as Card } from "../../../Components/StyledComponents";
 import ClaimNftsButton from "./ClaimNftsButton";
 import SendNft from "./SendNft";
 import TransferNft from "../Components/TransferNft";
@@ -63,7 +62,7 @@ function NftCard({ nft }: { nft: NonFungibleToken }) {
 
   return (
     <Grid item xs={12} sm={6} md={4} lg={3}>
-      <Card style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      <Card>
         <CardMedia
           component="img"
           height="200"

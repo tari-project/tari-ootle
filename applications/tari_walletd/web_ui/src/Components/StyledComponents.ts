@@ -26,6 +26,7 @@ import { styled } from "@mui/material/styles";
 import Box, { BoxProps } from "@mui/material/Box";
 import IconButton, { IconButtonProps } from "@mui/material/IconButton";
 import Typography, { TypographyProps } from "@mui/material/Typography";
+import Card, { CardProps } from "@mui/material/Card";
 
 export const AccordionIconButton: React.FC<IconButtonProps> = styled(IconButton)(({ theme }) => ({
   "backgroundColor": theme.palette.divider,
@@ -107,4 +108,14 @@ export const GridDataCell: React.FC<BoxProps> = styled(Box)(({ theme, className 
   borderBottom: `1px solid ${theme.palette.divider}`,
   fontFamily: "'Courier New', Courier, monospace",
   gridArea: `${className}`,
+}));
+
+export const NftCard: React.FC<CardProps> = styled(Card)(() => ({
+  "height": "100%",
+  "display": "flex",
+  "flexDirection": "column",
+  "transition": "transform 0.3s ease",
+  "&:hover": {
+    transform: "scale(1.02)",
+  },
 }));

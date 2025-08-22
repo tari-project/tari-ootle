@@ -256,3 +256,21 @@ export const formatXTM = (amount: number | bigint): string => {
   }
   return `${(amount / CURRENCY.DIVISOR).toFixed(CURRENCY.DECIMALS)} ${CURRENCY.SYMBOL}`;
 };
+
+export function validateHash(hash: string): boolean {
+  const regex = /^[a-fA-F0-9]{64}$/;
+  return regex.test(hash);
+}
+
+export function validateAddress(address: string): boolean {
+  if (!address || typeof address !== 'string') {
+    return false;
+  }
+  
+  // Trim whitespace and convert to lowercase for consistent validation
+  const cleanAddress = address.trim().toLowerCase();
+  
+  // Check if it's a valid 64-character hexadecimal string (32 bytes)
+  const regex = /^[a-f0-9]{64}$/;
+  return regex.test(cleanAddress);
+}

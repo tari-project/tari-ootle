@@ -20,26 +20,13 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { FormEvent, useEffect, useState } from "react";
-import { Form } from "react-router-dom";
+import { FormEvent, useEffect, useState, useMemo } from "react";
 import Button from "@mui/material/Button";
-import TextField from "@mui/material/TextField";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
-import Box from "@mui/material/Box";
-import { useTheme } from "@mui/material/styles";
-import {
-  Stepper,
-  Step,
-  StepLabel,
-  Typography,
-  Card,
-  CardContent,
-  Stack,
-  Divider,
-  CircularProgress,
-} from "@mui/material";
+import { Stepper, Step, StepLabel } from "@mui/material";
+import { SelectChangeEvent } from "@mui/material/Select/Select";
 import useAccountStore from "../../../store/accountStore";
 import type {
   Account,
@@ -48,16 +35,13 @@ import type {
   NonFungibleId,
   NonFungibleToken,
 } from "@tari-project/typescript-bindings";
-import Select from "@mui/material/Select";
-import MenuItem from "@mui/material/MenuItem";
-import Checkbox from "@mui/material/Checkbox";
-import ListItemText from "@mui/material/ListItemText";
-import { InputLabel } from "@mui/material";
-import { SelectChangeEvent } from "@mui/material/Select/Select";
 import { useListNfts, useNftsTransfer } from "../../../api/hooks/useNfts";
-import { substateIdToString, formatXTM } from "../../../utils/helpers";
+import { substateIdToString } from "../../../utils/helpers";
 import { useAccountsList } from "../../../api/hooks/useAccounts";
-import CopyAddress from "../../../Components/CopyAddress";
+import { useNftTransferStore } from "../../../store/nftTransferStore";
+import FormStep from "./steps/FormStep";
+import ConfirmationStep from "./steps/ConfirmationStep";
+import ResultStep from "./steps/ResultStep";
 
 interface TransferNftProps {
   account?: Account;
@@ -92,9 +76,22 @@ export interface TransferNftDialogProps {
   preSelectedResourceAddress?: ResourceAddress;
 }
 
-interface NftListItem {
-  address: string;
-  name: string;
+function getAccountSelector(account: Account): ComponentAddressOrName {
+  return account.name
+    ? {
+        Name: account.name,
+      }
+    : {
+        ComponentAddress: substateIdToString(account.address),
+      };
+}
+
+function nftIdToString(nftId: NonFungibleId): string {
+  const key = Object.keys(nftId)[0];
+  // @ts-ignore
+  const id = nftId[key].toString();
+  const typeName = getNftIdTypeAsName(nftId);
+  return typeName + "_" + id;
 }
 
 function getNftIdTypeAsName(nftId: NonFungibleId): string {
@@ -113,158 +110,112 @@ function getNftIdTypeAsName(nftId: NonFungibleId): string {
   }
 }
 
-function nftIdToString(nftId: NonFungibleId): string {
-  const key = Object.keys(nftId)[0];
-  // @ts-ignore
-  const id = nftId[key].toString();
-  return getNftIdTypeAsName(nftId) + "_" + id;
-}
-
-function getAccountSelector(account: Account): ComponentAddressOrName {
-  return account.name
-    ? {
-        Name: account.name,
-      }
-    : {
-        ComponentAddress: substateIdToString(account.address),
-      };
-}
-
-type DialogStep = "form" | "confirmation" | "result";
-
 export function TransferNftDialog(props: TransferNftDialogProps) {
   const { preSelectedNftId, preSelectedResourceAddress } = props;
-
-  const INITIAL_VALUES = {
-    payerAccount: "",
-    nfts: preSelectedNftId ? [preSelectedNftId] : ([] as NonFungibleId[]),
-    targetAccountPublicKey: "",
-    maxFee: "",
-    resourceAddress: (preSelectedResourceAddress || "") as ResourceAddress,
-  };
-
-  const [currentStep, setCurrentStep] = useState<DialogStep>("form");
-  const [disabled, setDisabled] = useState(false);
-  const [estimatedFee, setEstimatedFee] = useState<number | null>(null);
-  const [isEstimatingFee, setIsEstimatingFee] = useState(false);
-  const [transferResult, setTransferResult] = useState<{ success: boolean; message: string } | null>(null);
-  const [transferFormState, setTransferFormState] = useState(INITIAL_VALUES);
-  const [autoCloseCountdown, setAutoCloseCountdown] = useState<number | null>(null);
-  const [autoCloseTimeoutId, setAutoCloseTimeoutId] = useState<NodeJS.Timeout | null>(null);
-  const [validity, setValidity] = useState<object>({
-    payerAccount: true,
-    nfts: preSelectedNftId ? true : false,
-    targetAccountPublicKey: false,
-  });
-  const [allValid, setAllValid] = useState(false);
-
   const { account, setPopup } = useAccountStore();
+
   if (!account) {
     return <></>;
   }
 
-  //payer account
-  const currentAccountSelector = getAccountSelector(account);
-  const [payerAccount, setPayerAccount] = useState(currentAccountSelector);
-  useEffect(() => {
-    if (transferFormState.payerAccount != "") {
-      setPayerAccount({
-        ComponentAddress: transferFormState.payerAccount,
-      });
-    }
-  }, [transferFormState.payerAccount]);
+  const {
+    currentStep,
+    transferFormState,
+    setCurrentStep,
+    setDisabled,
+    setTransferFormState,
+    setValidity,
+    setIsEstimatingFee,
+    setTransferResult,
+    setAutoCloseTimeoutId,
+    initializeFormState,
+    resetState,
+  } = useNftTransferStore();
 
-  // list NFTs
+  const [availableNfts, setAvailableNfts] = useState<NonFungibleToken[]>([]);
+  const [isEstimatingFee, setLocalIsEstimatingFee] = useState(false);
+
+  // Memoize account selectors to prevent infinite re-renders
+  const sourceAccount = useMemo(() => getAccountSelector(account), [account]);
+  const feePayerAccount = useMemo(() => {
+    return transferFormState.payerAccount ? { ComponentAddress: transferFormState.payerAccount } : sourceAccount;
+  }, [transferFormState.payerAccount, sourceAccount]);
+
+  // List NFTs
   const { data: loadedNfts, refetch: refetchNfts } = useListNfts({
-    account: getAccountSelector(account),
+    account: sourceAccount,
   });
 
-  // list all accounts for payer account selection
-  let { data: accountsResp } = useAccountsList(0, 1000);
-  let accounts = accountsResp?.accounts;
+  // List all accounts for payer account selection
+  const { data: accountsResp } = useAccountsList(0, 1000);
+  const accounts = accountsResp?.accounts;
 
   refetchNfts().catch(console.error);
 
-  const theme = useTheme();
+  // Memoize hook parameters to prevent re-renders
+  const feeEstimateParams = useMemo(
+    () => ({
+      dry_run: true,
+      max_fee: 3000,
+      nfts: transferFormState.nfts,
+      source_account: sourceAccount,
+      target_account_public_key: transferFormState.targetAccountPublicKey,
+      fee_payer_account: feePayerAccount,
+      resource_address: transferFormState.resourceAddress,
+    }),
+    [
+      transferFormState.nfts,
+      sourceAccount,
+      transferFormState.targetAccountPublicKey,
+      feePayerAccount,
+      transferFormState.resourceAddress,
+    ],
+  );
 
-  const { mutateAsync: calculateFeeEstimate } = useNftsTransfer({
-    dry_run: true,
-    max_fee: 3000,
-    nfts: transferFormState.nfts,
-    source_account: getAccountSelector(account),
-    target_account_public_key: transferFormState.targetAccountPublicKey,
-    fee_payer_account: payerAccount,
-    resource_address: transferFormState.resourceAddress,
-  });
+  const transferParams = useMemo(
+    () => ({
+      nfts: transferFormState.nfts,
+      source_account: sourceAccount,
+      target_account_public_key: transferFormState.targetAccountPublicKey,
+      dry_run: false,
+      max_fee: parseInt(transferFormState.maxFee) || 3000,
+      fee_payer_account: feePayerAccount,
+      resource_address: transferFormState.resourceAddress,
+    }),
+    [
+      transferFormState.nfts,
+      sourceAccount,
+      transferFormState.targetAccountPublicKey,
+      transferFormState.maxFee,
+      feePayerAccount,
+      transferFormState.resourceAddress,
+    ],
+  );
 
-  const { mutateAsync: sendTransferNftsTx } = useNftsTransfer({
-    nfts: transferFormState.nfts,
-    source_account: getAccountSelector(account),
-    target_account_public_key: transferFormState.targetAccountPublicKey,
-    dry_run: false,
-    max_fee: parseInt(transferFormState.maxFee),
-    fee_payer_account: payerAccount,
-    resource_address: transferFormState.resourceAddress,
-  });
-
-  function setFormValue(e: React.ChangeEvent<HTMLInputElement>) {
-    const { name, value } = e.target;
-
-    setTransferFormState({
-      ...transferFormState,
-      [name]: value,
-    });
-
-    if (validity[name as keyof object] !== undefined) {
-      setValidity({
-        ...validity,
-        [name]: e.target.validity.valid,
-      });
-    }
-
-    // Auto-estimate fee when target account is entered and valid
-    if (name === "targetAccountPublicKey" && value.trim() && value.match(/^[0-9a-fA-F]+$/)) {
-      // Small delay to let state update, then estimate fee
-      setTimeout(() => {
-        estimateFeeWithTargetAccount(value).catch(() => {
-          // Fee estimation failed, but don't block the user
-        });
-      }, 500);
-    }
-  }
+  // Fee estimation and transfer hooks
+  const { mutateAsync: calculateFeeEstimate } = useNftsTransfer(feeEstimateParams);
+  const { mutateAsync: sendTransferNftsTx } = useNftsTransfer(transferParams);
 
   const estimateFeeWithTargetAccount = async (targetAccount: string) => {
     if (!account || isEstimatingFee || !targetAccount.trim()) {
-      console.log(
-        "Skipping fee estimation - account:",
-        !!account,
-        "isEstimating:",
-        isEstimatingFee,
-        "targetAccount:",
-        !!targetAccount.trim(),
-      );
       return;
     }
 
-    console.log("Starting fee estimation with target account:", targetAccount);
-
     setIsEstimatingFee(true);
+    setLocalIsEstimatingFee(true);
 
     // Ensure the form state is updated for fee estimation
-    setTransferFormState((prev) => ({ ...prev, targetAccountPublicKey: targetAccount }));
+    setTransferFormState({ targetAccountPublicKey: targetAccount });
 
     try {
       // Use a small delay to ensure state is updated
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       const result = await calculateFeeEstimate?.();
-      console.log("Fee estimation result:", result);
 
       if (result && "Accept" in result.result.result) {
         const fee = result.fee + 100; // Add buffer as per original comment
-        console.log("Estimated fee:", fee);
-        setEstimatedFee(fee);
-        setTransferFormState((prev) => ({ ...prev, maxFee: fee.toString() }));
+        setTransferFormState({ maxFee: fee.toString() });
         return fee;
       } else {
         console.error("Fee estimation rejected:", result);
@@ -272,10 +223,10 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       }
     } catch (e: any) {
       console.error("Fee estimation error:", e);
-      // Don't show popup for auto-estimation failures
       throw e;
     } finally {
       setIsEstimatingFee(false);
+      setLocalIsEstimatingFee(false);
     }
   };
 
@@ -287,25 +238,24 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     e.preventDefault();
     if (!account) return;
 
-    console.log("Form submitted, current fee:", transferFormState.maxFee);
-    console.log("AllValid:", allValid);
-    console.log("Validity state:", validity);
-    console.log("Target account:", transferFormState.targetAccountPublicKey);
-
     // Check if target account is filled (minimum requirement)
     if (!transferFormState.targetAccountPublicKey.trim()) {
       setPopup({ title: "Missing information", error: true, message: "Please enter the target account public key" });
       return;
     }
 
-    // Always estimate fee for better UX
-    try {
-      await estimateFee();
-      setCurrentStep("confirmation");
-    } catch (error) {
-      console.error("Fee estimation failed:", error);
-      // Don't proceed if fee estimation failed
+    // Only estimate fee if we don't already have one
+    if (!transferFormState.maxFee) {
+      try {
+        await estimateFee();
+      } catch (error) {
+        console.error("Fee estimation failed:", error);
+        // Don't proceed if fee estimation failed
+        return;
+      }
     }
+
+    setCurrentStep("confirmation");
   };
 
   const onTransfer = async () => {
@@ -324,25 +274,8 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
           message: "Your NFT has been successfully transferred!",
         });
 
-        // Start countdown from 10 seconds
-        setAutoCloseCountdown(10);
-
-        // Create countdown interval
-        const countdownInterval = setInterval(() => {
-          setAutoCloseCountdown((prev) => {
-            if (prev === null || prev <= 1) {
-              clearInterval(countdownInterval);
-              props.onSendComplete?.();
-              handleClose();
-              return null;
-            }
-            return prev - 1;
-          });
-        }, 1000);
-
-        // Store the timeout ID for cleanup
+        // Auto-close after 10 seconds
         const timeoutId = setTimeout(() => {
-          clearInterval(countdownInterval);
           props.onSendComplete?.();
           handleClose();
         }, 10000);
@@ -364,63 +297,9 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   };
 
   const handleClose = () => {
-    // Clear any active timeout
-    if (autoCloseTimeoutId) {
-      clearTimeout(autoCloseTimeoutId);
-      setAutoCloseTimeoutId(null);
-    }
-
-    // Reset all states
-    const freshInitialValues = {
-      payerAccount: "",
-      nfts: preSelectedNftId ? [preSelectedNftId] : ([] as NonFungibleId[]),
-      targetAccountPublicKey: "",
-      maxFee: "",
-      resourceAddress: (preSelectedResourceAddress || "") as ResourceAddress,
-    };
-    setTransferFormState(freshInitialValues);
-    setCurrentStep("form");
-    setDisabled(false);
-    setEstimatedFee(null);
-    setIsEstimatingFee(false);
-    setTransferResult(null);
-    setAutoCloseCountdown(null);
+    resetState(preSelectedNftId, preSelectedResourceAddress);
     props.handleClose?.();
   };
-
-  useEffect(() => {
-    setAllValid(Object.values(validity).every((v) => v));
-  }, [validity]);
-
-  const [availableNfts, setAvailableNfts] = useState<NonFungibleToken[]>([]);
-  useEffect(() => {
-    if (loadedNfts !== undefined) {
-      setAvailableNfts(loadedNfts);
-    }
-  }, [loadedNfts]);
-
-  useEffect(() => {
-    if (props.open) {
-      // When dialog opens, ensure we have fresh state with correct NFT
-      const freshInitialValues = {
-        payerAccount: substateIdToString(account.address),
-        nfts: preSelectedNftId ? [preSelectedNftId] : ([] as NonFungibleId[]),
-        targetAccountPublicKey: "",
-        maxFee: "",
-        resourceAddress: (preSelectedResourceAddress || "") as ResourceAddress,
-      };
-      setTransferFormState(freshInitialValues);
-    }
-  }, [props.open, preSelectedNftId, preSelectedResourceAddress, account.address]);
-
-  // Cleanup timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (autoCloseTimeoutId) {
-        clearTimeout(autoCloseTimeoutId);
-      }
-    };
-  }, [autoCloseTimeoutId]);
 
   const handleNftsChange = (event: SelectChangeEvent<string[]>) => {
     if (typeof event.target.value == "string") {
@@ -436,7 +315,6 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       .filter((value) => Boolean(value));
 
     setValidity({
-      ...validity,
       nfts: nftsSelected.length > 0,
     });
     if (nftsSelected.length === 0) {
@@ -444,34 +322,52 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     }
 
     setTransferFormState({
-      ...transferFormState,
       nfts: nftsSelected.map((item) => item.nft_id),
-      // TODO: for simplicity, this dialog should transfer NFTS from a specific vault/resource -
-      //       not for arbitrary NFTs from various vaults (this is not supported by the backend due to needlessly complexity/performance issues)
       resourceAddress: nftsSelected[0].resource_address,
     });
   };
 
-  const handlePayerAccountChange = (event: SelectChangeEvent<string[]>) => {
-    if (typeof event.target.value != "string") {
-      return;
-    }
-    const payerAccountSelected = {
-      ComponentAddress: event.target.value,
-    };
+  const handlePayerAccountChange = (event: SelectChangeEvent<string>) => {
+    const value = event.target.value;
 
-    if (payerAccountSelected.ComponentAddress != "") {
+    if (value != "") {
       setValidity({
-        ...validity,
         payerAccount: true,
       });
 
       setTransferFormState({
-        ...transferFormState,
-        payerAccount: event.target.value,
+        payerAccount: value,
       });
     }
   };
+
+  // Handle target account changes for auto fee estimation
+  useEffect(() => {
+    const targetAccount = transferFormState.targetAccountPublicKey;
+    if (targetAccount.trim() && targetAccount.match(/^[0-9a-fA-F]+$/)) {
+      // Small delay to let state update, then estimate fee
+      const timeoutId = setTimeout(() => {
+        estimateFeeWithTargetAccount(targetAccount).catch(() => {
+          // Fee estimation failed, but don't block the user
+        });
+      }, 500);
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [transferFormState.targetAccountPublicKey]);
+
+  useEffect(() => {
+    if (loadedNfts !== undefined) {
+      setAvailableNfts(loadedNfts);
+    }
+  }, [loadedNfts]);
+
+  useEffect(() => {
+    if (props.open) {
+      // When dialog opens, ensure we have fresh state with correct NFT
+      initializeFormState(preSelectedNftId, preSelectedResourceAddress, substateIdToString(account.address));
+    }
+  }, [props.open, preSelectedNftId, preSelectedResourceAddress, account.address]);
 
   const steps = ["Enter Details", "Confirm Transfer", "Complete"];
 
@@ -489,7 +385,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   };
 
   return (
-    <Dialog open={props.open} onClose={handleClose} maxWidth="md" fullWidth>
+    <Dialog open={props.open} onClose={handleClose} maxWidth="sm" fullWidth>
       <DialogTitle>
         Transfer NFT
         <Stepper activeStep={getStepIndex()} sx={{ mt: 2 }}>
@@ -500,214 +396,32 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
           ))}
         </Stepper>
       </DialogTitle>
-      <DialogContent className="dialog-content">
+      <DialogContent>
         {currentStep === "form" && (
-          <Form
+          <FormStep
+            account={account}
+            accounts={accounts}
+            availableNfts={availableNfts}
+            preSelectedNftId={preSelectedNftId}
+            isEstimatingFee={isEstimatingFee}
             onSubmit={handleFormSubmit}
-            className="flex-container-vertical"
-            style={{ paddingTop: theme.spacing(1) }}
-          >
-            {accounts && (
-              <>
-                <InputLabel id="select-payer-account">Account (to pay fees)</InputLabel>
-                <Select
-                  id="select-payer-account"
-                  name="payerAccount"
-                  disabled={disabled}
-                  displayEmpty
-                  // @ts-ignore
-                  value={
-                    transferFormState.payerAccount ||
-                    substateIdToString(accounts.find((a) => a.account.is_default)?.account.address) ||
-                    ""
-                  }
-                  onChange={handlePayerAccountChange}
-                  variant="outlined"
-                >
-                  {accounts.map((account) => (
-                    <MenuItem key={account.account.name} value={substateIdToString(account.account.address)}>
-                      {account.account.name} {account.account.is_default ? "(default)" : ""}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </>
-            )}
-            <TextField
-              name="targetAccountPublicKey"
-              label="Target Account Public Key"
-              value={transferFormState.targetAccountPublicKey}
-              inputProps={{ pattern: "^[0-9a-fA-F]*$" }}
-              required
-              onChange={setFormValue}
-              style={{ flexGrow: 1 }}
-              disabled={disabled}
-            />
-            <TextField
-              name="maxFee"
-              label="Transaction Fee"
-              value={
-                isEstimatingFee
-                  ? "Estimating..."
-                  : transferFormState.maxFee
-                    ? formatXTM(parseInt(transferFormState.maxFee))
-                    : "Will be calculated automatically"
-              }
-              placeholder="Fee will be estimated automatically"
-              disabled={true}
-              style={{ flexGrow: 1 }}
-            />
-
-            {!preSelectedNftId ? (
-              <>
-                <InputLabel id="nft-select-label">Select NFT(s)</InputLabel>
-                <Select
-                  labelId="nft-select-label"
-                  name="nfts"
-                  id="nft-select"
-                  multiple
-                  value={transferFormState.nfts.map((nft) => JSON.stringify(nft))}
-                  required
-                  disabled={disabled}
-                  onChange={handleNftsChange}
-                  renderValue={(selected) => selected.map((item) => item).join(", ")}
-                >
-                  {availableNfts.map((nft, index) => (
-                    <MenuItem key={index} value={JSON.stringify(nft.nft_id)}>
-                      <Checkbox
-                        checked={transferFormState.nfts.some((id) => nftIdToString(id) == nftIdToString(nft.nft_id))}
-                      />
-                      <ListItemText primary={nftIdToString(nft.nft_id)} />
-                    </MenuItem>
-                  ))}
-                </Select>
-              </>
-            ) : (
-              <TextField
-                label="Selected NFT"
-                value={nftIdToString(preSelectedNftId)}
-                disabled
-                variant="outlined"
-                style={{ flexGrow: 1 }}
-              />
-            )}
-
-            <Box
-              className="flex-container"
-              style={{
-                justifyContent: "flex-end",
-              }}
-            >
-              <Button variant="outlined" onClick={handleClose} disabled={disabled}>
-                Cancel
-              </Button>
-              <Button
-                variant="contained"
-                type="submit"
-                disabled={disabled || !transferFormState.targetAccountPublicKey.trim()}
-              >
-                Continue
-              </Button>
-            </Box>
-          </Form>
+            onCancel={handleClose}
+            onNftsChange={handleNftsChange}
+            onPayerAccountChange={handlePayerAccountChange}
+          />
         )}
 
         {currentStep === "confirmation" && (
-          <Stack spacing={3} sx={{ py: 2 }}>
-            <Typography variant="h5">You are about to:</Typography>
-
-            <Card variant="outlined">
-              <CardContent>
-                <Stack spacing={2}>
-                  <Box>
-                    <Typography variant="h6" gutterBottom>
-                      NFT Transfer
-                    </Typography>
-                    <Divider />
-                  </Box>
-
-                  <Box>
-                    <Typography variant="subtitle2" color="text.secondary">
-                      NFT:
-                    </Typography>
-                    <Typography>{preSelectedNftId ? nftIdToString(preSelectedNftId) : "Multiple NFTs"}</Typography>
-                  </Box>
-
-                  <Box>
-                    <Typography variant="subtitle2" color="text.secondary">
-                      To Account:
-                    </Typography>
-                    <Typography variant="subtitle1">
-                      {/* {transferFormState.targetAccountPublicKey} */}
-                      <CopyAddress address={transferFormState.targetAccountPublicKey} />
-                    </Typography>
-                  </Box>
-
-                  <Box>
-                    <Typography variant="subtitle2" color="text.secondary">
-                      Transaction Fee:
-                    </Typography>
-                    <Typography>{formatXTM(parseInt(transferFormState.maxFee))}</Typography>
-                  </Box>
-
-                  <Box>
-                    <Typography variant="subtitle2" color="text.secondary">
-                      Fee paid by:
-                    </Typography>
-                    <Typography>
-                      {accounts?.find(
-                        (acc) => substateIdToString(acc.account.address) === transferFormState.payerAccount,
-                      )?.account.name || transferFormState.payerAccount}
-                    </Typography>
-                    <Typography variant="subtitle1">
-                      <CopyAddress address={transferFormState.targetAccountPublicKey} />
-                    </Typography>
-                  </Box>
-                </Stack>
-              </CardContent>
-            </Card>
-
-            <Stack direction="row" justifyContent="space-between" sx={{ mt: 3 }}>
-              <Button variant="outlined" onClick={() => setCurrentStep("form")}>
-                Back
-              </Button>
-              <Button variant="contained" onClick={onTransfer} disabled={disabled}>
-                Confirm and Send
-              </Button>
-            </Stack>
-          </Stack>
+          <ConfirmationStep
+            accounts={accounts}
+            preSelectedNftId={preSelectedNftId}
+            onBack={() => setCurrentStep("form")}
+            onConfirm={onTransfer}
+          />
         )}
 
-        {currentStep === "result" && (
-          <Stack spacing={3} sx={{ py: 2, textAlign: "center" }}>
-            {disabled ? (
-              <>
-                <CircularProgress size={60} />
-                <Typography variant="h6">Sending NFT...</Typography>
-                <Typography color="text.secondary">Please wait while your transaction is processed.</Typography>
-              </>
-            ) : transferResult ? (
-              <>
-                <Typography variant="h5" color={transferResult.success ? "success.main" : "error.main"}>
-                  {transferResult.success ? "✅ Transfer Successful!" : "❌ Transfer Failed"}
-                </Typography>
-                <Typography>{transferResult.message}</Typography>
-                {transferResult.success && autoCloseCountdown && (
-                  <Typography variant="body2" color="text.secondary">
-                    This dialog will close automatically in {autoCloseCountdown} seconds
-                  </Typography>
-                )}
-                <Button variant="contained" onClick={handleClose}>
-                  {transferResult.success && autoCloseCountdown ? `Close Now` : "Close"}
-                </Button>
-              </>
-            ) : null}
-          </Stack>
-        )}
+        {currentStep === "result" && <ResultStep onClose={handleClose} />}
       </DialogContent>
     </Dialog>
   );
-}
-
-function unionGet<T extends object>(object: T, key: keyof T): T[keyof T] | null {
-  return key in object ? object[key] : null;
 }

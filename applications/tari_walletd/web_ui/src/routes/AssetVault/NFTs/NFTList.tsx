@@ -40,17 +40,20 @@ import {
   TableHead,
   TableRow,
   Avatar,
+  Divider,
 } from "@mui/material";
-import { GridView, ViewList } from "@mui/icons-material";
 import type { ApiError } from "../../../api/helpers/types";
 import { shortenString, shortenSubstateId, toHexString } from "../../../utils/helpers";
-import { IoCheckmarkOutline, IoCloseOutline } from "react-icons/io5";
 import type { NonFungibleId, NonFungibleToken, ListNftsResponse, Account } from "@tari-project/typescript-bindings";
 import { convertCborValue } from "../../../utils/cbor";
 import { DataTableCell } from "../../../Components/StyledComponents";
 import ClaimNftsButton from "./ClaimNftsButton";
 import SendNft from "./SendNft";
 import TransferNft from "../Components/TransferNft";
+import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
+import CancelRoundedIcon from "@mui/icons-material/CancelRounded";
+import CopyAddress from "../../../Components/CopyAddress";
+import { IoApps, IoList } from "react-icons/io5";
 
 function NftCard({ nft }: { nft: NonFungibleToken }) {
   const mutableData = convertCborValue(nft.mutable_data);
@@ -60,7 +63,7 @@ function NftCard({ nft }: { nft: NonFungibleToken }) {
 
   return (
     <Grid item xs={12} sm={6} md={4} lg={3}>
-      <Card sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      <Card style={{ height: "100%", display: "flex", flexDirection: "column" }}>
         <CardMedia
           component="img"
           height="200"
@@ -83,23 +86,28 @@ function NftCard({ nft }: { nft: NonFungibleToken }) {
             <Chip
               icon={
                 nft.is_burned ? (
-                  <IoCloseOutline style={{ height: 16, width: 16 }} />
+                  <CancelRoundedIcon style={{ height: 16, width: 16 }} />
                 ) : (
-                  <IoCheckmarkOutline style={{ height: 16, width: 16 }} />
+                  <CheckCircleRoundedIcon style={{ height: 16, width: 16 }} />
                 )
               }
               label={nft.is_burned ? "Burned" : "Active"}
               color={nft.is_burned ? "error" : "success"}
               size="small"
+              variant="outlined"
             />
           </Box>
 
+          <Divider />
+          <Typography variant="subtitle2">Vault:</Typography>
           <Typography variant="body2" color="text.secondary" gutterBottom>
-            <strong>Vault:</strong> {shortenSubstateId(nft.vault_id)}
+            <CopyAddress address={nft.vault_id} display={shortenSubstateId(nft.vault_id)} />
           </Typography>
 
+          <Divider />
+          <Typography variant="subtitle2">Original Owner:</Typography>
           <Typography variant="body2" color="text.secondary" gutterBottom>
-            <strong>Original Owner:</strong> {shortenString(originalOwner) || "Unknown"}
+            <CopyAddress address={originalOwner || ""} />
           </Typography>
 
           <SendNft nftId={nft.nft_id} resourceAddress={nft.resource_address} />
@@ -136,26 +144,29 @@ function NftRow({ nft }: { nft: NonFungibleToken }) {
               {displayNftId(nft.nft_id)}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Vault: {shortenSubstateId(nft.vault_id)}
+              <CopyAddress address={nft.vault_id} display={shortenSubstateId(nft.vault_id)} />
             </Typography>
           </Box>
         </Box>
       </DataTableCell>
       <DataTableCell>
-        <Typography variant="body2">{shortenString(originalOwner) || "Unknown"}</Typography>
+        <Typography variant="body2">
+          <CopyAddress address={originalOwner || ""} />
+        </Typography>
       </DataTableCell>
       <DataTableCell>
         <Chip
           icon={
             nft.is_burned ? (
-              <IoCloseOutline style={{ height: 16, width: 16 }} />
+              <CancelRoundedIcon style={{ height: 16, width: 16 }} />
             ) : (
-              <IoCheckmarkOutline style={{ height: 16, width: 16 }} />
+              <CheckCircleRoundedIcon style={{ height: 16, width: 16 }} />
             )
           }
           label={nft.is_burned ? "Burned" : "Active"}
           color={nft.is_burned ? "error" : "success"}
           size="small"
+          variant="outlined"
         />
       </DataTableCell>
       <DataTableCell>
@@ -228,7 +239,7 @@ export default function NFTList(props: NftListProps) {
                 backgroundColor: viewMode === "grid" ? "action.selected" : "transparent",
               }}
             >
-              <GridView />
+              <IoApps />
             </IconButton>
             <IconButton
               onClick={() => setViewMode("list")}
@@ -238,7 +249,7 @@ export default function NFTList(props: NftListProps) {
                 backgroundColor: viewMode === "list" ? "action.selected" : "transparent",
               }}
             >
-              <ViewList />
+              <IoList />
             </IconButton>
           </Stack>
 

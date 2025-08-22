@@ -21,14 +21,8 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { ChangeEvent } from "react";
-import type {
-  Amount,
-  ClaimBurnProof,
-  FinalizeResult,
-  SubstateId,
-  Transaction,
-  TransactionStatus,
-} from "@tari-project/typescript-bindings";
+import type { Amount, SubstateId } from "@tari-project/typescript-bindings";
+import { CURRENCY } from "./constants";
 
 export const renderJson = (json: any) => {
   if (Array.isArray(json)) {
@@ -255,3 +249,10 @@ export function bigintToDecimalString(int: bigint | Amount, decimalPlaces: numbe
   const padding = "0".repeat(decimalPlaces - fractionalValues.length);
   return `${wholeValues}.${padding}${fractionalValues}`;
 }
+
+export const formatXTM = (amount: number | bigint): string => {
+  if (typeof amount !== "number" || isNaN(amount)) {
+    return `0 ${CURRENCY.SYMBOL}`;
+  }
+  return `${(amount / CURRENCY.DIVISOR).toFixed(CURRENCY.DECIMALS)} ${CURRENCY.SYMBOL}`;
+};

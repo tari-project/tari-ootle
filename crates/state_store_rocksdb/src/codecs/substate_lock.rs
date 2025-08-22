@@ -38,7 +38,11 @@ impl<T> SubstateLockKeyCodec<T> {
     }
 
     fn decode_substate_id<R: Read>(&self, reader: &mut R) -> Result<SubstateId, RocksDbStorageError> {
-        self.substate_id_codec.decode_reader(reader)
+        self.substate_id_codec
+            .decode_reader(reader)
+            .map_err(|e| RocksDbStorageError::DecodeError {
+                source: anyhow!("SubstateLockKeyCodec: Failed to decode SubstateId: {}", e),
+            })
     }
 
     fn decode_block_height<R: Read>(&self, reader: &mut R) -> Result<NodeHeight, RocksDbStorageError> {

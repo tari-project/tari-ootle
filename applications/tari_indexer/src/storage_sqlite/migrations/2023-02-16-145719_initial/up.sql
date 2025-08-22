@@ -29,7 +29,7 @@ create table substate_transitions
 );
 
 create unique index substate_transitions_substate_id_version_uniq on substate_transitions (substate_id, version, is_up);
-create index substate_transitions_state_version_substate_type_idx on substate_transitions (state_version, substate_type);
+create index substate_transitions_shard_state_version_idx on substate_transitions (shard, state_version);
 
 -- all the indexes in NFT resources
 create table non_fungible_indexes
@@ -132,8 +132,6 @@ create table utxos
     created_at       timestamp not null default current_timestamp
 );
 
-create index utxos_substate_id_idx on utxos (substate_id);
-create index utxos_tag_bytes_idx on utxos (utxo_tag_byte);
-create index utxos_resource_address_idx on utxos (resource_address);
-create index utxos_shard_state_version_idx on utxos (shard, state_version);
+CREATE INDEX utxos_shard_tag_resource_state_version_idx
+    ON utxos (shard, utxo_tag_byte, resource_address, state_version);
 

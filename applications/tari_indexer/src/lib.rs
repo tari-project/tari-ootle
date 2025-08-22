@@ -218,7 +218,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
                 // TODO: shutdown while scanning
                 match event_scanner.scan().await {
                     Ok(0) => {},
-                    Ok(cnt) => info!(target: LOG_TARGET, "Scanned {} events(s) successfully", cnt),
+                    Ok(cnt) => info!(target: LOG_TARGET, "Scanned {} block(s) successfully", cnt),
                     Err(e) =>  error!(target: LOG_TARGET, "Event auto-scan failed: {}", e),
                 };
             },

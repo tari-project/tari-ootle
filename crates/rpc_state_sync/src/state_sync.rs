@@ -127,7 +127,6 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                 }
             },
             Err(RpcError::RequestFailed(err)) if err.is_not_found() => Ok(None),
-            Err(RpcError::RequestFailed(err)) if err.is_not_found() => Ok(None),
             Err(err) => Err(err.into()),
         }
     }

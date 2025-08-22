@@ -1,7 +1,6 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use diesel::internal::derives::multiconnection::time::OffsetDateTime;
 use futures::StreamExt;
 use log::*;
 use tari_consensus_types::BlockId;
@@ -11,7 +10,7 @@ use tari_ootle_common_types::{committee::Committee, Epoch, PeerAddress, ShardGro
 use tari_ootle_p2p::{proto, proto::rpc::SyncBlocksRequest};
 use tari_ootle_storage::{
     consensus_models::{Block, SubstateUpdateProof},
-    time::PrimitiveDateTime,
+    time::{OffsetDateTime, PrimitiveDateTime},
 };
 use tari_template_lib::types::TemplateAddress;
 use tari_validator_node_rpc::client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory};
@@ -47,7 +46,7 @@ impl BlockScanner {
     }
 
     pub async fn scan(&self) -> Result<usize, anyhow::Error> {
-        let mut event_count = 0;
+        let mut block_count = 0;
 
         let newest_epoch = self.epoch_manager.current_epoch().await?;
         let oldest_scanned_epoch = self.get_oldest_scanned_epoch().await?;
@@ -58,7 +57,7 @@ impl BlockScanner {
                 // but we want to avoid gaps of the latest scanned value if any of the intermediate epoch scans fail
                 for epoch in oldest_epoch.as_u64()..=newest_epoch.as_u64() {
                     let epoch = Epoch(epoch);
-                    event_count += self.scan_blocks_in_epoch(epoch).await?;
+                    block_count += self.scan_blocks_in_epoch(epoch).await?;
 
                     // at this point we can assume the previous epochs have been fully scanned
                     self.delete_scanned_epochs_older_than(epoch).await?;
@@ -68,22 +67,23 @@ impl BlockScanner {
                 // by default we start scanning since the current epoch
                 // TODO: maybe a new parameter in the indexer to specify a custom starting epoch, or we should scan from
                 // the genesis epoch
-                event_count += self.scan_blocks_in_epoch(newest_epoch).await?;
+                block_count += self.scan_blocks_in_epoch(newest_epoch).await?;
             },
         }
 
         info!(
             target: LOG_TARGET,
             "Scanned {} events",
-            event_count
+            block_count
         );
 
-        Ok(event_count)
+        Ok(block_count)
     }
 
     async fn scan_blocks_in_epoch(&self, epoch: Epoch) -> Result<usize, anyhow::Error> {
         // TODO(perf): This call can become expensive. Lazily load a committee member from all shard groups
         let committees = self.epoch_manager.get_committees(epoch).await?;
+        let mut count = 0;
 
         for (shard_group, committee) in committees {
             info!(
@@ -102,20 +102,9 @@ impl BlockScanner {
                 epoch,
             );
 
+            count += new_blocks.len();
             for block_data in new_blocks {
-                let timestamp = unix_epoch_to_primitive_date_time(
-                    i64::try_from(block_data.block.timestamp()).unwrap_or_else(|e| {
-                        // TODO: this is very possible because we trust that the timestamp is roughly correct, however
-                        // it is purely informational and not enforced in consensus therefore could be any value and
-                        // therefore cannot be relied for ordering (use (epoch,height) instead).
-                        warn!(
-                            target: LOG_TARGET,
-                            "Failed to convert block timestamp to PrimitiveDateTime: {}",
-                            e
-                        );
-                        i64::MAX
-                    }),
-                )?;
+                let timestamp = unix_epoch_to_primitive_date_time(block_data.block.timestamp());
                 // TODO: store blocks
                 // TODO: remove substates (I think). These can be requested lazily and cached (LRU) as needed to allow
                 // TODO: an committed transaction should queue a shard state sync in the affected shards
@@ -124,7 +113,7 @@ impl BlockScanner {
             }
         }
 
-        Ok(0)
+        Ok(count)
     }
 
     async fn delete_scanned_epochs_older_than(&self, epoch: Epoch) -> Result<(), anyhow::Error> {
@@ -370,7 +359,28 @@ impl BlockScanner {
     }
 }
 
-fn unix_epoch_to_primitive_date_time(timestamp: i64) -> anyhow::Result<PrimitiveDateTime> {
-    let osdt = OffsetDateTime::from_unix_timestamp(timestamp)?;
-    Ok(PrimitiveDateTime::new(osdt.date(), osdt.time()))
+fn unix_epoch_to_primitive_date_time(timestamp: u64) -> PrimitiveDateTime {
+    let timestamp = i64::try_from(timestamp).unwrap_or_else(|e| {
+        // TODO: this is very possible because we trust that the timestamp is roughly correct, however
+        // it is purely informational and not enforced in consensus therefore could be any value and
+        // therefore cannot be relied for ordering (use (epoch,height) instead).
+        warn!(
+            target: LOG_TARGET,
+            "Failed to convert block timestamp to PrimitiveDateTime: {}",
+            e
+        );
+        i64::MAX // = August 17, 292278994, 07:12:55.807 UTC
+    });
+    OffsetDateTime::from_unix_timestamp(timestamp)
+        .map(|osdt| PrimitiveDateTime::new(osdt.date(), osdt.time()))
+        .unwrap_or_else(|e| {
+            warn!(
+                target: LOG_TARGET,
+                "Failed to convert block timestamp to OffsetDateTime: {}. Using UNIX_EPOCH",
+                e
+            );
+            // An error cannot be because the timestamp is too small, because we use an u64 and a zero unix
+            // timestamp represents a greater date (1970 AD) than the minimum (9999 BC)
+            PrimitiveDateTime::MAX
+        })
 }

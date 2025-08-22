@@ -38,7 +38,7 @@ impl DbCodec<bool> for BoolCodec {
             .read_exact(&mut buf)
             .map_err(|e| RocksDbStorageError::MalformedData {
                 operation: "decode u8",
-                details: format!("Failed to read 1 byte for NumberCodec<u8>: {e}"),
+                details: format!("Failed to read 1 byte for BoolCodec: {e}"),
             })?;
         Ok(buf[0] != 0)
     }

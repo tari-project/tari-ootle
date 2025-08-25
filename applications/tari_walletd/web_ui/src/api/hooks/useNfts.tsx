@@ -49,7 +49,17 @@ export const useNftsTransfer = (request: TransferNftRequest) => {
         error;
       },
       onSettled: () => {
-        queryClient.invalidateQueries(["nfts"]);
+        // Invalidate all NFT-related queries
+        queryClient.invalidateQueries({ 
+          predicate: (query) => {
+            const key = query.queryKey[0];
+            return typeof key === "string" && (
+              key === "nfts" || 
+              key === "list_nfts" || 
+              key.startsWith("nfts_list_")
+            );
+          }
+        });
       },
     },
   );

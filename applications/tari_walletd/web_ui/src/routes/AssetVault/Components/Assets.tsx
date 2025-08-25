@@ -150,14 +150,19 @@ function tabProps(index: number) {
 }
 
 function Assets({ account }: { account: Account }) {
-  const assetTab = useAccountStore((state) => state.assetTab);
-  const setAssetTab = useAccountStore((state) => state.setAssetTab);
+  const [assetTab, setAssetTab] = useState(0);
   const [resourceToSend, setResourceToSend] = useState<{
     address: ResourceAddress;
     resource_type: ResourceType;
   } | null>(null);
   const [nftPage, setNftPage] = useState(0);
   const [nftRowsPerPage, setNftRowsPerPage] = useState(12);
+
+  // Reset pagination and tab when account changes
+  React.useEffect(() => {
+    setNftPage(0);
+    setAssetTab(0);
+  }, [account]);
 
   const {
     data: balancesData,

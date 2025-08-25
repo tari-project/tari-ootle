@@ -21,8 +21,8 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import Button from "@mui/material/Button";
-import { useMintTestnetFaucetNfts } from "../../../api/hooks/useAccounts";
-import useAccountStore from "../../../store/accountStore";
+import { useMintTestnetFaucetNfts } from "../../../../api/hooks/useAccounts";
+import useAccountStore from "../../../../store/accountStore";
 import { substateIdToString } from "@tari-project/typescript-bindings";
 
 function ClaimNftsButton() {

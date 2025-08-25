@@ -24,7 +24,6 @@ import { FormEvent } from "react";
 import { Form } from "react-router-dom";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
-import Box from "@mui/material/Box";
 import { useTheme } from "@mui/material/styles";
 import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
@@ -178,12 +177,7 @@ export default function FormStep({
           />
         )}
 
-        <Box
-          className="flex-container"
-          style={{
-            justifyContent: "flex-end",
-          }}
-        >
+        <Stack direction="row" justifyContent="space-between" sx={{ mt: 3 }}>
           <Button variant="outlined" onClick={onCancel} disabled={disabled}>
             Cancel
           </Button>
@@ -194,7 +188,7 @@ export default function FormStep({
           >
             Continue
           </Button>
-        </Box>
+        </Stack>
       </Stack>
     </Form>
   );

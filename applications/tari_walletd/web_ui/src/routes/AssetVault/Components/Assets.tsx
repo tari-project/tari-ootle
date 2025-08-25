@@ -30,10 +30,11 @@ import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
-import { useState } from "react";
+import React, { useState } from "react";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import { DataTableCell } from "../../../Components/StyledComponents";
 import { useAccountNFTsList, useAccountsGetBalances } from "../../../api/hooks/useAccounts";
+import { useListNfts } from "../../../api/hooks/useNfts";
 import useAccountStore from "../../../store/accountStore";
 import {
   bigintToDecimalString,
@@ -172,11 +173,17 @@ function Assets({ account }: { account: Account }) {
     isFetching: nftsListIsFetching,
   } = useAccountNFTsList(substateIdToString(account.address), nftPage * nftRowsPerPage, nftRowsPerPage);
 
-  // Calculate total count based on current page data
-  // If we got fewer NFTs than requested, we've reached the end
+  // Get total count of NFTs for accurate pagination
+  const { data: allNfts } = useListNfts({
+    account: { ComponentAddress: substateIdToString(account.address) }
+  });
+
+  // Calculate total count - use actual count from allNfts, fallback to estimation
   const currentNfts = nftsListData?.nfts || [];
-  const hasMore = currentNfts.length === nftRowsPerPage;
-  const estimatedTotal = hasMore ? (nftPage + 1) * nftRowsPerPage + 1 : nftPage * nftRowsPerPage + currentNfts.length;
+  const actualTotal = allNfts ? allNfts.length : null;
+  
+  // Use actual total if available, otherwise fall back to simple estimation
+  const totalCount = actualTotal !== null ? actualTotal : currentNfts.length;
 
   const handleChange = (_event: React.SyntheticEvent, newValue: number) => {
     setAssetTab(newValue);
@@ -256,7 +263,7 @@ function Assets({ account }: { account: Account }) {
           nftsListIsFetching={nftsListIsFetching}
           nftsListError={nftsListError}
           nftsListData={nftsListData}
-          totalCount={estimatedTotal}
+          totalCount={totalCount}
           page={nftPage}
           rowsPerPage={nftRowsPerPage}
           onPageChange={(event, newPage) => handleChangePage(event, newPage, setNftPage)}

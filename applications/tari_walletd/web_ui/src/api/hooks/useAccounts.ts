@@ -283,6 +283,13 @@ export const useAccountNFTsList = (account: ComponentAddress, offset: number, li
     queryKey: ["nfts_list_" + account + "_" + offset + "_" + limit],
     queryFn: () => nftList({ account: { ComponentAddress: account }, offset, limit }),
     onError: (_error: ApiError) => {},
+    structuralSharing: (oldData, newData) => {
+      if (!oldData || !newData) return newData;
+      if (JSON.stringify(oldData) === JSON.stringify(newData)) {
+        return oldData;
+      }
+      return newData;
+    },
   });
 };
 

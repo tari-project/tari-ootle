@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use log::*;
-use tari_engine::wasm::WasmModule;
+use tari_engine::{template::LoadedTemplate, wasm::WasmModule};
 use tari_engine_types::calculate_template_binary_hash;
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{services::template_provider::TemplateProvider, Epoch, NodeAddressable, ToPeerId};
@@ -29,7 +29,6 @@ use tari_ootle_p2p::proto::rpc::TemplateType;
 use tari_ootle_storage::global::{DbTemplateType, DbTemplateUpdate, TemplateStatus};
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, Hash, TemplateAddress};
-use tari_validator_node_client::types::{FunctionDef, TemplateAbi};
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 use tokio::{
     sync::{mpsc, oneshot},
@@ -252,26 +251,12 @@ where
         }
     }
 
-    fn handle_load_template_abi(&mut self, address: TemplateAddress) -> Result<TemplateAbi, TemplateManagerError> {
+    fn handle_load_template_abi(&mut self, address: TemplateAddress) -> Result<LoadedTemplate, TemplateManagerError> {
         let loaded = self
             .manager
             .get_template_module(&address)?
             .ok_or(TemplateManagerError::TemplateNotFound { address })?;
-        Ok(TemplateAbi {
-            template_name: loaded.template_def().template_name().to_string(),
-            functions: loaded
-                .template_def()
-                .functions()
-                .iter()
-                .map(|f| FunctionDef {
-                    name: f.name.clone(),
-                    arguments: f.arguments.iter().cloned().collect(),
-                    output: f.output.to_string(),
-                    is_mut: f.is_mut,
-                })
-                .collect(),
-            version: loaded.template_def().tari_version().to_string(),
-        })
+        Ok(loaded)
     }
 
     fn handle_completed_download(&mut self, download: DownloadResult) -> Result<(), TemplateManagerError> {

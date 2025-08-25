@@ -20,7 +20,6 @@ tari_rpc_framework = { workspace = true }
 tari_shutdown = { workspace = true }
 tari_template_builtin = { workspace = true }
 tari_template_lib = { workspace = true }
-tari_validator_node_client = { workspace = true }
 tari_validator_node_rpc = { workspace = true }
 
 anyhow = { workspace = true }

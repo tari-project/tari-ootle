@@ -12170,7 +12170,6 @@ dependencies = [
  "tari_shutdown",
  "tari_template_builtin",
  "tari_template_lib",
- "tari_validator_node_client",
  "tari_validator_node_rpc",
  "thiserror 1.0.69",
  "tokio",

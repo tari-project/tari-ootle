@@ -46,17 +46,18 @@ export default function AccountBalance() {
     data: balancesData,
     isError: balancesIsError,
     error: balancesError,
-    isFetching: balancesIsFetching,
+    // isFetching: balancesIsFetching,
     isLoading: balancesIsLoading,
     refetch,
   } = useAccountsGetBalances(substateIdToString(account.address));
+
 
   useEffect(() => {
     refetch();
   }, [account]);
 
   let formattedBalance = "";
-  if (balancesIsLoading) {
+  if (balancesIsLoading && !balancesData) {
     formattedBalance = "...";
   } else {
     if (showBalance) {
@@ -75,7 +76,7 @@ export default function AccountBalance() {
       errorMessage={balancesError?.message || "Error fetching data"}
       isLoading={false}
     >
-      <Fade in={!balancesIsFetching && !balancesIsError} timeout={100}>
+      <Fade in={!balancesIsError} timeout={100}>
         <Box>
           <Box>
             <Typography variant="body2" gutterBottom={false}>

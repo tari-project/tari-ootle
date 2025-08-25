@@ -238,6 +238,13 @@ export const useAccountsGetBalances = (account: ComponentAddress, refresh: boole
     queryFn: () => accountsGetBalances({ account: { ComponentAddress: account }, refresh }),
     onError: (_error: ApiError) => {},
     refetchInterval: 5000,
+    structuralSharing: (oldData, newData) => {
+      if (!oldData || !newData) return newData;
+      if (JSON.stringify(oldData) === JSON.stringify(newData)) {
+        return oldData;
+      }
+      return newData;
+    },
   });
 };
 

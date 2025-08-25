@@ -49,6 +49,7 @@ import DialogContent from "@mui/material/DialogContent";
 import useAccountStore from "../store/accountStore";
 import { Check } from "@mui/icons-material";
 import useAuthStore from "../store/authStore";
+import "./theme.css";
 
 const drawerWidth = 300;
 

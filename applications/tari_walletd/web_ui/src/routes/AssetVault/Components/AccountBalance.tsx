@@ -28,11 +28,11 @@ import { useTheme } from "@mui/material/styles";
 import { IoEyeOffOutline, IoEyeOutline } from "react-icons/io5";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import { useAccountsGetBalances } from "../../../api/hooks/useAccounts";
-import TariGem from "../../../assets/TariGem";
 import useAccountStore from "../../../store/accountStore";
 import { substateIdToString } from "@tari-project/typescript-bindings";
 import { useEffect } from "react";
 import { bigintToDecimalString } from "../../../utils/helpers";
+import { CURRENCY } from "../../../utils/constants";
 
 const XTR_RESOURCE = "resource_0101010101010101010101010101010101010101010101010101010101010101";
 export default function AccountBalance() {
@@ -90,7 +90,7 @@ export default function AccountBalance() {
             }}
           >
             <Typography variant="h2">
-              <TariGem fill={theme.palette.text.primary} style={{ float: "left" }} /> {formattedBalance}
+              {formattedBalance} <span style={{ fontSize: "18px" }}>{CURRENCY.SYMBOL}</span>
             </Typography>
             <IconButton onClick={() => setShowBalance(!showBalance)}>
               {showBalance ? (

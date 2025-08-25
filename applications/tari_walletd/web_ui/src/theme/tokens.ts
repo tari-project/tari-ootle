@@ -29,41 +29,53 @@ export const componentSettings: ThemeOptions = {
   },
   spacing: 8,
   typography: {
-    fontFamily: '"PoppinsRegular", sans-serif',
+    fontFamily: '"Poppins", sans-serif',
     fontSize: 12,
     body1: {
       letterSpacing: "0.5px",
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 500,
     },
     body2: {
       lineHeight: "1.5rem",
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 500,
     },
     h1: {
       fontSize: "2.2rem",
       lineHeight: "3.2rem",
-      fontFamily: '"DrukHeavy", sans-serif',
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 700,
     },
     h2: {
       fontSize: "1.9rem",
       lineHeight: "2.9rem",
-      fontFamily: '"DrukHeavy", sans-serif',
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 700,
     },
     h3: {
       fontSize: "1.6rem",
       lineHeight: "2.6rem",
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 700,
     },
     h4: {
       fontSize: "1.3rem",
       lineHeight: "2.3rem",
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 600,
     },
     h5: {
       fontSize: "14px",
-      fontFamily: '"PoppinsSemiBold", sans-serif',
+      fontFamily: '"Poppins", sans-serif',
       lineHeight: "1.4rem",
+      fontWeight: 600,
     },
     h6: {
       fontSize: "0.75rem",
       lineHeight: "1.8rem",
-      fontFamily: '"PoppinsSemiBold", sans-serif',
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 600,
     },
   },
   transitions: {

@@ -37,7 +37,9 @@ import { CURRENCY } from "../../../utils/constants";
 const XTR_RESOURCE = "resource_0101010101010101010101010101010101010101010101010101010101010101";
 export default function AccountBalance() {
   const theme = useTheme();
-  const { showBalance, setShowBalance, account } = useAccountStore();
+  const showBalance = useAccountStore((state) => state.showBalance);
+  const setShowBalance = useAccountStore((state) => state.setShowBalance);
+  const account = useAccountStore((state) => state.account);
   if (!account) return <></>;
 
   const {

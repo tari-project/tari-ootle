@@ -35,7 +35,9 @@ import TransferNft from "./TransferNft";
 function ActionMenu() {
   const { mutate: claimTestnetFaucetFunds } = useAccountsCreateFreeTestCoins();
   const { mutate: claimTestnetFaucetNfts } = useMintTestnetFaucetNfts();
-  const { account, setAccount, setPublicKey } = useAccountStore();
+  const account = useAccountStore((state) => state.account);
+  const setAccount = useAccountStore((state) => state.setAccount);
+  const setPublicKey = useAccountStore((state) => state.setPublicKey);
   const theme = useTheme();
   if (!account) {
     return null;

@@ -29,7 +29,9 @@ import FetchStatusCheck from "../../Components/FetchStatusCheck";
 import useAuthStore from "../../store/authStore";
 
 function AssetVault() {
-  const { account, setAccount, setPublicKey } = useAccountStore();
+  const account = useAccountStore((state) => state.account);
+  const setAccount = useAccountStore((state) => state.setAccount);
+  const setPublicKey = useAccountStore((state) => state.setPublicKey);
   const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
   const authStore = useAuthStore();
 

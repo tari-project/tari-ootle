@@ -83,7 +83,7 @@ function BalanceRow(props: BalanceRowProps) {
     divisibility,
     onSendClicked,
   } = props;
-  const { showBalance } = useAccountStore();
+  const showBalance = useAccountStore((state) => state.showBalance);
   return (
     <TableRow key={token_symbol || resource_address}>
       <DataTableCell>{vault_address ? <CopyAddress address={vault_address} /> : "--"}</DataTableCell>

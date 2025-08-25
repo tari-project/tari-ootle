@@ -106,7 +106,8 @@ const Drawer = styled(MuiDrawer, {
 export default function Layout() {
   const [open, setOpen] = useState(false);
   const { themeMode } = useThemeStore();
-  const { popup, setPopup } = useAccountStore();
+  const popup = useAccountStore((state) => state.popup);
+  const setPopup = useAccountStore((state) => state.setPopup);
   const { authToken } = useAuthStore();
 
   const handleClose = () => {

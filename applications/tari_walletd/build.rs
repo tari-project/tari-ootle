@@ -53,15 +53,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     #[cfg(windows)]
-    const NPM: &str = "pnpm.cmd";
+    const NPM: &str = "npm.cmd";
     #[cfg(not(windows))]
-    const NPM: &str = "pnpm";
+    const NPM: &str = "npm";
 
     for (target, args) in NPM_COMMANDS {
         match Command::new(NPM).args(*args).current_dir(target).output() {
             Ok(output) if !output.status.success() => {
                 println!(
-                    "cargo:warning='pnpm {}' in {} exited with non-zero status code",
+                    "cargo:warning='npm {}' in {} exited with non-zero status code",
                     args.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(" "),
                     target
                 );

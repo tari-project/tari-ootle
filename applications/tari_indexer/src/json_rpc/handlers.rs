@@ -422,7 +422,7 @@ impl JsonRpcHandlers {
             }
         }
 
-        Ok(JsonRpcResponse::success(answer_id, responses))
+        Ok(JsonRpcResponse::success(answer_id, GetSubstatesResponse { responses }))
     }
 
     pub async fn inspect_substate(&self, value: JsonRpcExtractor) -> JrpcResult {

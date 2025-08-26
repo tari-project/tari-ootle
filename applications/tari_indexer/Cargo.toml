@@ -62,6 +62,7 @@ mime_guess = { workspace = true }
 serde = { workspace = true, features = ["default", "derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+time = { workspace = true, features = ["serde"] }
 tokio = { workspace = true, features = [
     "default",
     "macros",

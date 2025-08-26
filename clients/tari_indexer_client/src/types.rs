@@ -8,7 +8,9 @@ use std::{
 
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, Seq};
+++ b/clients/tari_indexer_client/Cargo.toml
+@@ [dependencies]
+ serde_with = { version = "1.15.0", features = ["derive"] }
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::Decision;
 use tari_engine_types::{

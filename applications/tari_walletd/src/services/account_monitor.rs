@@ -34,7 +34,7 @@ use tari_shutdown::ShutdownSignal;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     models::{NonFungibleAddress, VaultId},
-    prelude::{ComponentAddress, NonFungibleId, ResourceAddress, ResourceType},
+    prelude::{ComponentAddress, NonFungibleId, ResourceAddress},
     resource::TOKEN_SYMBOL,
 };
 use tari_transaction::TransactionId;
@@ -164,23 +164,6 @@ where
             return Ok(false);
         };
 
-        // Scan for all stealth resources
-        let stealth_resources = self
-            .wallet_sdk
-            .resources_api()
-            .get_addresses_by_type(ResourceType::Stealth)?;
-        if !stealth_resources.is_empty() {
-            info!(
-                target: LOG_TARGET,
-                "👁️‍🗨️ Requesting UTXO scan for account {} for {} stealth resource(s)",
-                account_address,
-                stealth_resources.len()
-            );
-            for resource_address in stealth_resources {
-                self.utxo_scanner_handle.request_scan(account_address, resource_address);
-            }
-        }
-
         let mut is_updated = false;
         let maybe_scan_result = substate_api
             .fetch_substate_from_network(&account_address.into(), None)
@@ -196,6 +179,9 @@ where
                 warn!(target: LOG_TARGET, "❓️ Account {} does not exist according to indexer but confirmed_on_chain = true", account_address);
             }
             // Otherwise, the account is not on-chain, so we wouldn't expect the indexer to have it
+
+            // Scan for associated stealth resources
+            self.refresh_stealth_utxos(account_address)?;
 
             return Ok(false);
         };
@@ -297,7 +283,36 @@ where
             }
         }
 
+        // Scan for all stealth resources
+        self.refresh_stealth_utxos(account_address)?;
+
         Ok(is_updated)
+    }
+
+    fn refresh_stealth_utxos(&self, account_address: ComponentAddress) -> Result<(), AccountMonitorError> {
+        let stealth_resources = self
+            .wallet_sdk
+            .accounts_api()
+            .get_associated_stealth_resources(&account_address)?;
+        if stealth_resources.is_empty() {
+            debug!(
+                target: LOG_TARGET,
+                "👁️‍🗨️ No associated stealth resources for account {}",
+                account_address
+            );
+            return Ok(());
+        }
+
+        info!(
+            target: LOG_TARGET,
+            "👁️‍🗨️ Requesting UTXO scan for account {} for {} stealth resource(s)",
+            account_address,
+            stealth_resources.len()
+        );
+        for resource_address in stealth_resources {
+            self.utxo_scanner_handle.request_scan(account_address, resource_address);
+        }
+        Ok(())
     }
 
     #[allow(clippy::too_many_lines)]
@@ -389,15 +404,9 @@ where
 
         // If the vault has revealed stealth tokens, we should also to scan for UTXOs
         if latest_vault.resource_type().is_stealth() {
-            // TODO: always scan for stealth XTR when that is implemented
-            info!(
-                target: LOG_TARGET,
-                "👁️‍🗨️ Requesting UTXO scan for account {} for vault {}",
-                account_address,
-                vault_id
-            );
-            self.utxo_scanner_handle
-                .request_scan(account_address, *latest_vault.resource_address());
+            self.wallet_sdk
+                .accounts_api()
+                .associate_stealth_resource(&account_address, *latest_vault.resource_address())?;
         }
 
         let outputs_api = self.wallet_sdk.confidential_outputs_api();

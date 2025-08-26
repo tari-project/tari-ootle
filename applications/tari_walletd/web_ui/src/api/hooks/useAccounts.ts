@@ -41,6 +41,7 @@ import queryClient from "../queryClient";
 import type {
   AccountOrKeyIndex,
   ClaimBurnProof,
+  ClaimBurnRequest,
   ComponentAddress,
   ComponentAddressOrName,
   ConfidentialTransferInputSelection,
@@ -50,23 +51,15 @@ import type {
 const DEFAULT_MAX_FEE = 2000;
 
 //   Fees are passed as strings because Amount is tagged
-export const useAccountsClaimBurn = (account: string, claimProof: ClaimBurnProof, fee: number) => {
-  return useMutation(
-    () =>
-      accountsClaimBurn({
-        account: { Name: account },
-        claim_proof: claimProof,
-        max_fee: fee,
-      }),
-    {
-      onError: (error: ApiError) => {
-        error;
-      },
-      onSettled: () => {
-        queryClient.invalidateQueries(["accounts"]);
-      },
+export const useAccountsClaimBurn = () => {
+  return useMutation((params: ClaimBurnRequest) => accountsClaimBurn(params), {
+    onError: (error: ApiError) => {
+      error;
     },
-  );
+    onSettled: () => {
+      queryClient.invalidateQueries(["accounts"]);
+    },
+  });
 };
 
 export type AccountsCreateMutate = {

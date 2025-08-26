@@ -6,7 +6,7 @@
 import type {
   AccountGetDefaultRequest,
   AccountGetRequest,
-  AccountGetResponse,
+  AccountGetResponse, AccountsAssociateStealthResourceRequest, AccountsAssociateStealthResourceResponse,
   AccountsCreateFreeTestCoinsRequest,
   AccountsCreateFreeTestCoinsResponse,
   AccountsCreateRequest,
@@ -172,6 +172,10 @@ export class WalletDaemonClient {
 
   public accountsClaimBurn(params: ClaimBurnRequest): Promise<ClaimBurnResponse> {
     return this.__invokeRpc("accounts.claim_burn", params);
+  }
+
+  public accountsAssociateStealthResource(params: AccountsAssociateStealthResourceRequest): Promise<AccountsAssociateStealthResourceResponse> {
+    return this.__invokeRpc("accounts.associate_stealth_resource", params);
   }
 
   public accountsRevealFunds(params: RevealFundsRequest): Promise<RevealFundsResponse> {

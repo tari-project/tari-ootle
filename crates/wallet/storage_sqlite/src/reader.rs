@@ -448,6 +448,28 @@ impl WalletStoreReader for ReadTransaction<'_> {
         row.try_convert()
     }
 
+    fn accounts_get_associated_stealth_resources(
+        &mut self,
+        address: &ComponentAddress,
+    ) -> Result<HashSet<ResourceAddress>, WalletStorageError> {
+        const OPERATION: &str = "accounts_get_associated_stealth_resources";
+        use crate::schema::accounts;
+
+        let stealth_resources = accounts::table
+            .filter(accounts::address.eq(address.to_string()))
+            .select(accounts::stealth_resources)
+            .first::<String>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "account".to_string(),
+                key: address.to_string(),
+            })?;
+
+        deserialize_json(&stealth_resources)
+    }
+
     // -------------------------------- Vaults -------------------------------- //
     fn vaults_get(&mut self, vault_id: &VaultId) -> Result<VaultModel, WalletStorageError> {
         use crate::schema::{accounts, vaults};

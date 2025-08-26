@@ -25,7 +25,7 @@ tari_template_builtin = { workspace = true }
 # TODO: Ideally we should not have to include the WASM template lib, we should perhaps extract the address types into a separate crate (e.g. template_types)
 tari_template_lib = { workspace = true }
 tari_template_abi = { workspace = true }
-tari_indexer_client = { workspace = true }
+tari_indexer_client = { workspace = true, features = ["client"] }
 tari_key_manager = { workspace = true }
 tari_transaction_manifest = { workspace = true }
 

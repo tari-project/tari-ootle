@@ -76,6 +76,8 @@ use crate::{
         AccountGetResponse,
         AccountSetDefaultRequest,
         AccountSetDefaultResponse,
+        AccountsAssociateStealthResourceRequest,
+        AccountsAssociateStealthResourceResponse,
         AccountsCreateOrGetRequest,
         AccountsCreateOrGetResponse,
         AccountsCreateRequest,
@@ -247,6 +249,14 @@ impl WalletDaemonClient {
         request: T,
     ) -> Result<AccountsCreateOrGetResponse, WalletDaemonClientError> {
         self.send_request("accounts.create_or_get", request.borrow()).await
+    }
+
+    pub async fn associate_stealth_resource<T: Borrow<AccountsAssociateStealthResourceRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<AccountsAssociateStealthResourceResponse, WalletDaemonClientError> {
+        self.send_request("accounts.associate_stealth_resource", request.borrow())
+            .await
     }
 
     pub async fn get_account_balances<T: Borrow<AccountsGetBalancesRequest>>(

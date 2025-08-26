@@ -38,7 +38,7 @@ function NftListItem({ nft }: { nft: NonFungibleToken }) {
       <DataTableCell>{renderJson(convertCborValue(nft.data))}</DataTableCell>
       <DataTableCell>{renderJson(convertCborValue(nft.mutable_data))}</DataTableCell>
       <DataTableCell>
-        {nft.is_burned ? (
+        {nft.is_burnt ? (
           <IoCheckmarkOutline style={{ height: 22, width: 22 }} color="#DB7E7E" />
         ) : (
           <IoCloseOutline style={{ height: 22, width: 22 }} color="#5F9C91" />

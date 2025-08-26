@@ -174,6 +174,10 @@ pub trait WalletStoreReader {
     fn accounts_count(&mut self) -> Result<u64, WalletStorageError>;
     fn accounts_get_by_name(&mut self, name: &str) -> Result<Account, WalletStorageError>;
     fn accounts_get_by_vault(&mut self, vault_id: &VaultId) -> Result<Account, WalletStorageError>;
+    fn accounts_get_associated_stealth_resources(
+        &mut self,
+        address: &ComponentAddress,
+    ) -> Result<HashSet<ResourceAddress>, WalletStorageError>;
 
     // Vaults
     fn vaults_get(&mut self, vault_id: &VaultId) -> Result<VaultModel, WalletStorageError>;
@@ -348,6 +352,12 @@ pub trait WalletStoreWriter {
         &mut self,
         account_addr: &ComponentAddress,
         update: AccountUpdate,
+    ) -> Result<(), WalletStorageError>;
+
+    fn accounts_add_stealth_resource(
+        &mut self,
+        account_addr: &ComponentAddress,
+        resource_address: ResourceAddress,
     ) -> Result<(), WalletStorageError>;
 
     // Vaults

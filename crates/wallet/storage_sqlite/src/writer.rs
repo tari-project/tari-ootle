@@ -525,6 +525,26 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
+    fn accounts_add_stealth_resource(
+        &mut self,
+        account_addr: &ComponentAddress,
+        resource_address: ResourceAddress,
+    ) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "accounts_add_stealth_resource";
+        use crate::schema::accounts;
+
+        let mut resources = self.accounts_get_associated_stealth_resources(account_addr)?;
+        resources.insert(resource_address);
+
+        diesel::update(accounts::table)
+            .set(accounts::stealth_resources.eq(serialize_json(&resources)?))
+            .filter(accounts::address.eq(account_addr.to_string()))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(())
+    }
+
     fn vaults_insert(&mut self, vault: VaultModel) -> Result<(), WalletStorageError> {
         use crate::schema::{accounts, vaults};
 

@@ -44,6 +44,8 @@ use tari_wallet_daemon_client::{
         AccountInfo,
         AccountSetDefaultRequest,
         AccountSetDefaultResponse,
+        AccountsAssociateStealthResourceRequest,
+        AccountsAssociateStealthResourceResponse,
         AccountsCreateFreeTestCoinsRequest,
         AccountsCreateFreeTestCoinsResponse,
         AccountsCreateOrGetRequest,
@@ -1109,4 +1111,30 @@ pub async fn handle_stealth_transfer(
         Ok(StealthTransferResponse { transaction_id: tx_id })
     })
     .await?
+}
+pub async fn handle_associate_stealth_resource(
+    context: &HandlerContext,
+    token: Option<&Bearer>,
+    req: AccountsAssociateStealthResourceRequest,
+) -> Result<AccountsAssociateStealthResourceResponse, anyhow::Error> {
+    context.check_auth(token, &[JrpcPermission::Admin])?;
+    let sdk = context.wallet_sdk().clone();
+    let account = get_account(&req.account, &sdk.accounts_api())?;
+    let resource = sdk.substate_api().fetch_resource(req.resource_address).await?; // validate resource exists and cache it
+    if !resource.resource_type().is_stealth() {
+        return Err(invalid_params(
+            "resource_address",
+            Some(format!(
+                "Resource is not a stealth resource (type: {})",
+                resource.resource_type()
+            )),
+        ));
+    }
+
+    sdk.accounts_api()
+        .associate_stealth_resource(account.address(), req.resource_address)?;
+
+    context.account_monitor().refresh_account(*account.address()).await?;
+
+    Ok(AccountsAssociateStealthResourceResponse {})
 }

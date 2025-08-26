@@ -113,7 +113,7 @@ libp2p-substream = { path = "networking/libp2p-substream" }
 proto_builder = { path = "networking/proto_builder" }
 sqlite_message_logger = { path = "networking/sqlite_message_logger" }
 tari_base_node_client = { path = "clients/base_node_client" }
-tari_indexer_client = { path = "clients/tari_indexer_client" }
+tari_indexer_client = { path = "clients/tari_indexer_client", default-features = false }
 tari_networking = { path = "networking/core" }
 tari_rpc_framework = { path = "networking/rpc_framework" }
 tari_rpc_macros = { path = "networking/rpc_macros" }

@@ -8,6 +8,7 @@ diesel::table! {
         owner_key_index -> BigInt,
         is_default -> Bool,
         is_confirmed_on_chain -> Bool,
+        stealth_resources -> Text,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }

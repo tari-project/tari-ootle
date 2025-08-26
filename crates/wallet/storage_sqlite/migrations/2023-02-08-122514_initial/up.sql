@@ -81,6 +81,7 @@ CREATE TABLE accounts
     owner_key_index       BIGINT   NOT NULL,
     is_default            BOOLEAN  NOT NULL DEFAULT 0,
     is_confirmed_on_chain BOOLEAN  NOT NULL,
+    stealth_resources     TEXT     NOT NULL DEFAULT '[]',
     created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

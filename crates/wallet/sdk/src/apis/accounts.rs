@@ -1,6 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::collections::HashSet;
+
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
     component::derive_component_address_from_public_key,
@@ -122,6 +124,16 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
         })
     }
 
+    pub fn associate_stealth_resource(
+        &self,
+        account_address: &ComponentAddress,
+        stealth_resource_address: ResourceAddress,
+    ) -> Result<(), AccountsApiError> {
+        self.store
+            .with_write_tx(|tx| tx.accounts_add_stealth_resource(account_address, stealth_resource_address))?;
+        Ok(())
+    }
+
     pub fn get_many(&self, offset: u64, limit: u64) -> Result<Vec<Account>, AccountsApiError> {
         let mut tx = self.store.create_read_tx()?;
         let accounts = tx.accounts_get_many(offset, limit)?;
@@ -189,6 +201,16 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
             account,
             owner_public_key: pk.to_byte_type(),
         })
+    }
+
+    pub fn get_associated_stealth_resources(
+        &self,
+        address: &ComponentAddress,
+    ) -> Result<HashSet<ResourceAddress>, AccountsApiError> {
+        let resources = self
+            .store
+            .with_read_tx(|tx| tx.accounts_get_associated_stealth_resources(address))?;
+        Ok(resources)
     }
 
     pub fn get_account_by_public_key(

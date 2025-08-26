@@ -139,6 +139,9 @@ async fn handler(
             "confidential_transfer" => {
                 call_handler(context, value, token, accounts::handle_confidential_transfer).await
             },
+            "associate_stealth_resource" => {
+                call_handler(context, value, token, accounts::handle_associate_stealth_resource).await
+            },
             "stealth_transfer" => call_handler(context, value, token, accounts::handle_stealth_transfer).await,
             "set_default" => call_handler(context, value, token, accounts::handle_set_default).await,
             "create_free_test_coins" => {

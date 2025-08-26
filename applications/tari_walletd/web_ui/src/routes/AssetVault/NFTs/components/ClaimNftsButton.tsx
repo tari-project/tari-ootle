@@ -24,6 +24,7 @@ import Button from "@mui/material/Button";
 import { useMintTestnetFaucetNfts } from "../../../../api/hooks/useAccounts";
 import useAccountStore from "../../../../store/accountStore";
 import { substateIdToString } from "@tari-project/typescript-bindings";
+import queryClient from "../../../../api/queryClient";
 
 function ClaimNftsButton() {
   const { mutate: claimTestnetFaucetNfts } = useMintTestnetFaucetNfts();
@@ -46,6 +47,17 @@ function ClaimNftsButton() {
       {
         onSuccess: (resp) => {
           console.log(resp);
+          // Invalidate NFT queries to refresh the list
+          queryClient.invalidateQueries({ 
+            predicate: (query) => {
+              const key = query.queryKey[0];
+              return typeof key === "string" && (
+                key === "nfts" || 
+                key === "list_nfts" || 
+                key.startsWith("nfts_list_")
+              );
+            }
+          });
         },
       },
     );

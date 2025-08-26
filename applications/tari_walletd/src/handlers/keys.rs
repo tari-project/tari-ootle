@@ -48,7 +48,7 @@ pub async fn handle_list(
     Ok(KeysListResponse {
         keys: keys
             .into_iter()
-            .map(|key| (key.key_index(), key.public_key, key.is_active))
+            .map(|key| (key.key_index(), key.public_key().to_byte_type(), key.is_active))
             .collect(),
     })
 }

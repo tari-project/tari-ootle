@@ -59,6 +59,7 @@ use tari_ootle_common_types::{
     NodeHeight,
     ShardGroup,
     ShardStateVersions,
+    StateVersion,
     ValidatorMetadata,
 };
 use tari_ootle_storage::{
@@ -1075,7 +1076,7 @@ impl TryFrom<proto::consensus::SyncRequest> for SyncRequestMessage {
 impl From<&ShardStateVersions> for proto::consensus::ShardStateVersions {
     fn from(value: &ShardStateVersions) -> Self {
         Self {
-            versions: value.as_slice().to_vec(),
+            versions: value.as_slice().iter().map(|v| v.as_u64()).collect(),
         }
     }
 }
@@ -1084,6 +1085,18 @@ impl TryFrom<proto::consensus::ShardStateVersions> for ShardStateVersions {
     type Error = anyhow::Error;
 
     fn try_from(value: proto::consensus::ShardStateVersions) -> Result<Self, Self::Error> {
-        ShardStateVersions::from_vec(value.versions).map_err(|e| anyhow!("Failed to convert ShardStateVersions: {}", e))
+        if value.versions.is_empty() {
+            return Err(anyhow!("ShardStateVersions cannot be empty"));
+        }
+        if value.versions.len() > ShardStateVersions::MAX_LEN {
+            return Err(anyhow!(
+                "ShardStateVersions cannot have more than {} versions, got {}",
+                ShardStateVersions::MAX_LEN,
+                value.versions.len()
+            ));
+        }
+
+        ShardStateVersions::from_vec(value.versions.into_iter().map(StateVersion::new).collect())
+            .map_err(|e| anyhow!("Failed to convert ShardStateVersions: {}", e))
     }
 }

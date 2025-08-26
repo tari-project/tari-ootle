@@ -81,6 +81,7 @@ CREATE TABLE accounts
     owner_key_index       BIGINT   NOT NULL,
     is_default            BOOLEAN  NOT NULL DEFAULT 0,
     is_confirmed_on_chain BOOLEAN  NOT NULL,
+    stealth_resources     TEXT     NOT NULL DEFAULT '[]',
     created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -182,7 +183,7 @@ CREATE TABLE non_fungible_tokens
     resource_id  text     NOT NULL,
     data         TEXT     NOT NULL,
     mutable_data TEXT     NOT NULL,
-    is_burned    BOOLEAN  NOT NULL,
+    is_burnt     BOOLEAN  NOT NULL,
     created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -233,8 +234,10 @@ CREATE TABLE stealth_outputs
     locked_at                   DATETIME NULL,
     lock_id                     INTEGER  NULL,
     encryption_secret_key_index BIGINT   NOT NULL,
-    encrypted_data              blob     NOT NULL DEFAULT '',
+    encrypted_data              BLOB     NOT NULL DEFAULT '',
     tag_byte                    INTEGER  NOT NULL,
+    is_burnt                    BOOLEAN  NOT NULL DEFAULT 0,
+    is_frozen                   BOOLEAN  NOT NULL DEFAULT 0,
     created_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -242,3 +245,17 @@ CREATE TABLE stealth_outputs
 CREATE UNIQUE INDEX stealth_outputs_uniq_resource_addr_commitment ON stealth_outputs (resource_address, commitment);
 CREATE INDEX stealth_outputs_idx_resource_status ON stealth_outputs (resource_address, status);
 
+-- Shard State Versions
+CREATE TABLE shard_state_versions
+(
+    id            INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    account_id    INTEGER  NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+    resource_id   INTEGER  NOT NULL REFERENCES resources (id) ON DELETE CASCADE,
+    shard         INTEGER  NOT NULL,
+    state_version BIGINT   NOT NULL,
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX shard_state_versions_account_resource_shard_uniq ON shard_state_versions (account_id, resource_id, shard);
+CREATE INDEX shard_state_versions_account_resource_shard_state_version_idx ON shard_state_versions (account_id, resource_id, shard, state_version);

@@ -16,7 +16,7 @@ use tari_engine::{
 use tari_engine_types::hashing::hash_template_code;
 use tari_ootle_common_types::services::template_provider::TemplateProvider;
 use tari_template_builtin::get_template_builtin;
-use tari_template_lib::prelude::TemplateAddress;
+use tari_template_lib::types::TemplateAddress;
 use thiserror::Error;
 
 #[derive(Debug, Clone)]

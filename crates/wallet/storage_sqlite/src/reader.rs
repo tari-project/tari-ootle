@@ -27,7 +27,7 @@ use diesel::{
 use log::{error, warn};
 use serde::de::DeserializeOwned;
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::substate_type::SubstateType;
+use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, StateVersion};
 use tari_ootle_wallet_sdk::{
     models::{
         Account,
@@ -51,6 +51,7 @@ use tari_ootle_wallet_sdk::{
 use tari_template_lib::{
     models::{ResourceAddress, VaultId},
     prelude::{ComponentAddress, NonFungibleId, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    resource::ResourceType,
     types::TemplateAddress,
 };
 use tari_transaction::TransactionId;
@@ -447,6 +448,28 @@ impl WalletStoreReader for ReadTransaction<'_> {
         row.try_convert()
     }
 
+    fn accounts_get_associated_stealth_resources(
+        &mut self,
+        address: &ComponentAddress,
+    ) -> Result<HashSet<ResourceAddress>, WalletStorageError> {
+        const OPERATION: &str = "accounts_get_associated_stealth_resources";
+        use crate::schema::accounts;
+
+        let stealth_resources = accounts::table
+            .filter(accounts::address.eq(address.to_string()))
+            .select(accounts::stealth_resources)
+            .first::<String>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "account".to_string(),
+                key: address.to_string(),
+            })?;
+
+        deserialize_json(&stealth_resources)
+    }
+
     // -------------------------------- Vaults -------------------------------- //
     fn vaults_get(&mut self, vault_id: &VaultId) -> Result<VaultModel, WalletStorageError> {
         use crate::schema::{accounts, vaults};
@@ -574,6 +597,19 @@ impl WalletStoreReader for ReadTransaction<'_> {
             })?;
 
         row.try_convert()
+    }
+
+    fn resources_get_by_type(&mut self, resource_type: ResourceType) -> Result<Vec<ResourceModel>, WalletStorageError> {
+        const OPERATION: &str = "resources_get_by_type";
+
+        use crate::schema::resources;
+
+        let rows = resources::table
+            .filter(resources::resource_type.eq(resource_type.to_string()))
+            .get_results::<models::ResourceModel>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        rows.into_iter().map(|r| r.try_convert()).collect()
     }
 
     fn resources_get_many<'a, I: IntoIterator<Item = &'a ResourceAddress>>(
@@ -1114,6 +1150,42 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .collect::<Vec<AuthoredTemplateModel>>();
 
         Ok((templates, total_templates_for_key_index as u64))
+    }
+
+    fn shard_state_version_get(
+        &mut self,
+        account: &ComponentAddress,
+        resource: &ResourceAddress,
+    ) -> Result<HashMap<Shard, StateVersion>, WalletStorageError> {
+        const OPERATION: &str = "shard_state_version_get";
+        use crate::schema::{accounts, resources, shard_state_versions};
+
+        let row = shard_state_versions::table
+            .select((shard_state_versions::shard, shard_state_versions::state_version))
+            .filter(
+                shard_state_versions::account_id.eq(accounts::table
+                    .select(accounts::id)
+                    .filter(accounts::address.eq(account.to_string()))
+                    .limit(1)
+                    .single_value()
+                    .assume_not_null()),
+            )
+            .filter(
+                shard_state_versions::resource_id.eq(resources::table
+                    .select(resources::id)
+                    .filter(resources::address.eq(resource.to_string()))
+                    .limit(1)
+                    .single_value()
+                    .assume_not_null()),
+            )
+            .get_results::<(i32, i64)>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        let mut versions = HashMap::with_capacity(row.len());
+        for (shard, version) in row {
+            versions.insert(Shard::from(shard as u32), StateVersion::new(version as u64));
+        }
+        Ok(versions)
     }
 }
 

@@ -16,6 +16,7 @@ pub struct Account {
     pub owner_key_index: i64,
     pub is_default: bool,
     pub is_confirmed_on_chain: bool,
+    pub _stealth_resource_address: String,
     pub created_at: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
 }

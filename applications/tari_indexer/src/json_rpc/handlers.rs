@@ -82,11 +82,14 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_p2p::TariMessagingSpec;
 use tari_ootle_storage::{
-    global::GlobalDb,
+    global::{GlobalDb, TemplateStatus},
     time::{PrimitiveDateTime, UtcDateTime},
 };
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
-use tari_template_manager::{implementation::TemplateManager, interface::TemplateExecutable};
+use tari_template_manager::{
+    implementation::TemplateManager,
+    interface::{TemplateExecutable, TemplateManagerError},
+};
 use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClientFactory, TransactionResultStatus};
 
 use crate::{
@@ -455,7 +458,7 @@ impl JsonRpcHandlers {
                 JsonRpcError::new(
                     JsonRpcErrorReason::InvalidParams,
                     "per_shard_limit cannot be greater than 1000".to_string(),
-                    json::Value::Null,
+                    Value::Null,
                 ),
             ));
         }
@@ -494,8 +497,9 @@ impl JsonRpcHandlers {
         }
 
         let mut utxo_updates = Vec::new();
+        let mut per_shard_high_watermark = Vec::with_capacity(req.shard_state_versions.len());
         for (shard, state_version) in req.shard_state_versions {
-            let updates = self
+            let (max_version, updates) = self
                 .substate_manager
                 .get_utxo_updates(
                     req.resource_address,
@@ -513,11 +517,16 @@ impl JsonRpcHandlers {
                         ),
                     )
                 })?;
+            if max_version.as_u64() > 0 {
+                // Save a little over the wire initially by not sending 0 watermarks
+                per_shard_high_watermark.push((shard, max_version));
+            }
             utxo_updates.extend(updates);
         }
 
         Ok(JsonRpcResponse::success(answer_id, GetUtxoUpdatesResponse {
             utxo_updates,
+            per_shard_high_watermark,
         }))
     }
 
@@ -616,7 +625,22 @@ impl JsonRpcHandlers {
             .template_manager
             .fetch_template(&request.template_address)
             .optional()
-            .map_err(|e| Self::internal_error(answer_id, e))?
+            .map_err(|err| {
+                // If it's pending, we return a 404 to the client - this allows them to retry later
+                if matches!(err, TemplateManagerError::TemplateUnavailable {
+                    status: Some(TemplateStatus::Pending)
+                }) {
+                    Self::not_found(
+                        answer_id,
+                        format!(
+                            "Template with address {} is still being downloaded. Try again later.",
+                            request.template_address
+                        ),
+                    )
+                } else {
+                    Self::internal_error(answer_id, format!("Error fetching template: {}", err))
+                }
+            })?
             .ok_or_else(|| {
                 Self::not_found(
                     answer_id,

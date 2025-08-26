@@ -33,7 +33,7 @@ tari_ootle_app_utilities = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 tari_engine = { workspace = true }
 tari_engine_types = { workspace = true }
-tari_indexer_client = { workspace = true }
+tari_indexer_client = { workspace = true, features = ["client"] }
 tari_template_builtin = { workspace = true }
 tari_template_lib = { workspace = true }
 tari_transaction = { workspace = true }

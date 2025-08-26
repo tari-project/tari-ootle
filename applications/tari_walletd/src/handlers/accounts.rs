@@ -1,10 +1,11 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use anyhow::anyhow;
 use axum::headers::authorization::Bearer;
+use indexmap::IndexMap;
 use log::*;
 use rand::rngs::OsRng;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
@@ -44,6 +45,8 @@ use tari_wallet_daemon_client::{
         AccountInfo,
         AccountSetDefaultRequest,
         AccountSetDefaultResponse,
+        AccountsAssociateStealthResourceRequest,
+        AccountsAssociateStealthResourceResponse,
         AccountsCreateFreeTestCoinsRequest,
         AccountsCreateFreeTestCoinsResponse,
         AccountsCreateOrGetRequest,
@@ -285,7 +288,8 @@ pub async fn handle_get_balances(
     let stealth_outputs = stealth_outputs
         .into_iter()
         .filter(|o| !vaulted_resources.contains(&o.resource_address))
-        .fold(HashMap::new(), |mut acc, o| {
+        // NOTE: indexemap used to ensure a consistent order (HashMap causes UI to randomly switch positions for multiple stealth resources)
+        .fold(IndexMap::new(), |mut acc, o| {
             acc.entry(o.resource_address)
                 .and_modify(|v| *v += o.value)
                 .or_insert(o.value);
@@ -845,7 +849,7 @@ pub async fn handle_transfer(
 
     let mut builder = context.transaction_builder();
 
-    if let Some(ValidatorScanResult { address, substate }) = existing_dest_account {
+    if let Some(ValidatorScanResult { id: address, substate }) = existing_dest_account {
         inputs.insert(address.into());
 
         // Figure out which vault to add as an input
@@ -1109,4 +1113,30 @@ pub async fn handle_stealth_transfer(
         Ok(StealthTransferResponse { transaction_id: tx_id })
     })
     .await?
+}
+pub async fn handle_associate_stealth_resource(
+    context: &HandlerContext,
+    token: Option<&Bearer>,
+    req: AccountsAssociateStealthResourceRequest,
+) -> Result<AccountsAssociateStealthResourceResponse, anyhow::Error> {
+    context.check_auth(token, &[JrpcPermission::Admin])?;
+    let sdk = context.wallet_sdk().clone();
+    let account = get_account(&req.account, &sdk.accounts_api())?;
+    let resource = sdk.substate_api().fetch_resource(req.resource_address).await?; // validate resource exists and cache it
+    if !resource.resource_type().is_stealth() {
+        return Err(invalid_params(
+            "resource_address",
+            Some(format!(
+                "Resource is not a stealth resource (type: {})",
+                resource.resource_type()
+            )),
+        ));
+    }
+
+    sdk.accounts_api()
+        .associate_stealth_resource(account.address(), req.resource_address)?;
+
+    context.account_monitor().refresh_account(*account.address()).await?;
+
+    Ok(AccountsAssociateStealthResourceResponse {})
 }

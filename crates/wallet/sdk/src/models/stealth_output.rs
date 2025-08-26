@@ -1,6 +1,7 @@
-//   Copyright 2023 The Tari Project
+//   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_engine_types::UtxoAddress;
 use tari_template_lib::{
     models::{ComponentAddress, EncryptedData},
     prelude::{PedersenCommitmentBytes, ResourceAddress, RistrettoPublicKeyBytes},
@@ -20,7 +21,15 @@ pub struct StealthOutputModel {
     pub encrypted_data: EncryptedData,
     pub tag_byte: UtxoTagByte,
     pub status: OutputStatus,
+    pub is_burnt: bool,
+    pub is_frozen: bool,
     pub lock_id: Option<OutputLockId>,
+}
+
+impl StealthOutputModel {
+    pub fn to_utxo_address(&self) -> UtxoAddress {
+        UtxoAddress::new(self.resource_address, self.commitment.into())
+    }
 }
 
 pub struct StealthBalance {

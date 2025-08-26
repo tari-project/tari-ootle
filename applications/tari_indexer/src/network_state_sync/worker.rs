@@ -1,24 +1,5 @@
-//  Copyright 2024 The Tari Project
-//
-//  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
-//  following conditions are met:
-//
-//  1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following
-//  disclaimer.
-//
-//  2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the
-//  following disclaimer in the documentation and/or other materials provided with the distribution.
-//
-//  3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote
-//  products derived from this software without specific prior written permission.
-//
-//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
-//  INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-//  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-//  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-//  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
-//  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//   Copyright 2025 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{collections::HashMap, pin::pin};
 
@@ -29,7 +10,6 @@ use tari_engine_types::{
     transaction_receipt::TransactionReceipt,
 };
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerEvent, EpochManagerReader};
-use tari_indexer_client::types::{UtxoSpent, UtxoUnspent, UtxoUpdate};
 use tari_networking::NetworkingHandle;
 use tari_ootle_common_types::{
     optional::Optional,
@@ -38,6 +18,9 @@ use tari_ootle_common_types::{
     PeerAddress,
     ShardGroup,
     StateVersion,
+    UtxoSpent,
+    UtxoUnspent,
+    UtxoUpdate,
     VotePower,
 };
 use tari_ootle_p2p::{proto::rpc, TariMessagingSpec};
@@ -475,12 +458,17 @@ fn extend_bufs_from_substate_update(
     match &update {
         SubstateUpdateProof::Create(create) => match create.substate.value().value() {
             Some(SubstateValue::Utxo(utxo)) => {
-                utxos_buf.push(UtxoUpdate::Unspent(UtxoUnspent {
-                    versioned_substate_id: update.to_versioned_substate_id(),
-                    shard,
-                    state_version,
-                    utxo: utxo.clone(),
-                }));
+                if let Some(address) = create.substate.substate_id().as_utxo_address() {
+                    utxos_buf.push(UtxoUpdate::Unspent(UtxoUnspent {
+                        address,
+                        version: update.version(),
+                        shard,
+                        state_version,
+                        utxo: utxo.clone(),
+                    }));
+                } else {
+                    warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received UTXO substate with invalid address: {}", create.substate.substate_id());
+                };
             },
             Some(SubstateValue::TransactionReceipt(receipt)) => {
                 transactions_buf.push(receipt.clone());
@@ -506,17 +494,21 @@ fn extend_bufs_from_substate_update(
                 }
             },
         },
-        SubstateUpdateProof::Destroy(destroy) => match destroy.substate_id {
+        SubstateUpdateProof::Destroy(destroy) => match &destroy.substate_id {
             SubstateId::TransactionReceipt(_) => {
                 warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received destroy for transaction receipt substate: {}", destroy.substate_id);
             },
             SubstateId::Template(template_address) => {
                 // Currently not possible
-                templates_buf.push(TemplateChange::Deprecate { template_address });
+                templates_buf.push(TemplateChange::Deprecate {
+                    template_address: *template_address,
+                });
             },
-            SubstateId::Utxo(_) => {
+            SubstateId::Utxo(address) => {
                 utxos_buf.push(UtxoUpdate::Spent(UtxoSpent {
-                    versioned_substate_id: update.to_versioned_substate_id(),
+                    address: address.clone(),
+                    shard,
+                    version: update.version(),
                     state_version,
                 }));
             },

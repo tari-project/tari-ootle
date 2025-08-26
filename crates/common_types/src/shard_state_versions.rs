@@ -5,12 +5,12 @@ use bounded_vec::BoundedVec;
 pub use bounded_vec::BoundedVecOutOfBounds;
 use tari_bor::{Deserialize, Serialize};
 
-use crate::{shard::Shard, NumPreshards, ShardGroup};
+use crate::{shard::Shard, NumPreshards, ShardGroup, StateVersion};
 
 /// Maximum number of shards is one more than the maximum number of presharding options to allow for the global shard
 const MAX_SHARDS: usize = NumPreshards::MAX_SHARD.as_u32() as usize + 1;
 
-type BoundedVersionVec = BoundedVec<u64, 1, MAX_SHARDS>;
+type BoundedVersionVec = BoundedVec<StateVersion, 1, MAX_SHARDS>;
 
 /// The state versions for each shard that maps each shard managed by the ShardGroup (including the
 /// global shard) to a state version.
@@ -27,28 +27,30 @@ pub struct ShardStateVersions {
 }
 
 impl ShardStateVersions {
+    pub const MAX_LEN: usize = MAX_SHARDS;
+
     pub fn genesis(shard_group: ShardGroup) -> Self {
         Self {
-            inner: BoundedVersionVec::try_from(vec![0; shard_group.len() + 1])
+            inner: BoundedVersionVec::try_from(vec![StateVersion::zero(); shard_group.len() + 1])
                 .expect("Empty vec should always be valid"),
         }
     }
 
-    pub fn from_vec(shard_versions: Vec<u64>) -> Result<Self, BoundedVecOutOfBounds> {
+    pub fn from_vec(shard_versions: Vec<StateVersion>) -> Result<Self, BoundedVecOutOfBounds> {
         Ok(Self {
             inner: BoundedVersionVec::from_vec(shard_versions)?,
         })
     }
 
-    pub fn into_vec(self) -> Vec<u64> {
+    pub fn into_vec(self) -> Vec<StateVersion> {
         self.inner.into()
     }
 
-    pub fn get(&self, shard_index: usize) -> Option<u64> {
+    pub fn get(&self, shard_index: usize) -> Option<StateVersion> {
         self.inner.get(shard_index).copied()
     }
 
-    pub fn get_global(&self) -> u64 {
+    pub fn get_global(&self) -> StateVersion {
         *self.inner.first()
     }
 
@@ -69,7 +71,7 @@ impl ShardStateVersions {
         Some(index + 1)
     }
 
-    pub fn get_by_shard_checked(&self, shard_group: ShardGroup, shard: Shard) -> Option<u64> {
+    pub fn get_by_shard_checked(&self, shard_group: ShardGroup, shard: Shard) -> Option<StateVersion> {
         let index = Self::shard_to_index(shard_group, shard)?;
         self.inner.get(index).copied()
     }
@@ -82,7 +84,7 @@ impl ShardStateVersions {
         false
     }
 
-    pub fn as_slice(&self) -> &[u64] {
+    pub fn as_slice(&self) -> &[StateVersion] {
         self.inner.as_slice()
     }
 
@@ -91,9 +93,9 @@ impl ShardStateVersions {
             panic!("Length mismatch: expected {} but got {}", self.len(), bitmap.len());
         }
 
-        let inner_mut: &mut [u64] = self.inner.as_mut();
+        let inner_mut: &mut [StateVersion] = self.inner.as_mut();
         for (i, _) in bitmap.into_iter().enumerate().filter(|(_, v)| *v) {
-            inner_mut[i] += 1;
+            inner_mut[i] = StateVersion::new(inner_mut[i].as_u64() + 1);
         }
         self
     }
@@ -105,10 +107,10 @@ mod tests {
 
     #[test]
     fn it_gets_by_index() {
-        let versions = ShardStateVersions::from_vec(vec![1, 2, 3]).unwrap();
-        assert_eq!(versions.get(0), Some(1));
-        assert_eq!(versions.get(1), Some(2));
-        assert_eq!(versions.get(2), Some(3));
+        let versions = ShardStateVersions::from_vec(vec![1.into(), 2.into(), 3.into()]).unwrap();
+        assert_eq!(versions.get(0), Some(1u64.into()));
+        assert_eq!(versions.get(1), Some(2u64.into()));
+        assert_eq!(versions.get(2), Some(3u64.into()));
         assert_eq!(versions.get(3), None);
         assert_eq!(versions.len(), 3);
         assert!(!versions.is_empty());
@@ -116,19 +118,24 @@ mod tests {
 
     #[test]
     fn it_gets_by_shard() {
-        let v = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
+        let v = vec![1u64, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
         let num_non_global_shards = v.len() as u32 - 1;
-        let versions = ShardStateVersions::from_vec(v).unwrap();
+        let versions = ShardStateVersions::from_vec(v.into_iter().map(Into::into).collect()).unwrap();
         let shard_group = ShardGroup::new(100, 100 + num_non_global_shards);
         assert_eq!(shard_group.len(), versions.len());
         let v = versions.get_by_shard_checked(shard_group, 0.into()).unwrap();
-        assert_eq!(v, 1, "returned incorrect version {v} for global shard");
+        assert_eq!(v.as_u64(), 1, "returned incorrect version {v} for global shard");
 
         for (i, shard) in (100..100 + num_non_global_shards).enumerate() {
             let v = versions
                 .get_by_shard_checked(shard_group, shard.into())
                 .unwrap_or_else(|| panic!("Shard {} not found", shard));
-            assert_eq!(v, i as u64 + 2, "returned incorrect version {v} for shard {}", shard);
+            assert_eq!(
+                v.as_u64(),
+                i as u64 + 2,
+                "returned incorrect version {v} for shard {}",
+                shard
+            );
         }
         let v = versions.get_by_shard_checked(shard_group, Shard::from(13));
         assert!(v.is_none());
@@ -136,16 +143,19 @@ mod tests {
 
     #[test]
     fn it_errors_if_more_then_max_shards() {
-        let e = ShardStateVersions::from_vec(vec![1; MAX_SHARDS + 1]).unwrap_err();
+        let e = ShardStateVersions::from_vec(vec![StateVersion::zero(); MAX_SHARDS + 1]).unwrap_err();
         assert!(matches!(e, BoundedVecOutOfBounds::UpperBoundError { .. }));
     }
 
     #[test]
     fn it_deserializes_if_serialized_vec_is_within_bounds() {
-        let v = vec![1, 2, 3];
+        let v = vec![1u64, 2, 3];
         let serialized = tari_bor::encode(&v).unwrap();
         let deserialized: ShardStateVersions = tari_bor::decode(&serialized).unwrap();
-        assert_eq!(deserialized.as_slice(), v);
+        assert_eq!(
+            deserialized.as_slice(),
+            v.into_iter().map(Into::into).collect::<Vec<_>>().as_slice()
+        );
     }
 
     #[test]
@@ -164,13 +174,13 @@ mod tests {
 
     #[test]
     fn it_applies_a_bitmap_to_increment_versions() {
-        let versions = ShardStateVersions::from_vec(vec![1, 2, 3]).unwrap();
+        let versions = ShardStateVersions::from_vec(vec![1.into(), 2.into(), 3.into()]).unwrap();
         let bitmap = vec![true, false, true];
         let updated_versions = versions.apply_bitmap(bitmap);
 
-        assert_eq!(updated_versions.get(0), Some(2));
-        assert_eq!(updated_versions.get(1), Some(2));
-        assert_eq!(updated_versions.get(2), Some(4));
+        assert_eq!(updated_versions.get(0), Some(2.into()));
+        assert_eq!(updated_versions.get(1), Some(2.into()));
+        assert_eq!(updated_versions.get(2), Some(4.into()));
         assert_eq!(updated_versions.len(), 3);
     }
 }

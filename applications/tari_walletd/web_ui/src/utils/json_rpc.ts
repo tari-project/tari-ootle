@@ -24,6 +24,8 @@ import type {
   AccountGetDefaultRequest,
   AccountGetRequest,
   AccountGetResponse,
+  AccountsAssociateStealthResourceRequest,
+  AccountsAssociateStealthResourceResponse,
   AccountsCreateFreeTestCoinsRequest,
   AccountsCreateFreeTestCoinsResponse,
   AccountsCreateRequest,
@@ -284,6 +286,10 @@ export const accountsTransfer = (request: AccountsTransferRequest): Promise<Acco
 export const accountsConfidentialTransfer = (
   request: ConfidentialTransferRequest,
 ): Promise<ConfidentialTransferResponse> => client().then((c) => c.confidentialTransfer(request));
+export const accountsAssociateStealthResource = (
+  request: AccountsAssociateStealthResourceRequest,
+): Promise<AccountsAssociateStealthResourceResponse> =>
+  client().then((c) => c.accountsAssociateStealthResource(request));
 export const accountsStealthTransfer = (request: StealthTransferRequest): Promise<StealthTransferResponse> =>
   client().then((c) => c.stealthTransfer(request));
 export const accountsSetDefault = (request: AccountSetDefaultRequest): Promise<AccountSetDefaultResponse> =>

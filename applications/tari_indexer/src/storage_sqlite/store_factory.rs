@@ -30,7 +30,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use diesel::{prelude::*, sql_query, SqliteConnection};
+use diesel::{dsl, prelude::*, sql_query, SqliteConnection};
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
 use log::*;
 use serde::{de::DeserializeOwned, Serialize};
@@ -40,9 +40,9 @@ use tari_engine_types::{
     events::Event,
     substate::{SubstateId, SubstateValue},
 };
-use tari_indexer_client::types::{ListSubstateItem, TransactionEntry, UtxoUpdate};
+use tari_indexer_client::types::{ListSubstateItem, TransactionEntry};
 use tari_indexer_lib::NonFungibleSubstate;
-use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, ShardGroup, StateVersion};
+use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, ShardGroup, StateVersion, UtxoUpdate};
 use tari_ootle_storage::{
     consensus_models::{EpochCheckpoint, SubstateUpdateProof},
     time::PrimitiveDateTime,
@@ -201,7 +201,17 @@ pub trait IndexerStoreReadTransaction {
     fn key_value_get_value<K: AsRef<str>, T: DeserializeOwned>(&mut self, key: K) -> Result<T, StorageError>;
     fn key_value_get_raw<K: AsRef<str>>(&mut self, key: K) -> Result<KeyValue<String>, StorageError>;
 
-    fn get_utxo_updates(
+    fn utxos_get_max_state_version(
+        &mut self,
+        resource_address: ResourceAddress,
+        shard: Shard,
+    ) -> Result<StateVersion, StorageError>;
+
+    /// Get UTXO updates for a given resource address and shard, starting from a specific state version.
+    ///
+    /// Returns a tuple containing the total count of matching UTXO updates (without the limit) and a vector of UTXO
+    /// updates limited by the specified limit.
+    fn utxos_get_updates(
         &mut self,
         resource_address: ResourceAddress,
         shard: Shard,
@@ -495,7 +505,28 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         Ok(key_value.into())
     }
 
-    fn get_utxo_updates(
+    fn utxos_get_max_state_version(
+        &mut self,
+        resource_address: ResourceAddress,
+        shard: Shard,
+    ) -> Result<StateVersion, StorageError> {
+        const OPERATION: &str = "utxos_get_max_state_version";
+        use crate::storage_sqlite::schema::utxos;
+        let max_version = utxos::table
+            .select(dsl::max(utxos::state_version))
+            .filter(utxos::resource_address.eq(resource_address.to_string()))
+            .filter(utxos::shard.eq(shard.as_u32() as i32))
+            .get_result::<Option<i64>>(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?
+            .map(|v| StateVersion::new(v as u64))
+            .unwrap_or_else(StateVersion::zero);
+
+        Ok(max_version)
+    }
+
+    fn utxos_get_updates(
         &mut self,
         resource_address: ResourceAddress,
         shard: Shard,
@@ -648,11 +679,11 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         const OPERATION: &str = "batch_insert_utxo_updates";
         use crate::storage_sqlite::schema::utxos;
 
-        fn utxo_exists(connection: &mut SqliteConnection, substate_id: &str) -> Result<bool, StorageError> {
+        fn utxo_exists(connection: &mut SqliteConnection, address: &str) -> Result<bool, StorageError> {
             use crate::storage_sqlite::schema::utxos;
 
             let count = utxos::table
-                .filter(utxos::substate_id.eq(substate_id))
+                .filter(utxos::address.eq(address))
                 .count()
                 .limit(1)
                 .get_result::<i64>(connection)
@@ -668,35 +699,25 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                 .try_fold((Vec::new(), Vec::new()), |(mut inserts, mut updates), update| {
                     match update {
                         UtxoUpdate::Unspent(unspent) => {
-                            let substate_id = unspent.versioned_substate_id.substate_id().to_string();
-                            if utxo_exists(self.connection(), &substate_id)? {
+                            let address = unspent.address.to_string();
+                            if utxo_exists(self.connection(), &address)? {
                                 // If the UTXO already exists, we update it instead of inserting a new one
                                 let update = UtxoRecordUpdate {
-                                    version: Some(unspent.versioned_substate_id.version() as i32),
+                                    version: Some(unspent.version as i32),
                                     output: Some(unspent.utxo.output().map(serialize_json).transpose()?),
                                     state_version: Some(unspent.state_version.as_u64() as i64),
                                     is_spent: Some(false),
                                     is_burnt: Some(unspent.utxo.is_burnt()),
                                     is_frozen: Some(unspent.utxo.is_frozen()),
                                 };
-                                updates.push((substate_id, update));
+                                updates.push((address, update));
                             } else {
                                 inserts.push(UtxoRecordInsert {
-                                    substate_id,
-                                    version: unspent.versioned_substate_id.version() as i32,
+                                    address,
+                                    version: unspent.version as i32,
                                     output: unspent.utxo.output().map(serialize_json).transpose()?,
                                     shard: unspent.shard.as_u32() as i32,
-                                    resource_address: unspent
-                                        .versioned_substate_id
-                                        .substate_id()
-                                        .as_utxo_address()
-                                        .map(|a| a.resource_address().to_string())
-                                        .ok_or_else(|| StorageError::QueryError {
-                                            reason: format!(
-                                                "[{OPERATION}] Substate ID {} is not a valid UTXO address",
-                                                unspent.versioned_substate_id.substate_id()
-                                            ),
-                                        })?,
+                                    resource_address: unspent.address.resource_address().to_string(),
                                     state_version: unspent.state_version.as_u64() as i64,
                                     utxo_tag_byte: unspent.utxo.output().map(|o| i32::from(o.tag.as_byte())),
                                     is_spent: false,
@@ -707,7 +728,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                         },
                         UtxoUpdate::Spent(spent) => {
                             let update = UtxoRecordUpdate {
-                                version: Some(spent.versioned_substate_id.version() as i32),
+                                version: Some(spent.version as i32),
                                 // Prune the UTXO data for spent outputs
                                 output: Some(None),
                                 // Update to deleted state version
@@ -715,7 +736,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                                 is_spent: Some(true),
                                 ..Default::default()
                             };
-                            updates.push((spent.versioned_substate_id.substate_id().to_string(), update));
+                            updates.push((spent.address.to_string(), update));
                         },
                     }
 
@@ -730,8 +751,8 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                 .map_err(|e| StorageError::general(OPERATION, format!("insert error: {e}")))?;
         }
 
-        for (substate_id, update) in updates {
-            diesel::update(utxos::table.filter(utxos::substate_id.eq(substate_id.to_string())))
+        for (address, update) in updates {
+            diesel::update(utxos::table.filter(utxos::address.eq(address)))
                 .set(update)
                 .execute(self.connection())
                 .map_err(|e| StorageError::general(OPERATION, format!("update error: {e}")))?;

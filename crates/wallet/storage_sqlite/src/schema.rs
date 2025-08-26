@@ -8,6 +8,7 @@ diesel::table! {
         owner_key_index -> BigInt,
         is_default -> Bool,
         is_confirmed_on_chain -> Bool,
+        stealth_resources -> Text,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }
@@ -66,7 +67,7 @@ diesel::table! {
         resource_id -> Text,
         data -> Text,
         mutable_data -> Text,
-        is_burned -> Bool,
+        is_burnt -> Bool,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }
@@ -122,6 +123,18 @@ diesel::table! {
 }
 
 diesel::table! {
+    shard_state_versions (id) {
+        id -> Integer,
+        account_id -> Integer,
+        resource_id -> Integer,
+        shard -> Integer,
+        state_version -> BigInt,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     stealth_outputs (id) {
         id -> Integer,
         owner_account_id -> Integer,
@@ -135,6 +148,8 @@ diesel::table! {
         encryption_secret_key_index -> BigInt,
         encrypted_data -> Binary,
         tag_byte -> Integer,
+        is_burnt -> Bool,
+        is_frozen -> Bool,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }
@@ -220,6 +235,8 @@ diesel::joinable!(non_fungible_tokens -> vaults (vault_id));
 diesel::joinable!(output_locks -> vaults (vault_id));
 diesel::joinable!(outputs -> accounts (account_id));
 diesel::joinable!(outputs -> vaults (vault_id));
+diesel::joinable!(shard_state_versions -> accounts (account_id));
+diesel::joinable!(shard_state_versions -> resources (resource_id));
 diesel::joinable!(vaults -> accounts (account_id));
 diesel::joinable!(webauthn_registration_passkeys -> webauthn_registrations (registration_id));
 
@@ -233,6 +250,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     output_locks,
     outputs,
     resources,
+    shard_state_versions,
     stealth_outputs,
     substates,
     transactions,

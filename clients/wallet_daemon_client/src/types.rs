@@ -1096,3 +1096,14 @@ pub struct StealthTransferRequest {
 pub struct StealthTransferResponse {
     pub transaction_id: TransactionId,
 }
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub struct AccountsAssociateStealthResourceRequest {
+    pub account: ComponentAddressOrName,
+    pub resource_address: ResourceAddress,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub struct AccountsAssociateStealthResourceResponse {}

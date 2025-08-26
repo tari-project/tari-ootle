@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{events::Event, substate::SubstateId};
-use tari_template_lib::prelude::{EntityId, TemplateAddress};
+use tari_template_lib::types::{EntityId, TemplateAddress};
 
 #[derive(Default, Debug, Serialize, Deserialize, Clone)]
 pub struct EventFilter {

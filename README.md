@@ -8,32 +8,30 @@ If you're looking for the core Tari base layer code, it's in [this repository](h
 
 ## Prerequisites
 
-You will require the following in order to successfully build the Ootle and/or run the Ootle locally via the Localnet environment:
+You will require the following tools and dependencies to successfully build the Ootle and/or run the Ootle locally via the Localnet environment:
 
-- **Rust**: Install Rust via [rustup](https://rustup.rs), and add a WASM target:
+- **C/C++ compiler**
+   - Linux: `gcc` or `clang`
+   - macOS: `clang` (via Xcode CLI tools)
+   - Windows: `MSVC` (via Visual Studio Build Tools)
+- **Build tools**
+   - `make`, `cmake`, or equivalent
+   - `pkg-config` (Linux/macOS)
+- **Libraries**
+   - OpenSSL development libraries (`libssl-dev`)
+   - SQLite development libraries (`libsqlite3-dev`)
+   - Protobuf compiler (`protoc`) and headers (`libprotobuf-dev`)
+- **Other**
+   - `git`
+
+- **Rust (>=1.74)**: Install Rust via [rustup](https://rustup.rs), and add a WASM target:
 
 ```bash
 rustup target add wasm32-unknown-unknown
 ```
 
-- **Node.js & npm**: Node.js is required for building the React UI components. The easiest way to manage this follow the instructions at [node.js](https://nodejs.org/en/download) for your desired operating system and package/version managers. 
-
-- **Linux-only steps**: Ensure you have the following dependencies installed: 
-
-```bash
-sudo apt-get update
-sudo apt-get install -y \
-  build-essential \
-  openssl \
-  libssl-dev \
-  pkg-config \
-  libsqlite3-dev \
-  git \
-  cmake \
-  protobuf-compiler \
-  libprotobuf-dev
-```
-
+- **Node.js (>=20.x) & npm**: Node.js is required for building the React UI components. Follow the instructions at [node.js](https://nodejs.org/en/download) for your desired operating system and package/version managers. We recommend installing Node.js via [`nvm`](https://github.com/nvm-sh/nvm) to easily manage versions across projects.
+ 
 ## Accessing the Ootle Testnet
 
 The Tari Ootle Wallet Daemon is available on the project’s [releases page](https://github.com/tari-project/tari-ootle/releases).

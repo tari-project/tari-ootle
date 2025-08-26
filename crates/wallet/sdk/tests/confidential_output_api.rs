@@ -24,7 +24,7 @@ use tari_ootle_wallet_sdk::{
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_abi::TemplateDef;
 use tari_template_lib::{
-    constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
+    constants::STEALTH_TARI_RESOURCE_ADDRESS,
     models::{ComponentAddress, EncryptedData, ResourceAddress, VaultId},
     prelude::crypto::UtxoTagByte,
     resource::ResourceType,
@@ -164,8 +164,8 @@ impl Test {
             .add_vault(
                 Test::test_account_address(),
                 Test::test_vault_address(),
-                CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-                ResourceType::Confidential,
+                STEALTH_TARI_RESOURCE_ADDRESS,
+                ResourceType::Stealth,
                 Some("TEST".to_string()),
                 6,
             )

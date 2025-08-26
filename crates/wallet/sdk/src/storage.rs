@@ -156,6 +156,7 @@ pub trait WalletStoreReader {
         &mut self,
         status: Option<TransactionStatus>,
         component: Option<ComponentAddress>,
+        signed_by_public_key: Option<RistrettoPublicKeyBytes>,
     ) -> Result<Vec<WalletTransaction>, WalletStorageError>;
     // Substates
     fn substates_get(&mut self, address: &SubstateId) -> Result<SubstateModel, WalletStorageError>;

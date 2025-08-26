@@ -33,7 +33,7 @@ use crate::{
         key_manager::{KeyBranch, KeyManagerApi, KeyManagerApiError},
         stealth_crypto::{StealthCryptoApi, StealthCryptoApiError},
     },
-    models::{AccountWithPublicKey, KeyPair, OutputLockId, OutputStatus, StealthBalance, StealthOutputModel},
+    models::{Account, KeyPair, OutputLockId, OutputStatus, StealthBalance, StealthOutputModel},
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
@@ -176,7 +176,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
 
     pub fn resolve_output_masks_for_spending(
         &self,
-        owner_account: &AccountWithPublicKey,
+        owner_account: &Account,
         outputs: Vec<StealthOutputModel>,
     ) -> Result<Vec<UnblindedStealthInputStatement>, StealthOutputsApiError> {
         let network = self.config_api.get_network()?;
@@ -205,7 +205,9 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                 &output.encrypted_data,
             )?;
 
-            let stealth_secret = kdfs::owner_stealth_dh_secret(network, &owner_key_part.key, &nonce);
+            let stealth_secret = self
+                .crypto_api
+                .derive_stealth_owner_secret(network, &owner_key_part.key, &nonce);
 
             outputs_with_masks.push(UnblindedStealthInputStatement {
                 mask_and_value: MaskAndValue {
@@ -458,7 +460,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
             );
             let (value, status) = match unblinded_result {
                 Ok(mask_and_value) => {
-                    let stealth_secret = kdfs::owner_stealth_dh_secret(
+                    let stealth_secret = self.crypto_api.derive_stealth_owner_secret(
                         network,
                         &wallet_key.secret_key.key,
                         &output_stealth_public_nonce,

@@ -11,7 +11,7 @@ use tari_engine_types::{FromByteType, ToByteType};
 use tari_ootle_common_types::{optional::IsNotFoundError, SubstateRequirement};
 use tari_ootle_wallet_crypto::{MaskAndValue, UnblindedOutputStatement};
 use tari_template_lib::{
-    constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
+    constants::STEALTH_TARI_RESOURCE_ADDRESS,
     models::{ComponentAddress, ResourceAddress, VaultId},
     prelude::RistrettoPublicKeyBytes,
     types::Amount,
@@ -246,7 +246,7 @@ where
         let max_fee = params.max_fee.into();
         let fee_inputs_to_spend = self.resolved_inputs_for_transfer(
             *from_account.address(),
-            CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
+            STEALTH_TARI_RESOURCE_ADDRESS,
             max_fee,
             ConfidentialTransferInputSelection::PreferRevealed,
         )?;
@@ -360,9 +360,7 @@ where
             });
         let change_confidential_amount = inputs_to_spend.total_confidential_amount() - remaining_left_to_pay;
 
-        let maybe_change_statement = if change_confidential_amount.is_zero() {
-            None
-        } else {
+        let maybe_change_statement = if change_confidential_amount.is_positive() {
             let statement = self.create_confidential_proof_statement(
                 &account_public_key,
                 change_confidential_amount,
@@ -371,7 +369,7 @@ where
 
             let change_value = statement.amount;
 
-            if !statement.amount.is_zero() {
+            if change_value.is_positive() {
                 self.outputs_api.add_output(ConfidentialOutputModel {
                     account_address: *account.address(),
                     vault_id: src_vault.id,
@@ -390,6 +388,8 @@ where
             }
 
             Some(statement)
+        } else {
+            None
         };
 
         let proof = self.crypto_api.generate_withdraw_proof(
@@ -405,7 +405,7 @@ where
         let transaction = Transaction::builder()
             .for_network(network.as_byte())
             .with_dry_run(params.is_dry_run)
-            .fee_transaction_pay_from_component_confidential(*from_account.address(), fee_withdraw_proof)
+            .fee_transaction_pay_fees_stealth_from_component(*from_account.address(), fee_withdraw_proof)
             .then(|builder| {
                 if dest_account_exists {
                     builder

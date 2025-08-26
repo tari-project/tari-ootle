@@ -34,7 +34,7 @@ use tari_shutdown::ShutdownSignal;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     models::{NonFungibleAddress, VaultId},
-    prelude::{ComponentAddress, NonFungibleId, ResourceAddress},
+    prelude::{ComponentAddress, NonFungibleId, ResourceAddress, XTR},
     resource::TOKEN_SYMBOL,
 };
 use tari_transaction::TransactionId;
@@ -290,18 +290,11 @@ where
     }
 
     fn refresh_stealth_utxos(&self, account_address: ComponentAddress) -> Result<(), AccountMonitorError> {
-        let stealth_resources = self
+        let mut stealth_resources = self
             .wallet_sdk
             .accounts_api()
             .get_associated_stealth_resources(&account_address)?;
-        if stealth_resources.is_empty() {
-            debug!(
-                target: LOG_TARGET,
-                "👁️‍🗨️ No associated stealth resources for account {}",
-                account_address
-            );
-            return Ok(());
-        }
+        stealth_resources.insert(XTR);
 
         info!(
             target: LOG_TARGET,

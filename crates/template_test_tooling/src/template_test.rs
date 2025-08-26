@@ -38,7 +38,7 @@ use tari_ootle_common_types::{
     Network,
     SubstateRequirement,
 };
-use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
+use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, XTR_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     args::InstructionArg,
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS},
@@ -57,7 +57,7 @@ use crate::{
     Package,
 };
 
-pub fn test_faucet_component() -> ComponentAddress {
+pub const fn test_faucet_component() -> ComponentAddress {
     XTR_FAUCET_COMPONENT_ADDRESS
 }
 
@@ -110,6 +110,7 @@ impl TemplateTest {
         // Add builtin templates
         builder.add_builtin_template(&ACCOUNT_TEMPLATE_ADDRESS);
         builder.add_builtin_template(&NFT_FAUCET_TEMPLATE_ADDRESS);
+        builder.add_builtin_template(&XTR_FAUCET_TEMPLATE_ADDRESS);
 
         // Add the faucet template for fungible tokens
         builder.add_template(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/faucet"));
@@ -568,6 +569,7 @@ impl TemplateTest {
 
     /// Executes a transaction. Panics if the transaction is not finalized (fee transaction fails). Does not panic if
     /// the main instructions fails (use execute_expect_success for that).
+    #[track_caller]
     pub fn execute_expect_commit(
         &mut self,
         transaction: Transaction,
@@ -587,6 +589,7 @@ impl TemplateTest {
     }
 
     /// Executes a transaction. Panics if the transaction fails.
+    #[track_caller]
     pub fn execute_expect_success(
         &mut self,
         transaction: Transaction,
@@ -598,6 +601,7 @@ impl TemplateTest {
     }
 
     /// Executes a transaction. Panics if the transaction succeeds.
+    #[track_caller]
     pub fn execute_expect_failure(
         &mut self,
         transaction: Transaction,

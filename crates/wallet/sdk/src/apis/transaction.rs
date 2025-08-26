@@ -12,7 +12,10 @@ use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
     VersionedSubstateIdRef,
 };
-use tari_template_lib::{constants::XTR, prelude::ComponentAddress};
+use tari_template_lib::{
+    constants::XTR,
+    prelude::{ComponentAddress, RistrettoPublicKeyBytes},
+};
 use tari_transaction::{Transaction, TransactionId};
 
 use crate::{
@@ -60,7 +63,7 @@ where
         Ok(tx_id)
     }
 
-    pub async fn submit_transaction(&self, transaction_id: TransactionId) -> Result<(), TransactionApiError> {
+    pub async fn submit_transaction(&self, transaction_id: TransactionId) -> Result<bool, TransactionApiError> {
         let transaction = self.store.with_read_tx(|tx| tx.transactions_get(transaction_id))?;
 
         if !matches!(transaction.status, TransactionStatus::New) {
@@ -90,6 +93,7 @@ where
                                 .with_invalid_reason(&message),
                         )
                     })?;
+                    return Ok(false);
                 },
                 _ => {
                     return Err(err.into());
@@ -97,7 +101,7 @@ where
             },
         }
 
-        Ok(())
+        Ok(true)
     }
 
     pub async fn submit_dry_run_transaction(
@@ -158,9 +162,10 @@ where
         &self,
         status: Option<TransactionStatus>,
         component: Option<ComponentAddress>,
+        signed_by_public_key: Option<RistrettoPublicKeyBytes>,
     ) -> Result<Vec<WalletTransaction>, TransactionApiError> {
         let mut tx = self.store.create_read_tx()?;
-        let transactions = tx.transactions_fetch_all(status, component)?;
+        let transactions = tx.transactions_fetch_all(status, component, signed_by_public_key)?;
         Ok(transactions)
     }
 

@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::HashSet;
+use std::{array, collections::HashSet};
 
 use anyhow::anyhow;
 use axum::headers::authorization::Bearer;
@@ -11,13 +11,17 @@ use rand::rngs::OsRng;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
     component::derive_component_address_from_public_key,
-    confidential::ConfidentialClaim,
+    confidential::TariStealthClaim,
     substate::SubstateId,
     FromByteType,
     ToByteType,
 };
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
-use tari_ootle_wallet_crypto::UnblindedOutputStatement;
+use tari_ootle_wallet_crypto::{
+    UnblindedOutputStatement,
+    UnblindedStealthInputStatement,
+    UnblindedStealthOutputStatement,
+};
 use tari_ootle_wallet_sdk::{
     apis::{
         confidential_transfer::ConfidentialTransferParams,
@@ -29,7 +33,7 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    constants::{CONFIDENTIAL_TARI_RESOURCE_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
+    constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
     models::UnclaimedConfidentialOutputAddress,
     prelude::ResourceType,
     types::Amount,
@@ -65,6 +69,7 @@ use tari_wallet_daemon_client::{
         ClaimBurnResponse,
         ConfidentialTransferRequest,
         ConfidentialTransferResponse,
+        ExtClaimBurnProof,
         RevealFundsRequest,
         RevealFundsResponse,
         StealthTransferRequest,
@@ -381,7 +386,7 @@ pub async fn handle_reveal_funds(
 
         let vault = sdk
             .accounts_api()
-            .get_vault_by_resource(account.address(), &CONFIDENTIAL_TARI_RESOURCE_ADDRESS)?;
+            .get_vault_by_resource(account.address(), &STEALTH_TARI_RESOURCE_ADDRESS)?;
 
         let max_fee = req.max_fee.unwrap_or(DEFAULT_FEE);
         let amount_to_reveal = req.amount_to_reveal +
@@ -445,7 +450,7 @@ pub async fn handle_reveal_funds(
             builder = builder.with_fee_instructions_builder(|builder| {
                 builder
                     .call_method(account_address, "withdraw_confidential", args![
-                        CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
+                        STEALTH_TARI_RESOURCE_ADDRESS,
                         reveal_proof.clone()
                     ])
                     .put_last_instruction_output_on_workspace("revealed")
@@ -456,7 +461,7 @@ pub async fn handle_reveal_funds(
             builder = builder
                 .fee_transaction_pay_from_component(account_address, max_fee)
                 .call_method(account_address, "withdraw_confidential", args![
-                    CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
+                    STEALTH_TARI_RESOURCE_ADDRESS,
                     reveal_proof
                 ])
                 .put_last_instruction_output_on_workspace("revealed")
@@ -512,40 +517,50 @@ pub async fn handle_claim_burn(
 
     let max_fee = max_fee.unwrap_or(DEFAULT_FEE);
 
-    let ClaimBurnProof {
-        reciprocal_claim_public_key,
-        commitment,
-        ownership_proof,
-        range_proof,
+    let ExtClaimBurnProof {
+        owner_nonce_key_index,
+        claim_proof:
+            ClaimBurnProof {
+                reciprocal_claim_public_key,
+                commitment,
+                ownership_proof,
+                range_proof,
+            },
     } = claim_proof;
-
-    // TODO: validate the proof_of_knowledge from the claim before submitting the transaction
-
-    let mut inputs = vec![];
 
     let accounts_api = sdk.accounts_api();
     let account = get_account(&account, &accounts_api)?;
+    let account_secret_key = sdk.key_manager_api().derive_account_key(account.key_index())?;
 
-    let account_substate = sdk.substate_api().get_substate(&(*account.address()).into())?;
-    inputs.push(account_substate.substate_id.into());
+    let network = sdk.config_api().get_network()?;
+    let claim_nonce_keypair = sdk
+        .key_manager_api()
+        .derive_keypair(KeyBranch::Nonce, owner_nonce_key_index)?;
 
-    let (account_secret_key, account_public_key) = sdk.key_manager_api().derive_account_keypair(account.key_index())?;
+    if !sdk.stealth_crypto_api().validate_burn_claim_ownership_proof(
+        network,
+        &ownership_proof,
+        &commitment,
+        &claim_nonce_keypair.public_key.to_byte_type(),
+    ) {
+        return Err(invalid_params(
+            "claim_proof.ownership_proof",
+            Some("ownership proof validation failed"),
+        ));
+    }
+
+    let mut inputs = vec![];
 
     info!(
         target: LOG_TARGET,
         "ℹ️ Signing claim burn with key {}. NOTE: This must be the same as the claiming key used in the burn transaction for this to succeed.",
-        account_public_key
+        account.owner_public_key
     );
 
     // Add all versioned account child addresses as inputs
     // add the commitment substate id as input to the claim burn transaction
     let address = UnclaimedConfidentialOutputAddress::from_commitment(&commitment);
     inputs.push(SubstateRequirement::unversioned(address));
-
-    let child_addresses = sdk
-        .substate_api()
-        .load_dependent_substates(&[&(*account.address()).into()])?;
-    inputs.extend(child_addresses);
 
     info!(
         target: LOG_TARGET,
@@ -566,22 +581,26 @@ pub async fn handle_claim_burn(
             address,
         )
     })?;
+
     let reciprocal_claim_public_key_expanded = RistrettoPublicKey::try_from_byte_type(&reciprocal_claim_public_key)
         .map_err(|e| invalid_params("claim_proof.reciprocal_claim_public_key", Some(e)))?;
-    let unmasked_output = sdk.confidential_crypto_api().unblind_output(
+    let unmasked_output = sdk.stealth_crypto_api().unblind_output(
         &output.commitment,
         &output.encrypted_data,
-        &account_secret_key.key,
+        claim_nonce_keypair.secret_key(),
         &reciprocal_claim_public_key_expanded,
     )?;
 
     let mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMasks)?;
-    let (nonce, output_public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
 
     let final_amount = unmasked_output
         .value
-        .checked_sub(max_fee.into())
+        .checked_sub_positive(max_fee.into())
         .ok_or_else(|| invalid_params("max_fee", Some("more fees paid than claimed amount")))?;
+
+    if final_amount.is_zero() {
+        return Err(invalid_params("max_fee", Some("fee equals or exceeds claimed amount")));
+    }
 
     let final_amount_u64 = final_amount.to_u64_checked().ok_or_else(|| {
         // NOTE: this can never be anywhere close to this large because this would be more than the total supply of XTM
@@ -592,69 +611,72 @@ pub async fn handle_claim_burn(
         )
     })?;
 
-    // NOTE: the confidential encryption format currently does not support amounts larger than u64. Apart from it being
-    // insane/basically impossible to have that much in a single UTXO, the L1 emission will reach this much in many
-    // thousands of years.
-    let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
+    let (nonce, output_public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
+    let account_owner_public_key = RistrettoPublicKey::from_secret_key(&account_secret_key.key);
+    // NOTE: the confidential encryption format and the bullet proofs currently do not support amounts larger than
+    // u64::MAX. Apart from it being insane/basically impossible to have that much XTR in a single UTXO, the L1 emission
+    // will reach this much in many thousands of years.
+    let encrypted_data = sdk.stealth_crypto_api().encrypt_value_and_mask(
         final_amount_u64,
         &mask.key,
-        &account_public_key,
+        &account_owner_public_key,
         &nonce,
     )?;
 
-    let output_statement = UnblindedOutputStatement {
-        amount: final_amount,
-        mask: mask.key,
-        sender_public_nonce: output_public_nonce,
-        minimum_value_promise: 0,
-        encrypted_data,
-        resource_view_key: None,
+    let tag = sdk
+        .stealth_crypto_api()
+        .derive_stealth_output_tag(network, &account.owner_public_key);
+
+    // Create stealth address - used during spend time
+    let stealth_output_owner_public_key =
+        sdk.stealth_crypto_api()
+            .derive_stealth_owner_public_key(network, &account_owner_public_key, &nonce);
+
+    let output_statement = UnblindedStealthOutputStatement {
+        statement: UnblindedOutputStatement {
+            amount: final_amount,
+            mask: mask.key,
+            sender_public_nonce: output_public_nonce.clone(),
+            minimum_value_promise: 0,
+            encrypted_data,
+            resource_view_key: None,
+        },
+        output_owner_public_key: stealth_output_owner_public_key,
+        tag,
     };
 
-    let reveal_proof = sdk.confidential_crypto_api().generate_withdraw_proof(
-        &[unmasked_output],
+    // Generate the correct secret to spend the claimed output
+    let input = UnblindedStealthInputStatement {
+        mask_and_value: unmasked_output,
+        owner_secret: claim_nonce_keypair.secret_key().clone(),
+        public_nonce: reciprocal_claim_public_key_expanded,
+    };
+
+    let pay_fee_and_mint_output = sdk.stealth_crypto_api().generate_transfer_statement(
+        array::from_ref(&input),
         0,
-        Some(&output_statement).filter(|o| !o.amount.is_zero()),
+        array::from_ref(&output_statement),
         max_fee,
-        None,
-        0,
     )?;
 
     let transaction = context
         .transaction_builder()
         .with_fee_instructions_builder(|fee_builder| {
             fee_builder
-                .claim_burn(ConfidentialClaim {
-                    public_key: reciprocal_claim_public_key,
+                .claim_burn(TariStealthClaim {
+                    burn_public_key: reciprocal_claim_public_key,
                     output_address: address,
                     range_proof,
                     proof_of_knowledge: ownership_proof,
-                    withdraw_proof: Some(reveal_proof),
+                    transfer_statement: None,
                 })
-                .put_last_instruction_output_on_workspace("bucket")
-                .then(|builder| {
-                    if account.is_confirmed_on_chain() {
-                        builder.call_method(*account.address(), "deposit", args![Workspace("bucket")])
-                    } else {
-                        // If the account is not on-chain yet, we create it
-                        builder.create_account_with_bucket(account_public_key.to_byte_type(), "bucket")
-                    }
-                })
-                .call_method(*account.address(), "pay_fee", args![Amount(max_fee)])
+                .pay_fee_stealth(pay_fee_and_mint_output)
         })
-        .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
-        .build_and_seal(&account_secret_key.key);
+        .with_inputs(inputs)
+        .build_and_seal(claim_nonce_keypair.secret_key());
 
     let mut events = context.notifier().subscribe();
-    let tx_id = context
-        .transaction_service()
-        .submit_transaction_with_opts(
-            transaction,
-            account.is_confirmed_on_chain().then(|| NewAccountData {
-                address: *account.address(),
-            }),
-        )
-        .await?;
+    let tx_id = context.transaction_service().submit_transaction(transaction).await?;
 
     // Wait for the monitor to pick up the new or updated account
     let finalized = wait_for_result(&mut events, tx_id).await?;
@@ -676,7 +698,7 @@ pub async fn handle_claim_burn(
     })
 }
 
-/// Mints coins into an existing account from the testnet faucet.
+/// Takes tXTR from the testnet faucet and deposits them into an existing account.
 #[allow(clippy::too_many_lines)]
 pub async fn handle_create_free_test_coins(
     context: &HandlerContext,

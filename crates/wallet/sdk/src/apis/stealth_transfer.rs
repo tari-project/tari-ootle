@@ -13,14 +13,13 @@ use tari_ootle_common_types::{
     SubstateRequirement,
 };
 use tari_ootle_wallet_crypto::{
-    kdfs,
     MaskAndValue,
     UnblindedOutputStatement,
     UnblindedStealthInputStatement,
     UnblindedStealthOutputStatement,
 };
 use tari_template_lib::{
-    models::{Account, ComponentAddress, ResourceAddress, VaultId},
+    models::{Account as BuiltinAccount, ComponentAddress, ResourceAddress, VaultId},
     prelude::{RistrettoPublicKeyBytes, XTR},
     types::Amount,
 };
@@ -36,7 +35,7 @@ use crate::{
         stealth_outputs::{StealthOutputsApi, StealthOutputsApiError},
         substate::{SubstateApiError, SubstatesApi, ValidatorScanResult},
     },
-    models::{AccountWithPublicKey, OutputLockId, OutputStatus, StealthOutputModel},
+    models::{Account, AccountWithPublicKey, OutputLockId, OutputStatus, StealthOutputModel},
     network::WalletNetworkInterface,
     storage::{WalletStorageError, WalletStore},
 };
@@ -79,7 +78,7 @@ where
     #[allow(clippy::too_many_lines)]
     fn resolved_inputs_for_transfer(
         &self,
-        from_account: &AccountWithPublicKey,
+        from_account: &Account,
         resource_address: ResourceAddress,
         spend_amount: Amount,
         input_selection: ConfidentialTransferInputSelection,
@@ -313,21 +312,19 @@ where
     #[allow(clippy::too_many_lines)]
     pub async fn transfer(&self, params: StealthTransferParams) -> Result<TransferOutput, StealthTransferApiError> {
         params.validate()?;
-        // TODO: XTR as a stealth resource
-        let fee_account = self.accounts_api.get_default()?;
 
         let destination_account = derive_account_address_from_public_key(&params.destination_public_key);
 
         // Determine Transaction Inputs
         let mut inputs = Vec::new();
+        let fee_account = params.owner_account.clone();
 
-        let fee_account_substate = self.substate_api.get_substate(&fee_account.account.address.into())?;
-        inputs.push(fee_account_substate.substate_id.into_unversioned_requirement());
+        inputs.push(SubstateRequirement::unversioned(*fee_account.address()));
 
         // Add all versioned account child addresses as inputs
         let child_addresses = self
             .substate_api
-            .load_dependent_substates(&[&fee_account.account.address.into()])?;
+            .load_dependent_substates(&[&(*fee_account.address()).into()])?;
         inputs.extend(child_addresses.into_iter().map(|a| a.into_unversioned()));
 
         let fee_vault = self
@@ -370,8 +367,8 @@ where
                 },
                 None => {
                     // TODO: we're just determining if the account exists - symptom of a larger problem/missing
-                    // feature where account is created as needed instead of having to be determined by the client
-                    // side
+                    // feature where account is created as needed by the execution layer instead of having to be
+                    // determined by the client side
                     let to_account_substate = self
                         .substate_api
                         .fetch_substate_from_network(&SubstateId::Component(destination_account), None)
@@ -390,7 +387,7 @@ where
                                         destination_account, address
                                     ),
                                 })?;
-                        let dest_account = Account::from_value(account.state()).map_err(|e| {
+                        let dest_account = BuiltinAccount::from_value(account.state()).map_err(|e| {
                             StealthTransferApiError::UnexpectedIndexerResponse {
                                 details: format!("Failed to convert component substate to account: {e}"),
                             }
@@ -454,7 +451,7 @@ where
         // Reserve and lock input funds
         // TODO: preserve atomicity across api calls - needed in many places
         let inputs_to_spend = match self.resolved_inputs_for_transfer(
-            &params.owner_account,
+            params.owner_account.account(),
             params.resource_address,
             params.total_output_amount(),
             params.input_selection,
@@ -678,7 +675,9 @@ where
         )?;
 
         // Create stealth address - used during spend time
-        let output_owner_public_key = kdfs::owner_stealth_dh_stealth_address(network, dest_public_key, &nonce_secret);
+        let output_owner_public_key =
+            self.crypto_api
+                .derive_stealth_owner_public_key(network, dest_public_key, &nonce_secret);
 
         let derived_tag = self
             .crypto_api

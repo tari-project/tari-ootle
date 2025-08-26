@@ -196,6 +196,7 @@ pub struct TransactionGetResponse {
     pub transaction: Transaction,
     pub result: Option<FinalizeResult>,
     pub status: TransactionStatus,
+    pub invalid_reason: Option<String>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub last_update_time: PrimitiveDateTime,
 }
@@ -205,6 +206,7 @@ pub struct TransactionGetResponse {
 pub struct TransactionGetAllRequest {
     pub status: Option<TransactionStatus>,
     pub component: Option<ComponentAddress>,
+    pub signer_public_key: Option<RistrettoPublicKeyBytes>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -574,9 +576,17 @@ pub struct ConfidentialViewVaultBalanceResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ClaimBurnRequest {
     pub account: ComponentAddressOrName,
-    pub claim_proof: ClaimBurnProof,
+    pub claim_proof: ExtClaimBurnProof,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub max_fee: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub struct ExtClaimBurnProof {
+    pub claim_proof: ClaimBurnProof,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub owner_nonce_key_index: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

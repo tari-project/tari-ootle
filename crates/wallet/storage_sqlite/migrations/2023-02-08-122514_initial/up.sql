@@ -30,31 +30,25 @@ CREATE UNIQUE INDEX config_uniq_key on config (key);
 -- Transaction
 CREATE TABLE transactions
 (
-    id                        INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    hash                      TEXT     NOT NULL,
-    network                   INTEGER  NOT NULL,
-    instructions              TEXT     NOT NULL,
-    fee_instructions          TEXT     NOT NULL,
-    inputs                    TEXT     NOT NULL,
-    signatures                TEXT     NOT NULL,
-    seal_signature            TEXT     NOT NULL,
-    is_seal_signer_authorized BOOLEAN  NOT NULL,
-    result                    TEXT     NULL,
-    qcs                       TEXT     NULL,
-    final_fee                 BIGINT   NULL,
-    status                    TEXT     NOT NULL,
-    dry_run                   BOOLEAN  NOT NULL,
-    min_epoch                 BIGINT   NULL,
-    max_epoch                 BIGINT   NULL,
-    executed_time_ms          BIGINT   NULL,
-    finalized_time            DATETIME NULL,
-    new_account_info          TEXT     NULL,
-    invalid_reason            TEXT     NULL,
-    created_at                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id                    INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    transaction_id        TEXT     NOT NULL,
+    transaction_json      TEXT     NOT NULL,
+    referenced_components TEXT     NOT NULL,
+    signers               TEXT     NOT NULL,
+    result                TEXT     NULL,
+    qcs                   TEXT     NULL,
+    final_fee             BIGINT   NULL,
+    status                TEXT     NOT NULL,
+    dry_run               BOOLEAN  NOT NULL,
+    executed_time_ms      BIGINT   NULL,
+    finalized_time        DATETIME NULL,
+    new_account_info      TEXT     NULL,
+    invalid_reason        TEXT     NULL,
+    created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE UNIQUE INDEX transactions_uniq_hash ON transactions (hash);
+CREATE UNIQUE INDEX transactions_transaction_id_uniq ON transactions (transaction_id);
 CREATE INDEX transactions_idx_status ON transactions (status);
 
 -- Substates

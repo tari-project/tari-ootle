@@ -17,6 +17,28 @@ pub struct Account {
     pub is_default: bool,
 }
 
+impl Account {
+    pub fn address(&self) -> &ComponentAddress {
+        &self.address
+    }
+
+    pub fn key_index(&self) -> u64 {
+        self.key_index
+    }
+
+    pub fn name(&self) -> Option<&String> {
+        self.name.as_ref()
+    }
+
+    pub fn is_confirmed_on_chain(&self) -> bool {
+        self.is_confirmed_on_chain
+    }
+
+    pub fn is_default(&self) -> bool {
+        self.is_default
+    }
+}
+
 impl Display for Account {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.name {

@@ -570,6 +570,17 @@ impl JsonRpcHandlers {
                         ),
                     )
                 },
+                TransactionManagerError::InvalidTransaction {
+                    transaction_id,
+                    details,
+                } => JsonRpcResponse::error(
+                    answer_id,
+                    JsonRpcError::new(
+                        JsonRpcErrorReason::ApplicationError(400),
+                        format!("Transaction {} is invalid: {}", transaction_id, details),
+                        json::Value::Null,
+                    ),
+                ),
                 e => Self::internal_error(answer_id, e),
             })?;
 

@@ -36,7 +36,7 @@ use tari_ootle_common_types::substate_type::SubstateType;
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     call_args,
-    models::{ComponentAddress, NonFungible, NonFungibleAddress, NonFungibleId, ResourceAddress},
+    models::{ComponentAddress, NonFungible, NonFungibleAddress, ResourceAddress},
     types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
@@ -639,10 +639,6 @@ mod basic_nft {
         template_test
             .execute_and_commit_manifest(
                 r#"
-            let account = var!["account"];
-            let sparkle_nft_resource = var!["nft_resx"];
-            account.get_non_fungible_ids(sparkle_nft_resource);
-
             let sparkle_nft = var!["nft"];
             let sparkle_nft_id = var!["nft_id"];
             sparkle_nft.inc_brightness(sparkle_nft_id, 10u32);
@@ -1011,7 +1007,6 @@ mod emoji_id {
 
 mod tickets {
     use tari_template_lib::{
-        call_args,
         constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS},
         types::Amount,
     };
@@ -1026,17 +1021,17 @@ mod tickets {
     #[test]
     #[allow(clippy::too_many_lines)]
     fn buy_and_redeem_ticket() {
-        let mut template_test = TemplateTest::new(vec!["tests/templates/nft/tickets"]);
+        let mut test = TemplateTest::new(vec!["tests/templates/nft/tickets"]);
 
         // create an account
-        let (account_address, owner_proof, secret) = template_test.create_funded_account();
+        let (account_address, owner_proof, secret) = test.create_funded_account();
 
         // initialize the ticket seller
-        let ticket_template = template_test.get_template_address("TicketSeller");
+        let ticket_template = test.get_template_address("TicketSeller");
         let initial_supply = 10;
         let price = Amount::from(20);
         let event_description = "My music festival".to_string();
-        let result = template_test.execute_expect_success(
+        let result = test.execute_expect_success(
             Transaction::builder()
                 .call_function(ticket_template, "new", args![initial_supply, price, event_description])
                 .build_and_seal(&secret),
@@ -1052,11 +1047,11 @@ mod tickets {
             .unwrap();
 
         // at the beginning we have the initial supply of tickets
-        let total_supply: Amount = template_test.call_method(ticket_seller, "total_supply", args![], vec![]);
+        let total_supply: Amount = test.call_method(ticket_seller, "total_supply", args![], vec![]);
         assert_eq!(total_supply, initial_supply);
 
         // get some funds into the account
-        template_test.execute_expect_success(
+        test.execute_expect_success(
             Transaction::builder()
                 .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take_free_coins", args![])
                 .put_last_instruction_output_on_workspace("coins")
@@ -1066,7 +1061,7 @@ mod tickets {
         );
 
         // buy a ticket
-        template_test.execute_expect_success(
+        test.execute_expect_success(
             Transaction::builder()
                 .call_method(account_address, "withdraw", args![XTR, Amount(20)])
                 .put_last_instruction_output_on_workspace("payment")
@@ -1078,12 +1073,12 @@ mod tickets {
         );
 
         // redeem a ticket
-        let ticket_ids: Vec<NonFungibleId> = template_test.call_method(
-            account_address,
-            "get_non_fungible_ids",
-            call_args![ticket_resource],
-            vec![],
-        );
+        let vaults = test
+            .read_only_state_store()
+            .get_vaults_for_account(account_address)
+            .unwrap();
+        let vault = vaults.get(&ticket_resource).unwrap();
+        let ticket_ids = vault.get_non_fungible_ids();
         assert_eq!(ticket_ids.len(), 1);
         let ticket_id = ticket_ids.first().unwrap().clone();
 
@@ -1095,19 +1090,18 @@ mod tickets {
             ("ticket_addr", ManifestValue::NonFungibleId(ticket_id.clone())),
         ];
 
-        template_test
-            .execute_and_commit_manifest(
-                r#"
+        test.execute_and_commit_manifest(
+            r#"
                 let account = var!["account"];
                 let ticket_seller = var!["ticket_seller"];
                 let ticket_addr = var!["ticket_addr"];
 
                 ticket_seller.redeem_ticket(ticket_addr);
             "#,
-                vars.clone(),
-                vec![],
-            )
-            .unwrap();
+            vars.clone(),
+            vec![],
+        )
+        .unwrap();
 
         #[derive(Debug, Clone, Serialize, Deserialize, Default)]
         pub struct Ticket {
@@ -1115,7 +1109,7 @@ mod tickets {
         }
 
         let ticket_substate_addr = SubstateId::NonFungible(NonFungibleAddress::new(ticket_resource, ticket_id));
-        let ticket_nft = template_test
+        let ticket_nft = test
             .read_only_state_store()
             .get_substate(&ticket_substate_addr)
             .unwrap()

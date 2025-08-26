@@ -3,6 +3,7 @@
 
 use std::{
     collections::HashSet,
+    iter,
     ops::{Add, Deref, DerefMut, Sub},
     str::FromStr,
     sync::MutexGuard,
@@ -302,16 +303,22 @@ impl WalletStoreWriter for WriteTransaction<'_> {
     ) -> Result<(), WalletStorageError> {
         use crate::schema::transactions;
 
+        let ref_components = transaction
+            .as_referenced_components()
+            .map(|c| c.to_string())
+            .collect::<Vec<_>>();
+        let signers = transaction
+            .signatures()
+            .iter()
+            .map(|s| s.public_key())
+            .chain(iter::once(transaction.seal_signature().public_key()))
+            .collect::<Vec<_>>();
         diesel::insert_into(transactions::table)
             .values((
-                transactions::hash.eq(transaction.calculate_id().to_string()),
-                transactions::network.eq(i32::from(transaction.network())),
-                transactions::fee_instructions.eq(serialize_json(transaction.fee_instructions())?),
-                transactions::instructions.eq(serialize_json(transaction.instructions())?),
-                transactions::signatures.eq(serialize_json(transaction.signatures())?),
-                transactions::seal_signature.eq(serialize_json(transaction.seal_signature())?),
-                transactions::is_seal_signer_authorized.eq(transaction.is_seal_signer_authorized()),
-                transactions::inputs.eq(serialize_json(transaction.inputs())?),
+                transactions::transaction_id.eq(transaction.calculate_id().to_string()),
+                transactions::transaction_json.eq(serialize_json(transaction)?),
+                transactions::referenced_components.eq(serialize_json(&ref_components)?),
+                transactions::signers.eq(serialize_json(&signers)?),
                 transactions::status.eq(TransactionStatus::New.as_key_str()),
                 transactions::new_account_info.eq(new_account_info.map(serialize_json).transpose()?),
                 transactions::dry_run.eq(is_dry_run),
@@ -338,7 +345,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 transactions::invalid_reason.eq(update.invalid_reason),
                 transactions::updated_at.eq(diesel::dsl::now),
             ))
-            .filter(transactions::hash.eq(update.transaction_id.to_string()))
+            .filter(transactions::transaction_id.eq(update.transaction_id.to_string()))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("transactions_set_result_and_status", e))?;
 

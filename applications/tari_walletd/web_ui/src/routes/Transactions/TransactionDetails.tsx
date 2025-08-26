@@ -46,6 +46,7 @@ import {
   TransactionSignature,
 } from "@tari-project/typescript-bindings";
 import { getRejectReasonFromTransactionResult, rejectReasonToString } from "@tari-project/typescript-bindings";
+import { BsQuestionCircle } from "react-icons/bs";
 
 export default function TransactionDetails() {
   const [expandedPanels, setExpandedPanels] = useState<string[]>([]);
@@ -123,45 +124,7 @@ export default function TransactionDetails() {
     const seal_signature = data.transaction.V1?.seal_signature;
     const transaction_body = data.transaction.V1?.body;
     const transaction = transaction_body?.transaction;
-
-    if (data.status === "Rejected" || data.status === "InvalidTransaction") {
-      return (
-        <>
-          <TableContainer>
-            <Table>
-              <TableBody>
-                <TableRow>
-                  <TableCell>Transaction Hash</TableCell>
-                  <DataTableCell>{transactionId}</DataTableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>Timestamp</TableCell>
-                  <DataTableCell>{last_update_time.toLocaleString()}</DataTableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>Status</TableCell>
-                  <DataTableCell>
-                    <StatusChip status={data.status} />
-                  </DataTableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>JSON</TableCell>
-                  <DataTableCell>
-                    <Button variant="outlined" onClick={handleDownload}>
-                      Download
-                    </Button>
-                  </DataTableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>Reason</TableCell>
-                  <DataTableCell>{getTransactionFailure(data?.result?.result)}</DataTableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </>
-      );
-    }
+    const feeReceipt = data.result?.fee_receipt;
 
     return (
       <Fade in={!isLoading}>
@@ -180,7 +143,22 @@ export default function TransactionDetails() {
                   </TableRow>
                   <TableRow>
                     <TableCell>Total Fees</TableCell>
-                    <DataTableCell>{data?.result?.fee_receipt.total_fees_paid.toString() || 0}</DataTableCell>
+                    <DataTableCell>
+                      {feeReceipt?.total_fees_paid.toString() || 0}
+                      {feeReceipt?.total_fee_overcharge ? (
+                        <>
+                          {" "}
+                          ({feeReceipt.total_fee_overcharge} overcharge{" "}
+                          <BsQuestionCircle
+                            style={{ display: "inline" }}
+                            title="An overcharge occurs when paying more fees than required using stealth transfers. To preserve privacy, there is no vault to refund excess fees, therefore the fees are given to validators in their entirety."
+                          />
+                          )
+                        </>
+                      ) : (
+                        ""
+                      )}
+                    </DataTableCell>
                   </TableRow>
                   <TableRow>
                     <TableCell>Status</TableCell>
@@ -190,7 +168,9 @@ export default function TransactionDetails() {
                   </TableRow>
                   <TableRow>
                     <TableCell>Result</TableCell>
-                    <DataTableCell>{renderResult(data?.result)}</DataTableCell>
+                    <DataTableCell>
+                      {data.invalid_reason ? data.invalid_reason : renderResult(data?.result)}
+                    </DataTableCell>
                   </TableRow>
                   <TableRow>
                     <TableCell>JSON</TableCell>

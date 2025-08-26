@@ -42,13 +42,14 @@ import { useGetAllTransactions } from "../../api/hooks/useTransactions";
 import { emptyRows, handleChangePage, handleChangeRowsPerPage } from "../../utils/helpers";
 import { Account, substateIdToString, WalletTransaction } from "@tari-project/typescript-bindings";
 
-export default function Transactions({ account }: { account: Account }) {
+export default function Transactions({ account, ownerPublicKey }: { account: Account; ownerPublicKey: string }) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-  const { data, isLoading, error, isError, refetch } = useGetAllTransactions(
-    null,
-    account ? substateIdToString(account.address) : null,
-  );
+  const { data, isLoading, error, isError, refetch } = useGetAllTransactions({
+    status: null,
+    component: account ? substateIdToString(account.address) : null,
+    signer_public_key: ownerPublicKey ? ownerPublicKey : null,
+  });
   useEffect(() => {
     refetch();
   }, [account]);
@@ -72,6 +73,7 @@ export default function Transactions({ account }: { account: Account }) {
                 ?.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                 .map((transaction: WalletTransaction) => {
                   const { transaction: _, finalize: result, status, id: hash } = transaction;
+                  const { fee_receipt } = result || {};
                   return (
                     <TableRow key={hash}>
                       <DataTableCell>
@@ -88,7 +90,7 @@ export default function Transactions({ account }: { account: Account }) {
                       <DataTableCell>
                         <StatusChip status={status} showTitle />
                       </DataTableCell>
-                      <DataTableCell>{result?.fee_receipt.total_fees_paid.toString() || "--"}</DataTableCell>
+                      <DataTableCell>{fee_receipt?.total_fees_paid.toString() || "--"}</DataTableCell>
                       <DataTableCell>
                         <IconButton
                           component={Link}

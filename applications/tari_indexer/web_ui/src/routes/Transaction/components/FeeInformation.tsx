@@ -46,13 +46,14 @@ interface FeeInformationProps extends FeeReceipt {
 }
 
 function FeeInformation({
-  total_fee_payment,
-  total_fees_paid,
-  cost_breakdown,
-  expandAllTrigger = 0,
-  collapseAllTrigger = 0,
-  onExpandedChange,
-}: FeeInformationProps) {
+                          total_fee_payment,
+                          total_fees_paid,
+                          total_fee_overcharge,
+                          cost_breakdown,
+                          expandAllTrigger = 0,
+                          collapseAllTrigger = 0,
+                          onExpandedChange,
+                        }: FeeInformationProps) {
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
@@ -91,7 +92,7 @@ function FeeInformation({
               </TableRow>
               <TableRow>
                 <TableCell>Total Fees Paid</TableCell>
-                <DataTableCell>{formatXTM(total_fees_paid)}</DataTableCell>
+                <DataTableCell>{formatXTM(total_fees_paid)}{total_fee_overcharge > 0 ? ` Overcharge: ${total_fee_overcharge}` : ""}</DataTableCell>
               </TableRow>
               <TableRow>
                 <TableCell>Cost Breakdown</TableCell>
@@ -105,7 +106,7 @@ function FeeInformation({
                           variant="filled"
                           color="default"
                         />
-                      )
+                      ),
                     )}
                   </Stack>
                 </DataTableCell>

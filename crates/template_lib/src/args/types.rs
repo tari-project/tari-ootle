@@ -418,7 +418,7 @@ pub enum VaultWithdrawArg {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PayFeeArg {
     pub amount: Amount,
-    pub proof: Option<ConfidentialWithdrawProof>,
+    pub statement: Option<StealthTransferStatement>,
 }
 
 // -------------------------------- Bucket -------------------------------- //

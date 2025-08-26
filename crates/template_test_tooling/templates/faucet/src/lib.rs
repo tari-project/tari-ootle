@@ -57,11 +57,6 @@ mod faucet_template {
             self.vault.withdraw(amount)
         }
 
-        pub fn take_free_coins_confidential(&mut self, proof: ConfidentialWithdrawProof) -> Bucket {
-            debug!("Withdrawing <unknown> coins from faucet");
-            self.vault.withdraw_confidential(proof)
-        }
-
         pub fn burn_coins(&mut self, amount: Amount) {
             let mut bucket = self.vault.withdraw(amount);
             bucket.burn();
@@ -69,16 +64,6 @@ mod faucet_template {
 
         pub fn total_supply(&self) -> Amount {
             ResourceManager::get(self.vault.resource_address()).total_supply()
-        }
-
-        pub fn pay_fee(&mut self, amount: Amount) {
-            debug!("Paying fee from faucet");
-            self.vault.pay_fee(amount);
-        }
-
-        pub fn pay_fee_confidential(&mut self, proof: ConfidentialWithdrawProof) {
-            debug!("Paying fee from faucet");
-            self.vault.pay_fee_confidential(proof);
         }
     }
 }

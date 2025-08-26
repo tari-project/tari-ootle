@@ -154,13 +154,21 @@ where
         let transaction_id = transaction_api
             .insert_new_transaction(transaction, new_account_info.clone(), false)
             .await?;
-        transaction_api.submit_transaction(transaction_id).await?;
-
-        self.notify.notify(TransactionSubmittedEvent {
-            transaction_id,
-            new_account: new_account_info,
-        });
-        Ok(transaction_id)
+        if transaction_api.submit_transaction(transaction_id).await? {
+            self.notify.notify(TransactionSubmittedEvent {
+                transaction_id,
+                new_account: new_account_info,
+            });
+            Ok(transaction_id)
+        } else {
+            self.notify.notify(TransactionInvalidEvent {
+                transaction_id,
+                status: TransactionStatus::InvalidTransaction,
+                finalize: None,
+                final_fee: None,
+            });
+            Ok(transaction_id)
+        }
     }
 
     async fn on_poll(&self) -> Result<(), TransactionServiceError> {
@@ -176,7 +184,7 @@ where
         let notify = self.notify.clone();
         tokio::spawn(async move {
             if let Err(err) = Self::resubmit_new_transactions(&wallet_sdk, &notify).await {
-                error!(target: LOG_TARGET, "Error re-submitting new transactions: {}", err);
+                error!(target: LOG_TARGET, "Error resubmitting new transactions: {}", err);
             }
             if let Err(err) = Self::check_pending_transactions(&wallet_sdk, &notify).await {
                 error!(target: LOG_TARGET, "Error checking pending transactions: {}", err);
@@ -192,7 +200,7 @@ where
         notify: &Notify<WalletEvent>,
     ) -> Result<(), TransactionServiceError> {
         let transaction_api = wallet_sdk.transaction_api();
-        let new_transactions = transaction_api.fetch_all(Some(TransactionStatus::New), None)?;
+        let new_transactions = transaction_api.fetch_all(Some(TransactionStatus::New), None, None)?;
         let log_level = if new_transactions.is_empty() {
             Level::Debug
         } else {
@@ -211,11 +219,19 @@ where
                 transaction.id,
             );
             let transaction_id = transaction.id;
-            transaction_api.submit_transaction(transaction_id).await?;
-            notify.notify(TransactionSubmittedEvent {
-                transaction_id,
-                new_account: transaction.new_account_info,
-            });
+            if transaction_api.submit_transaction(transaction_id).await? {
+                notify.notify(TransactionSubmittedEvent {
+                    transaction_id,
+                    new_account: transaction.new_account_info,
+                });
+            } else {
+                notify.notify(TransactionInvalidEvent {
+                    transaction_id,
+                    status: TransactionStatus::InvalidTransaction,
+                    finalize: None,
+                    final_fee: None,
+                });
+            }
         }
         Ok(())
     }
@@ -225,7 +241,7 @@ where
         notify: &Notify<WalletEvent>,
     ) -> Result<(), TransactionServiceError> {
         let transaction_api = wallet_sdk.transaction_api();
-        let pending_transactions = transaction_api.fetch_all(Some(TransactionStatus::Pending), None)?;
+        let pending_transactions = transaction_api.fetch_all(Some(TransactionStatus::Pending), None, None)?;
         let log_level = if pending_transactions.is_empty() {
             Level::Debug
         } else {

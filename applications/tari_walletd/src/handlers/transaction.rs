@@ -377,6 +377,7 @@ pub async fn handle_get(
         transaction: transaction.transaction,
         result: transaction.finalize,
         status: transaction.status,
+        invalid_reason: transaction.invalid_reason,
         last_update_time: transaction.last_update_time,
     })
 }
@@ -387,10 +388,11 @@ pub async fn handle_get_all(
     req: TransactionGetAllRequest,
 ) -> Result<TransactionGetAllResponse, anyhow::Error> {
     context.check_auth(token, &[JrpcPermission::TransactionGet])?;
-    let transactions = context
-        .wallet_sdk()
-        .transaction_api()
-        .fetch_all(req.status, req.component)?;
+    let transactions =
+        context
+            .wallet_sdk()
+            .transaction_api()
+            .fetch_all(req.status, req.component, req.signer_public_key)?;
     Ok(TransactionGetAllResponse { transactions })
 }
 

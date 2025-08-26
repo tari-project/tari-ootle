@@ -45,7 +45,7 @@ import { validateHash } from "../../../utils/helpers";
 
 // Type guard to check if result is finalized
 const isFinalized = (
-  result: IndexerTransactionFinalizedResult
+  result: IndexerTransactionFinalizedResult,
 ): result is { Finalized: any } => {
   return typeof result === "object" && result !== null && "Finalized" in result;
 };
@@ -59,7 +59,7 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
   const normalizedTransactionId = transaction_id.toLowerCase();
   const isValidHash = validateHash(normalizedTransactionId);
   const { data, isLoading, error, isError } = useGetTransactionResult(
-    normalizedTransactionId
+    normalizedTransactionId,
   );
 
   if (!isValidHash) {
@@ -105,12 +105,12 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
                       <DataTableCell>
                         {data.result.Finalized.execution_result?.execution_time
                           ? `${
-                              data.result.Finalized.execution_result
-                                .execution_time.secs
-                            }s ${Math.round(
-                              data.result.Finalized.execution_result
-                                .execution_time.nanos / 1000000
-                            )}ms`
+                            data.result.Finalized.execution_result
+                              .execution_time.secs
+                          }s ${Math.round(
+                            data.result.Finalized.execution_result
+                              .execution_time.nanos / 1000000,
+                          )}ms`
                           : "N/A"}
                       </DataTableCell>
                     </TableRow>
@@ -121,10 +121,7 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
               <AccordionGroup>
                 {data.result.Finalized.execution_result?.finalize
                   ?.fee_receipt && (
-                  <FeeInformation
-                    {...data.result.Finalized.execution_result.finalize
-                      .fee_receipt}
-                  />
+                  <FeeInformation {...data.result.Finalized.execution_result.finalize.fee_receipt} />
                 )}
 
                 <Events
@@ -142,7 +139,7 @@ function Result({ transaction_id }: IndexerGetTransactionResultRequest) {
 
                 {data.result.Finalized.execution_result?.finalize?.result &&
                   isAcceptResult(
-                    data.result.Finalized.execution_result.finalize.result
+                    data.result.Finalized.execution_result.finalize.result,
                   ) && (
                     <SubstateChanges
                       result={

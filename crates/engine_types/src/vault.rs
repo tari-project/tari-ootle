@@ -79,7 +79,7 @@ impl Vault {
     }
 
     pub fn recall_all(&mut self) -> Result<ResourceContainer, ResourceError> {
-        self.resource_container.recall_all()
+        self.resource_container.withdraw_all()
     }
 
     pub fn recall_confidential<T: Into<Amount>>(

@@ -30,6 +30,6 @@ pub(crate) use proof::OutputLock;
 pub use resource::*;
 pub use stealth_output::*;
 pub use substate::Substate;
-pub use transaction::Transaction;
+pub use transaction::TransactionRecord;
 pub use vault::Vault;
 pub use webauthn_registrations::*;

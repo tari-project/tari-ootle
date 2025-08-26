@@ -11,6 +11,11 @@ export type FeeReceipt = {
    */
   total_fees_paid: bigint;
   /**
+   * The amount of non-refundable fees which the user overpaid. Fees cannot be when paying purely with a stealth
+   * reveal (since we do not know the account/vault to refund).
+   */
+  total_fee_overcharge: bigint;
+  /**
    * Breakdown of fee costs
    */
   cost_breakdown: FeeBreakdown;

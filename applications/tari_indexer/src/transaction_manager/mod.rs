@@ -62,6 +62,14 @@ where
     }
 
     pub async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, TransactionManagerError> {
+        if !transaction.verify_all_signatures() {
+            // DEV note: If signatures are invalid here (but they should be valid), this probably indicates an issue
+            // with the JSON decoding (crates/engine_types/src/argument_parser.rs)
+            return Err(TransactionManagerError::InvalidTransaction {
+                transaction_id: transaction.calculate_id(),
+                details: "Transaction has one or more invalid signature(s)".to_string(),
+            });
+        }
         self.store
             .with_write_tx(|tx| tx.insert_or_ignore_transaction(&transaction))?;
         let id = self.network_client.submit_transaction(transaction).await?;

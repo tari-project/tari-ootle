@@ -31,11 +31,11 @@ use tari_crypto::{
 use tari_engine_types::{substate::SubstateId, ToByteType};
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_ootle_wallet_sdk::{
-    apis::confidential_transfer::ConfidentialTransferInputSelection,
+    apis::{confidential_transfer::ConfidentialTransferInputSelection, key_manager::KeyBranch},
     models::{Account, AccountWithPublicKey, NonFungibleToken},
 };
 use tari_template_lib::{
-    constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
+    constants::STEALTH_TARI_RESOURCE_ADDRESS,
     prelude::{PedersenCommitmentBytes, ResourceAddress, RistrettoPublicKeyBytes},
     resource::TOKEN_SYMBOL,
     types::{crypto::RangeProofBytes, Amount},
@@ -57,6 +57,7 @@ use tari_wallet_daemon_client::{
         ClaimValidatorFeesRequest,
         ClaimValidatorFeesResponse,
         ConfidentialTransferRequest,
+        ExtClaimBurnProof,
         ListNftsRequest,
         MintFaucetNftRequest,
         ProofsGenerateRequest,
@@ -88,14 +89,18 @@ pub async fn claim_burn(
     max_fee: u64,
 ) -> Result<ClaimBurnResponse, WalletDaemonClientError> {
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
+    let resp = client.create_key(KeyBranch::Nonce).await?;
 
     let claim_burn_request = ClaimBurnRequest {
-        account: ComponentAddressOrName::Name(account_name.clone()),
-        claim_proof: ClaimBurnProof {
-            commitment,
-            ownership_proof: ownership_proof.to_byte_type(),
-            reciprocal_claim_public_key: reciprocal_claim_public_key.to_byte_type(),
-            range_proof,
+        account: ComponentAddressOrName::Name(account_name),
+        claim_proof: ExtClaimBurnProof {
+            claim_proof: ClaimBurnProof {
+                commitment,
+                ownership_proof: ownership_proof.to_byte_type(),
+                reciprocal_claim_public_key: reciprocal_claim_public_key.to_byte_type(),
+                range_proof,
+            },
+            owner_nonce_key_index: resp.id,
         },
         max_fee: Some(max_fee),
     };
@@ -182,7 +187,7 @@ pub async fn transfer_confidential(
     let destination_account = destination_account_resp.account.address;
     let destination_public_key = destination_account_resp.public_key;
 
-    let resource_address = CONFIDENTIAL_TARI_RESOURCE_ADDRESS;
+    let resource_address = STEALTH_TARI_RESOURCE_ADDRESS;
 
     let create_transfer_proof_req = ProofsGenerateRequest {
         account: Some(source_account_name),
@@ -885,7 +890,7 @@ pub async fn confidential_transfer(
         amount,
         destination_public_key,
         max_fee,
-        resource_address: CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
+        resource_address: STEALTH_TARI_RESOURCE_ADDRESS,
         proof_from_badge_resource: None,
         dry_run: false,
         input_selection: ConfidentialTransferInputSelection::PreferRevealed,

@@ -45,7 +45,7 @@ use tari_ootle_wallet_sdk::apis::confidential_transfer::ConfidentialTransferInpu
 use tari_template_lib::{
     args::InstructionArg,
     call_arg,
-    constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
+    constants::STEALTH_TARI_RESOURCE_ADDRESS,
     models::{BucketId, NonFungibleAddress, NonFungibleId},
     prelude::{ResourceAddress, RistrettoPublicKeyBytes},
     types::{Amount, TemplateAddress},
@@ -402,7 +402,7 @@ pub async fn handle_confidential_transfer(
             account: source_account,
             input_selection: ConfidentialTransferInputSelection::PreferConfidential,
             amount: amount.into(),
-            resource_address: resource_address.unwrap_or(CONFIDENTIAL_TARI_RESOURCE_ADDRESS),
+            resource_address: resource_address.unwrap_or(STEALTH_TARI_RESOURCE_ADDRESS),
             destination_public_key,
             max_fee: common.max_fee,
             output_to_revealed: false,

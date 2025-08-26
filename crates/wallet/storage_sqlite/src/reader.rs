@@ -224,8 +224,8 @@ impl WalletStoreReader for ReadTransaction<'_> {
     fn transactions_get(&mut self, transaction_id: TransactionId) -> Result<WalletTransaction, WalletStorageError> {
         use crate::schema::transactions;
         let row = transactions::table
-            .filter(transactions::hash.eq(transaction_id.to_string()))
-            .first::<models::Transaction>(self.connection())
+            .filter(transactions::transaction_id.eq(serialize_hex(transaction_id)))
+            .first::<models::TransactionRecord>(self.connection())
             .optional()
             .map_err(|e| WalletStorageError::general("transaction_get", e))?
             .ok_or_else(|| WalletStorageError::NotFound {
@@ -242,23 +242,32 @@ impl WalletStoreReader for ReadTransaction<'_> {
         &mut self,
         status: Option<TransactionStatus>,
         component: Option<ComponentAddress>,
+        signed_by_public_key: Option<RistrettoPublicKeyBytes>,
     ) -> Result<Vec<WalletTransaction>, WalletStorageError> {
         use crate::schema::transactions;
 
-        let mut rows = transactions::table.into_boxed().filter(transactions::dry_run.eq(false));
+        let mut query = transactions::table.into_boxed().filter(transactions::dry_run.eq(false));
         if let Some(status) = status {
-            rows = rows.filter(transactions::status.eq(status.as_key_str()));
+            query = query.filter(transactions::status.eq(status.as_key_str()));
         }
         if let Some(component) = component {
-            rows = rows.filter(
-                transactions::instructions
-                    .like(format!("%{}%", component))
-                    .or(transactions::fee_instructions.like(format!("%{}%", component))),
-            );
+            if let Some(public_key) = signed_by_public_key {
+                query = query.filter(
+                    transactions::referenced_components
+                        .like(format!("%{}%", component))
+                        .or(transactions::signers.like(format!("%{}%", serialize_hex(public_key)))),
+                );
+            } else {
+                query = query.filter(transactions::referenced_components.like(format!("%{}%", component)));
+            }
+        } else if let Some(public_key) = signed_by_public_key {
+            query = query.filter(transactions::signers.like(format!("%{}%", serialize_hex(public_key))));
+        } else {
+            // No filter
         }
-        let rows = rows
+        let rows = query
             .order(transactions::created_at.desc())
-            .load::<models::Transaction>(self.connection())
+            .load::<models::TransactionRecord>(self.connection())
             .map_err(|e| WalletStorageError::general("transactions_fetch_all", e))?;
 
         rows.into_iter().map(|row| row.try_into_wallet_transaction()).collect()

@@ -215,20 +215,22 @@ fn gasless() {
 
     let fee_account_pk = RistrettoPublicKey::from_secret_key(&fee_account_sk);
 
-    let result = test.execute_expect_success(
+    test.execute_expect_success(
         Transaction::builder()
             .fee_transaction_pay_from_component(fee_account, 1000)
             .call_method(user_account, "withdraw", args![XTR, Amount(100)])
             .put_last_instruction_output_on_workspace("b")
             .call_method(user2_account, "deposit", args![Workspace("b")])
-            .call_method(user2_account, "get_balances", args![])
             .add_signature(&fee_account_pk.to_byte_type(), &user_account_sk)
             .build_and_seal(&fee_account_sk),
         vec![fee_account_proof, user_account_proof],
     );
 
-    let balance = result.expect_return::<Vec<(ResourceAddress, Amount)>>(3);
-    assert_eq!(balance[0].1, 100u64);
+    let vaults = test
+        .read_only_state_store()
+        .get_vaults_for_account(user2_account)
+        .unwrap();
+    assert_eq!(vaults.get(&XTR).unwrap().balance(), 100u64);
 }
 
 #[test]
@@ -243,7 +245,6 @@ fn custom_access_rules() {
         .add_method_rule("get_balances", rule!(allow_all))
         .add_method_rule("deposit", rule!(allow_all))
         .add_method_rule("deposit_all", rule!(allow_all))
-        .add_method_rule("get_non_fungible_ids", rule!(allow_all))
         // We are going to make it so anyone can withdraw
         .default(rule!(allow_all));
 

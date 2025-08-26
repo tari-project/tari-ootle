@@ -34,13 +34,13 @@ import MenuItem from "@mui/material/MenuItem";
 import Box from "@mui/material/Box";
 import { useAccountsList } from "../../../api/hooks/useAccounts";
 import { useTheme } from "@mui/material/styles";
-import { accountsClaimBurn } from "../../../utils/json_rpc";
+import { accountsClaimBurn, transactionsWaitResult } from "../../../utils/json_rpc";
 import useAccountStore from "../../../store/accountStore";
 import { useKeysList } from "../../../api/hooks/useKeys";
-import type { AccountInfo } from "@tari-project/typescript-bindings";
+import type { AccountInfo, ComponentAddress } from "@tari-project/typescript-bindings";
 
 type FormState = {
-  account: string;
+  account: ComponentAddress;
   claimProof: string;
   fee: string;
   is_valid_json: boolean;
@@ -105,11 +105,15 @@ export default function ClaimBurn() {
   const onClaimBurn = async () => {
     try {
       setClaimBurnFormState({ ...claimBurnFormState, disabled: true });
-      await accountsClaimBurn({
-        account: { Name: claimBurnFormState.account },
+      const resp = await accountsClaimBurn({
+        account: { ComponentAddress: claimBurnFormState.account },
         claim_proof: JSON.parse(claimBurnFormState.claimProof),
         max_fee: +claimBurnFormState.fee,
       });
+      const waitResp = await transactionsWaitResult({ transaction_id: resp.transaction_id, timeout_secs: 30 });
+      if (waitResp.status != "Accepted") {
+        throw new Error(`Transaction not accepted: ${waitResp.status}`);
+      }
       setOpen(false);
       setPopup({ title: "Claimed", error: false });
       setClaimBurnFormState(INITIAL_FORM_STATE);

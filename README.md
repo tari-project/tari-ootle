@@ -26,6 +26,12 @@ Navigate to http://127.0.0.1:5100 to create an account, claim test tokens and st
 
 NOTE: This repo is heavily under development, so these instructions may change without notice.
 
+### Prerequisites
+Make sure you have the following installed:
+
+* pnpm
+
+### Running 
 The easiest way to test out the Ootle is to use the `tari_swarm_daemon`. This will spin up all necessary MinoTari and Ootle components for a localnet.
 
 Clone both the tari and tari-ootle repositories in the same folder:

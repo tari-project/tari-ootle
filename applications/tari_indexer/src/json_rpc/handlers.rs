@@ -367,10 +367,12 @@ impl JsonRpcHandlers {
 
     pub async fn get_substates(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
-        let requests: Vec<GetSubstateRequest> = value.parse_params()?;
-
-        let mut responses = Vec::new();
+-        let requests: Vec<GetSubstateRequest> = value.parse_params()?;
+-
+        let GetSubstatesRequest { requests } = value.parse_params::<GetSubstatesRequest>()?;
+        let mut responses = Vec::with_capacity(requests.len());
         for request in requests {
+            // …
             let maybe_substate = self
                 .substate_manager
                 .get_substate(&request.address, request.version)

@@ -63,18 +63,25 @@
             ]
         },
         {
-            "name": "get_identity",
-            "summary": "Return this node's public identity.",
-            "tags": [],
-            "params": [],
-            "result": {
-                "name": "get_identity_response",
-                "description": "",
-                "schema": {
-                    "$ref": "#/components/schemas/GetIdentityResponse"
-                }
-            },
-            "errors": [],
+    "GetIdentityResponse": {
+      "type": "object",
+      "properties": {
+        "peer_id": {
+          "type": "string",
+          "description": "Libp2p PeerId string"
+        },
+        "public_addresses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "public_key": {
+          "type": "string"
+        }
+      },
+      "required": ["peer_id", "public_addresses", "public_key"]
+    }
             "examples": [
                 {
                     "name": "default",

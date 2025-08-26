@@ -12,8 +12,8 @@ use diesel::{NullableExpressionMethods, OptionalExtension, QueryDsl, RunQueryDsl
 use log::*;
 use serde::Serialize;
 use tari_bor::json_encoding::CborValueJsonSerializeWrapper;
-use tari_engine_types::{resource::Resource, substate::SubstateId, UtxoId};
-use tari_ootle_common_types::VersionedSubstateIdRef;
+use tari_engine_types::{resource::Resource, substate::SubstateId, UtxoAddress};
+use tari_ootle_common_types::{shard::Shard, StateVersion, VersionedSubstateIdRef};
 use tari_ootle_wallet_sdk::{
     models::{
         AccountUpdate,
@@ -43,7 +43,9 @@ use webauthn_rs::prelude::Passkey;
 
 use crate::{
     diesel::ExpressionMethods,
+    helpers,
     models,
+    models::StealthOutputUpdate,
     reader::ReadTransaction,
     schema::accounts,
     serialization::{serialize_hex, serialize_json},
@@ -976,6 +978,8 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .filter(stealth_outputs::resource_address.eq(&lock.resource_address))
             .filter(stealth_outputs::owner_account_id.eq(account_id))
             .filter(stealth_outputs::status.eq(OutputStatus::Unspent.as_key_str()))
+            .filter(stealth_outputs::is_burnt.eq(false))
+            .filter(stealth_outputs::is_frozen.eq(false))
             .order_by(stealth_outputs::value.asc())
             .first::<models::StealthOutput>(self.connection())
             .optional()
@@ -1005,7 +1009,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(output)
     }
 
-    fn stealth_outputs_insert(&mut self, output: StealthOutputModel) -> Result<(), WalletStorageError> {
+    fn stealth_outputs_insert(&mut self, output: &StealthOutputModel) -> Result<(), WalletStorageError> {
         const OPERATION: &str = "stealth_outputs_insert";
         use crate::schema::{accounts, stealth_outputs};
 
@@ -1025,10 +1029,38 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 stealth_outputs::encrypted_data.eq(output.encrypted_data.as_ref()),
                 stealth_outputs::tag_byte.eq(i32::from(output.tag_byte.as_byte())),
                 stealth_outputs::status.eq(output.status.as_key_str()),
+                stealth_outputs::is_burnt.eq(output.is_burnt),
+                stealth_outputs::is_frozen.eq(output.is_frozen),
                 stealth_outputs::lock_id.eq(output.lock_id.map(|v| v as i32)),
             ))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(())
+    }
+
+    fn stealth_outputs_mark_as_spent(&mut self, address: &UtxoAddress) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "stealth_outputs_mark_as_spent";
+        use crate::schema::stealth_outputs;
+
+        let num_rows = diesel::update(stealth_outputs::table)
+            .set((
+                stealth_outputs::status.eq(OutputStatus::Spent.as_key_str()),
+                stealth_outputs::lock_id.eq::<Option<i32>>(None),
+                stealth_outputs::locked_at.eq::<Option<PrimitiveDateTime>>(None),
+            ))
+            .filter(stealth_outputs::resource_address.eq(address.resource_address().to_string()))
+            .filter(stealth_outputs::commitment.eq(serialize_hex(address.id().into_commitment_bytes())))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        if num_rows == 0 {
+            return Err(WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "stealth_output".to_string(),
+                key: format!("address={address}"),
+            });
+        }
 
         Ok(())
     }
@@ -1090,18 +1122,26 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
-    fn stealth_outputs_mark_burnt(
+    fn stealth_outputs_update(
         &mut self,
-        resource_address: &ResourceAddress,
-        id: &UtxoId,
+        address: &UtxoAddress,
+        is_burnt: Option<bool>,
+        status: Option<OutputStatus>,
+        is_frozen: Option<bool>,
     ) -> Result<(), WalletStorageError> {
-        const OPERATION: &str = "stealth_outputs_mark_burnt";
+        const OPERATION: &str = "stealth_outputs_update_status_from_utxo";
         use crate::schema::stealth_outputs;
+        let update = StealthOutputUpdate {
+            is_burnt,
+            is_frozen,
+            status: status.map(|s| s.as_key_str()),
+            updated_at: Some(helpers::now()),
+        };
 
         let num_rows = diesel::update(stealth_outputs::table)
-            .set(stealth_outputs::status.eq(OutputStatus::Burnt.as_key_str()))
-            .filter(stealth_outputs::resource_address.eq(resource_address.to_string()))
-            .filter(stealth_outputs::commitment.eq(serialize_hex(id.into_commitment_bytes())))
+            .set(update)
+            .filter(stealth_outputs::resource_address.eq(address.resource_address().to_string()))
+            .filter(stealth_outputs::commitment.eq(serialize_hex(address.id().into_commitment_bytes())))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
@@ -1109,7 +1149,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             return Err(WalletStorageError::NotFound {
                 operation: OPERATION,
                 entity: "stealth_output".to_string(),
-                key: format!("resource_address={}, id={}", resource_address, id),
+                key: format!("address={address}"),
             });
         }
 
@@ -1256,14 +1296,14 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 non_fungible_tokens::resource_id.eq(non_fungible_token.resource_address.to_string()),
                 non_fungible_tokens::mutable_data.eq(&mutable_data),
                 non_fungible_tokens::vault_id.eq(vault_id),
-                non_fungible_tokens::is_burned.eq(non_fungible_token.is_burned),
+                non_fungible_tokens::is_burnt.eq(non_fungible_token.is_burnt),
             ))
             .on_conflict((non_fungible_tokens::nft_id, non_fungible_tokens::vault_id))
             .do_update()
             .set((
                 non_fungible_tokens::data.eq(&data),
                 non_fungible_tokens::mutable_data.eq(&mutable_data),
-                non_fungible_tokens::is_burned.eq(non_fungible_token.is_burned),
+                non_fungible_tokens::is_burnt.eq(non_fungible_token.is_burnt),
             ))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("non_fungible_token_upsert", e))?;
@@ -1348,6 +1388,47 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             ))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("authored_templates_insert", e))?;
+
+        Ok(())
+    }
+
+    fn shard_state_version_set_many<I: IntoIterator<Item = (Shard, StateVersion)>>(
+        &mut self,
+        account_address: &ComponentAddress,
+        resource_address: &ResourceAddress,
+        state_versions: I,
+    ) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "shard_state_version_set_many";
+        use crate::schema::{accounts, resources, shard_state_versions};
+
+        for (shard, state_version) in state_versions {
+            diesel::insert_into(shard_state_versions::table)
+                .values((
+                    shard_state_versions::account_id.eq(accounts::table
+                        .select(accounts::id)
+                        .filter(accounts::address.eq(account_address.to_string()))
+                        .limit(1)
+                        .single_value()
+                        .assume_not_null()),
+                    shard_state_versions::resource_id.eq(resources::table
+                        .select(resources::id)
+                        .filter(resources::address.eq(resource_address.to_string()))
+                        .limit(1)
+                        .single_value()
+                        .assume_not_null()),
+                    shard_state_versions::shard.eq(shard.as_u32() as i32),
+                    shard_state_versions::state_version.eq(state_version.as_u64() as i64),
+                ))
+                .on_conflict((
+                    shard_state_versions::account_id,
+                    shard_state_versions::resource_id,
+                    shard_state_versions::shard,
+                ))
+                .do_update()
+                .set(shard_state_versions::state_version.eq(state_version.as_u64() as i64))
+                .execute(self.connection())
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        }
 
         Ok(())
     }

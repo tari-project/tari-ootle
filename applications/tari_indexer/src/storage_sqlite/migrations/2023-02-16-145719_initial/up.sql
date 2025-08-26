@@ -119,7 +119,7 @@ CREATE UNIQUE INDEX epoch_checkpoints_uniq_epoch_shard_group ON epoch_checkpoint
 create table utxos
 (
     id               integer   not NULL primary key AUTOINCREMENT,
-    substate_id      text      not NULL,
+    address          text      not NULL,
     version          int       not NULL,
     resource_address text      not NULL,
     shard            int       not NULL,

@@ -92,7 +92,7 @@ diesel::table! {
 diesel::table! {
     utxos (id) {
         id -> Integer,
-        substate_id -> Text,
+        address -> Text,
         version -> Integer,
         resource_address -> Text,
         shard -> Integer,

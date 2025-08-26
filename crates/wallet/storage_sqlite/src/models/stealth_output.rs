@@ -26,6 +26,8 @@ pub struct StealthOutput {
     pub encryption_secret_key_index: i64,
     pub encrypted_data: Vec<u8>,
     pub tag_byte: i32,
+    pub is_burnt: bool,
+    pub is_frozen: bool,
     pub created_at: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
 }
@@ -80,7 +82,18 @@ impl StealthOutput {
                 item: "output",
                 details: format!("Corrupt db: invalid output status '{}'", self.status),
             })?,
+            is_burnt: self.is_burnt,
+            is_frozen: self.is_frozen,
             lock_id: self.locked_by_proof.map(|proof| proof as u64),
         })
     }
+}
+
+#[derive(AsChangeset, Default)]
+#[diesel(table_name = stealth_outputs)]
+pub(crate) struct StealthOutputUpdate<'a> {
+    pub status: Option<&'a str>,
+    pub is_burnt: Option<bool>,
+    pub is_frozen: Option<bool>,
+    pub updated_at: Option<PrimitiveDateTime>,
 }

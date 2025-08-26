@@ -1,16 +1,19 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{convert::Infallible, str::FromStr};
+use std::{
+    collections::{HashMap, HashSet},
+    convert::Infallible,
+    str::FromStr,
+};
 
-use async_trait::async_trait;
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, tari_utilities::SafePassword};
 use tari_engine_types::{
     crypto::{commit_amount_checked, get_commitment_factory},
     substate::SubstateId,
     ToByteType,
 };
-use tari_ootle_common_types::{optional::Optional, Network};
+use tari_ootle_common_types::{optional::Optional, shard::Shard, Network, StateVersion, UtxoQueryResponse};
 use tari_ootle_wallet_sdk::{
     models::{ConfidentialOutputModel, OutputLockId, OutputStatus},
     network::{SubstateQueryResult, TransactionQueryResult, WalletNetworkInterface},
@@ -22,7 +25,8 @@ use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_abi::TemplateDef;
 use tari_template_lib::{
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-    models::{ComponentAddress, EncryptedData, VaultId},
+    models::{ComponentAddress, EncryptedData, ResourceAddress, VaultId},
+    prelude::crypto::UtxoTagByte,
     resource::ResourceType,
     types::{crypto::PedersenCommitmentBytes, Amount, TemplateAddress},
 };
@@ -237,7 +241,6 @@ impl Test {
 struct PanicNetworkInterface;
 
 // TODO: test the substate scanning in the SDK
-#[async_trait]
 impl WalletNetworkInterface for PanicNetworkInterface {
     type Error = Infallible;
 
@@ -248,12 +251,12 @@ impl WalletNetworkInterface for PanicNetworkInterface {
         _version: Option<u32>,
         _local_search_only: bool,
     ) -> Result<SubstateQueryResult, Self::Error> {
-        panic!("PanicIndexer called")
+        panic!("PanicNetworkInterface called")
     }
 
     #[allow(clippy::diverging_sub_expression)]
     async fn submit_transaction(&self, _transaction: Transaction) -> Result<TransactionId, Self::Error> {
-        panic!("PanicIndexer called")
+        panic!("PanicNetworkInterface called")
     }
 
     #[allow(clippy::diverging_sub_expression)]
@@ -261,7 +264,7 @@ impl WalletNetworkInterface for PanicNetworkInterface {
         &self,
         _transaction: Transaction,
     ) -> Result<TransactionQueryResult, Self::Error> {
-        panic!("PanicIndexer called")
+        panic!("PanicNetworkInterface called")
     }
 
     #[allow(clippy::diverging_sub_expression)]
@@ -269,11 +272,11 @@ impl WalletNetworkInterface for PanicNetworkInterface {
         &self,
         _transaction_id: TransactionId,
     ) -> Result<TransactionQueryResult, Self::Error> {
-        panic!("PanicIndexer called")
+        panic!("PanicNetworkInterface called")
     }
 
     async fn fetch_template_definition(&self, _template_address: TemplateAddress) -> Result<TemplateDef, Self::Error> {
-        panic!("PanicIndexer called")
+        panic!("PanicNetworkInterface called")
     }
 
     async fn list_substates(
@@ -283,10 +286,19 @@ impl WalletNetworkInterface for PanicNetworkInterface {
         _limit: Option<u64>,
         _offset: Option<u64>,
     ) -> Result<tari_ootle_wallet_sdk::network::SubstateListResult, Self::Error> {
-        panic!("PanicIndexer called")
+        panic!("PanicNetworkInterface called")
     }
 
     async fn wait_until_ready(&self) -> Result<(), Self::Error> {
-        panic!("PanicIndexer called")
+        panic!("PanicNetworkInterface called")
+    }
+
+    async fn query_stealth_utxo_updates(
+        &self,
+        _resource_address: ResourceAddress,
+        _shard_state_versions: HashMap<Shard, StateVersion>,
+        _filter_tag_bytes: HashSet<UtxoTagByte>,
+    ) -> Result<UtxoQueryResponse, Self::Error> {
+        panic!("PanicNetworkInterface called")
     }
 }

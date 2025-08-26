@@ -16,5 +16,5 @@ pub struct NonFungibleToken {
     #[cfg_attr(feature = "ts", ts(type = "any"))]
     #[serde(with = "serde_with::cbor_value")]
     pub mutable_data: tari_bor::Value,
-    pub is_burned: bool,
+    pub is_burnt: bool,
 }

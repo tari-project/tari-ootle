@@ -11689,7 +11689,6 @@ name = "tari_ootle_wallet_sdk"
 version = "0.11.2"
 dependencies = [
  "anyhow",
- "async-trait",
  "blake2",
  "digest",
  "keyring",
@@ -11752,6 +11751,7 @@ dependencies = [
  "config",
  "either",
  "futures 0.3.31",
+ "futures-bounded",
  "humantime-serde",
  "include_dir",
  "jsonwebtoken",

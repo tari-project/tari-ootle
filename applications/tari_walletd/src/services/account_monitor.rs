@@ -34,7 +34,7 @@ use tari_shutdown::ShutdownSignal;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     models::{NonFungibleAddress, VaultId},
-    prelude::{ComponentAddress, NonFungibleId, ResourceAddress},
+    prelude::{ComponentAddress, NonFungibleId, ResourceAddress, ResourceType},
     resource::TOKEN_SYMBOL,
 };
 use tari_transaction::TransactionId;
@@ -46,7 +46,7 @@ use tokio::{
 
 use crate::{
     notify::Notify,
-    services::{AccountChangedEvent, AccountCreatedEvent, Reply, WalletEvent},
+    services::{stealth_utxo_scanner::UtxoScannerHandle, AccountChangedEvent, AccountCreatedEvent, Reply, WalletEvent},
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::account_monitor";
@@ -56,6 +56,7 @@ pub struct AccountMonitor<TStore, TNetworkInterface> {
     wallet_sdk: WalletSdk<TStore, TNetworkInterface>,
     request_rx: mpsc::Receiver<AccountMonitorRequest>,
     pending_accounts: HashMap<TransactionId, NewAccountData>,
+    utxo_scanner_handle: UtxoScannerHandle,
     shutdown_signal: ShutdownSignal,
 }
 
@@ -68,6 +69,7 @@ where
     pub fn new(
         notify: Notify<WalletEvent>,
         wallet_sdk: WalletSdk<TStore, TNetworkInterface>,
+        utxo_scanner_handle: UtxoScannerHandle,
         shutdown_signal: ShutdownSignal,
     ) -> (Self, AccountMonitorHandle) {
         let (request_tx, request_rx) = mpsc::channel(1);
@@ -78,6 +80,7 @@ where
                 wallet_sdk,
                 request_rx,
                 pending_accounts: HashMap::new(),
+                utxo_scanner_handle,
                 shutdown_signal,
             },
             AccountMonitorHandle { sender: request_tx },
@@ -161,6 +164,23 @@ where
             return Ok(false);
         };
 
+        // Scan for all stealth resources
+        let stealth_resources = self
+            .wallet_sdk
+            .resources_api()
+            .get_addresses_by_type(ResourceType::Stealth)?;
+        if !stealth_resources.is_empty() {
+            info!(
+                target: LOG_TARGET,
+                "👁️‍🗨️ Requesting UTXO scan for account {} for {} stealth resource(s)",
+                account_address,
+                stealth_resources.len()
+            );
+            for resource_address in stealth_resources {
+                self.utxo_scanner_handle.request_scan(account_address, resource_address);
+            }
+        }
+
         let mut is_updated = false;
         let maybe_scan_result = substate_api
             .fetch_substate_from_network(&account_address.into(), None)
@@ -168,12 +188,12 @@ where
             .optional()?;
 
         let Some(ValidatorScanResult {
-            address: account_substate_id,
+            id: account_substate_id,
             substate: account_value,
         }) = maybe_scan_result
         else {
             if account.is_confirmed_on_chain() {
-                warn!(target: LOG_TARGET, "Account {} does not exist according to indexer", account_address);
+                warn!(target: LOG_TARGET, "❓️ Account {} does not exist according to indexer but confirmed_on_chain = true", account_address);
             }
             // Otherwise, the account is not on-chain, so we wouldn't expect the indexer to have it
 
@@ -200,7 +220,7 @@ where
         for vault_id in indexed_value.vault_ids() {
             let vault_substate_id = SubstateId::Vault(*vault_id);
             let Some(ValidatorScanResult {
-                address: versioned_vault_substate_id,
+                id: versioned_vault_substate_id,
                 substate,
                 ..
             }) = substate_api
@@ -280,6 +300,7 @@ where
         Ok(is_updated)
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn refresh_vault(
         &self,
         account_address: ComponentAddress,
@@ -364,6 +385,19 @@ where
                 latest_vault.get_non_fungible_ids().len()
             );
             self.update_vault_nfts(vault_id, latest_vault, updated_nft_data).await?;
+        }
+
+        // If the vault has revealed stealth tokens, we should also to scan for UTXOs
+        if latest_vault.resource_type().is_stealth() {
+            // TODO: always scan for stealth XTR when that is implemented
+            info!(
+                target: LOG_TARGET,
+                "👁️‍🗨️ Requesting UTXO scan for account {} for vault {}",
+                account_address,
+                vault_id
+            );
+            self.utxo_scanner_handle
+                .request_scan(account_address, *latest_vault.resource_address());
         }
 
         let outputs_api = self.wallet_sdk.confidential_outputs_api();
@@ -473,7 +507,7 @@ where
             let maybe_nft_contents = nft.contents();
 
             let non_fungible = NonFungibleToken {
-                is_burned: nft.is_burnt(),
+                is_burnt: nft.is_burnt(),
                 resource_address: *latest_vault.resource_address(),
                 vault_id,
                 nft_id: id.clone(),
@@ -688,6 +722,10 @@ where
     }
 
     async fn fetch_resource(&self, resx_addr: ResourceAddress) -> Result<Resource, AccountMonitorError> {
+        if let Some(resx) = self.wallet_sdk.resources_api().get(&resx_addr).optional()? {
+            return Ok(resx);
+        }
+
         let substate = self.fetch_substate(&SubstateId::Resource(resx_addr)).await?;
         let resx = substate.into_substate_value().into_resource().ok_or_else(|| {
             AccountMonitorError::UnexpectedSubstate(format!("Expected {} to be a resource.", resx_addr))
@@ -698,7 +736,7 @@ where
 
     async fn fetch_substate(&self, substate_id: &SubstateId) -> Result<Substate, AccountMonitorError> {
         let substate_api = self.wallet_sdk.substate_api();
-        let ValidatorScanResult { substate, address } =
+        let ValidatorScanResult { substate, id: address } =
             substate_api.fetch_substate_from_network(substate_id, None).await?;
         Ok(Substate::new(address.version(), substate))
     }

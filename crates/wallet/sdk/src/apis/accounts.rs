@@ -191,6 +191,19 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
         })
     }
 
+    pub fn get_account_by_public_key(
+        &self,
+        public_key: &RistrettoPublicKeyBytes,
+    ) -> Result<AccountWithPublicKey, AccountsApiError> {
+        let account_address = derive_account_address_from_public_key(public_key);
+        let account = self.store.with_read_tx(|tx| tx.accounts_get(&account_address))?;
+        let (_, pk) = self.key_manager_api.derive_account_keypair(account.key_index)?;
+        Ok(AccountWithPublicKey {
+            account,
+            owner_public_key: pk.to_byte_type(),
+        })
+    }
+
     pub fn get_account_or_default(&self, address: Option<&ComponentAddress>) -> Result<Account, AccountsApiError> {
         self.store.with_read_tx(|tx| {
             if let Some(address) = address {
@@ -310,7 +323,9 @@ where
             .await
             .optional()?
         {
-            Some(ValidatorScanResult { address, substate, .. }) => {
+            Some(ValidatorScanResult {
+                id: address, substate, ..
+            }) => {
                 let indexed_component = substate
                     .component()
                     .map(|c| IndexedWellKnownTypes::from_value(c.state()))

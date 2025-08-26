@@ -371,7 +371,7 @@ where
                         .await
                         .optional()?;
 
-                    if let Some(ValidatorScanResult { address, substate }) = to_account_substate {
+                    if let Some(ValidatorScanResult { id: address, substate }) = to_account_substate {
                         inputs.push(SubstateRequirement::unversioned(destination_account));
 
                         let account =
@@ -542,7 +542,7 @@ where
             let change_value = change.statement.amount;
 
             if !change.statement.amount.is_zero() {
-                self.outputs_api.add_output(StealthOutputModel {
+                self.outputs_api.add_output(&StealthOutputModel {
                     owner_account: *params.owner_account.address(),
                     resource_address: params.resource_address,
                     commitment: change
@@ -557,6 +557,8 @@ where
                     status: OutputStatus::LockedUnconfirmed,
                     tag_byte: change.tag,
                     lock_id: Some(inputs_to_spend.lock_id),
+                    is_burnt: false,
+                    is_frozen: false,
                 })?;
             }
 
@@ -671,7 +673,9 @@ where
         // Create stealth address - used during spend time
         let output_owner_public_key = kdfs::owner_stealth_dh_stealth_address(network, dest_public_key, &nonce_secret);
 
-        let derived_tag = kdfs::derive_stealth_output_tag(network, &dest_public_key.to_byte_type());
+        let derived_tag = self
+            .crypto_api
+            .derive_stealth_output_tag(network, &dest_public_key.to_byte_type());
 
         Ok(UnblindedStealthOutputStatement {
             statement: UnblindedOutputStatement {

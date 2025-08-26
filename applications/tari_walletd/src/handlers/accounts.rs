@@ -845,7 +845,7 @@ pub async fn handle_transfer(
 
     let mut builder = context.transaction_builder();
 
-    if let Some(ValidatorScanResult { address, substate }) = existing_dest_account {
+    if let Some(ValidatorScanResult { id: address, substate }) = existing_dest_account {
         inputs.insert(address.into());
 
         // Figure out which vault to add as an input

@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_epoch_manager::service::EpochManagerHandle;
-use tari_indexer_client::types::{ListSubstateItem, UtxoUpdate};
+use tari_indexer_client::types::ListSubstateItem;
 use tari_indexer_lib::{substate_scanner::SubstateScanner, NonFungibleSubstate};
 use tari_ootle_app_utilities::substate_file_cache::SubstateFileCache;
 use tari_ootle_common_types::{
@@ -34,6 +34,7 @@ use tari_ootle_common_types::{
     substate_type::SubstateType,
     PeerAddress,
     StateVersion,
+    UtxoUpdate,
     VersionedSubstateIdRef,
 };
 use tari_template_lib::{

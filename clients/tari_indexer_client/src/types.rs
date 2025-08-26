@@ -15,9 +15,8 @@ use tari_engine_types::{
     commit_result::ExecuteResult,
     substate::{SubstateId, SubstateValue},
     template_lib_models::{NonFungibleAddress, ResourceAddress},
-    Utxo,
 };
-use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, StateVersion, VersionedSubstateId};
+use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, StateVersion, UtxoUpdate};
 use tari_ootle_storage::time::PrimitiveDateTime;
 use tari_template_abi::TemplateDef;
 use tari_template_lib_types::{
@@ -370,27 +369,4 @@ pub struct GetUtxoUpdatesRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 pub struct GetUtxoUpdatesResponse {
     pub utxo_updates: Vec<UtxoUpdate>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
-pub enum UtxoUpdate {
-    Unspent(UtxoUnspent),
-    Spent(UtxoSpent),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
-pub struct UtxoUnspent {
-    pub versioned_substate_id: VersionedSubstateId,
-    pub shard: Shard,
-    pub state_version: StateVersion,
-    pub utxo: Utxo,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
-pub struct UtxoSpent {
-    pub versioned_substate_id: VersionedSubstateId,
-    pub state_version: StateVersion,
 }

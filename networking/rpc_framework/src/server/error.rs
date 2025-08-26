@@ -47,7 +47,7 @@ pub enum RpcServerError {
     HandshakeError(#[from] RpcHandshakeError),
     #[error("Service not found for protocol `{0}`")]
     ProtocolServiceNotFound(StreamProtocol),
-    #[error("Unexpected incoming message")]
+    #[error("Unexpected incoming message: {0:?}")]
     UnexpectedIncomingMessage(proto::RpcRequest),
     #[error("Unexpected incoming MALFORMED message")]
     UnexpectedIncomingMessageMalformed,

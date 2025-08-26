@@ -153,7 +153,7 @@ async fn try_find_target_account(
         .await
         .optional()?;
 
-    let Some(ValidatorScanResult { address, substate }) = existing_account else {
+    let Some(ValidatorScanResult { id: address, substate }) = existing_account else {
         return Ok(false);
     };
     inputs.insert(address.into());

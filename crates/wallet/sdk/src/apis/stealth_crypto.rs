@@ -9,6 +9,7 @@ use tari_engine_types::{
     crypto::{ElgamalVerifiableBalance, PrivateOutput, ValueLookupTable},
     FromByteType,
 };
+use tari_ootle_common_types::Network;
 use tari_ootle_wallet_crypto::{
     confidential,
     encrypted_data::{encrypt_value_and_mask, extract_value_and_mask, unblind_output},
@@ -23,8 +24,8 @@ use tari_ootle_wallet_crypto::{
 };
 use tari_template_lib::{
     models::{ConfidentialOutputStatement, EncryptedData, StealthTransferStatement},
-    prelude::PedersenCommitmentBytes,
-    types::Amount,
+    prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    types::{crypto::UtxoTagByte, Amount},
 };
 
 pub struct StealthCryptoApi;
@@ -62,6 +63,14 @@ impl StealthCryptoApi {
                 .ok_or(StealthCryptoApiError::NegativeAmount)?,
         )?;
         Ok(stmt)
+    }
+
+    pub fn derive_stealth_output_tag(
+        &self,
+        network: Network,
+        dest_public_key: &RistrettoPublicKeyBytes,
+    ) -> UtxoTagByte {
+        kdfs::derive_stealth_output_tag(network, dest_public_key)
     }
 
     pub fn encrypt_value_and_mask(

@@ -30,3 +30,9 @@ impl Display for StateVersion {
         write!(f, "{}", self.0)
     }
 }
+
+impl From<u64> for StateVersion {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}

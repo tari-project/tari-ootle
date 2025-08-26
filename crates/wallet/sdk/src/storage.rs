@@ -2,15 +2,28 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     ops::{Deref, DerefMut},
 };
 
-use tari_engine_types::{resource::Resource, substate::SubstateId, UtxoId};
-use tari_ootle_common_types::{optional::IsNotFoundError, substate_type::SubstateType, VersionedSubstateIdRef};
+use tari_engine_types::{resource::Resource, substate::SubstateId, UtxoAddress};
+use tari_ootle_common_types::{
+    optional::IsNotFoundError,
+    shard::Shard,
+    substate_type::SubstateType,
+    StateVersion,
+    VersionedSubstateIdRef,
+};
 use tari_template_lib::{
     models::VaultId,
-    prelude::{ComponentAddress, NonFungibleId, PedersenCommitmentBytes, ResourceAddress, RistrettoPublicKeyBytes},
+    prelude::{
+        ComponentAddress,
+        NonFungibleId,
+        PedersenCommitmentBytes,
+        ResourceAddress,
+        ResourceType,
+        RistrettoPublicKeyBytes,
+    },
     types::{Amount, TemplateAddress},
 };
 use tari_transaction::{Transaction, TransactionId};
@@ -175,6 +188,7 @@ pub trait WalletStoreReader {
 
     // Resources
     fn resources_get(&mut self, resource_address: &ResourceAddress) -> Result<ResourceModel, WalletStorageError>;
+    fn resources_get_by_type(&mut self, resource_type: ResourceType) -> Result<Vec<ResourceModel>, WalletStorageError>;
     fn resources_get_many<'a, I: IntoIterator<Item = &'a ResourceAddress>>(
         &mut self,
         addresses: I,
@@ -263,6 +277,12 @@ pub trait WalletStoreReader {
         page: u64,
         page_size: u64,
     ) -> Result<(Vec<AuthoredTemplateModel>, u64), WalletStorageError>;
+
+    fn shard_state_version_get(
+        &mut self,
+        account: &ComponentAddress,
+        resource: &ResourceAddress,
+    ) -> Result<HashMap<Shard, StateVersion>, WalletStorageError>;
 }
 
 pub trait WalletStoreWriter {
@@ -365,16 +385,20 @@ pub trait WalletStoreWriter {
         account_addr: &ComponentAddress,
         lock_id: OutputLockId,
     ) -> Result<StealthOutputModel, WalletStorageError>;
-    fn stealth_outputs_insert(&mut self, output: StealthOutputModel) -> Result<(), WalletStorageError>;
+    fn stealth_outputs_insert(&mut self, output: &StealthOutputModel) -> Result<(), WalletStorageError>;
+    fn stealth_outputs_mark_as_spent(&mut self, address: &UtxoAddress) -> Result<(), WalletStorageError>;
     /// Mark outputs locked by this lock id as finalized
     fn stealth_outputs_finalize_by_lock_id(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
     /// Release outputs that were locked and remove pending unconfirmed outputs for this lock
     fn stealth_outputs_release_by_lock_id(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
-    fn stealth_outputs_mark_burnt(
+    fn stealth_outputs_update(
         &mut self,
-        resource_address: &ResourceAddress,
-        id: &UtxoId,
+        address: &UtxoAddress,
+        is_burnt: Option<bool>,
+        status: Option<OutputStatus>,
+        is_frozen: Option<bool>,
     ) -> Result<(), WalletStorageError>;
+
     // Output locks
     fn output_locks_insert(&mut self, resource_address: &ResourceAddress) -> Result<OutputLockId, WalletStorageError>;
     fn output_locks_insert_for_vault(&mut self, vault_id: &VaultId) -> Result<OutputLockId, WalletStorageError>;
@@ -399,4 +423,10 @@ pub trait WalletStoreWriter {
 
     // Authored templates
     fn authored_templates_insert(&mut self, model: AuthoredTemplateModel) -> Result<(), WalletStorageError>;
+    fn shard_state_version_set_many<I: IntoIterator<Item = (Shard, StateVersion)>>(
+        &mut self,
+        account: &ComponentAddress,
+        resource_address: &ResourceAddress,
+        shard_state_versions: I,
+    ) -> Result<(), WalletStorageError>;
 }

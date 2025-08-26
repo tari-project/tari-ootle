@@ -20,8 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Typography, Stack, Button, CircularProgress } from "@mui/material";
+import { Typography, Stack, Button, CircularProgress, Fade, Divider } from "@mui/material";
 import { useNftTransferStore } from "../../../../store/nftTransferStore";
+import CancelRoundedIcon from "@mui/icons-material/CancelRounded";
+import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 
 interface ResultStepProps {
   onClose: () => void;
@@ -40,10 +42,20 @@ export default function ResultStep({ onClose }: ResultStepProps) {
         </>
       ) : transferResult ? (
         <>
-          <Typography variant="h5" color={transferResult.success ? "success.main" : "error.main"}>
-            {transferResult.success ? "✅ Transfer Successful!" : "❌ Transfer Failed"}
-          </Typography>
+          <Stack direction="column" alignItems="center" spacing={1}>
+            {transferResult.success ? (
+              <Fade in>
+                <CheckCircleRoundedIcon sx={{ fontSize: 60, color: "success.main" }} />
+              </Fade>
+            ) : (
+              <Fade in>
+                <CancelRoundedIcon sx={{ fontSize: 60, color: "error.main" }} />
+              </Fade>
+            )}
+            <Typography variant="h5">{transferResult.success ? "Transfer Successful!" : "Transfer Failed"}</Typography>
+          </Stack>
           <Typography>{transferResult.message}</Typography>
+          <Divider />
           <Button variant="contained" onClick={onClose}>
             Close
           </Button>

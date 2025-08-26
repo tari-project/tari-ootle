@@ -143,6 +143,15 @@ export const componentSettings: ThemeOptions = {
         },
       },
     },
+    MuiDialogTitle: {
+      defaultProps: {
+        sx: {
+          fontSize: "1.2rem",
+          fontWeight: 600,
+          lineHeight: "2.3rem",
+        },
+      },
+    },
   },
 };
 

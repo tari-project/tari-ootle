@@ -415,6 +415,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
           <ConfirmationStep
             accounts={accounts}
             preSelectedNftId={preSelectedNftId}
+            availableNfts={availableNfts}
             onBack={() => setCurrentStep("form")}
             onConfirm={onTransfer}
           />

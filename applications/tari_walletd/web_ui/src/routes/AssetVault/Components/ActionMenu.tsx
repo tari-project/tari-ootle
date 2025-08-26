@@ -30,7 +30,6 @@ import SendMoney from "./SendMoney";
 import ClaimFees from "./ClaimFees";
 import PublishTemplate from "./PublishTemplate";
 import { substateIdToString } from "@tari-project/typescript-bindings";
-import TransferNft from "./TransferNft";
 
 function ActionMenu() {
   const { mutate: claimTestnetFaucetFunds } = useAccountsCreateFreeTestCoins();
@@ -58,23 +57,6 @@ function ActionMenu() {
       },
     );
   };
-  const onClaimTestnetNfts = () => {
-    claimTestnetFaucetNfts(
-      {
-        account: { ComponentAddress: substateIdToString(account.address) },
-        numberToMint: 5,
-        mutableData: {
-          image_url: "https://img.freepik.com/free-vector/gradient-isometric-nft-concept_52683-62009.jpg?w=740",
-        },
-        maxFee: 2000,
-      },
-      {
-        onSuccess: (resp) => {
-          console.log(resp);
-        },
-      },
-    );
-  };
 
   return (
     <Box
@@ -85,16 +67,12 @@ function ActionMenu() {
       }}
     >
       <SendMoney />
-      <TransferNft />
       <ClaimFees />
       <Button variant="outlined" onClick={onClaimFreeCoins}>
         Claim Testnet Coins
       </Button>
       <ClaimBurn />
       <PublishTemplate />
-      <Button variant="outlined" onClick={() => onClaimTestnetNfts()}>
-        Claim Testnet NFTs
-      </Button>
     </Box>
   );
 }

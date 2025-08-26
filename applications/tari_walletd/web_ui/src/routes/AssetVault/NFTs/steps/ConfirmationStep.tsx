@@ -20,15 +20,17 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Typography, Card, CardContent, Stack, Divider, Box, Button } from "@mui/material";
-import type { NonFungibleId, Account } from "@tari-project/typescript-bindings";
-import { substateIdToString, formatXTM } from "../../../../utils/helpers";
-import { useNftTransferStore } from "../../../../store/nftTransferStore";
+import { Box, Button, Stack, Typography, Avatar, Divider } from "@mui/material";
+import type { Account, NonFungibleId, NonFungibleToken } from "@tari-project/typescript-bindings";
 import CopyAddress from "../../../../Components/CopyAddress";
+import { useNftTransferStore } from "../../../../store/nftTransferStore";
+import { formatXTM, substateIdToString } from "../../../../utils/helpers";
+import { convertCborValue } from "../../../../utils/cbor";
 
 interface ConfirmationStepProps {
   accounts: Array<{ account: Account }> | undefined;
   preSelectedNftId?: NonFungibleId;
+  availableNfts?: NonFungibleToken[];
   onBack: () => void;
   onConfirm: () => void;
 }
@@ -57,48 +59,89 @@ function getNftIdTypeAsName(nftId: NonFungibleId): string {
   }
 }
 
-export default function ConfirmationStep({ accounts, preSelectedNftId, onBack, onConfirm }: ConfirmationStepProps) {
+export default function ConfirmationStep({
+  accounts,
+  preSelectedNftId,
+  availableNfts,
+  onBack,
+  onConfirm,
+}: ConfirmationStepProps) {
   const { transferFormState, disabled } = useNftTransferStore();
+
+  // Find the NFT being transferred to show its image
+  const selectedNft = availableNfts?.find(
+    (nft) => preSelectedNftId && nftIdToString(nft.nft_id) === nftIdToString(preSelectedNftId),
+  );
+
+  const nftMutableData = selectedNft ? convertCborValue(selectedNft.mutable_data) : null;
+  const nftImageUrl = nftMutableData?.image_url;
 
   return (
     <Stack spacing={3} sx={{ py: 2 }}>
-      <Typography variant="h5">You are about to:</Typography>
+      <Stack direction="row" justifyContent="space-between" alignItems="center">
+        <Stack spacing={4} direction={"row"}>
+          <Stack spacing={2}>
+            {preSelectedNftId && selectedNft ? (
+              <Stack direction="row" spacing={2} alignItems="center">
+                <Avatar
+                  src={nftImageUrl}
+                  sx={{
+                    width: 215,
+                    height: 215,
+                    borderRadius: 1,
+                    backgroundColor: "grey.200",
+                  }}
+                  variant="rounded"
+                  onError={(e: any) => {
+                    e.target.src =
+                      "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjRjVGNUY1Ii8+CjxwYXRoIGQ9Ik0zMCAyNUg1MFY1NUgzMFYyNVoiIGZpbGw9IiNERERERUREIi8+CjxwYXRoIGQ9Ik0zNiAzMUg0NFY0M0gzNlYzMVoiIGZpbGw9IiNCQkJCQkIiLz4KPHR1eHQgeD0iNDAiIHk9IjUyIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iOCIgZmlsbD0iIzk5OTk5OSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+TkZUPC90ZXh0Pgo8L3N2Zz4K";
+                  }}
+                >
+                  NFT
+                </Avatar>
+              </Stack>
+            ) : (
+              <Typography>{preSelectedNftId ? nftIdToString(preSelectedNftId) : "Multiple NFTs"}</Typography>
+            )}
+          </Stack>
+          <Stack spacing={2} direction={"column"}>
+            {preSelectedNftId && (
+              <Box>
+                <Typography variant="subtitle2" color="text.secondary">
+                  You are about to send:
+                </Typography>
+                <Typography variant="subtitle1">{nftIdToString(preSelectedNftId)}</Typography>
+              </Box>
+            )}
+            <Box>
+              <Typography variant="subtitle2" color="text.secondary">
+                To Account:
+              </Typography>
+              <Typography variant="subtitle1">
+                <CopyAddress address={transferFormState.targetAccountPublicKey} />
+              </Typography>
+            </Box>
 
-      <Stack spacing={2}>
-        <Box>
-          <Typography variant="subtitle2" color="text.secondary">
-            Send:
-          </Typography>
-          <Typography>{preSelectedNftId ? nftIdToString(preSelectedNftId) : "Multiple NFTs"}</Typography>
-        </Box>
+            <Box>
+              <Typography variant="subtitle2" color="text.secondary">
+                Transaction Fee:
+              </Typography>
+              <Typography>{formatXTM(parseInt(transferFormState.maxFee))}</Typography>
+            </Box>
 
-        <Box>
-          <Typography variant="subtitle2" color="text.secondary">
-            To Account:
-          </Typography>
-          <Typography variant="subtitle1">
-            <CopyAddress address={transferFormState.targetAccountPublicKey} />
-          </Typography>
-        </Box>
-
-        <Box>
-          <Typography variant="subtitle2" color="text.secondary">
-            Transaction Fee:
-          </Typography>
-          <Typography>{formatXTM(parseInt(transferFormState.maxFee))}</Typography>
-        </Box>
-
-        <Box>
-          <Typography variant="subtitle2" color="text.secondary">
-            Fee paid by:
-          </Typography>
-          <Typography>
-            {accounts?.find((acc) => substateIdToString(acc.account.address) === transferFormState.payerAccount)
-              ?.account.name || transferFormState.payerAccount}
-          </Typography>
-        </Box>
+            <Box>
+              <Typography variant="subtitle2" color="text.secondary">
+                Fee paid by:
+              </Typography>
+              <Typography>
+                {accounts?.find((acc) => substateIdToString(acc.account.address) === transferFormState.payerAccount)
+                  ?.account.name || transferFormState.payerAccount}
+              </Typography>
+            </Box>
+          </Stack>
+        </Stack>
       </Stack>
-
+      <Divider />
       <Stack direction="row" justifyContent="space-between" sx={{ mt: 3 }}>
         <Button variant="outlined" onClick={onBack}>
           Back

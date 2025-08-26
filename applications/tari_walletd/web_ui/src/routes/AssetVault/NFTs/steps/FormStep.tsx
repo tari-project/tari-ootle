@@ -24,12 +24,11 @@ import { FormEvent } from "react";
 import { Form } from "react-router-dom";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
-import { useTheme } from "@mui/material/styles";
 import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import Checkbox from "@mui/material/Checkbox";
 import ListItemText from "@mui/material/ListItemText";
-import { InputLabel, Stack } from "@mui/material";
+import { Divider, InputLabel, Stack } from "@mui/material";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
 import type { NonFungibleId, NonFungibleToken, Account } from "@tari-project/typescript-bindings";
 import { substateIdToString, formatXTM, validateAddress } from "../../../../utils/helpers";
@@ -81,7 +80,6 @@ export default function FormStep({
   onNftsChange,
   onPayerAccountChange,
 }: FormStepProps) {
-  const theme = useTheme();
   const { transferFormState, disabled, updateFormValue } = useNftTransferStore();
 
   const setFormValue = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -176,7 +174,7 @@ export default function FormStep({
             style={{ flexGrow: 1 }}
           />
         )}
-
+        <Divider />
         <Stack direction="row" justifyContent="space-between" sx={{ mt: 3 }}>
           <Button variant="outlined" onClick={onCancel} disabled={disabled}>
             Cancel

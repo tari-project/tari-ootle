@@ -47,7 +47,6 @@ import { SelectChangeEvent } from "@mui/material/Select/Select";
 import { useListNfts, useNftsTransfer } from "../../../api/hooks/useNfts";
 import { substateIdToString } from "../../../utils/helpers";
 import { useAccountsList } from "../../../api/hooks/useAccounts";
-import { convertCborValue } from "../../../utils/cbor";
 
 export default function TransferNft() {
   const [open, setOpen] = useState(false);

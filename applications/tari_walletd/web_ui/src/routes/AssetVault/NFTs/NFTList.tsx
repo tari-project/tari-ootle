@@ -37,7 +37,6 @@ import React, { useState } from "react";
 import { IoApps, IoList } from "react-icons/io5";
 import type { ApiError } from "../../../api/helpers/types";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
-import TransferNft from "../Components/TransferNft";
 import ClaimNftsButton from "./components/ClaimNftsButton";
 import { NftCard, NftRow } from "./components/NftParts";
 
@@ -102,7 +101,6 @@ export default function NFTList(props: NftListProps) {
           </Stack>
 
           <Stack direction="row" spacing={2} alignItems="center">
-            <TransferNft />
             <ClaimNftsButton />
           </Stack>
         </Stack>

@@ -11,6 +11,7 @@ pub mod non_fungible_tokens;
 pub mod resources;
 pub mod stealth_crypto;
 pub mod stealth_outputs;
+pub mod stealth_scanner;
 pub mod stealth_transfer;
 pub mod substate;
 pub mod template;

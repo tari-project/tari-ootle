@@ -59,6 +59,7 @@ use tari_ootle_common_types::{
     NodeHeight,
     ShardGroup,
     ShardStateVersions,
+    StateVersion,
     SubstateAddress,
     ToSubstateAddress,
     VersionedSubstateIdRef,
@@ -1692,11 +1693,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         shard_group: ShardGroup,
     ) -> Result<ShardStateVersions, StorageError> {
         const OPERATION: &str = "state_tree_versions_get_latest_for_shard_group";
-        let mut shard_tree_versions = vec![0; shard_group.len() + 1];
+        let mut shard_tree_versions = vec![StateVersion::zero(); shard_group.len() + 1];
 
         let cf = self.db().cf(state_tree_shard_versions::ByShard)?;
         let global = cf.get(&Shard::global(), OPERATION).optional()?.unwrap_or_default();
-        shard_tree_versions[0] = global;
+        shard_tree_versions[0] = global.into();
         let sg_range = shard_group.start()..Shard::from(shard_group.end().as_u32() + 1);
         let iter = cf.query_range_iterator(Ordering::Ascending, sg_range);
         let mut shards_iter = shard_group.shard_iter();
@@ -1711,13 +1712,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
                 let index =
                     ShardStateVersions::shard_to_index(shard_group, sg_shard).expect("sg_shard must be in shard group");
-                shard_tree_versions[index] = 0;
+                shard_tree_versions[index] = StateVersion::zero();
             }
 
             let index = ShardStateVersions::shard_to_index(shard_group, shard)
                 .expect("BUG: we checked the end of the shard group, so shard must be in shard group");
 
-            shard_tree_versions[index] = version;
+            shard_tree_versions[index] = version.into();
         }
 
         let shard_tree_versions =

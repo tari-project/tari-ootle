@@ -25,7 +25,7 @@ pub struct ConfidentialOutputModel {
     pub lock_id: Option<OutputLockId>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub enum OutputStatus {
     /// The output is available for spending
     Unspent,
@@ -40,8 +40,6 @@ pub enum OutputStatus {
     /// mask were not constructed correctly by the sender. This output will not "be counted" in the confidential
     /// balance.
     Invalid,
-    /// The output was burnt, meaning it was intentionally destroyed and should not be counted in the balance.
-    Burnt,
 }
 
 impl OutputStatus {
@@ -52,7 +50,6 @@ impl OutputStatus {
             Self::LockedForSpend => "LockedForSpend",
             Self::LockedUnconfirmed => "LockedUnconfirmed",
             Self::Invalid => "Invalid",
-            Self::Burnt => "Burnt",
         }
     }
 }
@@ -67,7 +64,6 @@ impl FromStr for OutputStatus {
             "LockedForSpend" => Ok(Self::LockedForSpend),
             "LockedUnconfirmed" => Ok(Self::LockedUnconfirmed),
             "Invalid" => Ok(Self::Invalid),
-            "Burnt" => Ok(Self::Burnt),
             _ => Err(()),
         }
     }

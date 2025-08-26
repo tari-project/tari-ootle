@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_epoch_manager::service::EpochManagerHandle;
-use tari_indexer_client::types::{ListSubstateItem, UtxoUpdate};
+use tari_indexer_client::types::ListSubstateItem;
 use tari_indexer_lib::{substate_scanner::SubstateScanner, NonFungibleSubstate};
 use tari_ootle_app_utilities::substate_file_cache::SubstateFileCache;
 use tari_ootle_common_types::{
@@ -34,6 +34,7 @@ use tari_ootle_common_types::{
     substate_type::SubstateType,
     PeerAddress,
     StateVersion,
+    UtxoUpdate,
     VersionedSubstateIdRef,
 };
 use tari_template_lib::{
@@ -99,11 +100,13 @@ impl SubstateManager {
         from_state_version: StateVersion,
         filter_tag_bytes: &HashSet<UtxoTagByte>,
         limit: u32,
-    ) -> Result<Vec<UtxoUpdate>, anyhow::Error> {
-        let utxos = self.substate_store.with_read_tx(|tx| {
-            tx.get_utxo_updates(resource_address, shard, from_state_version, filter_tag_bytes, limit)
+    ) -> Result<(StateVersion, Vec<UtxoUpdate>), anyhow::Error> {
+        let (max_version, updates) = self.substate_store.with_read_tx(|tx| {
+            let updates = tx.utxos_get_updates(resource_address, shard, from_state_version, filter_tag_bytes, limit)?;
+            let max_state_version = tx.utxos_get_max_state_version(resource_address, shard)?;
+            Ok::<_, anyhow::Error>((max_state_version, updates))
         })?;
-        Ok(utxos)
+        Ok((max_version, updates))
     }
 
     pub async fn get_substate(

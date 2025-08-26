@@ -102,7 +102,7 @@ where
                         parent_id
                     );
                     let ValidatorScanResult {
-                        address: substate_id,
+                        id: substate_id,
                         substate,
                         ..
                     } = self.fetch_substate_from_network(parent_id, None).await?;
@@ -118,7 +118,7 @@ where
                                 if unversioned {
                                     substate_ids.insert(addr.into());
                                 } else {
-                                    let ValidatorScanResult { address: addr, .. } =
+                                    let ValidatorScanResult { id: addr, .. } =
                                         self.fetch_substate_from_network(&addr, None).await?;
                                     substate_ids.insert(addr.into());
                                 }
@@ -147,7 +147,7 @@ where
                             if unversioned {
                                 substate_ids.insert(resx_addr.into());
                             } else {
-                                let ValidatorScanResult { address: id, .. } =
+                                let ValidatorScanResult { id, .. } =
                                     self.fetch_substate_from_network(&resx_addr, None).await?;
                                 substate_ids.insert(id.into());
                             }
@@ -168,7 +168,7 @@ where
                                 substate_ids.insert(resx_addr.into());
                             } else {
                                 // NonFungible substates are always v0
-                                let ValidatorScanResult { address: id, .. } =
+                                let ValidatorScanResult { id, .. } =
                                     self.fetch_substate_from_network(&resx_addr, None).await?;
                                 substate_ids.insert(id.into());
                             }
@@ -196,7 +196,7 @@ where
                             if unversioned {
                                 substate_ids.insert(resx_addr.into());
                             } else {
-                                let ValidatorScanResult { address: id, .. } =
+                                let ValidatorScanResult { id, .. } =
                                     self.fetch_substate_from_network(&resx_addr, None).await?;
                                 substate_ids.insert(id.into());
                             }
@@ -234,7 +234,7 @@ where
             .query_substate(address, version_hint, false)
             .await
             .optional()
-            .map_err(|e| SubstateApiError::NetworkIndexerError(e.into()))?
+            .map_err(|e| SubstateApiError::NetworkInterfaceError(e.into()))?
             .ok_or_else(|| SubstateApiError::SubstateDoesNotExist {
                 address: address.clone(),
             })?;
@@ -244,7 +244,7 @@ where
             "Found substate {} at version {}", address, resp.version
         );
         Ok(ValidatorScanResult {
-            address: VersionedSubstateId::new(address.clone(), resp.version),
+            id: VersionedSubstateId::new(address.clone(), resp.version),
             substate: resp.substate,
         })
     }
@@ -310,8 +310,8 @@ where
 pub enum SubstateApiError {
     #[error("Store error: {0}")]
     StoreError(#[from] WalletStorageError),
-    #[error("Network network_interface error: {0}")]
-    NetworkIndexerError(anyhow::Error),
+    #[error("Network interface error: {0}")]
+    NetworkInterfaceError(anyhow::Error),
     #[error("Invalid validator node response: {0}")]
     InvalidValidatorNodeResponse(String),
     #[error("Substate {address} does not exist")]
@@ -328,7 +328,7 @@ impl IsNotFoundError for SubstateApiError {
 }
 
 pub struct ValidatorScanResult {
-    pub address: VersionedSubstateId,
+    pub id: VersionedSubstateId,
     pub substate: SubstateValue,
 }
 

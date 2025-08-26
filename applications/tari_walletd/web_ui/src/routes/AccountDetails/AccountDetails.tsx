@@ -29,13 +29,22 @@ import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TableCell from "@mui/material/TableCell";
 import TableBody from "@mui/material/TableBody";
-import { useAccountsGetBalances, useAccountNFTsList } from "../../api/hooks/useAccounts";
+import { useAccountsGetBalances, useAccountNFTsList, useAccountsGet } from "../../api/hooks/useAccounts";
 import { DataTableCell } from "../../Components/StyledComponents";
 import FetchStatusCheck from "../../Components/FetchStatusCheck";
-import { BalanceEntry, substateIdToString } from "@tari-project/typescript-bindings";
+import { AccountGetResponse, BalanceEntry, substateIdToString } from "@tari-project/typescript-bindings";
 import NFTList from "../../Components/NFTList";
 import CopyAddress from "../../Components/CopyAddress";
 import useAccountStore from "../../store/accountStore";
+import { Form, useParams } from "react-router-dom";
+import { accountsAssociateStealthResource, accountsGet } from "../../utils/json_rpc";
+import { useEffect, useState } from "react";
+import Loading from "../../Components/Loading";
+import Button from "@mui/material/Button";
+import { IoAdd } from "react-icons/io5";
+import Box from "@mui/material/Box";
+import Fade from "@mui/material/Fade";
+import TextField from "@mui/material/TextField/TextField";
 
 function BalanceRow(props: BalanceEntry) {
   return (
@@ -51,39 +60,94 @@ function BalanceRow(props: BalanceEntry) {
 }
 
 function AccountDetailsLayout() {
-  const { account, publicKey } = useAccountStore();
-
-  if (!account) {
-    return <>No Account</>;
-  }
+  const { id: accountAddr } = useParams();
+  const [showAddStealth, setShowAddStealth] = useState(false);
+  const [stealthResource, setStealthResource] = useState({ newResourceAddress: "" });
 
   const {
     data: balancesData,
     isLoading: balancesIsLoading,
     isError: balancesIsError,
     error: balancesError,
-  } = useAccountsGetBalances(substateIdToString(account.address));
+  } = useAccountsGetBalances(substateIdToString(accountAddr!));
 
-  // const {
-  //   data: accountsData,
-  //   isLoading: accountsIsLoading,
-  //   isError: accountsIsError,
-  //   error: accountsError,
-  // } = useAccountsGet({ ComponentAddress: accountId });
+  const {
+    data: accountsData,
+    isLoading: accountsIsLoading,
+    isError: accountsIsError,
+    error: accountsError,
+  } = useAccountsGet(accountAddr!);
 
   const {
     data: nftsListData,
     isLoading: nftsListIsFetching,
     isError: nftsListIsError,
     error: nftsListError,
-  } = useAccountNFTsList(substateIdToString(account.address), 0, 10);
+  } = useAccountNFTsList(substateIdToString(accountAddr!), 0, 10);
+
+  if (balancesIsLoading || accountsIsLoading || nftsListIsFetching) {
+    return <Loading />;
+  }
+
+  const onStealthResourceChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setStealthResource({ ...stealthResource, [event.target.name]: event.target.value });
+  };
+
+  const onSubmitAddStealthResource = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (stealthResource.newResourceAddress) {
+      accountsAssociateStealthResource({
+        account: { ComponentAddress: accountAddr! },
+        resource_address: stealthResource.newResourceAddress,
+      })
+        .then(() => {
+          setStealthResource({ newResourceAddress: "" });
+          setShowAddStealth(false);
+        })
+        .catch((error) => {
+          console.error("Error adding stealth resource:", error);
+        });
+    }
+  };
+
   return (
     <>
+      {accountsIsError && <div>Error loading account: {accountsError?.message}</div>}
+      {balancesIsError && <div>Error loading balances: {balancesError?.message}</div>}
+      {nftsListIsError && <div>Error loading NFTs: {nftsListError?.message}</div>}
+
       <Grid item xs={12} md={12} lg={12}>
         <PageHeading>Account Details</PageHeading>
       </Grid>
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
+          <Button
+            variant="outlined"
+            startIcon={<IoAdd />}
+            title="Associates a stealth resource with this account. This will enable periodic scans for this resource"
+            onClick={() => setShowAddStealth(!showAddStealth)}
+          >
+            Add Stealth Resource
+          </Button>
+          <Box mt={2} mb={2}>
+            <Fade in={showAddStealth}>
+              <Form onSubmit={onSubmitAddStealthResource} className="flex-container">
+                <TextField
+                  name="newResourceAddress"
+                  label="Resource Address"
+                  value={stealthResource.newResourceAddress}
+                  onChange={onStealthResourceChange}
+                  style={{ flexGrow: 1 }}
+                />
+                <Button variant="contained" type="submit">
+                  Add Stealth Resource
+                </Button>
+                <Button variant="outlined" onClick={() => setShowAddStealth(false)}>
+                  Cancel
+                </Button>
+              </Form>
+            </Fade>
+          </Box>
           <TableContainer>
             <Table>
               <TableHead>
@@ -95,12 +159,12 @@ function AccountDetailsLayout() {
               </TableHead>
               <TableBody>
                 <TableRow>
-                  <DataTableCell>{account.name}</DataTableCell>
+                  <DataTableCell>{accountsData?.account?.name || "<No Name>"}</DataTableCell>
                   <DataTableCell>
-                    <CopyAddress address={substateIdToString(account.address)} />
+                    <CopyAddress address={substateIdToString(accountsData?.account.address)} />
                   </DataTableCell>
                   <DataTableCell>
-                    <CopyAddress address={publicKey} />
+                    {accountsData?.public_key && <CopyAddress address={accountsData?.account.address!} />}
                   </DataTableCell>
                 </TableRow>
               </TableBody>

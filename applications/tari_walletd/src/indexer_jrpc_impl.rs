@@ -1,9 +1,11 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, Mutex},
+};
 
-use axum::async_trait;
 use reqwest::{IntoUrl, Url};
 use tari_engine_types::substate::SubstateId;
 use tari_indexer_client::{
@@ -12,12 +14,19 @@ use tari_indexer_client::{
     types::{
         GetSubstateRequest,
         GetTransactionResultRequest,
+        GetUtxoUpdatesRequest,
         IndexerTransactionFinalizedResult,
         ListSubstatesRequest,
         SubmitTransactionRequest,
     },
 };
-use tari_ootle_common_types::{optional::IsNotFoundError, substate_type::SubstateType};
+use tari_ootle_common_types::{
+    optional::IsNotFoundError,
+    shard::Shard,
+    substate_type::SubstateType,
+    StateVersion,
+    UtxoQueryResponse,
+};
 use tari_ootle_wallet_sdk::network::{
     StatusResponseError,
     SubstateListItem,
@@ -28,7 +37,10 @@ use tari_ootle_wallet_sdk::network::{
     WalletNetworkInterface,
     WalletQueryErrorStatus,
 };
-use tari_template_lib::types::TemplateAddress;
+use tari_template_lib::{
+    models::ResourceAddress,
+    types::{crypto::UtxoTagByte, TemplateAddress},
+};
 use tari_transaction::{Transaction, TransactionId};
 use url::ParseError;
 
@@ -65,7 +77,6 @@ impl IndexerJsonRpcNetworkInterface {
     }
 }
 
-#[async_trait]
 impl WalletNetworkInterface for IndexerJsonRpcNetworkInterface {
     type Error = IndexerJrpcError;
 
@@ -174,6 +185,27 @@ impl WalletNetworkInterface for IndexerJsonRpcNetworkInterface {
             .await?;
 
         Ok(resp.definition)
+    }
+
+    async fn query_stealth_utxo_updates(
+        &self,
+        resource_address: ResourceAddress,
+        shard_state_versions: HashMap<Shard, StateVersion>,
+        filter_tag_bytes: HashSet<UtxoTagByte>,
+    ) -> Result<UtxoQueryResponse, Self::Error> {
+        let mut client = self.get_client()?;
+        let resp = client
+            .get_utxo_updates(GetUtxoUpdatesRequest {
+                shard_state_versions,
+                filter_tag_bytes,
+                resource_address,
+                per_shard_limit: 100,
+            })
+            .await?;
+        Ok(UtxoQueryResponse {
+            updates: resp.utxo_updates,
+            per_shard_high_watermark: resp.per_shard_high_watermark,
+        })
     }
 
     async fn wait_until_ready(&self) -> Result<(), Self::Error> {

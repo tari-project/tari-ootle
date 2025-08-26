@@ -32,6 +32,7 @@ use crate::{
         resources::ResourcesApi,
         stealth_crypto::StealthCryptoApi,
         stealth_outputs::StealthOutputsApi,
+        stealth_scanner::StealthScannerApi,
         stealth_transfer::StealthTransferApi,
         substate::SubstatesApi,
         template::TemplateApi,
@@ -207,7 +208,18 @@ where
         StealthOutputsApi::new(
             self.store(),
             self.key_manager_api(),
-            self.confidential_crypto_api(),
+            self.stealth_crypto_api(),
+            self.config_api(),
+        )
+    }
+
+    pub fn stealth_scanner_api(&self) -> StealthScannerApi<'_, TStore, TNetworkInterface> {
+        StealthScannerApi::new(
+            &self.store,
+            self.stealth_crypto_api(),
+            self.key_manager_api(),
+            self.stealth_outputs_api(),
+            &self.network_interface,
             self.config_api(),
         )
     }

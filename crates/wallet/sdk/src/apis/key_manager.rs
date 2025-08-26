@@ -5,7 +5,6 @@ use blake2::Blake2b;
 use digest::consts::U64;
 use tari_bor::{Deserialize, Serialize};
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
-use tari_engine_types::ToByteType;
 use tari_key_manager::{
     cipher_seed::CipherSeed,
     key_manager::{DerivedKey, KeyManager},
@@ -14,7 +13,7 @@ use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
-    models::WalletKey,
+    models::{KeyPair, WalletKey},
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
@@ -87,8 +86,10 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
             let pk = RistrettoPublicKey::from_secret_key(&key.key);
             keys.push(WalletKey {
                 branch: branch.as_ref().to_string(),
-                public_key: pk.to_byte_type(),
-                secret_key: key,
+                key_pair: KeyPair {
+                    public_key: pk,
+                    secret_key: key,
+                },
                 is_active: active,
             });
         }
@@ -123,6 +124,15 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
 
     pub fn next_account_key(&self) -> Result<DerivedKey<RistrettoPublicKey>, KeyManagerApiError> {
         self.next_key(KeyBranch::Account)
+    }
+
+    pub fn derive_account_key_pair(&self, index: u64) -> Result<KeyPair, KeyManagerApiError> {
+        let key = self.derive_account_key(index)?;
+        let public_key = RistrettoPublicKey::from_secret_key(&key.key);
+        Ok(KeyPair {
+            public_key,
+            secret_key: key,
+        })
     }
 
     pub fn last_index(&self, branch: &str) -> Result<u64, KeyManagerApiError> {

@@ -25,7 +25,7 @@ tari_template_builtin = { workspace = true }
 # TODO: Ideally we should not have to include the WASM template lib, we should perhaps extract the address types into a separate crate (e.g. template_types)
 tari_template_lib = { workspace = true }
 tari_template_abi = { workspace = true }
-tari_indexer_client = { workspace = true }
+tari_indexer_client = { workspace = true, features = ["client"] }
 tari_key_manager = { workspace = true }
 tari_transaction_manifest = { workspace = true }
 
@@ -38,6 +38,7 @@ either = { workspace = true }
 humantime-serde = { workspace = true }
 futures = { workspace = true }
 include_dir = { workspace = true, optional = true }
+indexmap = { workspace = true }
 jsonwebtoken = { workspace = true }
 libsqlite3-sys = { workspace = true, features = ["bundled"] }
 log = { workspace = true }
@@ -67,6 +68,7 @@ webauthn-rs = { workspace = true }
 uuid = { workspace = true }
 wasm-opt = "0.116.1"
 tempfile.workspace = true
+futures-bounded = { workspace = true }
 
 [dev-dependencies]
 tari_utilities = { workspace = true }

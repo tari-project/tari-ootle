@@ -4,9 +4,8 @@
 use std::str::FromStr;
 
 use diesel::internal::derives::multiconnection::time::PrimitiveDateTime;
-use tari_engine_types::{substate::SubstateId, Utxo};
-use tari_indexer_client::types::{UtxoSpent, UtxoUnspent, UtxoUpdate};
-use tari_ootle_common_types::{shard::Shard, StateVersion, VersionedSubstateId};
+use tari_engine_types::{Utxo, UtxoAddress};
+use tari_ootle_common_types::{shard::Shard, StateVersion, UtxoSpent, UtxoUnspent, UtxoUpdate};
 use tari_ootle_storage::StorageError;
 
 use crate::storage_sqlite::{schema::utxos, serialization::deserialize_json};
@@ -25,7 +24,7 @@ pub(crate) struct UtxoRecordUpdate {
 #[derive(Insertable)]
 #[diesel(table_name = utxos)]
 pub(crate) struct UtxoRecordInsert {
-    pub substate_id: String,
+    pub address: String,
     pub version: i32,
     pub shard: i32,
     pub resource_address: String,
@@ -41,7 +40,7 @@ pub(crate) struct UtxoRecordInsert {
 pub(crate) struct UtxoRecord {
     #[allow(dead_code)]
     pub id: i32,
-    pub substate_id: String,
+    pub address: String,
     pub version: i32,
     #[allow(dead_code)]
     pub resource_address: String,
@@ -60,21 +59,23 @@ pub(crate) struct UtxoRecord {
 
 impl UtxoRecord {
     pub fn try_convert(self) -> Result<UtxoUpdate, StorageError> {
-        let substate_id = SubstateId::from_str(&self.substate_id).map_err(|e| StorageError::DecodingError {
+        let address = UtxoAddress::from_str(&self.address).map_err(|e| StorageError::DecodingError {
             operation: "UtxoRecord::try_convert",
             item: "Utxo",
             details: format!("Failed to parse SubstateId from string: {}", e),
         })?;
-        let substate_id = VersionedSubstateId::new(substate_id, self.version as u32);
 
         let update = if self.is_spent {
             UtxoUpdate::Spent(UtxoSpent {
-                versioned_substate_id: substate_id,
+                address,
+                version: self.version as u32,
+                shard: Shard::from(self.shard as u32),
                 state_version: StateVersion::new(self.state_version as u64),
             })
         } else {
             UtxoUpdate::Unspent(UtxoUnspent {
-                versioned_substate_id: substate_id,
+                address,
+                version: self.version as u32,
                 shard: Shard::from(self.shard as u32),
                 state_version: StateVersion::new(self.state_version as u64),
                 utxo: Utxo {

@@ -39,21 +39,7 @@
                                     "address": "/onion3/zqydnqgtapphitwdxr4sfg5kuvv7kbs5ye54yjy2mybi7f7qxd5jeiyd:18141",
                                     "age": 9946,
                                     "direction": false,
-                                    "node_id": [
-                                        208,
-                                        146,
-                                        146,
-                                        229,
-                                        165,
-                                        144,
-                                        10,
-                                        41,
-                                        56,
-                                        35,
-                                        69,
-                                        224,
-                                        120
-                                    ],
+                                    "peer_id": "12D3KooWJn8z...tVx",
                                     "public_key": "b4a0b93ccd3a50ab8f7fb766cc9fea59e574283d69a53fe60d6aa842f42ecd38"
                                 }
                             ]

@@ -77,14 +77,14 @@ function NftCard({ nft }: { nft: NonFungibleToken }) {
             </Typography>
             <Chip
               icon={
-                nft.is_burned ? (
+                nft.is_burnt ? (
                   <CancelRoundedIcon style={{ height: 16, width: 16 }} />
                 ) : (
                   <CheckCircleRoundedIcon style={{ height: 16, width: 16 }} />
                 )
               }
-              label={nft.is_burned ? "Burned" : "Active"}
-              color={nft.is_burned ? "error" : "success"}
+              label={nft.is_burnt ? "Burnt" : "Active"}
+              color={nft.is_burnt ? "error" : "success"}
               size="small"
               variant="outlined"
             />
@@ -149,14 +149,14 @@ function NftRow({ nft }: { nft: NonFungibleToken }) {
       <DataTableCell>
         <Chip
           icon={
-            nft.is_burned ? (
+            nft.is_burnt ? (
               <CancelRoundedIcon style={{ height: 16, width: 16 }} />
             ) : (
               <CheckCircleRoundedIcon style={{ height: 16, width: 16 }} />
             )
           }
-          label={nft.is_burned ? "Burned" : "Active"}
-          color={nft.is_burned ? "error" : "success"}
+          label={nft.is_burnt ? "Burnt" : "Active"}
+          color={nft.is_burnt ? "error" : "success"}
           size="small"
           variant="outlined"
         />

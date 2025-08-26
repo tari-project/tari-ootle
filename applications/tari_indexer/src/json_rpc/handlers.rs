@@ -206,7 +206,7 @@ impl JsonRpcHandlers {
             dial_wait.await.map_err(internal_error(answer_id))?;
         }
 
-        Ok(JsonRpcResponse::success(answer_id, AddPeerResponse {}))
+        Ok(JsonRpcResponse::success(answer_id, AddPeerResponse { success: true }))
     }
 
     pub async fn get_comms_stats(&self, value: JsonRpcExtractor) -> JrpcResult {
@@ -363,6 +363,66 @@ impl JsonRpcHandlers {
                 }
             },
         }
+    }
+
+    pub async fn get_substates(&self, value: JsonRpcExtractor) -> JrpcResult {
+        let answer_id = value.get_answer_id();
+        let requests: Vec<GetSubstateRequest> = value.parse_params()?;
+
+        let mut responses = Vec::new();
+        for request in requests {
+            let maybe_substate = self
+                .substate_manager
+                .get_substate(&request.address, request.version)
+                .await
+                .map_err(|e| {
+                    warn!(target: LOG_TARGET, "Error getting substate: {}", e);
+                    Self::internal_error(answer_id, format!("Error getting substate: {}", e))
+                })?;
+
+            match maybe_substate {
+                Some(substate_resp) => responses.push(Some(GetSubstateResponse {
+                    address: substate_resp.address,
+                    version: substate_resp.version,
+                    substate: substate_resp.substate,
+                })),
+                None => {
+                    if request.local_search_only {
+                        responses.push(None);
+                    } else {
+                        // Ask network
+                        let substate = self
+                            .transaction_manager
+                            .get_substate(&SubstateRequirement::new(request.address.clone(), request.version))
+                            .await
+                            .map_err(|e| {
+                                warn!(target: LOG_TARGET, "Error asking network for substate: {}", e);
+                                JsonRpcResponse::error(
+                                    answer_id,
+                                    JsonRpcError::new(
+                                        JsonRpcErrorReason::ApplicationError(501),
+                                        format!("Error asking network for substate:{}", e),
+                                        Value::Null,
+                                    ),
+                                )
+                            })?;
+                        match substate {
+                            SubstateResult::DoesNotExist => responses.push(None),
+                            SubstateResult::Up { id, substate } => {
+                                responses.push(Some(GetSubstateResponse {
+                                    address: id,
+                                    version: substate.version(),
+                                    substate: substate.into_substate_value(),
+                                }))
+                            },
+                            SubstateResult::Down { version, .. } => responses.push(None),
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(JsonRpcResponse::success(answer_id, responses))
     }
 
     pub async fn inspect_substate(&self, value: JsonRpcExtractor) -> JrpcResult {
@@ -598,10 +658,10 @@ impl JsonRpcHandlers {
 
         let resp = match result {
             TransactionResultStatus::Pending => GetTransactionResultResponse {
-                result: IndexerTransactionFinalizedResult::Pending,
+                status: IndexerTransactionFinalizedResult::Pending,
             },
             TransactionResultStatus::Finalized(finalized) => GetTransactionResultResponse {
-                result: IndexerTransactionFinalizedResult::Finalized {
+                status: IndexerTransactionFinalizedResult::Finalized {
                     final_decision: finalized.final_decision,
                     execution_result: finalized.execute_result.map(Box::new),
                     execution_time: finalized.execution_time,
@@ -632,7 +692,7 @@ impl JsonRpcHandlers {
 
         let transactions = self
             .transaction_manager
-            .list_recent_transactions(req.last_id, limit as usize)
+            .list_recent_transactions(None, limit as usize)
             .map_err(|e| Self::internal_error(answer_id, e))?;
 
         let resp = ListRecentTransactionsResponse { transactions };

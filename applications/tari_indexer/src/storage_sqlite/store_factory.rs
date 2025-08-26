@@ -35,10 +35,11 @@ use log::*;
 use tari_consensus_types::BlockId;
 use tari_crypto::tari_utilities::hex::to_hex;
 use tari_engine_types::substate::{SubstateId, SubstateValue};
-use tari_indexer_client::types::{ListSubstateItem, TransactionEntry};
+use tari_indexer_client::types::{ListSubstateItem, TransactionEntry, IndexerTransactionFinalizedResult};
 use tari_indexer_lib::NonFungibleSubstate;
 use tari_ootle_common_types::{substate_type::SubstateType, Epoch, ShardGroup};
 use tari_ootle_storage::{time::PrimitiveDateTime, StorageError};
+
 use tari_ootle_storage_sqlite::{error::SqliteStorageError, SqliteTransaction};
 use tari_template_lib::{models::ResourceAddress, types::TemplateAddress};
 use tari_transaction::{Transaction, TransactionId};
@@ -238,7 +239,11 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                 let substate_id = SubstateId::from_str(&s.address)?;
                 let version = u32::try_from(s.version)?;
                 let template_address = s.template_address.map(|h| TemplateAddress::from_hex(&h)).transpose()?;
-                let timestamp = u64::try_from(s.timestamp)?;
+                // Convert u64 timestamp (seconds since Unix epoch) to PrimitiveDateTime
+                // The stored timestamp is in seconds since Unix epoch (1970-01-01 00:00:00 UTC)
+                let offset_datetime = tari_ootle_storage::time::OffsetDateTime::from_unix_timestamp(s.timestamp as i64)
+                    .map_err(|e| anyhow::anyhow!("Invalid timestamp: {}", e))?;
+                let timestamp = PrimitiveDateTime::new(offset_datetime.date(), offset_datetime.time());
                 Ok(ListSubstateItem {
                     substate_id,
                     module_name: s.module_name,
@@ -473,8 +478,9 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                 let transaction: Transaction = deserialize_json(&body)?;
                 Ok(TransactionEntry {
                     transaction_id: transaction.calculate_id(),
-                    created_at,
-                    transaction,
+                    status: IndexerTransactionFinalizedResult::Pending,
+                    fee: 0, // Default fee since it's not available
+                    timestamp: created_at,
                 })
             })
         })

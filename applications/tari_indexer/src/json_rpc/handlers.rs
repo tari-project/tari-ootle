@@ -392,23 +392,26 @@ impl JsonRpcHandlers {
                     if request.local_search_only {
                         responses.push(None);
                     } else {
-                        // Ask network
-                        let substate = self
+                        // Ask network; on error, push None (don’t fail the entire batch)
+                        match self
                             .transaction_manager
                             .get_substate(&SubstateRequirement::new(request.address.clone(), request.version))
                             .await
-                            .map_err(|e| {
+                        {
+                            Err(e) => {
                                 warn!(target: LOG_TARGET, "Error asking network for substate: {}", e);
-                                JsonRpcResponse::error(
-                                    answer_id,
-                                    JsonRpcError::new(
-                                        JsonRpcErrorReason::ApplicationError(501),
-                                        format!("Error asking network for substate:{}", e),
-                                        Value::Null,
-                                    ),
-                                )
-                            })?;
-                        match substate {
+                                responses.push(None);
+                            },
+                            Ok(SubstateResult::DoesNotExist) => responses.push(None),
+                            Ok(SubstateResult::Up { id, substate }) => {
+                                responses.push(Some(GetSubstateResponse {
+                                    address: id,
+                                    version: substate.version(),
+                                    substate: substate.into_substate_value(),
+                                }))
+                            },
+                            Ok(SubstateResult::Down { .. }) => responses.push(None),
+                        }
                             SubstateResult::DoesNotExist => responses.push(None),
                             SubstateResult::Up { id, substate } => {
                                 responses.push(Some(GetSubstateResponse {

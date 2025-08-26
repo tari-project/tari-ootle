@@ -13,11 +13,7 @@ use time::PrimitiveDateTime;
 use crate::models::NewAccountData;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct WalletTransaction {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub id: TransactionId,
@@ -38,11 +34,7 @@ pub struct WalletTransaction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum TransactionStatus {
     #[default]
     New,

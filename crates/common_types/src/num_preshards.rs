@@ -7,11 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{shard::Shard, ShardGroup};
 
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NumPreshards {
     P1 = 1,
@@ -27,6 +23,7 @@ pub enum NumPreshards {
 
 impl NumPreshards {
     pub const MAX: Self = Self::P256;
+    pub const MAX_SHARD: Shard = Shard::from_u32(Self::MAX.as_u32());
 
     pub const fn as_u32(self) -> u32 {
         self as u32

@@ -545,11 +545,7 @@ impl ConfidentialTransferParams {
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum ConfidentialTransferInputSelection {
     ConfidentialOnly,
     RevealedOnly,

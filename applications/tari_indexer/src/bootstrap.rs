@@ -20,9 +20,9 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{fs, io, str::FromStr};
+use std::{fs, io, str::FromStr, sync::Arc};
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use libp2p::identity;
 use log::warn;
 use minotari_app_utilities::identity_management;
@@ -51,7 +51,7 @@ use tari_ootle_app_utilities::{
     seed_peer::SeedPeer,
     template_download_queue::TemplateDownloadQueue,
 };
-use tari_ootle_common_types::PeerAddress;
+use tari_ootle_common_types::{optional::Optional, Network, PeerAddress};
 use tari_ootle_p2p::TariMessagingSpec;
 use tari_ootle_storage::global::GlobalDb;
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
@@ -62,7 +62,12 @@ use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
 use crate::{
     network_client::TariNetworkClient,
-    storage_sqlite::store_factory::SqliteIndexerStore,
+    network_state_sync,
+    network_state_sync::NetworkWideStateSyncConfig,
+    storage_sqlite::{
+        models::Key,
+        store_factory::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreWriteTransaction, SqliteIndexerStore},
+    },
     ApplicationConfig,
     IndexerEpochManagerSpec,
     Noop,
@@ -151,6 +156,7 @@ pub async fn spawn_services(
 
     // Connect to substate db
     let store = SqliteIndexerStore::try_create(config.indexer.state_db_path())?;
+    check_store(config, &store)?;
 
     // Epoch event oracle
     let epoch_event_oracle = create_epoch_oracle(config, global_db.clone(), &consensus_constants).await?;
@@ -196,6 +202,17 @@ pub async fn spawn_services(
         template_queue_receiver,
         shutdown.clone(),
     );
+    network_state_sync::NetworkWideStateSync::new(
+        epoch_manager.clone(),
+        networking.clone(),
+        store.clone(),
+        template_manager_service.clone(),
+        NetworkWideStateSyncConfig {
+            event_filters: Arc::from(config.indexer.event_filters.clone()),
+            ..Default::default()
+        },
+    )
+    .spawn(shutdown.clone());
 
     // Save final node identity after comms has initialized. This is required because the public_address can be
     // changed by comms during initialization when using tor.
@@ -209,7 +226,7 @@ pub async fn spawn_services(
         store,
         global_db,
         template_manager,
-        template_manager_service,
+        _template_manager_service: template_manager_service,
     })
 }
 
@@ -222,7 +239,7 @@ pub struct Services {
     pub network_client: TariNetworkClient<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory>,
     pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     pub template_manager: TemplateManager<PeerAddress>,
-    pub template_manager_service: TemplateManagerHandle,
+    pub _template_manager_service: TemplateManagerHandle,
 }
 
 fn ensure_directories_exist(config: &ApplicationConfig) -> io::Result<()> {
@@ -318,4 +335,26 @@ async fn create_hybrid_epoch_oracle<TStore: EpochOracleStore + Clone + Send + 's
     let (ticker, trigger) = watch_ticker();
     let configured_oracle = ConfiguredEpochOracle::with_custom_ticker(oracle_config, store, ticker);
     Ok(HybridEpochOracle::new(configured_oracle, base_layer_oracle, trigger))
+}
+
+fn check_store<TStore: IndexerStore>(config: &ApplicationConfig, store: &TStore) -> anyhow::Result<()> {
+    store.with_write_tx(|tx| {
+        match tx.key_value_get_value::<_, Network>(Key::Network).optional()? {
+            Some(network) => {
+                if network != config.network {
+                    return Err(anyhow!(
+                        "The network in the database ({}) does not match the configured network ({})",
+                        network,
+                        config.network
+                    ));
+                }
+                Ok(())
+            },
+            None => {
+                // If the network is not set, we can assume this is a new store and we can set it
+                tx.key_value_set(Key::Network, config.network)
+                    .map_err(|e| anyhow!("Failed to set network in the store: {}", e))
+            },
+        }
+    })
 }

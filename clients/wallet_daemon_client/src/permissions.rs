@@ -12,11 +12,7 @@ use tari_engine_types::substate::SubstateId;
 use tari_template_lib::models::{ComponentAddress, ResourceAddress};
 
 #[derive(Debug, Clone, Deserialize, Serialize, Hash, Eq, PartialEq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum JrpcPermission {
     AccountInfo,
     NftGetOwnershipProof(Option<ResourceAddress>),
@@ -98,11 +94,7 @@ impl Display for JrpcPermission {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct JrpcPermissions(HashSet<JrpcPermission>);
 
 impl FromStr for JrpcPermissions {
@@ -145,11 +137,7 @@ impl TryFrom<&[String]> for JrpcPermissions {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Claims {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub id: u64,

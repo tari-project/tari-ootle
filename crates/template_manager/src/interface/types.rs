@@ -22,6 +22,7 @@
 
 use reqwest::Url;
 use tari_common_types::types::FixedHash;
+use tari_engine::template::LoadedTemplate;
 use tari_engine_types::published_template::PublishedTemplateAddress;
 use tari_ootle_common_types::Epoch;
 use tari_ootle_storage::{
@@ -29,7 +30,6 @@ use tari_ootle_storage::{
     StorageError,
 };
 use tari_template_lib::{prelude::RistrettoPublicKeyBytes, types::TemplateAddress};
-use tari_validator_node_client::types::TemplateAbi;
 use tokio::{sync::oneshot, task::JoinHandle};
 
 use super::TemplateManagerError;
@@ -161,7 +161,7 @@ pub enum TemplateManagerRequest {
     },
     LoadTemplateAbi {
         address: TemplateAddress,
-        reply: Reply<TemplateAbi>,
+        reply: Reply<LoadedTemplate>,
     },
     TemplateExists {
         address: TemplateAddress,

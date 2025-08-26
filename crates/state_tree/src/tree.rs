@@ -19,12 +19,13 @@ use tari_jellyfish::{
     TreeUpdateBatch,
     Version,
 };
-use tari_ootle_common_types::VersionedSubstateId;
+use tari_ootle_common_types::{ToSubstateAddress, VersionedSubstateId};
 
 use crate::{
     error::StateTreeError,
     key_mapper::{DbKeyMapper, HashIdentityKeyMapper, SpreadPrefixKeyMapper},
     memory_store::MemoryTreeStore,
+    StateTreePayload,
     TreeStoreBatchWriter,
     SPARSE_MERKLE_PLACEHOLDER_HASH,
 };
@@ -48,12 +49,12 @@ impl<'a, S, M> StateTree<'a, S, M> {
     }
 }
 
-impl<S: TreeStoreReader<Version>, M: DbKeyMapper<VersionedSubstateId>> StateTree<'_, S, M> {
+impl<S: TreeStoreReader<StateTreePayload>, M: DbKeyMapper<VersionedSubstateId>> StateTree<'_, S, M> {
     pub fn get_proof(
         &self,
         version: Version,
         key: &VersionedSubstateId,
-    ) -> Result<(LeafKey, Option<ProofValue<Version>>, SparseMerkleProofExt), StateTreeError> {
+    ) -> Result<(LeafKey, Option<ProofValue<StateTreePayload>>, SparseMerkleProofExt), StateTreeError> {
         let jmt = JellyfishMerkleTree::new(self.store);
         let key = M::map_to_leaf_key(key);
         let (maybe_value, proof) = jmt.get_with_proof_ext(key.as_ref(), version)?;
@@ -71,14 +72,14 @@ impl<S: TreeStoreReader<Version>, M: DbKeyMapper<VersionedSubstateId>> StateTree
         current_version: Option<Version>,
         next_version: Version,
         changes: I,
-    ) -> Result<(TreeHash, StateHashTreeDiff<Version>), StateTreeError> {
+    ) -> Result<(TreeHash, StateHashTreeDiff<StateTreePayload>), StateTreeError> {
         let (root_hash, update_batch) =
             calculate_substate_changes::<_, M, _>(self.store, current_version, next_version, changes)?;
         Ok((root_hash, update_batch.into()))
     }
 }
 
-impl<S: TreeStore<Version>, M: DbKeyMapper<VersionedSubstateId>> StateTree<'_, S, M> {
+impl<S: TreeStore<StateTreePayload>, M: DbKeyMapper<VersionedSubstateId>> StateTree<'_, S, M> {
     /// Stores the substate changes in the state tree and returns the new root hash.
     pub fn put_substate_changes<I: IntoIterator<Item = SubstateTreeChange>>(
         &mut self,
@@ -91,7 +92,7 @@ impl<S: TreeStore<Version>, M: DbKeyMapper<VersionedSubstateId>> StateTree<'_, S
         Ok(root_hash)
     }
 
-    fn commit_diff(&mut self, diff: StateHashTreeDiff<Version>) -> Result<(), StateTreeError> {
+    fn commit_diff(&mut self, diff: StateHashTreeDiff<StateTreePayload>) -> Result<(), StateTreeError> {
         for (key, node) in diff.new_nodes {
             log::debug!("Inserting node: {}", key);
             self.store.insert_node(key, node)?;
@@ -106,8 +107,10 @@ impl<S: TreeStore<Version>, M: DbKeyMapper<VersionedSubstateId>> StateTree<'_, S
     }
 }
 
-impl<S: TreeStoreReader<Version> + TreeStoreBatchWriter<Version>, M: DbKeyMapper<VersionedSubstateId>>
-    StateTree<'_, S, M>
+impl<
+        S: TreeStoreReader<StateTreePayload> + TreeStoreBatchWriter<StateTreePayload>,
+        M: DbKeyMapper<VersionedSubstateId>,
+    > StateTree<'_, S, M>
 {
     /// Stores the substate changes in the state tree and returns the new root hash.
     pub fn batch_put_substate_changes<I: IntoIterator<Item = SubstateTreeChange>>(
@@ -171,26 +174,26 @@ impl<S: TreeStore<()>, M: DbKeyMapper<TreeHash>> StateTree<'_, S, M> {
 
 /// Calculates the new root hash and tree updates for the given substate changes.
 fn calculate_substate_changes<
-    S: TreeStoreReader<Version>,
+    S: TreeStoreReader<StateTreePayload>,
     M: DbKeyMapper<VersionedSubstateId>,
     I: IntoIterator<Item = SubstateTreeChange>,
 >(
     store: &mut S,
     current_version: Option<Version>,
-    next_version: Version,
+    version: Version,
     changes: I,
-) -> Result<(TreeHash, TreeUpdateBatch<Version>), StateTreeError> {
+) -> Result<(TreeHash, TreeUpdateBatch<StateTreePayload>), StateTreeError> {
     let jmt = JellyfishMerkleTree::new(store);
 
     let changes = changes.into_iter().map(|ch| match ch {
         SubstateTreeChange::Up { id, value_hash } => (
             M::map_to_leaf_key(&id),
-            Some((TreeHash::new(value_hash.into_array()), next_version)),
+            Some((TreeHash::new(value_hash.into_array()), id.to_substate_address())),
         ),
         SubstateTreeChange::Down { id } => (M::map_to_leaf_key(&id), None),
     });
 
-    let (root_hash, update_result) = jmt.batch_put_value_set(changes, None, current_version, next_version)?;
+    let (root_hash, update_result) = jmt.batch_put_value_set(changes, None, current_version, version)?;
 
     Ok((root_hash, update_result))
 }

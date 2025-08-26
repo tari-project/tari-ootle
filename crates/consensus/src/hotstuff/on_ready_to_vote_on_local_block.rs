@@ -10,7 +10,13 @@ use tari_engine_types::{
     commit_result::{AbortReason, RejectReason},
     substate::Substate,
 };
-use tari_ootle_common_types::{committee::CommitteeInfo, optional::Optional, Epoch, ShardGroup, SubstateAddress};
+use tari_ootle_common_types::{
+    committee::CommitteeInfo,
+    optional::Optional,
+    Epoch,
+    ShardGroup,
+    VersionedSubstateIdRef,
+};
 use tari_ootle_storage::{
     consensus_models::{
         Block,
@@ -135,7 +141,7 @@ where TConsensusSpec: ConsensusSpec
             tx,
             |tx, _prev_locked, block, _justify_qc| self.on_lock_block(tx, block),
             |tx, mut commit_block| {
-                let committed = self.on_commit(tx, &block_qc_id, &commit_block, local_committee_info)?;
+                let committed = self.on_commit(tx, &block_qc_id, &commit_block)?;
                 // NOTE: update the commit QC in the local copy so that foreign proposals can obtain the commit QC
                 // on_commit already sets the persisted commit_qc for the block
                 commit_block.set_commit_qc(block_qc_id);
@@ -478,7 +484,7 @@ where TConsensusSpec: ConsensusSpec
             block.shard_group(),
             pending,
             substate_store
-                .diff()
+                .changes()
                 .iter()
                 // Calculate for local shards only or the global shard
                 .filter(|ch| block.shard_group().contains_or_global(&ch.shard())),
@@ -492,17 +498,19 @@ where TConsensusSpec: ConsensusSpec
                 expected_merkle_root
             );
             let (diff, locks) = substate_store.into_parts();
+            let diff = BlockDiff::new(*block.id(), diff);
             proposed_block_change_set
                 .set_no_vote(NoVoteReason::StateMerkleRootMismatch)
                 // These are set for debugging purposes but aren't actually committed
-                .set_substate_changes(diff)
+                .set_block_diff_to_commit(diff.into_filtered(local_committee_info.shard_group()))
                 .set_substate_locks(locks);
             return Ok(());
         }
 
         let (diff, locks) = substate_store.into_parts();
+        let diff = BlockDiff::new(*block.id(), diff);
         proposed_block_change_set
-            .set_substate_changes(diff)
+            .set_block_diff_to_commit(diff)
             .set_state_tree_diffs(tree_diffs)
             .set_substate_locks(locks)
             .set_quorum_decision(QuorumDecision::Accept);
@@ -1485,7 +1493,7 @@ where TConsensusSpec: ConsensusSpec
             return Ok(Some(NoVoteReason::MintConfidentialOutputUnknown));
         };
         let substate_id = atom.commitment.into();
-        let addr = SubstateAddress::from_substate_id(&substate_id, 0);
+        let addr = VersionedSubstateIdRef::new(&substate_id, 0);
         let shard = addr.to_shard(local_committee_info.num_preshards());
         let change = SubstateChange::Up {
             id: substate_id,
@@ -1545,9 +1553,8 @@ where TConsensusSpec: ConsensusSpec
         tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
         commit_qc_id: &QcId,
         block: &Block,
-        local_committee_info: &CommitteeInfo,
     ) -> Result<Vec<TransactionPoolRecord>, HotStuffError> {
-        let committed_transactions = self.finalize_block(tx, commit_qc_id, block, local_committee_info)?;
+        let committed_transactions = self.finalize_block(tx, commit_qc_id, block)?;
         debug!(
             target: LOG_TARGET,
             "✅ COMMIT block {}",
@@ -1598,7 +1605,6 @@ where TConsensusSpec: ConsensusSpec
         tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
         commit_qc_id: &QcId,
         block: &Block,
-        local_committee_info: &CommitteeInfo,
     ) -> Result<Vec<TransactionPoolRecord>, HotStuffError> {
         if block.is_dummy() {
             block.increment_leader_failure_count(
@@ -1607,7 +1613,7 @@ where TConsensusSpec: ConsensusSpec
             )?;
 
             // Nothing to do here for empty dummy blocks. Just mark the block as committed.
-            block.commit_diff(tx, commit_qc_id, BlockDiff::empty(*block.id()))?;
+            block.commit_block_without_state_changes(tx, commit_qc_id)?;
             return Ok(vec![]);
         }
 
@@ -1632,18 +1638,12 @@ where TConsensusSpec: ConsensusSpec
         // NOTE: this must happen before we commit the substate diff because the state transitions use this version
         let pending = block.remove_pending_tree_diff_and_return(tx)?;
         let mut state_tree = ShardedStateTree::new(tx);
-        state_tree.commit_diffs(pending)?;
+        let version_updates = state_tree.commit_diffs(pending)?;
         let tx = state_tree.into_transaction();
 
-        let diff = block.get_diff(&**tx)?;
-        info!(
-            target: LOG_TARGET,
-            "🌳 COMMIT block {} with {} substate change(s)", block, diff.len()
-        );
         {
             let _timer = TraceTimer::debug(LOG_TARGET, "commit_block");
-            let local_diff = diff.into_filtered(local_committee_info);
-            block.commit_diff(tx, commit_qc_id, local_diff)?;
+            block.commit_block(tx, commit_qc_id, &version_updates)?;
         }
 
         let finalized_transactions = {

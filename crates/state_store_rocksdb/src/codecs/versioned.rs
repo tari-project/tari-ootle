@@ -1,6 +1,8 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
+use std::io::Read;
+
 use crate::{
     codecs::{DbCodec, EncodeVec},
     error::RocksDbStorageError,
@@ -18,8 +20,8 @@ impl<C: DbCodec<T>, T: Versioned<Latest = V>, V: Into<T> + Clone> DbCodec<V> for
         self.codec.encode(&value)
     }
 
-    fn decode(&self, bytes: &[u8]) -> Result<V, RocksDbStorageError> {
-        let versioned = self.codec.decode(bytes)?;
+    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<V, RocksDbStorageError> {
+        let versioned = self.codec.decode_reader(reader)?;
         Ok(versioned.full_upgrade().into_latest())
     }
 }

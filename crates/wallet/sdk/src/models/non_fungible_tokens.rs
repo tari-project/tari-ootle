@@ -5,11 +5,7 @@ use tari_engine_types::serde_with;
 use tari_template_lib::models::{NonFungibleId, ResourceAddress, VaultId};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct NonFungibleToken {
     pub vault_id: VaultId,
     pub nft_id: NonFungibleId,

@@ -29,7 +29,7 @@ use ts_rs::TS;
 use crate::indexed_value::{IndexedValue, IndexedValueError};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(feature = "ts", derive(TS), ts(export))]
 pub struct InstructionResult {
     pub indexed: IndexedValue,
     pub return_type: Type,

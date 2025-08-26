@@ -67,3 +67,9 @@ mod vote_power;
 pub use vote_power::*;
 
 pub mod base_layer_hashing;
+mod shard_state_versions;
+
+pub use shard_state_versions::*;
+
+mod state_version;
+pub use state_version::*;

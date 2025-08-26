@@ -232,9 +232,9 @@ fn lit_to_arg(lit: &Lit) -> Result<InstructionArg, ManifestError> {
             "u128" => Ok(call_arg!(i.base10_parse::<u128>()?)),
             "i8" => Ok(call_arg!(i.base10_parse::<i8>()?)),
             "i16" => Ok(call_arg!(i.base10_parse::<i16>()?)),
-            "" | "i32" => Ok(call_arg!(i.base10_parse::<i32>()?)),
+            "i32" => Ok(call_arg!(i.base10_parse::<i32>()?)),
             "i64" => Ok(call_arg!(i.base10_parse::<i64>()?)),
-            "i128" => Ok(call_arg!(i.base10_parse::<i128>()?)),
+            "" | "i128" => Ok(call_arg!(i.base10_parse::<i128>()?)),
             _ => Err(ManifestError::UnsupportedExpr(format!(
                 r#"Unsupported integer suffix "{}""#,
                 i.suffix()

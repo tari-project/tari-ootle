@@ -23,24 +23,24 @@
 
 use std::{convert::TryFrom, str::FromStr};
 
-use diesel::sql_types::{Integer, Nullable, Text};
+use diesel::sql_types::{Nullable, Text};
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
+use tari_ootle_storage::time::PrimitiveDateTime;
 use tari_template_lib::types::Hash;
 
 use crate::storage_sqlite::schema::*;
 
 #[derive(Debug, Identifiable, Queryable)]
 #[diesel(table_name = events)]
-pub struct Event {
+pub struct EventDb {
     pub id: i32,
     pub template_address: String,
     pub tx_hash: String,
     pub topic: String,
     pub payload: String,
-    pub version: i32,
     pub substate_id: Option<String>,
-    pub timestamp: i64,
+    pub created_at: PrimitiveDateTime,
 }
 
 #[derive(Debug, Clone, Insertable, AsChangeset)]
@@ -51,18 +51,7 @@ pub struct NewEvent {
     pub tx_hash: String,
     pub topic: String,
     pub payload: String,
-    pub version: i32,
     pub substate_id: Option<String>,
-    pub timestamp: i64,
-}
-
-#[derive(Debug, Clone, Insertable, AsChangeset)]
-#[diesel(table_name = event_payloads)]
-#[diesel(treat_none_as_null = true)]
-pub struct NewEventPayloadField {
-    pub payload_key: String,
-    pub payload_value: String,
-    pub event_id: i32,
 }
 
 #[derive(Clone, Debug, QueryableByName, Deserialize, Serialize)]
@@ -75,8 +64,6 @@ pub struct EventData {
     pub topic: String,
     #[diesel(sql_type = Text)]
     pub payload: String,
-    #[diesel(sql_type = Integer)]
-    pub version: i32,
     #[diesel(sql_type = Nullable<Text>)]
     pub substate_id: Option<String>,
 }

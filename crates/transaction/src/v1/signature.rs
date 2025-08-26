@@ -22,11 +22,7 @@ use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, SchnorrSignature
 use crate::{UnsealedTransactionV1, UnsignedTransactionV1};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionSealSignature {
     public_key: RistrettoPublicKeyBytes,
     signature: SchnorrSignatureBytes,
@@ -81,11 +77,7 @@ impl TransactionSealSignature {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionSignature {
     public_key: RistrettoPublicKeyBytes,
     signature: SchnorrSignatureBytes,

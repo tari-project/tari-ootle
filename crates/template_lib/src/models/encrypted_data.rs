@@ -8,11 +8,7 @@ use tari_template_lib_types::serde_helpers;
 /// as well as Minotari burns
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct EncryptedData(
     #[serde(with = "serde_helpers::dynamic_hex")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]

@@ -18,11 +18,7 @@ use crate::hashing::{hasher32, EngineHashDomainLabel};
 const TAG: u64 = BinaryTag::TemplateAddress.as_u64();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PublishedTemplateAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl PublishedTemplateAddress {
@@ -91,11 +87,7 @@ impl borsh::BorshDeserialize for PublishedTemplateAddress {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PublishedTemplate {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub author: RistrettoPublicKeyBytes,

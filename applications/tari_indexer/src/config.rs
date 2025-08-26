@@ -42,6 +42,8 @@ use tari_ootle_app_utilities::{
 use tari_ootle_common_types::Network;
 use tari_template_manager::implementation::TemplateConfig;
 
+use crate::network_state_sync::EventFilter;
+
 #[derive(Debug, Clone)]
 pub struct ApplicationConfig {
     pub common: CommonConfig,
@@ -102,7 +104,7 @@ pub struct IndexerConfig {
     /// The burnt utxos sidechain id
     pub burnt_utxo_sidechain_id: Option<RistrettoPublicKey>,
     /// The event filtering configuration
-    pub event_filters: Vec<EventFilterConfig>,
+    pub event_filters: Vec<EventFilter>,
 }
 
 impl IndexerConfig {
@@ -150,12 +152,4 @@ impl SubConfigPath for IndexerConfig {
     fn main_key_prefix() -> &'static str {
         "indexer"
     }
-}
-
-#[derive(Default, Debug, Serialize, Deserialize, Clone)]
-pub struct EventFilterConfig {
-    pub topic: Option<String>,
-    pub entity_id: Option<String>,
-    pub substate_id: Option<String>,
-    pub template_address: Option<String>,
 }

@@ -62,11 +62,7 @@ pub use manager::*;
 /// TypeScript bindings when the `ts` feature is enabled.
 
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum ResourceType {
     /// Fungible tokens do not have individual identity, making them interchangeable.
     /// Examples include monetary units, liquidity pool tokens, or tokenized shares.

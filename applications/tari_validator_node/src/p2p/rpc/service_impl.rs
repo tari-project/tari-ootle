@@ -20,18 +20,30 @@
 // CAUSED AND ON ANY THEORY OF LIABILITY,  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
 // OTHERWISE) ARISING IN ANY WAY OUT OF THE  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
 // DAMAGE.
-use std::convert::{TryFrom, TryInto};
+use std::{
+    convert::{TryFrom, TryInto},
+    num::NonZeroUsize,
+};
 
 use log::*;
 use tari_bor::encode;
 use tari_consensus_types::BlockId;
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
-use tari_ootle_common_types::{optional::Optional, shard::Shard, Epoch, NodeHeight, PeerAddress, SubstateRequirement};
+use tari_ootle_common_types::{
+    displayable::Displayable,
+    optional::Optional,
+    shard::Shard,
+    Epoch,
+    NodeHeight,
+    NumPreshards,
+    PeerAddress,
+    SubstateRequirement,
+};
 use tari_ootle_p2p::{
     proto,
     proto::rpc::{
-        GetCheckpointRequest,
-        GetCheckpointResponse,
+        GetCheckpointsRequest,
+        GetCheckpointsResponse,
         GetSubstateRequest,
         GetSubstateResponse,
         GetTransactionResultRequest,
@@ -47,7 +59,7 @@ use tari_ootle_p2p::{
     },
 };
 use tari_ootle_storage::{
-    consensus_models::{Block, EpochCheckpoint, StateTransitionId, SubstateRecord, TransactionRecord},
+    consensus_models::{Block, EpochCheckpoint, SubstateRecord, SubstateValueFilterFlags, TransactionRecord},
     StateStore,
 };
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
@@ -171,27 +183,14 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             }));
         };
 
-        let created_qc = substate
-            .get_created_proposal_certificate(&tx)
-            // TODO: We may not have this... We dont sync PCs. Hmm...
-            // This does not actually prove this substate was committed anyhow.
-            .optional()
-            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-
-        let resp = if substate.is_destroyed() {
-            let destroyed_qc = substate
-                .get_destroyed_proposal_certificate(&tx)
-                .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+        let resp = if let Some(destroyed) = substate.destroyed() {
             GetSubstateResponse {
                 status: SubstateStatus::Down as i32,
                 address: substate.substate_id().to_bytes(),
+                substate: vec![],
                 version: substate.version(),
-                quorum_certificates: created_qc
-                    .into_iter()
-                    .chain(destroyed_qc)
-                    .map(|qc| (&qc).into())
-                    .collect(),
-                ..Default::default()
+                created_at_state_version: substate.created().at_state_version,
+                destroyed_at_state_version: destroyed.at_state_version,
             }
         } else {
             GetSubstateResponse {
@@ -202,7 +201,8 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
                     .substate_value()
                     .map(|v| v.to_bytes())
                     .ok_or_else(|| RpcStatus::general("NEVER HAPPEN: UP substate has no value"))?,
-                quorum_certificates: created_qc.iter().map(Into::into).collect(),
+                created_at_state_version: substate.created().at_state_version,
+                destroyed_at_state_version: Default::default(),
             }
         };
 
@@ -330,10 +330,10 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         Ok(Streaming::new(receiver))
     }
 
-    async fn get_checkpoint(
+    async fn get_checkpoints(
         &self,
-        request: Request<GetCheckpointRequest>,
-    ) -> Result<Response<GetCheckpointResponse>, RpcStatus> {
+        request: Request<GetCheckpointsRequest>,
+    ) -> Result<Response<GetCheckpointsResponse>, RpcStatus> {
         let msg = request.into_message();
         if !self
             .epoch_manager
@@ -355,23 +355,37 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
                 current_epoch, consensus_epoch
             )));
         }
+        let from_epoch = msg
+            .from_epoch
+            .ok_or_else(|| RpcStatus::bad_request("from_epoch is required"))?
+            .into();
 
-        if msg.epoch >= consensus_epoch.as_u64() {
+        if from_epoch >= consensus_epoch {
             // This may occur if one of the nodes has not fully scanned the base layer
             return Err(RpcStatus::bad_request(format!(
                 "Peer requested checkpoint with epoch {} but the current epoch is {}",
-                msg.epoch, consensus_epoch
+                from_epoch, consensus_epoch
             )));
         }
 
-        let checkpoint = self
+        if msg.num_to_return > 100 {
+            return Err(RpcStatus::bad_request("num_to_return must be less than 100"));
+        }
+
+        let limit = NonZeroUsize::new(msg.num_to_return as usize).ok_or_else(|| {
+            RpcStatus::bad_request(format!(
+                "Invalid number of checkpoints requested: {}. Must be a integer.",
+                msg.num_to_return
+            ))
+        })?;
+
+        let checkpoints = self
             .state_store
-            .with_read_tx(|tx| EpochCheckpoint::get(tx, Epoch(msg.epoch)))
-            .optional()
+            .with_read_tx(|tx| EpochCheckpoint::get_all_from_epoch(tx, from_epoch, limit.get()))
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
-        Ok(Response::new(GetCheckpointResponse {
-            checkpoint: checkpoint.map(Into::into),
+        Ok(Response::new(GetCheckpointsResponse {
+            checkpoints: checkpoints.into_iter().map(Into::into).collect(),
         }))
     }
 
@@ -380,20 +394,42 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
 
         let (sender, receiver) = mpsc::channel(10);
 
-        let start_epoch = Epoch(req.start_epoch);
-        let start_shard = Shard::from(req.start_shard);
-        let last_state_transition_for_chain = StateTransitionId::new(start_epoch, start_shard, req.start_seq);
+        let shard = Shard::from_u32(req.shard);
+        if shard > NumPreshards::MAX_SHARD {
+            return Err(RpcStatus::bad_request(format!(
+                "Shard {} out of range. Maximum shard is {}",
+                shard,
+                NumPreshards::MAX_SHARD
+            )));
+        }
 
-        let end_epoch = Epoch(req.current_epoch);
-        info!(target: LOG_TARGET, "🌍peer initiated sync with this node ({}, {}, seq={}) to {}", start_epoch, start_shard, req.start_seq, end_epoch);
+        let end_epoch = req.until_epoch.map(Epoch::from);
+        if req.start_state_version == 0 {
+            return Err(RpcStatus::bad_request("start_state_version must be greater than 0"));
+        }
+
+        let value_filter_flags = SubstateValueFilterFlags::from_bits_truncate(req.value_filters);
+
+        info!(
+            target: LOG_TARGET,
+            "🌍 peer initiated sync with this node (start: v{}, {}) to {} (values: {:?})",
+            req.start_state_version,
+            shard,
+            end_epoch.display(),
+            value_filter_flags
+        );
 
         task::spawn(
             StateSyncTask::new(
                 self.state_store.clone(),
                 sender,
-                last_state_transition_for_chain,
+                shard,
+                req.start_state_version,
                 end_epoch,
-                STATE_SYNC_MAX_BATCH_SIZE,
+                STATE_SYNC_MAX_BATCH_SIZE
+                    .try_into()
+                    .expect("STATE_SYNC_MAX_BATCH_SIZE is not zero"),
+                value_filter_flags,
             )
             .run(),
         );
@@ -431,4 +467,34 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
 
         Ok(Streaming::new(rx))
     }
+
+    // async fn get_chain_summary(
+    //     &self,
+    //     _req: Request<GetChainSummaryRequest>,
+    // ) -> Result<GetChainSummaryResponse, RpcStatus> {
+    //     let current_epoch = self.epoch_manager.get_current_epoch();
+    //     let committee_into = self
+    //         .epoch_manager
+    //         .get_local_committee_info(current_epoch)
+    //         .await
+    //         .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+    //
+    //     self.state_store
+    //         .with_read_tx(|tx| {
+    //             let mut sharded_state_versions = IndexMap::with_capacity(committee_into.shard_group().len());
+    //             for shard in committee_into.shard_group().shard_iter() {
+    //                 let state_version = tx.state_tree_versions_get_latest(shard)?.unwrap_or_default();
+    //                 sharded_state_versions.insert(shard, state_version);
+    //             }
+    //
+    //             let leaf = LeafBlock::get(tx, current_epoch)?;
+    //             Ok(GetChainSummaryResponse {
+    //                 epoch: Some(current_epoch.into()),
+    //                 committee_info: Some(committee_into.into()),
+    //                 sharded_state_versions,
+    //                 leaf_block: Some(leaf.into()),
+    //             })
+    //         })
+    //         .map_err(RpcStatus::log_internal_error(LOG_TARGET))
+    // }
 }

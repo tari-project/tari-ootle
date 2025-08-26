@@ -21,11 +21,7 @@ use crate::{
 pub type WalletKeyManager = KeyManager<RistrettoPublicKey, Blake2b<U64>>;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 #[serde(rename_all = "snake_case")]
 pub enum KeyBranch {
     /// The account key branch, used for deriving account keys.

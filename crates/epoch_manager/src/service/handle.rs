@@ -22,7 +22,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::{
     error::EpochManagerError,
-    service::types::EpochManagerRequest,
+    service::{types::EpochManagerRequest, NetworkDescription},
     traits::{EpochManagerReader, EpochManagerWriter},
     EpochManagerEvent,
 };
@@ -70,6 +70,16 @@ impl<TAddr: NodeAddressable> EpochManagerHandle<TAddr> {
     /// Non-async and infallible version of `current_epoch`. TODO: change the trait to be non-async and infallible
     pub fn get_current_epoch(&self) -> Epoch {
         Epoch(self.current_epoch.load(std::sync::atomic::Ordering::SeqCst))
+    }
+
+    pub async fn get_network_description(&self) -> Result<NetworkDescription, EpochManagerError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx_request
+            .send(EpochManagerRequest::GetNetworkDescription { reply: tx })
+            .await
+            .map_err(|_| EpochManagerError::SendError)?;
+
+        rx.await.map_err(|_| EpochManagerError::ReceiveError)?
     }
 }
 
@@ -224,6 +234,24 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
         rx.await.map_err(|_| EpochManagerError::ReceiveError)?
     }
 
+    async fn get_committee_info(
+        &self,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> Result<CommitteeInfo, EpochManagerError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx_request
+            .send(EpochManagerRequest::GetCommitteeInfo {
+                epoch,
+                shard_group,
+                reply: tx,
+            })
+            .await
+            .map_err(|_| EpochManagerError::SendError)?;
+
+        rx.await.map_err(|_| EpochManagerError::ReceiveError)?
+    }
+
     async fn get_committee_info_for_substate(
         &self,
         epoch: Epoch,
@@ -231,7 +259,7 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
     ) -> Result<CommitteeInfo, EpochManagerError> {
         let (tx, rx) = oneshot::channel();
         self.tx_request
-            .send(EpochManagerRequest::GetCommitteeInfo {
+            .send(EpochManagerRequest::GetCommitteeInfoForSubstate {
                 epoch,
                 substate_address,
                 reply: tx,
@@ -239,7 +267,7 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
             .await
             .map_err(|_| EpochManagerError::SendError)?;
 
-        Ok(rx.await.map_err(|_| EpochManagerError::ReceiveError).unwrap().unwrap())
+        rx.await.map_err(|_| EpochManagerError::ReceiveError)?
     }
 
     async fn get_committee_info_by_validator_address(

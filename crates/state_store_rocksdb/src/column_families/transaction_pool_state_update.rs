@@ -27,7 +27,7 @@ use tari_ootle_storage::consensus_models::{Evidence, LeaderFee, TransactionPoolR
 use tari_transaction::TransactionId;
 
 use crate::{
-    codecs::{BlockIdCodec, BytesCodec, DefaultCodec, EpochCodec, NumberCodec, TupleBytesCodec},
+    codecs::{BlockIdCodec, BytesCodec, DefaultCodec, EpochCodec, NumberCodec, TransactionIdCodec},
     traits::{Cf, QueryCf},
 };
 
@@ -65,7 +65,7 @@ pub struct TransactionPoolStateUpdateCf;
 
 impl Cf for TransactionPoolStateUpdateCf {
     type Key = (BlockId, TransactionId);
-    type KeyCodec = TupleBytesCodec<Self::Key>;
+    type KeyCodec = (BlockIdCodec, TransactionIdCodec);
     type Value = TransactionPoolStateUpdateData;
     type ValueCodec = DefaultCodec<TransactionPoolStateUpdateData>;
 

@@ -38,8 +38,8 @@ pub struct BlockDiffKey {
     pub substate_id: SubstateId,
     pub version: u32,
     pub is_up: bool,
-    /// Retains the ordering of the substate changes in the block. This limits the mximum number of substate changes in
-    /// a block to u32::MAX (4,294,967,295).
+    /// Retains the ordering of the substate changes in the block. This limits the maximum number of substate changes
+    /// in a block to u32::MAX (4,294,967,295).
     pub sequence: u32,
 }
 

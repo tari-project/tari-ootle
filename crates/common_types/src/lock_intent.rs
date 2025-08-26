@@ -28,11 +28,7 @@ impl<T: LockIntent> ToSubstateAddress for T {
 
 /// Substate lock flags
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, BorshSerialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum SubstateLockType {
     Read,
     Write,

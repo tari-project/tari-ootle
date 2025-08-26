@@ -1,17 +1,15 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{fmt, fmt::Display};
+use std::{fmt, fmt::Display, io::Read};
 
 use anyhow::anyhow;
-use tari_ootle_common_types::displayable::Displayable;
 
 use crate::{
     codecs::{DbCodec, EncodeVec},
     error::RocksDbStorageError,
+    utils::read_to_fixed,
 };
-
-const SZ_OF_U32: usize = size_of::<u32>();
 
 /// A const key used to differentiate "columns" in a reused column family.
 /// This hard codes 32 bytes (big-endian) from the encoded bytes.
@@ -48,20 +46,17 @@ impl<const COL: u32> DbCodec<Column<COL>> for ColumnCodec {
         Ok(EncodeVec::new_from_array(COL.to_be_bytes()))
     }
 
-    fn decode(&self, bytes: &[u8]) -> Result<Column<COL>, RocksDbStorageError> {
-        if bytes.len() < SZ_OF_U32 {
-            return Err(RocksDbStorageError::DecodeError {
-                source: anyhow!("Invalid bytes len={} for ColumnCodec", bytes.len()),
-            });
-        }
-        let col_bytes = bytes.get(..SZ_OF_U32).ok_or_else(|| RocksDbStorageError::DecodeError {
-            source: anyhow!("Invalid bytes len={} for ColumnCodec", bytes.len()),
+    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<Column<COL>, RocksDbStorageError> {
+        let arr = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
+            source: anyhow!("Invalid bytes for ColumnCodec"),
         })?;
-        if col_bytes != COL.to_be_bytes() {
+
+        let col = u32::from_be_bytes(arr);
+        if col != COL {
             return Err(RocksDbStorageError::DecodeError {
                 source: anyhow!(
-                    "Invalid column bytes '{}', ColumnCodec expected big-endian bytes for '{}'",
-                    col_bytes.display(),
+                    "Invalid column '{}', ColumnCodec expected big-endian bytes for '{}'",
+                    col,
                     COL
                 ),
             });
@@ -75,17 +70,20 @@ impl<const COL: u8> DbCodec<ByteColumn<COL>> for ColumnCodec {
         Ok(EncodeVec::new_from_array([COL]))
     }
 
-    fn decode(&self, bytes: &[u8]) -> Result<ByteColumn<COL>, RocksDbStorageError> {
-        let Some(first_byte) = bytes.first() else {
-            return Err(RocksDbStorageError::DecodeError {
-                source: anyhow!("Invalid bytes len={} for ColumnCodec", bytes.len()),
-            });
-        };
-        if *first_byte != COL {
+    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<ByteColumn<COL>, RocksDbStorageError> {
+        let mut buf = [0u8; 1];
+        reader
+            .read_exact(&mut buf)
+            .map_err(|e| RocksDbStorageError::MalformedData {
+                operation: "decode ByteColumn",
+                details: format!("Failed to read 1 byte for ColumnCodec: {e}"),
+            })?;
+
+        if buf[0] != COL {
             return Err(RocksDbStorageError::DecodeError {
                 source: anyhow!(
                     "Invalid byte column bytes '{}', ColumnCodec expected byte '{}'",
-                    first_byte,
+                    buf[0],
                     COL
                 ),
             });

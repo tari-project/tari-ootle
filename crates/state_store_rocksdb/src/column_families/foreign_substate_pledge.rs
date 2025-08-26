@@ -25,7 +25,7 @@ use tari_ootle_storage::consensus_models::SubstatePledge;
 use tari_transaction::TransactionId;
 
 use crate::{
-    codecs::{DefaultCodec, TransactionIdCodec, TupleBytesCodec},
+    codecs::{DefaultCodec, FixedBytesCodec, TransactionIdCodec},
     traits::{Cf, QueryCf},
 };
 
@@ -33,7 +33,7 @@ pub struct ForeignSubstatePledgeCf;
 
 impl Cf for ForeignSubstatePledgeCf {
     type Key = (TransactionId, SubstateAddress);
-    type KeyCodec = TupleBytesCodec<Self::Key>;
+    type KeyCodec = (TransactionIdCodec, FixedBytesCodec<{ SubstateAddress::LENGTH }>);
     type Value = SubstatePledge;
     type ValueCodec = DefaultCodec<Self::Value>;
 

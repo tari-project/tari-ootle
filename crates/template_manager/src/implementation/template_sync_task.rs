@@ -195,7 +195,7 @@ where
                 return Err(TemplateSyncError::NoMoreSyncValidators);
             };
 
-            let mut client = self.client_factory.create_client(&vn.address);
+            let client = self.client_factory.create_client(&vn.address);
             match client.client_connection().await {
                 Ok(conn) => {
                     self.recently_failed_clients.remove(&vn.address);

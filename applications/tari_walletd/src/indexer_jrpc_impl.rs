@@ -13,7 +13,6 @@ use tari_indexer_client::{
         GetSubstateRequest,
         GetTransactionResultRequest,
         IndexerTransactionFinalizedResult,
-        ListSubstateItem,
         ListSubstatesRequest,
         SubmitTransactionRequest,
     },
@@ -110,21 +109,12 @@ impl WalletNetworkInterface for IndexerJsonRpcNetworkInterface {
         let substates = result
             .substates
             .into_iter()
-            .map(|s| {
-                let ListSubstateItem {
-                    substate_id,
-                    module_name,
-                    version,
-                    template_address,
-                    timestamp,
-                } = s;
-                SubstateListItem {
-                    substate_id,
-                    module_name,
-                    version,
-                    template_address,
-                    timestamp,
-                }
+            .map(|s| SubstateListItem {
+                substate_id: s.substate_id,
+                module_name: s.module_name,
+                version: s.version,
+                template_address: s.template_address,
+                timestamp: s.timestamp,
             })
             .collect();
         Ok(SubstateListResult { substates })

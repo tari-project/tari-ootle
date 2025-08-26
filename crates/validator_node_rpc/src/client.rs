@@ -1,10 +1,9 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, convert::TryInto, sync::Arc, time::Duration};
+use std::{collections::HashMap, convert::TryInto, future::Future, sync::Arc, time::Duration};
 
 use anyhow::anyhow;
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tari_bor::decode;
 use tari_consensus_types::Decision;
@@ -31,17 +30,22 @@ pub trait ValidatorNodeClientFactory<TAddr: NodeAddressable>: Send + Sync {
     fn create_client(&self, address: &TAddr) -> Self::Client;
 }
 
-#[async_trait]
 pub trait ValidatorNodeRpcClient<TAddr: NodeAddressable>: Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
 
-    async fn submit_transaction(&mut self, transaction: Transaction) -> Result<TransactionId, Self::Error>;
-    async fn get_finalized_transaction_result(
+    fn submit_transaction(
+        &mut self,
+        transaction: Transaction,
+    ) -> impl Future<Output = Result<TransactionId, Self::Error>> + Send;
+    fn get_finalized_transaction_result(
         &mut self,
         transaction_id: TransactionId,
-    ) -> Result<TransactionResultStatus, Self::Error>;
+    ) -> impl Future<Output = Result<TransactionResultStatus, Self::Error>> + Send;
 
-    async fn get_substate(&mut self, substate_req: SubstateRequirementRef<'_>) -> Result<SubstateResult, Self::Error>;
+    fn get_substate(
+        &mut self,
+        substate_req: SubstateRequirementRef<'_>,
+    ) -> impl Future<Output = Result<SubstateResult, Self::Error>> + Send;
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -89,20 +93,23 @@ pub struct TariValidatorNodeRpcClient<TAddr, TMsg: MessageSpec> {
     pool: RpcMultiPool<TMsg>,
 }
 
+impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> TariValidatorNodeRpcClient<TAddr, TMsg> {
+    pub fn new(address: TAddr, pool: RpcMultiPool<TMsg>) -> Self {
+        Self { address, pool }
+    }
+}
+
 impl<TAddr: ToPeerId, TMsg: MessageSpec> TariValidatorNodeRpcClient<TAddr, TMsg> {
     pub fn address(&self) -> &TAddr {
         &self.address
     }
 
-    pub async fn client_connection(
-        &mut self,
-    ) -> Result<rpc_service::ValidatorNodeRpcClient, ValidatorNodeRpcClientError> {
+    pub async fn client_connection(&self) -> Result<rpc_service::ValidatorNodeRpcClient, ValidatorNodeRpcClientError> {
         let client = self.pool.get_or_connect(&self.address.to_peer_id()).await?;
         Ok(client)
     }
 }
 
-#[async_trait]
 impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClient<TAddr>
     for TariValidatorNodeRpcClient<TAddr, TMsg>
 {
@@ -257,8 +264,8 @@ impl<TMsg: MessageSpec> RpcMultiPool<TMsg> {
         }
     }
 
-    async fn get_or_connect(
-        &mut self,
+    pub async fn get_or_connect(
+        &self,
         addr: &PeerId,
     ) -> Result<rpc_service::ValidatorNodeRpcClient, ValidatorNodeRpcClientError> {
         let mut sessions = self.sessions.write().await;

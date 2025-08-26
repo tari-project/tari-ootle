@@ -6,18 +6,18 @@ use std::{fmt::Display, ops::RangeInclusive};
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 
-use crate::{uint::U256, NumPreshards, SubstateAddress};
+use crate::{uint::U256, NumPreshards, ShardGroup, SubstateAddress};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, BorshSerialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(transparent)]
 pub struct Shard(#[cfg_attr(feature = "ts", ts(type = "number"))] u32);
 
 impl Shard {
+    pub const fn from_u32(v: u32) -> Self {
+        Self(v)
+    }
+
     /// Returns the first available shard in the whole range.
     /// Note: it starts from `1` as `0` is reserved for global substates.
     pub const fn first() -> Shard {
@@ -40,6 +40,15 @@ impl Shard {
 
     pub const fn as_u32(self) -> u32 {
         self.0
+    }
+
+    pub fn relative_to_shard_group_start(self, shard_group: ShardGroup) -> Option<usize> {
+        if !shard_group.contains(&self) {
+            // Also return None for global
+            return None;
+        }
+        let relative_index = self.as_u32().checked_sub(shard_group.start().as_u32())?;
+        Some(relative_index as usize)
     }
 
     pub fn to_substate_address_range(self, num_shards: NumPreshards) -> RangeInclusive<SubstateAddress> {

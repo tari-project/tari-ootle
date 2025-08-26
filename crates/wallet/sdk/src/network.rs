@@ -95,7 +95,7 @@ pub struct SubstateListItem {
     pub module_name: Option<String>,
     pub version: u32,
     pub template_address: Option<TemplateAddress>,
-    pub timestamp: u64,
+    pub timestamp: PrimitiveDateTime,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

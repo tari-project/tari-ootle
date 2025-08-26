@@ -24,7 +24,7 @@ use tari_consensus_types::BlockId;
 use tari_transaction::TransactionId;
 
 use crate::{
-    codecs::{BlockIdCodec, TransactionIdCodec, TupleBytesCodec, UnitCodec},
+    codecs::{BlockIdCodec, TransactionIdCodec, UnitCodec},
     traits::{Cf, QueryCf},
 };
 
@@ -32,7 +32,7 @@ pub struct MissingTransactionCf;
 
 impl Cf for MissingTransactionCf {
     type Key = (TransactionId, BlockId);
-    type KeyCodec = TupleBytesCodec<Self::Key>;
+    type KeyCodec = (TransactionIdCodec, BlockIdCodec);
     type Value = ();
     type ValueCodec = UnitCodec;
 
@@ -53,7 +53,7 @@ pub struct MissingTransactionBlockIdIndex;
 
 impl Cf for MissingTransactionBlockIdIndex {
     type Key = (BlockId, TransactionId);
-    type KeyCodec = TupleBytesCodec<Self::Key>;
+    type KeyCodec = (BlockIdCodec, TransactionIdCodec);
     type Value = ();
     type ValueCodec = UnitCodec;
 

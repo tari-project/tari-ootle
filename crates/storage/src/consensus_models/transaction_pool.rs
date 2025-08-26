@@ -211,11 +211,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
 
 // Ord: ensure that the enum variants are ordered in the order of their progression
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum TransactionPoolStage {
     /// Transaction has just come in and has never been proposed
     New,
@@ -322,11 +318,7 @@ impl FromStr for TransactionPoolConfirmedStage {
 pub struct TransactionPoolConfirmedStageFromStrErr(String);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionPoolRecord {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     transaction_id: TransactionId,

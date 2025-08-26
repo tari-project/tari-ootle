@@ -65,11 +65,7 @@ pub struct EmitLogArg {
 
 /// All the possible log levels
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum LogLevel {
     Error,
     Warn,
@@ -570,11 +566,7 @@ pub struct CallerContextInvokeArg {
 
 /// Possible allocatable address types
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum AllocatableAddressType {
     Component,
     Resource,

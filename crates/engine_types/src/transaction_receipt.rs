@@ -20,11 +20,7 @@ use crate::{events::Event, fees::FeeReceipt, logs::LogEntry};
 const TAG: u64 = BinaryTag::TransactionReceipt.as_u64();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionReceiptAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl TransactionReceiptAddress {
@@ -85,11 +81,7 @@ impl borsh::BorshDeserialize for TransactionReceiptAddress {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionReceipt {
     pub transaction_hash: Hash,
     pub events: Vec<Event>,

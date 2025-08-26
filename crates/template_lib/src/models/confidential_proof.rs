@@ -15,11 +15,7 @@ use crate::{
 /// A statement for confidential and revealed outputs. A statement must contain either confidential outputs or non-zero
 /// revealed funds or both.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ConfidentialOutputStatement {
     /// Output that is transferred to the receiver account
     pub output: Option<UnspentOutput>,
@@ -58,11 +54,7 @@ impl ConfidentialOutputStatement {
 ///
 /// Withdrawals can be revealed only, confidential only, or a mix of both.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ConfidentialWithdrawProof {
     pub inputs: Vec<PedersenCommitmentBytes>,
     /// The amount to withdraw from revealed funds i.e. the revealed funds as inputs

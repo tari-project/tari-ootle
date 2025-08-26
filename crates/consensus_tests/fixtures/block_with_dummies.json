@@ -7,7 +7,7 @@
     "height": 18,
     "epoch": 5,
     "shard_group": {
-      "start": 0,
+      "start": 1,
       "end_inclusive": 127
     },
     "proposed_by": "584b42ac801387ab50e4af50aaea63ff9cf0b4ae8fe199157e811b0eae67cf51",
@@ -30,7 +30,7 @@
     "height": 0,
     "epoch": 5,
     "shard_group": {
-      "start": 0,
+      "start": 1,
       "end_inclusive": 127
     },
     "signatures": [],

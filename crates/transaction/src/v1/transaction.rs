@@ -33,11 +33,7 @@ use crate::{
 const LOG_TARGET: &str = "tari::ootle::transaction::transaction";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionV1 {
     body: UnsealedTransactionV1,
     seal_signature: TransactionSealSignature,

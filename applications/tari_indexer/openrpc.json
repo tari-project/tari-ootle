@@ -15,13 +15,15 @@
     "methods": [
         {
             "name": "get_connections",
-            "summary": "",
+            "summary": "List active P2P connections.",
             "tags": [],
             "params": [],
             "result": {
-                "name": "epoch_stats",
+                "name": "get_connections_response",
                 "description": "",
-                "schema": {}
+                "schema": {
+                    "$ref": "#/components/schemas/GetConnectionsResponse"
+                }
             },
             "errors": [],
             "examples": [
@@ -62,13 +64,15 @@
         },
         {
             "name": "get_identity",
-            "summary": "",
+            "summary": "Return this node's public identity.",
             "tags": [],
             "params": [],
             "result": {
-                "name": "epoch_stats",
+                "name": "get_identity_response",
                 "description": "",
-                "schema": {}
+                "schema": {
+                    "$ref": "#/components/schemas/GetIdentityResponse"
+                }
             },
             "errors": [],
             "examples": [
@@ -88,14 +92,15 @@
             ]
         },
         {
-            "name": "get_addresses",
             "summary": "",
             "tags": [],
             "params": [],
             "result": {
-                "name": "epoch_stats",
+                "name": "get_addresses_response",
                 "description": "",
-                "schema": {}
+                "schema": {
+                    "$ref": "#/components/schemas/GetAddressesResponse"
+                }
             },
             "errors": [],
             "examples": [
@@ -457,6 +462,96 @@
     ],
     "components": {
         "schemas": {
+            "GetConnectionsResponse": {
+                "type": "object",
+                "properties": {
+                    "connections": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Connection"
+                        }
+                    }
+                },
+                "required": [
+                    "connections"
+                ]
+            },
+            "Connection": {
+                "type": "object",
+                "properties": {
+                    "address": {
+                        "type": "string",
+                        "description": "Multiaddress (onion3/TCP)"
+                    },
+                    "age": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Connection age in seconds"
+                    },
+                    "direction": {
+                        "type": "boolean",
+                        "description": "true=inbound, false=outbound"
+                    },
+                    "node_id": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]+$",
+                        "description": "Hex-encoded peer NodeId"
+                    },
+                    "public_key": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]+$",
+                        "description": "Hex-encoded public key"
+                    }
+                },
+                "required": [
+                    "address",
+                    "age",
+                    "direction",
+                    "node_id",
+                    "public_key"
+                ]
+            },
+            "GetIdentityResponse": {
+                "type": "object",
+                "properties": {
+                    "node_id": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]+$",
+                        "description": "Hex-encoded NodeId"
+                    },
+                    "public_address": {
+                        "type": "string"
+                    },
+                    "public_key": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]+$"
+                    }
+                },
+                "required": [
+                    "node_id",
+                    "public_address",
+                    "public_key"
+                ]
+            },
+            "GetAddressesResponse": {
+                "type": "array",
+                "items": {
+                    "type": "array",
+                    "items": [
+                        {
+                            "type": "string",
+                            "description": "Prefixed address string (e.g., \"component_<hex>\")"
+                        },
+                        {
+                            "type": "integer",
+                            "description": "Latest version number"
+                        }
+                    ],
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "additionalItems": false
+                }
+            },
             "GetSubstateRequest": {
                 "type": "object",
                 "properties": {

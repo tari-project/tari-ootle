@@ -6,6 +6,34 @@ You can read about the technical specifications of the Ootle in the [RFCs](https
 
 If you're looking for the core Tari base layer code, it's in [this repository](https://github.com/tari-project/tari)
 
+## Prerequisites
+
+You will require the following in order to successfully build the Ootle and/or run the Ootle locally via the Localnet environment:
+
+- **Rust**: Install Rust via [rustup](https://rustup.rs), and add a WASM target:
+
+```bash
+rustup target add wasm32-unknown-unknown
+```
+
+- **Node.js & npm**: Node.js is required for building the React UI components. The easiest way to manage this follow the instructions at [node.js](https://nodejs.org/en/download) for your desired operating system and package/version managers. 
+
+- **Linux-only steps**: Ensure you have the following dependencies installed: 
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  build-essential \
+  openssl \
+  libssl-dev \
+  pkg-config \
+  libsqlite3-dev \
+  git \
+  cmake \
+  protobuf-compiler \
+  libprotobuf-dev
+```
+
 ## Accessing the Ootle Testnet
 
 The Tari Ootle Wallet Daemon is available on the project’s [releases page](https://github.com/tari-project/tari-ootle/releases).
@@ -26,10 +54,7 @@ Navigate to http://127.0.0.1:5100 to create an account, claim test tokens and st
 
 NOTE: This repo is heavily under development, so these instructions may change without notice.
 
-### Prerequisites
-Make sure you have the following installed:
-
-* pnpm
+Confirm you have installed all the prerequisites listed in the **Prerequisites** section (Rust, Node.js, npm, linux dependencies)
 
 ### Running 
 The easiest way to test out the Ootle is to use the `tari_swarm_daemon`. This will spin up all necessary MinoTari and Ootle components for a localnet.
@@ -121,7 +146,4 @@ For other environments, the "manual" process is as follows:
    - Depending on the network configuration, this may take **tens to hundreds of blocks** before the burn is picked up.
 
 7. **Claim the burn**.  
-   Use the Ootle wallet web UI or the `tari_ootle_wallet_cli` tool to claim the burn using the burn proof via the **"Claim Burn"** dialog.  
-
-
-
+   Use the Ootle wallet web UI or the `tari_ootle_wallet_cli` tool to claim the burn using the burn proof via the **"Claim Burn"** dialog.

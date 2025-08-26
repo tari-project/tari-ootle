@@ -140,18 +140,25 @@
                 {
                     "name": "version",
                     "required": false,
-                    "schema": { "type": "integer" }
+                    "schema": {
+                        "type": "integer"
+                    }
                 },
                 {
                     "name": "local_search_only",
                     "required": false,
-                    "schema": { "type": "boolean", "default": false }
+                    "schema": {
+                        "type": "boolean",
+                        "default": false
+                    }
                 }
             ],
             "result": {
                 "name": "get_substate_response",
                 "description": "",
-                "schema": { "$ref": "#/components/schemas/GetSubstateResponse" }
+                "schema": {
+                    "$ref": "#/components/schemas/GetSubstateResponse"
+                }
             },
             "errors": [],
             "examples": [
@@ -457,6 +464,14 @@
                         "type": "string",
                         "pattern": "^[0-9a-fA-F]+$",
                         "description": "Hex-encoded SubstateId as expected by the JSON API"
+                    },
+                    "version": {
+                        "type": "integer",
+                        "description": "Optional version number for the substate request"
+                    },
+                    "local_search_only": {
+                        "type": "boolean",
+                        "description": "Optional flag to restrict the search to local storage only"
                     }
                 },
                 "required": [

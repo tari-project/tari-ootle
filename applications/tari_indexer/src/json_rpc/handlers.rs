@@ -517,7 +517,10 @@ impl JsonRpcHandlers {
                         ),
                     )
                 })?;
-            per_shard_high_watermark.push((shard, max_version));
+            if max_version.as_u64() > 0 {
+                // Save a little over the wire initially by not sending 0 watermarks
+                per_shard_high_watermark.push((shard, max_version));
+            }
             utxo_updates.extend(updates);
         }
 

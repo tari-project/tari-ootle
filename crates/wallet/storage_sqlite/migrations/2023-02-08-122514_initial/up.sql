@@ -249,8 +249,8 @@ CREATE INDEX stealth_outputs_idx_resource_status ON stealth_outputs (resource_ad
 CREATE TABLE shard_state_versions
 (
     id            INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    account_id    INTEGER  NOT NULL,
-    resource_id   INTEGER  NOT NULL,
+    account_id    INTEGER  NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+    resource_id   INTEGER  NOT NULL REFERENCES resources (id) ON DELETE CASCADE,
     shard         INTEGER  NOT NULL,
     state_version BIGINT   NOT NULL,
     created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

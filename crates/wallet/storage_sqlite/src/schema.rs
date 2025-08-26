@@ -235,6 +235,8 @@ diesel::joinable!(non_fungible_tokens -> vaults (vault_id));
 diesel::joinable!(output_locks -> vaults (vault_id));
 diesel::joinable!(outputs -> accounts (account_id));
 diesel::joinable!(outputs -> vaults (vault_id));
+diesel::joinable!(shard_state_versions -> accounts (account_id));
+diesel::joinable!(shard_state_versions -> resources (resource_id));
 diesel::joinable!(vaults -> accounts (account_id));
 diesel::joinable!(webauthn_registration_passkeys -> webauthn_registrations (registration_id));
 

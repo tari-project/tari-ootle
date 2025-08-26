@@ -158,10 +158,21 @@
                 {
                     "name": "default",
                     "description": "",
-                    "params": [],
+                    "params": [
+                        {
+                            "name": "address",
+                            "value": "e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd"
+                        },
+                        {
+                            "name": "version",
+                            "value": 0
+                        }
+                    ],
                     "result": {
                         "name": "example1",
                         "value": {
+                            "address": "e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd",
+                            "version": 0,
                             "substate": {
                                 "Component": {
                                     "access_rules": {
@@ -322,7 +333,7 @@
                 "schema": {
                     "$ref": "#/components/schemas/GetSubstatesResponse"
                 }
-            ],
+            },
             "errors": [],
             "examples": [
                 {
@@ -331,16 +342,14 @@
                     "params": [
                         {
                             "name": "requests",
-                            "value": {
-                                "requests": [
-                                    {
-                                        "address": "e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd"
-                                    },
-                                    {
-                                        "address": "7c45d28ffa167b10d2fa700ce29343de692b97422a65485d0a00e8e7578d692e"
-                                    }
-                                ]
-                            }
+                            "value": [
+                                {
+                                    "address": "e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd"
+                                },
+                                {
+                                    "address": "7c45d28ffa167b10d2fa700ce29343de692b97422a65485d0a00e8e7578d692e"
+                                }
+                            ]
                         }
                     ],
                     "result": {
@@ -371,6 +380,9 @@
             ]
         },
         {
+            "name": "fetch_substates",
+            "summary": "Fetch multiple substates in a single request (alias for get_substates)",
+            "tags": [],
             "params": [
                 {
                     "name": "requests",
@@ -383,6 +395,13 @@
                     }
                 }
             ],
+            "result": {
+                "name": "fetch_substates_response",
+                "description": "Batch substate fetch response",
+                "schema": {
+                    "$ref": "#/components/schemas/GetSubstatesResponse"
+                }
+            },
             "errors": [],
             "examples": [
                 {
@@ -391,16 +410,14 @@
                     "params": [
                         {
                             "name": "requests",
-                            "value": {
-                                "requests": [
-                                    {
-                                        "address": "e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd"
-                                    },
-                                    {
-                                        "address": "7c45d28ffa167b10d2fa700ce29343de692b97422a65485d0a00e8e7578d692e"
-                                    }
-                                ]
-                            }
+                            "value": [
+                                {
+                                    "address": "e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd"
+                                },
+                                {
+                                    "address": "7c45d28ffa167b10d2fa700ce29343de692b97422a65485d0a00e8e7578d692e"
+                                }
+                            ]
                         }
                     ],
                     "result": {

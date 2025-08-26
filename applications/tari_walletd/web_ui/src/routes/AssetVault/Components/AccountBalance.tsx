@@ -29,19 +29,30 @@ import { IoEyeOffOutline, IoEyeOutline } from "react-icons/io5";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import { useAccountsGetBalances } from "../../../api/hooks/useAccounts";
 import useAccountStore from "../../../store/accountStore";
-import { substateIdToString } from "@tari-project/typescript-bindings";
 import { useEffect } from "react";
-import { bigintToDecimalString } from "../../../utils/helpers";
+import { substateIdToString, bigintToDecimalString } from "../../../utils/helpers";
 import { CURRENCY } from "../../../utils/constants";
 
 const XTR_RESOURCE = "resource_0101010101010101010101010101010101010101010101010101010101010101";
 export default function AccountBalance() {
-  const theme = useTheme();
   const showBalance = useAccountStore((state) => state.showBalance);
   const setShowBalance = useAccountStore((state) => state.setShowBalance);
   const account = useAccountStore((state) => state.account);
+
   if (!account) return <></>;
 
+  return (
+    <AccountBalanceInner 
+      account={account} 
+      showBalance={showBalance} 
+      setShowBalance={setShowBalance} 
+    />
+  );
+}
+
+function AccountBalanceInner({ account, showBalance, setShowBalance }) {
+  const theme = useTheme();
+  
   const {
     data: balancesData,
     isError: balancesIsError,
@@ -51,10 +62,9 @@ export default function AccountBalance() {
     refetch,
   } = useAccountsGetBalances(substateIdToString(account.address));
 
-
   useEffect(() => {
     refetch();
-  }, [account]);
+  }, [account, refetch]);
 
   let formattedBalance = "";
   if (balancesIsLoading && !balancesData) {

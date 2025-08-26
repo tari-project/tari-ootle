@@ -251,10 +251,26 @@ export function bigintToDecimalString(int: bigint | Amount, decimalPlaces: numbe
 }
 
 export const formatXTM = (amount: number | bigint): string => {
-  if (typeof amount !== "number" || isNaN(amount)) {
+  if (typeof amount === "bigint") {
+    // Handle bigint: divide by divisor to get integer and remainder for fractional part
+    const divisor = BigInt(CURRENCY.DIVISOR);
+    const integerPart = amount / divisor;
+    const remainder = amount % divisor;
+    
+    // Convert remainder to fractional string padded to CURRENCY.DECIMALS
+    const fractionalPart = remainder.toString().padStart(CURRENCY.DECIMALS, '0');
+    
+    return `${integerPart.toString()}.${fractionalPart} ${CURRENCY.SYMBOL}`;
+  } else if (typeof amount === "number") {
+    // Handle number: guard against NaN and use existing toFixed logic
+    if (isNaN(amount)) {
+      return `0 ${CURRENCY.SYMBOL}`;
+    }
+    return `${(amount / CURRENCY.DIVISOR).toFixed(CURRENCY.DECIMALS)} ${CURRENCY.SYMBOL}`;
+  } else {
+    // Handle invalid types
     return `0 ${CURRENCY.SYMBOL}`;
   }
-  return `${(amount / CURRENCY.DIVISOR).toFixed(CURRENCY.DECIMALS)} ${CURRENCY.SYMBOL}`;
 };
 
 export function validateHash(hash: string): boolean {

@@ -81,12 +81,13 @@ function AccountDetailsLayout() {
     error: accountsError,
   } = useAccountsGet(accountAddr!);
 
+  const offset = nftPage * nftRowsPerPage;
   const {
     data: nftsListData,
     isLoading: nftsListIsFetching,
     isError: nftsListIsError,
     error: nftsListError,
-  } = useAccountNFTsList(substateIdToString(accountAddr!), 0, 10);
+  } = useAccountNFTsList(substateIdToString(accountAddr!), offset, nftRowsPerPage);
 
   const currentNfts = nftsListData?.nfts || [];
   const hasMore = currentNfts.length === nftRowsPerPage;

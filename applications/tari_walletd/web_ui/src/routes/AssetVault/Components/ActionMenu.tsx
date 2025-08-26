@@ -23,7 +23,7 @@
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import { useTheme } from "@mui/material/styles";
-import { useMintTestnetFaucetNfts, useAccountsCreateFreeTestCoins } from "../../../api/hooks/useAccounts";
+import { useAccountsCreateFreeTestCoins } from "../../../api/hooks/useAccounts";
 import ClaimBurn from "./ClaimBurn";
 import useAccountStore from "../../../store/accountStore";
 import SendMoney from "./SendMoney";
@@ -33,7 +33,6 @@ import { substateIdToString } from "@tari-project/typescript-bindings";
 
 function ActionMenu() {
   const { mutate: claimTestnetFaucetFunds } = useAccountsCreateFreeTestCoins();
-  const { mutate: claimTestnetFaucetNfts } = useMintTestnetFaucetNfts();
   const account = useAccountStore((state) => state.account);
   const setAccount = useAccountStore((state) => state.setAccount);
   const setPublicKey = useAccountStore((state) => state.setPublicKey);

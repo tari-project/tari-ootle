@@ -215,10 +215,11 @@ export const useMintTestnetFaucetNfts = () => {
   });
 };
 
-export const useAccountsList = (offset: number, limit: number) => {
+export const useAccountsList = (offset: number, limit: number, enabled: boolean = true) => {
   return useQuery({
     queryKey: ["accounts"],
     queryFn: () => accountsList({ offset, limit }),
+    enabled,
     onError: (error: ApiError) => {
       error;
     },

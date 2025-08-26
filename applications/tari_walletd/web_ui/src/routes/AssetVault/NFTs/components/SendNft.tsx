@@ -114,10 +114,6 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   const { preSelectedNftId, preSelectedResourceAddress } = props;
   const { account, setPopup } = useAccountStore();
 
-  if (!account) {
-    return <></>;
-  }
-
   const {
     currentStep,
     transferFormState,
@@ -135,22 +131,27 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   const [availableNfts, setAvailableNfts] = useState<NonFungibleToken[]>([]);
   const [isEstimatingFee, setLocalIsEstimatingFee] = useState(false);
 
-  // Memoize account selectors to prevent infinite re-renders
-  const sourceAccount = useMemo(() => getAccountSelector(account), [account]);
+  // Memoize account selectors to prevent infinite re-renders - now nullable
+  const sourceAccount = useMemo(() => account ? getAccountSelector(account) : null, [account]);
   const feePayerAccount = useMemo(() => {
+    if (!sourceAccount) return null;
     return transferFormState.payerAccount ? { ComponentAddress: transferFormState.payerAccount } : sourceAccount;
   }, [transferFormState.payerAccount, sourceAccount]);
 
-  // List NFTs
+  // List NFTs - only enabled when account is present
   const { data: loadedNfts, refetch: refetchNfts } = useListNfts({
     account: sourceAccount,
+    enabled: !!account,
   });
 
-  // List all accounts for payer account selection
-  const { data: accountsResp } = useAccountsList(0, 1000);
+  // List all accounts for payer account selection - only enabled when account is present
+  const { data: accountsResp } = useAccountsList(0, 1000, !!account);
   const accounts = accountsResp?.accounts;
 
-  refetchNfts().catch(console.error);
+  // Only refetch NFTs when account is available
+  if (account) {
+    refetchNfts().catch(console.error);
+  }
 
   // Memoize hook parameters to prevent re-renders
   const feeEstimateParams = useMemo(
@@ -158,9 +159,9 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       dry_run: true,
       max_fee: 3000,
       nfts: transferFormState.nfts,
-      source_account: sourceAccount,
+      source_account: sourceAccount!,
       target_account_public_key: transferFormState.targetAccountPublicKey,
-      fee_payer_account: feePayerAccount,
+      fee_payer_account: feePayerAccount!,
       resource_address: transferFormState.resourceAddress,
     }),
     [
@@ -175,11 +176,11 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   const transferParams = useMemo(
     () => ({
       nfts: transferFormState.nfts,
-      source_account: sourceAccount,
+      source_account: sourceAccount!,
       target_account_public_key: transferFormState.targetAccountPublicKey,
       dry_run: false,
       max_fee: parseInt(transferFormState.maxFee) || 3000,
-      fee_payer_account: feePayerAccount,
+      fee_payer_account: feePayerAccount!,
       resource_address: transferFormState.resourceAddress,
     }),
     [
@@ -259,7 +260,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   };
 
   const onTransfer = async () => {
-    if (!account) {
+    if (!account || !sourceAccount || !feePayerAccount) {
       return;
     }
 
@@ -276,8 +277,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
 
         // Auto-close after 10 seconds
         const timeoutId = setTimeout(() => {
-          props.onSendComplete?.();
-          handleClose();
+          handleAutoCloseAfterSuccess();
         }, 10000);
         setAutoCloseTimeoutId(timeoutId);
       } else {
@@ -299,6 +299,12 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   const handleClose = () => {
     resetState(preSelectedNftId, preSelectedResourceAddress);
     props.handleClose?.();
+  };
+
+  const handleAutoCloseAfterSuccess = () => {
+    resetState(preSelectedNftId, preSelectedResourceAddress);
+    props.handleClose?.();
+    props.onSendComplete?.();
   };
 
   const handleNftsChange = (event: SelectChangeEvent<string[]>) => {
@@ -363,11 +369,11 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   }, [loadedNfts]);
 
   useEffect(() => {
-    if (props.open) {
+    if (props.open && account) {
       // When dialog opens, ensure we have fresh state with correct NFT
       initializeFormState(preSelectedNftId, preSelectedResourceAddress, substateIdToString(account.address));
     }
-  }, [props.open, preSelectedNftId, preSelectedResourceAddress, account.address]);
+  }, [props.open, preSelectedNftId, preSelectedResourceAddress, account?.address]);
 
   const steps = ["Enter Details", "Confirm Transfer", "Complete"];
 
@@ -397,31 +403,39 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
         </Stepper>
       </DialogTitle>
       <DialogContent>
-        {currentStep === "form" && (
-          <FormStep
-            account={account}
-            accounts={accounts}
-            availableNfts={availableNfts}
-            preSelectedNftId={preSelectedNftId}
-            isEstimatingFee={isEstimatingFee}
-            onSubmit={handleFormSubmit}
-            onCancel={handleClose}
-            onNftsChange={handleNftsChange}
-            onPayerAccountChange={handlePayerAccountChange}
-          />
-        )}
+        {!account ? (
+          <div style={{ padding: '20px', textAlign: 'center' }}>
+            <p>Please select an account first to transfer NFTs.</p>
+          </div>
+        ) : (
+          <>
+            {currentStep === "form" && (
+              <FormStep
+                account={account}
+                accounts={accounts}
+                availableNfts={availableNfts}
+                preSelectedNftId={preSelectedNftId}
+                isEstimatingFee={isEstimatingFee}
+                onSubmit={handleFormSubmit}
+                onCancel={handleClose}
+                onNftsChange={handleNftsChange}
+                onPayerAccountChange={handlePayerAccountChange}
+              />
+            )}
 
-        {currentStep === "confirmation" && (
-          <ConfirmationStep
-            accounts={accounts}
-            preSelectedNftId={preSelectedNftId}
-            availableNfts={availableNfts}
-            onBack={() => setCurrentStep("form")}
-            onConfirm={onTransfer}
-          />
-        )}
+            {currentStep === "confirmation" && (
+              <ConfirmationStep
+                accounts={accounts}
+                preSelectedNftId={preSelectedNftId}
+                availableNfts={availableNfts}
+                onBack={() => setCurrentStep("form")}
+                onConfirm={onTransfer}
+              />
+            )}
 
-        {currentStep === "result" && <ResultStep onClose={handleClose} />}
+            {currentStep === "result" && <ResultStep onClose={handleClose} />}
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );

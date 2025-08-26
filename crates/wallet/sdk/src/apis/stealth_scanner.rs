@@ -108,6 +108,15 @@ impl<'a, TStore: WalletStore, TNetworkInterface: WalletNetworkInterface>
                     "🔍️ Scan complete for account {}: No more stealth outputs found",
                     account.address()
                 );
+                // Update state versions to avoid rescanning from previous versions that didnt contain any changes
+                self.store.with_write_tx(|tx| {
+                    tx.shard_state_version_set_many(
+                        account.address(),
+                        resource_address,
+                        response.per_shard_high_watermark,
+                    )
+                })?;
+
                 break;
             }
 

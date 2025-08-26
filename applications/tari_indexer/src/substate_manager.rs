@@ -100,11 +100,13 @@ impl SubstateManager {
         from_state_version: StateVersion,
         filter_tag_bytes: &HashSet<UtxoTagByte>,
         limit: u32,
-    ) -> Result<Vec<UtxoUpdate>, anyhow::Error> {
-        let utxos = self.substate_store.with_read_tx(|tx| {
-            tx.get_utxo_updates(resource_address, shard, from_state_version, filter_tag_bytes, limit)
+    ) -> Result<(StateVersion, Vec<UtxoUpdate>), anyhow::Error> {
+        let (max_version, updates) = self.substate_store.with_read_tx(|tx| {
+            let updates = tx.utxos_get_updates(resource_address, shard, from_state_version, filter_tag_bytes, limit)?;
+            let max_state_version = tx.utxos_get_max_state_version(resource_address, shard)?;
+            Ok::<_, anyhow::Error>((max_state_version, updates))
         })?;
-        Ok(utxos)
+        Ok((max_version, updates))
     }
 
     pub async fn get_substate(

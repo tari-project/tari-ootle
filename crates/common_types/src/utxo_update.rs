@@ -36,4 +36,5 @@ pub struct UtxoSpent {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UtxoQueryResponse {
     pub updates: Vec<UtxoUpdate>,
+    pub per_shard_high_watermark: Vec<(Shard, StateVersion)>,
 }

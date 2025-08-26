@@ -497,8 +497,9 @@ impl JsonRpcHandlers {
         }
 
         let mut utxo_updates = Vec::new();
+        let mut per_shard_high_watermark = Vec::with_capacity(req.shard_state_versions.len());
         for (shard, state_version) in req.shard_state_versions {
-            let updates = self
+            let (max_version, updates) = self
                 .substate_manager
                 .get_utxo_updates(
                     req.resource_address,
@@ -516,11 +517,13 @@ impl JsonRpcHandlers {
                         ),
                     )
                 })?;
+            per_shard_high_watermark.push((shard, max_version));
             utxo_updates.extend(updates);
         }
 
         Ok(JsonRpcResponse::success(answer_id, GetUtxoUpdatesResponse {
             utxo_updates,
+            per_shard_high_watermark,
         }))
     }
 

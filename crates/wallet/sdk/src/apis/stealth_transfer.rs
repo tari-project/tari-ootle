@@ -330,7 +330,17 @@ where
             .load_dependent_substates(&[&fee_account.account.address.into()])?;
         inputs.extend(child_addresses.into_iter().map(|a| a.into_unversioned()));
 
-        let fee_vault = self.accounts_api.get_vault_by_resource(fee_account.address(), &XTR)?;
+        let fee_vault = self
+            .accounts_api
+            .get_vault_by_resource(fee_account.address(), &XTR)
+            .optional()?
+            .ok_or_else(|| StealthTransferApiError::InvalidParameter {
+                param: "fee_resource",
+                reason: format!(
+                    "XTR fee vault not found for fee account {}. Create or fund an XTR vault to pay fees.",
+                    fee_account.address()
+                ),
+            })?;
         inputs.push(SubstateRequirement::unversioned(fee_vault.id));
 
         // add the input for the resource address to be transferred

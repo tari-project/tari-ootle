@@ -4,7 +4,7 @@
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_key_manager::key_manager::DerivedKey;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct WalletKey {
     pub branch: String,
     pub key_pair: KeyPair,
@@ -21,7 +21,7 @@ impl WalletKey {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct KeyPair {
     pub public_key: RistrettoPublicKey,
     pub secret_key: DerivedKey<RistrettoPublicKey>,

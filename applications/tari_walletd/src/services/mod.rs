@@ -61,7 +61,7 @@ where
     let template_monitor_join_handle = tokio::spawn(template_monitor.run());
 
     let utxo_scanner = StealthUtxoScannerWorker::new(wallet_sdk.clone());
-    let utxo_scanner_handle = utxo_scanner.spawn();
+    let (utxo_scanner_join_handle, utxo_scanner_handle) = utxo_scanner.spawn();
 
     let (account_monitor, account_monitor_handle) =
         AccountMonitor::new(notify, wallet_sdk, utxo_scanner_handle, shutdown_signal);
@@ -74,6 +74,7 @@ where
             transaction_service_join_handle,
             account_monitor_join_handle,
             template_monitor_join_handle,
+            utxo_scanner_join_handle,
         ])
         .boxed(),
     }

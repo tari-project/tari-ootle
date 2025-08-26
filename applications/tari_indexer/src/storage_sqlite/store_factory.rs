@@ -30,7 +30,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use diesel::{prelude::*, sql_query, SqliteConnection};
+use diesel::{dsl, prelude::*, sql_query, SqliteConnection};
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
 use log::*;
 use serde::{de::DeserializeOwned, Serialize};
@@ -201,11 +201,17 @@ pub trait IndexerStoreReadTransaction {
     fn key_value_get_value<K: AsRef<str>, T: DeserializeOwned>(&mut self, key: K) -> Result<T, StorageError>;
     fn key_value_get_raw<K: AsRef<str>>(&mut self, key: K) -> Result<KeyValue<String>, StorageError>;
 
+    fn utxos_get_max_state_version(
+        &mut self,
+        resource_address: ResourceAddress,
+        shard: Shard,
+    ) -> Result<StateVersion, StorageError>;
+
     /// Get UTXO updates for a given resource address and shard, starting from a specific state version.
     ///
     /// Returns a tuple containing the total count of matching UTXO updates (without the limit) and a vector of UTXO
     /// updates limited by the specified limit.
-    fn get_utxo_updates(
+    fn utxos_get_updates(
         &mut self,
         resource_address: ResourceAddress,
         shard: Shard,
@@ -499,7 +505,28 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         Ok(key_value.into())
     }
 
-    fn get_utxo_updates(
+    fn utxos_get_max_state_version(
+        &mut self,
+        resource_address: ResourceAddress,
+        shard: Shard,
+    ) -> Result<StateVersion, StorageError> {
+        const OPERATION: &str = "utxos_get_max_state_version";
+        use crate::storage_sqlite::schema::utxos;
+        let max_version = utxos::table
+            .select(dsl::max(utxos::state_version))
+            .filter(utxos::resource_address.eq(resource_address.to_string()))
+            .filter(utxos::shard.eq(shard.as_u32() as i32))
+            .get_result::<Option<i64>>(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?
+            .map(|v| StateVersion::new(v as u64))
+            .unwrap_or_else(StateVersion::zero);
+
+        Ok(max_version)
+    }
+
+    fn utxos_get_updates(
         &mut self,
         resource_address: ResourceAddress,
         shard: Shard,

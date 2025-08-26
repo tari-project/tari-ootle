@@ -16,7 +16,7 @@ use tari_ootle_wallet_sdk::{
     WalletSdk,
 };
 use tari_template_lib::{models::ComponentAddress, prelude::ResourceAddress};
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, task::JoinHandle};
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::stealth_utxo_scanner";
 
@@ -53,15 +53,16 @@ where
         }
     }
 
-    pub fn spawn(self) -> UtxoScannerHandle {
+    pub fn spawn(self) -> (JoinHandle<anyhow::Result<()>>, UtxoScannerHandle) {
         let (tx, rx) = mpsc::unbounded_channel();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let mut worker = self;
             worker.run(rx).await;
+            Ok(())
         });
 
-        UtxoScannerHandle { tx }
+        (handle, UtxoScannerHandle { tx })
     }
 
     async fn run(&mut self, mut work_queue: mpsc::UnboundedReceiver<UtxoScanRequest>) {

@@ -369,4 +369,6 @@ pub struct GetUtxoUpdatesRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 pub struct GetUtxoUpdatesResponse {
     pub utxo_updates: Vec<UtxoUpdate>,
+    /// Highest observed state_version per shard (may equal the request’s)
+    pub per_shard_high_watermark: Vec<(Shard, StateVersion)>,
 }

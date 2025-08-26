@@ -204,6 +204,7 @@ impl WalletNetworkInterface for IndexerJsonRpcNetworkInterface {
             .await?;
         Ok(UtxoQueryResponse {
             updates: resp.utxo_updates,
+            per_shard_high_watermark: resp.per_shard_high_watermark,
         })
     }
 

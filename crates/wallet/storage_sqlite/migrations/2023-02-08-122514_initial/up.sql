@@ -236,8 +236,8 @@ CREATE TABLE stealth_outputs
     encryption_secret_key_index BIGINT   NOT NULL,
     encrypted_data              BLOB     NOT NULL DEFAULT '',
     tag_byte                    INTEGER  NOT NULL,
-    is_burnt                    BOOLEAN  NOT NULL DEFAULT '',
-    is_frozen                   BOOLEAN  NOT NULL DEFAULT '',
+    is_burnt                    BOOLEAN  NOT NULL DEFAULT 0,
+    is_frozen                   BOOLEAN  NOT NULL DEFAULT 0,
     created_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -258,4 +258,4 @@ CREATE TABLE shard_state_versions
 );
 
 CREATE UNIQUE INDEX shard_state_versions_account_resource_shard_uniq ON shard_state_versions (account_id, resource_id, shard);
-
+CREATE INDEX shard_state_versions_account_resource_shard_state_version_idx ON shard_state_versions (account_id, resource_id, shard, state_version);

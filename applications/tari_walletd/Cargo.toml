@@ -38,6 +38,7 @@ either = { workspace = true }
 humantime-serde = { workspace = true }
 futures = { workspace = true }
 include_dir = { workspace = true, optional = true }
+indexmap = { workspace = true }
 jsonwebtoken = { workspace = true }
 libsqlite3-sys = { workspace = true, features = ["bundled"] }
 log = { workspace = true }

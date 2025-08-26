@@ -1,10 +1,11 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use anyhow::anyhow;
 use axum::headers::authorization::Bearer;
+use indexmap::IndexMap;
 use log::*;
 use rand::rngs::OsRng;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
@@ -287,7 +288,8 @@ pub async fn handle_get_balances(
     let stealth_outputs = stealth_outputs
         .into_iter()
         .filter(|o| !vaulted_resources.contains(&o.resource_address))
-        .fold(HashMap::new(), |mut acc, o| {
+        // NOTE: indexemap used to ensure a consistent order (HashMap causes UI to randomly switch positions for multiple stealth resources)
+        .fold(IndexMap::new(), |mut acc, o| {
             acc.entry(o.resource_address)
                 .and_modify(|v| *v += o.value)
                 .or_insert(o.value);

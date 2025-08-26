@@ -11754,6 +11754,7 @@ dependencies = [
  "futures-bounded",
  "humantime-serde",
  "include_dir",
+ "indexmap 2.9.0",
  "jsonwebtoken",
  "libsqlite3-sys",
  "log",

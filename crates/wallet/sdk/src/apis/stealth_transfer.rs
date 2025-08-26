@@ -21,7 +21,7 @@ use tari_ootle_wallet_crypto::{
 };
 use tari_template_lib::{
     models::{Account, ComponentAddress, ResourceAddress, VaultId},
-    prelude::RistrettoPublicKeyBytes,
+    prelude::{RistrettoPublicKeyBytes, XTR},
     types::Amount,
 };
 use tari_transaction::{args, Transaction};
@@ -330,11 +330,8 @@ where
             .load_dependent_substates(&[&fee_account.account.address.into()])?;
         inputs.extend(child_addresses.into_iter().map(|a| a.into_unversioned()));
 
-        let src_vault = self
-            .accounts_api
-            .get_vault_by_resource(fee_account.address(), &params.resource_address)?;
-        let src_vault_substate = self.substate_api.get_substate(&src_vault.id.into())?;
-        inputs.push(src_vault_substate.substate_id.into_unversioned_requirement());
+        let fee_vault = self.accounts_api.get_vault_by_resource(fee_account.address(), &XTR)?;
+        inputs.push(SubstateRequirement::unversioned(fee_vault.id));
 
         // add the input for the resource address to be transferred
         inputs.push(SubstateRequirement::unversioned(params.resource_address));

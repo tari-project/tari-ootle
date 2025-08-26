@@ -11,18 +11,18 @@ If you're looking for the core Tari base layer code, it's in [this repository](h
 You will require the following tools and dependencies to successfully build the Ootle and/or run the Ootle locally via the Localnet environment:
 
 - **C/C++ compiler**
-   - Linux: `gcc` or `clang`
-   - macOS: `clang` (via Xcode CLI tools)
-   - Windows: `MSVC` (via Visual Studio Build Tools)
+  - Linux: `gcc` or `clang`
+  - macOS: `clang` (via Xcode CLI tools)
+  - Windows: `MSVC` (via Visual Studio Build Tools)
 - **Build tools**
-   - `make`, `cmake`, or equivalent
-   - `pkg-config` (Linux/macOS)
+  - `make`, `cmake`, or equivalent
+  - `pkg-config` (Linux/macOS)
 - **Libraries**
-   - OpenSSL development libraries (`libssl-dev`)
-   - SQLite development libraries (`libsqlite3-dev`)
-   - Protobuf compiler (`protoc`) and headers (`libprotobuf-dev`)
+  - OpenSSL development libraries (`libssl-dev`)
+  - SQLite development libraries (`libsqlite3-dev`)
+  - Protobuf compiler (`protoc`) and headers (`libprotobuf-dev`)
 - **Other**
-   - `git`
+  - `git`
 
 - **Rust (>=1.74)**: Install Rust via [rustup](https://rustup.rs), and add a WASM target:
 

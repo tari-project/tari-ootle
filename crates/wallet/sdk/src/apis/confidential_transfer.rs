@@ -11,7 +11,6 @@ use tari_engine_types::{FromByteType, ToByteType};
 use tari_ootle_common_types::{optional::IsNotFoundError, SubstateRequirement};
 use tari_ootle_wallet_crypto::{MaskAndValue, UnblindedOutputStatement};
 use tari_template_lib::{
-    constants::STEALTH_TARI_RESOURCE_ADDRESS,
     models::{ComponentAddress, ResourceAddress, VaultId},
     prelude::RistrettoPublicKeyBytes,
     types::Amount,
@@ -243,62 +242,12 @@ where
         }
 
         // Reserve and lock input funds for fees
-        let max_fee = params.max_fee.into();
-        let fee_inputs_to_spend = self.resolved_inputs_for_transfer(
-            *from_account.address(),
-            STEALTH_TARI_RESOURCE_ADDRESS,
-            max_fee,
-            ConfidentialTransferInputSelection::PreferRevealed,
-        )?;
+        let max_fee = params.max_fee;
 
         let account_secret = self.key_manager_api.derive_account_key(account.key_index())?;
         let account_public_key = PublicKey::from_secret_key(&account_secret.key);
 
-        // Generate fee proof
-        let fee_not_paid_by_revealed = max_fee
-            .checked_sub_positive(fee_inputs_to_spend.revealed)
-            .expect("BUG: PreferRevealed did not pay <= the max_fee in revealed fees");
-        let confidential_change = fee_inputs_to_spend.total_confidential_amount() - fee_not_paid_by_revealed;
-        let maybe_fee_change_statement = if confidential_change.is_zero() {
-            // No change necessary
-            None
-        } else {
-            let statement = self.create_confidential_proof_statement(&account_public_key, confidential_change, None)?;
-
-            self.outputs_api.add_output(ConfidentialOutputModel {
-                account_address: *account.address(),
-                vault_id: src_vault.id,
-                commitment: statement
-                    .to_commitment()
-                    .expect("BUG: to_commitment negative amount")
-                    .to_byte_type(),
-                value: confidential_change,
-                sender_public_nonce: Some(statement.sender_public_nonce.to_byte_type()),
-                encryption_secret_key_index: account_secret.key_index,
-                encrypted_data: statement.encrypted_data.clone(),
-                public_asset_tag: None,
-                // TODO: We could technically spend this output in the main transaction, however, we cannot mark it
-                //       as unspent e.g. in the case of tx failure. We should allow spending of LockedUnconfirmed if
-                //       the locking transaction is the same.
-                status: OutputStatus::LockedUnconfirmed,
-                lock_id: Some(fee_inputs_to_spend.lock_id),
-            })?;
-
-            Some(statement)
-        };
-
-        let fee_withdraw_proof = self.crypto_api.generate_withdraw_proof(
-            fee_inputs_to_spend.confidential.as_slice(),
-            fee_inputs_to_spend.revealed,
-            None,
-            params.max_fee.into(),
-            maybe_fee_change_statement.as_ref(),
-            // We always withdraw the exact amount of revealed required
-            Amount::zero(),
-        )?;
-
         // Reserve and lock input funds
-        // TODO: preserve atomicity across api calls - needed in many places
         let inputs_to_spend = match self.resolved_inputs_for_transfer(
             params.from_account,
             params.resource_address,
@@ -308,17 +257,6 @@ where
             Ok(inputs) => inputs,
             Err(e) => {
                 warn!(target: LOG_TARGET, "Unlocking fee fund locks after error: {}", e);
-                // This is a hack that addresses the case where input locking fails after the fee transaction. However
-                // any error after this point do not undo locking. This is a limitation of the current
-                // design - the db transaction should be passed in and automatically rolled back on error.
-                if let Err(err) = self.outputs_api.release_locked_outputs(fee_inputs_to_spend.lock_id) {
-                    error!(
-                        target: LOG_TARGET,
-                        "Failed to release fee inputs for transfer: {}",
-                        err
-                    );
-                }
-
                 return Err(e);
             },
         };
@@ -405,7 +343,8 @@ where
         let transaction = Transaction::builder()
             .for_network(network.as_byte())
             .with_dry_run(params.is_dry_run)
-            .fee_transaction_pay_fees_stealth_from_component(*from_account.address(), fee_withdraw_proof)
+            // TODO: we assume that from_account has XTR
+            .fee_transaction_pay_from_component(*from_account.address(), max_fee)
             .then(|builder| {
                 if dest_account_exists {
                     builder
@@ -441,12 +380,9 @@ where
         let tx_id = transaction.calculate_id();
         self.outputs_api
             .locks_set_transaction_hash(inputs_to_spend.lock_id, tx_id)?;
-        self.outputs_api
-            .locks_set_transaction_hash(fee_inputs_to_spend.lock_id, tx_id)?;
 
         Ok(TransferOutput {
             transaction,
-            fee_transaction_proof_id: fee_inputs_to_spend.lock_id,
             transaction_proof_id: inputs_to_spend.lock_id,
         })
     }
@@ -494,7 +430,6 @@ where
 
 pub struct TransferOutput {
     pub transaction: Transaction,
-    pub fee_transaction_proof_id: OutputLockId,
     pub transaction_proof_id: OutputLockId,
 }
 

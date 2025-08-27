@@ -76,7 +76,7 @@ impl FeeState {
     }
 
     pub fn add_charge(&mut self, source: FeeSource, amount: u64) {
-        self.fee_charges.insert(source, amount)
+        self.fee_charges.add(source, amount)
     }
 
     pub fn take_fee_charges(&mut self) -> FeeBreakdown {

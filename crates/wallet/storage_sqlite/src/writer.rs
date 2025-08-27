@@ -315,7 +315,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .collect::<Vec<_>>();
         diesel::insert_into(transactions::table)
             .values((
-                transactions::transaction_id.eq(transaction.calculate_id().to_string()),
+                transactions::transaction_id.eq(serialize_hex(transaction.calculate_id())),
                 transactions::transaction_json.eq(serialize_json(transaction)?),
                 transactions::referenced_components.eq(serialize_json(&ref_components)?),
                 transactions::signers.eq(serialize_json(&signers)?),

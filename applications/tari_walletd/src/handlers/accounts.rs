@@ -384,10 +384,6 @@ pub async fn handle_reveal_funds(
     task::spawn(async move {
         let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
 
-        let vault = sdk
-            .accounts_api()
-            .get_vault_by_resource(account.address(), &STEALTH_TARI_RESOURCE_ADDRESS)?;
-
         let max_fee = req.max_fee.unwrap_or(DEFAULT_FEE);
         let amount_to_reveal = req.amount_to_reveal +
             if req.pay_fee_from_reveal {
@@ -396,43 +392,60 @@ pub async fn handle_reveal_funds(
                 0.into()
             };
 
-        let proof_id = sdk.confidential_outputs_api().add_output_lock(&vault.id)?;
+        let lock_id = sdk
+            .stealth_outputs_api()
+            .create_lock_for_resource(&STEALTH_TARI_RESOURCE_ADDRESS)?;
 
-        let (inputs, input_amount) =
-            sdk.confidential_outputs_api()
-                .lock_outputs_by_amount(proof_id, &vault.id, amount_to_reveal)?;
+        let (inputs, input_amount) = sdk.stealth_outputs_api().lock_outputs_in_account_by_amount(
+            account.address(),
+            lock_id,
+            amount_to_reveal,
+        )?;
 
         let account_key = sdk.key_manager_api().derive_account_key(account.key_index())?;
+        let account_public_key = RistrettoPublicKey::from_secret_key(&account_key.key);
 
-        let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMasks)?;
-        let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
+        let output_mask = sdk.key_manager_api().next_key(KeyBranch::StealthMasks)?;
 
+        let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
         let remaining_confidential_amount = input_amount - amount_to_reveal;
-        let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
+        let encrypted_data = sdk.stealth_crypto_api().encrypt_value_and_mask(
             remaining_confidential_amount.to_u64_checked().unwrap(),
             &output_mask.key,
             &public_nonce,
             &account_key.key,
         )?;
 
-        let output_statement = UnblindedOutputStatement {
-            amount: remaining_confidential_amount,
-            mask: output_mask.key,
-            sender_public_nonce: public_nonce,
-            minimum_value_promise: 0,
-            encrypted_data,
-            resource_view_key: None,
+        let network = sdk.config_api().get_network()?;
+        let tag = sdk
+            .stealth_crypto_api()
+            .derive_stealth_output_tag(network, &account.owner_public_key);
+        let stealth_address =
+            sdk.stealth_crypto_api()
+                .derive_stealth_owner_public_key(network, &account_public_key, &nonce);
+
+        let output_statement = UnblindedStealthOutputStatement {
+            statement: UnblindedOutputStatement {
+                amount: remaining_confidential_amount,
+                mask: output_mask.key,
+                sender_public_nonce: public_nonce,
+                minimum_value_promise: 0,
+                encrypted_data,
+                resource_view_key: None,
+            },
+            output_owner_public_key: stealth_address,
+            tag,
         };
 
-        let inputs = sdk.confidential_outputs_api().resolve_output_masks(inputs)?;
+        let inputs = sdk
+            .stealth_outputs_api()
+            .resolve_output_masks_for_spending(account.account(), inputs)?;
 
-        let reveal_proof = sdk.confidential_crypto_api().generate_withdraw_proof(
+        let transfer = sdk.stealth_crypto_api().generate_transfer_statement(
             &inputs,
             Amount::zero(),
-            Some(&output_statement),
+            array::from_ref(&output_statement),
             amount_to_reveal,
-            None,
-            Amount::zero(),
         )?;
 
         info!(
@@ -449,10 +462,7 @@ pub async fn handle_reveal_funds(
         if req.pay_fee_from_reveal {
             builder = builder.with_fee_instructions_builder(|builder| {
                 builder
-                    .call_method(account_address, "withdraw_confidential", args![
-                        STEALTH_TARI_RESOURCE_ADDRESS,
-                        reveal_proof.clone()
-                    ])
+                    .stealth_transfer(STEALTH_TARI_RESOURCE_ADDRESS, transfer)
                     .put_last_instruction_output_on_workspace("revealed")
                     .call_method(account_address, "deposit", args![Workspace("revealed")])
                     .call_method(account_address, "pay_fee", args![max_fee])
@@ -460,10 +470,7 @@ pub async fn handle_reveal_funds(
         } else {
             builder = builder
                 .fee_transaction_pay_from_component(account_address, max_fee)
-                .call_method(account_address, "withdraw_confidential", args![
-                    STEALTH_TARI_RESOURCE_ADDRESS,
-                    reveal_proof
-                ])
+                .stealth_transfer(STEALTH_TARI_RESOURCE_ADDRESS, transfer)
                 .put_last_instruction_output_on_workspace("revealed")
                 .call_method(account_address, "deposit", args![Workspace("revealed")]);
         }
@@ -481,7 +488,7 @@ pub async fn handle_reveal_funds(
         let transaction = builder.with_inputs(inputs).build_and_seal(&account_key.key);
 
         sdk.confidential_outputs_api()
-            .locks_set_transaction_hash(proof_id, transaction.calculate_id())?;
+            .locks_set_transaction_hash(lock_id, transaction.calculate_id())?;
 
         let mut events = notifier.subscribe();
         let tx_id = transaction_service.submit_transaction(transaction).await?;
@@ -591,7 +598,7 @@ pub async fn handle_claim_burn(
         &reciprocal_claim_public_key_expanded,
     )?;
 
-    let mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMasks)?;
+    let mask = sdk.key_manager_api().next_key(KeyBranch::StealthMasks)?;
 
     let final_amount = unmasked_output
         .value

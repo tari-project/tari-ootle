@@ -23,7 +23,7 @@ use tari_template_lib::{
     args::{AllocatableAddressType, InstructionArg, WorkspaceOffsetId},
     auth::OwnerRule,
     call_args,
-    models::{ConfidentialWithdrawProof, ResourceAddress, StealthTransferStatement},
+    models::{ResourceAddress, StealthTransferStatement},
     prelude::AccessRules,
     types::{crypto::RistrettoPublicKeyBytes, Amount, TemplateAddress},
 };
@@ -84,6 +84,12 @@ impl TransactionBuilder {
         self
     }
 
+    /// Pays fees using a stealth transfer statement. The statement must reveal sufficient funds to cover the fee.
+    /// NOTE: fees paid are not refunded, so any overpayment is kept by validators.
+    pub fn fee_transaction_pay_fees_stealth(self, statement: StealthTransferStatement) -> Self {
+        self.with_fee_instructions_builder(|builder| builder.pay_fee_stealth(statement))
+    }
+
     /// Adds a fee instruction that calls the "take_fee" method on a component.
     /// This method must exist and return a Bucket with containing revealed confidential XTR resource.
     /// This allows the fee to originate from sources other than the transaction sender's account.
@@ -106,12 +112,12 @@ impl TransactionBuilder {
     pub fn fee_transaction_pay_fees_stealth_from_component<A: Into<ComponentCall>>(
         self,
         call: A,
-        proof: ConfidentialWithdrawProof,
+        statement: StealthTransferStatement,
     ) -> Self {
         self.add_fee_instruction(Instruction::CallMethod {
             call: call.into(),
             method: "pay_fee_stealth".to_string(),
-            args: call_args![proof],
+            args: call_args![statement],
         })
     }
 

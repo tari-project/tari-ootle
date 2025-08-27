@@ -55,6 +55,13 @@ export const useGetAllTransactions = (status: TransactionStatus | null, componen
     },
     refetchInterval: 5000,
     keepPreviousData: true,
+    structuralSharing: (oldData, newData) => {
+      if (!oldData || !newData) return newData;
+      if (JSON.stringify(oldData) === JSON.stringify(newData)) {
+        return oldData;
+      }
+      return newData;
+    },
   });
 };
 

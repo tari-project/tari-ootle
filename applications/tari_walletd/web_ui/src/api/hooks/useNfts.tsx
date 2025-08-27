@@ -9,14 +9,18 @@ import queryClient from "../queryClient";
 import type { ComponentAddressOrName } from "@tari-project/typescript-bindings/dist";
 
 export interface ListAccountNftsReq {
-  account: ComponentAddressOrName;
+  account: ComponentAddressOrName | null;
+  enabled?: boolean;
 }
 
 export const useListNfts = (request: ListAccountNftsReq) => {
   return useQuery({
-    queryKey: ["list_nfts"],
+    queryKey: ["list_nfts", request.account],
     queryFn: async () => {
-      const limit = 10;
+      if (!request.account) {
+        return [];
+      }
+      const limit = 100;
       let offset = 0;
       let nfts = await nftList({
         account: request.account,
@@ -35,6 +39,7 @@ export const useListNfts = (request: ListAccountNftsReq) => {
       }
       return result;
     },
+    enabled: request.enabled !== false && !!request.account,
     retry: false,
   });
 };
@@ -49,7 +54,17 @@ export const useNftsTransfer = (request: TransferNftRequest) => {
         error;
       },
       onSettled: () => {
-        queryClient.invalidateQueries(["nfts"]);
+        // Invalidate all NFT-related queries
+        queryClient.invalidateQueries({ 
+          predicate: (query) => {
+            const key = query.queryKey[0];
+            return typeof key === "string" && (
+              key === "nfts" || 
+              key === "list_nfts" || 
+              key.startsWith("nfts_list_")
+            );
+          }
+        });
       },
     },
   );

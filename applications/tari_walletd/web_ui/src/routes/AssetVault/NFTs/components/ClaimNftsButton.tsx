@@ -1,4 +1,4 @@
-//  Copyright 2022. The Tari Project
+//  Copyright 2025. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,39 +20,54 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useAccountsGetDefault } from "../../api/hooks/useAccounts";
-import useAccountStore from "../../store/accountStore";
-import Onboarding from "../Onboarding/Onboarding";
-import MyAssets from "./Components/MyAssets";
-import { useEffect } from "react";
-import FetchStatusCheck from "../../Components/FetchStatusCheck";
-import useAuthStore from "../../store/authStore";
+import Button from "@mui/material/Button";
+import { useMintTestnetFaucetNfts } from "../../../../api/hooks/useAccounts";
+import useAccountStore from "../../../../store/accountStore";
+import { substateIdToString } from "@tari-project/typescript-bindings";
+import queryClient from "../../../../api/queryClient";
 
-function AssetVault() {
+function ClaimNftsButton() {
+  const { mutate: claimTestnetFaucetNfts } = useMintTestnetFaucetNfts();
   const account = useAccountStore((state) => state.account);
-  const setAccount = useAccountStore((state) => state.setAccount);
-  const setPublicKey = useAccountStore((state) => state.setPublicKey);
-  const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
-  const authStore = useAuthStore();
 
-  useEffect(() => {
-    if (!isError && defaultAccount) {
-      setAccount(defaultAccount.account);
-      setPublicKey(defaultAccount.public_key);
-    }
+  if (!account) {
+    return <></>;
+  }
 
-    if (error) {
-      // This can happen when the token is invalid
-      console.error(error);
-      authStore.clearToken();
-    }
-  }, [defaultAccount, isError]);
+  const onClaimTestnetNfts = () => {
+    claimTestnetFaucetNfts(
+      {
+        account: { ComponentAddress: substateIdToString(account.address) },
+        numberToMint: 5,
+        mutableData: {
+          image_url: "https://img.freepik.com/free-vector/gradient-isometric-nft-concept_52683-62009.jpg?w=740",
+        },
+        maxFee: 2000,
+      },
+      {
+        onSuccess: (resp) => {
+          console.log(resp);
+          // Invalidate NFT queries to refresh the list
+          queryClient.invalidateQueries({ 
+            predicate: (query) => {
+              const key = query.queryKey[0];
+              return typeof key === "string" && (
+                key === "nfts" || 
+                key === "list_nfts" || 
+                key.startsWith("nfts_list_")
+              );
+            }
+          });
+        },
+      },
+    );
+  };
 
   return (
-    <FetchStatusCheck errorMessage={""} isError={false} isLoading={isLoading}>
-      {account ? <MyAssets /> : <Onboarding />}
-    </FetchStatusCheck>
+    <Button variant="outlined" onClick={() => onClaimTestnetNfts()}>
+      Claim Testnet NFTs
+    </Button>
   );
 }
 
-export default AssetVault;
+export default ClaimNftsButton;

@@ -29,35 +29,53 @@ export const componentSettings: ThemeOptions = {
   },
   spacing: 8,
   typography: {
-    fontFamily: '"AvenirMedium", sans-serif',
-    fontSize: 14,
-    body1: {},
+    fontFamily: '"Poppins", sans-serif',
+    fontSize: 12,
+    body1: {
+      letterSpacing: "0.5px",
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 500,
+    },
     body2: {
       lineHeight: "1.5rem",
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 500,
     },
     h1: {
       fontSize: "2.2rem",
       lineHeight: "3.2rem",
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 700,
     },
     h2: {
       fontSize: "1.9rem",
       lineHeight: "2.9rem",
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 700,
     },
     h3: {
       fontSize: "1.6rem",
       lineHeight: "2.6rem",
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 700,
     },
     h4: {
       fontSize: "1.3rem",
       lineHeight: "2.3rem",
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 600,
     },
     h5: {
-      fontSize: "1rem",
-      lineHeight: "2em",
+      fontSize: "14px",
+      fontFamily: '"Poppins", sans-serif',
+      lineHeight: "1.4rem",
+      fontWeight: 600,
     },
     h6: {
-      fontSize: "0.875rem",
+      fontSize: "0.75rem",
       lineHeight: "1.8rem",
+      fontFamily: '"Poppins", sans-serif',
+      fontWeight: 600,
     },
   },
   transitions: {
@@ -112,6 +130,25 @@ export const componentSettings: ThemeOptions = {
         thickness: 4,
         sx: {
           color: (theme) => theme.palette.primary.main,
+        },
+      },
+    },
+    MuiCard: {
+      defaultProps: {
+        elevation: 0,
+        sx: {
+          background: (theme) =>
+            theme.palette.mode === "light" ? theme.palette.background.paper : theme.palette.divider,
+          boxShadow: (theme) => (theme.palette.mode === "light" ? "5px 10px 25px rgba(0, 0, 0, 0.07)" : "none"),
+        },
+      },
+    },
+    MuiDialogTitle: {
+      defaultProps: {
+        sx: {
+          fontSize: "1.2rem",
+          fontWeight: 600,
+          lineHeight: "2.3rem",
         },
       },
     },

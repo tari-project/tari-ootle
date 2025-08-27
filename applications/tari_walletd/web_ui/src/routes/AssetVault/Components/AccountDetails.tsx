@@ -21,26 +21,17 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import Box from "@mui/material/Box";
-import { GridHeadCell, GridDataCell } from "../../../Components/StyledComponents";
+import { GridHeadCell, GridDataCell, DataTableCell } from "../../../Components/StyledComponents";
 import { styled } from "@mui/material/styles";
 import useAccountStore from "../../../store/accountStore";
 import CopyAddress from "../../../Components/CopyAddress";
 import { substateIdToString } from "@tari-project/typescript-bindings";
-
-const GridContainer = styled(Box)(({ theme }) => ({
-  display: "grid",
-  gridTemplateColumns: "1fr 2fr",
-  gridTemplateAreas: `'head1 content1'
-    'head2 content2'
-    'head3 content3'`,
-
-  [theme.breakpoints.up("md")]: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr 1fr",
-    gridTemplateAreas: `'head1 head2 head3'
-      'content1 content2 content3'`,
-  },
-}));
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableHead from "@mui/material/TableHead";
+import TableRow from "@mui/material/TableRow";
 
 function AccountDetails() {
   const { account, publicKey } = useAccountStore();
@@ -49,18 +40,28 @@ function AccountDetails() {
   }
 
   return (
-    <GridContainer>
-      <GridHeadCell className="head1">Name</GridHeadCell>
-      <GridHeadCell className="head2">Address</GridHeadCell>
-      <GridHeadCell className="head3">Public Key</GridHeadCell>
-      <GridDataCell className="content1">{account.name}</GridDataCell>
-      <GridDataCell className="content2">
-        <CopyAddress address={substateIdToString(account.address)} />
-      </GridDataCell>
-      <GridDataCell className="content3">
-        <CopyAddress address={publicKey} />
-      </GridDataCell>
-    </GridContainer>
+    <TableContainer>
+      <Table>
+        <TableHead>
+          <TableRow>
+            <TableCell>Name</TableCell>
+            <TableCell>Address</TableCell>
+            <TableCell>Public Key</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          <TableRow>
+            <DataTableCell>{account.name}</DataTableCell>
+            <DataTableCell>
+              <CopyAddress address={substateIdToString(account.address)} />
+            </DataTableCell>
+            <DataTableCell>
+              <CopyAddress address={publicKey} />
+            </DataTableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+    </TableContainer>
   );
 }
 

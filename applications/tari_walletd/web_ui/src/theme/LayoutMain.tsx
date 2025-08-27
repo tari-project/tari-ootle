@@ -49,6 +49,7 @@ import DialogContent from "@mui/material/DialogContent";
 import useAccountStore from "../store/accountStore";
 import { Check } from "@mui/icons-material";
 import useAuthStore from "../store/authStore";
+import "./theme.css";
 
 const drawerWidth = 300;
 
@@ -105,7 +106,8 @@ const Drawer = styled(MuiDrawer, {
 export default function Layout() {
   const [open, setOpen] = useState(false);
   const { themeMode } = useThemeStore();
-  const { popup, setPopup } = useAccountStore();
+  const popup = useAccountStore((state) => state.popup);
+  const setPopup = useAccountStore((state) => state.setPopup);
   const { authToken } = useAuthStore();
 
   const handleClose = () => {
@@ -126,7 +128,7 @@ export default function Layout() {
 
   return (
     <ThemeProvider theme={theme}>
-      <Dialog open={popup.visible || false} onClose={handleClose}>
+      <Dialog open={popup?.visible ?? false} onClose={handleClose}>
         <DialogTitle>
           {popup?.error ? (
             <h2 style={{ color: "red" }}>{popup?.title}</h2>

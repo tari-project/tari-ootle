@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import { useState } from "react";
 import PageHeading from "../../Components/PageHeading";
 import Grid from "@mui/material/Grid";
 import { StyledPaper } from "../../Components/StyledComponents";
@@ -33,18 +34,18 @@ import { useAccountsGetBalances, useAccountNFTsList, useAccountsGet } from "../.
 import { DataTableCell } from "../../Components/StyledComponents";
 import FetchStatusCheck from "../../Components/FetchStatusCheck";
 import { AccountGetResponse, BalanceEntry, substateIdToString } from "@tari-project/typescript-bindings";
-import NFTList from "../../Components/NFTList";
+import NFTList from "../AssetVault/NFTs/NFTList";
 import CopyAddress from "../../Components/CopyAddress";
 import useAccountStore from "../../store/accountStore";
 import { Form, useParams } from "react-router-dom";
 import { accountsAssociateStealthResource, accountsGet } from "../../utils/json_rpc";
-import { useEffect, useState } from "react";
 import Loading from "../../Components/Loading";
 import Button from "@mui/material/Button";
 import { IoAdd } from "react-icons/io5";
 import Box from "@mui/material/Box";
 import Fade from "@mui/material/Fade";
 import TextField from "@mui/material/TextField/TextField";
+import { handleChangePage, handleChangeRowsPerPage } from "../../utils/helpers";
 
 function BalanceRow(props: BalanceEntry) {
   return (
@@ -63,6 +64,8 @@ function AccountDetailsLayout() {
   const { id: accountAddr } = useParams();
   const [showAddStealth, setShowAddStealth] = useState(false);
   const [stealthResource, setStealthResource] = useState({ newResourceAddress: "" });
+  const [nftPage, setNftPage] = useState(0);
+  const [nftRowsPerPage, setNftRowsPerPage] = useState(12);
 
   const {
     data: balancesData,
@@ -78,16 +81,17 @@ function AccountDetailsLayout() {
     error: accountsError,
   } = useAccountsGet(accountAddr!);
 
+  const offset = nftPage * nftRowsPerPage;
   const {
     data: nftsListData,
     isLoading: nftsListIsFetching,
     isError: nftsListIsError,
     error: nftsListError,
-  } = useAccountNFTsList(substateIdToString(accountAddr!), 0, 10);
+  } = useAccountNFTsList(substateIdToString(accountAddr!), offset, nftRowsPerPage);
 
-  if (balancesIsLoading || accountsIsLoading || nftsListIsFetching) {
-    return <Loading />;
-  }
+  const currentNfts = nftsListData?.nfts || [];
+  const hasMore = currentNfts.length === nftRowsPerPage;
+  const estimatedTotal = hasMore ? (nftPage + 1) * nftRowsPerPage + 1 : nftPage * nftRowsPerPage + currentNfts.length;
 
   const onStealthResourceChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setStealthResource({ ...stealthResource, [event.target.name]: event.target.value });
@@ -109,6 +113,10 @@ function AccountDetailsLayout() {
         });
     }
   };
+
+  if (balancesIsLoading || accountsIsLoading || nftsListIsFetching) {
+    return <Loading />;
+  }
 
   return (
     <>
@@ -204,6 +212,11 @@ function AccountDetailsLayout() {
             nftsListIsFetching={nftsListIsFetching}
             nftsListError={nftsListError}
             nftsListData={nftsListData}
+            totalCount={estimatedTotal}
+            page={nftPage}
+            rowsPerPage={nftRowsPerPage}
+            onPageChange={(event, newPage) => handleChangePage(event, newPage, setNftPage)}
+            onRowsPerPageChange={(event) => handleChangeRowsPerPage(event, setNftRowsPerPage, setNftPage)}
           />
         </StyledPaper>
       </Grid>

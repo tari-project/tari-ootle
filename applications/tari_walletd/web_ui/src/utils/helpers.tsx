@@ -21,14 +21,8 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { ChangeEvent } from "react";
-import type {
-  Amount,
-  ClaimBurnProof,
-  FinalizeResult,
-  SubstateId,
-  Transaction,
-  TransactionStatus,
-} from "@tari-project/typescript-bindings";
+import type { Amount, SubstateId } from "@tari-project/typescript-bindings";
+import { CURRENCY } from "./constants";
 
 export const renderJson = (json: any) => {
   if (Array.isArray(json)) {
@@ -254,4 +248,45 @@ export function bigintToDecimalString(int: bigint | Amount, decimalPlaces: numbe
 
   const padding = "0".repeat(decimalPlaces - fractionalValues.length);
   return `${wholeValues}.${padding}${fractionalValues}`;
+}
+
+export const formatXTM = (amount: number | bigint): string => {
+  if (typeof amount === "bigint") {
+    // Handle bigint: divide by divisor to get integer and remainder for fractional part
+    const divisor = BigInt(CURRENCY.DIVISOR);
+    const integerPart = amount / divisor;
+    const remainder = amount % divisor;
+    
+    // Convert remainder to fractional string padded to CURRENCY.DECIMALS
+    const fractionalPart = remainder.toString().padStart(CURRENCY.DECIMALS, '0');
+    
+    return `${integerPart.toString()}.${fractionalPart} ${CURRENCY.SYMBOL}`;
+  } else if (typeof amount === "number") {
+    // Handle number: guard against NaN and use existing toFixed logic
+    if (isNaN(amount)) {
+      return `0 ${CURRENCY.SYMBOL}`;
+    }
+    return `${(amount / CURRENCY.DIVISOR).toFixed(CURRENCY.DECIMALS)} ${CURRENCY.SYMBOL}`;
+  } else {
+    // Handle invalid types
+    return `0 ${CURRENCY.SYMBOL}`;
+  }
+};
+
+export function validateHash(hash: string): boolean {
+  const regex = /^[a-fA-F0-9]{64}$/;
+  return regex.test(hash);
+}
+
+export function validateAddress(address: string): boolean {
+  if (!address || typeof address !== 'string') {
+    return false;
+  }
+  
+  // Trim whitespace and convert to lowercase for consistent validation
+  const cleanAddress = address.trim().toLowerCase();
+  
+  // Check if it's a valid 64-character hexadecimal string (32 bytes)
+  const regex = /^[a-f0-9]{64}$/;
+  return regex.test(cleanAddress);
 }

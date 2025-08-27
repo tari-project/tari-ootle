@@ -215,10 +215,11 @@ export const useMintTestnetFaucetNfts = () => {
   });
 };
 
-export const useAccountsList = (offset: number, limit: number) => {
+export const useAccountsList = (offset: number, limit: number, enabled: boolean = true) => {
   return useQuery({
     queryKey: ["accounts"],
     queryFn: () => accountsList({ offset, limit }),
+    enabled,
     onError: (error: ApiError) => {
       error;
     },
@@ -231,6 +232,13 @@ export const useAccountsGetBalances = (account: ComponentAddress, refresh: boole
     queryFn: () => accountsGetBalances({ account: { ComponentAddress: account }, refresh }),
     onError: (_error: ApiError) => {},
     refetchInterval: 5000,
+    structuralSharing: (oldData, newData) => {
+      if (!oldData || !newData) return newData;
+      if (JSON.stringify(oldData) === JSON.stringify(newData)) {
+        return oldData;
+      }
+      return newData;
+    },
   });
 };
 
@@ -266,11 +274,19 @@ export const useAccountsGet = (account: ComponentAddress) => {
 
 export const useAccountNFTsList = (account: ComponentAddress, offset: number, limit: number) => {
   return useQuery({
-    queryKey: ["nfts_list_" + account],
+    queryKey: ["nfts_list_" + account + "_" + offset + "_" + limit],
     queryFn: () => nftList({ account: { ComponentAddress: account }, offset, limit }),
     onError: (_error: ApiError) => {},
+    structuralSharing: (oldData, newData) => {
+      if (!oldData || !newData) return newData;
+      if (JSON.stringify(oldData) === JSON.stringify(newData)) {
+        return oldData;
+      }
+      return newData;
+    },
   });
 };
+
 
 export const useValidatorFees = (accountOrKeyIndex: AccountOrKeyIndex, shardGroup = null) => {
   return useQuery({

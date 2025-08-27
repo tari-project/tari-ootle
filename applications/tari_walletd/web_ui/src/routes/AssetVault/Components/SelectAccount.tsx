@@ -35,7 +35,9 @@ import { useAccountsList } from "../../../api/hooks/useAccounts";
 import { AccountInfo, substateIdToString } from "@tari-project/typescript-bindings";
 
 function SelectAccount() {
-  const { account, setAccount, setPublicKey } = useAccountStore();
+  const account = useAccountStore((state) => state.account);
+  const setAccount = useAccountStore((state) => state.setAccount);
+  const setPublicKey = useAccountStore((state) => state.setPublicKey);
   const { data: dataAccountsList } = useAccountsList(0, 10);
   const [dialogOpen, setDialogOpen] = useState(false);
   const theme = useTheme();

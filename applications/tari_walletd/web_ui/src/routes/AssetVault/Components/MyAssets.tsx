@@ -40,7 +40,7 @@ import { Refresh } from "@mui/icons-material";
 
 function MyAssets() {
   const theme = useTheme();
-  const { account } = useAccountStore();
+  const account = useAccountStore((state) => state.account);
 
   if (!account) {
     return <>Loading...</>;

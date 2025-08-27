@@ -30,13 +30,20 @@ import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
-import { useState } from "react";
+import React, { useState } from "react";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import { DataTableCell } from "../../../Components/StyledComponents";
 import { useAccountNFTsList, useAccountsGetBalances } from "../../../api/hooks/useAccounts";
+import { useListNfts } from "../../../api/hooks/useNfts";
 import useAccountStore from "../../../store/accountStore";
-import { bigintToDecimalString, shortenSubstateId, substateIdToString } from "../../../utils/helpers";
-import NFTList from "../../../Components/NFTList";
+import {
+  bigintToDecimalString,
+  shortenSubstateId,
+  substateIdToString,
+  handleChangePage,
+  handleChangeRowsPerPage,
+} from "../../../utils/helpers";
+import NFTList from "../NFTs/NFTList";
 import { Button } from "@mui/material";
 import { SendMoneyDialog } from "./SendMoney";
 import {
@@ -77,7 +84,7 @@ function BalanceRow(props: BalanceRowProps) {
     divisibility,
     onSendClicked,
   } = props;
-  const { showBalance } = useAccountStore();
+  const showBalance = useAccountStore((state) => state.showBalance);
   return (
     <TableRow key={token_symbol || resource_address}>
       <DataTableCell>{vault_address ? <CopyAddress address={vault_address} /> : "--"}</DataTableCell>
@@ -143,11 +150,19 @@ function tabProps(index: number) {
 }
 
 function Assets({ account }: { account: Account }) {
+  const [assetTab, setAssetTab] = useState(0);
   const [resourceToSend, setResourceToSend] = useState<{
     address: ResourceAddress;
     resource_type: ResourceType;
   } | null>(null);
-  const [value, setValue] = useState(0);
+  const [nftPage, setNftPage] = useState(0);
+  const [nftRowsPerPage, setNftRowsPerPage] = useState(12);
+
+  // Reset pagination and tab when account changes
+  React.useEffect(() => {
+    setNftPage(0);
+    setAssetTab(0);
+  }, [account]);
 
   const {
     data: balancesData,
@@ -161,10 +176,22 @@ function Assets({ account }: { account: Account }) {
     isError: nftsListIsError,
     error: nftsListError,
     isFetching: nftsListIsFetching,
-  } = useAccountNFTsList(substateIdToString(account.address), 0, 10);
+  } = useAccountNFTsList(substateIdToString(account.address), nftPage * nftRowsPerPage, nftRowsPerPage);
+
+  // Get total count of NFTs for accurate pagination
+  const { data: allNfts } = useListNfts({
+    account: { ComponentAddress: substateIdToString(account.address) }
+  });
+
+  // Calculate total count - use actual count from allNfts, fallback to estimation
+  const currentNfts = nftsListData?.nfts || [];
+  const actualTotal = allNfts ? allNfts.length : null;
+  
+  // Use actual total if available, otherwise fall back to simple estimation
+  const totalCount = actualTotal !== null ? actualTotal : currentNfts.length;
 
   const handleChange = (_event: React.SyntheticEvent, newValue: number) => {
-    setValue(newValue);
+    setAssetTab(newValue);
   };
 
   const handleSendResourceClicked = (address: ResourceAddress, resource_type: ResourceType) => {
@@ -181,12 +208,12 @@ function Assets({ account }: { account: Account }) {
         resource_type={resourceToSend?.resource_type!}
       />
       <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
-        <Tabs value={value} onChange={handleChange} aria-label="account assets" variant="standard">
+        <Tabs value={assetTab} onChange={handleChange} aria-label="account assets" variant="standard">
           <Tab label="Tokens" {...tabProps(0)} style={{ width: 150 }} />
           <Tab label="NFTs" {...tabProps(1)} style={{ width: 150 }} />
         </Tabs>
       </Box>
-      <TabPanel value={value} index={0}>
+      <TabPanel value={assetTab} index={0}>
         <FetchStatusCheck
           isError={balancesIsError}
           errorMessage={balancesError?.message || "Error fetching data"}
@@ -235,12 +262,17 @@ function Assets({ account }: { account: Account }) {
           </TableContainer>
         </FetchStatusCheck>
       </TabPanel>
-      <TabPanel value={value} index={1}>
+      <TabPanel value={assetTab} index={1}>
         <NFTList
           nftsListIsError={nftsListIsError}
           nftsListIsFetching={nftsListIsFetching}
           nftsListError={nftsListError}
           nftsListData={nftsListData}
+          totalCount={totalCount}
+          page={nftPage}
+          rowsPerPage={nftRowsPerPage}
+          onPageChange={(event, newPage) => handleChangePage(event, newPage, setNftPage)}
+          onRowsPerPageChange={(event) => handleChangeRowsPerPage(event, setNftRowsPerPage, setNftPage)}
         />
       </TabPanel>
     </Box>

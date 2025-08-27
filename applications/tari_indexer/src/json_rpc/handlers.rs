@@ -412,16 +412,6 @@ impl JsonRpcHandlers {
                             },
                             Ok(SubstateResult::Down { .. }) => responses.push(None),
                         }
-                            SubstateResult::DoesNotExist => responses.push(None),
-                            SubstateResult::Up { id, substate } => {
-                                responses.push(Some(GetSubstateResponse {
-                                    address: id,
-                                    version: substate.version(),
-                                    substate: substate.into_substate_value(),
-                                }))
-                            },
-                            SubstateResult::Down { version, .. } => responses.push(None),
-                        }
                     }
                 }
             }

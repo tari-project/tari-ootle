@@ -487,8 +487,8 @@ pub async fn handle_reveal_funds(
 
         let transaction = builder.with_inputs(inputs).build_and_seal(&account_key.key);
 
-        sdk.confidential_outputs_api()
-            .locks_set_transaction_hash(lock_id, transaction.calculate_id())?;
+        sdk.stealth_outputs_api()
+            .locks_set_transaction_id(lock_id, transaction.calculate_id())?;
 
         let mut events = notifier.subscribe();
         let tx_id = transaction_service.submit_transaction(transaction).await?;

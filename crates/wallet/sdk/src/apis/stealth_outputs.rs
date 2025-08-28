@@ -29,6 +29,7 @@ use tari_transaction::TransactionId;
 use crate::{
     apis::{
         accounts::AccountsApiError,
+        confidential_outputs::ConfidentialOutputsApiError,
         config::{ConfigApi, ConfigApiError},
         key_manager::{KeyBranch, KeyManagerApi, KeyManagerApiError},
         stealth_crypto::{StealthCryptoApi, StealthCryptoApiError},
@@ -83,6 +84,16 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
 
             Ok((outputs, total_output_amount))
         })
+    }
+
+    pub fn locks_set_transaction_id(
+        &self,
+        lock_id: OutputLockId,
+        transaction_id: TransactionId,
+    ) -> Result<(), ConfidentialOutputsApiError> {
+        self.store
+            .with_write_tx(|tx| tx.output_locks_set_params(lock_id, Some(transaction_id), None))?;
+        Ok(())
     }
 
     pub fn lock_outputs_until_partial_amount(

@@ -24,9 +24,12 @@ You will require the following tools and dependencies to successfully build the 
 - **Other**
   - `git`
 
-- **Rust (>=1.74)**: Install Rust via [rustup](https://rustup.rs), and add a WASM target:
+- **Rust (=1.88)**: Install Rust using [rustup](https://rustup.rs), and add a WASM target:
 
 ```bash
+# Install the rust version in rust-toolchain.toml
+rustup install
+# Add wasm target
 rustup target add wasm32-unknown-unknown
 ```
 

@@ -21,10 +21,10 @@ fn main() {
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "windows")]
-    const BIN: &str = "pnpm.cmd";
+    const BIN: &str = "npm.cmd";
     #[cfg(not(target_os = "windows"))]
-    const BIN: &str = "pnpm";
-    run_command(BIN, &["install", "--frozen-lockfile"])?;
+    const BIN: &str = "npm";
+    run_command(BIN, &["ci"])?;
     run_command(BIN, &["run", "build"])?;
 
     Ok(())

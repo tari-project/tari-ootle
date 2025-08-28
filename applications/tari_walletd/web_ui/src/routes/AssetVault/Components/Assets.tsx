@@ -180,13 +180,13 @@ function Assets({ account }: { account: Account }) {
 
   // Get total count of NFTs for accurate pagination
   const { data: allNfts } = useListNfts({
-    account: { ComponentAddress: substateIdToString(account.address) }
+    account: { ComponentAddress: substateIdToString(account.address) },
   });
 
   // Calculate total count - use actual count from allNfts, fallback to estimation
   const currentNfts = nftsListData?.nfts || [];
   const actualTotal = allNfts ? allNfts.length : null;
-  
+
   // Use actual total if available, otherwise fall back to simple estimation
   const totalCount = actualTotal !== null ? actualTotal : currentNfts.length;
 

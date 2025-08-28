@@ -155,7 +155,7 @@ pub async fn handle_submit(
     for proof_id in req.proof_ids {
         // update the proofs table with the corresponding transaction hash
         sdk.confidential_outputs_api()
-            .locks_set_transaction_hash(proof_id, tx_id)?;
+            .locks_set_transaction_id(proof_id, tx_id)?;
     }
 
     info!(
@@ -241,7 +241,7 @@ pub async fn handle_submit_dry_run(
     for proof_id in req.proof_ids {
         // update the proofs table with the corresponding transaction hash
         sdk.confidential_outputs_api()
-            .locks_set_transaction_hash(proof_id, transaction.calculate_id())?;
+            .locks_set_transaction_id(proof_id, transaction.calculate_id())?;
     }
 
     info!(

@@ -48,13 +48,18 @@ impl StealthCryptoApi {
         kdfs::encrypted_data_dh_kdf_aead(private_key, public_nonce)
     }
 
-    pub fn generate_transfer_statement<A: Into<Amount>>(
+    pub fn generate_transfer_statement<'a, A, Inputs, Outputs>(
         &self,
-        inputs: &[UnblindedStealthInputStatement],
+        inputs: Inputs,
         input_revealed_amount: A,
-        output_statements: &[UnblindedStealthOutputStatement],
+        output_statements: Outputs,
         output_revealed_amount: A,
-    ) -> Result<StealthTransferStatement, StealthCryptoApiError> {
+    ) -> Result<StealthTransferStatement, StealthCryptoApiError>
+    where
+        A: Into<Amount>,
+        Inputs: IntoIterator<Item = &'a UnblindedStealthInputStatement>,
+        Outputs: IntoIterator<Item = &'a UnblindedStealthOutputStatement> + Clone,
+    {
         let stmt = stealth::create_transfer_statement(
             inputs,
             input_revealed_amount
@@ -187,10 +192,12 @@ impl StealthCryptoApi {
         commitment: &PedersenCommitmentBytes,
         account_owner_pk: &RistrettoPublicKeyBytes,
     ) -> bool {
+        // NOTE: .as_bytes() used because the tari_crypto borsh implementations serialize fixed length bytes as variable
+        // length bytes of size 32
         let message = ownership_proof_hasher64(network)
             .chain(&ownership_proof.public_nonce().as_bytes())
             .chain(&commitment.as_bytes())
-            .chain(&account_owner_pk)
+            .chain(&account_owner_pk.as_bytes())
             .finalize();
 
         let Ok(commitment) = PedersenCommitment::try_from_byte_type(commitment) else {

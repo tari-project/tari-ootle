@@ -62,7 +62,6 @@ use tari_ootle_storage::{
     StorageError,
 };
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
-use tari_sidechain::QuorumDecision;
 use tari_template_lib::prelude::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
 use tari_template_manager::interface::TemplateManagerHandle;
 use tari_validator_node_client::types::{
@@ -70,7 +69,6 @@ use tari_validator_node_client::types::{
     AddPeerRequest,
     AddPeerResponse,
     ConnectionDirection,
-    DryRunTransactionFinalizeResult,
     FunctionDef,
     GetAllVnsRequest,
     GetAllVnsResponse,
@@ -116,7 +114,6 @@ use tari_validator_node_client::types::{
 use crate::{
     bootstrap::Services,
     consensus::{spec::ValidatorNodeStateStore, ConsensusHandle},
-    dry_run_transaction_processor::DryRunTransactionProcessor,
     file_l1_submitter::FileLayerOneSubmitter,
     json_rpc::jrpc_errors::{general_error, internal_error, invalid_operation, not_found},
     p2p::services::mempool::MempoolHandle,
@@ -136,7 +133,6 @@ pub struct JsonRpcHandlers {
     consensus: ConsensusHandle,
     networking: NetworkingHandle<TariMessagingSpec>,
     state_store: ValidatorNodeStateStore,
-    dry_run_transaction_processor: DryRunTransactionProcessor<ValidatorNodeStateStore>,
 }
 
 impl JsonRpcHandlers {
@@ -152,7 +148,6 @@ impl JsonRpcHandlers {
             layer_one_transaction_submitter: services.layer_one_transaction_submitter.clone(),
             networking: services.networking.clone(),
             state_store: services.state_store.clone(),
-            dry_run_transaction_processor: services.dry_run_transaction_processor.clone(),
         }
     }
 
@@ -183,10 +178,7 @@ impl JsonRpcHandlers {
 
     pub async fn submit_transaction(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
-        let SubmitTransactionRequest {
-            transaction,
-            is_dry_run,
-        } = value.parse_params()?;
+        let SubmitTransactionRequest { transaction } = value.parse_params()?;
         debug!(
             target: LOG_TARGET,
             "Transaction {} has {} involved shards",
@@ -196,31 +188,11 @@ impl JsonRpcHandlers {
 
         let tx_id = transaction.calculate_id();
 
-        if is_dry_run {
-            let result = self
-                .dry_run_transaction_processor
-                .process_transaction(transaction)
-                .await;
-            match result {
-                Ok(exec_result) => {
-                    let response = SubmitTransactionResponse {
-                        transaction_id: tx_id,
-                        dry_run_result: Some(DryRunTransactionFinalizeResult {
-                            decision: QuorumDecision::Accept,
-                            fee_breakdown: Some(exec_result.finalize.fee_receipt.to_cost_breakdown()),
-                            finalize: exec_result.finalize,
-                        }),
-                    };
-
-                    return Ok(JsonRpcResponse::success(answer_id, response));
-                },
-                Err(e) => {
-                    return Err(JsonRpcResponse::error(
-                        answer_id,
-                        JsonRpcError::new(JsonRpcErrorReason::ApplicationError(1), e.to_string(), json!(null)),
-                    ));
-                },
-            }
+        if transaction.is_dry_run() {
+            return Err(invalid_operation(
+                answer_id,
+                "Dry-run transactions cannot be submitted via this endpoint.",
+            ));
         }
 
         // Submit to mempool.

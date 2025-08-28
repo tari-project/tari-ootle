@@ -4,6 +4,8 @@
 use std::fmt::{Display, Formatter};
 
 use tari_bor::{Deserialize, Serialize};
+use tari_crypto::ristretto::RistrettoPublicKey;
+use tari_engine_types::FromByteType;
 use tari_template_lib::{models::ComponentAddress, prelude::RistrettoPublicKeyBytes};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -70,6 +72,11 @@ impl AccountWithPublicKey {
 
     pub fn owner_public_key(&self) -> &RistrettoPublicKeyBytes {
         &self.owner_public_key
+    }
+
+    pub fn to_ristretto_public_key(&self) -> RistrettoPublicKey {
+        RistrettoPublicKey::try_from_byte_type(&self.owner_public_key)
+            .expect("BUG: Malformed public key bytes in account")
     }
 
     pub fn is_confirmed_on_chain(&self) -> bool {

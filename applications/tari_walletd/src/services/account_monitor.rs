@@ -811,7 +811,7 @@ where
                 }
             },
             WalletEvent::TransactionFinalized(event) => {
-                if let Some(diff) = event.finalize.result.accept() {
+                if let Some(diff) = event.finalize.result.any_accept() {
                     self.process_result(event.transaction_id, diff).await?;
                 }
             },

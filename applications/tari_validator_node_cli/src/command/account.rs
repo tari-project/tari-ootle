@@ -38,10 +38,7 @@ pub enum AccountsSubcommand {
 }
 
 #[derive(Debug, Args, Clone)]
-pub struct CreateArgs {
-    #[clap(long, alias = "dry-run")]
-    pub is_dry_run: bool,
-}
+pub struct CreateArgs {}
 
 impl AccountsSubcommand {
     pub async fn handle<P: AsRef<Path>>(
@@ -59,7 +56,7 @@ impl AccountsSubcommand {
 }
 
 pub async fn handle_create(
-    args: CreateArgs,
+    _args: CreateArgs,
     base_dir: impl AsRef<Path>,
     client: &mut ValidatorNodeClient,
 ) -> Result<SubmitTransactionResponse, anyhow::Error> {
@@ -82,7 +79,6 @@ pub async fn handle_create(
         version: None,
         dump_outputs_into: None,
         account_template_address: None,
-        dry_run: args.is_dry_run,
     };
 
     submit_transaction(vec![instruction], common, base_dir, client).await

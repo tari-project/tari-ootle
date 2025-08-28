@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
+import { FormEvent, useState } from "react";
 import { Form } from "react-router-dom";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
@@ -102,7 +102,8 @@ export default function ClaimBurn() {
     });
   };
 
-  const onClaimBurn = async () => {
+  const onClaimBurn = async (e: FormEvent) => {
+    e.preventDefault();
     try {
       setClaimBurnFormState({ ...claimBurnFormState, disabled: true });
       const resp = await accountsClaimBurn({

@@ -26,7 +26,6 @@ pub mod epoch_oracle_config;
 pub mod keypair;
 pub mod p2p_config;
 pub mod seed_peer;
-pub mod substate_file_cache;
 pub mod template_download_queue;
 pub mod transaction_executor;
 pub mod utxo_store;

@@ -217,7 +217,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 finalize.result = TransactionResult::AcceptFeeRejectRest(
                     finalize
                         .result
-                        .accept()
+                        .any_accept()
                         .cloned()
                         .expect("The fee transaction should be there"),
                     RejectReason::ExecutionFailure(err.to_string()),

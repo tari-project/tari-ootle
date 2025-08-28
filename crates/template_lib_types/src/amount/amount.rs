@@ -52,10 +52,6 @@ impl Amount {
         Self(amount)
     }
 
-    pub fn from_u64(amount: u64) -> Self {
-        Self::new(I192::from(amount))
-    }
-
     /// A value of zero.
     pub const fn zero() -> Self {
         Self::ZERO

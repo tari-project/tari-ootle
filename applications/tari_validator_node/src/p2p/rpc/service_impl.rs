@@ -293,7 +293,6 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
                 None => {
                     let epoch = req
                         .epoch
-                        .clone()
                         .map(Epoch::from)
                         .map(|end| end.min(current_epoch))
                         .unwrap_or(current_epoch);

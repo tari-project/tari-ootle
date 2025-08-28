@@ -29,12 +29,12 @@ use tari_transaction::TransactionId;
 use crate::{
     apis::{
         accounts::AccountsApiError,
-        confidential_outputs::ConfidentialOutputsApiError,
         config::{ConfigApi, ConfigApiError},
         key_manager::{KeyBranch, KeyManagerApi, KeyManagerApiError},
         stealth_crypto::{StealthCryptoApi, StealthCryptoApiError},
+        stealth_transfer::InputToSpend,
     },
-    models::{Account, KeyPair, OutputLockId, OutputStatus, StealthBalance, StealthOutputModel},
+    models::{Account, KeyPair, OutputStatus, StealthBalance, StealthOutputModel, WalletLockId},
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
@@ -62,10 +62,13 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         }
     }
 
-    pub fn lock_outputs_in_account_by_amount<A: Into<Amount>>(
+    /// Locks as many outputs required to reach at least the specified amount. If there are insufficient funds, an
+    /// `InsufficientFunds` error is returned and no outputs are locked.
+    pub fn lock_outputs_for_at_least_amount<A: Into<Amount>>(
         &self,
         account_address: &ComponentAddress,
-        lock_id: OutputLockId,
+        resource_address: &ResourceAddress,
+        lock_id: WalletLockId,
         amount: A,
     ) -> Result<(Vec<StealthOutputModel>, Amount), StealthOutputsApiError> {
         let amount = amount
@@ -76,7 +79,8 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                 reason: "Amount must be non-negative".to_string(),
             })?;
         self.store.with_write_tx(|tx| {
-            let (outputs, total_output_amount) = self.lock_outputs_internal(tx, account_address, amount, lock_id)?;
+            let (outputs, total_output_amount) =
+                self.lock_outputs_internal(tx, account_address, resource_address, amount, lock_id)?;
 
             if total_output_amount < amount {
                 return Err(StealthOutputsApiError::InsufficientFunds);
@@ -88,30 +92,34 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
 
     pub fn locks_set_transaction_id(
         &self,
-        lock_id: OutputLockId,
+        lock_id: WalletLockId,
         transaction_id: TransactionId,
-    ) -> Result<(), ConfidentialOutputsApiError> {
+    ) -> Result<(), StealthOutputsApiError> {
         self.store
-            .with_write_tx(|tx| tx.output_locks_set_params(lock_id, Some(transaction_id), None))?;
+            .with_write_tx(|tx| tx.locks_link_transaction(lock_id, transaction_id))?;
         Ok(())
     }
 
+    /// Locks as many outputs required to reach at least the specified amount. If there are insufficient funds, all
+    /// available outputs will be locked and returned along with the total amount locked.
     pub fn lock_outputs_until_partial_amount(
         &self,
         account_address: &ComponentAddress,
+        resource_address: &ResourceAddress,
         amount: Amount,
-        locked_by_id: OutputLockId,
+        locked_by_id: WalletLockId,
     ) -> Result<(Vec<StealthOutputModel>, Amount), StealthOutputsApiError> {
         self.store
-            .with_write_tx(|tx| self.lock_outputs_internal(tx, account_address, amount, locked_by_id))
+            .with_write_tx(|tx| self.lock_outputs_internal(tx, account_address, resource_address, amount, locked_by_id))
     }
 
     fn lock_outputs_internal<TTx: WalletStoreWriter>(
         &self,
         tx: &mut TTx,
         account_address: &ComponentAddress,
+        resource_address: &ResourceAddress,
         amount: Amount,
-        locked_by_id: OutputLockId,
+        locked_by_id: WalletLockId,
     ) -> Result<(Vec<StealthOutputModel>, Amount), StealthOutputsApiError> {
         if amount.is_negative() {
             return Err(StealthOutputsApiError::InvalidParameter {
@@ -123,7 +131,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         let mut outputs = Vec::new();
         while total_output_amount < amount {
             let output = tx
-                .stealth_outputs_lock_smallest_amount(account_address, locked_by_id)
+                .stealth_outputs_lock_smallest_amount(account_address, resource_address, locked_by_id)
                 .optional()?;
             match output {
                 Some(output) => {
@@ -152,35 +160,34 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         Ok(())
     }
 
-    pub fn create_lock_for_vault(&self, vault_id: &VaultId) -> Result<OutputLockId, StealthOutputsApiError> {
-        let mut tx = self.store.create_write_tx()?;
-        let lock_id = tx.output_locks_insert_for_vault(vault_id)?;
-        tx.commit()?;
-        Ok(lock_id)
-    }
-
-    pub fn create_lock_for_resource(
+    pub fn lock_funds_in_vault<A: Into<Amount>>(
         &self,
-        resource_address: &ResourceAddress,
-    ) -> Result<OutputLockId, StealthOutputsApiError> {
-        let lock_id = self
-            .store
-            .with_write_tx(|tx| tx.output_locks_insert(resource_address))?;
+        lock_id: WalletLockId,
+        vault_id: &VaultId,
+        amount_to_lock: A,
+    ) -> Result<(), StealthOutputsApiError> {
+        self.store
+            .with_write_tx(|tx| tx.vaults_lock_revealed_funds(lock_id, vault_id, amount_to_lock.into()))?;
+        Ok(())
+    }
+
+    pub fn create_lock(&self) -> Result<WalletLockId, StealthOutputsApiError> {
+        let lock_id = self.store.with_write_tx(|tx| tx.locks_create())?;
         Ok(lock_id)
     }
 
-    pub fn release_locked_outputs(&self, lock_id: OutputLockId) -> Result<(), StealthOutputsApiError> {
+    pub fn release_locked_outputs(&self, lock_id: WalletLockId) -> Result<(), StealthOutputsApiError> {
         self.store.with_write_tx(|tx| {
-            tx.output_locks_delete(lock_id)?;
             tx.outputs_release_by_lock_id(lock_id)?;
+            tx.locks_delete(lock_id)?;
             Ok(())
         })
     }
 
-    pub fn finalize_outputs(&self, lock_id: OutputLockId) -> Result<(), StealthOutputsApiError> {
+    pub fn finalize_outputs(&self, lock_id: WalletLockId) -> Result<(), StealthOutputsApiError> {
         self.store.with_write_tx(|tx| {
-            tx.output_locks_delete(lock_id)?;
             tx.stealth_outputs_finalize_by_lock_id(lock_id)?;
+            tx.locks_delete(lock_id)?;
             Ok(())
         })
     }
@@ -189,11 +196,11 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         &self,
         owner_account: &Account,
         outputs: Vec<StealthOutputModel>,
-    ) -> Result<Vec<UnblindedStealthInputStatement>, StealthOutputsApiError> {
+    ) -> Result<Vec<InputToSpend>, StealthOutputsApiError> {
         let network = self.config_api.get_network()?;
         // Derive owner secret - the sender does not know the owner secret
         let owner_key_part = self.key_manager_api.derive_account_key(owner_account.key_index())?;
-        let mut outputs_with_masks = Vec::with_capacity(outputs.len());
+        let mut inputs_with_masks = Vec::with_capacity(outputs.len());
         for output in outputs {
             // Derive the account secret, of which the public key is used by senders to encrypt the value and mask.
             let decryption_key_part = self
@@ -220,30 +227,34 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                 .crypto_api
                 .derive_stealth_owner_secret(network, &owner_key_part.key, &nonce);
 
-            outputs_with_masks.push(UnblindedStealthInputStatement {
-                mask_and_value: MaskAndValue {
-                    value: output.value,
-                    mask,
+            inputs_with_masks.push(InputToSpend {
+                statement: UnblindedStealthInputStatement {
+                    mask_and_value: MaskAndValue {
+                        value: output.value,
+                        mask,
+                    },
+                    owner_secret: stealth_secret,
+                    public_nonce: nonce,
                 },
-                owner_secret: stealth_secret,
-                public_nonce: nonce,
+                is_on_chain: output.is_on_chain,
             });
         }
-        Ok(outputs_with_masks)
+        Ok(inputs_with_masks)
     }
 
-    pub fn lock_revealed_funds(
+    pub fn lock_revealed_funds<A: Into<Amount>>(
         &self,
-        lock_id: OutputLockId,
-        amount_to_lock: Amount,
+        lock_id: WalletLockId,
+        vault_id: &VaultId,
+        amount_to_lock: A,
     ) -> Result<(), StealthOutputsApiError> {
         self.store
-            .with_write_tx(|tx| tx.vaults_lock_revealed_funds(lock_id, amount_to_lock))?;
+            .with_write_tx(|tx| tx.vaults_lock_revealed_funds(lock_id, vault_id, amount_to_lock.into()))?;
 
         Ok(())
     }
 
-    pub fn finalize_locked_revealed_funds(&self, lock_id: OutputLockId) -> Result<(), StealthOutputsApiError> {
+    pub fn finalize_locked_revealed_funds(&self, lock_id: WalletLockId) -> Result<(), StealthOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
         tx.vaults_finalized_locked_revealed_funds(lock_id)?;
         tx.commit()?;
@@ -251,9 +262,9 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         Ok(())
     }
 
-    pub fn release_revealed_funds(&self, lock_id: OutputLockId) -> Result<(), StealthOutputsApiError> {
+    pub fn release_revealed_funds(&self, lock_id: WalletLockId) -> Result<(), StealthOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
-        tx.vaults_unlock_revealed_funds(lock_id)?;
+        tx.vaults_release_lock_revealed_funds(lock_id)?;
         tx.commit()?;
 
         Ok(())
@@ -527,31 +538,12 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                 status,
                 is_burnt,
                 is_frozen,
+                is_on_chain: true,
                 lock_id: None,
             }));
         }
 
         Ok(None)
-    }
-
-    pub fn set_transaction_hash_for_lock(
-        &self,
-        lock_id: OutputLockId,
-        transaction_id: TransactionId,
-    ) -> Result<(), StealthOutputsApiError> {
-        self.store
-            .with_write_tx(|tx| tx.output_locks_set_params(lock_id, Some(transaction_id), None))?;
-        Ok(())
-    }
-
-    pub fn set_vault_id_for_lock(
-        &self,
-        lock_id: OutputLockId,
-        vault_id: VaultId,
-    ) -> Result<(), StealthOutputsApiError> {
-        self.store
-            .with_write_tx(|tx| tx.output_locks_set_params(lock_id, None, Some(vault_id)))?;
-        Ok(())
     }
 }
 

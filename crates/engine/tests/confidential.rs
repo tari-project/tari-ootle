@@ -516,7 +516,7 @@ fn mint_with_view_key() {
         vec![user_proof],
     );
 
-    let diff = result.finalize.result.accept().unwrap();
+    let diff = result.finalize.result.any_accept().unwrap();
     let faucet_vault = diff
         .up_iter()
         .find(|(addr, _)| addr.is_vault() && addr.as_vault_id().unwrap().entity_id() == faucet_entity_id)

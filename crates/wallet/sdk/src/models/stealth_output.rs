@@ -8,7 +8,7 @@ use tari_template_lib::{
     types::{crypto::UtxoTagByte, Amount},
 };
 
-use crate::models::{OutputLockId, OutputStatus};
+use crate::models::{OutputStatus, WalletLockId};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StealthOutputModel {
@@ -23,7 +23,8 @@ pub struct StealthOutputModel {
     pub status: OutputStatus,
     pub is_burnt: bool,
     pub is_frozen: bool,
-    pub lock_id: Option<OutputLockId>,
+    pub is_on_chain: bool,
+    pub lock_id: Option<WalletLockId>,
 }
 
 impl StealthOutputModel {

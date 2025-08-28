@@ -2424,7 +2424,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 finalized.fee_receipt.total_fees_charged(),
                 finalized.fee_receipt.total_fees_paid()
             ));
-            finalized.result = if let Some(accept) = finalized.result.accept() {
+            finalized.result = if let Some(accept) = finalized.result.any_accept() {
                 TransactionResult::AcceptFeeRejectRest(accept.clone(), reason)
             } else {
                 TransactionResult::Reject(reason)

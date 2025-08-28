@@ -119,7 +119,7 @@ where
                 let transaction_id = transaction.calculate_id();
                 let transaction_api = self.wallet_sdk.transaction_api();
                 // Unlock all locks related to the transaction immediately since this is a dry run
-                transaction_api.release_all_outputs_for_transaction(transaction_id)?;
+                transaction_api.release_all_locks_for_transaction(transaction_id)?;
                 match transaction_api.submit_dry_run_transaction(transaction).await {
                     Ok(finalized_transaction) => {
                         let finalize = finalized_transaction.finalize.ok_or_else(|| {

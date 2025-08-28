@@ -96,6 +96,7 @@ CREATE TABLE vaults
     locked_revealed_balance BIGINT   NOT NULL DEFAULT 0,
     token_symbol            TEXT     NULL,
     divisibility            INTEGER  NOT NULL DEFAULT 0,
+    locked_by               INTEGER  NULL REFERENCES locks (id) ON DELETE SET NULL,
     created_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -147,15 +148,12 @@ CREATE TABLE outputs
 CREATE UNIQUE INDEX outputs_uniq_commitment ON outputs (commitment);
 CREATE INDEX outputs_idx_account_status ON outputs (account_id, status);
 
--- Output Locks
-CREATE TABLE output_locks
+-- Locks
+CREATE TABLE locks
 (
-    id                     INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    resource_address       TEXT     NOT NULL,
-    vault_id               INTEGER  NULL REFERENCES vaults (id),
-    transaction_hash       TEXT     NULL,
-    locked_revealed_amount BIGINT   NOT NULL DEFAULT 0,
-    created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id             INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    transaction_id TEXT     NULL,
+    created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Auth token, we don't store the auth token, the token in this table is the jwt token that is granted when user accepts the auth login request.
@@ -232,6 +230,7 @@ CREATE TABLE stealth_outputs
     tag_byte                    INTEGER  NOT NULL,
     is_burnt                    BOOLEAN  NOT NULL DEFAULT 0,
     is_frozen                   BOOLEAN  NOT NULL DEFAULT 0,
+    is_on_chain                 BOOLEAN  NOT NULL,
     created_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

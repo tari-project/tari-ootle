@@ -23,8 +23,8 @@
 mod bootstrap;
 mod config;
 pub mod consensus;
-mod dry_run_transaction_processor;
 mod event_subscription;
+mod file_l1_submitter;
 #[cfg(feature = "web_ui")]
 mod http_ui;
 mod json_rpc;
@@ -32,9 +32,6 @@ mod json_rpc;
 mod metrics;
 mod node;
 mod p2p;
-mod substate_resolver;
-
-mod file_l1_submitter;
 mod state_bootstrap;
 pub mod transaction_validators;
 mod validator;

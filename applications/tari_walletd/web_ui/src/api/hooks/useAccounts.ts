@@ -208,9 +208,10 @@ export const useMintTestnetFaucetNfts = () => {
     onError: (error: ApiError) => {
       console.error(error);
     },
-    onSettled: () => {
+    onSettled: (_resp, _err, req) => {
       queryClient.invalidateQueries(["transactions"]);
       queryClient.invalidateQueries(["accounts_balances"]);
+      queryClient.invalidateQueries(["nfts_list"]);
     },
   });
 };
@@ -274,7 +275,7 @@ export const useAccountsGet = (account: ComponentAddress) => {
 
 export const useAccountNFTsList = (account: ComponentAddress, offset: number, limit: number) => {
   return useQuery({
-    queryKey: ["nfts_list_" + account + "_" + offset + "_" + limit],
+    queryKey: ["nfts_list", account, offset, limit],
     queryFn: () => nftList({ account: { ComponentAddress: account }, offset, limit }),
     onError: (_error: ApiError) => {},
   });

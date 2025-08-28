@@ -6,11 +6,7 @@ use tari_networking::NetworkingError;
 use tari_ootle_storage::StorageError;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::{
-    dry_run_transaction_processor::DryRunTransactionProcessorError,
-    p2p::services::mempool::MempoolRequest,
-    transaction_validators::TransactionValidationError,
-};
+use crate::{p2p::services::mempool::MempoolRequest, transaction_validators::TransactionValidationError};
 
 #[derive(thiserror::Error, Debug)]
 pub enum MempoolError {
@@ -22,8 +18,6 @@ pub enum MempoolError {
     RequestCancelled,
     #[error("Consensus channel closed")]
     ConsensusChannelClosed,
-    #[error("DryRunTransactionProcessor Error: {0}")]
-    DryRunTransactionProcessorError(#[from] DryRunTransactionProcessorError),
     #[error("Storage Error: {0}")]
     StorageError(#[from] StorageError),
     #[error("Transaction validation error: {0}")]

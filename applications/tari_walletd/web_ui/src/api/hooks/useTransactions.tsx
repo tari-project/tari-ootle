@@ -48,20 +48,13 @@ export const useTransactionDetails = (hash: string) => {
 
 export const useGetAllTransactions = (req: TransactionGetAllRequest) => {
   return useQuery({
-    queryKey: ["transactions"],
+    queryKey: ["transactions", req.status],
     queryFn: () => transactionsGetAll(req),
     onError: (error: ApiError) => {
       error;
     },
     refetchInterval: 5000,
     keepPreviousData: true,
-    structuralSharing: (oldData, newData) => {
-      if (!oldData || !newData) return newData;
-      if (JSON.stringify(oldData) === JSON.stringify(newData)) {
-        return oldData;
-      }
-      return newData;
-    },
   });
 };
 

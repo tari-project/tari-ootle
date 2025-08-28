@@ -59,7 +59,7 @@ impl Runner {
             .build_and_seal(&key.key);
 
         let finalize = self.submit_transaction_and_wait(transaction).await?;
-        let diff = finalize.result.accept().unwrap();
+        let diff = finalize.result.any_accept().unwrap();
         Ok(diff
             .up_iter()
             .filter_map(|(addr, value)| {
@@ -166,7 +166,7 @@ impl Runner {
             if let Some(reject) = result.result.any_reject() {
                 return Err(anyhow::anyhow!("Transaction failed: {}", reject));
             }
-            let diff = result.result.accept().unwrap();
+            let diff = result.result.any_accept().unwrap();
             let lp_vault = diff
                 .up_iter()
                 .find_map(|(addr, s)| {

@@ -16,7 +16,7 @@ use crate::{
         confidential_crypto::{ConfidentialCryptoApi, ConfidentialCryptoApiError},
         key_manager::{KeyManagerApi, KeyManagerApiError},
     },
-    models::{Account, ConfidentialOutputModel, OutputLockId, OutputStatus},
+    models::{Account, ConfidentialOutputModel, OutputStatus, WalletLockId},
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
@@ -45,7 +45,7 @@ where TStore: WalletStore
 
     pub fn lock_outputs_by_amount<A: Into<Amount>>(
         &self,
-        lock_id: OutputLockId,
+        lock_id: WalletLockId,
         vault_id: &VaultId,
         amount: A,
     ) -> Result<(Vec<ConfidentialOutputModel>, Amount), ConfidentialOutputsApiError> {
@@ -58,7 +58,7 @@ where TStore: WalletStore
                     reason: "Amount must be non-negative".to_string(),
                 })?;
         self.store.with_write_tx(|tx| {
-            let (outputs, total_output_amount) = self.lock_outputs_internal(tx, vault_id, amount, lock_id)?;
+            let (outputs, total_output_amount) = self.lock_outputs_internal(tx, lock_id, vault_id, amount)?;
 
             if total_output_amount < amount {
                 return Err(ConfidentialOutputsApiError::InsufficientFunds);
@@ -70,20 +70,20 @@ where TStore: WalletStore
 
     pub fn lock_outputs_until_partial_amount(
         &self,
+        locked_id: WalletLockId,
         vault_id: &VaultId,
         amount: Amount,
-        locked_by_proof_id: OutputLockId,
     ) -> Result<(Vec<ConfidentialOutputModel>, Amount), ConfidentialOutputsApiError> {
         self.store
-            .with_write_tx(|tx| self.lock_outputs_internal(tx, vault_id, amount, locked_by_proof_id))
+            .with_write_tx(|tx| self.lock_outputs_internal(tx, locked_id, vault_id, amount))
     }
 
     fn lock_outputs_internal<TTx: WalletStoreWriter>(
         &self,
         tx: &mut TTx,
+        lock_id: WalletLockId,
         vault_id: &VaultId,
         amount: Amount,
-        locked_by_proof_id: OutputLockId,
     ) -> Result<(Vec<ConfidentialOutputModel>, Amount), ConfidentialOutputsApiError> {
         if amount.is_negative() {
             return Err(ConfidentialOutputsApiError::InvalidParameter {
@@ -94,9 +94,7 @@ where TStore: WalletStore
         let mut total_output_amount = Amount::zero();
         let mut outputs = Vec::new();
         while total_output_amount < amount {
-            let output = tx
-                .outputs_lock_smallest_amount(vault_id, locked_by_proof_id)
-                .optional()?;
+            let output = tx.outputs_lock_smallest_amount(vault_id, lock_id).optional()?;
             match output {
                 Some(output) => {
                     total_output_amount += output.value;
@@ -118,25 +116,34 @@ where TStore: WalletStore
         Ok(())
     }
 
-    pub fn add_output_lock(&self, vault_id: &VaultId) -> Result<OutputLockId, ConfidentialOutputsApiError> {
-        let mut tx = self.store.create_write_tx()?;
-        let lock_id = tx.output_locks_insert_for_vault(vault_id)?;
-        tx.commit()?;
+    pub fn create_lock(&self) -> Result<WalletLockId, ConfidentialOutputsApiError> {
+        let lock_id = self.store.with_write_tx(|tx| tx.locks_create())?;
         Ok(lock_id)
     }
 
-    pub fn release_locked_outputs(&self, lock_id: OutputLockId) -> Result<(), ConfidentialOutputsApiError> {
+    pub fn lock_vault_revealed_funds(
+        &self,
+        lock_id: WalletLockId,
+        vault_id: &VaultId,
+        amount: Amount,
+    ) -> Result<(), ConfidentialOutputsApiError> {
+        self.store
+            .with_write_tx(|tx| tx.vaults_lock_revealed_funds(lock_id, vault_id, amount))?;
+        Ok(())
+    }
+
+    pub fn release_locked_outputs(&self, lock_id: WalletLockId) -> Result<(), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
-        tx.output_locks_delete(lock_id)?;
         tx.outputs_release_by_lock_id(lock_id)?;
+        tx.locks_delete(lock_id)?;
         tx.commit()?;
         Ok(())
     }
 
-    pub fn finalize_outputs_for_lock(&self, lock_id: OutputLockId) -> Result<(), ConfidentialOutputsApiError> {
+    pub fn finalize_outputs_for_lock(&self, lock_id: WalletLockId) -> Result<(), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
-        tx.output_locks_delete(lock_id)?;
         tx.outputs_finalize_by_lock_id(lock_id)?;
+        tx.locks_delete(lock_id)?;
         tx.commit()?;
         Ok(())
     }
@@ -187,19 +194,7 @@ where TStore: WalletStore
         Ok(outputs_with_masks)
     }
 
-    pub fn lock_revealed_funds(
-        &self,
-        lock_id: OutputLockId,
-        amount_to_lock: Amount,
-    ) -> Result<(), ConfidentialOutputsApiError> {
-        let mut tx = self.store.create_write_tx()?;
-        tx.vaults_lock_revealed_funds(lock_id, amount_to_lock)?;
-        tx.commit()?;
-
-        Ok(())
-    }
-
-    pub fn finalize_locked_revealed_funds(&self, lock_id: OutputLockId) -> Result<(), ConfidentialOutputsApiError> {
+    pub fn finalize_locked_revealed_funds(&self, lock_id: WalletLockId) -> Result<(), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
         tx.vaults_finalized_locked_revealed_funds(lock_id)?;
         tx.commit()?;
@@ -207,9 +202,9 @@ where TStore: WalletStore
         Ok(())
     }
 
-    pub fn release_revealed_funds(&self, lock_id: OutputLockId) -> Result<(), ConfidentialOutputsApiError> {
+    pub fn release_revealed_funds(&self, lock_id: WalletLockId) -> Result<(), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
-        tx.vaults_unlock_revealed_funds(lock_id)?;
+        tx.vaults_release_lock_revealed_funds(lock_id)?;
         tx.commit()?;
 
         Ok(())
@@ -324,14 +319,13 @@ where TStore: WalletStore
         })
     }
 
-    pub fn locks_set_transaction_hash(
+    pub fn locks_set_transaction_id(
         &self,
-        lock_id: OutputLockId,
+        lock_id: WalletLockId,
         transaction_id: TransactionId,
     ) -> Result<(), ConfidentialOutputsApiError> {
-        let mut tx = self.store.create_write_tx()?;
-        tx.output_locks_set_params(lock_id, Some(transaction_id), None)?;
-        tx.commit()?;
+        self.store
+            .with_write_tx(|tx| tx.locks_link_transaction(lock_id, transaction_id))?;
         Ok(())
     }
 }

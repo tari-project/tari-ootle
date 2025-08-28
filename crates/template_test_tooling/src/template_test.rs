@@ -560,7 +560,7 @@ impl TemplateTest {
         proofs: Vec<NonFungibleAddress>,
     ) -> ExecuteResult {
         let result = self.try_execute(transaction, proofs).unwrap();
-        if let Some(diff) = result.finalize.result.accept() {
+        if let Some(diff) = result.finalize.result.any_accept() {
             self.commit_diff(diff);
         }
 
@@ -626,7 +626,7 @@ impl TemplateTest {
         proofs: Vec<NonFungibleAddress>,
     ) -> anyhow::Result<ExecuteResult> {
         let result = self.try_execute_instructions(fee_instructions, instructions, proofs)?;
-        let diff = result.finalize.result.accept().ok_or_else(|| {
+        let diff = result.finalize.result.any_accept().ok_or_else(|| {
             anyhow!(
                 "Transaction was rejected: {}",
                 result.finalize.result.fee_reject().unwrap()

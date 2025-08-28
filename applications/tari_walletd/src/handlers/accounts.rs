@@ -392,12 +392,11 @@ pub async fn handle_reveal_funds(
                 0.into()
             };
 
-        let lock_id = sdk
-            .stealth_outputs_api()
-            .create_lock_for_resource(&STEALTH_TARI_RESOURCE_ADDRESS)?;
+        let lock_id = sdk.stealth_outputs_api().create_lock()?;
 
-        let (inputs, input_amount) = sdk.stealth_outputs_api().lock_outputs_in_account_by_amount(
+        let (inputs, input_amount) = sdk.stealth_outputs_api().lock_outputs_for_at_least_amount(
             account.address(),
+            &STEALTH_TARI_RESOURCE_ADDRESS,
             lock_id,
             amount_to_reveal,
         )?;
@@ -442,7 +441,7 @@ pub async fn handle_reveal_funds(
             .resolve_output_masks_for_spending(account.account(), inputs)?;
 
         let transfer = sdk.stealth_crypto_api().generate_transfer_statement(
-            &inputs,
+            inputs.iter().map(|i| &i.statement),
             Amount::zero(),
             array::from_ref(&output_statement),
             amount_to_reveal,

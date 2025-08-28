@@ -315,30 +315,24 @@ export default function TransactionDetails() {
               <Typography>Signers</Typography>
             </AccordionSummary>
             <AccordionDetails>
-              {transaction_body?.signatures?.length ? (
-                <TableContainer>
-                  <Table>
-                    <TableBody>
-                      {seal_signature ? (
-                        <TableRow key={-1}>
-                          <DataTableCell>{seal_signature.public_key}</DataTableCell>
-                        </TableRow>
-                      ) : (
-                        <></>
-                      )}
-                      {transaction_body.signatures.map((item: TransactionSignature, i: number) => {
-                        return (
-                          <TableRow key={i}>
-                            <DataTableCell>{item.public_key}</DataTableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              ) : (
-                <span>Empty</span>
-              )}
+              <TableContainer>
+                <Table>
+                  <TableBody>
+                    {seal_signature ? (
+                      <TableRow key="seal">
+                        <DataTableCell>Sealed by: {seal_signature.public_key}</DataTableCell>
+                      </TableRow>
+                    ) : (
+                      <></>
+                    )}
+                    {(transaction_body?.signatures ?? []).map((item: TransactionSignature, i: number) => (
+                      <TableRow key={i}>
+                        <DataTableCell>{item.public_key}</DataTableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
             </AccordionDetails>
           </Accordion>
         </div>

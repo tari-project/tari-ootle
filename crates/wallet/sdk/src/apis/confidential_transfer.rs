@@ -26,7 +26,7 @@ use crate::{
         key_manager::{KeyBranch, KeyManagerApi, KeyManagerApiError},
         substate::{SubstateApiError, SubstatesApi},
     },
-    models::{ConfidentialOutputModel, OutputLockId, OutputStatus},
+    models::{ConfidentialOutputModel, OutputStatus, WalletLockId},
     network::WalletNetworkInterface,
     storage::{WalletStorageError, WalletStore},
 };
@@ -69,6 +69,7 @@ where
     #[allow(clippy::too_many_lines)]
     fn resolved_inputs_for_transfer(
         &self,
+        lock_id: WalletLockId,
         from_account: ComponentAddress,
         resource_address: ResourceAddress,
         spend_amount: Amount,
@@ -79,8 +80,6 @@ where
             .get_vault_by_resource(&from_account, &resource_address)?;
 
         let available_revealed_funds = src_vault.available_revealed_balance();
-
-        let lock_id = self.outputs_api.add_output_lock(&src_vault.id)?;
 
         match &input_selection {
             ConfidentialTransferInputSelection::ConfidentialOnly => {
@@ -107,7 +106,8 @@ where
                     return Err(ConfidentialTransferApiError::InsufficientFunds);
                 }
 
-                self.outputs_api.lock_revealed_funds(lock_id, spend_amount)?;
+                self.outputs_api
+                    .lock_vault_revealed_funds(lock_id, &src_vault.id, spend_amount)?;
 
                 info!(
                     target: LOG_TARGET,
@@ -133,7 +133,8 @@ where
                         src_vault.id,
                     );
 
-                    self.outputs_api.lock_revealed_funds(lock_id, revealed_to_spend)?;
+                    self.outputs_api
+                        .lock_vault_revealed_funds(lock_id, &src_vault.id, revealed_to_spend)?;
 
                     return Ok(InputsToSpend {
                         confidential: vec![],
@@ -149,7 +150,8 @@ where
 
                 let total_confidential_spent = confidential_inputs.iter().map(|i| i.value).sum::<Amount>();
 
-                self.outputs_api.lock_revealed_funds(lock_id, revealed_to_spend)?;
+                self.outputs_api
+                    .lock_vault_revealed_funds(lock_id, &src_vault.id, revealed_to_spend)?;
 
                 info!(
                     target: LOG_TARGET,
@@ -169,10 +171,9 @@ where
                 })
             },
             ConfidentialTransferInputSelection::PreferConfidential => {
-                let lock_id = self.outputs_api.add_output_lock(&src_vault.id)?;
                 let (confidential_inputs, amount_locked) =
                     self.outputs_api
-                        .lock_outputs_until_partial_amount(&src_vault.id, spend_amount, lock_id)?;
+                        .lock_outputs_until_partial_amount(lock_id, &src_vault.id, spend_amount)?;
 
                 let revealed_to_spend = spend_amount
                     .saturating_sub_positive(amount_locked)
@@ -182,7 +183,8 @@ where
                     return Err(ConfidentialTransferApiError::InsufficientFunds);
                 }
 
-                self.outputs_api.lock_revealed_funds(lock_id, revealed_to_spend)?;
+                self.outputs_api
+                    .lock_vault_revealed_funds(lock_id, &src_vault.id, revealed_to_spend)?;
 
                 let confidential_inputs = self.outputs_api.resolve_output_masks(confidential_inputs)?;
 
@@ -248,7 +250,9 @@ where
         let account_public_key = PublicKey::from_secret_key(&account_secret.key);
 
         // Reserve and lock input funds
+        let lock_id = self.outputs_api.create_lock()?;
         let inputs_to_spend = match self.resolved_inputs_for_transfer(
+            lock_id,
             params.from_account,
             params.resource_address,
             params.amount,
@@ -379,7 +383,7 @@ where
 
         let tx_id = transaction.calculate_id();
         self.outputs_api
-            .locks_set_transaction_hash(inputs_to_spend.lock_id, tx_id)?;
+            .locks_set_transaction_id(inputs_to_spend.lock_id, tx_id)?;
 
         Ok(TransferOutput {
             transaction,
@@ -430,7 +434,7 @@ where
 
 pub struct TransferOutput {
     pub transaction: Transaction,
-    pub transaction_proof_id: OutputLockId,
+    pub transaction_proof_id: WalletLockId,
 }
 
 #[derive(Debug)]
@@ -491,7 +495,7 @@ pub enum ConfidentialTransferInputSelection {
 #[derive(Debug)]
 pub struct InputsToSpend {
     pub confidential: Vec<MaskAndValue>,
-    pub lock_id: OutputLockId,
+    pub lock_id: WalletLockId,
     pub revealed: Amount,
 }
 

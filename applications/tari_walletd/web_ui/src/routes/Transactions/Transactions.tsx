@@ -40,15 +40,17 @@ import StatusChip from "../../Components/StatusChip";
 import { DataTableCell } from "../../Components/StyledComponents";
 import { useGetAllTransactions } from "../../api/hooks/useTransactions";
 import { emptyRows, handleChangePage, handleChangeRowsPerPage } from "../../utils/helpers";
-import { Account, substateIdToString, WalletTransaction } from "@tari-project/typescript-bindings";
+import { Account, WalletTransaction } from "@tari-project/typescript-bindings";
 
-export default function Transactions({ account, ownerPublicKey }: { account: Account; ownerPublicKey: string }) {
+export default function Transactions({ account }: { account: Account; ownerPublicKey: string }) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-  const { data, isLoading, error, isError, refetch } = useGetAllTransactions({
+  const { data, isLoading, error, isError, refetch, isRefetching } = useGetAllTransactions({
     status: null,
-    component: account ? substateIdToString(account.address) : null,
-    signer_public_key: ownerPublicKey ? ownerPublicKey : null,
+    // Some stealth transactions cannot be identified by component/public key in the wallet - so we fetch all transactions.
+    // If this feature is badly needed, we can "tag" transactions as involving a specific account when they are created.
+    component: null, //: account ? substateIdToString(account.address) : null,
+    signer_public_key: null, //: ownerPublicKey ? ownerPublicKey : null,
   });
   useEffect(() => {
     refetch();
@@ -56,7 +58,11 @@ export default function Transactions({ account, ownerPublicKey }: { account: Acc
   const theme = useTheme();
 
   return (
-    <FetchStatusCheck isLoading={isLoading} isError={isError} errorMessage={error?.message || "Error fetching data"}>
+    <FetchStatusCheck
+      isLoading={isLoading && !isRefetching}
+      isError={isError}
+      errorMessage={error?.message || "Error fetching data"}
+    >
       <Fade in={!isLoading && !isError}>
         <TableContainer>
           <Table>
@@ -72,7 +78,7 @@ export default function Transactions({ account, ownerPublicKey }: { account: Acc
               {data?.transactions
                 ?.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                 .map((transaction: WalletTransaction) => {
-                  const { transaction: _, finalize: result, status, id: hash } = transaction;
+                  const { finalize: result, status, id: hash } = transaction;
                   const { fee_receipt } = result || {};
                   return (
                     <TableRow key={hash}>

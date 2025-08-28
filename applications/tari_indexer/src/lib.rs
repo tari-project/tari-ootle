@@ -40,6 +40,7 @@ mod json_rpc;
 mod network_client;
 mod network_state_sync;
 mod storage_sqlite;
+mod substate_file_cache;
 mod substate_manager;
 mod transaction_manager;
 
@@ -61,11 +62,7 @@ use tari_epoch_manager::{
 use tari_epoch_oracles::EpochOracle;
 use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::NetworkingService;
-use tari_ootle_app_utilities::{
-    keypair::setup_keypair_prompt,
-    substate_file_cache::SubstateFileCache,
-    template_download_queue::TemplateDownloadQueue,
-};
+use tari_ootle_app_utilities::{keypair::setup_keypair_prompt, template_download_queue::TemplateDownloadQueue};
 use tari_ootle_common_types::{layer_one_transaction::LayerOneTransactionDef, Epoch, PeerAddress};
 use tari_ootle_storage::global::{DbFactory, GlobalDb};
 use tari_ootle_storage_sqlite::{global::SqliteGlobalDbAdapter, SqliteDbFactory};
@@ -79,6 +76,7 @@ use crate::{
     event_manager::EventManager,
     graphql::server::run_graphql,
     json_rpc::{spawn_json_rpc, JsonRpcHandlers},
+    substate_file_cache::SubstateFileCache,
     transaction_manager::TransactionManager,
 };
 

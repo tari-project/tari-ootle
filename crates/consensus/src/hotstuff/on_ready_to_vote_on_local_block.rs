@@ -612,7 +612,7 @@ where TConsensusSpec: ConsensusSpec
                         }
 
                         if pool_tx.current_decision().is_commit() {
-                            if let Some(diff) = execution.result().finalize.accept() {
+                            if let Some(diff) = execution.result().finalize.any_accept() {
                                 substate_store.put_diff(diff)?;
                             }
 
@@ -1310,7 +1310,7 @@ where TConsensusSpec: ConsensusSpec
                 ))
             })?;
 
-        let diff = execution.result().finalize.accept().ok_or_else(|| {
+        let diff = execution.result().finalize.any_accept().ok_or_else(|| {
             HotStuffError::InvariantError(format!(
                 "evaluate_local_accept_command: Transaction {} has COMMIT decision but execution failed when proposing",
                 tx_rec.transaction_id(),

@@ -87,7 +87,7 @@ impl Runner {
             }
 
             self.stats
-                .add_substate_created(finalize.result.accept().unwrap().up_len());
+                .add_substate_created(finalize.result.any_accept().unwrap().up_len());
 
             return Ok(finalize.clone());
         }

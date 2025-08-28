@@ -28,6 +28,7 @@ pub struct StealthOutput {
     pub tag_byte: i32,
     pub is_burnt: bool,
     pub is_frozen: bool,
+    pub is_on_chain: bool,
     pub created_at: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
 }
@@ -84,7 +85,8 @@ impl StealthOutput {
             })?,
             is_burnt: self.is_burnt,
             is_frozen: self.is_frozen,
-            lock_id: self.locked_by_proof.map(|proof| proof as u64),
+            is_on_chain: self.is_on_chain,
+            lock_id: self.locked_by_proof,
         })
     }
 }

@@ -869,7 +869,7 @@ pub async fn transfer(
     };
 
     let resp = client.accounts_transfer(request).await.unwrap();
-    add_substate_ids(world, outputs_name, resp.result.result.accept().unwrap());
+    add_substate_ids(world, outputs_name, resp.result.result.any_accept().unwrap());
 }
 
 pub async fn confidential_transfer(
@@ -898,7 +898,7 @@ pub async fn confidential_transfer(
     };
 
     let resp = client.accounts_confidential_transfer(request).await.unwrap();
-    add_substate_ids(world, outputs_name, resp.result.result.accept().unwrap());
+    add_substate_ids(world, outputs_name, resp.result.result.any_accept().unwrap());
 }
 
 pub async fn get_auth_wallet_daemon_client(world: &TariWorld, wallet_daemon_name: &str) -> WalletDaemonClient {

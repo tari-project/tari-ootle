@@ -67,7 +67,6 @@ pub async fn create_account(world: &mut TariWorld, account_name: String, validat
         version: None,
         dump_outputs_into: None,
         account_template_address: None,
-        dry_run: false,
     };
     let mut client = world.get_validator_node(&validator_node_name).get_client();
     let resp = submit_transaction(vec![instruction], common, data_dir, &mut client)
@@ -82,7 +81,7 @@ pub async fn create_account(world: &mut TariWorld, account_name: String, validat
     add_substate_ids(
         world,
         account_name,
-        resp.dry_run_result.unwrap().finalize.result.accept().unwrap(),
+        resp.dry_run_result.unwrap().finalize.result.any_accept().unwrap(),
     );
 }
 
@@ -117,7 +116,6 @@ pub async fn create_component(
             version: None,
             dump_outputs_into: None,
             account_template_address: None,
-            dry_run: false,
         },
     };
     let mut client = world.get_validator_node(&vn_name).get_client();
@@ -130,7 +128,7 @@ pub async fn create_component(
     add_substate_ids(
         world,
         outputs_name,
-        resp.dry_run_result.unwrap().finalize.result.accept().unwrap(),
+        resp.dry_run_result.unwrap().finalize.result.any_accept().unwrap(),
     );
 }
 
@@ -267,7 +265,13 @@ pub async fn call_method(
     add_substate_ids(
         world,
         outputs_name,
-        resp.dry_run_result.as_ref().unwrap().finalize.result.accept().unwrap(),
+        resp.dry_run_result
+            .as_ref()
+            .unwrap()
+            .finalize
+            .result
+            .any_accept()
+            .unwrap(),
     );
     Ok(resp)
 }
@@ -295,7 +299,6 @@ async fn call_method_inner(
             version: None,
             dump_outputs_into: None,
             account_template_address: None,
-            dry_run: false,
         },
     };
     let resp = handle_submit(args, vn_data_dir, &mut vn_client.clone()).await.unwrap();
@@ -366,7 +369,6 @@ pub async fn submit_manifest(
         version: None,
         dump_outputs_into: None,
         account_template_address: None,
-        dry_run: false,
     };
     let resp = submit_transaction(instructions.instructions, args, data_dir, &mut client)
         .await
@@ -379,7 +381,7 @@ pub async fn submit_manifest(
     add_substate_ids(
         world,
         outputs_name,
-        resp.dry_run_result.unwrap().finalize.result.accept().unwrap(),
+        resp.dry_run_result.unwrap().finalize.result.any_accept().unwrap(),
     );
 }
 

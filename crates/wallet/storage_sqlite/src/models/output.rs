@@ -76,7 +76,7 @@ impl ConfidentialOutput {
                 item: "output",
                 details: format!("Corrupt db: invalid output status '{}'", self.status),
             })?,
-            lock_id: self.locked_by_proof.map(|proof| proof as u64),
+            lock_id: self.locked_by_proof,
         })
     }
 }

@@ -49,7 +49,6 @@ use tari_epoch_oracles::{
     store::EpochOracleStore,
     EpochOracle,
 };
-use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_ootle_app_utilities::{
     common::verify_correct_network,
@@ -57,7 +56,6 @@ use tari_ootle_app_utilities::{
     epoch_oracle_config::{BaseLayerOracleConfig, EpochOracleType},
     keypair::RistrettoKeypair,
     seed_peer::SeedPeer,
-    substate_file_cache::SubstateFileCache,
     template_download_queue::TemplateDownloadQueue,
     transaction_executor::TariTransactionProcessor,
     utxo_store::StateUtxoStore,
@@ -81,7 +79,6 @@ use tokio::{
 use crate::consensus::metrics::PrometheusConsensusMetrics;
 use crate::{
     consensus::{self, ConsensusHandle, TarBlockTransactionExecutor, ValidationContext},
-    dry_run_transaction_processor::DryRunTransactionProcessor,
     file_l1_submitter::FileLayerOneSubmitter,
     p2p::{
         create_tari_validator_node_rpc_service,
@@ -93,7 +90,6 @@ use crate::{
         NopLogger,
     },
     state_bootstrap::bootstrap_state,
-    substate_resolver::TariSubstateResolver,
     transaction_validators::{
         EpochRangeValidator,
         FeeTransactionValidator,
@@ -367,19 +363,6 @@ pub async fn spawn_services(
     );
     handles.push(join_handle);
 
-    // substate cache
-    let substate_cache_dir = config.common.base_path.join("substate_cache");
-    let substate_cache = SubstateFileCache::new(substate_cache_dir)
-        .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Substate cache error: {}", e)))?;
-
-    // Dry-run services (TODO: should we implement dry-run on validator nodes, or just keep it in the indexer?)
-    let scanner = SubstateScanner::new(
-        epoch_manager.clone(),
-        validator_node_client_factory.clone(),
-        substate_cache,
-    );
-    let substate_resolver = TariSubstateResolver::new(state_store.clone(), scanner);
-
     spawn_p2p_rpc(
         &config,
         &mut networking,
@@ -393,9 +376,6 @@ pub async fn spawn_services(
     // changed by comms during initialization when using tor.
     save_identities(&config, &keypair)?;
 
-    let dry_run_transaction_processor =
-        DryRunTransactionProcessor::new(epoch_manager.clone(), payload_processor, substate_resolver);
-
     Ok(Services {
         config,
         keypair,
@@ -406,7 +386,6 @@ pub async fn spawn_services(
         template_manager: template_manager_service,
         consensus_handle,
         state_store,
-        dry_run_transaction_processor,
         handles,
         layer_one_transaction_submitter,
     })
@@ -431,7 +410,6 @@ pub struct Services<TStore> {
     pub epoch_manager: EpochManagerHandle<PeerAddress>,
     pub template_manager: TemplateManagerHandle,
     pub consensus_handle: ConsensusHandle,
-    pub dry_run_transaction_processor: DryRunTransactionProcessor<TStore>,
     pub state_store: TStore,
     pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     pub layer_one_transaction_submitter: FileLayerOneSubmitter,

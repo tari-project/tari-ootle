@@ -1,4 +1,4 @@
-//  Copyright 2022. The Tari Project
+//  Copyright 2025. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,39 +20,27 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { styled } from "@mui/material/styles";
-import { KeyboardArrowDownRounded } from "@mui/icons-material";
-import MuiAccordion, { AccordionProps } from "@mui/material/Accordion";
-import MuiAccordionSummary, { AccordionSummaryProps } from "@mui/material/AccordionSummary";
-import MuiAccordionDetails, { AccordionDetailsProps } from "@mui/material/AccordionDetails";
+import { Chip, Tooltip } from "@mui/material";
+import { useTimeAgo } from "../../hooks/useTimeAgo";
+import { formatTimestamp } from "../../utils/helpers";
 
-export const Accordion: React.FC<AccordionProps> = styled((props: AccordionProps) => (
-  <MuiAccordion disableGutters elevation={0} {...props} />
-))(({ theme }) => ({
-  "borderRadius": 12,
-  "boxShadow": theme.palette.mode === "dark" ? "none" : "3px 3px 12px rgba(0,0,0,0.08)",
-  "backgroundColor": theme.palette.mode === "dark" ? theme.palette.divider : theme.palette.background.paper,
-  "marginBottom": "8px",
-  "&:not(:last-child)": {
-    borderBottom: 0,
-  },
-  "&:before": {
-    display: "none",
-  },
-}));
+function TimeChip({ timestamp }: { timestamp: string | null | undefined }) {
+  const timeAgo = useTimeAgo(timestamp);
+  const formattedTime = formatTimestamp(timestamp);
 
-export const AccordionSummary: React.FC<AccordionSummaryProps> = styled((props: AccordionSummaryProps) => (
-  <MuiAccordionSummary expandIcon={<KeyboardArrowDownRounded fontSize="medium" />} {...props} />
-))(({ theme }) => ({
-  "flexDirection": "row",
-  "& .MuiAccordionSummary-expandIconWrapper.Mui-expanded": {
-    transform: "rotate(90deg)",
-  },
-  "& .MuiAccordionSummary-content": {
-    marginLeft: theme.spacing(1),
-  },
-}));
+  if (!timeAgo) return null;
 
-export const AccordionDetails: React.FC<AccordionDetailsProps> = styled(MuiAccordionDetails)(({ theme }) => ({
-  padding: theme.spacing(2),
-}));
+  return (
+    <Tooltip title={`Created at: ${formattedTime}`} placement="top" arrow>
+      <Chip
+        label={timeAgo}
+        color="default"
+        size="small"
+        variant="filled"
+        sx={{ padding: "2px 4px 0px 4px", marginTop: "4px" }}
+      />
+    </Tooltip>
+  );
+}
+
+export default TimeChip;

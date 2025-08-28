@@ -58,7 +58,7 @@ export const DataTableCell: React.FC<TableCellProps> = styled(TableCell)(({ them
 }));
 
 export const CodeBlock: React.FC<BoxProps> = styled(Box)(({ theme }) => ({
-  backgroundColor: theme.palette.divider,
+  backgroundColor: theme.palette.accent.background,
   borderRadius: theme.shape.borderRadius,
   padding: theme.spacing(3),
   maxHeight: "400px",

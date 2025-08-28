@@ -254,7 +254,7 @@ export default function TransactionDetails() {
           </>
           <Accordion expanded={expandedPanels.includes("panel1")} onChange={handleChange("panel1")}>
             <AccordionSummary aria-controls="panel1bh-content" id="panel1bh-header">
-              <Typography>Fee Instructions</Typography>
+              <Typography variant="h5">Fee Instructions</Typography>
             </AccordionSummary>
             <AccordionDetails>
               {transaction?.fee_instructions?.length ? (
@@ -266,7 +266,7 @@ export default function TransactionDetails() {
           </Accordion>
           <Accordion expanded={expandedPanels.includes("panel2")} onChange={handleChange("panel2")}>
             <AccordionSummary aria-controls="panel2bh-content" id="panel1bh-header">
-              <Typography>Instructions</Typography>
+              <Typography variant="h5">Instructions</Typography>
             </AccordionSummary>
             <AccordionDetails>
               {transaction?.instructions?.length ? (
@@ -279,7 +279,7 @@ export default function TransactionDetails() {
           {data.result && (
             <Accordion expanded={expandedPanels.includes("panel3")} onChange={handleChange("panel3")}>
               <AccordionSummary aria-controls="panel3bh-content" id="panel1bh-header">
-                <Typography>Events</Typography>
+                <Typography variant="h5">Events</Typography>
               </AccordionSummary>
               <AccordionDetails>
                 <Events data={data.result.events} />
@@ -289,7 +289,7 @@ export default function TransactionDetails() {
           {data.result && (
             <Accordion expanded={expandedPanels.includes("panel4")} onChange={handleChange("panel4")}>
               <AccordionSummary aria-controls="panel4bh-content" id="panel1bh-header">
-                <Typography>Logs</Typography>
+                <Typography variant="h5">Logs</Typography>
               </AccordionSummary>
               <AccordionDetails>
                 <Logs data={data.result.logs} />
@@ -299,7 +299,7 @@ export default function TransactionDetails() {
           {data.result && (
             <Accordion expanded={expandedPanels.includes("panel5")} onChange={handleChange("panel5")}>
               <AccordionSummary aria-controls="panel5bh-content" id="panel1bh-header">
-                <Typography>Substates</Typography>
+                <Typography variant="h5">Substates</Typography>
               </AccordionSummary>
               <AccordionDetails>
                 <Substates data={data.result.result} />
@@ -308,7 +308,7 @@ export default function TransactionDetails() {
           )}
           <Accordion expanded={expandedPanels.includes("panel6")} onChange={handleChange("panel6")}>
             <AccordionSummary aria-controls="panel1bh-content" id="panel1bh-header">
-              <Typography>Inputs</Typography>
+              <Typography variant="h5">Inputs</Typography>
             </AccordionSummary>
             <AccordionDetails>
               {transaction?.inputs?.length ? (
@@ -332,7 +332,7 @@ export default function TransactionDetails() {
           </Accordion>
           <Accordion expanded={expandedPanels.includes("panel7")} onChange={handleChange("panel7")}>
             <AccordionSummary aria-controls="panel7bh-content" id="panel7bh-header">
-              <Typography>Signers</Typography>
+              <Typography variant="h5">Signers</Typography>
             </AccordionSummary>
             <AccordionDetails>
               {transaction_body?.signatures?.length ? (

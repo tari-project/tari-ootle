@@ -1,4 +1,4 @@
-//  Copyright 2022. The Tari Project
+//  Copyright 2025. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,39 +20,46 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { styled } from "@mui/material/styles";
-import { KeyboardArrowDownRounded } from "@mui/icons-material";
-import MuiAccordion, { AccordionProps } from "@mui/material/Accordion";
-import MuiAccordionSummary, { AccordionSummaryProps } from "@mui/material/AccordionSummary";
-import MuiAccordionDetails, { AccordionDetailsProps } from "@mui/material/AccordionDetails";
+import { useEffect, useState } from "react";
+import { parseTimestamp } from "../utils/helpers";
 
-export const Accordion: React.FC<AccordionProps> = styled((props: AccordionProps) => (
-  <MuiAccordion disableGutters elevation={0} {...props} />
-))(({ theme }) => ({
-  "borderRadius": 12,
-  "boxShadow": theme.palette.mode === "dark" ? "none" : "3px 3px 12px rgba(0,0,0,0.08)",
-  "backgroundColor": theme.palette.mode === "dark" ? theme.palette.divider : theme.palette.background.paper,
-  "marginBottom": "8px",
-  "&:not(:last-child)": {
-    borderBottom: 0,
-  },
-  "&:before": {
-    display: "none",
-  },
-}));
+export function useTimeAgo(rawTimestamp: string | null | undefined): string {
+  const getTimeAgo = (timestamp: string | null | undefined): string => {
+    const date = parseTimestamp(timestamp);
+    if (!date) return "";
 
-export const AccordionSummary: React.FC<AccordionSummaryProps> = styled((props: AccordionSummaryProps) => (
-  <MuiAccordionSummary expandIcon={<KeyboardArrowDownRounded fontSize="medium" />} {...props} />
-))(({ theme }) => ({
-  "flexDirection": "row",
-  "& .MuiAccordionSummary-expandIconWrapper.Mui-expanded": {
-    transform: "rotate(90deg)",
-  },
-  "& .MuiAccordionSummary-content": {
-    marginLeft: theme.spacing(1),
-  },
-}));
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffSeconds = Math.floor(diffMs / 1000);
+    const diffMinutes = Math.floor(diffSeconds / 60);
+    const diffHours = Math.floor(diffMinutes / 60);
+    const diffDays = Math.floor(diffHours / 24);
 
-export const AccordionDetails: React.FC<AccordionDetailsProps> = styled(MuiAccordionDetails)(({ theme }) => ({
-  padding: theme.spacing(2),
-}));
+    if (diffSeconds < 60)
+      return `${diffSeconds} sec${diffSeconds !== 1 ? "s" : ""} ago`;
+    if (diffMinutes < 60)
+      return `${diffMinutes} min${diffMinutes !== 1 ? "s" : ""} ago`;
+    if (diffHours < 24)
+      return `${diffHours} hour${diffHours !== 1 ? "s" : ""} ago`;
+    if (diffDays === 1) return "yesterday";
+    if (diffDays < 7) return `${diffDays} day${diffDays !== 1 ? "s" : ""} ago`;
+
+    return date.toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  };
+
+  const [display, setDisplay] = useState(() => getTimeAgo(rawTimestamp));
+
+  useEffect(() => {
+    const update = () => setDisplay(getTimeAgo(rawTimestamp));
+    update();
+
+    const interval = setInterval(update, 60 * 1000);
+    return () => clearInterval(interval);
+  }, [rawTimestamp]);
+
+  return display;
+}

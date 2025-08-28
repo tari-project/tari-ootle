@@ -44,11 +44,12 @@ interface ICodeBlockExpand {
 }
 
 const CodeBlock = styled(Box)(({ theme }) => ({
-  backgroundColor: theme.palette.divider,
+  backgroundColor: theme.palette.accent.background,
   borderRadius: `${theme.spacing(1)} ${theme.spacing(1)} 0 0`,
   padding: theme.spacing(3),
   maxHeight: "400px",
   overflowY: "scroll",
+  border: `1px solid ${theme.palette.accent.border}`,
 }));
 
 const StyledToolbar = styled(Box)(({ theme }) => ({
@@ -59,7 +60,8 @@ const StyledToolbar = styled(Box)(({ theme }) => ({
   borderRadius: `0 0 ${theme.spacing(1)} ${theme.spacing(1)}`,
   borderRight: `1px solid ${theme.palette.divider}`,
   padding: 4,
-  border: `1px solid ${theme.palette.divider}`,
+  border: `1px solid ${theme.palette.accent.border}`,
+  borderTop: "none",
 }));
 
 export default function CodeBlockExpand({ title, content }: ICodeBlockExpand) {

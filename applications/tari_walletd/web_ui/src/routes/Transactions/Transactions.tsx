@@ -24,6 +24,7 @@ import { ChevronRight } from "@mui/icons-material";
 import {
   Fade,
   IconButton,
+  Stack,
   Table,
   TableBody,
   TableCell,
@@ -41,6 +42,7 @@ import { DataTableCell } from "../../Components/StyledComponents";
 import { useGetAllTransactions } from "../../api/hooks/useTransactions";
 import { emptyRows, handleChangePage, handleChangeRowsPerPage } from "../../utils/helpers";
 import { Account, substateIdToString, WalletTransaction } from "@tari-project/typescript-bindings";
+import TimeChip from "./TimeChip";
 
 export default function Transactions({ account }: { account: Account }) {
   const [page, setPage] = useState(0);
@@ -75,15 +77,18 @@ export default function Transactions({ account }: { account: Account }) {
                   return (
                     <TableRow key={hash}>
                       <DataTableCell>
-                        <Link
-                          to={`/transactions/${hash}`}
-                          style={{
-                            textDecoration: "none",
-                            color: theme.palette.text.secondary,
-                          }}
-                        >
-                          {hash}
-                        </Link>
+                        <Stack direction="row" spacing={2} alignItems="center">
+                          <Link
+                            to={`/transactions/${hash}`}
+                            style={{
+                              textDecoration: "none",
+                              color: theme.palette.text.secondary,
+                            }}
+                          >
+                            {hash}
+                          </Link>
+                          <TimeChip timestamp={transaction.last_update_time} />
+                        </Stack>
                       </DataTableCell>
                       <DataTableCell>
                         <StatusChip status={status} showTitle />

@@ -6,6 +6,35 @@ You can read about the technical specifications of the Ootle in the [RFCs](https
 
 If you're looking for the core Tari base layer code, it's in [this repository](https://github.com/tari-project/tari)
 
+## Prerequisites
+
+You will require the following tools and dependencies to successfully build the Ootle and/or run the Ootle locally via the Localnet environment:
+
+- **C/C++ compiler**
+  - Linux: `gcc` or `clang`
+  - macOS: `clang` (via Xcode CLI tools)
+  - Windows: `MSVC` (via Visual Studio Build Tools)
+- **Build tools**
+  - `make`, `cmake`, or equivalent
+  - `pkg-config` (Linux/macOS)
+- **Libraries**
+  - OpenSSL development libraries (`libssl-dev`)
+  - SQLite development libraries (`libsqlite3-dev`)
+  - Protobuf compiler (`protoc`) and headers (`libprotobuf-dev`)
+- **Other**
+  - `git`
+
+- **Rust (=1.88)**: Install Rust using [rustup](https://rustup.rs), and add a WASM target:
+
+```bash
+# Install the rust version in rust-toolchain.toml
+rustup install
+# Add wasm target
+rustup target add wasm32-unknown-unknown
+```
+
+- **Node.js (>=20.x) & npm**: Node.js is required for building the React UI components. Follow the instructions at [node.js](https://nodejs.org/en/download) for your desired operating system and package/version managers. We recommend installing Node.js via [`nvm`](https://github.com/nvm-sh/nvm) to easily manage versions across projects.
+ 
 ## Accessing the Ootle Testnet
 
 The Tari Ootle Wallet Daemon is available on the project’s [releases page](https://github.com/tari-project/tari-ootle/releases).
@@ -26,10 +55,7 @@ Navigate to http://127.0.0.1:5100 to create an account, claim test tokens and st
 
 NOTE: This repo is heavily under development, so these instructions may change without notice.
 
-### Prerequisites
-Make sure you have the following installed:
-
-* pnpm
+Confirm you have installed all the prerequisites listed in the **Prerequisites** section (Rust, Node.js, npm, linux dependencies)
 
 ### Running 
 The easiest way to test out the Ootle is to use the `tari_swarm_daemon`. This will spin up all necessary MinoTari and Ootle components for a localnet.
@@ -121,7 +147,4 @@ For other environments, the "manual" process is as follows:
    - Depending on the network configuration, this may take **tens to hundreds of blocks** before the burn is picked up.
 
 7. **Claim the burn**.  
-   Use the Ootle wallet web UI or the `tari_ootle_wallet_cli` tool to claim the burn using the burn proof via the **"Claim Burn"** dialog.  
-
-
-
+   Use the Ootle wallet web UI or the `tari_ootle_wallet_cli` tool to claim the burn using the burn proof via the **"Claim Burn"** dialog.

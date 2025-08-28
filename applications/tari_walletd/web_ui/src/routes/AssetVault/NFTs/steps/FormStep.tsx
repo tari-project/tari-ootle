@@ -31,7 +31,7 @@ import ListItemText from "@mui/material/ListItemText";
 import { Divider, InputLabel, Stack } from "@mui/material";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
 import type { NonFungibleId, NonFungibleToken, Account } from "@tari-project/typescript-bindings";
-import { substateIdToString, formatXTM, validateAddress } from "../../../../utils/helpers";
+import { substateIdToString, formatXTM, validateAddress, displayNftId } from "../../../../utils/helpers";
 import { useNftTransferStore } from "../../../../store/nftTransferStore";
 
 interface FormStepProps {
@@ -160,7 +160,7 @@ export default function FormStep({
                   <Checkbox
                     checked={transferFormState.nfts.some((id) => nftIdToString(id) == nftIdToString(nft.nft_id))}
                   />
-                  <ListItemText primary={nftIdToString(nft.nft_id)} />
+                  <ListItemText primary={displayNftId(nft.nft_id)} />
                 </MenuItem>
               ))}
             </Select>
@@ -168,7 +168,7 @@ export default function FormStep({
         ) : (
           <TextField
             label="Selected NFT"
-            value={nftIdToString(preSelectedNftId)}
+            value={displayNftId(preSelectedNftId)}
             disabled
             variant="outlined"
             style={{ flexGrow: 1 }}

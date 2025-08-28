@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { ChangeEvent } from "react";
-import type { Amount, SubstateId } from "@tari-project/typescript-bindings";
+import type { Amount, SubstateId, NonFungibleId } from "@tari-project/typescript-bindings";
 import { CURRENCY } from "./constants";
 
 export const renderJson = (json: any) => {
@@ -330,3 +330,20 @@ export const formatTimestamp = (rawTimestamp: string | null | undefined): string
 export const parseTimestamp = (rawTimestamp: string | null | undefined): Date | null => {
   return normalizeTimestamp(rawTimestamp);
 };
+
+export function displayNftId(nftId: NonFungibleId): string {
+  if ("U256" in nftId) {
+    return `NFT #${shortenString(toHexString(nftId.U256))}`;
+  }
+  if ("Uint64" in nftId) {
+    return `NFT #${nftId.Uint64}`;
+  }
+  if ("Uint32" in nftId) {
+    return `NFT #${nftId.Uint32}`;
+  }
+  if ("String" in nftId) {
+    return `NFT #${nftId.String}`;
+  }
+
+  return `NFT #${JSON.stringify(nftId)}`;
+}

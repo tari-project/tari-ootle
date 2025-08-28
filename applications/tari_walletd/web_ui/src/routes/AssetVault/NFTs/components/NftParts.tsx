@@ -23,29 +23,13 @@
 import CancelRoundedIcon from "@mui/icons-material/CancelRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 import { Avatar, Box, CardContent, CardMedia, Chip, Divider, Grid, TableRow, Typography } from "@mui/material";
-import type { NonFungibleId, NonFungibleToken } from "@tari-project/typescript-bindings";
+import type { NonFungibleToken } from "@tari-project/typescript-bindings";
 import CopyAddress from "../../../../Components/CopyAddress";
 import { NftCard as Card, DataTableCell } from "../../../../Components/StyledComponents";
 import { convertCborValue } from "../../../../utils/cbor";
-import { shortenString, shortenSubstateId, toHexString } from "../../../../utils/helpers";
+import { shortenSubstateId, displayNftId } from "../../../../utils/helpers";
 import SendNft from "./SendNft";
 
-function displayNftId(nftId: NonFungibleId) {
-  if ("U256" in nftId) {
-    return `U256:${shortenString(toHexString(nftId.U256))}`;
-  }
-  if ("Uint64" in nftId) {
-    return `Uint64:${nftId.Uint64}`;
-  }
-  if ("Uint32" in nftId) {
-    return `Uint32:${nftId.Uint32}`;
-  }
-  if ("String" in nftId) {
-    return `String:${nftId.String}`;
-  }
-
-  return JSON.stringify(nftId);
-}
 
 function NftCard({ nft }: { nft: NonFungibleToken }) {
   const mutableData = convertCborValue(nft.mutable_data);

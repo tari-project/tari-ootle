@@ -148,7 +148,7 @@ export function emptyRows(page: number, rowsPerPage: number, array: Array<any> |
 }
 
 export function handleChangePage(
-  event: unknown,
+  _event: unknown,
   newPage: number,
   setPage: React.Dispatch<React.SetStateAction<number>>,
 ) {

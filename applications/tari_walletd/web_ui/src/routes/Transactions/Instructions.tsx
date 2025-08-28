@@ -38,7 +38,8 @@ function RowData({ title, data }: { title: string; data: Instruction }, index: n
   return (
     <>
       <TableRow key={`${index}-1`}>
-        <DataTableCell width={90} sx={{ borderBottom: "none", textAlign: "center" }}>
+        <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>{title}</DataTableCell>
+        <DataTableCell width={90} sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none", textAlign: "center" }}>
           <AccordionIconButton
             aria-label="expand row"
             size="small"
@@ -49,7 +50,6 @@ function RowData({ title, data }: { title: string; data: Instruction }, index: n
             {open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
           </AccordionIconButton>
         </DataTableCell>
-        <DataTableCell>{title}</DataTableCell>
       </TableRow>
       <TableRow key={`${index}-2`}>
         <DataTableCell
@@ -142,7 +142,7 @@ function inspectify(instruction: Instruction) {
   // return instruction;
 }
 
-export default function Instructions({ data }: { data: Array<Instruction> }, index: number) {
+export default function Instructions({ data }: { data: Array<Instruction> }) {
   return (
     <TableContainer>
       <Table>

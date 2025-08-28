@@ -204,8 +204,8 @@ export const light: ThemeOptions = {
       contrastText: "#ffffff",
     },
     accent: {
-      background: grey[50],
-      border: grey[100],
+      background: "rgba(0, 0, 0, 0.03)",
+      border: "rgba(0, 0, 0, 0.03)",
     },
   },
 };
@@ -258,8 +258,8 @@ export const dark: ThemeOptions = {
       contrastText: "#ffffff",
     },
     accent: {
-      background: grey[800],
-      border: grey[800],
+      background: "rgba(255, 255, 255, 0.03) ",
+      border: "rgba(255, 255, 255, 0.03) ",
     },
   },
 };

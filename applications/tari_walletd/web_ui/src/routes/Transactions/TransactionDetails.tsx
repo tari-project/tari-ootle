@@ -24,7 +24,7 @@ import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTransactionDetails } from "../../api/hooks/useTransactions";
 import { Accordion, AccordionDetails, AccordionSummary } from "../../Components/Accordion";
-import { Grid, Table, TableContainer, TableBody, TableRow, TableCell, Button, Fade, Alert } from "@mui/material";
+import { Grid, Table, TableContainer, TableBody, TableRow, TableCell, Button, Fade, Alert, Box, Chip } from "@mui/material";
 import Typography from "@mui/material/Typography";
 import { saveAs } from "file-saver";
 import { DataTableCell, StyledPaper } from "../../Components/StyledComponents";
@@ -33,6 +33,10 @@ import Events from "./Events";
 import Logs from "./Logs";
 import Instructions from "./Instructions";
 import Substates from "./Substates";
+import Inputs from "./Inputs";
+import Signers from "./Signers";
+import ExecutionResults from "./ExecutionResults";
+import FeeReceipt from "./FeeReceipt";
 import StatusChip from "../../Components/StatusChip";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
@@ -40,12 +44,10 @@ import Loading from "../../Components/Loading";
 import Error from "../../Components/Error";
 import {
   FinalizeResult,
-  substateIdToString,
-  SubstateRequirement,
   TransactionResult,
-  TransactionSignature,
 } from "@tari-project/typescript-bindings";
 import { getRejectReasonFromTransactionResult, rejectReasonToString } from "@tari-project/typescript-bindings";
+
 
 export default function TransactionDetails() {
   const [expandedPanels, setExpandedPanels] = useState<string[]>([]);
@@ -53,7 +55,7 @@ export default function TransactionDetails() {
   const transactionId = params.id!;
   const { data, isLoading, isError, error } = useTransactionDetails(transactionId);
 
-  const handleChange = (panel: string) => (event: React.SyntheticEvent, isExpanded: boolean) => {
+  const handleChange = (panel: string) => (_event: React.SyntheticEvent, isExpanded: boolean) => {
     setExpandedPanels((prevExpandedPanels) => {
       if (isExpanded) {
         return [...prevExpandedPanels, panel];
@@ -64,7 +66,7 @@ export default function TransactionDetails() {
   };
 
   const expandAll = () => {
-    setExpandedPanels(["panel1", "panel2", "panel3", "panel4", "panel5", "panel6", "panel7"]);
+    setExpandedPanels(["panel1", "panel2", "panel3", "panel4", "panel5", "panel6", "panel7", "panel8", "panel9"]);
   };
 
   const collapseAll = () => {
@@ -306,59 +308,43 @@ export default function TransactionDetails() {
               </AccordionDetails>
             </Accordion>
           )}
-          <Accordion expanded={expandedPanels.includes("panel6")} onChange={handleChange("panel6")}>
-            <AccordionSummary aria-controls="panel1bh-content" id="panel1bh-header">
+          {data.result && data.result.execution_results && (
+            <Accordion expanded={expandedPanels.includes("panel6")} onChange={handleChange("panel6")}>
+              <AccordionSummary aria-controls="panel6bh-content" id="panel6bh-header">
+                <Typography variant="h5">Execution Results</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <ExecutionResults data={data.result.execution_results} />
+              </AccordionDetails>
+            </Accordion>
+          )}
+          {data.result && data.result.fee_receipt && (
+            <Accordion expanded={expandedPanels.includes("panel7")} onChange={handleChange("panel7")}>
+              <AccordionSummary aria-controls="panel7bh-content" id="panel7bh-header">
+                <Typography variant="h5">Fee Receipt</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <FeeReceipt data={data.result.fee_receipt} />
+              </AccordionDetails>
+            </Accordion>
+          )}
+          <Accordion expanded={expandedPanels.includes("panel8")} onChange={handleChange("panel8")}>
+            <AccordionSummary aria-controls="panel8bh-content" id="panel8bh-header">
               <Typography variant="h5">Inputs</Typography>
             </AccordionSummary>
             <AccordionDetails>
-              {transaction?.inputs?.length ? (
-                <TableContainer>
-                  <Table>
-                    <TableBody>
-                      {transaction.inputs.map((item: SubstateRequirement, index: number) => {
-                        return (
-                          <div key={index}>
-                            {substateIdToString(item.substate_id)}:{item.version || "x"}
-                          </div>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              ) : (
-                <span>Empty</span>
-              )}
+              <Inputs data={transaction?.inputs || []} />
             </AccordionDetails>
           </Accordion>
-          <Accordion expanded={expandedPanels.includes("panel7")} onChange={handleChange("panel7")}>
-            <AccordionSummary aria-controls="panel7bh-content" id="panel7bh-header">
+          <Accordion expanded={expandedPanels.includes("panel9")} onChange={handleChange("panel9")}>
+            <AccordionSummary aria-controls="panel9bh-content" id="panel9bh-header">
               <Typography variant="h5">Signers</Typography>
             </AccordionSummary>
             <AccordionDetails>
-              {transaction_body?.signatures?.length ? (
-                <TableContainer>
-                  <Table>
-                    <TableBody>
-                      {seal_signature ? (
-                        <TableRow key={-1}>
-                          <DataTableCell>{seal_signature.public_key}</DataTableCell>
-                        </TableRow>
-                      ) : (
-                        <></>
-                      )}
-                      {transaction_body.signatures.map((item: TransactionSignature, i: number) => {
-                        return (
-                          <TableRow key={i}>
-                            <DataTableCell>{item.public_key}</DataTableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              ) : (
-                <span>Empty</span>
-              )}
+              <Signers 
+                bodySignatures={transaction_body?.signatures}
+                sealSignature={seal_signature}
+              />
             </AccordionDetails>
           </Accordion>
         </div>

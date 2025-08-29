@@ -8,7 +8,7 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-tari_bor = { workspace = true, default-features = true }
+tari_bor = { workspace = true, default-features = true, features = ["std"] }
 tari_common_types = { workspace = true }
 tari_crypto = { workspace = true, features = ["borsh"] }
 tari_ootle_common_types = { workspace = true }

@@ -12,7 +12,7 @@ use tari_crypto::{
         RistrettoSecretKey,
     },
 };
-use tari_engine_types::crypto::bullet_proof_service_factory;
+use tari_engine_types::crypto::{get_static_range_proof_service, MAX_LAZY_BP_AGG_FACTORS};
 use tari_template_lib::types::crypto::RangeProofBytes;
 
 use crate::UnblindedOutputStatement;
@@ -56,10 +56,17 @@ pub fn generate_extended_bullet_proof<'a, I: IntoIterator<Item = &'a UnblindedOu
     }
 
     let agg_factor = extended_witnesses.len();
-    // TODO: restrict outputs to something like 4 and generate multiple bullet proofs if more are needed. Or simply use
-    // multiple transfers. Creating a bullet proof with a large aggregate takes a large amount of time and memory.
+    if agg_factor > MAX_LAZY_BP_AGG_FACTORS {
+        return Err(RangeProofError::ProofConstructionError {
+            reason: format!(
+                "Range proof aggregation factor {} exceeds the maximum supported {}",
+                agg_factor, MAX_LAZY_BP_AGG_FACTORS
+            ),
+        });
+    }
+
     let output_range_proof =
-        bullet_proof_service_factory(agg_factor).construct_extended_proof(extended_witnesses, None)?;
+        get_static_range_proof_service(agg_factor).construct_extended_proof(extended_witnesses, None)?;
 
     RangeProofBytes::try_from(output_range_proof)
         .map_err(|e| RangeProofError::ProofConstructionError { reason: e.to_string() })

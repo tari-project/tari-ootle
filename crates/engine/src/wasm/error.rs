@@ -37,6 +37,8 @@ pub enum WasmExecutionError {
     MemoryNotSet,
     #[error("Missing function {function}")]
     MissingAbiFunction { function: &'static str },
+    #[error("Engine call size limit of {limit} bytes exceeded")]
+    CallSizeLimitExceeded { limit: usize },
     #[error("Runtime error: {0}")]
     RuntimeError(#[from] RuntimeError),
     #[error("Failed to decode argument for engine call: {0:?}")]

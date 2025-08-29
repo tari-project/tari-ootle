@@ -259,7 +259,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             payload,
         );
         debug!(target: LOG_TARGET, "Emitted event {}", event);
-        state.push_event(event);
+        state.push_event(event)?;
 
         Ok(())
     }
@@ -454,7 +454,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         let topic = format!("{module}.{topic}");
 
         self.tracker
-            .add_event(Event::custom(substate_id, template_address, tx_hash, topic, payload));
+            .add_event(Event::custom(substate_id, template_address, tx_hash, topic, payload))?;
         Ok(())
     }
 
@@ -470,7 +470,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
         // eprintln!("{}: {}", log_level, message);
         log::log!(target: "tari::ootle::engine::runtime", log_level, "{}", message);
-        self.tracker.add_log(LogEntry::new(level, message));
+        self.tracker.add_log(LogEntry::new(level, message))?;
         Ok(())
     }
 
@@ -2606,7 +2606,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 "template",
                 "publish",
                 metadata,
-            ));
+            ))?;
 
             Ok(())
         })

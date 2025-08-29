@@ -102,13 +102,13 @@ impl StateTracker {
         })
     }
 
-    pub fn add_event(&self, event: Event) {
+    pub fn add_event(&self, event: Event) -> Result<(), RuntimeError> {
         debug!(target: LOG_TARGET, "Emit: {event}");
-        self.write_with(|state| state.push_event(event));
+        self.write_with(|state| state.push_event(event))
     }
 
-    pub fn add_log(&self, log: LogEntry) {
-        self.write_with(|state| state.push_log(log));
+    pub fn add_log(&self, log: LogEntry) -> Result<(), RuntimeError> {
+        self.write_with(|state| state.push_log(log))
     }
 
     pub fn take_events(&self) -> Vec<Event> {
@@ -210,7 +210,7 @@ impl StateTracker {
                 "component",
                 "created",
                 Metadata::from([("module_name".to_string(), module_name)]),
-            ));
+            ))?;
 
             debug!(target: LOG_TARGET, "New component created: {}", component_address);
             Ok(component_address)

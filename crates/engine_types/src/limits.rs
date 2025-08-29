@@ -18,10 +18,20 @@ pub const WASM_LIMITS: WasmLimits = WasmLimits {
 
 pub struct EngineLimits {
     pub max_substate_outputs: usize,
+    pub max_substate_size: usize,
+    pub max_call_size: usize,
+    pub max_logs: usize,
+    pub max_log_size_bytes: usize,
+    pub max_events: usize,
 }
 
 pub const ENGINE_LIMITS: EngineLimits = EngineLimits {
     max_substate_outputs: 1000,
+    max_substate_size: 2 * 1024 * 1024, // 2 MiB
+    max_call_size: 1024 * 1024,         // 1 MiB
+    max_logs: 256,
+    max_log_size_bytes: 32 * 1024, // 32 KiB
+    max_events: 256,
 };
 
 pub const MAX_DIVISIBILITY: u8 = 18;
@@ -33,5 +43,5 @@ pub struct StealthLimits {
 
 pub const STEALTH_LIMITS: StealthLimits = StealthLimits {
     max_inputs: 1000,
-    max_outputs: 500,
+    max_outputs: 8,
 };

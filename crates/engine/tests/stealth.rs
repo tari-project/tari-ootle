@@ -341,9 +341,8 @@ fn transfer_invalid_range_proof_in_statement() {
     assert_reject_reason(reason, "Invalid range proof");
 }
 
-#[cfg(not(debug_assertions))]
 #[test]
-fn many_outputs() {
+fn many_outputs_in_one_transfer() {
     use std::{iter, time::Instant};
 
     use tari_engine_types::limits;
@@ -352,21 +351,30 @@ fn many_outputs() {
     let (mut test, _faucet, faucet_resx) = setup(&mint, None);
 
     let timer = Instant::now();
+
+    assert_eq!(
+        1000 % limits::STEALTH_LIMITS.max_outputs,
+        0,
+        "Balance proof will fail due to rounding. Adjust the test amount to be a multiple of the limit"
+    );
     let transfer_from_faucet = stealth::generate_transfer_data(
         &[MaskAndValue {
             mask: mint.output_masks[0].clone(),
             value: 1000.into(),
         }],
         0,
-        // 500 max outputs permitted
-        iter::repeat_n(2, limits::STEALTH_LIMITS.max_outputs),
+        iter::repeat_n(
+            1000 / limits::STEALTH_LIMITS.max_outputs,
+            limits::STEALTH_LIMITS.max_outputs,
+        ),
         0,
     );
 
-    // Release mode: ± 23s on M1 Mac, 3.7s on Ryzen 5950x (single thread, total test time 6.1s)
-    // TODO: verification time (depending on hardware) of 2-10+ seconds is still a problem, determine what the upper
-    // bound for utxos should be. Parts of the verification could be parallelized (helps, assuming some minimum CPU spec
-    // for a VN). Note that generation in Debug mode took 16 minutes on Ryzen 5950x !
+    // Release mode: ± 23s on M1 Mac, 3.7s on Ryzen 5950x (single thread, total test time 6.1s) for 500 outputs - actual
+    // limit is 8
+    // TODO: verification time (depending on hardware) of 2-10+ seconds is still a problem, determine what
+    // the upper bound for utxos should be. Parts of the verification could be parallelized (helps, assuming some
+    // minimum CPU spec for a VN). Note that generation in Debug mode took 16 minutes on Ryzen 5950x !
     eprintln!("Generated transfer in {:.2?}", timer.elapsed());
 
     let result = test.execute_expect_success(
@@ -381,7 +389,7 @@ fn many_outputs() {
         .up_iter()
         .filter_map(|(_, substate)| substate.substate_value().as_utxo())
         .collect::<Vec<_>>();
-    assert_eq!(utxos.len(), 500);
+    assert_eq!(utxos.len(), 8);
 }
 
 pub fn try_brute_force_stealth_balance<I, TValueLookup>(

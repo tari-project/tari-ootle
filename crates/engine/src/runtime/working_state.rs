@@ -9,6 +9,7 @@ use std::{
 
 use indexmap::{IndexMap, IndexSet};
 use log::*;
+use tari_bor::encoded_len;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::{
     bucket::Bucket,
@@ -154,14 +155,30 @@ impl WorkingState {
         self.store.exists(address)
     }
 
+    fn enforce_substate_size_limit(&self, value: &SubstateValue) -> Result<(), RuntimeError> {
+        let size = encoded_len(value)?;
+        if size > limits::ENGINE_LIMITS.max_substate_size {
+            return Err(RuntimeError::LimitError {
+                details: format!(
+                    "Substate size of {} bytes exceeds the maximum allowed size of {} bytes",
+                    size,
+                    limits::ENGINE_LIMITS.max_substate_size
+                ),
+            });
+        }
+        Ok(())
+    }
+
     pub fn new_substate<K: Into<SubstateId>, V: Into<SubstateValue>>(
         &mut self,
         address: K,
         value: V,
     ) -> Result<(), RuntimeError> {
         let address = address.into();
+        let value = value.into();
+        self.enforce_substate_size_limit(&value)?;
         self.current_call_scope_mut()?.add_substate_to_scope(address.clone())?;
-        self.store.insert(address, value.into())?;
+        self.store.insert(address, value)?;
         Ok(())
     }
 
@@ -234,7 +251,7 @@ impl WorkingState {
             "component",
             "updated",
             tari_template_lib::models::Metadata::from([("module_name".to_string(), module_name)]),
-        ));
+        ))?;
 
         Ok(())
     }
@@ -672,7 +689,7 @@ impl WorkingState {
                 flags.iter().map(|f| (f.to_string(), "true".to_string())).collect(),
             )
         };
-        self.push_event(event);
+        self.push_event(event)?;
 
         Ok(())
     }
@@ -1318,16 +1335,44 @@ impl WorkingState {
         &self.proofs
     }
 
-    pub fn push_log(&mut self, log: LogEntry) {
+    pub fn push_log(&mut self, log: LogEntry) -> Result<(), RuntimeError> {
+        // TIL: that String::len returns the number of bytes, not UTF8 characters
+        if log.message.len() > limits::ENGINE_LIMITS.max_log_size_bytes {
+            return Err(RuntimeError::LimitError {
+                details: format!(
+                    "Log entry exceeds maximum size of {} bytes",
+                    limits::ENGINE_LIMITS.max_log_size_bytes
+                ),
+            });
+        }
+
+        if self.logs.len() >= limits::ENGINE_LIMITS.max_logs {
+            return Err(RuntimeError::LimitError {
+                details: format!(
+                    "Exceeded maximum number of logs per transaction: {}",
+                    limits::ENGINE_LIMITS.max_logs
+                ),
+            });
+        }
         self.logs.push(log);
+        Ok(())
     }
 
     pub fn take_logs(&mut self) -> Vec<LogEntry> {
         mem::take(&mut self.logs)
     }
 
-    pub fn push_event(&mut self, event: Event) {
+    pub fn push_event(&mut self, event: Event) -> Result<(), RuntimeError> {
+        if self.events.len() >= limits::ENGINE_LIMITS.max_events {
+            return Err(RuntimeError::LimitError {
+                details: format!(
+                    "Exceeded maximum number of events per transaction: {}",
+                    limits::ENGINE_LIMITS.max_events
+                ),
+            });
+        }
         self.events.push(event);
+        Ok(())
     }
 
     pub fn take_events(&mut self) -> Vec<Event> {
@@ -1483,7 +1528,7 @@ impl WorkingState {
                 }
             },
             None => {
-                if !statement.inputs_statement.revealed_amount.is_zero() {
+                if statement.inputs_statement.revealed_amount.is_positive() {
                     return Err(RuntimeError::InvalidArgument {
                         argument: "revealed_funds_bucket",
                         reason: format!(

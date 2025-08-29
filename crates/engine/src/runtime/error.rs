@@ -284,6 +284,9 @@ pub enum RuntimeError {
 
     #[error("Assert error: {0}")]
     AssertError(#[from] AssertError),
+
+    #[error("Limit error: {details}")]
+    LimitError { details: String },
 }
 
 impl RuntimeError {

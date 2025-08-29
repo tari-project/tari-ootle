@@ -36,12 +36,13 @@ mod state_bootstrap;
 pub mod transaction_validators;
 mod validator;
 
-use std::{fs, io, process};
+use std::{fs, io, iter, process, time::Instant};
 
 use log::*;
 use serde::{Deserialize, Serialize};
 use tari_common::exit_codes::{ExitCode, ExitError};
 use tari_consensus::consensus_constants::ConsensusConstants;
+use tari_engine_types::crypto::{get_commitment_factory, get_static_range_proof_service, MAX_LAZY_BP_AGG_FACTORS};
 use tari_epoch_manager::traits::EpochManagerSpec;
 use tari_epoch_oracles::EpochOracle;
 use tari_ootle_app_utilities::{
@@ -107,6 +108,10 @@ pub async fn run_validator_node(
         "🚀 Node starting with pub key: {} and peer id {}",
         keypair.public_key(),keypair.to_peer_address(),
     );
+
+    // Preload the range proof services. This avoids initialization cost during transaction processing and helps ensure
+    // validators execute at a more similar speed.
+    preload_crypto_services();
 
     #[cfg(feature = "metrics")]
     let mut base_registry = prometheus_client::registry::Registry::default();
@@ -184,6 +189,31 @@ fn create_metrics_registry<'a>(
     )
 }
 
+fn preload_crypto_services() {
+    let timer = Instant::now();
+    // iterate through the power of 2 up to the max aggregation factor
+    let agg_factors = iter::successors(Some(1usize), |po2| {
+        let next = (po2 + 1).next_power_of_two();
+        if next > MAX_LAZY_BP_AGG_FACTORS {
+            None
+        } else {
+            Some(next)
+        }
+    });
+    for agg in agg_factors {
+        // Preload the static range proof services into memory so that initialization cost is not paid during
+        // execution
+        let _ = get_static_range_proof_service(agg);
+    }
+    let _ = get_commitment_factory();
+
+    info!(
+        target: LOG_TARGET,
+        "Preloaded crypto services in {:.2?}",
+        timer.elapsed()
+    );
+}
+
 pub struct ValidatorNodeEpochManagerSpec;
 
 impl EpochManagerSpec for ValidatorNodeEpochManagerSpec {
@@ -192,4 +222,15 @@ impl EpochManagerSpec for ValidatorNodeEpochManagerSpec {
     type LayerOneSubmitter = FileLayerOneSubmitter;
     type TemplateDownloader = TemplateDownloadQueue;
     type UtxoStore = StateUtxoStore<ValidatorNodeStateStore>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preload_crypto_services_does_not_panic() {
+        preload_crypto_services();
+        preload_crypto_services();
+    }
 }

@@ -85,7 +85,7 @@ where
             params.owner_account.account(),
             XTR,
             params.max_fee.into(),
-            ConfidentialTransferInputSelection::PreferRevealed,
+            params.input_selection,
         )
     }
 

@@ -40,7 +40,7 @@ import { Refresh } from "@mui/icons-material";
 
 function MyAssets() {
   const theme = useTheme();
-  const account = useAccountStore((state) => state.account);
+  const { account, publicKey } = useAccountStore();
 
   if (!account) {
     return <>Loading...</>;
@@ -127,7 +127,7 @@ function MyAssets() {
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
           <InnerHeading>Transactions</InnerHeading>
-          <Transactions account={account} />
+          <Transactions account={account} ownerPublicKey={publicKey} />
         </StyledPaper>
       </Grid>
     </>

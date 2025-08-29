@@ -9,7 +9,7 @@ use tari_template_lib::{
     types::Amount,
 };
 
-use crate::models::OutputLockId;
+use crate::models::WalletLockId;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConfidentialOutputModel {
@@ -22,7 +22,7 @@ pub struct ConfidentialOutputModel {
     pub encrypted_data: EncryptedData,
     pub public_asset_tag: Option<RistrettoPublicKeyBytes>,
     pub status: OutputStatus,
-    pub lock_id: Option<OutputLockId>,
+    pub lock_id: Option<WalletLockId>,
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]

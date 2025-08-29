@@ -49,7 +49,7 @@ tari_comms_dht = { git = "https://github.com/tari-project/tari.git", tag = "v4.9
 anyhow = { workspace = true }
 config = { workspace = true }
 cucumber = { version = "0.21.1", features = ["default", "libtest", "output-junit"] }
-httpmock = { workspace = true }
+httpmock = { version = "0.8.0-alpha.1", features = ["remote"] }
 indexmap = { workspace = true }
 libp2p = { workspace = true }
 log = { workspace = true, features = ["std"] }

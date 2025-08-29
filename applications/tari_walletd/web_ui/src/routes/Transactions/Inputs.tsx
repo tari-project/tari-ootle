@@ -38,13 +38,20 @@ function getSubstateType(substateId: string): string {
 
 function getTypeColor(type: string): "primary" | "secondary" | "success" | "warning" | "info" | "error" {
   switch (type) {
-    case "Component": return "primary";
-    case "Vault": return "success";
-    case "Resource": return "secondary";
-    case "NFT": return "info";
-    case "Commitment": return "warning";
-    case "Transaction Receipt": return "error";
-    default: return "primary";
+    case "Component":
+      return "primary";
+    case "Vault":
+      return "success";
+    case "Resource":
+      return "secondary";
+    case "NFT":
+      return "info";
+    case "Commitment":
+      return "warning";
+    case "Transaction Receipt":
+      return "error";
+    default:
+      return "primary";
   }
 }
 
@@ -64,8 +71,8 @@ export default function Inputs({ data }: { data: SubstateRequirement[] }) {
       <Table>
         <TableHead>
           <TableRow>
-            <TableCell>Type</TableCell>
             <TableCell>Substate ID</TableCell>
+            <TableCell>Type</TableCell>
             <TableCell>Version</TableCell>
           </TableRow>
         </TableHead>
@@ -73,36 +80,21 @@ export default function Inputs({ data }: { data: SubstateRequirement[] }) {
           {data.map((item: SubstateRequirement, index: number) => {
             const substateId = substateIdToString(item.substate_id);
             const type = getSubstateType(substateId);
-            
+
             return (
               <TableRow key={index}>
-                <DataTableCell>
-                  <Chip 
-                    label={type} 
-                    size="small" 
-                    color={getTypeColor(type)}
-                    variant="outlined" 
-                  />
-                </DataTableCell>
                 <DataTableCell>
                   <CopyAddress address={substateId} />
                 </DataTableCell>
                 <DataTableCell>
+                  <Chip label={type} size="small" color={getTypeColor(type)} variant="outlined" />
+                </DataTableCell>
+                <DataTableCell>
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                     {item.version !== null ? (
-                      <Chip 
-                        label={`v${item.version}`} 
-                        size="small" 
-                        color="default" 
-                        variant="outlined" 
-                      />
+                      <Chip label={`v${item.version}`} size="small" color="default" variant="outlined" />
                     ) : (
-                      <Chip 
-                        label="Latest" 
-                        size="small" 
-                        color="success" 
-                        variant="outlined" 
-                      />
+                      <Chip label="Latest" size="small" color="success" variant="outlined" />
                     )}
                   </Box>
                 </DataTableCell>

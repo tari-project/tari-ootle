@@ -20,7 +20,8 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use async_trait::async_trait;
+use std::future::Future;
+
 use serde::{Deserialize, Serialize};
 use tari_validator_node_rpc::client::SubstateResult;
 
@@ -34,8 +35,14 @@ pub struct SubstateCacheEntry {
     pub substate_result: SubstateResult,
 }
 
-#[async_trait]
 pub trait SubstateCache: Send + Sync {
-    async fn read(&self, address: String) -> Result<Option<SubstateCacheEntry>, SubstateCacheError>;
-    async fn write(&self, address: String, entry: &SubstateCacheEntry) -> Result<(), SubstateCacheError>;
+    fn read(
+        &self,
+        address: String,
+    ) -> impl Future<Output = Result<Option<SubstateCacheEntry>, SubstateCacheError>> + Send;
+    fn write(
+        &self,
+        address: String,
+        entry: &SubstateCacheEntry,
+    ) -> impl Future<Output = Result<(), SubstateCacheError>> + Send;
 }

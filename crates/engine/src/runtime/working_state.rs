@@ -9,6 +9,7 @@ use std::{
 
 use indexmap::{IndexMap, IndexSet};
 use log::*;
+use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::{
     bucket::Bucket,
     component::ComponentHeader,
@@ -24,11 +25,15 @@ use tari_engine_types::{
     proof::{ContainerRef, LockedResource, Proof},
     resource::Resource,
     resource_container::{ResourceContainer, ResourceError},
+    stealth,
     substate::{Substate, SubstateDiff, SubstateId, SubstateValue},
     transaction_receipt::TransactionReceipt,
     vault::Vault,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
+    FromByteType,
     ResourceAddressRef,
+    ToByteType,
+    Utxo,
     UtxoAddress,
     ValidatorFeePoolAddress,
     ValidatorFeeWithdrawal,
@@ -36,7 +41,8 @@ use tari_engine_types::{
 use tari_ootle_common_types::{optional::Optional, Epoch};
 use tari_template_lib::{
     args::{MintArg, ResourceDiscriminator, VaultFreezeFlags},
-    constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
+    auth::ResourceAuthAction,
+    constants::STEALTH_TARI_RESOURCE_ADDRESS,
     models::{
         AddressAllocationId,
         BucketId,
@@ -45,6 +51,7 @@ use tari_template_lib::{
         ProofId,
         ResourceAddress,
         StealthInputsStatement,
+        StealthTransferStatement,
         UnclaimedConfidentialOutputAddress,
         VaultId,
     },
@@ -61,6 +68,7 @@ use crate::{
         scope::{CallFrame, CallScope},
         state_store::WorkingStateStore,
         tracker_auth::Authorization,
+        validation::check_stealth_transfer_limits,
         ActionIdent,
         NativeAction,
         RuntimeError,
@@ -850,15 +858,8 @@ impl WorkingState {
             .ok_or(RuntimeError::AddressAllocationNotUsed { id })
     }
 
-    pub fn pay_fee(&mut self, resource: ResourceContainer, return_vault: VaultId) -> Result<(), RuntimeError> {
-        let amount = resource.amount();
-        if !self.fee_state.add_fee_payment(resource, return_vault) {
-            return Err(RuntimeError::InvalidAmount {
-                amount,
-                reason: "Payed an invalid amount. Amount must be positive and not overflow".to_string(),
-            });
-        }
-        Ok(())
+    pub fn pay_fee(&mut self, resource: ResourceContainer, return_vault: Option<VaultId>) -> Result<(), RuntimeError> {
+        self.fee_state.add_fee_payment_checked(resource, return_vault)
     }
 
     pub fn withdraw_all_fees_from_pool(
@@ -978,35 +979,68 @@ impl WorkingState {
 
         let total_fee_payment = self.fee_state.total_payments();
 
-        let mut fee_resource =
-            ResourceContainer::confidential(CONFIDENTIAL_TARI_RESOURCE_ADDRESS, None, Amount::zero());
+        let mut fee_resource = ResourceContainer::stealth(STEALTH_TARI_RESOURCE_ADDRESS, Amount::zero());
 
         // Collect the fee
         let mut remaining_fees = total_fees;
-        for (resx, _) in &mut self.fee_state.fee_payments {
-            if remaining_fees == 0 {
-                break;
-            }
+        let mut total_fee_overcharge = 0;
+        // First collect fees that cannot be refunded (we have to take all fees even if they exceed the required amount)
+        for resx in self.fee_state.non_refundable_fee_payments_mut_iter() {
             // PANIC: this is checked by FeeState
-            let fee_amount = resx.amount().to_u64_checked().expect("invalid fee entry in fee state");
+            let paid_amount = resx.amount().to_u64_checked().expect("invalid fee entry in fee state");
 
-            let amount_to_withdraw = cmp::min(fee_amount, remaining_fees);
-            remaining_fees -= amount_to_withdraw;
-            fee_resource.deposit(resx.withdraw(amount_to_withdraw.into())?)?;
+            debug!(
+                target: LOG_TARGET,
+                "Collecting {} of non-refundable fees", resx.amount()
+            );
+
+            // If there is no refund vault, we must take the entire amount to avoid destroying funds
+            fee_resource.deposit(resx.withdraw(resx.amount())?)?;
+            if remaining_fees < paid_amount {
+                total_fee_overcharge += paid_amount - remaining_fees;
+            }
+
+            remaining_fees = remaining_fees.saturating_sub(paid_amount);
         }
 
-        // Refund the remaining payments if any
-        for (mut resx, refund_vault) in self.fee_state.fee_payments.drain(..) {
+        if remaining_fees > 0 {
+            for (resx, _) in self.fee_state.refundable_fee_payments_iter_mut() {
+                if remaining_fees == 0 {
+                    break;
+                }
+
+                debug!(
+                    target: LOG_TARGET,
+                    "Collecting {} of refundable fees", resx.amount()
+                );
+
+                // PANIC: this is checked by FeeState
+                let paid_amount = resx.amount().to_u64_checked().expect("invalid fee entry in fee state");
+
+                // Withdraw only what is needed
+                let amount_to_withdraw = cmp::min(paid_amount, remaining_fees);
+                fee_resource.deposit(resx.withdraw(amount_to_withdraw.into())?)?;
+                remaining_fees = remaining_fees.saturating_sub(amount_to_withdraw);
+            }
+        }
+
+        // Refund the remaining refundable payments if any
+        for (mut resx, refund_vault) in self.fee_state.drain_refundable_fee_payments() {
             if resx.amount().is_zero() {
+                debug_assert!(!resx.amount().is_negative());
                 continue;
             }
 
+            debug!(
+                target: LOG_TARGET,
+                "Refunding {} of fees to vault {}", resx.amount(), refund_vault
+            );
             let vault_mut = substates_to_persist
                 .get_mut(&SubstateId::Vault(refund_vault))
                 .expect("invariant: vault that made fee payment not in changeset")
                 .as_vault_mut()
                 .expect("invariant: substate substate_id for fee refund is not a vault");
-            vault_mut.resource_container_mut().deposit(resx.recall_all()?)?;
+            vault_mut.resource_container_mut().deposit(resx.withdraw_all()?)?;
         }
 
         Ok(TransactionReceipt {
@@ -1019,7 +1053,8 @@ impl WorkingState {
                     .amount()
                     .to_u64_checked()
                     .expect("FeeState guarantees that the total fee payments fit in a u64"),
-                cost_breakdown: mem::take(&mut self.fee_state.fee_charges),
+                total_fee_overcharge,
+                cost_breakdown: self.fee_state.take_fee_charges(),
             },
         })
     }
@@ -1386,5 +1421,112 @@ impl WorkingState {
         }
 
         Ok(())
+    }
+
+    pub fn execute_stealth_transfer(
+        &mut self,
+        resource_address: ResourceAddressRef,
+        statement: StealthTransferStatement,
+        revealed_funds_bucket_id: Option<BucketId>,
+    ) -> Result<Option<ResourceContainer>, RuntimeError> {
+        check_stealth_transfer_limits(&limits::STEALTH_LIMITS, &statement)?;
+        let resource_address = self.resolve_resource_address_ref(resource_address)?;
+
+        let resource_lock = self.read_lock_substate(&SubstateId::Resource(resource_address))?;
+        {
+            let resource = self.get_resource(&resource_lock)?;
+            if !resource.resource_type().is_stealth() {
+                return Err(ResourceError::OperationNotAllowed(format!(
+                    "Stealth transfer is only allowed for stealth resources: {}",
+                    resource_address
+                ))
+                .into());
+            }
+
+            // Authorize transfer
+            self.authorization().check_resource_access_rules(
+                // TODO: specific auth action for stealth transfer? Technically this is a withdraw and deposit, but
+                // a separate AccessRule may be excessive/not useful.
+                ResourceAuthAction::Withdraw,
+                resource.as_ownership(),
+                resource.access_rules(),
+            )?;
+        }
+
+        let revealed_funds_bucket = revealed_funds_bucket_id.map(|id| self.take_bucket(id)).transpose()?;
+        if let Some(ref bucket) = revealed_funds_bucket {
+            if *bucket.resource_address() != resource_address {
+                return Err(RuntimeError::InvalidArgument {
+                    argument: "revealed_funds_bucket",
+                    reason: format!(
+                        "Revealed funds bucket resource address ({}) does not match the statement's resource address \
+                         ({})",
+                        bucket.resource_address(),
+                        resource_address
+                    ),
+                });
+            }
+        }
+
+        match revealed_funds_bucket {
+            Some(ref bucket) => {
+                if bucket.amount() != statement.inputs_statement.revealed_amount {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "revealed_funds_bucket",
+                        reason: format!(
+                            "Revealed funds bucket amount ({}) does not match the statement's revealed input amount \
+                             ({})",
+                            bucket.amount(),
+                            statement.inputs_statement.revealed_amount
+                        ),
+                    });
+                }
+            },
+            None => {
+                if !statement.inputs_statement.revealed_amount.is_zero() {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "revealed_funds_bucket",
+                        reason: format!(
+                            "An input bucket is required but not provided for stealth transfers with revealed input \
+                             amount ({})",
+                            statement.inputs_statement.revealed_amount
+                        ),
+                    });
+                }
+            },
+        }
+
+        self.spend_stealth_utxos(resource_address, &statement.inputs_statement)?;
+
+        let resource = self.get_resource(&resource_lock)?;
+        let view_key = resource
+            .view_key()
+            .map(RistrettoPublicKey::try_from_byte_type)
+            .transpose()
+            .map_err(|e| {
+                warn!(target: LOG_TARGET, "Stealth transfer failed - malformed view key: {}", e);
+                RuntimeError::InvalidArgument {
+                    argument: "view_key",
+                    reason: "Malformed RistrettoPublicKeyBytes".to_string(),
+                }
+            })?;
+
+        let valid_transfer = stealth::validate_transfer(&statement, view_key.as_ref())?;
+
+        for output in valid_transfer.outputs {
+            let address = UtxoAddress::new(resource_address, output.output.commitment.to_byte_type().into());
+            let value = Utxo::new(output.to_utxo_output());
+            self.new_substate(address, value)?;
+        }
+
+        self.unlock_substate(resource_lock)?;
+
+        if valid_transfer.revealed_output_amount.is_zero() {
+            return Ok(None);
+        }
+
+        let container = ResourceContainer::stealth(resource_address, valid_transfer.revealed_output_amount);
+
+        Ok(Some(container))
     }
 }

@@ -193,7 +193,7 @@ impl WorkingStateStore {
             })?;
         const EXPECT: &str = "invariant: substate found at utxo address is not a UTXO";
         if let Some(value) = self.new_substates.shift_remove(substate_id) {
-            self.downed_utxos.insert(address);
+            // No need to down it, we simply won't create it by removing it from the new substates
             return Ok(value.into_utxo().expect(EXPECT));
         }
         if let Some(substate) = self.loaded_substates.remove(substate_id) {
@@ -228,14 +228,14 @@ impl WorkingStateStore {
         })
     }
 
-    pub(super) fn get_unmodified_substate(&self, address: &SubstateId) -> Result<&Substate, RuntimeError> {
-        match self.loaded_substates.get(address) {
+    pub(super) fn get_unmodified_substate(&self, id: &SubstateId) -> Result<&Substate, RuntimeError> {
+        match self.loaded_substates.get(id) {
             Some(substate) => Ok(substate),
             None => self
                 .state_store
-                .get_state(address)
+                .get_state(id)
                 .optional()?
-                .ok_or_else(|| RuntimeError::SubstateNotFound { id: address.clone() }),
+                .ok_or_else(|| RuntimeError::SubstateNotFound { id: id.clone() }),
         }
     }
 }

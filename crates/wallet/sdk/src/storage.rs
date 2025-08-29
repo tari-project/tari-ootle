@@ -37,7 +37,6 @@ use crate::models::{
     Config,
     NewAccountData,
     NonFungibleToken,
-    OutputLockId,
     OutputStatus,
     ResourceModel,
     StealthBalance,
@@ -45,6 +44,7 @@ use crate::models::{
     SubstateModel,
     TransactionStatus,
     VaultModel,
+    WalletLockId,
     WalletTransaction,
     WalletTransactionUpdate,
 };
@@ -156,6 +156,7 @@ pub trait WalletStoreReader {
         &mut self,
         status: Option<TransactionStatus>,
         component: Option<ComponentAddress>,
+        signed_by_public_key: Option<RistrettoPublicKeyBytes>,
     ) -> Result<Vec<WalletTransaction>, WalletStorageError>;
     // Substates
     fn substates_get(&mut self, address: &SubstateId) -> Result<SubstateModel, WalletStorageError>;
@@ -202,7 +203,7 @@ pub trait WalletStoreReader {
     fn outputs_get_unspent_balance(&mut self, vault_id: &VaultId) -> Result<u64, WalletStorageError>;
     fn outputs_get_locked_by_lock_id(
         &mut self,
-        lock_id: OutputLockId,
+        lock_id: WalletLockId,
     ) -> Result<Vec<ConfidentialOutputModel>, WalletStorageError>;
     fn outputs_get_by_commitment(
         &mut self,
@@ -229,7 +230,7 @@ pub trait WalletStoreReader {
 
     fn stealth_outputs_get_locked_by_lock_id(
         &mut self,
-        lock_id: OutputLockId,
+        lock_id: WalletLockId,
     ) -> Result<Vec<StealthOutputModel>, WalletStorageError>;
     fn stealth_outputs_get_by_commitment(
         &mut self,
@@ -238,10 +239,10 @@ pub trait WalletStoreReader {
     ) -> Result<StealthOutputModel, WalletStorageError>;
 
     // Output Locks
-    fn output_locks_get_by_transaction_id(
+    fn locks_get_by_transaction_id(
         &mut self,
         transaction_id: TransactionId,
-    ) -> Result<Vec<OutputLockId>, WalletStorageError>;
+    ) -> Result<Vec<WalletLockId>, WalletStorageError>;
 
     // Non fungible tokens
     fn non_fungible_token_get_by_nft_id(
@@ -370,37 +371,39 @@ pub trait WalletStoreWriter {
     ) -> Result<(), WalletStorageError>;
     fn vaults_lock_revealed_funds(
         &mut self,
-        lock_id: OutputLockId,
+        lock_id: WalletLockId,
+        vault_id: &VaultId,
         amount_to_lock: Amount,
     ) -> Result<(), WalletStorageError>;
-    fn vaults_finalized_locked_revealed_funds(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
-    fn vaults_unlock_revealed_funds(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
+    fn vaults_finalized_locked_revealed_funds(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
+    fn vaults_release_lock_revealed_funds(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
     // Resources
     fn resources_upsert(&mut self, address: &ResourceAddress, resource: &Resource) -> Result<(), WalletStorageError>;
     // Confidential Outputs
     fn outputs_lock_smallest_amount(
         &mut self,
         vault_id: &VaultId,
-        lock_id: OutputLockId,
+        lock_id: WalletLockId,
     ) -> Result<ConfidentialOutputModel, WalletStorageError>;
     fn outputs_insert(&mut self, output: ConfidentialOutputModel) -> Result<(), WalletStorageError>;
     /// Mark outputs as finalized
-    fn outputs_finalize_by_lock_id(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
+    fn outputs_finalize_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
     /// Release outputs that were locked and remove pending unconfirmed outputs for this proof
-    fn outputs_release_by_lock_id(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
+    fn outputs_release_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
 
     // Stealth Outputs
     fn stealth_outputs_lock_smallest_amount(
         &mut self,
         account_addr: &ComponentAddress,
-        lock_id: OutputLockId,
+        resource_address: &ResourceAddress,
+        lock_id: WalletLockId,
     ) -> Result<StealthOutputModel, WalletStorageError>;
     fn stealth_outputs_insert(&mut self, output: &StealthOutputModel) -> Result<(), WalletStorageError>;
     fn stealth_outputs_mark_as_spent(&mut self, address: &UtxoAddress) -> Result<(), WalletStorageError>;
     /// Mark outputs locked by this lock id as finalized
-    fn stealth_outputs_finalize_by_lock_id(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
+    fn stealth_outputs_finalize_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
     /// Release outputs that were locked and remove pending unconfirmed outputs for this lock
-    fn stealth_outputs_release_by_lock_id(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
+    fn stealth_outputs_release_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
     fn stealth_outputs_update(
         &mut self,
         address: &UtxoAddress,
@@ -409,15 +412,14 @@ pub trait WalletStoreWriter {
         is_frozen: Option<bool>,
     ) -> Result<(), WalletStorageError>;
 
-    // Output locks
-    fn output_locks_insert(&mut self, resource_address: &ResourceAddress) -> Result<OutputLockId, WalletStorageError>;
-    fn output_locks_insert_for_vault(&mut self, vault_id: &VaultId) -> Result<OutputLockId, WalletStorageError>;
-    fn output_locks_delete(&mut self, lock_id: OutputLockId) -> Result<(), WalletStorageError>;
-    fn output_locks_set_params(
+    // Locks
+    fn locks_create(&mut self) -> Result<WalletLockId, WalletStorageError>;
+
+    fn locks_delete(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
+    fn locks_link_transaction(
         &mut self,
-        lock_id: OutputLockId,
-        transaction_id: Option<TransactionId>,
-        vault_id: Option<VaultId>,
+        lock_id: WalletLockId,
+        transaction_id: TransactionId,
     ) -> Result<(), WalletStorageError>;
 
     // Non fungible tokens

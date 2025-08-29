@@ -27,4 +27,4 @@ pub use vault::*;
 pub use wallet_transaction::*;
 pub use webauthn_registration::*;
 
-pub type OutputLockId = u64;
+pub type WalletLockId = i32;

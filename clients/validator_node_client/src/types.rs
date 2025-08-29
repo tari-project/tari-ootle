@@ -136,7 +136,6 @@ pub struct TemplateMetadata {
 )]
 pub struct SubmitTransactionRequest {
     pub transaction: Transaction,
-    pub is_dry_run: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

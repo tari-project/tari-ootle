@@ -24,7 +24,7 @@ import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTransactionDetails } from "../../api/hooks/useTransactions";
 import { Accordion, AccordionDetails, AccordionSummary } from "../../Components/Accordion";
-import { Grid, Table, TableContainer, TableBody, TableRow, TableCell, Button, Fade, Alert, Box, Chip } from "@mui/material";
+import { Grid, Table, TableContainer, TableBody, TableRow, TableCell, Button, Fade, Stack } from "@mui/material";
 import Typography from "@mui/material/Typography";
 import { saveAs } from "file-saver";
 import { DataTableCell, StyledPaper } from "../../Components/StyledComponents";
@@ -42,12 +42,9 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import Loading from "../../Components/Loading";
 import Error from "../../Components/Error";
-import {
-  FinalizeResult,
-  TransactionResult,
-} from "@tari-project/typescript-bindings";
+import { FinalizeResult, TransactionResult, TransactionSignature } from "@tari-project/typescript-bindings";
 import { getRejectReasonFromTransactionResult, rejectReasonToString } from "@tari-project/typescript-bindings";
-
+import { BsQuestionCircle } from "react-icons/bs";
 
 export default function TransactionDetails() {
   const [expandedPanels, setExpandedPanels] = useState<string[]>([]);
@@ -83,6 +80,14 @@ export default function TransactionDetails() {
       return <span>In progress</span>;
     }
   };
+
+  const Empty = ({ message }: { message: string }) => (
+    <Stack alignItems="center" sx={{ p: 3 }}>
+      <Typography variant="body2" color="text.secondary">
+        {message}
+      </Typography>
+    </Stack>
+  );
 
   const renderContent = () => {
     if (isLoading) {
@@ -125,45 +130,7 @@ export default function TransactionDetails() {
     const seal_signature = data.transaction.V1?.seal_signature;
     const transaction_body = data.transaction.V1?.body;
     const transaction = transaction_body?.transaction;
-
-    if (data.status === "Rejected" || data.status === "InvalidTransaction") {
-      return (
-        <>
-          <TableContainer>
-            <Table>
-              <TableBody>
-                <TableRow>
-                  <TableCell>Transaction Hash</TableCell>
-                  <DataTableCell>{transactionId}</DataTableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>Timestamp</TableCell>
-                  <DataTableCell>{last_update_time.toLocaleString()}</DataTableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>Status</TableCell>
-                  <DataTableCell>
-                    <StatusChip status={data.status} />
-                  </DataTableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>JSON</TableCell>
-                  <DataTableCell>
-                    <Button variant="outlined" onClick={handleDownload}>
-                      Download
-                    </Button>
-                  </DataTableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>Reason</TableCell>
-                  <DataTableCell>{getTransactionFailure(data?.result?.result)}</DataTableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </>
-      );
-    }
+    const feeReceipt = data.result?.fee_receipt;
 
     return (
       <Fade in={!isLoading}>
@@ -182,7 +149,22 @@ export default function TransactionDetails() {
                   </TableRow>
                   <TableRow>
                     <TableCell>Total Fees</TableCell>
-                    <DataTableCell>{data?.result?.fee_receipt.total_fees_paid.toString() || 0}</DataTableCell>
+                    <DataTableCell>
+                      {feeReceipt?.total_fees_paid.toString() || 0}
+                      {feeReceipt?.total_fee_overcharge ? (
+                        <>
+                          {" "}
+                          ({feeReceipt.total_fee_overcharge} overcharge{" "}
+                          <BsQuestionCircle
+                            style={{ display: "inline" }}
+                            title="An overcharge occurs when paying more fees than required using stealth transfers. To preserve privacy, there is no vault to refund excess fees, therefore the fees are given to validators in their entirety."
+                          />
+                          )
+                        </>
+                      ) : (
+                        ""
+                      )}
+                    </DataTableCell>
                   </TableRow>
                   <TableRow>
                     <TableCell>Status</TableCell>
@@ -192,7 +174,9 @@ export default function TransactionDetails() {
                   </TableRow>
                   <TableRow>
                     <TableCell>Result</TableCell>
-                    <DataTableCell>{renderResult(data?.result)}</DataTableCell>
+                    <DataTableCell>
+                      {data.invalid_reason ? data.invalid_reason : renderResult(data?.result)}
+                    </DataTableCell>
                   </TableRow>
                   <TableRow>
                     <TableCell>JSON</TableCell>
@@ -222,7 +206,6 @@ export default function TransactionDetails() {
                 alignItems: "center",
                 padding: "2rem 1rem 0.5rem 1rem",
               }}
-              // className="flex-container"
             >
               <Typography variant="h5">More Info</Typography>
               <div
@@ -262,7 +245,7 @@ export default function TransactionDetails() {
               {transaction?.fee_instructions?.length ? (
                 <Instructions data={transaction?.fee_instructions} />
               ) : (
-                <span>Empty</span>
+                <Empty message="No fee instructions available" />
               )}
             </AccordionDetails>
           </Accordion>
@@ -274,7 +257,7 @@ export default function TransactionDetails() {
               {transaction?.instructions?.length ? (
                 <Instructions data={transaction.instructions} />
               ) : (
-                <span>Empty</span>
+                <Empty message="No instructions available" />
               )}
             </AccordionDetails>
           </Accordion>
@@ -294,7 +277,7 @@ export default function TransactionDetails() {
                 <Typography variant="h5">Logs</Typography>
               </AccordionSummary>
               <AccordionDetails>
-                <Logs data={data.result.logs} />
+                {data.result.logs?.length ? <Logs data={data.result.logs} /> : <Empty message="No logs available" />}
               </AccordionDetails>
             </Accordion>
           )}
@@ -341,10 +324,7 @@ export default function TransactionDetails() {
               <Typography variant="h5">Signers</Typography>
             </AccordionSummary>
             <AccordionDetails>
-              <Signers 
-                bodySignatures={transaction_body?.signatures}
-                sealSignature={seal_signature}
-              />
+              <Signers seal_signature={seal_signature} transaction_body={transaction_body} />
             </AccordionDetails>
           </Accordion>
         </div>

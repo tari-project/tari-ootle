@@ -43,6 +43,7 @@ use super::{
     Proof,
     ProofAuth,
     ResourceAddress,
+    StealthTransferStatement,
 };
 use crate::{
     args::{
@@ -377,7 +378,7 @@ impl Vault {
         ResourceManager::get(self.resource_address()).resource_type()
     }
 
-    /// Pay a transaction fee with the funds present in the vault.
+    /// Pay a transaction fee with revealed funds present in the vault.
     /// Note that the vault must hold native Tari tokens to perform this operation.
     pub fn pay_fee<A: Into<Amount>>(&self, amount: A) {
         let _resp: InvokeResult = call_engine(EngineOp::VaultInvoke, &VaultInvokeArg {
@@ -385,21 +386,22 @@ impl Vault {
             action: VaultAction::PayFee,
             args: invoke_args![PayFeeArg {
                 amount: amount.into(),
-                proof: None
+                statement: None
             }],
         });
     }
 
-    /// Pay a transaction fee with the confidential funds present in the vault.
-    /// Note that the vault must hold native Tari tokens to perform this operation
-    /// The withdraw proof must result in a non-zero amount of revealed funds.
-    pub fn pay_fee_confidential(&self, proof: ConfidentialWithdrawProof) {
+    /// Pay a transaction fee with stealth funds.
+    /// Note that the vault must hold native XTR tokens to perform this operation
+    /// The transfer statement must result in a positive amount of revealed funds (from this vault and/or from consumed
+    /// utxos).
+    pub fn pay_fee_stealth(&self, transfer: StealthTransferStatement) {
         let _resp: InvokeResult = call_engine(EngineOp::VaultInvoke, &VaultInvokeArg {
             vault_ref: self.vault_ref(),
             action: VaultAction::PayFee,
             args: invoke_args![PayFeeArg {
                 amount: Amount::zero(),
-                proof: Some(proof)
+                statement: Some(transfer)
             }],
         });
     }

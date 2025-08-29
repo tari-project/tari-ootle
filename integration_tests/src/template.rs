@@ -76,7 +76,7 @@ pub async fn publish_template(
     // look for the new UP template substate
     let template_id = finalize_result
         .result
-        .accept()
+        .any_accept()
         .and_then(|result| result.up_iter().find_map(|(substate_id, _)| substate_id.as_template()))
         .map(|id| id.as_hash())
         .ok_or_else(|| anyhow!("Transaction result did not contain a published template!"))?;

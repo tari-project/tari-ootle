@@ -32,7 +32,7 @@ import {
 import { ApiError } from "../helpers/types";
 import queryClient from "../queryClient";
 
-import type { AccountOrKeyIndex, TransactionStatus } from "@tari-project/typescript-bindings";
+import type { AccountOrKeyIndex, TransactionGetAllRequest, TransactionStatus } from "@tari-project/typescript-bindings";
 
 export const useTransactionDetails = (hash: string) => {
   return useQuery({
@@ -46,22 +46,15 @@ export const useTransactionDetails = (hash: string) => {
   });
 };
 
-export const useGetAllTransactions = (status: TransactionStatus | null, component: string | null) => {
+export const useGetAllTransactions = (req: TransactionGetAllRequest) => {
   return useQuery({
-    queryKey: ["transactions"],
-    queryFn: () => transactionsGetAll({ status: status, component: component }),
+    queryKey: ["transactions", req.status],
+    queryFn: () => transactionsGetAll(req),
     onError: (error: ApiError) => {
       error;
     },
     refetchInterval: 5000,
     keepPreviousData: true,
-    structuralSharing: (oldData, newData) => {
-      if (!oldData || !newData) return newData;
-      if (JSON.stringify(oldData) === JSON.stringify(newData)) {
-        return oldData;
-      }
-      return newData;
-    },
   });
 };
 

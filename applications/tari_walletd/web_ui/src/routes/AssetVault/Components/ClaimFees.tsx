@@ -73,7 +73,7 @@ export default function ClaimFees() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [validity, setValidity] = useState<{ [key: string]: boolean }>(INITIAL_VALIDITY);
   const { data: dataAccountsList } = useAccountsList(0, 10);
-  const { data: dataKeysList } = useKeysList();
+  const { data: dataKeysList } = useKeysList("account");
   const { setPopup } = useAccountStore();
 
   const theme = useTheme();

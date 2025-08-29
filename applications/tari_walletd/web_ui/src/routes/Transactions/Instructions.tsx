@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useState } from "react";
-import { TableContainer, Table, TableRow, TableBody, Collapse } from "@mui/material";
+import { TableContainer, Table, TableRow, TableBody, Collapse, Box, Typography } from "@mui/material";
 import { DataTableCell, AccordionIconButton } from "../../Components/StyledComponents";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
@@ -39,7 +39,10 @@ function RowData({ title, data }: { title: string; data: Instruction }, index: n
     <>
       <TableRow key={`${index}-1`}>
         <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>{title}</DataTableCell>
-        <DataTableCell width={90} sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none", textAlign: "center" }}>
+        <DataTableCell
+          width={90}
+          sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none", textAlign: "center" }}
+        >
           <AccordionIconButton
             aria-label="expand row"
             size="small"
@@ -109,37 +112,6 @@ function inspectify(instruction: Instruction) {
       args,
     },
   };
-
-  // if ("CallFunction" in instruction) {
-  //   const args = instruction.CallFunction.args.map((arg) => {
-  //     if ("Literal" in arg) {
-  //       return { Literal: decode(arg.Literal as unknown as string, { encoding: "hex" }) };
-  //     }
-  //     return arg;
-  //   });
-  //   return {
-  //     CallFunction: {
-  //       ...instruction.CallFunction,
-  //       args,
-  //     },
-  //   };
-  // }
-  // if ("CallMethod" in instruction) {
-  //   const args = instruction.CallMethod.args.map((arg) => {
-  //     if ("Literal" in arg) {
-  //       return { Literal: decode(arg.Literal as unknown as string, { encoding: "hex" }) };
-  //     }
-  //     return arg;
-  //   });
-  //   return {
-  //     CallMethod: {
-  //       ...instruction.CallMethod,
-  //       args,
-  //     },
-  //   };
-  // }
-  //
-  // return instruction;
 }
 
 export default function Instructions({ data }: { data: Array<Instruction> }) {
@@ -147,11 +119,17 @@ export default function Instructions({ data }: { data: Array<Instruction> }) {
     <TableContainer>
       <Table>
         <TableBody>
-          {data?.length
-            ? data.map((item: Instruction, index) => {
-                return <RowData key={index} title={Object.keys(item)[0]} data={item} />;
-              })
-            : "Empty"}
+          {data?.length ? (
+            data.map((item: Instruction, index) => {
+              return <RowData key={index} title={Object.keys(item)[0]} data={item} />;
+            })
+          ) : (
+            <Box sx={{ p: 3, textAlign: "center" }}>
+              <Typography variant="body2" color="text.secondary">
+                No instructions available
+              </Typography>
+            </Box>
+          )}
         </TableBody>
       </Table>
     </TableContainer>

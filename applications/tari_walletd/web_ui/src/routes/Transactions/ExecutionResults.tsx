@@ -20,7 +20,6 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
 import {
   TableContainer,
   Table,
@@ -28,21 +27,14 @@ import {
   TableRow,
   TableCell,
   TableBody,
-  Collapse,
+  Stack,
   Box,
   Typography,
   Chip,
 } from "@mui/material";
-import { DataTableCell, AccordionIconButton } from "../../Components/StyledComponents";
-import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
-import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import CodeBlockExpand from "../../Components/CodeBlock";
-import { useTheme } from "@mui/material/styles";
+import { DataTableCell } from "../../Components/StyledComponents";
 
 function ResultRowData({ result, index }: { result: any; index: number }) {
-  const [open, setOpen] = useState(false);
-  const theme = useTheme();
-
   const returnTypeLabel =
     typeof result.return_type === "string" ? result.return_type : result.return_type?.Other?.name || "Unknown";
 
@@ -64,97 +56,45 @@ function ResultRowData({ result, index }: { result: any; index: number }) {
     if (!result.indexed?.indexed) return null;
 
     const indexed = result.indexed.indexed;
-    const sections = [];
+    const sections: JSX.Element[] = [];
 
-    if (indexed.bucket_ids?.length > 0) {
-      sections.push(
-        <Box key="bucket_ids" sx={{ mb: 1 }}>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-            Bucket IDs:
-          </Typography>
-          <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap" }}>
-            {indexed.bucket_ids.map((id: any, idx: number) => (
-              <Chip key={idx} label={id} size="small" color="primary" variant="outlined" />
-            ))}
-          </Box>
-        </Box>,
-      );
-    }
+    const fieldConfig = [
+      { key: "bucket_ids", label: "Bucket IDs", color: "primary" },
+      { key: "component_addresses", label: "Component Addresses", color: "info" },
+      { key: "component_address_allocations", label: "Component Address Allocations", color: "info" },
+      { key: "resource_addresses", label: "Resource Addresses", color: "success" },
+      { key: "resource_address_allocations", label: "Resource Address Allocations", color: "success" },
+      { key: "vault_ids", label: "Vault IDs", color: "warning" },
+      { key: "non_fungible_addresses", label: "NFT Addresses", color: "secondary" },
+      { key: "proof_ids", label: "Proof IDs", color: "error" },
+      { key: "metadata", label: "Metadata", color: "default" },
+      { key: "published_template_addresses", label: "Published Template Addresses", color: "primary" },
+      { key: "transaction_receipt_addresses", label: "Transaction Receipt Addresses", color: "info" },
+      {
+        key: "unclaimed_confidential_output_address",
+        label: "Unclaimed Confidential Output Address",
+        color: "warning",
+      },
+      { key: "utxos", label: "UTXOs", color: "success" },
+      { key: "validator_node_fee_pools", label: "Validator Node Fee Pools", color: "secondary" },
+    ];
 
-    if (indexed.component_addresses?.length > 0) {
-      sections.push(
-        <Box key="component_addresses" sx={{ mb: 1 }}>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-            Component Addresses:
-          </Typography>
-          <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap" }}>
-            {indexed.component_addresses.map((addr: any, idx: number) => (
-              <Chip key={idx} label={addr} size="small" color="info" variant="outlined" />
-            ))}
-          </Box>
-        </Box>,
-      );
-    }
-
-    if (indexed.resource_addresses?.length > 0) {
-      sections.push(
-        <Box key="resource_addresses" sx={{ mb: 1 }}>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-            Resource Addresses:
-          </Typography>
-          <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap" }}>
-            {indexed.resource_addresses.map((addr: any, idx: number) => (
-              <Chip key={idx} label={addr} size="small" color="success" variant="outlined" />
-            ))}
-          </Box>
-        </Box>,
-      );
-    }
-
-    if (indexed.vault_ids?.length > 0) {
-      sections.push(
-        <Box key="vault_ids" sx={{ mb: 1 }}>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-            Vault IDs:
-          </Typography>
-          <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap" }}>
-            {indexed.vault_ids.map((id: any, idx: number) => (
-              <Chip key={idx} label={id} size="small" color="warning" variant="outlined" />
-            ))}
-          </Box>
-        </Box>,
-      );
-    }
-
-    if (indexed.non_fungible_addresses?.length > 0) {
-      sections.push(
-        <Box key="non_fungible_addresses" sx={{ mb: 1 }}>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-            NFT Addresses:
-          </Typography>
-          <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap" }}>
-            {indexed.non_fungible_addresses.map((addr: any, idx: number) => (
-              <Chip key={idx} label={addr} size="small" color="secondary" variant="outlined" />
-            ))}
-          </Box>
-        </Box>,
-      );
-    }
-
-    if (indexed.proof_ids?.length > 0) {
-      sections.push(
-        <Box key="proof_ids" sx={{ mb: 1 }}>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-            Proof IDs:
-          </Typography>
-          <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap" }}>
-            {indexed.proof_ids.map((id: any, idx: number) => (
-              <Chip key={idx} label={id} size="small" color="error" variant="outlined" />
-            ))}
-          </Box>
-        </Box>,
-      );
-    }
+    fieldConfig.forEach(({ key, label, color }) => {
+      if (indexed[key]?.length > 0) {
+        sections.push(
+          <Stack key={key} direction="row" spacing={1} alignItems="center" sx={{ mb: 1, flexWrap: "wrap" }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+              {label}:
+            </Typography>
+            <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap" }}>
+              {indexed[key].map((item: any, idx: number) => (
+                <Chip key={idx} label={item} size="small" color={color as any} variant="outlined" />
+              ))}
+            </Box>
+          </Stack>,
+        );
+      }
+    });
 
     return sections.length > 0 ? sections : null;
   };
@@ -162,45 +102,17 @@ function ResultRowData({ result, index }: { result: any; index: number }) {
   return (
     <>
       <TableRow key={index}>
-        <DataTableCell width={150} sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>Result #{index + 1}</DataTableCell>
+        <DataTableCell width={150} sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>
+          <Typography variant="body2">Result #{index + 1}</Typography>
+        </DataTableCell>
         <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>
           <Chip label={returnTypeLabel} size="small" color="secondary" variant="outlined" />
         </DataTableCell>
-        <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>{renderValue() || "--"}</DataTableCell>
-        <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none", textAlign: "center" }}>
-          <AccordionIconButton
-            aria-label="expand row"
-            size="small"
-            onClick={() => {
-              setOpen(!open);
-            }}
-          >
-            {open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-          </AccordionIconButton>
+        <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>
+          {renderValue() || "--"}
         </DataTableCell>
-      </TableRow>
-      <TableRow>
-        <DataTableCell
-          style={{
-            paddingBottom: theme.spacing(1),
-            paddingTop: 0,
-            borderBottom: "none",
-          }}
-          colSpan={4}
-        >
-          <Collapse in={open} timeout="auto" unmountOnExit>
-            <Box sx={{ p: 2, backgroundColor: theme.palette.accent.background, borderRadius: 1 }}>
-              {renderIndexedData() && (
-                <Box sx={{ mb: 2 }}>
-                  <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                    Indexed Data
-                  </Typography>
-                  {renderIndexedData()}
-                </Box>
-              )}
-              <CodeBlockExpand title="Raw Execution Result" content={result} />
-            </Box>
-          </Collapse>
+        <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none", textAlign: "center" }}>
+          {renderIndexedData() && <Box sx={{ mb: 2 }}>{renderIndexedData()}</Box>}
         </DataTableCell>
       </TableRow>
     </>
@@ -226,7 +138,7 @@ export default function ExecutionResults({ data }: { data: any[] }) {
             <TableCell>Result</TableCell>
             <TableCell>Return Type</TableCell>
             <TableCell>Value</TableCell>
-            <TableCell width={90}>Details</TableCell>
+            <TableCell>Indexed Data</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>

@@ -48,9 +48,9 @@ function Key(key: [number, string, boolean], setActive: any) {
 
 function Keys() {
   const [showKeyDialog, setShowAddKeyDialog] = useState(false);
-  const { data, isLoading, isError, error } = useKeysList();
+  const { data, isLoading, isError, error } = useKeysList("account");
   const { mutate: mutateSetActive } = useKeysSetActive();
-  const { mutate: mutateCreateKey } = useKeysCreate();
+  const { mutate: mutateCreateKey } = useKeysCreate("account");
 
   const showAddKeyDialog = (setElseToggle: boolean = !showKeyDialog) => {
     setShowAddKeyDialog(setElseToggle);

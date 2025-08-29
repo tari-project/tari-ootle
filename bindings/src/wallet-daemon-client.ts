@@ -102,6 +102,7 @@ export * from "./types/wallet-daemon-client/TransferNftResponse";
 export * from "./types/wallet-daemon-client/SubstatesListRequest";
 export * from "./types/wallet-daemon-client/BalanceEntry";
 export * from "./types/wallet-daemon-client/TemplatesGetRequest";
+export * from "./types/wallet-daemon-client/ExtClaimBurnProof";
 export * from "./types/wallet-daemon-client/ProofsCancelRequest";
 export * from "./types/wallet-daemon-client/AccountSetDefaultResponse";
 export * from "./types/wallet-daemon-client/GetNftRequest";

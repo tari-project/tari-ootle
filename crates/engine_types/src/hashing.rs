@@ -37,6 +37,7 @@ use tari_crypto::{
 use tari_hashing::TariEngineHashDomain;
 use tari_template_lib::types::Hash;
 
+// TODO: switch all hashes to borsh
 pub fn engine_hasher64(label: EngineHashDomainLabel) -> TariHasher64 {
     TariHasher64::new_with_label::<TariEngineHashDomain>(label.as_label())
 }

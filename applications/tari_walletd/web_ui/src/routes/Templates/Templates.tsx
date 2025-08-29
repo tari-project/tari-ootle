@@ -146,7 +146,7 @@ function Templates() {
                     <>
                       <TableRow key={`template-${index}-1`}>
                         <DataTableCell>
-                          <CopyAddress address={template.address} />
+                          <CopyAddress address={`template_${template.address}`} />
                         </DataTableCell>
                         <DataTableCell>{template.name}</DataTableCell>
                         <TableCell>{template.tari_version}</TableCell>

@@ -56,6 +56,8 @@ pub fn generate_extended_bullet_proof<'a, I: IntoIterator<Item = &'a UnblindedOu
     }
 
     let agg_factor = extended_witnesses.len();
+    // TODO: restrict outputs to something like 4 and generate multiple bullet proofs if more are needed. Or simply use
+    // multiple transfers. Creating a bullet proof with a large aggregate takes a large amount of time and memory.
     let output_range_proof =
         bullet_proof_service_factory(agg_factor).construct_extended_proof(extended_witnesses, None)?;
 

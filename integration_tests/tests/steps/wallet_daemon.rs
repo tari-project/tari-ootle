@@ -118,7 +118,7 @@ async fn when_i_claim_fees_for_validator_and_epoch(
     let resp = wallet_daemon_cli::claim_fees(world, wallet_daemon_name, account_name, validator_node, false)
         .await
         .unwrap();
-    resp.result.result.accept().unwrap_or_else(|| {
+    resp.result.result.any_accept().unwrap_or_else(|| {
         panic!(
             "Expected fee claim to succeeded but failed with {}",
             resp.result.result.fee_reject().unwrap()

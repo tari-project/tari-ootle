@@ -3,12 +3,12 @@ import type { AllocatableAddressType } from "./AllocatableAddressType";
 import type { Amount } from "./Amount";
 import type { ComponentAccessRules } from "./ComponentAccessRules";
 import type { ComponentCall } from "./ComponentCall";
-import type { ConfidentialClaim } from "./ConfidentialClaim";
 import type { LogLevel } from "./LogLevel";
 import type { OwnerRule } from "./OwnerRule";
 import type { ResourceAddress } from "./ResourceAddress";
 import type { ResourceAddressRef } from "./ResourceAddressRef";
 import type { StealthTransferStatement } from "./StealthTransferStatement";
+import type { TariStealthClaim } from "./TariStealthClaim";
 import type { WorkspaceOffsetId } from "./WorkspaceOffsetId";
 
 export type Instruction =
@@ -24,7 +24,7 @@ export type Instruction =
   | { CallMethod: { call: ComponentCall; method: string; args: Array<any> } }
   | { PutLastInstructionOutputOnWorkspace: { key: number } }
   | { EmitLog: { level: LogLevel; message: string } }
-  | { ClaimBurn: { claim: ConfidentialClaim } }
+  | { ClaimBurn: { claim: TariStealthClaim } }
   | { ClaimValidatorFees: { address: string } }
   | "DropAllProofsInWorkspace"
   | { AssertBucketContains: { key: WorkspaceOffsetId; resource_address: ResourceAddress; min_amount: Amount } }
@@ -36,4 +36,5 @@ export type Instruction =
         statement: StealthTransferStatement;
         revealed_input_bucket: WorkspaceOffsetId | null;
       };
-    };
+    }
+  | { PayFee: { statement: StealthTransferStatement; revealed_input_bucket: WorkspaceOffsetId | null } };

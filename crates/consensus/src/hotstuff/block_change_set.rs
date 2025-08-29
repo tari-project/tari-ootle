@@ -654,17 +654,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn check_max_stack_mem_usage() {
+    fn check_max_mem_usage() {
         let sz = size_of::<ProposedBlockChangeSet>();
         eprintln!("ProposedBlockChangeSet: {}", sz);
-        const TARGET_MAX_MEM_USAGE: usize = 13_232_000;
+        const TARGET_MAX_MEM_USAGE: usize = 13_240_000;
         let mem_block_diff = size_of::<SubstateChange>() * MEM_MAX_BLOCK_DIFF_CHANGES;
         eprintln!("mem_block_diff: {}KiB", mem_block_diff / 1024);
         let mem_state_tree_diffs =
             size_of::<Shard>() * size_of::<PendingShardStateTreeDiff>() * MEM_MAX_STATE_TREE_DIFF_SIZE;
         eprintln!("mem_state_tree_diffs: {}", mem_state_tree_diffs);
         let mem_substate_locks = (size_of::<SubstateId>() + size_of::<SubstateLock>()) * MEM_MAX_SUBSTATE_LOCK_SIZE;
-        eprintln!("mem_substate_locks: {}", mem_substate_locks);
+        eprintln!("mem_substate_locks: {}MiB", mem_substate_locks / 1024 / 1024);
         let mem_transaction_changes =
             (size_of::<TransactionId>() + size_of::<TransactionChangeSet>()) * MEM_MAX_TRANSACTION_CHANGE_SIZE;
         eprintln!("mem_transaction_changes: {}", mem_transaction_changes);

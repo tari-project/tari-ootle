@@ -109,7 +109,7 @@ function Onboarding() {
                 textAlign: "center",
               }}
             >
-              Create your test account below to get started
+              Give your account a friendly name to get started
             </Typography>
             <Form
               onSubmit={handleCreateAccount}

@@ -28,12 +28,16 @@ use crate::{
     WalletCryptoError,
 };
 
-pub fn create_transfer_statement(
-    inputs: &[UnblindedStealthInputStatement],
+pub fn create_transfer_statement<'a, Inputs, Outputs>(
+    inputs: Inputs,
     revealed_input_amount: Amount,
-    output_statements: &[UnblindedStealthOutputStatement],
+    output_statements: Outputs,
     revealed_output_amount: Amount,
-) -> Result<StealthTransferStatement, WalletCryptoError> {
+) -> Result<StealthTransferStatement, WalletCryptoError>
+where
+    Inputs: IntoIterator<Item = &'a UnblindedStealthInputStatement>,
+    Outputs: IntoIterator<Item = &'a UnblindedStealthOutputStatement> + Clone,
+{
     if revealed_input_amount.is_negative() {
         return Err(WalletCryptoError::InvalidArgument {
             name: "revealed_input_amount",
@@ -47,8 +51,13 @@ pub fn create_transfer_statement(
         });
     }
 
-    let (inputs_to_spend, agg_input_mask) = inputs.iter().try_fold(
-        (Vec::with_capacity(inputs.len()), RistrettoSecretKey::default()),
+    let mut input_iter = inputs.into_iter();
+    let num_inputs_estimate = {
+        let (lower, upper) = input_iter.size_hint();
+        upper.unwrap_or(lower)
+    };
+    let (inputs_to_spend, agg_input_mask) = input_iter.try_fold(
+        (Vec::with_capacity(num_inputs_estimate), RistrettoSecretKey::default()),
         |(mut inputs, agg_input), input| {
             let commitment =
                 input
@@ -75,7 +84,8 @@ pub fn create_transfer_statement(
     )?;
 
     let agg_output_mask = output_statements
-        .iter()
+        .clone()
+        .into_iter()
         .map(|stmt| &stmt.statement.mask)
         .fold(RistrettoSecretKey::default(), |agg, mask| agg + mask);
 
@@ -98,12 +108,13 @@ pub fn create_transfer_statement(
     })
 }
 
-pub fn create_outputs_statement(
-    output_statements: &[UnblindedStealthOutputStatement],
+pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a UnblindedStealthOutputStatement> + Clone>(
+    output_statements: Outputs,
     revealed_output_amount: Amount,
 ) -> Result<StealthOutputsStatement, ConfidentialProofError> {
     let outputs = output_statements
-        .iter()
+        .clone()
+        .into_iter()
         .map(|output_stmt| {
             let unblinded_stmt = &output_stmt.statement;
             let commitment = output_stmt
@@ -133,7 +144,7 @@ pub fn create_outputs_statement(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let output_range_proof = generate_extended_bullet_proof(output_statements.iter().map(|o| &o.statement))?;
+    let output_range_proof = generate_extended_bullet_proof(output_statements.into_iter().map(|o| &o.statement))?;
 
     Ok(StealthOutputsStatement {
         outputs,

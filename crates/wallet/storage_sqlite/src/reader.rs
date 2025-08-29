@@ -35,7 +35,6 @@ use tari_ootle_wallet_sdk::{
         ConfidentialOutputModel,
         Config,
         NonFungibleToken,
-        OutputLockId,
         OutputStatus,
         ResourceModel,
         StealthBalance,
@@ -43,6 +42,7 @@ use tari_ootle_wallet_sdk::{
         SubstateModel,
         TransactionStatus,
         VaultModel,
+        WalletLockId,
         WalletTransaction,
         WebauthnRegistrationPasskeyModel,
     },
@@ -224,8 +224,8 @@ impl WalletStoreReader for ReadTransaction<'_> {
     fn transactions_get(&mut self, transaction_id: TransactionId) -> Result<WalletTransaction, WalletStorageError> {
         use crate::schema::transactions;
         let row = transactions::table
-            .filter(transactions::hash.eq(transaction_id.to_string()))
-            .first::<models::Transaction>(self.connection())
+            .filter(transactions::transaction_id.eq(serialize_hex(transaction_id)))
+            .first::<models::TransactionRecord>(self.connection())
             .optional()
             .map_err(|e| WalletStorageError::general("transaction_get", e))?
             .ok_or_else(|| WalletStorageError::NotFound {
@@ -242,23 +242,32 @@ impl WalletStoreReader for ReadTransaction<'_> {
         &mut self,
         status: Option<TransactionStatus>,
         component: Option<ComponentAddress>,
+        signed_by_public_key: Option<RistrettoPublicKeyBytes>,
     ) -> Result<Vec<WalletTransaction>, WalletStorageError> {
         use crate::schema::transactions;
 
-        let mut rows = transactions::table.into_boxed().filter(transactions::dry_run.eq(false));
+        let mut query = transactions::table.into_boxed().filter(transactions::dry_run.eq(false));
         if let Some(status) = status {
-            rows = rows.filter(transactions::status.eq(status.as_key_str()));
+            query = query.filter(transactions::status.eq(status.as_key_str()));
         }
         if let Some(component) = component {
-            rows = rows.filter(
-                transactions::instructions
-                    .like(format!("%{}%", component))
-                    .or(transactions::fee_instructions.like(format!("%{}%", component))),
-            );
+            if let Some(public_key) = signed_by_public_key {
+                query = query.filter(
+                    transactions::referenced_components
+                        .like(format!("%{}%", component))
+                        .or(transactions::signers.like(format!("%{}%", serialize_hex(public_key)))),
+                );
+            } else {
+                query = query.filter(transactions::referenced_components.like(format!("%{}%", component)));
+            }
+        } else if let Some(public_key) = signed_by_public_key {
+            query = query.filter(transactions::signers.like(format!("%{}%", serialize_hex(public_key))));
+        } else {
+            // No filter
         }
-        let rows = rows
+        let rows = query
             .order(transactions::created_at.desc())
-            .load::<models::Transaction>(self.connection())
+            .load::<models::TransactionRecord>(self.connection())
             .map_err(|e| WalletStorageError::general("transactions_fetch_all", e))?;
 
         rows.into_iter().map(|row| row.try_into_wallet_transaction()).collect()
@@ -656,13 +665,13 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
     fn outputs_get_locked_by_lock_id(
         &mut self,
-        lock_id: OutputLockId,
+        lock_id: WalletLockId,
     ) -> Result<Vec<ConfidentialOutputModel>, WalletStorageError> {
         const OPERATION: &str = "outputs_get_locked_by_lock_id";
         use crate::schema::{accounts, outputs, vaults};
 
         let rows = outputs::table
-            .filter(outputs::lock_id.eq(lock_id as i32))
+            .filter(outputs::lock_id.eq(lock_id))
             .get_results::<models::ConfidentialOutput>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
@@ -843,13 +852,13 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
     fn stealth_outputs_get_locked_by_lock_id(
         &mut self,
-        lock_id: OutputLockId,
+        lock_id: WalletLockId,
     ) -> Result<Vec<StealthOutputModel>, WalletStorageError> {
         const OPERATION: &str = "stealth_outputs_get_locked_by_lock_id";
         use crate::schema::{accounts, stealth_outputs};
 
         let rows = stealth_outputs::table
-            .filter(stealth_outputs::lock_id.eq(lock_id as i32))
+            .filter(stealth_outputs::lock_id.eq(lock_id))
             .get_results::<models::StealthOutput>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
@@ -911,19 +920,19 @@ impl WalletStoreReader for ReadTransaction<'_> {
         row.try_convert(account_address)
     }
 
-    fn output_locks_get_by_transaction_id(
+    fn locks_get_by_transaction_id(
         &mut self,
         transaction_id: TransactionId,
-    ) -> Result<Vec<OutputLockId>, WalletStorageError> {
-        use crate::schema::output_locks;
+    ) -> Result<Vec<WalletLockId>, WalletStorageError> {
+        use crate::schema::locks;
 
-        let lock_ids = output_locks::table
-            .filter(output_locks::transaction_hash.eq(transaction_id.to_string()))
-            .select(output_locks::id)
+        let lock_ids = locks::table
+            .filter(locks::transaction_id.eq(serialize_hex(transaction_id)))
+            .select(locks::id)
             .get_results::<i32>(self.connection())
-            .map_err(|e| WalletStorageError::general("output_locks_get_by_transaction_id", e))?;
+            .map_err(|e| WalletStorageError::general("locks_get_by_transaction_id", e))?;
 
-        Ok(lock_ids.into_iter().map(|id| id as u64).collect())
+        Ok(lock_ids)
     }
 
     fn non_fungible_token_get_by_nft_id(

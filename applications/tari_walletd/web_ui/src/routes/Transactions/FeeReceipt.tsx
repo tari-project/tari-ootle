@@ -20,7 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Box, Typography, Chip } from "@mui/material";
+import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Box, Typography, Chip } from "@mui/material";
+import { DataTableCell } from "../../Components/StyledComponents";
 
 export default function FeeReceipt({ data }: { data: any }) {
   if (!data) {
@@ -32,36 +33,55 @@ export default function FeeReceipt({ data }: { data: any }) {
       </Box>
     );
   }
-  
+
+  const feeItems = [
+    { label: "Total Fee Payment", value: data.total_fee_payment, color: "primary" as const },
+    { label: "Total Fees Paid", value: data.total_fees_paid, color: "success" as const },
+  ];
+
+  const costBreakdownItems = data.cost_breakdown?.breakdown
+    ? [
+        {
+          label: "Cost Breakdown",
+          breakdown: data.cost_breakdown.breakdown,
+        },
+      ]
+    : [];
+
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <Typography variant="body2" color="text.secondary">Total Fee Payment:</Typography>
-          <Chip label={data.total_fee_payment} size="small" color="primary" variant="outlined" />
-        </Box>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <Typography variant="body2" color="text.secondary">Total Fees Paid:</Typography>
-          <Chip label={data.total_fees_paid} size="small" color="success" variant="outlined" />
-        </Box>
-      </Box>
-      
-      {data.cost_breakdown?.breakdown && (
-        <Box>
-          <Typography variant="subtitle2" sx={{ mb: 1 }}>Cost Breakdown</Typography>
-          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-            {Object.entries(data.cost_breakdown.breakdown).map(([key, value]) => (
-              <Chip 
-                key={key} 
-                label={`${key}: ${value}`} 
-                size="small" 
-                variant="outlined"
-                color="default"
-              />
-            ))}
-          </Box>
-        </Box>
-      )}
-    </Box>
+    <TableContainer>
+      <Table>
+        <TableHead>
+          <TableRow>
+            <TableCell>Fee Type</TableCell>
+            <TableCell>Amount</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {feeItems.map((item, index) => (
+            <TableRow key={index}>
+              <DataTableCell>
+                <Typography variant="body2">{item.label}</Typography>
+              </DataTableCell>
+              <DataTableCell>{item.value}</DataTableCell>
+            </TableRow>
+          ))}
+          {costBreakdownItems.map((item, index) => (
+            <TableRow key={`breakdown-${index}`}>
+              <DataTableCell>
+                <Typography variant="body2">{item.label}</Typography>
+              </DataTableCell>
+              <DataTableCell>
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+                  {Object.entries(item.breakdown).map(([key, value]) => (
+                    <Chip key={key} label={`${key}: ${value}`} size="small" color="default" variant="outlined" />
+                  ))}
+                </Box>
+              </DataTableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
   );
 }

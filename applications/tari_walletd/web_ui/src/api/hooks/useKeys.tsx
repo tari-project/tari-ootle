@@ -24,12 +24,13 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { ApiError } from "../helpers/types";
 import queryClient from "../queryClient";
 import { keysCreate, keysList, keysSetActive } from "../../utils/json_rpc";
+import { KeyBranch } from "@tari-project/typescript-bindings";
 
-export const useKeysList = () => {
+export const useKeysList = (branch: KeyBranch) => {
   return useQuery({
-    queryKey: ["keys_list"],
+    queryKey: ["keys_list", branch],
     queryFn: () => {
-      return keysList({ branch: "transaction" });
+      return keysList({ branch });
     },
     onError: (error: ApiError) => {
       error;
@@ -37,8 +38,8 @@ export const useKeysList = () => {
   });
 };
 
-export const useKeysCreate = () => {
-  return useMutation(() => keysCreate({ branch: "transaction", specific_index: null }), {
+export const useKeysCreate = (branch: KeyBranch) => {
+  return useMutation(() => keysCreate({ branch, specific_index: null }), {
     onError: (error: ApiError) => {
       error;
     },

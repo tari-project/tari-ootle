@@ -45,9 +45,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     #[cfg(windows)]
-    const NPM: &str = "npm.cmd";
+    const NPM: &str = "pnpm.cmd";
     #[cfg(not(windows))]
-    const NPM: &str = "npm";
+    const NPM: &str = "pnpm";
 
     if let Err(error) = Command::new(NPM).arg("install").current_dir("./web_ui").status() {
         println!("cargo:warning='{NPM} install' error : {:?}", error);

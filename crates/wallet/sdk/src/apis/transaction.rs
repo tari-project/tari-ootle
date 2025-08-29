@@ -12,7 +12,10 @@ use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
     VersionedSubstateIdRef,
 };
-use tari_template_lib::{constants::XTR, prelude::ComponentAddress};
+use tari_template_lib::{
+    constants::XTR,
+    prelude::{ComponentAddress, RistrettoPublicKeyBytes},
+};
 use tari_transaction::{Transaction, TransactionId};
 
 use crate::{
@@ -60,7 +63,7 @@ where
         Ok(tx_id)
     }
 
-    pub async fn submit_transaction(&self, transaction_id: TransactionId) -> Result<(), TransactionApiError> {
+    pub async fn submit_transaction(&self, transaction_id: TransactionId) -> Result<bool, TransactionApiError> {
         let transaction = self.store.with_read_tx(|tx| tx.transactions_get(transaction_id))?;
 
         if !matches!(transaction.status, TransactionStatus::New) {
@@ -90,6 +93,7 @@ where
                                 .with_invalid_reason(&message),
                         )
                     })?;
+                    return Ok(false);
                 },
                 _ => {
                     return Err(err.into());
@@ -97,7 +101,7 @@ where
             },
         }
 
-        Ok(())
+        Ok(true)
     }
 
     pub async fn submit_dry_run_transaction(
@@ -158,9 +162,10 @@ where
         &self,
         status: Option<TransactionStatus>,
         component: Option<ComponentAddress>,
+        signed_by_public_key: Option<RistrettoPublicKeyBytes>,
     ) -> Result<Vec<WalletTransaction>, TransactionApiError> {
         let mut tx = self.store.create_read_tx()?;
-        let transactions = tx.transactions_fetch_all(status, component)?;
+        let transactions = tx.transactions_fetch_all(status, component, signed_by_public_key)?;
         Ok(transactions)
     }
 
@@ -221,7 +226,7 @@ where
                     if !transaction.is_dry_run && final_decision.is_commit() {
                         let diff = execution_result
                             .as_ref()
-                            .and_then(|e| e.finalize.result.accept())
+                            .and_then(|e| e.finalize.result.any_accept())
                             .ok_or_else(|| TransactionApiError::InvalidTransactionQueryResponse {
                                 details: format!(
                                     "NEVERHAPPEN: Finalize decision is COMMIT but transaction failed: {:?}",
@@ -249,14 +254,23 @@ where
                     // we should make sure that the account's locked outputs
                     // are either set to spent or released, depending if the
                     // transaction was finalized or rejected. Always release for dry runs.
-                    if transaction.is_dry_run || new_status != TransactionStatus::Accepted {
-                        self.release_all_outputs_for_transaction_internal(tx, transaction_id)?;
+                    if transaction.is_dry_run ||
+                        !matches!(
+                            new_status,
+                            TransactionStatus::Accepted | TransactionStatus::OnlyFeeAccepted
+                        )
+                    {
+                        self.release_all_locks_for_transaction_internal(tx, transaction_id)?;
                     } else {
-                        let lock_ids = tx.output_locks_get_by_transaction_id(transaction_id)?;
+                        // TODO: it becomes more complicated if the transaction is Fee accepted, we'll need to finalize
+                        // spends relating to fees and release the rest
+                        let lock_ids = tx.locks_get_by_transaction_id(transaction_id)?;
+                        info!(target: LOG_TARGET, "Finalizing locked outputs for transaction {}: {:?}", transaction_id, lock_ids);
                         for lock_id in lock_ids {
                             tx.outputs_finalize_by_lock_id(lock_id)?;
                             tx.stealth_outputs_finalize_by_lock_id(lock_id)?;
-                            tx.vaults_finalized_locked_revealed_funds(lock_id)?;
+                            tx.vaults_finalized_locked_revealed_funds(lock_id).optional()?;
+                            tx.locks_delete(lock_id)?;
                         }
                     }
 
@@ -269,20 +283,17 @@ where
         }
     }
 
-    pub fn release_all_outputs_for_transaction(
-        &self,
-        transaction_id: TransactionId,
-    ) -> Result<(), TransactionApiError> {
+    pub fn release_all_locks_for_transaction(&self, transaction_id: TransactionId) -> Result<(), TransactionApiError> {
         self.store
-            .with_write_tx(|tx| self.release_all_outputs_for_transaction_internal(tx, transaction_id))
+            .with_write_tx(|tx| self.release_all_locks_for_transaction_internal(tx, transaction_id))
     }
 
-    fn release_all_outputs_for_transaction_internal(
+    fn release_all_locks_for_transaction_internal(
         &self,
         tx: &mut <TStore as WalletStore>::WriteTransaction<'_>,
         transaction_id: TransactionId,
     ) -> Result<(), TransactionApiError> {
-        let lock_ids = tx.output_locks_get_by_transaction_id(transaction_id)?;
+        let lock_ids = tx.locks_get_by_transaction_id(transaction_id)?;
 
         debug!(target: LOG_TARGET, "Releasing {} locks (and associated outputs) for transaction {} that was not committed", lock_ids.len(), transaction_id);
         for lock_id in lock_ids {
@@ -290,7 +301,8 @@ where
             tx.outputs_release_by_lock_id(lock_id)?;
             tx.stealth_outputs_release_by_lock_id(lock_id)?;
             // If the lock locks a vault, we need to release the revealed funds
-            tx.vaults_unlock_revealed_funds(lock_id)?;
+            tx.vaults_release_lock_revealed_funds(lock_id).optional()?;
+            tx.locks_delete(lock_id)?;
         }
 
         Ok(())

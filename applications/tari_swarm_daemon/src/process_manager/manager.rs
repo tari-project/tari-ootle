@@ -23,6 +23,7 @@ use tari_ootle_common_types::Network;
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib_types::TemplateAddress;
 use tari_validator_node_client::types::{AddPeerRequest, GetTemplatesRequest};
+use tari_wallet_daemon_client::types::ExtClaimBurnProof;
 use tokio::{sync::mpsc, time, time::sleep};
 use url::Url;
 
@@ -603,7 +604,7 @@ impl ProcessManager {
                     "No wallet daemon instances {wallet_instance_id} found. Please start a wallet before burning funds"
                 )
             })?;
-        let claim_public_key = wallet.get_account_public_key(account_name.clone(), None).await?;
+        let (claim_public_key, nonce_key_index) = wallet.create_nonce_key().await?;
         let wallet = self
             .instance_manager
             .minotari_wallets()
@@ -615,7 +616,10 @@ impl ProcessManager {
         let file_name = PathBuf::from(format!("burn_proof-{}.json", proof.tx_id));
         let path = out_path.join(&file_name);
         let mut file = File::create(path)?;
-        serde_json::to_writer_pretty(&mut file, &proof)?;
+        serde_json::to_writer_pretty(&mut file, &ExtClaimBurnProof {
+            claim_proof: proof.claim_proof,
+            owner_nonce_key_index: nonce_key_index,
+        })?;
 
         info!("🔥 Burned {amount} Tari to account {account_name}");
         Ok(file_name)

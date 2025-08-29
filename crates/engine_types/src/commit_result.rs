@@ -172,8 +172,8 @@ impl FinalizeResult {
 
     /// Returns the accept diff if the transaction was accepted, otherwise None.
     /// Acceptance includes fee-only acceptance.
-    pub fn accept(&self) -> Option<&SubstateDiff> {
-        self.result.accept()
+    pub fn any_accept(&self) -> Option<&SubstateDiff> {
+        self.result.any_accept()
     }
 
     pub fn into_accept(self) -> Option<SubstateDiff> {
@@ -230,7 +230,7 @@ impl TransactionResult {
         matches!(self, Self::Reject(_))
     }
 
-    pub fn accept(&self) -> Option<&SubstateDiff> {
+    pub fn any_accept(&self) -> Option<&SubstateDiff> {
         match self {
             Self::Accept(substate_diff) => Some(substate_diff),
             Self::AcceptFeeRejectRest(substate_diff, _) => Some(substate_diff),

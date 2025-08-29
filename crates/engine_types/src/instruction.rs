@@ -14,7 +14,7 @@ use tari_template_lib::{
 
 use crate::{
     component_call::ComponentCall,
-    confidential::ConfidentialClaim,
+    confidential::TariStealthClaim,
     resource_address_ref::ResourceAddressRef,
     ValidatorFeePoolAddress,
 };
@@ -40,6 +40,8 @@ pub enum Instruction {
     CallMethod {
         call: ComponentCall,
         method: String,
+        // TODO: remove this as it causes tricky issues that are hard to track down (typically Signature errors).
+        // Rather have clients provide raw arguments using CBOR.
         #[serde(deserialize_with = "crate::argument_parser::json_deserialize")]
         // Argument parser takes an array of strings as input
         #[cfg_attr(feature = "ts", ts(type = "Array<any>"))]
@@ -53,7 +55,7 @@ pub enum Instruction {
         message: String,
     },
     ClaimBurn {
-        claim: Box<ConfidentialClaim>,
+        claim: Box<TariStealthClaim>,
     },
     ClaimValidatorFees {
         #[cfg_attr(feature = "ts", ts(type = "string"))]
@@ -74,6 +76,10 @@ pub enum Instruction {
     },
     StealthTransfer {
         resource_address_ref: ResourceAddressRef,
+        statement: StealthTransferStatement,
+        revealed_input_bucket: Option<WorkspaceOffsetId>,
+    },
+    PayFee {
         statement: StealthTransferStatement,
         revealed_input_bucket: Option<WorkspaceOffsetId>,
     },
@@ -100,6 +106,7 @@ impl Instruction {
 }
 
 impl Display for Instruction {
+    #[allow(clippy::too_many_lines)]
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::CreateAccount {
@@ -173,10 +180,10 @@ impl Display for Instruction {
                     key, resource_address, min_amount
                 )
             },
-            Instruction::PublishTemplate { .. } => {
+            Self::PublishTemplate { .. } => {
                 write!(f, "PublishTemplate")
             },
-            Instruction::AllocateAddress {
+            Self::AllocateAddress {
                 allocatable_type: substate_type,
                 workspace_id,
             } => {
@@ -185,19 +192,38 @@ impl Display for Instruction {
                     "AllocateAddress {{ substate_type: {substate_type:?}, workspace ID: {workspace_id} }}"
                 )
             },
-            Instruction::StealthTransfer {
+            Self::StealthTransfer {
                 resource_address_ref: resource_address,
                 statement,
                 revealed_input_bucket: bucket,
             } => {
                 write!(
                     f,
-                    "StealthTransfer {{ resource_address: {}, output(s): {}, rp-size: {}, bucket: {:?} }}",
+                    "StealthTransfer {{ resource_address: {}, output(s): {}, rp-size: {}",
                     resource_address,
                     statement.outputs_statement.outputs.len(),
                     statement.outputs_statement.agg_range_proof.len(),
-                    bucket
-                )
+                )?;
+                match bucket {
+                    Some(id) => write!(f, ", revealed_input_bucket: Some({}) }}", id),
+                    None => write!(f, ", revealed_input_bucket: None }}"),
+                }
+            },
+            Self::PayFee {
+                statement,
+                revealed_input_bucket: bucket,
+            } => {
+                write!(
+                    f,
+                    "PayFee {{ revealed_input: {}, output(s): {}, rp-size: {}",
+                    statement.inputs_statement.revealed_amount,
+                    statement.outputs_statement.outputs.len(),
+                    statement.outputs_statement.agg_range_proof.len(),
+                )?;
+                match bucket {
+                    Some(id) => write!(f, ", revealed_input_bucket: Some({}) }}", id),
+                    None => write!(f, ", revealed_input_bucket: None }}"),
+                }
             },
         }
     }

@@ -59,8 +59,7 @@ pub async fn handle_create_transfer_proof(
     let vault = sdk
         .accounts_api()
         .get_vault_by_resource(account.address(), &req.resource_address)?;
-    let proof_id = sdk.confidential_outputs_api().add_output_lock(&vault.id)?;
-    // Lock inputs we're going to spend
+    let lock_id = sdk.confidential_outputs_api().create_lock()?;
 
     let amount_to_transfer = req.amount.checked_add_positive(req.reveal_amount).ok_or_else(|| {
         invalid_request(format!(
@@ -68,15 +67,16 @@ pub async fn handle_create_transfer_proof(
             req.amount, req.reveal_amount
         ))
     })?;
+    // Lock inputs we're going to spend
     let (inputs, total_input_value) =
         sdk.confidential_outputs_api()
-            .lock_outputs_by_amount(proof_id, &vault.id, amount_to_transfer)?;
+            .lock_outputs_by_amount(lock_id, &vault.id, amount_to_transfer)?;
 
     info!(
         target: LOG_TARGET,
         "Locked {} inputs for proof {} worth {} µT",
         inputs.len(),
-        proof_id,
+        lock_id,
         total_input_value
     );
 
@@ -161,7 +161,7 @@ pub async fn handle_create_transfer_proof(
             encrypted_data: encrypted_data.clone(),
             public_asset_tag: None,
             status: OutputStatus::LockedUnconfirmed,
-            lock_id: Some(proof_id),
+            lock_id: Some(lock_id),
         })?;
 
         Some(UnblindedOutputStatement {
@@ -188,7 +188,10 @@ pub async fn handle_create_transfer_proof(
         Amount::zero(),
     )?;
 
-    Ok(ProofsGenerateResponse { proof_id, proof })
+    Ok(ProofsGenerateResponse {
+        proof_id: lock_id,
+        proof,
+    })
 }
 
 pub async fn handle_finalize_transfer(
@@ -212,6 +215,7 @@ pub async fn handle_cancel_transfer(
 ) -> Result<ProofsCancelResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
+    sdk.confidential_outputs_api().release_revealed_funds(req.proof_id)?;
     sdk.confidential_outputs_api().release_locked_outputs(req.proof_id)?;
     Ok(ProofsCancelResponse {})
 }

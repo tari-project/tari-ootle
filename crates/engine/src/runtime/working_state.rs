@@ -156,11 +156,12 @@ impl WorkingState {
     }
 
     fn enforce_substate_size_limit(&self, value: &SubstateValue) -> Result<(), RuntimeError> {
-        if encoded_len(value)? > limits::ENGINE_LIMITS.max_substate_size {
+        let size = encoded_len(value)?;
+        if size > limits::ENGINE_LIMITS.max_substate_size {
             return Err(RuntimeError::LimitError {
                 details: format!(
                     "Substate size of {} bytes exceeds the maximum allowed size of {} bytes",
-                    encoded_len(value)?,
+                    size,
                     limits::ENGINE_LIMITS.max_substate_size
                 ),
             });

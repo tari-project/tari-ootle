@@ -234,7 +234,7 @@ impl WorkingState {
             "component",
             "updated",
             tari_template_lib::models::Metadata::from([("module_name".to_string(), module_name)]),
-        ));
+        ))?;
 
         Ok(())
     }
@@ -672,7 +672,7 @@ impl WorkingState {
                 flags.iter().map(|f| (f.to_string(), "true".to_string())).collect(),
             )
         };
-        self.push_event(event);
+        self.push_event(event)?;
 
         Ok(())
     }
@@ -1318,16 +1318,34 @@ impl WorkingState {
         &self.proofs
     }
 
-    pub fn push_log(&mut self, log: LogEntry) {
+    pub fn push_log(&mut self, log: LogEntry) -> Result<(), RuntimeError> {
+        if self.logs.len() + 1 > limits::ENGINE_LIMITS.max_logs {
+            return Err(RuntimeError::LimitError {
+                details: format!(
+                    "Exceeded maximum number of logs per transaction: {}",
+                    limits::ENGINE_LIMITS.max_logs
+                ),
+            });
+        }
         self.logs.push(log);
+        Ok(())
     }
 
     pub fn take_logs(&mut self) -> Vec<LogEntry> {
         mem::take(&mut self.logs)
     }
 
-    pub fn push_event(&mut self, event: Event) {
+    pub fn push_event(&mut self, event: Event) -> Result<(), RuntimeError> {
+        if self.events.len() + 1 > limits::ENGINE_LIMITS.max_events {
+            return Err(RuntimeError::LimitError {
+                details: format!(
+                    "Exceeded maximum number of events per transaction: {}",
+                    limits::ENGINE_LIMITS.max_events
+                ),
+            });
+        }
         self.events.push(event);
+        Ok(())
     }
 
     pub fn take_events(&mut self) -> Vec<Event> {
@@ -1483,7 +1501,7 @@ impl WorkingState {
                 }
             },
             None => {
-                if !statement.inputs_statement.revealed_amount.is_zero() {
+                if statement.inputs_statement.revealed_amount.is_positive() {
                     return Err(RuntimeError::InvalidArgument {
                         argument: "revealed_funds_bucket",
                         reason: format!(

@@ -18,10 +18,14 @@ pub const WASM_LIMITS: WasmLimits = WasmLimits {
 
 pub struct EngineLimits {
     pub max_substate_outputs: usize,
+    pub max_logs: usize,
+    pub max_events: usize,
 }
 
 pub const ENGINE_LIMITS: EngineLimits = EngineLimits {
     max_substate_outputs: 1000,
+    max_logs: 100,
+    max_events: 100,
 };
 
 pub const MAX_DIVISIBILITY: u8 = 18;

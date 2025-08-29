@@ -47,12 +47,17 @@ impl RuntimeModule for FeeModule {
             Ok::<_, RuntimeModuleError>(counter.get())
         })?;
 
+        let cost = self
+            .fee_table
+            .per_byte_storage_cost()
+            .checked_mul(total_storage)
+            .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating storage cost".to_string()))?;
         // TODO: Cost per byte of storage is reduced by a pretty arbitrarily chosen factor (floor(cost*0.25))
         const STORAGE_COST_REDUCTION_DIVISOR: u64 = 4;
         track.add_fee_charge(
             FeeSource::Storage,
             // Divide a storage cost reduction factor
-            self.fee_table.per_byte_storage_cost() * total_storage as u64 / STORAGE_COST_REDUCTION_DIVISOR,
+            cost / STORAGE_COST_REDUCTION_DIVISOR,
         );
 
         track.add_fee_charge(FeeSource::Logs, track.num_logs() as u64 * self.fee_table.per_log_cost());
@@ -69,7 +74,7 @@ impl RuntimeModule for FeeModule {
 // TODO: This may become available in tari_utilities in future
 #[derive(Debug, Clone, Default)]
 struct ByteCounter {
-    count: usize,
+    count: u64,
 }
 
 impl ByteCounter {
@@ -77,7 +82,7 @@ impl ByteCounter {
         Default::default()
     }
 
-    pub fn get(&self) -> usize {
+    pub fn get(&self) -> u64 {
         self.count
     }
 }
@@ -85,7 +90,14 @@ impl ByteCounter {
 impl io::Write for ByteCounter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let len = buf.len();
-        self.count += len;
+        let len_u64 = u64::try_from(len).map_err(|_| {
+            // Not really possible
+            io::Error::other("usize len Overflow u64")
+        })?;
+        self.count = self
+            .count
+            .checked_add(len_u64)
+            .ok_or_else(|| io::Error::other("ByteCounter overflowed u64"))?;
         Ok(len)
     }
 

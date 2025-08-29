@@ -126,9 +126,6 @@ Feature: Wallet Daemon
     # Initialize a base node, wallet, miner and VN
     Given a network with registered validator VAL_1 and wallet daemon WALLET_D
 
-    # Initialize an indexer
-    Given an indexer IDX connected to base node NETWORK_BASE
-
     # Initialize the wallet daemon
     Given a wallet daemon WALLET_D connected to indexer IDX
 

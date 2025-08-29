@@ -6,10 +6,10 @@ use std::time::Duration;
 use cucumber::{then, when};
 use integration_tests::{wallet_daemon_cli, TariWorld};
 use log::info;
-use tari_core::transactions::transaction_components::payment_id::{PaymentId, TxType};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
 use tari_template_lib::prelude::Amount;
+use tari_transaction_components::transaction_components::{memo_field::TxType, MemoField};
 use tari_wallet_daemon_client::ComponentAddressOrName;
 
 #[when(
@@ -248,7 +248,7 @@ async fn when_i_burn_funds_with_wallet_daemon(
         .create_burn_transaction(minotari_app_grpc::tari_rpc::CreateBurnTransactionRequest {
             amount: amount * 1_000_000,
             fee_per_gram: 1,
-            payment_id: PaymentId::open_from_string("Burn", TxType::Burn).to_bytes(),
+            payment_id: MemoField::open_from_string("Burn", TxType::Burn).to_bytes(),
             claim_public_key: public_key.to_vec(),
             sidechain_deployment_key: vec![],
         })

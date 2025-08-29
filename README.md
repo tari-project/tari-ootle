@@ -88,12 +88,12 @@ So:
 | tari
 | ootle
 
-`cd` into `tari` and change the branch `v4.9.0-pre.1`:
+`cd` into `tari` and change the branch `v5.0.0-pre.8`:
 
 ```shell
 cd tari
-git fetch origin tag v4.9.0-pre.1
-git checkout v4.9.0-pre.1
+git fetch origin tag v5.0.0-pre.8
+git checkout v5.0.0-pre.8
 ```
 
 Once done, change directory to the `ootle` and run the following from the ootle folder:

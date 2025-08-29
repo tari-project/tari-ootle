@@ -1,11 +1,10 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use anyhow::bail;
+use anyhow::{anyhow, bail};
 use log::info;
 use minotari_node_grpc_client::grpc;
 use minotari_wallet_grpc_client::WalletGrpcClient;
-use tari_core::transactions::transaction_components::payment_id::{PaymentId, TxType};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_ootle_common_types::layer_one_transaction::{
     LayerOnePayloadType,
@@ -14,6 +13,7 @@ use tari_ootle_common_types::layer_one_transaction::{
     ValidatorRegistrationParams,
 };
 use tari_sidechain::EvictionProof;
+use tari_transaction_components::transaction_components::{memo_field::TxType, MemoField};
 
 pub struct LayerOneTransactionSubmitter {
     client: WalletGrpcClient<tonic::transport::Channel>,
@@ -66,10 +66,11 @@ impl LayerOneTransactionSubmitter {
                         validator_node_claim_public_key: registration.claim_public_key.as_bytes().to_vec(),
                         max_epoch: registration.max_epoch.as_u64(),
                         fee_per_gram: 10,
-                        payment_id: PaymentId::Open {
-                            user_data: format!("VN registration: {}", registration.public_key).into_bytes(),
-                            tx_type: TxType::ValidatorNodeRegistration,
-                        }
+                        payment_id: MemoField::new_open(
+                            format!("VN registration: {}", registration.public_key).into_bytes(),
+                            TxType::ValidatorNodeRegistration,
+                        )
+                        .map_err(|e| anyhow!("Failed to create payment ID: {}", e))?
                         .to_bytes(),
                         sidechain_deployment_key: registration
                             .sidechain_public_key

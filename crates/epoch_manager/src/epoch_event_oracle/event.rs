@@ -3,6 +3,7 @@
 
 use std::fmt::Display;
 
+use anyhow::Context;
 use tari_common_types::types::FixedHash;
 use tari_engine_types::confidential::UnclaimedConfidentialOutput;
 use tari_ootle_common_types::{displayable::Displayable, Epoch, SubstateAddress};
@@ -144,6 +145,39 @@ pub enum ValidatorNodeChange {
     Remove {
         public_key: RistrettoPublicKeyBytes,
     },
+}
+
+#[cfg(feature = "service")]
+impl TryFrom<minotari_app_grpc::tari_rpc::ValidatorNodeChange> for ValidatorNodeChange {
+    type Error = anyhow::Error;
+
+    fn try_from(value: minotari_app_grpc::tari_rpc::ValidatorNodeChange) -> Result<Self, Self::Error> {
+        match value.change {
+            Some(minotari_app_grpc::tari_rpc::validator_node_change::Change::Add(add)) => {
+                let registration = add
+                    .registration
+                    .ok_or_else(|| anyhow::anyhow!("ValidatorNodeChange Add missing registration field"))?;
+                let claim_public_key = RistrettoPublicKeyBytes::from_bytes(&registration.claim_public_key)
+                    .context("Invalid claim_public_key")?;
+                let validator_node_public_key = RistrettoPublicKeyBytes::from_bytes(&registration.public_key)
+                    .context("Invalid validator_node_public_key")?;
+                Ok(ValidatorNodeChange::Add {
+                    claim_public_key,
+                    validator_node_public_key,
+                    activation_epoch: Epoch(add.activation_epoch),
+                    minimum_value_promise: add.minimum_value_promise,
+                    shard_key: SubstateAddress::from_bytes(&add.shard_key)?,
+                })
+            },
+            Some(minotari_app_grpc::tari_rpc::validator_node_change::Change::Remove(remove)) => {
+                Ok(ValidatorNodeChange::Remove {
+                    public_key: RistrettoPublicKeyBytes::from_bytes(&remove.public_key)
+                        .context("invalid public key in ValidatorNodeChange::Remove")?,
+                })
+            },
+            None => Err(anyhow::anyhow!("ValidatorNodeChange missing change field")),
+        }
+    }
 }
 
 impl Display for ValidatorNodeChange {

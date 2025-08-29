@@ -15,7 +15,8 @@ tari_validator_node = { workspace = true, default-features = false }
 tari_indexer = { workspace = true, default-features = false }
 tari_ootle_walletd = { workspace = true, default-features = false }
 
-tari_core = { workspace = true, default-features = true }
+tari_transaction_components = { workspace = true }
+tari_transaction_key_manager = { workspace = true }
 minotari_app_grpc = { workspace = true }
 minotari_app_utilities = { workspace = true }
 minotari_node_grpc_client = { workspace = true }
@@ -43,8 +44,8 @@ tari_base_node_client = { workspace = true }
 tari_transaction_manifest = { workspace = true }
 tari_ootle_wallet_sdk = { workspace = true }
 
-tari_comms = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
-tari_comms_dht = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
+tari_comms = { git = "https://github.com/tari-project/tari.git", tag = "v5.0.0-pre.8" }
+tari_comms_dht = { git = "https://github.com/tari-project/tari.git", tag = "v5.0.0-pre.8" }
 
 anyhow = { workspace = true }
 config = { workspace = true }

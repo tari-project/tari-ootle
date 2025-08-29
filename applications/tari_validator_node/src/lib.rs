@@ -54,6 +54,7 @@ use tari_ootle_common_types::{PeerAddress, SubstateAddress};
 use tari_ootle_storage::global::{DbFactory, GlobalDb};
 use tari_ootle_storage_sqlite::{global::SqliteGlobalDbAdapter, SqliteDbFactory};
 use tari_shutdown::Shutdown;
+use tokio::task;
 
 pub use crate::config::{ApplicationConfig, ValidatorNodeConfig};
 use crate::{
@@ -111,7 +112,7 @@ pub async fn run_validator_node(
 
     // Preload the range proof services. This avoids initialization cost during transaction processing and helps ensure
     // validators execute at a more similar speed.
-    preload_crypto_services();
+    task::spawn_blocking(preload_crypto_services).await?;
 
     #[cfg(feature = "metrics")]
     let mut base_registry = prometheus_client::registry::Registry::default();

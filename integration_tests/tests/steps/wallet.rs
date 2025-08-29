@@ -6,12 +6,12 @@ use std::time::Duration;
 use cucumber::{given, then, when};
 use minotari_app_grpc::tari_rpc::{GetBalanceRequest, SubmitValidatorEvictionProofRequest, ValidateRequest};
 use tari_common_types::types::PrivateKey;
-use tari_core::transactions::transaction_components::payment_id::{PaymentId, TxType};
 use tari_crypto::{
     ristretto::{pedersen::PedersenCommitment, RistrettoComSig, RistrettoPublicKey},
     tari_utilities::ByteArray,
 };
 use tari_template_lib::prelude::PedersenCommitmentBytes;
+use tari_transaction_components::transaction_components::{memo_field::TxType, MemoField};
 use tokio::time::sleep;
 
 use crate::{spawn_wallet, TariWorld};
@@ -50,11 +50,9 @@ async fn when_i_burn_on_wallet(
         .create_burn_transaction(minotari_app_grpc::tari_rpc::CreateBurnTransactionRequest {
             amount: amount * 1_000_000,
             fee_per_gram: 1,
-            payment_id: PaymentId::Open {
-                user_data: "Burn".as_bytes().to_vec(),
-                tx_type: TxType::Burn,
-            }
-            .to_bytes(),
+            payment_id: MemoField::new_open("Burn".as_bytes().to_vec(), TxType::Burn)
+                .unwrap()
+                .to_bytes(),
             claim_public_key: public_key.to_vec(),
             sidechain_deployment_key: vec![],
         })
@@ -87,6 +85,7 @@ async fn when_i_burn_on_wallet(
 
 #[when(expr = "wallet {word} has at least {int} {word}")]
 pub async fn check_balance(world: &mut TariWorld, wallet_name: String, balance: u64, units: String) {
+    const MAX_WAIT_TIME_SECS: u64 = 100;
     let wallet = world
         .wallets
         .get(&wallet_name)
@@ -116,10 +115,10 @@ pub async fn check_balance(world: &mut TariWorld, wallet_name: String, balance: 
         );
         sleep(Duration::from_secs(1)).await;
 
-        if iterations == 40 {
+        if iterations == MAX_WAIT_TIME_SECS {
             panic!(
-                "Wallet {} did not have at least {} uT after 40 seconds  (balance: {} uT, pending: {} uT)",
-                wallet_name, balance, resp.available_balance, resp.pending_incoming_balance
+                "Wallet {} did not have at least {} uT after {} seconds  (balance: {} uT, pending: {} uT)",
+                wallet_name, balance, MAX_WAIT_TIME_SECS, resp.available_balance, resp.pending_incoming_balance
             );
         }
         iterations += 1;

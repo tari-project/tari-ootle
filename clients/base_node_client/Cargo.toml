@@ -10,7 +10,8 @@ license.workspace = true
 minotari_app_grpc = { workspace = true }
 minotari_node_grpc_client = { workspace = true }
 tari_common_types = { workspace = true }
-tari_core = { workspace = true, default-features = false, features = ["base_node"] } # Currently needed to compile (it shouldnt be)
+tari_transaction_components = { workspace = true, default-features = false }
+tari_node_components = { workspace = true, default-features = false }
 tari_utilities = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 tari_template_lib = { workspace = true }

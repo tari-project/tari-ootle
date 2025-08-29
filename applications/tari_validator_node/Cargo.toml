@@ -18,7 +18,7 @@ web_ui = []
 minotari_app_utilities = { workspace = true }
 tari_common = { workspace = true }
 tari_common_types = { workspace = true }
-tari_core = { workspace = true, default-features = false, features = ["transactions"] }
+tari_transaction_components = { workspace = true }
 tari_crypto = { workspace = true }
 tari_epoch_oracles = { workspace = true, features = ["base_layer"] }
 tari_validator_node_rpc = { workspace = true }

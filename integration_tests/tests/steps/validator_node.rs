@@ -21,11 +21,11 @@ use log::warn;
 use minotari_app_grpc::tari_rpc::{RegisterValidatorNodeRequest, Signature};
 use notify::Watcher;
 use tari_base_node_client::{grpc::GrpcBaseNodeClient, BaseNodeClient};
-use tari_core::transactions::transaction_components::payment_id::{PaymentId, TxType};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{layer_one_transaction::LayerOneTransactionDef, Epoch, SubstateAddress};
 use tari_sidechain::EvictionProof;
+use tari_transaction_components::transaction_components::{memo_field::TxType, MemoField};
 use tari_validator_node_client::types::{
     AddPeerRequest,
     GetBlocksRequest,
@@ -183,11 +183,9 @@ pub async fn send_vn_registration_with_claim_wallet(world: &mut TariWorld, vn_na
                 .map(|key| key.to_vec())
                 .unwrap_or_default(),
             fee_per_gram: 1,
-            payment_id: PaymentId::Open {
-                user_data: "Register by cucumber".as_bytes().to_vec(),
-                tx_type: TxType::ValidatorNodeRegistration,
-            }
-            .to_bytes(),
+            payment_id: MemoField::new_open_from_string("Register by cucumber", TxType::ValidatorNodeRegistration)
+                .unwrap()
+                .to_bytes(),
         })
         .await
         .unwrap()

@@ -5,7 +5,6 @@ use anyhow::anyhow;
 use minotari_node_grpc_client::grpc;
 use minotari_wallet_grpc_client::WalletGrpcClient;
 use serde::Serialize;
-use tari_core::transactions::transaction_components::payment_id::{PaymentId, TxType};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_template_lib_types::crypto::{
     CommitmentSignatureBytes,
@@ -13,6 +12,7 @@ use tari_template_lib_types::crypto::{
     RistrettoPublicKeyBytes,
     Scalar32Bytes,
 };
+use tari_transaction_components::transaction_components::{memo_field::TxType, MemoField};
 use tari_wallet_daemon_client::types::ClaimBurnProof;
 
 use crate::process_manager::Instance;
@@ -54,11 +54,9 @@ impl MinoTariWalletProcess {
         let request = grpc::CreateBurnTransactionRequest {
             amount,
             fee_per_gram: 1,
-            payment_id: PaymentId::Open {
-                user_data: "Burn funds in swarm".as_bytes().to_vec(),
-                tx_type: TxType::Burn,
-            }
-            .to_bytes(),
+            payment_id: MemoField::new_open("Burn funds in swarm".as_bytes().to_vec(), TxType::Burn)
+                .map_err(|e| anyhow!("Failed to create MemoField: {e}"))?
+                .to_bytes(),
             claim_public_key: claim_public_key.to_vec(),
             sidechain_deployment_key: vec![],
         };

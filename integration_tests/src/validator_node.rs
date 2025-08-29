@@ -51,9 +51,7 @@ use tokio::task;
 
 use crate::{
     helpers::{check_join_handle, get_os_assigned_port, get_os_assigned_ports, wait_listener_on_local_port},
-    indexer::spawn_indexer,
     logging::get_base_dir_for_scenario,
-    wallet_daemon::spawn_wallet_daemon,
     TariWorld,
 };
 
@@ -112,12 +110,7 @@ pub async fn spawn_validator_node(
     let walletd = match world.wallet_daemons.get(&wallet_daemon_name) {
         Some(walletd) => walletd,
         None => {
-            let indexer_name = format!("{}_indexer", wallet_daemon_name);
-            if world.indexers.get(&indexer_name).is_none() {
-                spawn_indexer(world, indexer_name.clone(), base_node_name).await;
-            }
-            spawn_wallet_daemon(world, wallet_daemon_name.clone(), indexer_name).await;
-            world.wallet_daemons.get(&wallet_daemon_name).unwrap()
+            panic!("No wallet daemon named {} found", wallet_daemon_name);
         },
     };
     let mut wallet_client = walletd.get_authed_client().await;

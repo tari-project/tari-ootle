@@ -4,11 +4,11 @@
 use log::*;
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
 use tari_engine_types::{crypto::PrivateOutput, FromByteType, ToByteType};
-use tari_key_manager::key_manager::DerivedKey;
 use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 use tari_ootle_wallet_crypto::{kdfs, MaskAndValue};
 use tari_template_lib::{models::VaultId, prelude::PedersenCommitmentBytes, types::Amount};
 use tari_transaction::TransactionId;
+use tari_transaction_components::key_manager::tari_key_manager::DerivedKey;
 
 use crate::{
     apis::{
@@ -265,7 +265,7 @@ where TStore: WalletStore
     fn validate_output(
         &self,
         account: &Account,
-        key: &DerivedKey<RistrettoPublicKey>,
+        key: &DerivedKey,
         vault_id: VaultId,
         commitment: PedersenCommitmentBytes,
         output: &PrivateOutput,

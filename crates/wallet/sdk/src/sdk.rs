@@ -6,13 +6,13 @@ use std::sync::Arc;
 use digest::crypto_common::rand_core::{OsRng, RngCore};
 use log::{info, warn};
 use passwords::PasswordGenerator;
-use tari_crypto::tari_utilities::SafePassword;
-use tari_key_manager::{
+use tari_common_types::seeds::{
     cipher_seed::CipherSeed,
-    error::KeyManagerError,
+    error::CipherError,
     mnemonic::{Mnemonic, MnemonicLanguage},
-    SeedWords,
+    seed_words::SeedWords,
 };
+use tari_crypto::tari_utilities::SafePassword;
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
     Network,
@@ -27,7 +27,7 @@ use crate::{
         confidential_outputs::ConfidentialOutputsApi,
         confidential_transfer::ConfidentialTransferApi,
         config::{ConfigApi, ConfigApiError, ConfigKey},
-        key_manager::KeyManagerApi,
+        key_manager::{KeyManagerApi, KeyManagerApiError},
         non_fungible_tokens::NonFungibleTokensApi,
         resources::ResourcesApi,
         stealth_crypto::StealthCryptoApi,
@@ -354,7 +354,9 @@ pub enum WalletSdkError {
     #[error("OS Keyring error: {0}")]
     KeyRing(#[from] keyring::Error),
     #[error("Key manager error: {0}")]
-    KeyManager(#[from] KeyManagerError),
+    KeyManager(#[from] KeyManagerApiError),
+    #[error("Cipher error: {0}")]
+    CipherError(#[from] CipherError),
     #[error("Failed to generate password for cipher seed: {0}")]
     PasswordGeneration(String),
     #[error(
@@ -373,10 +375,11 @@ impl IsNotFoundError for WalletSdkError {
         match self {
             Self::WalletStorageError(e) => e.is_not_found_error(),
             Self::ConfigApiError(e) => e.is_not_found_error(),
+            Self::KeyManager(e) => e.is_not_found_error(),
             Self::KeyRing(keyring::Error::NoEntry) => true,
             Self::KeyRing(_) |
+            Self::CipherError(_) |
             Self::PasswordGeneration(_) |
-            Self::KeyManager(_) |
             Self::InvariantError { .. } |
             Self::FailedToAccessKeyRing |
             Self::NetworkParseError(_) => false,

@@ -11,6 +11,7 @@ license.workspace = true
 minotari_app_utilities = { workspace = true }
 tari_bor = { workspace = true }
 tari_common = { workspace = true }
+tari_common_types = { workspace = true }
 tari_crypto = { workspace = true }
 tari_ootle_app_utilities = { workspace = true }
 tari_shutdown = { workspace = true }
@@ -26,7 +27,8 @@ tari_template_builtin = { workspace = true }
 tari_template_lib = { workspace = true }
 tari_template_abi = { workspace = true }
 tari_indexer_client = { workspace = true, features = ["client"] }
-tari_key_manager = { workspace = true }
+tari_transaction_key_manager = { workspace = true }
+tari_transaction_components = { workspace = true }
 tari_transaction_manifest = { workspace = true }
 
 anyhow = { workspace = true }

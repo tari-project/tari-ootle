@@ -209,7 +209,7 @@ fn preload_crypto_services() {
 
     info!(
         target: LOG_TARGET,
-        "Preloaded crypto services in {:.2?}ms",
+        "Preloaded crypto services in {:.2?}",
         timer.elapsed()
     );
 }
@@ -230,6 +230,7 @@ mod tests {
 
     #[test]
     fn preload_crypto_services_does_not_panic() {
+        preload_crypto_services();
         preload_crypto_services();
     }
 }

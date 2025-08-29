@@ -40,7 +40,7 @@ lazy_static! {
 }
 
 pub fn get_static_range_proof_service(aggregation_factor: usize) -> &'static BulletproofsPlusService {
-    match aggregation_factor {
+    match aggregation_factor.next_power_of_two() {
         1 => &RANGE_PROOF_AGG_1_SERVICE,
         2 => &RANGE_PROOF_AGG_2_SERVICE,
         4 => &RANGE_PROOF_AGG_4_SERVICE,

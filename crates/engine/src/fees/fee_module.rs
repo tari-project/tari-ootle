@@ -1,9 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::io;
-
-use tari_bor::encode_into_std_writer;
+use tari_bor::{encode_into_writer, ByteCounter};
 use tari_engine_types::fees::FeeSource;
 
 use super::FeeTable;
@@ -42,7 +40,7 @@ impl RuntimeModule for FeeModule {
         let total_storage = track.with_substates_to_persist(|changes| {
             let mut counter = ByteCounter::new();
             for substate in changes.values() {
-                encode_into_std_writer(substate, &mut counter)?;
+                encode_into_writer(substate, &mut counter)?;
             }
             Ok::<_, RuntimeModuleError>(counter.get())
         })?;
@@ -50,7 +48,7 @@ impl RuntimeModule for FeeModule {
         let cost = self
             .fee_table
             .per_byte_storage_cost()
-            .checked_mul(total_storage)
+            .checked_mul(total_storage as u64)
             .ok_or_else(|| RuntimeModuleError::Overflow("Overflow calculating storage cost".to_string()))?;
         // TODO: Cost per byte of storage is reduced by a pretty arbitrarily chosen factor (floor(cost*0.25))
         const STORAGE_COST_REDUCTION_DIVISOR: u64 = 4;
@@ -67,41 +65,6 @@ impl RuntimeModule for FeeModule {
             track.num_events() as u64 * self.fee_table.per_event_cost(),
         );
 
-        Ok(())
-    }
-}
-
-// TODO: This may become available in tari_utilities in future
-#[derive(Debug, Clone, Default)]
-struct ByteCounter {
-    count: u64,
-}
-
-impl ByteCounter {
-    pub fn new() -> Self {
-        Default::default()
-    }
-
-    pub fn get(&self) -> u64 {
-        self.count
-    }
-}
-
-impl io::Write for ByteCounter {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let len = buf.len();
-        let len_u64 = u64::try_from(len).map_err(|_| {
-            // Not really possible
-            io::Error::other("usize len Overflow u64")
-        })?;
-        self.count = self
-            .count
-            .checked_add(len_u64)
-            .ok_or_else(|| io::Error::other("ByteCounter overflowed u64"))?;
-        Ok(len)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
 }

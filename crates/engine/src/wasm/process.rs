@@ -22,8 +22,15 @@
 
 use log::*;
 use serde::{de::DeserializeOwned, Serialize};
-use tari_bor::{decode_exact, encode, encode_into_writer, encode_with_len_to_writer, encoded_len};
-use tari_engine_types::{indexed_value::IndexedValue, instruction_result::InstructionResult};
+use tari_bor::{
+    decode_exact,
+    encode,
+    encode_into_writer,
+    encode_with_len_to_writer,
+    encoded_len,
+    encoded_len_with_limit,
+};
+use tari_engine_types::{indexed_value::IndexedValue, instruction_result::InstructionResult, limits};
 use tari_template_abi::{version, CallInfo, EngineOp, FunctionDef};
 use tari_template_lib::{
     args::{
@@ -102,7 +109,11 @@ impl WasmProcess {
         store: &mut S,
         val: &T,
     ) -> Result<AllocPtr, WasmExecutionError> {
-        let len = encoded_len(val)?;
+        let len = encoded_len_with_limit(val, limits::ENGINE_LIMITS.max_call_size).map_err(|_| {
+            WasmExecutionError::CallSizeLimitExceeded {
+                limit: limits::ENGINE_LIMITS.max_call_size,
+            }
+        })?;
         let len = u32::try_from(len).map_err(|_| WasmExecutionError::MemoryAllocationTooLarge)?;
 
         let ptr = self.env.alloc(store, len)?;

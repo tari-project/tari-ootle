@@ -13,15 +13,11 @@ use tari_engine_types::{
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
 };
-use tari_ootle_common_types::{
-    Epoch,
-    NumPreshards,
-    ShardGroup,
-    SubstateAddress,
-    SubstateRequirement,
-    SubstateRequirementRef,
+use tari_ootle_common_types::{Epoch, SubstateRequirement, SubstateRequirementRef};
+use tari_template_lib::{
+    args::InstructionArg,
+    models::{ComponentAddress, StealthTransferStatement},
 };
-use tari_template_lib::{args::InstructionArg, models::ComponentAddress};
 
 use crate::{
     v1::signature::TransactionSignature,
@@ -120,16 +116,6 @@ impl TransactionV1 {
         self.inputs().iter().map(Into::into)
     }
 
-    pub fn to_all_involved_shards(&self, num_shards: NumPreshards, num_committees: u32) -> HashSet<ShardGroup> {
-        self.all_inputs_iter()
-            .map(|id| {
-                // version doesnt affect shard
-                let addr = SubstateAddress::from_substate_id(id.substate_id(), 0);
-                addr.to_shard_group(num_shards, num_committees)
-            })
-            .collect()
-    }
-
     pub fn all_published_templates_iter(&self) -> impl Iterator<Item = (PublishedTemplateAddress, &[u8])> + '_ {
         let sealed_pk = self.seal_signature.public_key();
         self.instructions()
@@ -206,11 +192,14 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::AssertBucketContains { .. } => 1,
         Instruction::PublishTemplate { binary } => binary.len() as u64 / BINARY_WEIGHT_DIVISOR,
         Instruction::AllocateAddress { .. } => 1,
-        Instruction::StealthTransfer { statement, .. } => {
-            // TODO: weight inputs and outputs accordingly - currently outputs cost 2x inputs
-            statement.inputs_statement.inputs.len() as u64 + (statement.outputs_statement.outputs.len() as u64 * 2)
-        },
+        Instruction::StealthTransfer { statement, .. } => calc_stealth_statement_weight(statement),
+        Instruction::PayFee { statement, .. } => calc_stealth_statement_weight(statement),
     }
+}
+
+fn calc_stealth_statement_weight(statement: &StealthTransferStatement) -> u64 {
+    // TODO: weight inputs and outputs accordingly - currently outputs cost 2x inputs
+    statement.inputs_statement.inputs.len() as u64 + (statement.outputs_statement.outputs.len() as u64 * 2)
 }
 
 fn calc_args_weight(args: &[InstructionArg]) -> u64 {

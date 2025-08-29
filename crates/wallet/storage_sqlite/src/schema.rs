@@ -60,6 +60,14 @@ diesel::table! {
 }
 
 diesel::table! {
+    locks (id) {
+        id -> Integer,
+        transaction_id -> Nullable<Text>,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     non_fungible_tokens (id) {
         id -> Integer,
         vault_id -> Integer,
@@ -70,17 +78,6 @@ diesel::table! {
         is_burnt -> Bool,
         created_at -> Timestamp,
         updated_at -> Timestamp,
-    }
-}
-
-diesel::table! {
-    output_locks (id) {
-        id -> Integer,
-        resource_address -> Text,
-        vault_id -> Nullable<Integer>,
-        transaction_hash -> Nullable<Text>,
-        locked_revealed_amount -> BigInt,
-        created_at -> Timestamp,
     }
 }
 
@@ -150,6 +147,7 @@ diesel::table! {
         tag_byte -> Integer,
         is_burnt -> Bool,
         is_frozen -> Bool,
+        is_on_chain -> Bool,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }
@@ -171,21 +169,15 @@ diesel::table! {
 diesel::table! {
     transactions (id) {
         id -> Integer,
-        hash -> Text,
-        network -> Integer,
-        instructions -> Text,
-        fee_instructions -> Text,
-        inputs -> Text,
-        signatures -> Text,
-        seal_signature -> Text,
-        is_seal_signer_authorized -> Bool,
+        transaction_id -> Text,
+        transaction_json -> Text,
+        referenced_components -> Text,
+        signers -> Text,
         result -> Nullable<Text>,
         qcs -> Nullable<Text>,
         final_fee -> Nullable<BigInt>,
         status -> Text,
         dry_run -> Bool,
-        min_epoch -> Nullable<BigInt>,
-        max_epoch -> Nullable<BigInt>,
         executed_time_ms -> Nullable<BigInt>,
         finalized_time -> Nullable<Timestamp>,
         new_account_info -> Nullable<Text>,
@@ -207,6 +199,7 @@ diesel::table! {
         locked_revealed_balance -> BigInt,
         token_symbol -> Nullable<Text>,
         divisibility -> Integer,
+        locked_by -> Nullable<Integer>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }
@@ -232,12 +225,12 @@ diesel::table! {
 }
 
 diesel::joinable!(non_fungible_tokens -> vaults (vault_id));
-diesel::joinable!(output_locks -> vaults (vault_id));
 diesel::joinable!(outputs -> accounts (account_id));
 diesel::joinable!(outputs -> vaults (vault_id));
 diesel::joinable!(shard_state_versions -> accounts (account_id));
 diesel::joinable!(shard_state_versions -> resources (resource_id));
 diesel::joinable!(vaults -> accounts (account_id));
+diesel::joinable!(vaults -> locks (locked_by));
 diesel::joinable!(webauthn_registration_passkeys -> webauthn_registrations (registration_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
@@ -246,8 +239,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     authored_templates,
     config,
     key_manager_states,
+    locks,
     non_fungible_tokens,
-    output_locks,
     outputs,
     resources,
     shard_state_versions,

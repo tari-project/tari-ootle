@@ -33,6 +33,8 @@ pub enum KeyBranch {
     StealthMasks,
     /// The confidential masks branch, used to derive masks for confidential transactions.
     ConfidentialMasks,
+    /// Used to generate nonces that need to be recreated later, e.g. to derive the DH secret for claim burn
+    Nonce,
 }
 
 impl KeyBranch {
@@ -43,6 +45,7 @@ impl KeyBranch {
             Self::ViewKey => "view_key",
             Self::StealthMasks => "stealth_masks",
             Self::ConfidentialMasks => "confidential_masks",
+            Self::Nonce => "nonce",
         }
     }
 }
@@ -107,6 +110,15 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
                 // TODO: Key manager shouldn't return other errors
                 .map_err(tari_key_manager::error::KeyManagerError::from)?;
         Ok(key)
+    }
+
+    pub fn derive_keypair<B: AsRef<str>>(&self, branch: B, index: u64) -> Result<KeyPair, KeyManagerApiError> {
+        let key = self.derive_key(branch, index)?;
+        let public_key = RistrettoPublicKey::from_secret_key(&key.key);
+        Ok(KeyPair {
+            public_key,
+            secret_key: key,
+        })
     }
 
     pub fn derive_account_keypair(

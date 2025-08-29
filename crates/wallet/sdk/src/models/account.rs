@@ -4,6 +4,8 @@
 use std::fmt::{Display, Formatter};
 
 use tari_bor::{Deserialize, Serialize};
+use tari_crypto::ristretto::RistrettoPublicKey;
+use tari_engine_types::FromByteType;
 use tari_template_lib::{models::ComponentAddress, prelude::RistrettoPublicKeyBytes};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -15,6 +17,28 @@ pub struct Account {
     pub key_index: u64,
     pub is_confirmed_on_chain: bool,
     pub is_default: bool,
+}
+
+impl Account {
+    pub fn address(&self) -> &ComponentAddress {
+        &self.address
+    }
+
+    pub fn key_index(&self) -> u64 {
+        self.key_index
+    }
+
+    pub fn name(&self) -> Option<&String> {
+        self.name.as_ref()
+    }
+
+    pub fn is_confirmed_on_chain(&self) -> bool {
+        self.is_confirmed_on_chain
+    }
+
+    pub fn is_default(&self) -> bool {
+        self.is_default
+    }
 }
 
 impl Display for Account {
@@ -48,6 +72,11 @@ impl AccountWithPublicKey {
 
     pub fn owner_public_key(&self) -> &RistrettoPublicKeyBytes {
         &self.owner_public_key
+    }
+
+    pub fn to_ristretto_public_key(&self) -> RistrettoPublicKey {
+        RistrettoPublicKey::try_from_byte_type(&self.owner_public_key)
+            .expect("BUG: Malformed public key bytes in account")
     }
 
     pub fn is_confirmed_on_chain(&self) -> bool {

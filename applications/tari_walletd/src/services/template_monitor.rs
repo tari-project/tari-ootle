@@ -78,7 +78,7 @@ where
 
     async fn handle_wallet_event(&self, event: WalletEvent) -> anyhow::Result<()> {
         if let WalletEvent::TransactionFinalized(event) = event {
-            let Some(diff) = event.finalize.result.accept() else {
+            let Some(diff) = event.finalize.result.any_accept() else {
                 return Ok(());
             };
 

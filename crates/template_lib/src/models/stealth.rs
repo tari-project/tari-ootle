@@ -45,6 +45,24 @@ pub struct StealthInputsStatement {
     pub revealed_amount: Amount,
 }
 
+impl StealthInputsStatement {
+    pub fn new(inputs: Vec<StealthInput>, revealed_amount: Amount) -> Self {
+        assert!(!revealed_amount.is_negative(), "Revealed amount must be positive");
+        assert!(
+            !inputs.is_empty() || !revealed_amount.is_zero(),
+            "At least one input or a revealed amount must be provided"
+        );
+        Self {
+            inputs,
+            revealed_amount,
+        }
+    }
+
+    pub fn new_revealed(amount: Amount) -> Self {
+        Self::new(vec![], amount)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct StealthTransferStatement {

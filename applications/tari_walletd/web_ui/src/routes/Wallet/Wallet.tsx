@@ -31,7 +31,7 @@ import AccessTokens from "./Components/AccessTokens";
 import useAccountStore from "../../store/accountStore";
 
 function Wallet() {
-  const account = useAccountStore((state) => state.account);
+  const { account, publicKey } = useAccountStore();
 
   return (
     <>
@@ -48,7 +48,7 @@ function Wallet() {
       </Grid>
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
-          <Transactions account={account!} />
+          <Transactions account={account!} ownerPublicKey={publicKey} />
         </StyledPaper>
       </Grid>
       <Grid item xs={12} md={12} lg={12}>

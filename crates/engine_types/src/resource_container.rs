@@ -277,8 +277,8 @@ impl ResourceContainer {
             (this, other) => {
                 return Err(ResourceError::ResourceTypeMismatch {
                     operate: "deposit",
-                    expected: this.resource_type(),
                     given: other.resource_type(),
+                    expected: this.resource_type(),
                 })
             },
         }
@@ -353,7 +353,7 @@ impl ResourceContainer {
         }
     }
 
-    pub fn recall_all(&mut self) -> Result<Self, ResourceError> {
+    pub fn withdraw_all(&mut self) -> Result<Self, ResourceError> {
         match self {
             Self::Fungible { .. } | Self::NonFungible { .. } | Self::Stealth { .. } => self.withdraw(self.amount()),
             Self::Confidential {
@@ -866,7 +866,7 @@ impl ResourceContainer {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ResourceError {
-    #[error("Attempted to {operate} a {expected} resource, but the resource type is {given}")]
+    #[error("Attempted to {operate} a {given} resource, but the container resource type is {expected}")]
     ResourceTypeMismatch {
         operate: &'static str,
         expected: ResourceType,

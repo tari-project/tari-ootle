@@ -26,7 +26,7 @@ use std::{fs, future, io, panic, str::FromStr, time::Duration};
 use anyhow::bail;
 use cucumber::{gherkin::Step, given, then, when, writer, writer::Verbosity, ScenarioType, World, WriterExt};
 use integration_tests::{
-    http_server::{spawn_template_http_server, MockHttpServer},
+    http_server::MockHttpServer,
     logging::{create_log_config_file, get_base_dir},
     miner::{mine_blocks, register_miner_process},
     validator_node_cli,
@@ -59,7 +59,6 @@ async fn main() {
 
     // Start the mock server that continues to run for the duration of the tests
     let mut shutdown = Shutdown::new();
-    let mock_port = spawn_template_http_server(shutdown.to_signal()).await;
 
     let file = fs::File::create("cucumber-output-junit.xml").unwrap();
     let cucumber_fut = TariWorld::cucumber()
@@ -81,7 +80,7 @@ async fn main() {
             Box::pin(async move {
                 // Each scenario gets a mock connection. As each connection is dropped after the scenario, all the mock
                 // urls are deregistered
-                world.http_server = Some(MockHttpServer::connect(mock_port).await);
+                world.http_server = Some(MockHttpServer::connect().await);
             })
         })
         .after(move |_feature, _rule, scenario, _finished, maybe_world| {

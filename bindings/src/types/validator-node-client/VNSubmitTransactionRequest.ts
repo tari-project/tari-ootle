@@ -4,4 +4,4 @@ import type { Transaction } from "../Transaction";
 /**
  * A request to submit a transaction
  */
-export type VNSubmitTransactionRequest = { transaction: Transaction; is_dry_run: boolean };
+export type VNSubmitTransactionRequest = { transaction: Transaction };

@@ -282,6 +282,7 @@ mod transaction_execution_operations {
                     FeeReceipt {
                         total_fee_payment: 0,
                         total_fees_paid: 0,
+                        total_fee_overcharge: 0,
                         cost_breakdown: FeeBreakdown::default(),
                     },
                 ),
@@ -306,6 +307,7 @@ mod transaction_execution_operations {
                     FeeReceipt {
                         total_fee_payment: 0,
                         total_fees_paid: 0,
+                        total_fee_overcharge: 0,
                         cost_breakdown: FeeBreakdown::default(),
                     },
                 ),

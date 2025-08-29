@@ -11,6 +11,9 @@ pub struct FeeReceipt {
     pub total_fee_payment: u64,
     /// Total fees paid after refunds
     pub total_fees_paid: u64,
+    /// The amount of non-refundable fees which the user overpaid. Fees cannot be refunded when paying purely with a
+    /// stealth reveal (since we do not know the account/vault to refund).
+    pub total_fee_overcharge: u64,
     /// Breakdown of fee costs
     pub cost_breakdown: FeeBreakdown,
 }
@@ -75,7 +78,7 @@ pub struct FeeBreakdown {
 }
 
 impl FeeBreakdown {
-    pub fn insert(&mut self, source: FeeSource, amount: u64) {
+    pub fn add(&mut self, source: FeeSource, amount: u64) {
         match self.breakdown.entry(source) {
             Entry::Occupied(entry) => {
                 *entry.into_mut() += amount;

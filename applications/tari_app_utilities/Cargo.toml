@@ -21,12 +21,9 @@ tari_template_lib = { workspace = true }
 tari_template_manager = { workspace = true }
 tari_transaction = { workspace = true }
 tari_bor = { workspace = true, default-features = true }
-tari_indexer_lib = { workspace = true }
 tari_networking = { workspace = true }
 
 anyhow = { workspace = true }
-async-trait = { workspace = true }
-cacache = { workspace = true }
 json5 = { workspace = true }
 libp2p-identity = { workspace = true }
 log = { workspace = true, features = ["std"] }

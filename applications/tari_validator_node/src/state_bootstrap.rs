@@ -30,15 +30,15 @@ use tari_state_tree::Version;
 use tari_template_lib::{
     auth::{ComponentAccessRules, OwnerRule, ResourceAccessRules},
     constants::{
-        CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
         NFT_FAUCET_COMPONENT_ADDRESS,
         NFT_FAUCET_RESOURCE_ADDRESS,
         PUBLIC_IDENTITY_RESOURCE_ADDRESS,
+        STEALTH_TARI_RESOURCE_ADDRESS,
         XTR_FAUCET_COMPONENT_ADDRESS,
         XTR_FAUCET_VAULT_ADDRESS,
     },
     models::Metadata,
-    prelude::ResourceType,
+    prelude::{ResourceManager, ResourceType},
     resource::TOKEN_SYMBOL,
     rule,
     types::EntityId,
@@ -80,15 +80,21 @@ where
     let is_testnet = !matches!(network, Network::MainNet);
     let symbol = if is_testnet { "tXTR" } else { "XTR" };
     let xtr_resource = Resource::new(
-        ResourceType::Confidential,
+        ResourceType::Stealth,
         None,
         OwnerRule::None,
-        ResourceAccessRules::new(),
+        ResourceAccessRules::new()
+            // These are defaults, but just for explicitness
+            .mintable(rule!(deny_all))
+            .burnable(rule!(deny_all))
+            .recallable(rule!(deny_all))
+            .freezable(rule!(deny_all))
+            .update_access_rules(rule!(deny_all)),
         Metadata::from([(TOKEN_SYMBOL, symbol)]),
         None,
         None,
         6,
-        false,
+        true,
     );
 
     if is_testnet {
@@ -98,7 +104,7 @@ where
         create_nft_faucet(tx, num_preshards)?;
     }
 
-    create_substate(tx, num_preshards, CONFIDENTIAL_TARI_RESOURCE_ADDRESS, xtr_resource)?;
+    create_substate(tx, num_preshards, STEALTH_TARI_RESOURCE_ADDRESS, xtr_resource)?;
 
     Ok(())
 }
@@ -117,18 +123,20 @@ where
         access_rules: ComponentAccessRules::allow_all(),
         entity_id: EntityId::default(),
         body: ComponentBody {
-            state: cbor!({"vault" => XTR_FAUCET_VAULT_ADDRESS}).unwrap(),
+            state: cbor!({
+                "vault" => XTR_FAUCET_VAULT_ADDRESS,
+                "resource_manager" => ResourceManager::get(STEALTH_TARI_RESOURCE_ADDRESS)
+            })
+            .unwrap(),
         },
     };
     create_substate(tx, num_preshards, XTR_FAUCET_COMPONENT_ADDRESS, value)?;
 
-    let value = Vault::new(ResourceContainer::Confidential {
-        address: CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-        commitments: Default::default(),
+    let value = Vault::new(ResourceContainer::Stealth {
+        address: STEALTH_TARI_RESOURCE_ADDRESS,
         // just under 18.5 trillion tXTR
         revealed_amount: u64::MAX.into(),
-        locked_commitments: Default::default(),
-        locked_revealed_amount: Default::default(),
+        locked_amount: Default::default(),
     });
 
     create_substate(tx, num_preshards, XTR_FAUCET_VAULT_ADDRESS, value)?;

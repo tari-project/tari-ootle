@@ -674,7 +674,7 @@ where TConsensusSpec: ConsensusSpec
                             self.config.consensus_constants.fee_exhaust_divisor,
                         );
                         pool_tx.set_leader_fee(leader_fee);
-                        let diff = execution.result().finalize.result.accept().ok_or_else(|| {
+                        let diff = execution.result().finalize.result.any_accept().ok_or_else(|| {
                             HotStuffError::InvariantError(format!(
                                 "prepare_transaction: Transaction {} has COMMIT decision but execution failed when \
                                  proposing",
@@ -879,7 +879,7 @@ where TConsensusSpec: ConsensusSpec
                     tx_rec.transaction_id(),
                 ))
             })?;
-        let diff = execution.result().finalize.accept().ok_or_else(|| {
+        let diff = execution.result().finalize.any_accept().ok_or_else(|| {
             HotStuffError::InvariantError(format!(
                 "local_accept_transaction: Transaction {} has COMMIT decision but execution failed when proposing",
                 tx_rec.transaction_id(),

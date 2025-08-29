@@ -141,6 +141,7 @@ struct TransactionSignatureFields<'a> {
     min_epoch: Option<Epoch>,
     max_epoch: Option<Epoch>,
     is_seal_signer_authorized: bool,
+    dry_run: bool,
 }
 
 impl<'a> From<&'a UnsignedTransactionV1> for TransactionSignatureFields<'a> {
@@ -153,6 +154,7 @@ impl<'a> From<&'a UnsignedTransactionV1> for TransactionSignatureFields<'a> {
             min_epoch: transaction.min_epoch,
             max_epoch: transaction.max_epoch,
             is_seal_signer_authorized: transaction.is_seal_signer_authorized,
+            dry_run: transaction.dry_run,
         }
     }
 }

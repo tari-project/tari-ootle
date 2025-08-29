@@ -138,14 +138,14 @@ function Templates() {
           <TableBody>
             {templates
               .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-              .map(({ address, binary_sha, name }, i) => (
+              .map(({ address, name }, i) => (
                 <TableRow key={i}>
                   <DataTableCell>
                     <Link to={`/templates/${address}`} state={[address]}
                           style={{ textDecoration: "none" }}>
-                      {shortenString(address)}
+                      template_{shortenString(address)}
                     </Link>
-                    <CopyToClipboard copy={address} />
+                    <CopyToClipboard copy={`template_${address}`} />
                   </DataTableCell>
                   <DataTableCell>{name}</DataTableCell>
                   <DataTableCell style={{ textAlign: "center" }}>Active</DataTableCell>

@@ -20,12 +20,8 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{fs, io, path::PathBuf};
-
-use anyhow::anyhow;
 use clap::{Args, Subcommand};
-use serde_json as json;
-use tari_ootle_common_types::{displayable::Displayable, optional::Optional};
+use tari_ootle_common_types::displayable::Displayable;
 use tari_wallet_daemon_client::{
     types::{
         AccountInfo,
@@ -33,8 +29,6 @@ use tari_wallet_daemon_client::{
         AccountsCreateOrGetRequest,
         AccountsCreateRequest,
         AccountsGetBalancesRequest,
-        ClaimBurnProof,
-        ClaimBurnRequest,
         RevealFundsRequest,
     },
     ComponentAddressOrName,
@@ -52,7 +46,6 @@ pub enum AccountsSubcommand {
     List,
 
     Get(GetArgs),
-    ClaimBurn(ClaimBurnArgs),
     #[clap(alias = "reveal")]
     RevealFunds(RevealFundsArgs),
     #[clap(alias = "faucet")]
@@ -83,21 +76,6 @@ pub struct GetBalancesArgs {
 #[derive(Debug, Args, Clone)]
 pub struct GetArgs {
     pub name: ComponentAddressOrName,
-}
-
-#[derive(Debug, Args, Clone)]
-pub struct ClaimBurnArgs {
-    #[clap(long, short = 'a', alias = "account")]
-    account: Option<ComponentAddressOrName>,
-    #[clap(long, short = 'i', alias = "input")]
-    proof_file: Option<PathBuf>,
-    /// Optional proof JSON from the L1 console wallet. If not provided, you will be prompted to enter it.
-    #[clap(long, short = 'j', alias = "json")]
-    proof_json: Option<serde_json::Value>,
-    #[clap(long, short = 'f')]
-    fee: Option<u32>,
-    #[clap(long)]
-    key_id: Option<u64>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -139,7 +117,6 @@ impl AccountsSubcommand {
                 handle_list(&mut client).await?;
             },
             AccountsSubcommand::Get(args) => handle_get(args, &mut client).await?,
-            AccountsSubcommand::ClaimBurn(args) => handle_claim_burn(args, &mut client).await?,
             AccountsSubcommand::RevealFunds(args) => handle_reveal_funds(args, &mut client).await?,
             AccountsSubcommand::CreateFreeTestCoins(args) => handle_create_free_test_coins(args, &mut client).await?,
             AccountsSubcommand::SetDefault(args) => handle_set_default(args, &mut client).await?,
@@ -197,92 +174,6 @@ async fn handle_get_balances(args: GetBalancesArgs, client: &mut WalletDaemonCli
         ));
     }
     table.print_stdout();
-    Ok(())
-}
-
-pub async fn handle_claim_burn(args: ClaimBurnArgs, client: &mut WalletDaemonClient) -> Result<(), anyhow::Error> {
-    let ClaimBurnArgs {
-        account,
-        proof_json,
-        fee,
-        proof_file,
-        key_id,
-    } = args;
-
-    let claim_proof: ClaimBurnProof = if let Some(proof_json) = proof_json {
-        json::from_value(proof_json).map_err(|e| anyhow!("Failed to serialize proof JSON: {}", e))?
-    } else if let Some(proof_file) = proof_file {
-        let mut file = fs::File::open(proof_file).map_err(|e| anyhow!("Failed to read proof file: {}", e))?;
-        json::from_reader(&mut file).map_err(|e| anyhow!("Failed to parse proof JSON: {}", e))?
-    } else {
-        println!(
-            "Please paste console wallet JSON output from claim_burn call in the terminal: Press <Ctrl/Cmd + d> once \
-             done"
-        );
-
-        json::from_reader(&mut io::stdin()).map_err(|e| anyhow!("Failed to parse proof JSON: {}", e))?
-    };
-
-    println!("✅ Claim burn submitted");
-    let existing_account = match account {
-        Some(account) => {
-            let account_name = account.name().map(|s| s.to_string());
-            match client.accounts_get(account).await.optional()? {
-                Some(resp) => resp.account,
-                None => {
-                    let resp = client
-                        .create_account(AccountsCreateRequest {
-                            account_name,
-                            is_default: None,
-                            key_id,
-                        })
-                        .await?;
-                    resp.account
-                },
-            }
-        },
-        None => {
-            let existing_for_key = match key_id {
-                Some(id) => client
-                    .accounts_get_by_key_index(id)
-                    .await
-                    .optional()?
-                    .map(|resp| resp.account),
-                None => None,
-            };
-            match existing_for_key {
-                Some(account) => account,
-                None => {
-                    println!("No account found for the provided key_id or key_id is None. Creating a new account...");
-                    let resp = client
-                        .create_account(AccountsCreateRequest {
-                            account_name: None,
-                            is_default: None,
-                            key_id,
-                        })
-                        .await?;
-
-                    resp.account
-                },
-            }
-        },
-    };
-
-    let req = ClaimBurnRequest {
-        account: existing_account.address.into(),
-        claim_proof,
-        max_fee: fee.map(Into::into),
-    };
-
-    let resp = client
-        .claim_burn(req)
-        .await
-        .map_err(|e| anyhow!("Failed to claim burn with error = {}", e.to_string()))?;
-
-    println!("Total transaction fee: {}", resp.fee);
-    println!();
-
-    summarize_finalize_result(&resp.result);
     Ok(())
 }
 

@@ -45,6 +45,7 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_shutdown::ShutdownSignal;
+use tari_template_lib::constants::XTR;
 
 use crate::{
     cli::Cli,
@@ -75,6 +76,16 @@ pub async fn run_tari_ootle_walletd(
     let needs_seed_recovery = wallet_sdk.initialize_cipher_seed(cli.wallet_restore.seed_words.as_ref())?;
 
     wallet_sdk.key_manager_api().get_or_create_initial(KeyBranch::Account)?;
+
+    tokio::spawn({
+        let wallet_sdk = wallet_sdk.clone();
+        async move {
+            // Ensures that the XTR resource is available in the substate cache
+            if let Err(err) = wallet_sdk.substate_api().fetch_resource(XTR).await {
+                error!(target: LOG_TARGET, "Failed to fetch XTR resource: {}", err);
+            }
+        }
+    });
 
     let notify = Notify::new(100);
     let services = spawn_services(shutdown_signal.clone(), notify.clone(), wallet_sdk.clone());

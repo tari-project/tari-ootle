@@ -106,7 +106,7 @@ fn basic_transfer() {
         vec![],
     );
 
-    let diff = result.finalize.accept().unwrap();
+    let diff = result.finalize.any_accept().unwrap();
     let utxos = diff
         .up_iter()
         .filter_map(|(_, substate)| substate.substate_value().as_utxo())
@@ -142,7 +142,7 @@ fn programmatic_transfer() {
         vec![],
     );
 
-    let diff = result.finalize.accept().unwrap();
+    let diff = result.finalize.any_accept().unwrap();
     let utxos = diff
         .up_iter()
         .filter_map(|(_, substate)| substate.substate_value().as_utxo())
@@ -178,7 +178,7 @@ fn transfer_with_revealed_outputs() {
         vec![],
     );
 
-    let diff = result.finalize.accept().unwrap();
+    let diff = result.finalize.any_accept().unwrap();
     let utxos = diff
         .up_iter()
         .filter_map(|(_, substate)| substate.substate_value().as_utxo())
@@ -228,7 +228,7 @@ fn transfer_revealed_between_accounts() {
         vec![alice_proof],
     );
 
-    let diff = result.finalize.accept().unwrap();
+    let diff = result.finalize.any_accept().unwrap();
     let utxos = diff
         .up_iter()
         .filter_map(|(_, substate)| substate.substate_value().as_utxo())
@@ -376,7 +376,7 @@ fn many_outputs() {
         vec![],
     );
 
-    let diff = result.finalize.accept().unwrap();
+    let diff = result.finalize.any_accept().unwrap();
     let utxos = diff
         .up_iter()
         .filter_map(|(_, substate)| substate.substate_value().as_utxo())
@@ -433,7 +433,7 @@ fn mint_with_view_key() {
         vec![],
     );
 
-    let diff = result.finalize.result.accept().unwrap();
+    let diff = result.finalize.result.any_accept().unwrap();
     let utxos = diff
         .up_iter()
         .filter_map(|(addr, substate)| {

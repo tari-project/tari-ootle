@@ -39,7 +39,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_wallet_sdk::{
     apis::{confidential_transfer::ConfidentialTransferInputSelection, key_manager::KeyBranch},
-    models::{Account, AuthoredTemplateModel, NonFungibleToken, OutputLockId, TransactionStatus, WalletTransaction},
+    models::{Account, AuthoredTemplateModel, NonFungibleToken, TransactionStatus, WalletLockId, WalletTransaction},
 };
 use tari_template_abi::{FunctionDef, TemplateDef};
 use tari_template_lib::{
@@ -85,7 +85,7 @@ pub struct CallInstructionRequest {
     pub new_outputs: Option<u8>,
     #[serde(default)]
     #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
-    pub proof_ids: Vec<OutputLockId>,
+    pub proof_ids: Vec<WalletLockId>,
     #[serde(default)]
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub min_epoch: Option<u64>,
@@ -109,7 +109,7 @@ pub struct TransactionSubmitRequest {
     #[serde(default = "return_true")]
     pub detect_inputs_use_unversioned: bool,
     #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
-    pub proof_ids: Vec<OutputLockId>,
+    pub proof_ids: Vec<WalletLockId>,
 }
 
 const fn return_true() -> bool {
@@ -131,7 +131,7 @@ pub struct TransactionSubmitDryRunRequest {
     pub detect_inputs: bool,
     pub detect_inputs_use_unversioned: bool,
     #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
-    pub proof_ids: Vec<OutputLockId>,
+    pub proof_ids: Vec<WalletLockId>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -196,6 +196,7 @@ pub struct TransactionGetResponse {
     pub transaction: Transaction,
     pub result: Option<FinalizeResult>,
     pub status: TransactionStatus,
+    pub invalid_reason: Option<String>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub last_update_time: PrimitiveDateTime,
 }
@@ -205,6 +206,7 @@ pub struct TransactionGetResponse {
 pub struct TransactionGetAllRequest {
     pub status: Option<TransactionStatus>,
     pub component: Option<ComponentAddress>,
+    pub signer_public_key: Option<RistrettoPublicKeyBytes>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -492,7 +494,7 @@ pub struct ProofsGenerateRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ProofsGenerateResponse {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub proof_id: OutputLockId,
+    pub proof_id: WalletLockId,
     pub proof: ConfidentialWithdrawProof,
 }
 
@@ -500,7 +502,7 @@ pub struct ProofsGenerateResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ProofsFinalizeRequest {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub proof_id: OutputLockId,
+    pub proof_id: WalletLockId,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -511,7 +513,7 @@ pub struct ProofsFinalizeResponse {}
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ProofsCancelRequest {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub proof_id: OutputLockId,
+    pub proof_id: WalletLockId,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -574,9 +576,17 @@ pub struct ConfidentialViewVaultBalanceResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ClaimBurnRequest {
     pub account: ComponentAddressOrName,
-    pub claim_proof: ClaimBurnProof,
+    pub claim_proof: ExtClaimBurnProof,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub max_fee: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub struct ExtClaimBurnProof {
+    pub claim_proof: ClaimBurnProof,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub owner_nonce_key_index: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

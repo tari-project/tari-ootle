@@ -112,6 +112,7 @@ pub fn create_execution_result_for_transaction(
                 fee_receipt: FeeReceipt {
                     total_fee_payment: fee,
                     total_fees_paid: fee,
+                    total_fee_overcharge: 0,
                     cost_breakdown: FeeBreakdown::default(),
                 },
             }),
@@ -135,6 +136,7 @@ pub fn create_execution_result_for_transaction(
             FeeReceipt {
                 total_fee_payment: fee,
                 total_fees_paid: fee,
+                total_fee_overcharge: 0,
                 cost_breakdown: FeeBreakdown::default(),
             },
         ),

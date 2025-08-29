@@ -15,7 +15,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{optional::Optional, shard::Shard, Network, StateVersion, UtxoQueryResponse};
 use tari_ootle_wallet_sdk::{
-    models::{ConfidentialOutputModel, OutputLockId, OutputStatus},
+    models::{ConfidentialOutputModel, OutputStatus, WalletLockId},
     network::{SubstateQueryResult, TransactionQueryResult, WalletNetworkInterface},
     storage::{WalletStore, WalletStoreReader},
     WalletSdk,
@@ -24,7 +24,7 @@ use tari_ootle_wallet_sdk::{
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_abi::TemplateDef;
 use tari_template_lib::{
-    constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
+    constants::STEALTH_TARI_RESOURCE_ADDRESS,
     models::{ComponentAddress, EncryptedData, ResourceAddress, VaultId},
     prelude::crypto::UtxoTagByte,
     resource::ResourceType,
@@ -40,18 +40,18 @@ fn outputs_locked_and_released() {
     let commitment_49 = test.add_unspent_output(49);
     let _commitment_100 = test.add_unspent_output(100);
 
-    let proof_id = test.new_proof();
+    let lock_id = test.new_lock();
     let (inputs, total_value) = test
         .sdk()
         .confidential_outputs_api()
-        .lock_outputs_by_amount(proof_id, &Test::test_vault_address(), 50)
+        .lock_outputs_by_amount(lock_id, &Test::test_vault_address(), 50)
         .unwrap();
     assert_eq!(total_value, 74);
     assert_eq!(inputs.len(), 2);
 
     let locked = test
         .store()
-        .with_read_tx(|tx| tx.outputs_get_locked_by_lock_id(proof_id))
+        .with_read_tx(|tx| tx.outputs_get_locked_by_lock_id(lock_id))
         .unwrap();
 
     assert!(locked.iter().any(|l| l.commitment == commitment_25));
@@ -60,12 +60,12 @@ fn outputs_locked_and_released() {
 
     test.sdk
         .confidential_outputs_api()
-        .release_locked_outputs(proof_id)
+        .release_locked_outputs(lock_id)
         .unwrap();
 
     let locked = test
         .store()
-        .with_read_tx(|tx| tx.outputs_get_locked_by_lock_id(proof_id))
+        .with_read_tx(|tx| tx.outputs_get_locked_by_lock_id(lock_id))
         .unwrap();
     assert_eq!(locked.len(), 0);
 }
@@ -79,7 +79,7 @@ fn outputs_locked_and_finalized() {
     let commitment_100 = test.add_unspent_output(100);
 
     let outputs_api = test.sdk().confidential_outputs_api();
-    let proof_id = test.new_proof();
+    let proof_id = test.new_lock();
 
     let (inputs, total_value) = outputs_api
         .lock_outputs_by_amount(proof_id, &Test::test_vault_address(), 50)
@@ -164,8 +164,8 @@ impl Test {
             .add_vault(
                 Test::test_account_address(),
                 Test::test_vault_address(),
-                CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-                ResourceType::Confidential,
+                STEALTH_TARI_RESOURCE_ADDRESS,
+                ResourceType::Stealth,
                 Some("TEST".to_string()),
                 6,
             )
@@ -214,9 +214,8 @@ impl Test {
         commitment
     }
 
-    pub fn new_proof(&self) -> OutputLockId {
-        let outputs_api = self.sdk.confidential_outputs_api();
-        outputs_api.add_output_lock(&Self::test_vault_address()).unwrap()
+    pub fn new_lock(&self) -> WalletLockId {
+        self.sdk.confidential_outputs_api().create_lock().unwrap()
     }
 
     pub fn get_unspent_balance(&self) -> Amount {

@@ -28,7 +28,6 @@ use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_indexer_client::types::ListSubstateItem;
 use tari_indexer_lib::{substate_scanner::SubstateScanner, NonFungibleSubstate};
-use tari_ootle_app_utilities::substate_file_cache::SubstateFileCache;
 use tari_ootle_common_types::{
     shard::Shard,
     substate_type::SubstateType,
@@ -43,7 +42,10 @@ use tari_template_lib::{
 };
 use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClientFactory};
 
-use crate::storage_sqlite::store_factory::{IndexerStore, IndexerStoreReadTransaction, SqliteIndexerStore};
+use crate::{
+    storage_sqlite::store_factory::{IndexerStore, IndexerStoreReadTransaction, SqliteIndexerStore},
+    substate_file_cache::SubstateFileCache,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SubstateResponse {

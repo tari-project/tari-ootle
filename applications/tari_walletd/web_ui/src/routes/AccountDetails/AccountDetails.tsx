@@ -34,7 +34,7 @@ import { useAccountsGetBalances, useAccountNFTsList, useAccountsGet } from "../.
 import { DataTableCell } from "../../Components/StyledComponents";
 import FetchStatusCheck from "../../Components/FetchStatusCheck";
 import { AccountGetResponse, BalanceEntry, substateIdToString } from "@tari-project/typescript-bindings";
-import NFTList from "../AssetVault/NFTs/NFTList";
+import NftList from "../AssetVault/NFTs/NFTList";
 import CopyAddress from "../../Components/CopyAddress";
 import useAccountStore from "../../store/accountStore";
 import { Form, useParams } from "react-router-dom";
@@ -207,7 +207,7 @@ function AccountDetailsLayout() {
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
           Account NFTs
-          <NFTList
+          <NftList
             nftsListIsError={nftsListIsError}
             nftsListIsFetching={nftsListIsFetching}
             nftsListError={nftsListError}

@@ -14,7 +14,7 @@ use tari_template_lib::{
     auth::{OwnerRule, Ownership},
     constants::XTR,
     models::BinaryTag,
-    types::{crypto::RistrettoPublicKeyBytes, Hash, KeyParseError, ObjectKey},
+    types::{crypto::RistrettoPublicKeyBytes, Amount, Hash, KeyParseError, ObjectKey},
 };
 
 use crate::resource_container::{ResourceContainer, ResourceError};
@@ -168,12 +168,10 @@ impl ValidatorFeePool {
         }
         let amount = self.amount;
         self.amount = 0;
-        Ok(ResourceContainer::Confidential {
+        Ok(ResourceContainer::Stealth {
             address: XTR,
-            commitments: Default::default(),
             revealed_amount: amount.into(),
-            locked_commitments: Default::default(),
-            locked_revealed_amount: Default::default(),
+            locked_amount: Amount::zero(),
         })
     }
 }

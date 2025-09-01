@@ -10,7 +10,6 @@ license.workspace = true
 tari_base_node_client = { workspace = true, optional = true }
 tari_common_types = { workspace = true }
 tari_transaction_components = { workspace = true, optional = true }
-minotari_app_grpc = { workspace = true, optional = true }
 tari_ootle_common_types = { workspace = true }
 tari_ootle_storage = { workspace = true }
 tari_ootle_storage_sqlite = { workspace = true }
@@ -33,7 +32,6 @@ tokio = { workspace = true, features = ["time", "macros", "rt"] }
 [features]
 base_layer = [
     "tari_base_node_client",
-    "minotari_app_grpc",
     "tari_transaction_components",
     "url"
 ]

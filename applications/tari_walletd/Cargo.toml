@@ -27,7 +27,6 @@ tari_template_builtin = { workspace = true }
 tari_template_lib = { workspace = true }
 tari_template_abi = { workspace = true }
 tari_indexer_client = { workspace = true, features = ["client"] }
-tari_transaction_key_manager = { workspace = true }
 tari_transaction_components = { workspace = true }
 tari_transaction_manifest = { workspace = true }
 

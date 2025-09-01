@@ -10997,7 +10997,6 @@ version = "0.11.2"
 dependencies = [
  "anyhow",
  "log",
- "minotari_app_grpc",
  "serde",
  "tari_base_node_client",
  "tari_common_types",
@@ -11421,7 +11420,6 @@ dependencies = [
  "tari_template_lib",
  "tari_transaction",
  "tari_transaction_components",
- "tari_transaction_key_manager",
  "tempfile",
  "thiserror 1.0.69",
  "time",
@@ -11496,7 +11494,6 @@ dependencies = [
  "tari_template_lib",
  "tari_transaction",
  "tari_transaction_components",
- "tari_transaction_key_manager",
  "tari_transaction_manifest",
  "tari_utilities",
  "tari_wallet_daemon_client",

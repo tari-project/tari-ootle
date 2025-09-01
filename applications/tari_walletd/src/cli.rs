@@ -128,7 +128,7 @@ pub enum Subcommand {
     #[clap(name = "run", about = "Run the wallet daemon")]
     Run,
     #[clap(about = "Generate a new key and output the public key")]
-    CreateKey {
+    CreateAccount {
         #[clap(long, alias = "key")]
         key_index: Option<u64>,
         #[clap(long)]

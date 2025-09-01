@@ -26,6 +26,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+use multiaddr::multiaddr;
 use reqwest::Url;
 use tari_common::{
     configuration::{CommonConfig, StringList},
@@ -40,12 +41,12 @@ use tari_indexer::{
 use tari_indexer_client::{
     graphql_client::IndexerGraphQLClient,
     json_rpc_client::IndexerJsonRpcClient,
-    types::{GetNonFungiblesRequest, GetSubstateRequest, GetSubstateResponse, NonFungibleSubstate},
+    types::{AddPeerRequest, GetNonFungiblesRequest, GetSubstateRequest, GetSubstateResponse, NonFungibleSubstate},
 };
 use tari_ootle_app_utilities::{epoch_oracle_config::EpochOracleConfig, p2p_config::PeerSeedsConfig};
 use tari_ootle_common_types::Network;
 use tari_shutdown::Shutdown;
-use tari_template_lib::types::ObjectKey;
+use tari_template_lib::{prelude::RistrettoPublicKeyBytes, types::ObjectKey};
 use tokio::task;
 
 use crate::{
@@ -69,6 +70,18 @@ pub struct IndexerProcess {
 }
 
 impl IndexerProcess {
+    pub async fn add_peer(&self, public_key: RistrettoPublicKeyBytes, port: u16) {
+        let mut jrpc_client = self.get_jrpc_indexer_client();
+        jrpc_client
+            .add_peer(AddPeerRequest {
+                public_key,
+                addresses: vec![multiaddr!(Ip4([127, 0, 0, 1]), Tcp(port))],
+                wait_for_dial: true,
+            })
+            .await
+            .unwrap();
+    }
+
     pub async fn get_substate(&self, world: &TariWorld, output_ref: String, version: u32) -> GetSubstateResponse {
         let address = get_address_from_output(world, output_ref);
 
@@ -159,7 +172,7 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
     // we need to add all the validator nodes as seed peers
     let peer_seeds: Vec<String> = world
         .all_running_validators_iter()
-        .map(|vn| format!("{}::/ip4/127.0.0.1/tcp/{}", vn.public_key, vn.port))
+        .map(|vn| format!("{}::/ip4/127.0.0.1/tcp/{}", vn.public_key, vn.p2p_port))
         .collect();
 
     let shutdown = Shutdown::new();

@@ -166,7 +166,10 @@ impl TryFrom<minotari_app_grpc::tari_rpc::ValidatorNodeChange> for ValidatorNode
                     validator_node_public_key,
                     activation_epoch: Epoch(add.activation_epoch),
                     minimum_value_promise: add.minimum_value_promise,
-                    shard_key: SubstateAddress::from_bytes(&add.shard_key)?,
+                    shard_key: {
+                        let hash = FixedHash::try_from(add.shard_key.as_slice()).context("Invalid shard key hash")?;
+                        SubstateAddress::from_hash_and_version(hash, 0)
+                    },
                 })
             },
             Some(minotari_app_grpc::tari_rpc::validator_node_change::Change::Remove(remove)) => {

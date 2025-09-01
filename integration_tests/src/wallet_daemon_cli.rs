@@ -391,7 +391,7 @@ pub async fn get_balance(world: &mut TariWorld, account_name: &str, wallet_daemo
         .await
         .expect("Failed to get balance from account");
     eprintln!("resp = {}", serde_json::to_string_pretty(&resp).unwrap());
-    resp.balances.iter().map(|e| e.balance).sum()
+    resp.balances.iter().map(|e| e.balance + e.confidential_balance).sum()
 }
 
 pub async fn get_confidential_balance(
@@ -901,13 +901,8 @@ pub async fn confidential_transfer(
     add_substate_ids(world, outputs_name, resp.result.result.any_accept().unwrap());
 }
 
-pub async fn get_auth_wallet_daemon_client(world: &TariWorld, wallet_daemon_name: &str) -> WalletDaemonClient {
-    world
-        .wallet_daemons
-        .get(wallet_daemon_name)
-        .unwrap_or_else(|| panic!("Wallet daemon not found with name {}", wallet_daemon_name))
-        .get_authed_client()
-        .await
+pub async fn get_auth_wallet_daemon_client(world: &TariWorld, name: &str) -> WalletDaemonClient {
+    world.get_wallet_daemon(name).get_authed_client().await
 }
 
 async fn get_account_from_name(client: &mut WalletDaemonClient, account_name: String) -> Account {

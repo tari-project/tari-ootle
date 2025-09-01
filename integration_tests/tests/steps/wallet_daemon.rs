@@ -3,109 +3,70 @@
 
 use std::time::Duration;
 
+use anyhow::Context;
 use cucumber::{then, when};
-use integration_tests::{wallet_daemon_cli, TariWorld};
-use log::info;
-use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
+use integration_tests::{util::cucumber_log, wallet_daemon_cli, TariWorld};
+use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
-use tari_template_lib::prelude::Amount;
+use tari_template_lib::prelude::{crypto::CommitmentSignatureBytes, Amount, PedersenCommitmentBytes, Scalar32Bytes};
 use tari_transaction_components::transaction_components::{memo_field::TxType, MemoField};
-use tari_wallet_daemon_client::ComponentAddressOrName;
+use tari_wallet_daemon_client::{
+    types::{ClaimBurnProof, ExtClaimBurnProof},
+    ComponentAddressOrName,
+};
 
-#[when(
-    expr = "I claim burn {word} with {word}, {word} and {word} and spend it into account {word} via the wallet daemon \
-            {word}"
-)]
+async fn claim_burn(
+    world: &mut TariWorld,
+    proof_name: String,
+    account_name: String,
+    wallet_daemon_name: String,
+) -> anyhow::Result<FinalizeResult> {
+    let claim_proof = world
+        .claim_proofs
+        .get(&proof_name)
+        .unwrap_or_else(|| panic!("Burn proof {} not found", proof_name));
+    let walletd = world.get_wallet_daemon(&wallet_daemon_name);
+    // Then burn into the new account
+    let claim_burn_resp = walletd.claim_burn(&account_name, claim_proof.clone()).await?;
+    let resp = walletd
+        .wait_for_transaction_result(claim_burn_resp.transaction_id)
+        .await;
+    assert!(!resp.timed_out, "Timed out waiting for claim burn transaction result");
+    Ok(resp.result.expect("transaction result is None when claiming burn"))
+}
+
+#[when(expr = "I claim burn {word} and spend it into account {word} using wallet daemon {word}")]
+#[then(expr = "I claim burn {word} and spend it into account {word} using wallet daemon {word}")]
 async fn when_i_claim_burn_via_wallet_daemon(
     world: &mut TariWorld,
-    commitment_name: String,
     proof_name: String,
-    rangeproof_name: String,
-    claim_pubkey_name: String,
     account_name: String,
     wallet_daemon_name: String,
 ) {
-    // First create the account with this name
-    wallet_daemon_cli::create_account(world, account_name.clone(), wallet_daemon_name.clone()).await;
-    let commitment = world
-        .commitments
-        .get(&commitment_name)
-        .unwrap_or_else(|| panic!("Commitment {} not found", commitment_name));
-    let proof = world
-        .commitment_ownership_proofs
-        .get(&proof_name)
-        .unwrap_or_else(|| panic!("Proof {} not found", proof_name));
-    let rangeproof = world
-        .rangeproofs
-        .get(&rangeproof_name)
-        .unwrap_or_else(|| panic!("Rangeproof {} not found", rangeproof_name));
-    let reciprocal_claim_public_key = world
-        .claim_public_keys
-        .get(&claim_pubkey_name)
-        .unwrap_or_else(|| panic!("Claim public key {} not found", claim_pubkey_name));
-    // Then burn into the new account
-    let claim_burn_resp = wallet_daemon_cli::claim_burn(
-        world,
-        account_name,
-        *commitment,
-        rangeproof.clone().try_into().unwrap(),
-        proof.clone(),
-        reciprocal_claim_public_key.clone(),
-        wallet_daemon_name,
-        5000,
-    )
-    .await
-    .unwrap();
-    if let Some(ref reason) = claim_burn_resp.result.result.fee_reject() {
+    let result = claim_burn(world, proof_name, account_name, wallet_daemon_name)
+        .await
+        .unwrap();
+    if let Some(ref reason) = result.any_reject() {
         panic!("Transaction failed: {}", reason);
     }
 }
 
-#[when(
-    expr = "I claim burn {word} with {word}, {word} and {word} and spend it into account {word} via the wallet daemon \
-            {word}, it fails"
-)]
+#[when(expr = "I claim burn {word} and spend it into account {word} using wallet daemon {word}, it fails")]
 async fn when_i_claim_burn_via_wallet_daemon_it_fails(
     world: &mut TariWorld,
-    commitment_name: String,
     proof_name: String,
-    rangeproof_name: String,
-    claim_pubkey_name: String,
     account_name: String,
     wallet_daemon_name: String,
 ) {
-    let commitment = world
-        .commitments
-        .get(&commitment_name)
-        .unwrap_or_else(|| panic!("Commitment {} not found", commitment_name));
-    let proof = world
-        .commitment_ownership_proofs
-        .get(&proof_name)
-        .unwrap_or_else(|| panic!("Proof {} not found", proof_name));
-    let rangeproof = world
-        .rangeproofs
-        .get(&rangeproof_name)
-        .unwrap_or_else(|| panic!("Rangeproof {} not found", rangeproof_name));
-    let reciprocal_claim_public_key = world
-        .claim_public_keys
-        .get(&claim_pubkey_name)
-        .unwrap_or_else(|| panic!("Claim public key {} not found", claim_pubkey_name));
+    let _result = claim_burn(world, proof_name, account_name, wallet_daemon_name)
+        .await
+        .unwrap_err();
 
-    // TODO: The walletd picks up the substate that doesnt exist before the transaction is submitted. This doesnt test
-    // the validator node behaviour. We should submit the transaction directly without using the wallet's claim burn
-    // implementation
-    let _err = wallet_daemon_cli::claim_burn(
-        world,
-        account_name,
-        *commitment,
-        rangeproof.clone().try_into().unwrap(),
-        proof.clone(),
-        reciprocal_claim_public_key.clone(),
-        wallet_daemon_name,
-        5000,
-    )
-    .await
-    .unwrap_err();
+    // TODO: the wallet/indexer cannot find the substate before we submit the transaction, so this doesnt test the VN
+    // behaviour. assert!(
+    //     result.any_reject().is_some(),
+    //     "Expected transaction to fail, but it succeeded"
+    // );
 }
 
 #[when(expr = "I claim fees for validator {word} into account {word} using the wallet daemon {word}")]
@@ -120,7 +81,7 @@ async fn when_i_claim_fees_for_validator_and_epoch(
         .unwrap();
     resp.result.result.any_accept().unwrap_or_else(|| {
         panic!(
-            "Expected fee claim to succeeded but failed with {}",
+            "Expected fee claim to succeed but failed with {}",
             resp.result.result.fee_reject().unwrap()
         )
     });
@@ -213,30 +174,20 @@ async fn when_i_create_account_via_wallet_daemon_with_free_coins_using_key(
     .await;
 }
 
-#[when(
-    expr = "I burn {int}T on wallet {word} with wallet daemon {word} into commitment {word} with proof {word} for \
-            {word}, range proof {word} and claim public key {word}"
-)]
+#[when(expr = "I burn {int}T on wallet {word} for wallet daemon {word} into proof {word}")]
 async fn when_i_burn_funds_with_wallet_daemon(
     world: &mut TariWorld,
     amount: u64,
     wallet_name: String,
     wallet_daemon_name: String,
-    commitment_name: String,
-    ownership_proof_name: String,
-    account_name: String,
-    rangeproof_name: String,
-    claim_pubkey_name: String,
+    proof_name: String,
 ) {
     let mut wallet_daemon_client = wallet_daemon_cli::get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
-    let account = wallet_daemon_client
-        .accounts_get(account_name.parse().unwrap())
-        .await
-        .unwrap();
-    let public_key = account.public_key;
-    eprintln!("Burning funds using claim key {public_key}");
-    info!("Burning funds using claim key {public_key}");
+    let nonce = wallet_daemon_client.create_key(KeyBranch::Nonce).await.unwrap();
+
+    let public_key = nonce.public_key;
+    cucumber_log("Burning funds using claim key {public_key}");
 
     let wallet = world
         .wallets
@@ -256,21 +207,30 @@ async fn when_i_burn_funds_with_wallet_daemon(
         .unwrap()
         .into_inner();
 
-    assert!(resp.is_success);
-    world
-        .commitments
-        .insert(commitment_name, resp.commitment.as_slice().try_into().unwrap());
+    assert!(resp.is_success, "Burn transaction failed: {}", resp.failure_message);
 
-    let ownership_proof = resp.ownership_proof.unwrap();
-    world
-        .commitment_ownership_proofs
-        .insert(ownership_proof_name, ownership_proof.try_into().unwrap());
-    world.rangeproofs.insert(rangeproof_name, resp.range_proof);
-
-    world.claim_public_keys.insert(
-        claim_pubkey_name,
-        RistrettoPublicKey::from_canonical_bytes(&resp.reciprocal_claim_public_key).unwrap(),
+    let ownership_proof = resp.ownership_proof.as_ref().unwrap();
+    let ownership_proof = CommitmentSignatureBytes::new(
+        PedersenCommitmentBytes::from_bytes(&ownership_proof.public_nonce)
+            .context("comsig public_nonce parse error")
+            .unwrap(),
+        Scalar32Bytes::from_bytes(&ownership_proof.u)
+            .context("comsig u parse error")
+            .unwrap(),
+        Scalar32Bytes::from_bytes(&ownership_proof.v)
+            .context("comsig v parse error")
+            .unwrap(),
     );
+
+    world.claim_proofs.insert(proof_name, ExtClaimBurnProof {
+        claim_proof: ClaimBurnProof {
+            reciprocal_claim_public_key: resp.reciprocal_claim_public_key.as_slice().try_into().unwrap(),
+            commitment: resp.commitment.as_slice().try_into().unwrap(),
+            ownership_proof,
+            range_proof: resp.range_proof.try_into().unwrap(),
+        },
+        owner_nonce_key_index: nonce.id,
+    });
 }
 
 #[when(regex = r"I check the balance of (\S+) on wallet daemon (\S+) the amount is (at )?(\S+) (\d+)")]
@@ -309,6 +269,7 @@ async fn check_account_balance_via_daemon(
 }
 
 #[when(expr = "I wait for {word} on wallet daemon {word} to have balance {word} {int}")]
+#[then(expr = "I wait for {word} on wallet daemon {word} to have balance {word} {int}")]
 async fn wait_account_balance_via_daemon(
     world: &mut TariWorld,
     account_name: String,
@@ -334,7 +295,7 @@ async fn wait_account_balance_via_daemon(
         }
 
         i += 1;
-        if i == 10 {
+        if i == 30 {
             panic!("Timeout waiting for balance. Current balance = {}", current_balance);
         }
         tokio::time::sleep(Duration::from_secs(1)).await;

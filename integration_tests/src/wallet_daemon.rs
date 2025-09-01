@@ -33,8 +33,20 @@ use tari_ootle_walletd::{
     run_tari_ootle_walletd,
 };
 use tari_shutdown::Shutdown;
+use tari_transaction::TransactionId;
 use tari_wallet_daemon_client::{
-    types::{AuthLoginAcceptRequest, AuthLoginRequest, AuthLoginResponse},
+    error::WalletDaemonClientError,
+    types::{
+        AuthLoginAcceptRequest,
+        AuthLoginRequest,
+        AuthLoginResponse,
+        ClaimBurnRequest,
+        ClaimBurnResponse,
+        ExtClaimBurnProof,
+        TransactionWaitResultRequest,
+        TransactionWaitResultResponse,
+    },
+    ComponentAddressOrName,
     WalletDaemonClient,
 };
 use tokio::task;
@@ -103,7 +115,7 @@ impl TariWalletDaemonProcess {
         self.shutdown.trigger();
     }
 
-    pub fn get_client(&self) -> WalletDaemonClient {
+    fn get_client(&self) -> WalletDaemonClient {
         let endpoint = Url::parse(&format!("http://127.0.0.1:{}", self.json_rpc_port)).unwrap();
         WalletDaemonClient::connect(endpoint, None).unwrap()
     }
@@ -128,5 +140,32 @@ impl TariWalletDaemonProcess {
             .unwrap();
         client.set_auth_token(auth_response.permissions_token);
         client
+    }
+
+    pub async fn claim_burn(
+        &self,
+        account_name: &str,
+        claim_proof: ExtClaimBurnProof,
+    ) -> Result<ClaimBurnResponse, WalletDaemonClientError> {
+        let mut client = self.get_authed_client().await;
+
+        let req = ClaimBurnRequest {
+            account: ComponentAddressOrName::Name(account_name.into()),
+            claim_proof,
+            max_fee: Some(5000),
+        };
+
+        client.claim_burn(req).await
+    }
+
+    pub async fn wait_for_transaction_result(&self, tx_id: TransactionId) -> TransactionWaitResultResponse {
+        let mut client = self.get_authed_client().await;
+        client
+            .wait_transaction_result(TransactionWaitResultRequest {
+                transaction_id: tx_id,
+                timeout_secs: Some(30),
+            })
+            .await
+            .unwrap()
     }
 }

@@ -156,6 +156,11 @@ pub async fn spawn_wallet(world: &mut TariWorld, wallet_name: String, base_node_
             wallet_config.wallet.contacts_auto_ping_interval = Duration::from_secs(2);
             wallet_config
                 .wallet
+                .output_manager_service_config
+                .num_confirmations_required = 1;
+            wallet_config.wallet.output_manager_service_config.prevent_fee_gt_amount = false;
+            wallet_config
+                .wallet
                 .base_node_service_config
                 .base_node_monitor_max_refresh_interval = Duration::from_secs(15);
             wallet_config.wallet.p2p.transport.transport_type = TransportType::Tcp;

@@ -59,7 +59,7 @@ use crate::{
 pub struct ValidatorNodeProcess {
     pub name: String,
     pub public_key: RistrettoPublicKeyBytes,
-    pub port: u16,
+    pub p2p_port: u16,
     pub json_rpc_port: u16,
     pub web_ui_port: u16,
     pub base_node_grpc_port: u16,
@@ -94,6 +94,25 @@ impl ValidatorNodeProcess {
         let file = File::open(resp.path).expect("Could not open file");
         serde_json::from_reader(file).expect("Could not parse file")
     }
+
+    pub async fn wait_for_consensus_to_start(&self) {
+        let mut client = self.create_client();
+        let mut attempts = 60;
+        loop {
+            let resp = client.get_consensus_status().await.unwrap();
+            if resp.state == "Running" {
+                return;
+            }
+            attempts -= 1;
+            if attempts == 0 {
+                panic!(
+                    "Validator node did not start consensus in time: status: {}, epoch: {}",
+                    resp.state, resp.epoch
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    }
 }
 
 pub async fn spawn_validator_node(
@@ -125,7 +144,7 @@ pub async fn spawn_validator_node(
     let peer_seeds: Vec<String> = world
         .vn_seeds
         .values()
-        .map(|vn| format!("{}::/ip4/127.0.0.1/tcp/{}", vn.public_key, vn.port))
+        .map(|vn| format!("{}::/ip4/127.0.0.1/tcp/{}", vn.public_key, vn.p2p_port))
         .collect();
 
     let temp_dir = get_base_dir_for_scenario(
@@ -188,7 +207,7 @@ pub async fn spawn_validator_node(
     ValidatorNodeProcess {
         name: name.clone(),
         public_key,
-        port,
+        p2p_port: port,
         base_node_grpc_port,
         web_ui_port,
         handle,

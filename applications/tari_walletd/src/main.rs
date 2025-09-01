@@ -66,6 +66,7 @@ async fn main() -> Result<(), anyhow::Error> {
     match &cli.command {
         Some(Subcommand::Run) | None => run(cli, config).await?,
         Some(Subcommand::CreateAccount {
+            name,
             key_index,
             set_active,
             output_path,
@@ -85,7 +86,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 .accounts_api()
                 .derive_account_address_from_public_key(&public_key.to_byte_type());
             sdk.accounts_api()
-                .add_account(Some("Fee"), &account_addr, secret.key_index, false, true)?;
+                .add_account(name.as_deref(), &account_addr, secret.key_index, false, true)?;
 
             if *set_active {
                 km.set_active_key(KeyBranch::Account, secret.key_index)?;

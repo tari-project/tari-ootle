@@ -62,7 +62,6 @@ Feature: Account transfers
   ```
     When I print the cucumber world
 
-  @doit
   Scenario: Transfer tokens to existing account
     Given a network with registered validator VN and wallet daemon WALLET_D
 
@@ -79,7 +78,7 @@ Feature: Account transfers
 
     # Burn some tari in the base layer to have funds for fees in the sender account
     When I burn 10T on wallet NETWORK_CONSOLE_WALLET to proof BURN_PROOF for wallet daemon WALLET_D
-    When miner MINER mines 13 new blocks
+    When miner NETWORK_MINER mines 13 new blocks
     Then VN has scanned to at least height 40
     Then indexer IDX has scanned to at least height 40
 
@@ -115,7 +114,6 @@ Feature: Account transfers
   ```
     When I print the cucumber world
 
-  @doit
   Scenario: Confidential transfer to account that does not previously exist
     Given a network with registered validator VN and wallet daemon WALLET_D
 

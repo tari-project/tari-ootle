@@ -129,6 +129,8 @@ pub enum Subcommand {
     Run,
     #[clap(about = "Generate a new key and output the public key")]
     CreateAccount {
+        #[clap(long)]
+        name: Option<String>,
         #[clap(long, alias = "key")]
         key_index: Option<u64>,
         #[clap(long)]

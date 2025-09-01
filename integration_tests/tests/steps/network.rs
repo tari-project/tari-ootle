@@ -62,7 +62,7 @@ async fn start_a_network(world: &mut TariWorld, vn_name: String, walletd_name: S
     validator_node::send_vn_registration(world, vn_name.clone(), CONSOLE_WALLET_NAME.to_string()).await;
     cucumber_log("Validator node sent registration");
     miner::miner_mines_new_blocks(world, MINER_NAME.to_string(), 20).await;
-    cucumber_log("Mined 26 blocks");
+    cucumber_log("Mined 20 blocks");
     indexer::indexer_has_scanned_to_at_least_height(world, INDEXER_NAME.to_string(), 20).await;
     cucumber_log("Indexer has scanned up to or past height 26");
     validator_node::assert_vn_is_registered(world, vn_name.clone()).await;

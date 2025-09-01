@@ -3,7 +3,6 @@
 
 use std::fmt::Display;
 
-use anyhow::Context;
 use tari_common_types::types::FixedHash;
 use tari_engine_types::confidential::UnclaimedConfidentialOutput;
 use tari_ootle_common_types::{displayable::Displayable, Epoch, SubstateAddress};
@@ -152,6 +151,7 @@ impl TryFrom<minotari_app_grpc::tari_rpc::ValidatorNodeChange> for ValidatorNode
     type Error = anyhow::Error;
 
     fn try_from(value: minotari_app_grpc::tari_rpc::ValidatorNodeChange) -> Result<Self, Self::Error> {
+        use anyhow::Context;
         match value.change {
             Some(minotari_app_grpc::tari_rpc::validator_node_change::Change::Add(add)) => {
                 let registration = add

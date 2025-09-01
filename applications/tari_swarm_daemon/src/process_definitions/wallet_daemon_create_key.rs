@@ -9,16 +9,16 @@ use tokio::process::Command;
 use crate::process_definitions::{wallet_daemon, wallet_daemon::WalletDaemon, ProcessContext, ProcessDefinition};
 
 #[derive(Debug, Default)]
-pub struct WalletDaemonCreateKey;
+pub struct WalletDaemonCreateAccount;
 
-impl WalletDaemonCreateKey {
+impl WalletDaemonCreateAccount {
     pub fn new() -> Self {
         Self
     }
 }
 
 #[async_trait]
-impl ProcessDefinition for WalletDaemonCreateKey {
+impl ProcessDefinition for WalletDaemonCreateAccount {
     async fn get_command(&self, context: ProcessContext<'_>) -> anyhow::Result<Command> {
         let mut command = Command::new(context.bin());
         let output_path = context.processes_path().join("claim_key.json");
@@ -30,14 +30,16 @@ impl ProcessDefinition for WalletDaemonCreateKey {
             .arg("--network")
             .arg(context.network().to_string())
             .args([
-                "create-key",
+                "create-account",
+                "--name",
+                "Fees",
                 "--key",
                 "0",
                 "--set-active",
                 "--output",
                 output_path
                     .to_str()
-                    .expect("Non-UTF8 output path in WalletDaemonCreateKey"),
+                    .expect("Non-UTF8 output path in WalletDaemonCreateAccount"),
             ]);
 
         if let Some(override_keyring_password) =

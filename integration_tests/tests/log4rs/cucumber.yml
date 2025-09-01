@@ -24,7 +24,7 @@ appenders:
         kind: fixed_window
         base: 1
         count: 10
-        pattern: "{{log_dir}}/ootle.{}.log"
+        pattern: "{{log_dir}}/cucumber.{}.log"
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S)} [{t}] {l:5} {m}// {f}:{L}{n}"
 

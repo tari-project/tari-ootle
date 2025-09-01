@@ -22,6 +22,7 @@
 
 import { ThemeOptions } from "@mui/material/styles";
 import { tariPurple, blue, red, green, orange, grey, teal, gothic } from "./colors";
+import "./augmentation";
 
 export const componentSettings: ThemeOptions = {
   shape: {
@@ -202,6 +203,10 @@ export const light: ThemeOptions = {
       light: blue[400],
       contrastText: "#ffffff",
     },
+    accent: {
+      background: "rgba(0, 0, 0, 0.03)",
+      border: "rgba(0, 0, 0, 0.03)",
+    },
   },
 };
 
@@ -251,6 +256,10 @@ export const dark: ThemeOptions = {
       dark: blue[700],
       light: blue[400],
       contrastText: "#ffffff",
+    },
+    accent: {
+      background: "rgba(255, 255, 255, 0.03) ",
+      border: "rgba(255, 255, 255, 0.03) ",
     },
   },
 };

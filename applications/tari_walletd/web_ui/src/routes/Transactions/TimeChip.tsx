@@ -1,4 +1,4 @@
-//  Copyright 2022. The Tari Project
+//  Copyright 2025. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,53 +20,27 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Chip } from "@mui/material";
-import { DataTableCell } from "../../Components/StyledComponents";
-import type { LogEntry } from "@tari-project/typescript-bindings";
+import { Chip, Tooltip } from "@mui/material";
+import { useTimeAgo } from "../../hooks/useTimeAgo";
+import { formatTimestamp } from "../../utils/helpers";
 
-function getLogLevelColor(
-  level: string,
-): "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning" {
-  switch (level.toLowerCase()) {
-    case "error":
-      return "error";
-    case "warn":
-    case "warning":
-      return "warning";
-    case "info":
-      return "info";
-    case "debug":
-      return "secondary";
-    case "trace":
-      return "default";
-    default:
-      return "primary";
-  }
-}
+function TimeChip({ timestamp }: { timestamp: string | null | undefined }) {
+  const timeAgo = useTimeAgo(timestamp);
+  const formattedTime = formatTimestamp(timestamp);
 
-export default function Logs({ data }: { data: Array<LogEntry> }) {
+  if (!timeAgo) return null;
+
   return (
-    <TableContainer>
-      <Table>
-        <TableHead>
-          <TableRow>
-            <TableCell width={150}>Level</TableCell>
-            <TableCell>Message</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {data.map(({ level, message }: LogEntry, index: number) => {
-            return (
-              <TableRow key={index}>
-                <DataTableCell>
-                  <Chip label={level} size="small" color={getLogLevelColor(level)} variant="outlined" />
-                </DataTableCell>
-                <DataTableCell>{message}</DataTableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-    </TableContainer>
+    <Tooltip title={`Created at: ${formattedTime}`} placement="top" arrow>
+      <Chip
+        label={timeAgo}
+        color="default"
+        size="small"
+        variant="filled"
+        sx={{ padding: "2px 4px 0px 4px", marginTop: "4px" }}
+      />
+    </Tooltip>
   );
 }
+
+export default TimeChip;

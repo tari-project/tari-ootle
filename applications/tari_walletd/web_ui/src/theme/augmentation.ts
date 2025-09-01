@@ -20,53 +20,20 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Chip } from "@mui/material";
-import { DataTableCell } from "../../Components/StyledComponents";
-import type { LogEntry } from "@tari-project/typescript-bindings";
+import "@mui/material/styles";
 
-function getLogLevelColor(
-  level: string,
-): "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning" {
-  switch (level.toLowerCase()) {
-    case "error":
-      return "error";
-    case "warn":
-    case "warning":
-      return "warning";
-    case "info":
-      return "info";
-    case "debug":
-      return "secondary";
-    case "trace":
-      return "default";
-    default:
-      return "primary";
+declare module "@mui/material/styles" {
+  interface Palette {
+    accent: {
+      background: string;
+      border: string;
+    };
   }
-}
 
-export default function Logs({ data }: { data: Array<LogEntry> }) {
-  return (
-    <TableContainer>
-      <Table>
-        <TableHead>
-          <TableRow>
-            <TableCell width={150}>Level</TableCell>
-            <TableCell>Message</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {data.map(({ level, message }: LogEntry, index: number) => {
-            return (
-              <TableRow key={index}>
-                <DataTableCell>
-                  <Chip label={level} size="small" color={getLogLevelColor(level)} variant="outlined" />
-                </DataTableCell>
-                <DataTableCell>{message}</DataTableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-    </TableContainer>
-  );
+  interface PaletteOptions {
+    accent?: {
+      background?: string;
+      border?: string;
+    };
+  }
 }

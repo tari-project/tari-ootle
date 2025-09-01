@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { ChangeEvent } from "react";
-import type { Amount, SubstateId } from "@tari-project/typescript-bindings";
+import type { Amount, SubstateId, NonFungibleId } from "@tari-project/typescript-bindings";
 import { CURRENCY } from "./constants";
 
 export const renderJson = (json: any) => {
@@ -148,7 +148,7 @@ export function emptyRows(page: number, rowsPerPage: number, array: Array<any> |
 }
 
 export function handleChangePage(
-  event: unknown,
+  _event: unknown,
   newPage: number,
   setPage: React.Dispatch<React.SetStateAction<number>>,
 ) {
@@ -256,10 +256,10 @@ export const formatXTM = (amount: number | bigint): string => {
     const divisor = BigInt(CURRENCY.DIVISOR);
     const integerPart = amount / divisor;
     const remainder = amount % divisor;
-    
+
     // Convert remainder to fractional string padded to CURRENCY.DECIMALS
-    const fractionalPart = remainder.toString().padStart(CURRENCY.DECIMALS, '0');
-    
+    const fractionalPart = remainder.toString().padStart(CURRENCY.DECIMALS, "0");
+
     return `${integerPart.toString()}.${fractionalPart} ${CURRENCY.SYMBOL}`;
   } else if (typeof amount === "number") {
     // Handle number: guard against NaN and use existing toFixed logic
@@ -279,14 +279,71 @@ export function validateHash(hash: string): boolean {
 }
 
 export function validateAddress(address: string): boolean {
-  if (!address || typeof address !== 'string') {
+  if (!address || typeof address !== "string") {
     return false;
   }
-  
+
   // Trim whitespace and convert to lowercase for consistent validation
   const cleanAddress = address.trim().toLowerCase();
-  
+
   // Check if it's a valid 64-character hexadecimal string (32 bytes)
   const regex = /^[a-f0-9]{64}$/;
   return regex.test(cleanAddress);
+}
+
+const normalizeTimestamp = (rawTimestamp: string | null | undefined): Date | null => {
+  if (!rawTimestamp) return null;
+
+  let formatted = rawTimestamp;
+
+  if (!formatted.includes("T")) {
+    formatted = formatted.replace(" ", "T");
+  }
+
+  if (formatted.endsWith(".0")) {
+    formatted = formatted.slice(0, -2);
+  }
+
+  if (!/[Z+\-]\d{2}:?\d{2}$/.test(formatted)) {
+    formatted += "Z";
+  }
+
+  const date = new Date(formatted);
+  return isNaN(date.getTime()) ? null : date;
+};
+
+export const formatTimestamp = (rawTimestamp: string | null | undefined): string => {
+  const date = normalizeTimestamp(rawTimestamp);
+  
+  if (!date) return "";
+
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+};
+
+export const parseTimestamp = (rawTimestamp: string | null | undefined): Date | null => {
+  return normalizeTimestamp(rawTimestamp);
+};
+
+export function displayNftId(nftId: NonFungibleId): string {
+  if ("U256" in nftId) {
+    return `NFT #${shortenString(toHexString(nftId.U256))}`;
+  }
+  if ("Uint64" in nftId) {
+    return `NFT #${nftId.Uint64}`;
+  }
+  if ("Uint32" in nftId) {
+    return `NFT #${nftId.Uint32}`;
+  }
+  if ("String" in nftId) {
+    return `NFT #${nftId.String}`;
+  }
+
+  return `NFT #${JSON.stringify(nftId)}`;
 }

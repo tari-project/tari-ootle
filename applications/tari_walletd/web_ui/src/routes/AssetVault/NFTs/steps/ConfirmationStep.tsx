@@ -24,7 +24,7 @@ import { Box, Button, Stack, Typography, Avatar, Divider } from "@mui/material";
 import type { Account, NonFungibleId, NonFungibleToken } from "@tari-project/typescript-bindings";
 import CopyAddress from "../../../../Components/CopyAddress";
 import { useNftTransferStore } from "../../../../store/nftTransferStore";
-import { formatXTM, substateIdToString } from "../../../../utils/helpers";
+import { formatXTM, substateIdToString, displayNftId } from "../../../../utils/helpers";
 import { convertCborValue } from "../../../../utils/cbor";
 
 interface ConfirmationStepProps {
@@ -101,7 +101,7 @@ export default function ConfirmationStep({
                 </Avatar>
               </Stack>
             ) : (
-              <Typography>{preSelectedNftId ? nftIdToString(preSelectedNftId) : "Multiple NFTs"}</Typography>
+              <Typography>{preSelectedNftId ? displayNftId(preSelectedNftId) : "Multiple NFTs"}</Typography>
             )}
           </Stack>
           <Stack spacing={2} direction={"column"}>
@@ -110,7 +110,7 @@ export default function ConfirmationStep({
                 <Typography variant="subtitle2" color="text.secondary">
                   You are about to send:
                 </Typography>
-                <Typography variant="subtitle1">{nftIdToString(preSelectedNftId)}</Typography>
+                <Typography variant="subtitle1">{displayNftId(preSelectedNftId)}</Typography>
               </Box>
             )}
             <Box>

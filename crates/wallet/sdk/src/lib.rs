@@ -8,8 +8,8 @@ pub mod models;
 mod sdk;
 
 pub use sdk::{WalletSdk, WalletSdkConfig};
+pub use tari_common_types::seeds::cipher_seed::CipherSeed;
+
 pub mod network;
 
-pub use tari_key_manager::cipher_seed::CipherSeed;
-
-pub type WalletSecretKey = tari_key_manager::key_manager::DerivedKey<tari_crypto::ristretto::RistrettoPublicKey>;
+pub type WalletSecretKey = tari_transaction_components::key_manager::tari_key_manager::DerivedKey;

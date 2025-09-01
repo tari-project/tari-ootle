@@ -54,6 +54,10 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
         }
     }
 
+    pub fn derive_account_address_from_public_key(&self, public_key: &RistrettoPublicKeyBytes) -> ComponentAddress {
+        derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, public_key)
+    }
+
     pub fn create_account(
         &self,
         account_name: Option<&str>,

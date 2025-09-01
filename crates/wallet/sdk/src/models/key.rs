@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
-use tari_key_manager::key_manager::DerivedKey;
+use tari_transaction_components::key_manager::tari_key_manager::DerivedKey;
 
 #[derive(Clone)]
 pub struct WalletKey {
@@ -24,7 +24,7 @@ impl WalletKey {
 #[derive(Clone)]
 pub struct KeyPair {
     pub public_key: RistrettoPublicKey,
-    pub secret_key: DerivedKey<RistrettoPublicKey>,
+    pub secret_key: DerivedKey,
 }
 
 impl KeyPair {

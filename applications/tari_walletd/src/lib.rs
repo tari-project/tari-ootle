@@ -34,6 +34,7 @@ mod webrtc;
 use std::{fs, panic, process};
 
 use log::*;
+use tari_common_types::seeds::seed_words::SeedWords;
 use tari_ootle_common_types::{optional::Optional, NumPreshards};
 use tari_ootle_wallet_sdk::{
     apis::{
@@ -48,7 +49,6 @@ use tari_shutdown::ShutdownSignal;
 use tari_template_lib::constants::XTR;
 
 use crate::{
-    cli::Cli,
     config::ApplicationConfig,
     handlers::{auth::create_authenticator, HandlerContext},
     indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
@@ -63,17 +63,17 @@ const DEFAULT_FEE: u64 = 1500;
 const NUM_PRESHARDS: NumPreshards = NumPreshards::current();
 
 pub async fn run_tari_ootle_walletd(
-    cli: Cli,
     config: ApplicationConfig,
+    seed_words: Option<&SeedWords>,
     shutdown_signal: ShutdownSignal,
 ) -> Result<(), anyhow::Error> {
     // Uncomment to enable tokio tracing via tokio-console
     // console_subscriber::init();
 
     let wallet_store = init_wallet_store(&config)?;
-    let mut wallet_sdk = initialize_wallet_sdk(&cli, &config, wallet_store.clone())?;
+    let mut wallet_sdk = initialize_wallet_sdk(&config, wallet_store.clone())?;
 
-    let needs_seed_recovery = wallet_sdk.initialize_cipher_seed(cli.wallet_restore.seed_words.as_ref())?;
+    let needs_seed_recovery = wallet_sdk.initialize_cipher_seed(seed_words)?;
 
     wallet_sdk.key_manager_api().get_or_create_initial(KeyBranch::Account)?;
 
@@ -170,13 +170,12 @@ pub fn init_wallet_store(config: &ApplicationConfig) -> anyhow::Result<SqliteWal
 }
 
 pub fn initialize_wallet_sdk(
-    cli: &Cli,
     config: &ApplicationConfig,
     store: SqliteWalletStore,
 ) -> anyhow::Result<WalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>> {
     let sdk_config = WalletSdkConfig {
         network: config.ootle_wallet_daemon.network,
-        override_keyring_password: cli.override_keyring_password.clone(),
+        override_keyring_password: config.ootle_wallet_daemon.override_keyring_password.clone(),
     };
     let config_api = ConfigApi::new(&store);
     let indexer_jrpc_endpoint = if let Some(indexer_url) = config_api.get(ConfigKey::IndexerUrl).optional()? {

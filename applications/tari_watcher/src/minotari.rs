@@ -8,7 +8,6 @@ use log::*;
 use minotari_app_grpc::tari_rpc::{self as grpc, GetActiveValidatorNodesResponse, RegisterValidatorNodeResponse};
 use minotari_node_grpc_client::BaseNodeGrpcClient;
 use minotari_wallet_grpc_client::WalletGrpcClient;
-use tari_core::transactions::transaction_components::payment_id::{PaymentId, TxType};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_ootle_common_types::layer_one_transaction::{
     LayerOnePayloadType,
@@ -17,6 +16,7 @@ use tari_ootle_common_types::layer_one_transaction::{
     ValidatorRegistrationParams,
 };
 use tari_sidechain::EvictionProof;
+use tari_transaction_components::transaction_components::{memo_field::TxType, MemoField};
 use tonic::transport::Channel;
 use url::Url;
 
@@ -140,10 +140,11 @@ impl MinotariNodes {
                 max_epoch: 0u64,
                 fee_per_gram: 10,
                 sidechain_deployment_key: vec![],
-                payment_id: PaymentId::Open {
-                    user_data: format!("VN registration: {}", info.public_key).into_bytes(),
-                    tx_type: TxType::ValidatorNodeRegistration,
-                }
+                payment_id: MemoField::new_open(
+                    format!("VN registration: {}", info.public_key).into_bytes(),
+                    TxType::ValidatorNodeRegistration,
+                )
+                .map_err(|e| anyhow!("Failed to create payment ID: {}", e))?
                 .to_bytes(),
             })
             .await?
@@ -198,10 +199,11 @@ impl MinotariNodes {
                         validator_node_claim_public_key: registration.claim_public_key.as_bytes().to_vec(),
                         max_epoch: registration.max_epoch.as_u64(),
                         fee_per_gram: 10,
-                        payment_id: PaymentId::Open {
-                            user_data: format!("VN registration: {}", registration.public_key).into_bytes(),
-                            tx_type: TxType::ValidatorNodeRegistration,
-                        }
+                        payment_id: MemoField::new_open(
+                            format!("VN registration: {}", registration.public_key).into_bytes(),
+                            TxType::ValidatorNodeRegistration,
+                        )
+                        .map_err(|e| anyhow!("Failed to create payment ID: {}", e))?
                         .to_bytes(),
                         sidechain_deployment_key: registration
                             .sidechain_public_key

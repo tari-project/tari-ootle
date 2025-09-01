@@ -29,15 +29,14 @@ use minotari_app_grpc::{
 };
 use minotari_node_grpc_client::BaseNodeGrpcClient;
 use tari_common_types::tari_address::TariAddress;
-use tari_core::{
+use tari_transaction_components::{
     consensus::ConsensusManager,
-    transactions::{
-        generate_coinbase_with_wallet_output,
-        tari_amount::MicroMinotari,
-        transaction_components::{payment_id::PaymentId, RangeProofType, WalletOutput},
-        transaction_key_manager::{MemoryDbKeyManager, TariKeyId},
-    },
+    generate_coinbase_with_wallet_output,
+    key_manager::TariKeyId,
+    transaction_components::{MemoField, RangeProofType, WalletOutput},
+    MicroMinotari,
 };
+use tari_transaction_key_manager::MemoryDbKeyManager;
 
 use crate::TariWorld;
 
@@ -161,7 +160,7 @@ async fn create_block_template_with_coinbase(
         stealth_payment,
         consensus_manager.consensus_constants(height),
         RangeProofType::BulletProofPlus,
-        PaymentId::Empty,
+        MemoField::new_empty(),
     )
     .await
     .unwrap();

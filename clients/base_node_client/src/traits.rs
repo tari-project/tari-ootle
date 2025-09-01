@@ -2,14 +2,12 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use async_trait::async_trait;
+use minotari_app_grpc::tari_rpc::ValidatorNodeChange;
 use tari_common_types::types::FixedHash;
-use tari_core::{
-    base_node::comms_interface::ValidatorNodeChange,
-    blocks::BlockHeader,
-    transactions::transaction_components::CodeTemplateRegistration,
-};
+use tari_node_components::blocks::BlockHeader;
 use tari_ootle_common_types::{Epoch, SubstateAddress};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_transaction_components::transaction_components::CodeTemplateRegistration;
 
 use crate::{
     error::BaseNodeClientError,

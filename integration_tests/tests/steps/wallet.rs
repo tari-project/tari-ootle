@@ -5,13 +5,16 @@ use std::time::Duration;
 
 use cucumber::{given, then, when};
 use minotari_app_grpc::tari_rpc::{GetBalanceRequest, SubmitValidatorEvictionProofRequest, ValidateRequest};
-use tari_common_types::types::PrivateKey;
-use tari_core::transactions::transaction_components::payment_id::{PaymentId, TxType};
-use tari_crypto::{
-    ristretto::{pedersen::PedersenCommitment, RistrettoComSig, RistrettoPublicKey},
-    tari_utilities::ByteArray,
+use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
+use tari_template_lib::{
+    prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
+    types::crypto::{CommitmentSignatureBytes, RangeProofBytes},
 };
-use tari_template_lib::prelude::PedersenCommitmentBytes;
+use tari_transaction_components::{
+    tari_amount::T,
+    transaction_components::{memo_field::TxType, MemoField},
+};
+use tari_wallet_daemon_client::types::{ClaimBurnProof, ExtClaimBurnProof};
 use tokio::time::sleep;
 
 use crate::{spawn_wallet, TariWorld};
@@ -21,41 +24,32 @@ async fn start_wallet(world: &mut TariWorld, wallet_name: String, bn_name: Strin
     spawn_wallet(world, wallet_name, bn_name).await;
 }
 
-#[when(
-    expr = "I burn {int}T on wallet {word} into commitment {word} with proof {word} for {word}, range proof {word} \
-            and claim public key {word}"
-)]
+#[when(expr = "I burn {int}T on wallet {word} to proof {word} for wallet daemon {word}")]
 async fn when_i_burn_on_wallet(
     world: &mut TariWorld,
     amount: u64,
     wallet_name: String,
-    commitment_name: String,
-    proof: String,
-    account_name: String,
-    range_proof: String,
-    claim_public_key_name: String,
+    proof_name: String,
+    walletd_name: String,
 ) {
     let wallet = world
         .wallets
         .get(&wallet_name)
         .unwrap_or_else(|| panic!("Wallet {} not found", wallet_name));
 
-    let public_key = world
-        .account_keys
-        .get(&account_name)
-        .unwrap_or_else(|| panic!("Account {} not found", account_name));
+    let walletd = world.get_wallet_daemon(&walletd_name);
+    let mut client = walletd.get_authed_client().await;
+    let nonce = client.create_key(KeyBranch::Nonce).await.unwrap();
 
     let mut client = wallet.create_client().await;
     let resp = client
         .create_burn_transaction(minotari_app_grpc::tari_rpc::CreateBurnTransactionRequest {
-            amount: amount * 1_000_000,
+            amount: (amount * T).as_u64(),
             fee_per_gram: 1,
-            payment_id: PaymentId::Open {
-                user_data: "Burn".as_bytes().to_vec(),
-                tx_type: TxType::Burn,
-            }
-            .to_bytes(),
-            claim_public_key: public_key.to_vec(),
+            payment_id: MemoField::new_open("Burn".as_bytes().to_vec(), TxType::Burn)
+                .unwrap()
+                .to_bytes(),
+            claim_public_key: nonce.public_key.as_bytes().to_vec(),
             sidechain_deployment_key: vec![],
         })
         .await
@@ -63,30 +57,26 @@ async fn when_i_burn_on_wallet(
         .into_inner();
 
     assert!(resp.is_success);
-    world.commitments.insert(
-        commitment_name,
-        PedersenCommitmentBytes::try_from(resp.commitment.as_slice()).unwrap(),
-    );
     let ownership_proof = resp.ownership_proof.unwrap();
-    world.commitment_ownership_proofs.insert(
-        proof,
-        RistrettoComSig::new(
-            PedersenCommitment::from_public_key(
-                &RistrettoPublicKey::from_canonical_bytes(&ownership_proof.public_nonce).unwrap(),
+    world.claim_proofs.insert(proof_name, ExtClaimBurnProof {
+        claim_proof: ClaimBurnProof {
+            reciprocal_claim_public_key: RistrettoPublicKeyBytes::from_bytes(&resp.reciprocal_claim_public_key)
+                .unwrap(),
+            commitment: PedersenCommitmentBytes::from_bytes(&resp.commitment).unwrap(),
+            ownership_proof: CommitmentSignatureBytes::new(
+                PedersenCommitmentBytes::from_bytes(&ownership_proof.public_nonce).unwrap(),
+                Scalar32Bytes::from_bytes(&ownership_proof.u).unwrap(),
+                Scalar32Bytes::from_bytes(&ownership_proof.v).unwrap(),
             ),
-            PrivateKey::from_canonical_bytes(&ownership_proof.u).unwrap(),
-            PrivateKey::from_canonical_bytes(&ownership_proof.v).unwrap(),
-        ),
-    );
-    world.rangeproofs.insert(range_proof, resp.range_proof);
-    world.claim_public_keys.insert(
-        claim_public_key_name,
-        RistrettoPublicKey::from_canonical_bytes(&resp.reciprocal_claim_public_key).unwrap(),
-    );
+            range_proof: RangeProofBytes::try_from(resp.range_proof).unwrap(),
+        },
+        owner_nonce_key_index: nonce.id,
+    });
 }
 
 #[when(expr = "wallet {word} has at least {int} {word}")]
 pub async fn check_balance(world: &mut TariWorld, wallet_name: String, balance: u64, units: String) {
+    const MAX_WAIT_TIME_SECS: u64 = 100;
     let wallet = world
         .wallets
         .get(&wallet_name)
@@ -114,12 +104,12 @@ pub async fn check_balance(world: &mut TariWorld, wallet_name: String, balance: 
             "Waiting for wallet {} to have at least {} uT (balance: {} uT, pending: {} uT)",
             wallet_name, balance, resp.available_balance, resp.pending_incoming_balance
         );
-        sleep(Duration::from_secs(1)).await;
+        sleep(Duration::from_secs(2)).await;
 
-        if iterations == 40 {
+        if iterations == MAX_WAIT_TIME_SECS.div_ceil(2) {
             panic!(
-                "Wallet {} did not have at least {} uT after 40 seconds  (balance: {} uT, pending: {} uT)",
-                wallet_name, balance, resp.available_balance, resp.pending_incoming_balance
+                "Wallet {} did not have at least {} uT after {} seconds  (balance: {} uT, pending: {} uT)",
+                wallet_name, balance, MAX_WAIT_TIME_SECS, resp.available_balance, resp.pending_incoming_balance
             );
         }
         iterations += 1;

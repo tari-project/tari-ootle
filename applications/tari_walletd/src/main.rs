@@ -27,6 +27,7 @@ use log::*;
 use serde_json::json;
 use tari_common::initialize_logging;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
+use tari_engine_types::ToByteType;
 use tari_ootle_app_utilities::configuration::load_configuration;
 use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
 use tari_ootle_walletd::{
@@ -50,7 +51,7 @@ async fn main() -> Result<(), anyhow::Error> {
         process::exit(1);
     }));
 
-    let cli = Cli::init();
+    let mut cli = Cli::init();
     let config_path = cli.common.config_path();
     let cfg = load_configuration(config_path, true, &cli, cli.network_override())?;
     let mut config = ApplicationConfig::load_from(&cfg)?;
@@ -58,17 +59,20 @@ async fn main() -> Result<(), anyhow::Error> {
     if let Some(network) = cli.network_override() {
         config.ootle_wallet_daemon.network = network;
     }
+    if let Some(password) = cli.override_keyring_password.take() {
+        config.ootle_wallet_daemon.override_keyring_password = Some(password);
+    }
 
     match &cli.command {
         Some(Subcommand::Run) | None => run(cli, config).await?,
-        // TODO: rather implement create account and return the key
-        Some(Subcommand::CreateKey {
+        Some(Subcommand::CreateAccount {
+            name,
             key_index,
             set_active,
             output_path,
         }) => {
             let wallet_store = init_wallet_store(&config)?;
-            let mut sdk = initialize_wallet_sdk(&cli, &config, wallet_store)?;
+            let mut sdk = initialize_wallet_sdk(&config, wallet_store)?;
             sdk.initialize_cipher_seed(cli.wallet_restore.seed_words.as_ref())?;
             let km = sdk.key_manager_api();
             let secret = if let Some(index) = key_index {
@@ -76,13 +80,21 @@ async fn main() -> Result<(), anyhow::Error> {
             } else {
                 km.next_account_key()?
             };
+            let public_key = RistrettoPublicKey::from_secret_key(&secret.key);
+
+            let account_addr = sdk
+                .accounts_api()
+                .derive_account_address_from_public_key(&public_key.to_byte_type());
+            sdk.accounts_api()
+                .add_account(name.as_deref(), &account_addr, secret.key_index, false, true)?;
 
             if *set_active {
                 km.set_active_key(KeyBranch::Account, secret.key_index)?;
             }
 
             let json = json!({
-                "public_key": RistrettoPublicKey::from_secret_key(&secret.key),
+                "address": account_addr,
+                "public_key": public_key,
                 "key_index": secret.key_index,
             });
             match output_path {
@@ -105,7 +117,7 @@ async fn main() -> Result<(), anyhow::Error> {
         },
         Some(Subcommand::SeedWords) => {
             let wallet_store = init_wallet_store(&config)?;
-            let mut sdk = initialize_wallet_sdk(&cli, &config, wallet_store)?;
+            let mut sdk = initialize_wallet_sdk(&config, wallet_store)?;
             sdk.initialize_cipher_seed(cli.wallet_restore.seed_words.as_ref())?;
             let seed_words = sdk.load_seed_words()?;
             println!("{}", seed_words.join(" ").reveal())
@@ -124,7 +136,7 @@ async fn run(cli: Cli, config: ApplicationConfig) -> Result<(), anyhow::Error> {
 
     if let Err(e) = initialize_logging(
         &cli.common.log_config_path("ootle_wallet_daemon"),
-        &cli.common.get_base_path(),
+        config.common.base_path(),
         include_str!("../log4rs_sample.yml"),
     ) {
         eprintln!("{}", e);
@@ -138,5 +150,5 @@ async fn run(cli: Cli, config: ApplicationConfig) -> Result<(), anyhow::Error> {
         config.ootle_wallet_daemon.indexer_json_rpc_url
     );
 
-    run_tari_ootle_walletd(cli, config, shutdown_signal).await
+    run_tari_ootle_walletd(config, cli.wallet_restore.seed_words.as_ref(), shutdown_signal).await
 }

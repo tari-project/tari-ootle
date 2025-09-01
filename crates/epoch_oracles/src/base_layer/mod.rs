@@ -17,17 +17,19 @@ use tari_base_node_client::{
     BaseNodeClientError,
 };
 use tari_common_types::types::FixedHash;
-use tari_core::{
-    base_node::comms_interface::ValidatorNodeChange as BaseLayerValidatorNodeChange,
-    transactions::transaction_components::{OutputType, SideChainFeature, SideChainFeatureData, TransactionOutput},
-};
 use tari_engine_types::confidential::UnclaimedConfidentialOutput;
-use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle, ValidatorNodeChange};
-use tari_ootle_common_types::{displayable::Displayable, optional::Optional, Epoch, SubstateAddress};
+use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle};
+use tari_ootle_common_types::{displayable::Displayable, optional::Optional};
 use tari_template_lib::{
     models::EncryptedData,
     prelude::PedersenCommitmentBytes,
     types::crypto::RistrettoPublicKeyBytes,
+};
+use tari_transaction_components::transaction_components::{
+    OutputType,
+    SideChainFeature,
+    SideChainFeatureData,
+    TransactionOutput,
 };
 use tari_utilities::ByteArray;
 use tokio::time;
@@ -238,7 +240,7 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                 .await?
                 .pop()
                 .ok_or_else(|| {
-                    BaseLayerOracleError::InvalidSideChainUtxoResponse(format!(
+                    BaseLayerOracleError::InvalidBaseNodeResponse(format!(
                         "Base layer returned empty response for height {}",
                         current_height
                     ))
@@ -389,7 +391,7 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
 
                         let encrypted_data_bytes = encrypted_data.as_bytes().to_vec();
                         let encrypted_data = EncryptedData::try_from(encrypted_data_bytes).map_err(|len| {
-                            BaseLayerOracleError::InvalidSideChainUtxoResponse(format!(
+                            BaseLayerOracleError::InvalidBaseNodeResponse(format!(
                                 "Encrypted data incorrect length of bytes: {len}"
                             ))
                         })?;
@@ -465,39 +467,14 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                     .map_err(BaseLayerOracleError::BaseNodeError)?;
                 let node_changes = node_changes
                     .into_iter()
-                    .map(|ch| match ch {
-                        BaseLayerValidatorNodeChange::Add {
-                            registration,
-                            activation_epoch,
-                            minimum_value_promise,
-                            shard_key,
-                        } => ValidatorNodeChange::Add {
-                            claim_public_key: RistrettoPublicKeyBytes::from_bytes(
-                                registration.claim_public_key().as_bytes(),
-                            )
-                            .expect(
-                                "claim_public_key: Compressed<RistrettoPublicKey> and RistrettoPublicKeyBytes must be \
-                                 the same length",
-                            ),
-                            validator_node_public_key: RistrettoPublicKeyBytes::from_bytes(
-                                registration.public_key().as_bytes(),
-                            )
-                            .expect(
-                                "validator_node_public_key: Compressed<RistrettoPublicKey> and \
-                                 RistrettoPublicKeyBytes must be the same length",
-                            ),
-                            activation_epoch: Epoch::from(activation_epoch.as_u64()),
-                            minimum_value_promise: minimum_value_promise.as_u64(),
-                            shard_key: SubstateAddress::from_hash_and_version(shard_key, 0),
-                        },
-                        BaseLayerValidatorNodeChange::Remove { public_key } => ValidatorNodeChange::Remove {
-                            public_key: RistrettoPublicKeyBytes::from_bytes(public_key.as_bytes()).expect(
-                                "public_key: Compressed<RistrettoPublicKey> and RistrettoPublicKeyBytes must be the \
-                                 same  length",
-                            ),
-                        },
-                    })
-                    .collect::<Vec<_>>();
+                    .map(TryInto::try_into)
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| {
+                        BaseLayerOracleError::InvalidBaseNodeResponse(format!(
+                            "Failed to convert validator node change: {}",
+                            e
+                        ))
+                    })?;
 
                 // This maybe empty if the MR changed as a result of other side chain IDs
                 if !node_changes.is_empty() {
@@ -535,7 +512,7 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                         "⛓️ No more blocks to scan. Last scanned block height: {}", block_info.height
                     );
                     if block_info.height != end_height {
-                        return Err(BaseLayerOracleError::InvalidSideChainUtxoResponse(format!(
+                        return Err(BaseLayerOracleError::InvalidBaseNodeResponse(format!(
                             "Expected to scan to height {}, but got to height {}",
                             end_height, block_info.height
                         )));
@@ -702,8 +679,8 @@ pub enum BaseLayerOracleError {
     StoreError(anyhow::Error),
     #[error("Base node client error: {0}")]
     BaseNodeError(#[from] BaseNodeClientError),
-    #[error("Invalid side chain utxo response: {0}")]
-    InvalidSideChainUtxoResponse(String),
+    #[error("Invalid base node response: {0}")]
+    InvalidBaseNodeResponse(String),
     #[error("Template URL failed to parse: {0}")]
     TemplateUrlParseError(#[from] url::ParseError),
 }

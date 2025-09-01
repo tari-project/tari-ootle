@@ -21,7 +21,7 @@ Feature: Wallet Daemon
         # VN registration
     When validator node VAL_1 sends a registration transaction to base wallet WALLET
     When miner MINER mines 26 new blocks
-    Then VAL_1 has scanned to height 27
+    Then VAL_1 has scanned to at least height 27
     Then the validator node VAL_1 is listed as registered
 
         # Initialize an indexer
@@ -104,17 +104,17 @@ Feature: Wallet Daemon
     When I create an account ACCOUNT_1 via the wallet daemon WALLET_D with 10000 free coins
     When I create an account ACCOUNT_2 via the wallet daemon WALLET_D
 
-    When I burn 1000T on wallet WALLET with wallet daemon WALLET_D into commitment COMMITMENT with proof PROOF for ACCOUNT_1, range proof RANGEPROOF and claim public key CLAIM_PUBKEY
+    When I burn 1000T on wallet NETWORK_CONSOLE_WALLET to proof BURN_PROOF for wallet daemon WALLET_D
 
         # unfortunately have to wait for this to get into the mempool....
     Then there is 1 transaction in the mempool of BASE within 10 seconds
     When miner MINER mines 13 new blocks
-    Then VN has scanned to height 40
+    Then VN has scanned to at least height 40
 
-    When I convert commitment COMMITMENT into COMM_ADDRESS address
+    When I convert commitment in proof BURN_PROOF into COMM_ADDRESS address
     Then validator node VN has state at COMM_ADDRESS within 20 seconds
 
-    When I claim burn COMMITMENT with PROOF, RANGEPROOF and CLAIM_PUBKEY and spend it into account ACCOUNT_1 via the wallet daemon WALLET_D
+    When I claim burn BURN_PROOF and spend it into account ACCOUNT_1 using wallet daemon WALLET_D
     When I print the cucumber world
         # TODO: remove the wait
     When I wait 5 seconds
@@ -125,9 +125,6 @@ Feature: Wallet Daemon
   Scenario: Create and mint account NFT
     # Initialize a base node, wallet, miner and VN
     Given a network with registered validator VAL_1 and wallet daemon WALLET_D
-
-    # Initialize an indexer
-    Given an indexer IDX connected to base node NETWORK_BASE
 
     # Initialize the wallet daemon
     Given a wallet daemon WALLET_D connected to indexer IDX

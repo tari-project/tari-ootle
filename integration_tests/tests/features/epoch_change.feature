@@ -38,7 +38,7 @@ Feature: Epoch change
 
     When Block height on VN VAL is at least 6
     When miner MINER mines 7 new blocks
-    Then VAL has scanned to height 40
+    Then VAL has scanned to at least height 40
     Then the validator node VAL has started epoch 4
 
 #  @serial
@@ -79,7 +79,7 @@ Feature: Epoch change
 #
 #   # Mine them into registered epoch
 #    When miner MINER mines 10 new blocks
-#    Then VAL_1 has scanned to height 21
+#    Then VAL_1 has scanned to at least height 21
 #    Then the validator node VAL_1 is listed as registered
 #    Then the validator node VAL_2 is listed as registered
 #    Then the validator node VAL_3 is listed as registered

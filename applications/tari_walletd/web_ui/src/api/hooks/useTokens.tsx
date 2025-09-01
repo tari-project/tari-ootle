@@ -31,9 +31,6 @@ export const useGetAllTokens = () => {
     queryFn: () => {
       return authGetAllJwt({});
     },
-    onError: (error: ApiError) => {
-      error;
-    },
   });
 };
 
@@ -42,13 +39,14 @@ export const useAuthRevokeToken = () => {
     const result = await authRevoke({ permission_token_id: token });
     return result;
   };
-  return useMutation(revokeToken, {
+  return useMutation({
+    mutationFn: revokeToken,
     onError: (error: ApiError) => {
       error;
       console.error(error);
     },
     onSettled: () => {
-      queryClient.invalidateQueries(["jwts_list"]);
+      queryClient.invalidateQueries({ queryKey: ["jwts_list"] });
     },
   });
 };

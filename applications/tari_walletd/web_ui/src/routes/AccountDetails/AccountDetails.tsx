@@ -31,6 +31,7 @@ import TableRow from "@mui/material/TableRow";
 import TableCell from "@mui/material/TableCell";
 import TableBody from "@mui/material/TableBody";
 import { useAccountsGetBalances, useAccountNFTsList, useAccountsGet } from "../../api/hooks/useAccounts";
+import { ApiError } from "../../api/helpers/types";
 import { DataTableCell } from "../../Components/StyledComponents";
 import FetchStatusCheck from "../../Components/FetchStatusCheck";
 import { AccountGetResponse, BalanceEntry, substateIdToString } from "@tari-project/typescript-bindings";
@@ -210,7 +211,7 @@ function AccountDetailsLayout() {
           <NftList
             nftsListIsError={nftsListIsError}
             nftsListIsFetching={nftsListIsFetching}
-            nftsListError={nftsListError}
+            nftsListError={nftsListError as ApiError | null}
             nftsListData={nftsListData}
             totalCount={estimatedTotal}
             page={nftPage}

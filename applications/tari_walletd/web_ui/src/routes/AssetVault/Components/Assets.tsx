@@ -34,6 +34,7 @@ import React, { useState } from "react";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import { DataTableCell } from "../../../Components/StyledComponents";
 import { useAccountNFTsList, useAccountsGetBalances } from "../../../api/hooks/useAccounts";
+import { ApiError } from "../../../api/helpers/types";
 import { useListNfts } from "../../../api/hooks/useNfts";
 import useAccountStore from "../../../store/accountStore";
 import {
@@ -266,7 +267,7 @@ function Assets({ account }: { account: Account }) {
         <NFTList
           nftsListIsError={nftsListIsError}
           nftsListIsFetching={nftsListIsFetching}
-          nftsListError={nftsListError}
+          nftsListError={nftsListError as ApiError | null}
           nftsListData={nftsListData}
           totalCount={totalCount}
           page={nftPage}

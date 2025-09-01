@@ -56,7 +56,7 @@ function AddAccount({ open, setOpen }: { open: boolean; setOpen: React.Dispatch<
             accountName: "",
           });
           setOpen(false);
-          queryClient.invalidateQueries(["accounts"]);
+          queryClient.invalidateQueries({ queryKey: ["accounts"] });
         },
       },
     );

@@ -45,27 +45,25 @@ export const useListNfts = (request: ListAccountNftsReq) => {
 };
 
 export const useNftsTransfer = (request: TransferNftRequest) => {
-  return useMutation(
-    () => {
+  return useMutation({
+    mutationFn: () => {
       return nftTransfer(request);
     },
-    {
-      onError: (error: ApiError) => {
-        error;
-      },
-      onSettled: () => {
-        // Invalidate all NFT-related queries
-        queryClient.invalidateQueries({ 
-          predicate: (query) => {
-            const key = query.queryKey[0];
-            return typeof key === "string" && (
-              key === "nfts" || 
-              key === "list_nfts" || 
-              key.startsWith("nfts_list_")
-            );
-          }
-        });
-      },
+    onError: (error: ApiError) => {
+      error;
     },
-  );
+    onSettled: () => {
+      // Invalidate all NFT-related queries
+      queryClient.invalidateQueries({ 
+        predicate: (query) => {
+          const key = query.queryKey[0];
+          return typeof key === "string" && (
+            key === "nfts" || 
+            key === "list_nfts" || 
+            key.startsWith("nfts_list_")
+          );
+        }
+      });
+    },
+  });
 };

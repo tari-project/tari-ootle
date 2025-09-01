@@ -115,7 +115,7 @@ function MyAssets() {
             <Button
               title="Refresh all accounts"
               variant="text"
-              disabled={refreshBalances.isLoading}
+              disabled={refreshBalances.isPending}
               onClick={handleRefreshClicked}
             >
               <Refresh />

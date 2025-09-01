@@ -40,9 +40,6 @@ export const useTransactionDetails = (hash: string) => {
     queryFn: () => {
       return transactionsGet({ transaction_id: hash });
     },
-    onError: (error: ApiError) => {
-      error;
-    },
   });
 };
 
@@ -50,33 +47,32 @@ export const useGetAllTransactions = (req: TransactionGetAllRequest) => {
   return useQuery({
     queryKey: ["transactions", req.status],
     queryFn: () => transactionsGetAll(req),
-    onError: (error: ApiError) => {
-      error;
-    },
     refetchInterval: 5000,
-    keepPreviousData: true,
+    placeholderData: (previousData) => previousData,
   });
 };
 
 export const usePublishTemplate = () => {
-  return useMutation(transactionsPublishTemplate, {
+  return useMutation({
+    mutationFn: transactionsPublishTemplate,
     onError: (error: ApiError) => {
       console.error(error);
     },
     onSettled: () => {
-      queryClient.invalidateQueries(["transactions"]);
-      queryClient.invalidateQueries(["accounts_balances"]);
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts_balances"] });
     },
   });
 };
 export const useSubmitManifest = () => {
-  return useMutation(transactionsSubmitManifest, {
+  return useMutation({
+    mutationFn: transactionsSubmitManifest,
     onError: (error: ApiError) => {
       console.error(error);
     },
     onSettled: () => {
-      queryClient.invalidateQueries(["transactions"]);
-      queryClient.invalidateQueries(["accounts_balances"]);
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts_balances"] });
     },
   });
 };

@@ -52,12 +52,13 @@ const DEFAULT_MAX_FEE = 2000;
 
 //   Fees are passed as strings because Amount is tagged
 export const useAccountsClaimBurn = () => {
-  return useMutation((params: ClaimBurnRequest) => accountsClaimBurn(params), {
+  return useMutation({
+    mutationFn: (params: ClaimBurnRequest) => accountsClaimBurn(params),
     onError: (error: ApiError) => {
       error;
     },
     onSettled: () => {
-      queryClient.invalidateQueries(["accounts"]);
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
   });
 };
@@ -69,23 +70,21 @@ export type AccountsCreateMutate = {
 };
 
 export const useAccountsCreate = () => {
-  return useMutation(
-    async (req: AccountsCreateMutate) => {
+  return useMutation({
+    mutationFn: async (req: AccountsCreateMutate) => {
       return await accountsCreate({
         account_name: req.accountName || "",
         is_default: req.isDefault || null,
         key_id: req.keyId || null,
       });
     },
-    {
-      onError: (error: ApiError) => {
-        error;
-      },
-      onSettled: () => {
-        queryClient.invalidateQueries(["accounts"]);
-      },
+    onError: (error: ApiError) => {
+      error;
     },
-  );
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+    },
+  });
 };
 
 export interface TransferParams {
@@ -102,8 +101,8 @@ export interface TransferParams {
 }
 
 export const useAccountsTransfer = () => {
-  return useMutation(
-    (params: TransferParams) => {
+  return useMutation({
+    mutationFn: (params: TransferParams) => {
       const account = { ComponentAddress: params.account };
       const max_fee = params.max_fee || DEFAULT_MAX_FEE;
       if (params.resourceType === "Confidential") {
@@ -147,15 +146,13 @@ export const useAccountsTransfer = () => {
         return accountsTransfer(transferRequest);
       }
     },
-    {
-      onError: (error: ApiError) => {
-        error;
-      },
-      onSettled: () => {
-        queryClient.invalidateQueries(["accounts"]);
-      },
+    onError: (error: ApiError) => {
+      error;
     },
-  );
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+    },
+  });
 };
 
 export const useAccountsCreateFreeTestCoins = () => {
@@ -174,13 +171,14 @@ export const useAccountsCreateFreeTestCoins = () => {
       max_fee: fee,
     });
 
-  return useMutation(createFreeTestCoins, {
+  return useMutation({
+    mutationFn: createFreeTestCoins,
     onError: (error: ApiError) => {
       console.error(error);
     },
     onSettled: () => {
-      queryClient.invalidateQueries(["transactions"]);
-      queryClient.invalidateQueries(["accounts_balances"]);
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts_balances"] });
     },
   });
 };
@@ -204,14 +202,15 @@ export const useMintTestnetFaucetNfts = () => {
       max_fee: maxFee,
     });
 
-  return useMutation(callApi, {
+  return useMutation({
+    mutationFn: callApi,
     onError: (error: ApiError) => {
       console.error(error);
     },
-    onSettled: (_resp, _err, req) => {
-      queryClient.invalidateQueries(["transactions"]);
-      queryClient.invalidateQueries(["accounts_balances"]);
-      queryClient.invalidateQueries(["nfts_list"]);
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts_balances"] });
+      queryClient.invalidateQueries({ queryKey: ["nfts_list"] });
     },
   });
 };
@@ -221,9 +220,6 @@ export const useAccountsList = (offset: number, limit: number, enabled: boolean 
     queryKey: ["accounts"],
     queryFn: () => accountsList({ offset, limit }),
     enabled,
-    onError: (error: ApiError) => {
-      error;
-    },
   });
 };
 
@@ -231,7 +227,6 @@ export const useAccountsGetBalances = (account: ComponentAddress, refresh: boole
   return useQuery({
     queryKey: [`accounts_balances_${account}`],
     queryFn: () => accountsGetBalances({ account: { ComponentAddress: account }, refresh }),
-    onError: (_error: ApiError) => {},
     refetchInterval: 5000,
     structuralSharing: (oldData, newData) => {
       if (!oldData || !newData) return newData;
@@ -244,12 +239,13 @@ export const useAccountsGetBalances = (account: ComponentAddress, refresh: boole
 };
 
 export const refreshAccountsBalances = (account: ComponentAddress) => {
-  return useMutation(() => accountsGetBalances({ account: { ComponentAddress: account }, refresh: true }), {
+  return useMutation({
+    mutationFn: () => accountsGetBalances({ account: { ComponentAddress: account }, refresh: true }),
     onError: (error: ApiError) => {
       error;
     },
     onSettled: () => {
-      queryClient.invalidateQueries(["accounts_balances_" + account]);
+      queryClient.invalidateQueries({ queryKey: ["accounts_balances_" + account] });
     },
   });
 };
@@ -262,14 +258,12 @@ export const useAccountsGetDefault = () => {
     notifyOnChangeProps: ["data", "error"],
     retryOnMount: false,
     retry: false,
-    onError: (_error: ApiError) => {},
   });
 };
 export const useAccountsGet = (account: ComponentAddress) => {
   return useQuery({
     queryKey: ["accounts_get_" + account],
     queryFn: () => accountsGet({ name_or_address: { ComponentAddress: account } }),
-    onError: (_error: ApiError) => {},
   });
 };
 
@@ -277,7 +271,6 @@ export const useAccountNFTsList = (account: ComponentAddress, offset: number, li
   return useQuery({
     queryKey: ["nfts_list", account, offset, limit],
     queryFn: () => nftList({ account: { ComponentAddress: account }, offset, limit }),
-    onError: (_error: ApiError) => {},
   });
 };
 
@@ -285,8 +278,5 @@ export const useValidatorFees = (accountOrKeyIndex: AccountOrKeyIndex, shardGrou
   return useQuery({
     queryKey: ["validator_fees"],
     queryFn: () => validatorsGetFees({ account_or_key: accountOrKeyIndex, shard_group: shardGroup }),
-    onError: (error: ApiError) => {
-      error;
-    },
   });
 };

@@ -66,7 +66,7 @@ function Onboarding() {
     });
   };
 
-  if (status === "loading") {
+  if (status === "pending") {
     return <Loading />;
   }
 

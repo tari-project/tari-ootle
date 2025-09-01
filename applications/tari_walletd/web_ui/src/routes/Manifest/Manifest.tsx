@@ -55,7 +55,7 @@ function ManifestEditor() {
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
   const theme = useTheme();
 
-  const { mutateAsync: submitManifest, isLoading: isSubmittingManifest, error } = useSubmitManifest();
+  const { mutateAsync: submitManifest, isPending: isSubmittingManifest, error } = useSubmitManifest();
 
   const isDryRun = !fee;
 

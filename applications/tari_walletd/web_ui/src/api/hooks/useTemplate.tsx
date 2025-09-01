@@ -21,7 +21,6 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useQuery } from "@tanstack/react-query";
-import { ApiError } from "../helpers/types";
 import { templatesGet } from "../../utils/json_rpc";
 import { TemplatesGetRequest } from "@tari-project/typescript-bindings";
 
@@ -30,9 +29,6 @@ export const useTemplateGet = (request: TemplatesGetRequest, options = {}) => {
     queryKey: ["template_get", request],
     queryFn: () => {
       return templatesGet(request);
-    },
-    onError: (error: ApiError) => {
-      error;
     },
     refetchInterval: false,
     notifyOnChangeProps: ["data", "error"],

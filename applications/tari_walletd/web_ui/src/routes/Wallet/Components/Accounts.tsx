@@ -109,7 +109,7 @@ function Accounts() {
             fee: "",
           });
           setShowAddAccountDialog(false);
-          queryClient.invalidateQueries(["accounts"]);
+          queryClient.invalidateQueries({ queryKey: ["accounts"] });
         },
       },
     );

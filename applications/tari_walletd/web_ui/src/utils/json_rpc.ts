@@ -107,8 +107,8 @@ import type {
   WebRtcStartResponse,
 } from "@tari-project/typescript-bindings";
 import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
-import useAuthStore from "../store/authStore";
-import { AUTH_TOKEN_FOR_NONE_AUTH } from "../routes/Auth/Auth";
+import useAuthStore from "@store/authStore";
+import { AUTH_TOKEN_FOR_NONE_AUTH } from "@routes/Auth/Auth";
 
 let clientInstance: WalletDaemonClient | null = null;
 let pendingClientInstance: Promise<WalletDaemonClient> | null = null;

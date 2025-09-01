@@ -20,19 +20,19 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import PageHeading from "../../Components/PageHeading";
+import PageHeading from "@components/PageHeading";
 import Grid from "@mui/material/Grid";
-import { StyledPaper } from "../../Components/StyledComponents";
+import { StyledPaper } from "@components/StyledComponents";
 import { Stack, Table, TableBody, TableHead, TableRow, TableCell, TextareaAutosize } from "@mui/material";
 import { useState } from "react";
-import useManifestCodeStore from "../../store/manifestStore";
+import useManifestCodeStore from "@store/manifestStore";
 import Button from "@mui/material/Button/Button";
 import TextField from "@mui/material/TextField/TextField";
 import Box from "@mui/material/Box";
-import { useSubmitManifest } from "../../api/hooks/useTransactions";
+import { useSubmitManifest } from "@api/hooks/useTransactions";
 import { rejectReasonToString } from "@tari-project/typescript-bindings";
 import { useTheme } from "@mui/material";
-import { DataTableCell } from "../../Components/StyledComponents";
+import { DataTableCell } from "@components/StyledComponents";
 
 function Manifest() {
   return (

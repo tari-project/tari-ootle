@@ -21,9 +21,9 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { ApiError } from "../helpers/types";
-import queryClient from "../queryClient";
-import { authGetAllJwt, authRevoke } from "../../utils/json_rpc";
+import { ApiError } from "@api/helpers/types";
+import queryClient from "@api/queryClient";
+import { authGetAllJwt, authRevoke } from "@utils/json_rpc";
 
 export const useGetAllTokens = () => {
   return useQuery({

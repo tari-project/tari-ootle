@@ -3,7 +3,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { AUTH_TOKEN_FOR_NONE_AUTH } from "../routes/Auth/Auth";
+import { AUTH_TOKEN_FOR_NONE_AUTH } from "@routes/Auth/Auth";
 
 interface Store {
   username: string;

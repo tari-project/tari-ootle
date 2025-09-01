@@ -30,8 +30,8 @@ import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import Select, { SelectChangeEvent } from "@mui/material/Select";
 import Dialog from "./AddAccount";
-import useAccountStore from "../../../store/accountStore";
-import { useAccountsList } from "../../../api/hooks/useAccounts";
+import useAccountStore from "@store/accountStore";
+import { useAccountsList } from "@api/hooks/useAccounts";
 import { AccountInfo, substateIdToString } from "@tari-project/typescript-bindings";
 
 function SelectAccount() {

@@ -22,10 +22,10 @@
 
 import { Box, Button, Stack, Typography, Avatar, Divider } from "@mui/material";
 import type { Account, NonFungibleId, NonFungibleToken } from "@tari-project/typescript-bindings";
-import CopyAddress from "../../../../Components/CopyAddress";
-import { useNftTransferStore } from "../../../../store/nftTransferStore";
-import { formatXTM, substateIdToString, displayNftId } from "../../../../utils/helpers";
-import { convertCborValue } from "../../../../utils/cbor";
+import CopyAddress from "@components/CopyAddress";
+import { useNftTransferStore } from "@store/nftTransferStore";
+import { formatXTM, substateIdToString, displayNftId } from "@utils/helpers";
+import { convertCborValue } from "@utils/cbor";
 
 interface ConfirmationStepProps {
   accounts: Array<{ account: Account }> | undefined;

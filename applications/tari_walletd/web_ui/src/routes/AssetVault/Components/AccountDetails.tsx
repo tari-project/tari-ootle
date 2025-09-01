@@ -21,10 +21,10 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import Box from "@mui/material/Box";
-import { GridHeadCell, GridDataCell, DataTableCell } from "../../../Components/StyledComponents";
+import { GridHeadCell, GridDataCell, DataTableCell } from "@components/StyledComponents";
 import { styled } from "@mui/material/styles";
-import useAccountStore from "../../../store/accountStore";
-import CopyAddress from "../../../Components/CopyAddress";
+import useAccountStore from "@store/accountStore";
+import CopyAddress from "@components/CopyAddress";
 import { substateIdToString } from "@tari-project/typescript-bindings";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";

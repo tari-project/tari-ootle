@@ -28,19 +28,19 @@ import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import Box from "@mui/material/Box";
-import { useAccountsList } from "../../../api/hooks/useAccounts";
+import { useAccountsList } from "@api/hooks/useAccounts";
 import { useTheme } from "@mui/material/styles";
-import useAccountStore from "../../../store/accountStore";
+import useAccountStore from "@store/accountStore";
 import Select from "@mui/material/Select";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
 import MenuItem from "@mui/material/MenuItem";
 import { useFilePicker } from "use-file-picker";
 import { ResourceAddress, ResourceType, substateIdToString } from "@tari-project/typescript-bindings";
 import InputLabel from "@mui/material/InputLabel";
-import { usePublishTemplate } from "../../../api/hooks/useTransactions";
+import { usePublishTemplate } from "@api/hooks/useTransactions";
 import { FileAmountLimitValidator, FileSizeValidator, FileTypeValidator } from "use-file-picker/validators";
 import { FileContent } from "use-file-picker/types";
-import { base64FromArrayBuffer } from "../../../utils/helpers";
+import { base64FromArrayBuffer } from "@utils/helpers";
 
 export default function PublishTemplate() {
   const [open, setOpen] = useState(false);

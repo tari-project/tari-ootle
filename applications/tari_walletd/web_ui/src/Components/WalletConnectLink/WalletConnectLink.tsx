@@ -31,10 +31,10 @@ import DialogContentText from "@mui/material/DialogContentText";
 import CloseIcon from "@mui/icons-material/Close";
 import IconButton from "@mui/material/IconButton";
 import "./ConnectorLink.css";
-import Permissions from "./Permissions";
-import CheckMark from "./CheckMark";
-import ConnectorLogo from "./ConnectorLogo";
-import ConfirmTransaction from "./ConfirmTransaction";
+import Permissions from "@components/WalletConnectLink/Permissions";
+import CheckMark from "@components/WalletConnectLink/CheckMark";
+import ConnectorLogo from "@components/WalletConnectLink/ConnectorLogo";
+import ConfirmTransaction from "@components/WalletConnectLink/ConfirmTransaction";
 import { useTheme } from "@mui/material/styles";
 import { TariPermission } from "@tari-project/tari-permissions";
 import { Core } from "@walletconnect/core";
@@ -54,8 +54,8 @@ import {
   transactionsGetResult,
   transactionsSubmit,
   walletGetInfo,
-} from "../../utils/json_rpc";
-import useAccountStore from "../../store/accountStore";
+} from "@utils/json_rpc";
+import useAccountStore from "@store/accountStore";
 import { buildApprovedNamespaces, getSdkError } from "@walletconnect/utils";
 import { Error as ErrorIcon } from "@mui/icons-material";
 import CircularProgress from "@mui/material/CircularProgress";

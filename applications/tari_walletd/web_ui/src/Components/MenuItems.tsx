@@ -35,7 +35,7 @@ import {
 } from "react-icons/io5";
 import Tooltip from "@mui/material/Tooltip";
 import Fade from "@mui/material/Fade";
-import ThemeSwitcher from "./ThemeSwitcher";
+import ThemeSwitcher from "@components/ThemeSwitcher";
 import Box from "@mui/material/Box";
 import { useTheme } from "@mui/material/styles";
 import { LuLayoutTemplate } from "react-icons/lu";

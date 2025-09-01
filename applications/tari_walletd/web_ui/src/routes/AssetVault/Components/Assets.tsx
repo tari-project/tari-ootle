@@ -31,20 +31,20 @@ import TableRow from "@mui/material/TableRow";
 import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
 import React, { useState } from "react";
-import FetchStatusCheck from "../../../Components/FetchStatusCheck";
-import { DataTableCell } from "../../../Components/StyledComponents";
-import { useAccountNFTsList, useAccountsGetBalances } from "../../../api/hooks/useAccounts";
-import { ApiError } from "../../../api/helpers/types";
-import { useListNfts } from "../../../api/hooks/useNfts";
-import useAccountStore from "../../../store/accountStore";
+import FetchStatusCheck from "@components/FetchStatusCheck";
+import { DataTableCell } from "@components/StyledComponents";
+import { useAccountNFTsList, useAccountsGetBalances } from "@api/hooks/useAccounts";
+import { ApiError } from "@api/helpers/types";
+import { useListNfts } from "@api/hooks/useNfts";
+import useAccountStore from "@store/accountStore";
 import {
   bigintToDecimalString,
   shortenSubstateId,
   substateIdToString,
   handleChangePage,
   handleChangeRowsPerPage,
-} from "../../../utils/helpers";
-import NFTList from "../NFTs/NFTList";
+} from "@utils/helpers";
+import NFTList from "@routes/AssetVault/NFTs/NFTList";
 import { Button } from "@mui/material";
 import { SendMoneyDialog } from "./SendMoney";
 import {
@@ -55,7 +55,7 @@ import {
   Account,
   Amount,
 } from "@tari-project/typescript-bindings";
-import CopyAddress from "../../../Components/CopyAddress";
+import CopyAddress from "@components/CopyAddress";
 
 interface TabPanelProps {
   children?: React.ReactNode;

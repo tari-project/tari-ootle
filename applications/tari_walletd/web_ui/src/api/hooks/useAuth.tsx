@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 import { useQuery } from "@tanstack/react-query";
-import { authGetMethod } from "../../utils/json_rpc";
+import { authGetMethod } from "@utils/json_rpc";
 
 export const useAuthMethod = () => {
   return useQuery({

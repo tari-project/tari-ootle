@@ -36,11 +36,11 @@ import {
 import { useTheme } from "@mui/material/styles";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import FetchStatusCheck from "../../Components/FetchStatusCheck";
-import StatusChip from "../../Components/StatusChip";
-import { DataTableCell } from "../../Components/StyledComponents";
-import { useGetAllTransactions } from "../../api/hooks/useTransactions";
-import { emptyRows, handleChangePage, handleChangeRowsPerPage } from "../../utils/helpers";
+import FetchStatusCheck from "@components/FetchStatusCheck";
+import StatusChip from "@components/StatusChip";
+import { DataTableCell } from "@components/StyledComponents";
+import { useGetAllTransactions } from "@api/hooks/useTransactions";
+import { emptyRows, handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
 import { Account, WalletTransaction } from "@tari-project/typescript-bindings";
 import TimeChip from "./TimeChip";
 

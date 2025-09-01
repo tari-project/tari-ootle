@@ -34,12 +34,12 @@ import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField/TextField";
 import { ChevronRight } from "@mui/icons-material";
 import IconButton from "@mui/material/IconButton";
-import { BoxHeading2, DataTableCell } from "../../../Components/StyledComponents";
-import { useAccountsCreate, useAccountsList } from "../../../api/hooks/useAccounts";
-import FetchStatusCheck from "../../../Components/FetchStatusCheck";
-import queryClient from "../../../api/queryClient";
+import { BoxHeading2, DataTableCell } from "@components/StyledComponents";
+import { useAccountsCreate, useAccountsList } from "@api/hooks/useAccounts";
+import FetchStatusCheck from "@components/FetchStatusCheck";
+import queryClient from "@api/queryClient";
 import { AccountInfo, substateIdToString, shortenSubstateId } from "@tari-project/typescript-bindings";
-import CopyAddress from "../../../Components/CopyAddress";
+import CopyAddress from "@components/CopyAddress";
 
 function Account(account: AccountInfo, index: number) {
   return (

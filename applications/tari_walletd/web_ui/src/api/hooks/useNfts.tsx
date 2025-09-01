@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { nftList, nftTransfer } from "../../utils/json_rpc";
-import { ApiError } from "../helpers/types";
+import { nftList, nftTransfer } from "@utils/json_rpc";
+import { ApiError } from "@api/helpers/types";
 import { TransferNftRequest } from "@tari-project/typescript-bindings";
-import queryClient from "../queryClient";
+import queryClient from "@api/queryClient";
 import type { ComponentAddressOrName } from "@tari-project/typescript-bindings/dist";
 
 export interface ListAccountNftsReq {

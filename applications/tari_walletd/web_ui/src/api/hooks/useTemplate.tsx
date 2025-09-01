@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useQuery } from "@tanstack/react-query";
-import { templatesGet } from "../../utils/json_rpc";
+import { templatesGet } from "@utils/json_rpc";
 import { TemplatesGetRequest } from "@tari-project/typescript-bindings";
 
 export const useTemplateGet = (request: TemplatesGetRequest, options = {}) => {

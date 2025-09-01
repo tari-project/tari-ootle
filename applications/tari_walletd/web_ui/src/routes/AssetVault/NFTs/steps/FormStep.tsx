@@ -31,8 +31,8 @@ import ListItemText from "@mui/material/ListItemText";
 import { Divider, InputLabel, Stack } from "@mui/material";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
 import type { NonFungibleId, NonFungibleToken, Account } from "@tari-project/typescript-bindings";
-import { substateIdToString, formatXTM, validateAddress, displayNftId } from "../../../../utils/helpers";
-import { useNftTransferStore } from "../../../../store/nftTransferStore";
+import { substateIdToString, formatXTM, validateAddress, displayNftId } from "@utils/helpers";
+import { useNftTransferStore } from "@store/nftTransferStore";
 
 interface FormStepProps {
   account: Account;

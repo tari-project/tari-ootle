@@ -28,12 +28,12 @@ import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import Box from "@mui/material/Box";
-import { useAccountsList } from "../../../api/hooks/useAccounts";
+import { useAccountsList } from "@api/hooks/useAccounts";
 import { useTheme } from "@mui/material/styles";
-import useAccountStore from "../../../store/accountStore";
+import useAccountStore from "@store/accountStore";
 import { FormControl, InputLabel, MenuItem, Select, SelectChangeEvent } from "@mui/material";
-import { useKeysList } from "../../../api/hooks/useKeys";
-import { validatorsClaimFees, validatorsGetFees } from "../../../utils/json_rpc";
+import { useKeysList } from "@api/hooks/useKeys";
+import { validatorsClaimFees, validatorsGetFees } from "@utils/json_rpc";
 import {
   AccountInfo,
   getRejectReasonFromTransactionResult,
@@ -43,7 +43,7 @@ import {
   TransactionResult,
 } from "@tari-project/typescript-bindings";
 import { FileContent } from "use-file-picker/types";
-import { toHexString } from "../../../utils/helpers";
+import { toHexString } from "@utils/helpers";
 
 interface FormState {
   account: string | null;

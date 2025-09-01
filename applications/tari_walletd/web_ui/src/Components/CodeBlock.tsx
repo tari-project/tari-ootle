@@ -36,7 +36,7 @@ import {
   IoContractOutline,
   IoCheckmarkOutline,
 } from "react-icons/io5";
-import { renderJson } from "../utils/helpers";
+import { renderJson } from "@utils/helpers";
 
 interface ICodeBlockExpand {
   title: string;

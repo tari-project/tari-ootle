@@ -1,11 +1,11 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-import { useAuthMethod } from "../../api/hooks/useAuth";
+import { useAuthMethod } from "@api/hooks/useAuth";
 import { useEffect, useState } from "react";
-import Loading from "../../Components/Loading";
+import Loading from "@components/Loading";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
-import useAuthStore from "../../store/authStore";
+import useAuthStore from "@store/authStore";
 
 export const AUTH_TOKEN_FOR_NONE_AUTH: string = "auth_none";
 

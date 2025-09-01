@@ -22,7 +22,7 @@
 
 import { ChangeEvent } from "react";
 import type { Amount, SubstateId, NonFungibleId } from "@tari-project/typescript-bindings";
-import { CURRENCY } from "./constants";
+import { CURRENCY } from "@utils/constants";
 
 export const renderJson = (json: any) => {
   if (Array.isArray(json)) {

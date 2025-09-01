@@ -21,9 +21,9 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Box, Chip, Typography } from "@mui/material";
-import { DataTableCell } from "../../Components/StyledComponents";
+import { DataTableCell } from "@components/StyledComponents";
 import { SubstateRequirement, substateIdToString } from "@tari-project/typescript-bindings";
-import CopyAddress from "../../Components/CopyAddress";
+import CopyAddress from "@components/CopyAddress";
 
 function getSubstateType(substateId: string): string {
   if (substateId.startsWith("component_")) return "Component";

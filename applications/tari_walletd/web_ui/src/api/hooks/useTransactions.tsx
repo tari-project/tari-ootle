@@ -28,9 +28,9 @@ import {
   transactionsSubmitManifest,
   transactionsWaitResult,
   validatorsGetFees,
-} from "../../utils/json_rpc";
-import { ApiError } from "../helpers/types";
-import queryClient from "../queryClient";
+} from "@utils/json_rpc";
+import { ApiError } from "@api/helpers/types";
+import queryClient from "@api/queryClient";
 
 import type { AccountOrKeyIndex, TransactionGetAllRequest, TransactionStatus } from "@tari-project/typescript-bindings";
 

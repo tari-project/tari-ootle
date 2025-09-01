@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 import { useQuery } from "@tanstack/react-query";
-import { templatesListAuthored } from "../../utils/json_rpc";
+import { templatesListAuthored } from "@utils/json_rpc";
 import { TemplatesListAuthoredRequest } from "@tari-project/typescript-bindings";
 
 export const useListTemplatesAuthored = (request: TemplatesListAuthoredRequest) => {

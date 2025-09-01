@@ -21,9 +21,9 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { ApiError } from "../helpers/types";
-import queryClient from "../queryClient";
-import { keysCreate, keysList, keysSetActive } from "../../utils/json_rpc";
+import { ApiError } from "@api/helpers/types";
+import queryClient from "@api/queryClient";
+import { keysCreate, keysList, keysSetActive } from "@utils/json_rpc";
 import { KeyBranch } from "@tari-project/typescript-bindings";
 
 export const useKeysList = (branch: KeyBranch) => {

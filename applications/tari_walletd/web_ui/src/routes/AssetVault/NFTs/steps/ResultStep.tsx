@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { Typography, Stack, Button, CircularProgress, Fade, Divider } from "@mui/material";
-import { useNftTransferStore } from "../../../../store/nftTransferStore";
+import { useNftTransferStore } from "@store/nftTransferStore";
 import CancelRoundedIcon from "@mui/icons-material/CancelRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 

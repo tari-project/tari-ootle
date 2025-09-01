@@ -23,12 +23,12 @@
 import Accounts from "./Components/Accounts";
 import Keys from "./Components/Keys";
 import "./Wallet.css";
-import { StyledPaper } from "../../Components/StyledComponents";
+import { StyledPaper } from "@components/StyledComponents";
 import Grid from "@mui/material/Grid";
-import SecondaryHeading from "../../Components/SecondaryHeading";
-import Transactions from "../Transactions/Transactions";
+import SecondaryHeading from "@components/SecondaryHeading";
+import Transactions from "@routes/Transactions/Transactions";
 import AccessTokens from "./Components/AccessTokens";
-import useAccountStore from "../../store/accountStore";
+import useAccountStore from "@store/accountStore";
 
 function Wallet() {
   const { account, publicKey } = useAccountStore();

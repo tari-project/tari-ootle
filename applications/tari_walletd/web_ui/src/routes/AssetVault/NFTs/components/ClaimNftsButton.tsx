@@ -21,10 +21,10 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import Button from "@mui/material/Button";
-import { useMintTestnetFaucetNfts } from "../../../../api/hooks/useAccounts";
-import useAccountStore from "../../../../store/accountStore";
+import { useMintTestnetFaucetNfts } from "@api/hooks/useAccounts";
+import useAccountStore from "@store/accountStore";
 import { substateIdToString } from "@tari-project/typescript-bindings";
-import queryClient from "../../../../api/queryClient";
+import queryClient from "@api/queryClient";
 
 function ClaimNftsButton() {
   const { mutate: claimTestnetFaucetNfts } = useMintTestnetFaucetNfts();

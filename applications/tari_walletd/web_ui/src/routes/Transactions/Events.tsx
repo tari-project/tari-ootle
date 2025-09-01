@@ -22,13 +22,13 @@
 
 import { useState } from "react";
 import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Collapse, Box, Chip, Typography } from "@mui/material";
-import { DataTableCell, AccordionIconButton } from "../../Components/StyledComponents";
+import { DataTableCell, AccordionIconButton } from "@components/StyledComponents";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import CodeBlockExpand from "../../Components/CodeBlock";
+import CodeBlockExpand from "@components/CodeBlock";
 import { useTheme } from "@mui/material/styles";
 import { Event, substateIdToString } from "@tari-project/typescript-bindings";
-import CopyAddress from "../../Components/CopyAddress";
+import CopyAddress from "@components/CopyAddress";
 
 function renderPayloadField(key: string, value: any) {
   if (key === "amount" && typeof value === "string") {

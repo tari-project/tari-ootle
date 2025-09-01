@@ -22,15 +22,15 @@
 
 import { useState } from "react";
 import { TableContainer, Table, TableRow, TableBody, Collapse, Box, Typography, Chip } from "@mui/material";
-import { DataTableCell } from "../../Components/StyledComponents";
-import { AccordionIconButton } from "../../Components/StyledComponents";
+import { DataTableCell } from "@components/StyledComponents";
+import { AccordionIconButton } from "@components/StyledComponents";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import { IoArrowDownCircle, IoArrowUpCircle } from "react-icons/io5";
-import CodeBlockExpand from "../../Components/CodeBlock";
+import CodeBlockExpand from "@components/CodeBlock";
 import { useTheme } from "@mui/material/styles";
 import { Substate, SubstateId, substateIdToString, TransactionResult } from "@tari-project/typescript-bindings";
-import CopyAddress from "../../Components/CopyAddress";
+import CopyAddress from "@components/CopyAddress";
 
 function renderSubstateDetails(substate: any, id: SubstateId) {
   if (!substate || typeof substate === "number") {

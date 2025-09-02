@@ -62,7 +62,7 @@ async fn main() {
 
     let file = fs::File::create("cucumber-output-junit.xml").unwrap();
     let cucumber_fut = TariWorld::cucumber()
-        .max_concurrent_scenarios(5)
+        .max_concurrent_scenarios(2)
         .with_writer(writer::Tee::new(
             writer::JUnit::new(file, Verbosity::ShowWorldAndDocString).normalized(),
             // following config needed to use eprint statements in the tests
@@ -392,7 +392,7 @@ async fn call_wallet_daemon_method_and_check_result(
         .unwrap_or_else(|| panic!("Failed to call first() on results: {:?}", resp));
     match result.return_type {
         Type::U32 => {
-            let u32_result: u32 = result.decode().unwrap();
+            let u32_result: u32 = result.decode()?;
             assert_eq!(u32_result.to_string(), expected_result);
         },
         _ => todo!(),
@@ -677,7 +677,7 @@ async fn given_all_validator_connects_to_other_vns(world: &mut TariWorld) {
         .map(|vn| {
             (
                 vn.public_key,
-                Multiaddr::from_str(&format!("/ip4/127.0.0.1/tcp/{}", vn.port)).unwrap(),
+                Multiaddr::from_str(&format!("/ip4/127.0.0.1/tcp/{}", vn.p2p_port)).unwrap(),
             )
         })
         .collect::<Vec<_>>();

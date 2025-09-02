@@ -79,6 +79,7 @@ pub struct WalletDaemonConfig {
     /// The number of contiguous failures to find an account derived from a public key before abandoning recovery and
     /// assuming that there are no further accounts.
     pub recovery_abandon_count: usize,
+    pub override_keyring_password: Option<SafePassword>,
 }
 
 fn return_default_jwt_expiry() -> Duration {
@@ -103,6 +104,7 @@ impl Default for WalletDaemonConfig {
             web_ui_address: Some("127.0.0.1:5100".parse().unwrap()),
             value_lookup_table_file: None,
             recovery_abandon_count: 10,
+            override_keyring_password: None,
         }
     }
 }

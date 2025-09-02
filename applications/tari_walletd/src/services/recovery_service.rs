@@ -6,7 +6,6 @@ use std::{collections::HashMap, time::Duration};
 use log::{error, info, warn};
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine_types::{component::derive_component_address_from_public_key, ToByteType};
-use tari_key_manager::key_manager::DerivedKey;
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
     substate_type::SubstateType,
@@ -24,6 +23,7 @@ use tari_ootle_wallet_sdk::{
 use tari_shutdown::ShutdownSignal;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_transaction_components::key_manager::tari_key_manager::DerivedKey;
 
 use crate::services::{account_monitor::AccountMonitorError, AccountMonitorHandle};
 
@@ -163,7 +163,7 @@ where
     /// Attempt to recover an account by the provided public key.
     async fn try_recover_account(
         &self,
-        key: &DerivedKey<RistrettoPublicKey>,
+        key: &DerivedKey,
         owner_key_cache: &mut HashMap<RistrettoPublicKeyBytes, u64>,
     ) -> Result<(), AccountScannerError> {
         let network_interface = self.wallet_sdk.get_network_interface();

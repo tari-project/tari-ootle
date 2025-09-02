@@ -62,17 +62,15 @@ This will start a wallet connected to the Igor Testnet. You can view the public 
 
 Navigate to http://127.0.0.1:5100 to create an account, claim test tokens and start testing features.
 
-## Running the Ootle Locally (Localnet Development Environment)
+## Running a Small Ootle Network Locally (Localnet)
 
 NOTE: This repo is heavily under development, so these instructions may change without notice.
 
 Confirm you have installed all the prerequisites listed in the **Prerequisites** section (Rust, Node.js, npm, linux
 dependencies)
 
-### Running
-
 The easiest way to test out the Ootle is to use the `tari_swarm_daemon`. This will spin up all necessary MinoTari and
-Ootle components for a localnet.
+Ootle applications for a localnet.
 
 Clone both the tari and tari-ootle repositories in the same folder:
 
@@ -83,24 +81,14 @@ git clone https://github.com/tari-project/tari.git
 git clone https://github.com/tari-project/tari-ootle.git ootle
 ```
 
-So:
-<Some container folder>
-| tari
-| ootle
-
-`cd` into `tari` and change the branch `v4.9.0-pre.1`:
-
 ```shell
 cd tari
-git fetch origin tag v4.9.0-pre.1
-git checkout v4.9.0-pre.1
-```
-
-Once done, change directory to the `ootle` and run the following from the ootle folder:
-
-```shell
+git checkout development
+cd ../ootle
 rustup target add wasm32-unknown-unknown
+# Creates an initial "swarm" config in data/swarm/config.toml
 cargo run --bin tari_swarm_daemon --release -- -c data/swarm/config.toml init
+# Build all the necessary binaries (this may take a while) and starts the swarm
 cargo run --bin tari_swarm_daemon --release -- -c data/swarm/config.toml start
 ```
 

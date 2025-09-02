@@ -49,15 +49,15 @@ where
             return Err(NetworkClientError::NoInputsProvided);
         }
 
+        // Ensure initial scanning has completed to ensure an accurate epoch
+        self.epoch_manager.wait_for_initial_scanning_to_complete().await?;
+
         let tx_id = transaction.calculate_id();
 
         info!(
             target: LOG_TARGET,
-            "Submitting transaction {} to the validator node", tx_id
+            "Submitting transaction {} to the network", tx_id
         );
-
-        // Ensure initial scanning has completed to ensure an accurate epoch
-        self.epoch_manager.wait_for_initial_scanning_to_complete().await?;
 
         let involved = transaction
             .all_inputs_iter()
@@ -147,6 +147,13 @@ where
     {
         let epoch = self.epoch_manager.current_epoch().await?;
         let num_committees = self.epoch_manager.get_num_committees(epoch).await?;
+
+        info!(
+            target: LOG_TARGET,
+            "Fetching committee members at epoch {} ({} total committees)",
+            epoch,
+            num_committees,
+        );
 
         let mut all_members = HashMap::new();
         for substate_address in substate_addresses {

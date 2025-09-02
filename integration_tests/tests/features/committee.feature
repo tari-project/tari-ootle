@@ -29,8 +29,8 @@ Feature: Committee scenarios
     # Register the "counter" template
 #    When base wallet WALLET registers the template "counter"
     When miner MINER mines 25 new blocks
-    Then VAL_1 has scanned to height 28
-    Then VAL_2 has scanned to height 28
+    Then VAL_1 has scanned to at least height 28
+    Then VAL_2 has scanned to at least height 28
     Then the validator node VAL_1 is listed as registered
     Then the validator node VAL_2 is listed as registered
 

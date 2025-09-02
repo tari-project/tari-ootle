@@ -12,6 +12,22 @@
 refresh_rate: 30 seconds
 appenders:
 
+  cucumber:
+    kind: rolling_file
+    path: "{{log_dir}}/cucumber.log"
+    policy:
+      kind: compound
+      trigger:
+        kind: size
+        limit: 100mb
+      roller:
+        kind: fixed_window
+        base: 1
+        count: 10
+        pattern: "{{log_dir}}/cucumber.{}.log"
+    encoder:
+      pattern: "{d(%Y-%m-%d %H:%M:%S)} [{t}] {l:5} {m}// {f}:{L}{n}"
+
   # An appender named "ootle" that writes to a file with a custom pattern encoder
   ootle:
     kind: rolling_file
@@ -122,6 +138,7 @@ loggers:
   cucumber:
     level: debug
     appenders:
+      - cucumber
       - ootle
     additive: false
 

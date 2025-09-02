@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 
+use anyhow::Context;
 use async_trait::async_trait;
 use tokio::process::Command;
 
@@ -39,7 +40,7 @@ impl ProcessDefinition for WalletDaemonCreateAccount {
                 "--output",
                 output_path
                     .to_str()
-                    .expect("Non-UTF8 output path in WalletDaemonCreateAccount"),
+                    .context("Non-UTF8 output path in WalletDaemonCreateAccount")?,
             ]);
 
         if let Some(override_keyring_password) =

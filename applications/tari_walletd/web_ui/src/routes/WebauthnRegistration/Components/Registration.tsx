@@ -15,7 +15,7 @@ import useAuthStore from "../../../store/authStore";
 
 const WEBAUTHN_RP_ID = import.meta.env.VITE_DAEMON_WEBAUTHN_RP_ID || window.location.hostname;
 
-const createCredential = async (rpOptions: { rpId: string; rpName: string }, username: string, challenge: Buffer) => {
+const createCredential = async (rpOptions: { rpId: string; rpName: string }, username: string, challenge: BufferSource) => {
   const publicKeyCredentialCreationOptions: PublicKeyCredentialCreationOptions = {
     rp: {
       name: rpOptions.rpName,
@@ -85,8 +85,7 @@ function WebauthnRegistration() {
         throw new Error("Failed to start registration: missing public_key");
       }
 
-      // @ts-ignore
-      const challenge = Buffer.from(startRegisterResponse.public_key.challenge, "base64");
+      const challenge = Buffer.from((startRegisterResponse.public_key as any).challenge, "base64");
       const regSessionId = startRegisterResponse.session_id;
 
       // get credential

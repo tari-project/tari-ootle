@@ -1,5 +1,6 @@
 target
 .env
+cucumber-output-junit.xml
 # Non-root Cargo.locks
 **/Cargo.lock
 !/Cargo.lock
@@ -62,4 +63,3 @@ clients/validator_node_grpc_client/package-lock.json
 # moon
 .moon/cache
 .moon/docker
-./cucumber-output-junit.xml

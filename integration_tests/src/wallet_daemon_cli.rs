@@ -36,11 +36,11 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_template_lib::{
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
-    prelude::{PedersenCommitmentBytes, ResourceAddress, RistrettoPublicKeyBytes},
+    prelude::{PedersenCommitmentBytes, ResourceAddress, RistrettoPublicKeyBytes, XTR},
     resource::TOKEN_SYMBOL,
     types::{crypto::RangeProofBytes, Amount},
 };
-use tari_transaction::{args, UnsignedTransaction};
+use tari_transaction::UnsignedTransaction;
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 use tari_validator_node_cli::command::transaction::CliArg;
 use tari_wallet_daemon_client::{
@@ -60,8 +60,8 @@ use tari_wallet_daemon_client::{
         ExtClaimBurnProof,
         ListNftsRequest,
         MintFaucetNftRequest,
-        ProofsGenerateRequest,
         RevealFundsRequest,
+        StealthTransferRequest,
         TransactionSubmitRequest,
         TransactionWaitResultRequest,
         TransactionWaitResultResponse,
@@ -73,7 +73,7 @@ use tokio::{task::JoinSet, time::timeout};
 
 use crate::{
     helpers::get_address_from_output,
-    util::transaction_builder,
+    util::{cucumber_log, transaction_builder},
     validator_node_cli::add_substate_ids,
     TariWorld,
 };
@@ -167,67 +167,84 @@ pub async fn transfer_confidential(
     amount: u64,
     wallet_daemon_name: String,
     outputs_name: String,
-    min_epoch: Option<Epoch>,
-    max_epoch: Option<Epoch>,
-) -> tari_wallet_daemon_client::types::TransactionSubmitResponse {
+) {
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
     let source_account_name = ComponentAddressOrName::Name(source_account_name);
-    let AccountGetResponse { account, .. } = client.accounts_get(source_account_name.clone()).await.unwrap();
-    let source_component_address = account.address;
-
-    let signing_key_index = account.key_index;
 
     let dest_account_name = ComponentAddressOrName::Name(dest_account_name);
-    let destination_account_resp = client
+    let dest_account = client
         .accounts_get(dest_account_name)
         .await
         .expect("Failed to retrieve destination account address from its name");
 
-    let destination_account = destination_account_resp.account.address;
-    let destination_public_key = destination_account_resp.public_key;
+    let resp = client
+        .accounts_stealth_transfer(StealthTransferRequest {
+            owner_account: source_account_name,
+            input_selection: ConfidentialTransferInputSelection::ConfidentialOnly,
+            resource_address: XTR,
+            destination_public_key: dest_account.public_key,
+            max_fee: 5000,
+            blinded_output_amount: amount.into(),
+            revealed_output_amount: Default::default(),
+            dry_run: false,
+        })
+        .await
+        .unwrap();
 
-    let resource_address = STEALTH_TARI_RESOURCE_ADDRESS;
-
-    let create_transfer_proof_req = ProofsGenerateRequest {
-        account: Some(source_account_name),
-        amount: amount.into(),
-        reveal_amount: Amount::zero(),
-        resource_address,
-        destination_public_key,
-    };
-
-    let transfer_proof_resp = client.create_transfer_proof(create_transfer_proof_req).await.unwrap();
-    let withdraw_proof = transfer_proof_resp.proof;
-    let proof_id = transfer_proof_resp.proof_id;
-
-    let transaction = transaction_builder()
-        .fee_transaction_pay_from_component(source_component_address, 5000)
-        .call_method(source_component_address, "withdraw_confidential", args![
-            resource_address,
-            withdraw_proof
-        ])
-        .put_last_instruction_output_on_workspace("bucket")
-        .call_method(destination_account, "deposit", args![Workspace("bucket")])
-        .with_min_epoch(min_epoch)
-        .with_max_epoch(max_epoch)
-        .build_unsigned_transaction();
-
-    let submit_req = TransactionSubmitRequest {
-        transaction,
-        signing_key_index: Some(signing_key_index),
-        proof_ids: vec![proof_id],
-        detect_inputs: true,
-        detect_inputs_use_unversioned: true,
-    };
-
-    let submit_resp = client.submit_transaction(submit_req).await.unwrap();
-
+    // let signing_key_index = account.key_index;
+    //
+    //
+    // let resource_address = STEALTH_TARI_RESOURCE_ADDRESS;
+    //
+    // let create_transfer_proof_req = ProofsGenerateRequest {
+    //     account: Some(source_account_name),
+    //     amount: amount.into(),
+    //     reveal_amount: Amount::zero(),
+    //     resource_address,
+    //     destination_public_key,
+    // };
+    //
+    // let transfer_proof_resp = client.create_transfer_proof(create_transfer_proof_req).await.unwrap();
+    // let withdraw_proof = transfer_proof_resp.proof;
+    // let proof_id = transfer_proof_resp.proof_id;
+    //
+    // let transaction = transaction_builder()
+    //     .fee_transaction_pay_from_component(source_component_address, 5000)
+    //     .call_method(source_component_address, "withdraw_confidential", args![
+    //         resource_address,
+    //         withdraw_proof
+    //     ])
+    //     .put_last_instruction_output_on_workspace("bucket")
+    //     .call_method(destination_account, "deposit", args![Workspace("bucket")])
+    //     .with_min_epoch(min_epoch)
+    //     .with_max_epoch(max_epoch)
+    //     .build_unsigned_transaction();
+    //
+    // let submit_req = TransactionSubmitRequest {
+    //     transaction,
+    //     signing_key_index: Some(signing_key_index),
+    //     proof_ids: vec![proof_id],
+    //     detect_inputs: true,
+    //     detect_inputs_use_unversioned: true,
+    // };
+    //
+    // let submit_resp = client.submit_transaction(submit_req).await.unwrap();
+    //
     let wait_req = TransactionWaitResultRequest {
-        transaction_id: submit_resp.transaction_id,
+        transaction_id: resp.transaction_id,
         timeout_secs: Some(120),
     };
     let wait_resp = client.wait_transaction_result(wait_req).await.unwrap();
+    if let Some(reason) = wait_resp
+        .result
+        .as_ref()
+        .expect("Transaction has timed out")
+        .result
+        .any_reject()
+    {
+        panic!("Transaction failed: {}", reason);
+    }
 
     add_substate_ids(
         world,
@@ -238,8 +255,6 @@ pub async fn transfer_confidential(
             .result
             .expect("Transaction has failed"),
     );
-
-    submit_resp
 }
 
 pub async fn create_account(
@@ -390,7 +405,7 @@ pub async fn get_balance(world: &mut TariWorld, account_name: &str, wallet_daemo
         .get_account_balances(get_balance_req)
         .await
         .expect("Failed to get balance from account");
-    eprintln!("resp = {}", serde_json::to_string_pretty(&resp).unwrap());
+    cucumber_log(format!("resp = {}", serde_json::to_string_pretty(&resp).unwrap()));
     resp.balances.iter().map(|e| e.balance + e.confidential_balance).sum()
 }
 
@@ -410,7 +425,7 @@ pub async fn get_confidential_balance(
         .get_account_balances(get_balance_req)
         .await
         .expect("Failed to get balance from account");
-    eprintln!("resp = {}", serde_json::to_string_pretty(&resp).unwrap());
+    cucumber_log(format!("resp = {}", serde_json::to_string_pretty(&resp).unwrap()));
     resp.balances.iter().map(|e| e.confidential_balance).sum()
 }
 

@@ -106,11 +106,6 @@ tari_template_test_tooling = { path = "crates/template_test_tooling" }
 tari_transaction = { path = "crates/transaction" }
 tari_transaction_manifest = { path = "crates/transaction_manifest" }
 tari_validator_node_rpc = { path = "crates/validator_node_rpc" }
-
-# internal dependencies among workspace crates
-libp2p-messaging = { path = "networking/libp2p-messaging" }
-libp2p-substream = { path = "networking/libp2p-substream" }
-proto_builder = { path = "networking/proto_builder" }
 sqlite_message_logger = { path = "networking/sqlite_message_logger" }
 tari_base_node_client = { path = "clients/base_node_client" }
 tari_indexer_client = { path = "clients/tari_indexer_client", default-features = false }
@@ -131,23 +126,26 @@ minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git", 
 minotari_wallet = { git = "https://github.com/tari-project/tari.git", branch = "development" }
 minotari_wallet_grpc_client = { git = "https://github.com/tari-project/tari.git", branch = "development" }
 tari_common = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-tari_common_types = { git = "https://github.com/tari-project/tari.git", branch = "development" }
 tari_common_sqlite = { git = "https://github.com/tari-project/tari.git", branch = "development" }
+tari_common_types = { git = "https://github.com/tari-project/tari.git", branch = "development" }
 tari_hashing = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-tari_sidechain = { git = "https://github.com/tari-project/tari.git", branch = "development" }
 tari_jellyfish = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-
-# avoid including default features so each crate can choose which ones to import
-tari_transaction_components = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-tari_node_components = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-tari_transaction_key_manager = { git = "https://github.com/tari-project/tari.git", branch = "development" }
 tari_metrics = { git = "https://github.com/tari-project/tari.git", branch = "development" }
 tari_mmr = { git = "https://github.com/tari-project/tari.git", branch = "development" }
+tari_node_components = { git = "https://github.com/tari-project/tari.git", branch = "development" }
 tari_p2p = { git = "https://github.com/tari-project/tari.git", branch = "development" }
 tari_shutdown = { git = "https://github.com/tari-project/tari.git", branch = "development" }
+tari_sidechain = { git = "https://github.com/tari-project/tari.git", branch = "development" }
+tari_transaction_components = { git = "https://github.com/tari-project/tari.git", branch = "development" }
+tari_transaction_key_manager = { git = "https://github.com/tari-project/tari.git", branch = "development" }
 
 tari_crypto = "0.22.0"
 tari_utilities = "0.8.0"
+
+# networking crates
+proto_builder = { path = "networking/proto_builder" }
+libp2p-messaging = { path = "networking/libp2p-messaging" }
+libp2p-substream = { path = "networking/libp2p-substream" }
 
 # third-party dependencies
 anyhow = "1.0.75"

@@ -20,13 +20,13 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useAccountsGetDefault } from "../../api/hooks/useAccounts";
-import useAccountStore from "../../store/accountStore";
-import Onboarding from "../Onboarding/Onboarding";
+import { useAccountsGetDefault } from "@api/hooks/useAccounts";
+import useAccountStore from "@store/accountStore";
+import Onboarding from "@routes/Onboarding/Onboarding";
 import MyAssets from "./Components/MyAssets";
 import { useEffect } from "react";
-import FetchStatusCheck from "../../Components/FetchStatusCheck";
-import useAuthStore from "../../store/authStore";
+import FetchStatusCheck from "@components/FetchStatusCheck";
+import useAuthStore from "@store/authStore";
 
 function AssetVault() {
   const account = useAccountStore((state) => state.account);

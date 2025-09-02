@@ -24,10 +24,10 @@ import CancelRoundedIcon from "@mui/icons-material/CancelRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 import { Avatar, Box, CardContent, CardMedia, Chip, Divider, Grid, TableRow, Typography } from "@mui/material";
 import type { NonFungibleToken } from "@tari-project/typescript-bindings";
-import CopyAddress from "../../../../Components/CopyAddress";
-import { NftCard as Card, DataTableCell } from "../../../../Components/StyledComponents";
-import { convertCborValue } from "../../../../utils/cbor";
-import { shortenSubstateId, displayNftId } from "../../../../utils/helpers";
+import CopyAddress from "@components/CopyAddress";
+import { NftCard as Card, DataTableCell } from "@components/StyledComponents";
+import { convertCborValue } from "@utils/cbor";
+import { shortenSubstateId, displayNftId } from "@utils/helpers";
 import SendNft from "./SendNft";
 
 

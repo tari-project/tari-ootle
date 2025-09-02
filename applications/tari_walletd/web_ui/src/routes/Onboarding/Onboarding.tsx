@@ -28,9 +28,9 @@ import Button from "@mui/material/Button";
 import Grid from "@mui/material/Grid";
 import Typography from "@mui/material/Typography";
 import { useTheme } from "@mui/material/styles";
-import Loading from "../../Components/Loading";
-import { useAccountsCreate } from "../../api/hooks/useAccounts";
-import useAccountStore from "../../store/accountStore";
+import Loading from "@components/Loading";
+import { useAccountsCreate } from "@api/hooks/useAccounts";
+import useAccountStore from "@store/accountStore";
 
 function Onboarding() {
   const { mutate, status } = useAccountsCreate();
@@ -66,7 +66,7 @@ function Onboarding() {
     });
   };
 
-  if (status === "loading") {
+  if (status === "pending") {
     return <Loading />;
   }
 

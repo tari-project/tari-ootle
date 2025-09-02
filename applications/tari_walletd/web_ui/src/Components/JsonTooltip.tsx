@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import React from "react";
-import { renderJson } from "../utils/helpers";
+import { renderJson } from "@utils/helpers";
 
 export default function JsonTooltip({ jsonText, children }: { jsonText: string; children: string }) {
   if (jsonText === null) {

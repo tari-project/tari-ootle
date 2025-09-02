@@ -21,31 +21,32 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useState } from "react";
-import PageHeading from "../../Components/PageHeading";
+import PageHeading from "@components/PageHeading";
 import Grid from "@mui/material/Grid";
-import { StyledPaper } from "../../Components/StyledComponents";
+import { StyledPaper } from "@components/StyledComponents";
 import TableContainer from "@mui/material/TableContainer";
 import Table from "@mui/material/Table";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TableCell from "@mui/material/TableCell";
 import TableBody from "@mui/material/TableBody";
-import { useAccountsGetBalances, useAccountNFTsList, useAccountsGet } from "../../api/hooks/useAccounts";
-import { DataTableCell } from "../../Components/StyledComponents";
-import FetchStatusCheck from "../../Components/FetchStatusCheck";
+import { useAccountsGetBalances, useAccountNFTsList, useAccountsGet } from "@api/hooks/useAccounts";
+import { ApiError } from "@api/helpers/types";
+import { DataTableCell } from "@components/StyledComponents";
+import FetchStatusCheck from "@components/FetchStatusCheck";
 import { AccountGetResponse, BalanceEntry, substateIdToString } from "@tari-project/typescript-bindings";
-import NftList from "../AssetVault/NFTs/NFTList";
-import CopyAddress from "../../Components/CopyAddress";
-import useAccountStore from "../../store/accountStore";
+import NftList from "@routes/AssetVault/NFTs/NFTList";
+import CopyAddress from "@components/CopyAddress";
+import useAccountStore from "@store/accountStore";
 import { Form, useParams } from "react-router-dom";
-import { accountsAssociateStealthResource, accountsGet } from "../../utils/json_rpc";
-import Loading from "../../Components/Loading";
+import { accountsAssociateStealthResource, accountsGet } from "@utils/json_rpc";
+import Loading from "@components/Loading";
 import Button from "@mui/material/Button";
 import { IoAdd } from "react-icons/io5";
 import Box from "@mui/material/Box";
 import Fade from "@mui/material/Fade";
 import TextField from "@mui/material/TextField/TextField";
-import { handleChangePage, handleChangeRowsPerPage } from "../../utils/helpers";
+import { handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
 
 function BalanceRow(props: BalanceEntry) {
   return (
@@ -210,7 +211,7 @@ function AccountDetailsLayout() {
           <NftList
             nftsListIsError={nftsListIsError}
             nftsListIsFetching={nftsListIsFetching}
-            nftsListError={nftsListError}
+            nftsListError={nftsListError as ApiError | null}
             nftsListData={nftsListData}
             totalCount={estimatedTotal}
             page={nftPage}

@@ -21,8 +21,8 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { Chip, Tooltip } from "@mui/material";
-import { useTimeAgo } from "../../hooks/useTimeAgo";
-import { formatTimestamp } from "../../utils/helpers";
+import { useTimeAgo } from "@hooks/useTimeAgo";
+import { formatTimestamp } from "@utils/helpers";
 
 function TimeChip({ timestamp }: { timestamp: string | null | undefined }) {
   const timeAgo = useTimeAgo(timestamp);

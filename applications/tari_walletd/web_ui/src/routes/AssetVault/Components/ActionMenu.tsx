@@ -23,9 +23,9 @@
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import { useTheme } from "@mui/material/styles";
-import { useAccountsCreateFreeTestCoins } from "../../../api/hooks/useAccounts";
+import { useAccountsCreateFreeTestCoins } from "@api/hooks/useAccounts";
 import ClaimBurn from "./ClaimBurn";
-import useAccountStore from "../../../store/accountStore";
+import useAccountStore from "@store/accountStore";
 import SendMoney from "./SendMoney";
 import ClaimFees from "./ClaimFees";
 import PublishTemplate from "./PublishTemplate";

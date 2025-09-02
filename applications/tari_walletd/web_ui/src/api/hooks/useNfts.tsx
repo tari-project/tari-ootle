@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { nftList, nftTransfer } from "../../utils/json_rpc";
-import { ApiError } from "../helpers/types";
+import { nftList, nftTransfer } from "@utils/json_rpc";
+import { ApiError } from "@api/helpers/types";
 import { TransferNftRequest } from "@tari-project/typescript-bindings";
-import queryClient from "../queryClient";
+import queryClient from "@api/queryClient";
 import type { ComponentAddressOrName } from "@tari-project/typescript-bindings/dist";
 
 export interface ListAccountNftsReq {
@@ -45,27 +45,25 @@ export const useListNfts = (request: ListAccountNftsReq) => {
 };
 
 export const useNftsTransfer = (request: TransferNftRequest) => {
-  return useMutation(
-    () => {
+  return useMutation({
+    mutationFn: () => {
       return nftTransfer(request);
     },
-    {
-      onError: (error: ApiError) => {
-        error;
-      },
-      onSettled: () => {
-        // Invalidate all NFT-related queries
-        queryClient.invalidateQueries({ 
-          predicate: (query) => {
-            const key = query.queryKey[0];
-            return typeof key === "string" && (
-              key === "nfts" || 
-              key === "list_nfts" || 
-              key.startsWith("nfts_list_")
-            );
-          }
-        });
-      },
+    onError: (error: ApiError) => {
+      error;
     },
-  );
+    onSettled: () => {
+      // Invalidate all NFT-related queries
+      queryClient.invalidateQueries({ 
+        predicate: (query) => {
+          const key = query.queryKey[0];
+          return typeof key === "string" && (
+            key === "nfts" || 
+            key === "list_nfts" || 
+            key.startsWith("nfts_list_")
+          );
+        }
+      });
+    },
+  });
 };

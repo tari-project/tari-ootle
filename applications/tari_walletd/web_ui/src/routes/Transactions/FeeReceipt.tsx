@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Box, Typography, Chip } from "@mui/material";
-import { DataTableCell } from "../../Components/StyledComponents";
+import { DataTableCell } from "@components/StyledComponents";
 
 export default function FeeReceipt({ data }: { data: any }) {
   if (!data) {

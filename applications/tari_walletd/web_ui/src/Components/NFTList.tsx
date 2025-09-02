@@ -21,14 +21,14 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import React from "react";
-import FetchStatusCheck from "./FetchStatusCheck";
+import FetchStatusCheck from "@components/FetchStatusCheck";
 import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
-import type { ApiError } from "../api/helpers/types";
-import { DataTableCell } from "./StyledComponents";
-import { renderJson, shortenString, shortenSubstateId, toHexString } from "../utils/helpers";
+import type { ApiError } from "@api/helpers/types";
+import { DataTableCell } from "@components/StyledComponents";
+import { renderJson, shortenString, shortenSubstateId, toHexString } from "@utils/helpers";
 import { IoCheckmarkOutline, IoCloseOutline } from "react-icons/io5";
 import type { NonFungibleId, NonFungibleToken, ListNftsResponse } from "@tari-project/typescript-bindings";
-import { convertCborValue } from "../utils/cbor";
+import { convertCborValue } from "@utils/cbor";
 
 function NftListItem({ nft }: { nft: NonFungibleToken }) {
   return (

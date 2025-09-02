@@ -29,7 +29,7 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import Box from "@mui/material/Box";
 import { useTheme } from "@mui/material/styles";
-import useAccountStore from "../../../store/accountStore";
+import useAccountStore from "@store/accountStore";
 import type {
   Account,
   ComponentAddressOrName,
@@ -44,9 +44,9 @@ import Checkbox from "@mui/material/Checkbox";
 import ListItemText from "@mui/material/ListItemText";
 import { InputLabel } from "@mui/material";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
-import { useListNfts, useNftsTransfer } from "../../../api/hooks/useNfts";
-import { substateIdToString } from "../../../utils/helpers";
-import { useAccountsList } from "../../../api/hooks/useAccounts";
+import { useListNfts, useNftsTransfer } from "@api/hooks/useNfts";
+import { substateIdToString } from "@utils/helpers";
+import { useAccountsList } from "@api/hooks/useAccounts";
 
 export default function TransferNft() {
   const [open, setOpen] = useState(false);

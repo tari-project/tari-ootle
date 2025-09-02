@@ -32,11 +32,11 @@ import InputLabel from "@mui/material/InputLabel";
 import Select, { SelectChangeEvent } from "@mui/material/Select/Select";
 import MenuItem from "@mui/material/MenuItem";
 import Box from "@mui/material/Box";
-import { useAccountsList } from "../../../api/hooks/useAccounts";
+import { useAccountsList } from "@api/hooks/useAccounts";
 import { useTheme } from "@mui/material/styles";
-import { accountsClaimBurn, transactionsWaitResult } from "../../../utils/json_rpc";
-import useAccountStore from "../../../store/accountStore";
-import { useKeysList } from "../../../api/hooks/useKeys";
+import { accountsClaimBurn, transactionsWaitResult } from "@utils/json_rpc";
+import useAccountStore from "@store/accountStore";
+import { useKeysList } from "@api/hooks/useKeys";
 import type { AccountInfo, ComponentAddress } from "@tari-project/typescript-bindings";
 
 type FormState = {

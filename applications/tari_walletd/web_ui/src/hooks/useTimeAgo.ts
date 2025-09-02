@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useEffect, useState } from "react";
-import { parseTimestamp } from "../utils/helpers";
+import { parseTimestamp } from "@utils/helpers";
 
 export function useTimeAgo(rawTimestamp: string | null | undefined): string {
   const getTimeAgo = (timestamp: string | null | undefined): string => {

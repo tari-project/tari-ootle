@@ -31,14 +31,14 @@ import DialogContentText from "@mui/material/DialogContentText";
 import CloseIcon from "@mui/icons-material/Close";
 import IconButton from "@mui/material/IconButton";
 import "./ConnectorLink.css";
-import Permissions from "./Permissions";
-import CheckMark from "./CheckMark";
-import ConnectorLogo from "./ConnectorLogo";
-import { parse } from "../../utils/tari_permissions";
-import ConfirmTransaction from "./ConfirmTransaction";
-import Stepper from "../Stepper";
+import Permissions from "@components/ConnectorLink/Permissions";
+import CheckMark from "@components/ConnectorLink/CheckMark";
+import ConnectorLogo from "@components/ConnectorLink/ConnectorLogo";
+import { parse } from "@utils/tari_permissions";
+import ConfirmTransaction from "@components/ConnectorLink/ConfirmTransaction";
+import Stepper from "@components/Stepper";
 import { useTheme } from "@mui/material/styles";
-import { webrtcStart } from "../../utils/json_rpc";
+import { webrtcStart } from "@utils/json_rpc";
 
 const ConnectorDialog = () => {
   const [page, setPage] = useState(1);

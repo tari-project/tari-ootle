@@ -21,27 +21,27 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { Navigate, Route, Routes } from "react-router-dom";
-import Accounts from "./routes/Accounts/Accounts";
-import AccountDetails from "./routes/AccountDetails/AccountDetails";
-import Keys from "./routes/Keys/Keys";
-import ErrorPage from "./routes/ErrorPage";
-import Wallet from "./routes/Wallet/Wallet";
-import Layout from "./theme/LayoutMain";
-import AccessTokensLayout from "./routes/AccessTokens/AccessTokens";
-import Transactions from "./routes/Transactions/TransactionsLayout";
-import TransactionDetails from "./routes/Transactions/TransactionDetails";
-import AssetVault from "./routes/AssetVault/AssetVault";
-import SettingsPage from "./routes/Settings/Settings";
-import Auth, { AUTH_TOKEN_FOR_NONE_AUTH } from "./routes/Auth/Auth";
-import Webauthn from "./routes/WebauthnRegistration/Webauthn";
-import useAuthStore from "./store/authStore";
+import Accounts from "@routes/Accounts/Accounts";
+import AccountDetails from "@routes/AccountDetails/AccountDetails";
+import Keys from "@routes/Keys/Keys";
+import ErrorPage from "@routes/ErrorPage";
+import Wallet from "@routes/Wallet/Wallet";
+import Layout from "@theme/LayoutMain";
+import AccessTokensLayout from "@routes/AccessTokens/AccessTokens";
+import Transactions from "@routes/Transactions/TransactionsLayout";
+import TransactionDetails from "@routes/Transactions/TransactionDetails";
+import AssetVault from "@routes/AssetVault/AssetVault";
+import SettingsPage from "@routes/Settings/Settings";
+import Auth, { AUTH_TOKEN_FOR_NONE_AUTH } from "@routes/Auth/Auth";
+import Webauthn from "@routes/WebauthnRegistration/Webauthn";
+import useAuthStore from "@store/authStore";
 import { useEffect } from "react";
-import { useAuthMethod } from "./api/hooks/useAuth";
-import AccessToken from "./routes/AccessToken/AccessToken";
+import { useAuthMethod } from "@api/hooks/useAuth";
+import AccessToken from "@routes/AccessToken/AccessToken";
 import { jwtDecode } from "jwt-decode";
-import Templates from "./routes/Templates/Templates";
-import Manifest from "./routes/Manifest/Manifest";
-import FlowEditor from "./routes/FlowEditor/FlowEditor";
+import Templates from "@routes/Templates/Templates";
+import Manifest from "@routes/Manifest/Manifest";
+import FlowEditor from "@routes/FlowEditor/FlowEditor";
 
 export const breadcrumbRoutes = [
   {

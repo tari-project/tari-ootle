@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Chip } from "@mui/material";
-import { DataTableCell } from "../../Components/StyledComponents";
+import { DataTableCell } from "@components/StyledComponents";
 import type { LogEntry } from "@tari-project/typescript-bindings";
 
 function getLogLevelColor(

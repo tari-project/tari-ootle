@@ -21,8 +21,8 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { SubstateId, shortenString } from "@tari-project/typescript-bindings";
-import { isSubstateIdString, shortenSubstateId, substateIdToString } from "../utils/helpers";
-import CopyToClipboard from "./CopyToClipboard";
+import { isSubstateIdString, shortenSubstateId, substateIdToString } from "@utils/helpers";
+import CopyToClipboard from "@components/CopyToClipboard";
 
 interface Props {
   address: string;

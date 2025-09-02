@@ -29,9 +29,9 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import Box from "@mui/material/Box";
 import Snackbar from "@mui/material/Snackbar";
-import { useAccountsCreate } from "../../../api/hooks/useAccounts";
+import { useAccountsCreate } from "@api/hooks/useAccounts";
 import { useTheme } from "@mui/material/styles";
-import queryClient from "../../../api/queryClient";
+import queryClient from "@api/queryClient";
 
 function AddAccount({ open, setOpen }: { open: boolean; setOpen: React.Dispatch<React.SetStateAction<boolean>> }) {
   const [accountFormState, setAccountFormState] = useState({
@@ -56,7 +56,7 @@ function AddAccount({ open, setOpen }: { open: boolean; setOpen: React.Dispatch<
             accountName: "",
           });
           setOpen(false);
-          queryClient.invalidateQueries(["accounts"]);
+          queryClient.invalidateQueries({ queryKey: ["accounts"] });
         },
       },
     );

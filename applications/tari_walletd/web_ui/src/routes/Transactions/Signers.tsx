@@ -21,8 +21,8 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Chip, Box, Typography } from "@mui/material";
-import { DataTableCell } from "../../Components/StyledComponents";
-import CopyAddress from "../../Components/CopyAddress";
+import { DataTableCell } from "@components/StyledComponents";
+import CopyAddress from "@components/CopyAddress";
 import { TransactionSignature } from "@tari-project/typescript-bindings";
 
 interface SignersProps {

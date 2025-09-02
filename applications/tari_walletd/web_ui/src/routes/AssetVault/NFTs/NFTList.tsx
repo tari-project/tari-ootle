@@ -35,8 +35,8 @@ import {
 import type { ListNftsResponse, NonFungibleToken } from "@tari-project/typescript-bindings";
 import React, { useState } from "react";
 import { IoApps, IoList } from "react-icons/io5";
-import type { ApiError } from "../../../api/helpers/types";
-import FetchStatusCheck from "../../../Components/FetchStatusCheck";
+import type { ApiError } from "@api/helpers/types";
+import FetchStatusCheck from "@components/FetchStatusCheck";
 import ClaimNftsButton from "./components/ClaimNftsButton";
 import { NftCard, NftRow } from "./components/NftParts";
 

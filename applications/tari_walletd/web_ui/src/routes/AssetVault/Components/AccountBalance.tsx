@@ -26,12 +26,12 @@ import IconButton from "@mui/material/IconButton";
 import Typography from "@mui/material/Typography";
 import { useTheme } from "@mui/material/styles";
 import { IoEyeOffOutline, IoEyeOutline } from "react-icons/io5";
-import FetchStatusCheck from "../../../Components/FetchStatusCheck";
-import { useAccountsGetBalances } from "../../../api/hooks/useAccounts";
-import useAccountStore from "../../../store/accountStore";
+import FetchStatusCheck from "@components/FetchStatusCheck";
+import { useAccountsGetBalances } from "@api/hooks/useAccounts";
+import useAccountStore from "@store/accountStore";
 import { useEffect } from "react";
-import { substateIdToString, bigintToDecimalString } from "../../../utils/helpers";
-import { CURRENCY } from "../../../utils/constants";
+import { substateIdToString, bigintToDecimalString } from "@utils/helpers";
+import { CURRENCY } from "@utils/constants";
 import { Account } from "@tari-project/typescript-bindings";
 
 const XTR_RESOURCE = "resource_0101010101010101010101010101010101010101010101010101010101010101";

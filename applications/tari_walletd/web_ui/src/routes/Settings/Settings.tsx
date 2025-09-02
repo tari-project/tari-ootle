@@ -20,15 +20,15 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import PageHeading from "../../Components/PageHeading";
+import PageHeading from "@components/PageHeading";
 import Grid from "@mui/material/Grid";
-import { StyledPaper } from "../../Components/StyledComponents";
-import Accounts from "../Wallet/Components/Accounts";
-import Keys from "../Wallet/Components/Keys";
-import AccessTokens from "../Wallet/Components/AccessTokens";
-import SettingsTabs from "./Components/SettingsTabs";
-import GeneralSettings from "./Components/GeneralSettings";
-import ViewVaultBalance from "./Components/ViewVaultBalance";
+import { StyledPaper } from "@components/StyledComponents";
+import Accounts from "@routes/Wallet/Components/Accounts";
+import Keys from "@routes/Wallet/Components/Keys";
+import AccessTokens from "@routes/Wallet/Components/AccessTokens";
+import SettingsTabs from "@routes/Settings/Components/SettingsTabs";
+import GeneralSettings from "@routes/Settings/Components/GeneralSettings";
+import ViewVaultBalance from "@routes/Settings/Components/ViewVaultBalance";
 
 export interface ISettingsMenu {
   label: string;

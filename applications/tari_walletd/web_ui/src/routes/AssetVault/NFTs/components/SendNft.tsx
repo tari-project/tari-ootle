@@ -27,7 +27,7 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import { Stepper, Step, StepLabel } from "@mui/material";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
-import useAccountStore from "../../../../store/accountStore";
+import useAccountStore from "@store/accountStore";
 import type {
   Account,
   ComponentAddressOrName,
@@ -35,10 +35,10 @@ import type {
   NonFungibleId,
   NonFungibleToken,
 } from "@tari-project/typescript-bindings";
-import { useListNfts, useNftsTransfer } from "../../../../api/hooks/useNfts";
-import { substateIdToString } from "../../../../utils/helpers";
-import { useAccountsList } from "../../../../api/hooks/useAccounts";
-import { useNftTransferStore } from "../../../../store/nftTransferStore";
+import { useListNfts, useNftsTransfer } from "@api/hooks/useNfts";
+import { substateIdToString } from "@utils/helpers";
+import { useAccountsList } from "@api/hooks/useAccounts";
+import { useNftTransferStore } from "@store/nftTransferStore";
 import FormStep from "../steps/FormStep";
 import ConfirmationStep from "../steps/ConfirmationStep";
 import ResultStep from "../steps/ResultStep";

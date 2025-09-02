@@ -22,15 +22,15 @@
 
 import { useState } from "react";
 import { TableContainer, Table, TableRow, TableBody, Collapse, Box, Typography } from "@mui/material";
-import { DataTableCell, AccordionIconButton } from "../../Components/StyledComponents";
+import { DataTableCell, AccordionIconButton } from "@components/StyledComponents";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import CodeBlockExpand from "../../Components/CodeBlock";
+import CodeBlockExpand from "@components/CodeBlock";
 import { useTheme } from "@mui/material/styles";
 import type { Instruction } from "@tari-project/typescript-bindings";
 import { decode } from "cbor2";
-import { toHexString } from "../../utils/helpers";
-import { BinaryTag } from "../../utils/cbor";
+import { toHexString } from "@utils/helpers";
+import { BinaryTag } from "@utils/cbor";
 
 function RowData({ title, data }: { title: string; data: Instruction }, index: number) {
   const [open, setOpen] = useState(false);

@@ -32,7 +32,7 @@ import {
   Typography,
   Chip,
 } from "@mui/material";
-import { DataTableCell } from "../../Components/StyledComponents";
+import { DataTableCell } from "@components/StyledComponents";
 
 function ResultRowData({ result, index }: { result: any; index: number }) {
   const returnTypeLabel =

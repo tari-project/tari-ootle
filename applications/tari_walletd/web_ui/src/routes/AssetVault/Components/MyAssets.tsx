@@ -25,10 +25,10 @@ import Box from "@mui/material/Box";
 import Divider from "@mui/material/Divider";
 import Typography from "@mui/material/Typography";
 import { useTheme } from "@mui/material/styles";
-import { InnerHeading, StyledPaper } from "../../../Components/StyledComponents";
-import { refreshAccountsBalances } from "../../../api/hooks/useAccounts";
-import useAccountStore from "../../../store/accountStore";
-import Transactions from "../../Transactions/Transactions";
+import { InnerHeading, StyledPaper } from "@components/StyledComponents";
+import { refreshAccountsBalances } from "@api/hooks/useAccounts";
+import useAccountStore from "@store/accountStore";
+import Transactions from "@routes/Transactions/Transactions";
 import AccountBalance from "./AccountBalance";
 import AccountDetails from "./AccountDetails";
 import ActionMenu from "./ActionMenu";
@@ -115,7 +115,7 @@ function MyAssets() {
             <Button
               title="Refresh all accounts"
               variant="text"
-              disabled={refreshBalances.isLoading}
+              disabled={refreshBalances.isPending}
               onClick={handleRefreshClicked}
             >
               <Refresh />

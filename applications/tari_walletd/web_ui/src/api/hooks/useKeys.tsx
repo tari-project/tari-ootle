@@ -21,9 +21,9 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { ApiError } from "../helpers/types";
-import queryClient from "../queryClient";
-import { keysCreate, keysList, keysSetActive } from "../../utils/json_rpc";
+import { ApiError } from "@api/helpers/types";
+import queryClient from "@api/queryClient";
+import { keysCreate, keysList, keysSetActive } from "@utils/json_rpc";
 import { KeyBranch } from "@tari-project/typescript-bindings";
 
 export const useKeysList = (branch: KeyBranch) => {
@@ -32,19 +32,17 @@ export const useKeysList = (branch: KeyBranch) => {
     queryFn: () => {
       return keysList({ branch });
     },
-    onError: (error: ApiError) => {
-      error;
-    },
   });
 };
 
 export const useKeysCreate = (branch: KeyBranch) => {
-  return useMutation(() => keysCreate({ branch, specific_index: null }), {
+  return useMutation({
+    mutationFn: () => keysCreate({ branch, specific_index: null }),
     onError: (error: ApiError) => {
       error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(["keys_list"]);
+      queryClient.invalidateQueries({ queryKey: ["keys_list"] });
     },
   });
 };
@@ -55,12 +53,13 @@ export const useKeysSetActive = () => {
     return result;
   };
 
-  return useMutation(setActive, {
+  return useMutation({
+    mutationFn: setActive,
     onError: (error: ApiError) => {
       error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(["keys_list"]);
+      queryClient.invalidateQueries({ queryKey: ["keys_list"] });
     },
   });
 };

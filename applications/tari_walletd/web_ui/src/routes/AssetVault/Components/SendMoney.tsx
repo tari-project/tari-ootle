@@ -30,9 +30,9 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import Box from "@mui/material/Box";
-import { useAccountsGetBalances, useAccountsTransfer } from "../../../api/hooks/useAccounts";
+import { useAccountsGetBalances, useAccountsTransfer } from "@api/hooks/useAccounts";
 import { useTheme } from "@mui/material/styles";
-import useAccountStore from "../../../store/accountStore";
+import useAccountStore from "@store/accountStore";
 import Select from "@mui/material/Select";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
 import MenuItem from "@mui/material/MenuItem";
@@ -46,7 +46,7 @@ import {
   XTR,
 } from "@tari-project/typescript-bindings";
 import InputLabel from "@mui/material/InputLabel";
-import { transactionsWaitResult } from "../../../utils/json_rpc";
+import { transactionsWaitResult } from "@utils/json_rpc";
 
 export default function SendMoney() {
   const [open, setOpen] = useState(false);

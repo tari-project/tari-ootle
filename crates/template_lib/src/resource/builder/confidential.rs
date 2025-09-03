@@ -96,7 +96,7 @@ impl ConfidentialResourceBuilder {
     ///
     /// This allows you to pass the access rules that will be applied to the resource in a single call.
     ///
-    /// Using this function will override the default access rules defined in [`ResourceAccessRules::new()`].
+    /// Using this function will override all previously set access rules.
     pub fn with_access_rules(mut self, rules: ResourceAccessRules) -> Self {
         self.access_rules = rules;
         self
@@ -111,7 +111,7 @@ impl ConfidentialResourceBuilder {
     /// Specify a view key for the confidential resource. This allows anyone with the secret key to uncover the balance
     /// of commitments generated for the resource.
     /// 
-    /// Developers can pass a view key of the [`RistrettoPublicKeyBytes`] type.
+    /// The view key is [`RistrettoPublicKeyBytes`] type, that is, the compressed public key representation of the secret view key.
     /// 
     /// # Note
     /// It is not currently possible to change the view key after the resource is created.
@@ -161,7 +161,7 @@ impl ConfidentialResourceBuilder {
 
     /// Sets up who can recall tokens of the resource.
     ///
-    /// A recall is the forceful withdrawal of **ALL** tokens from any external vault.
+    /// A recall is the forceful withdrawal of **ALL** tokens from any external vault containing the resource.
     ///
     /// Allows you to pass an [`AccessRule`] that defines who can recall tokens from a vault.
     ///
@@ -173,7 +173,7 @@ impl ConfidentialResourceBuilder {
     /// use tari_template_lib::auth::AccessRule;
     /// use tari_template_lib::resource::builder::ResourceBuilder;
     /// ResourceBuilder::confidential()
-    ///    .recallable(rule!(allow_all))
+    ///    .recallable(rule!(require(resource_admin_badge)))
     ///   .build();
     /// ```
     pub fn recallable(mut self, rule: AccessRule) -> Self {
@@ -252,8 +252,8 @@ impl ConfidentialResourceBuilder {
     ///
     /// # Examples
     /// ```rust, ignore
-    ///  use tari_template_lib::resource::builder::ResourceBuilder;
-    /// ResourceBuilder::fungible()
+    /// use tari_template_lib::resource::builder::ResourceBuilder;
+    /// ResourceBuilder::confidential()
     ///     .with_token_symbol("MY_TOKEN")
     ///     .build();
     /// ```
@@ -323,7 +323,7 @@ impl ConfidentialResourceBuilder {
 
     /// Sets the divisibility of the resource. i.e. the number of decimal places
     ///
-    /// The default divisibility is 18, which means the smallest unit of the resource is 0.000000000000000001 of the
+    /// The default divisibility is 8, which means the smallest unit of the resource is 0.00000001 of the
     /// whole unit.
     ///
     /// # Panics
@@ -375,9 +375,9 @@ impl ConfidentialResourceBuilder {
         self
     }
 
-    /// Build the resource, returning the address
+    /// Build the resource, with no initial supply and returns the `ResourceAddress` of the created resource.
     ///
-    /// Utilises an internal method to create the resource with the specified properties.
+    /// To create a resource with an initial supply, see [ResourceBuilder::initial_supply].
     ///      
     pub fn build(self) -> ResourceAddress {
         let (address, _) = self.build_internal(None);

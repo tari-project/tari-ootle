@@ -4,7 +4,7 @@
 import { useTheme } from "@mui/material/styles";
 import { FormEvent, useState } from "react";
 import { Form, useNavigate, useSearchParams } from "react-router-dom";
-import Loading from "../../../Components/Loading";
+import Loading from "@components/Loading";
 import Typography from "@mui/material/Typography";
 import Grid from "@mui/material/Grid";
 import Box from "@mui/material/Box";

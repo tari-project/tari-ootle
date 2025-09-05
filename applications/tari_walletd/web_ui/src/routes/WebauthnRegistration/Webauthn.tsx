@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import WebauthnLogin from "./Components/Login";
 import { useWebauthnAlreadyRegistered } from "../../api/hooks/useWebauthn";
-import Loading from "../../Components/Loading";
+import Loading from "@components/Loading";
 import WebauthnRegistration from "./Components/Registration";
 import useAuthStore from "../../store/authStore";
 import { useNavigate, useSearchParams } from "react-router-dom";

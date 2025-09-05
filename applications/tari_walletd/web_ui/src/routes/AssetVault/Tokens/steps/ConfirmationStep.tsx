@@ -23,7 +23,7 @@
 import { Box, Button, Stack, Typography, Divider } from "@mui/material";
 import type { ResourceAddress, ResourceType } from "@tari-project/typescript-bindings";
 import CopyAddress from "@components/CopyAddress";
-import { formatDisplayCurrency, formatCurrency } from "@utils/helpers";
+import { formatCurrency } from "@utils/helpers";
 import { CURRENCY } from "@utils/constants";
 import { SendMoneyFormState } from "./FormStep";
 

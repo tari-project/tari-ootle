@@ -21,9 +21,9 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import "@tari-project/tari-extension-query-builder/dist/tari-extension-query-builder.css";
-import PageHeading from "../../Components/PageHeading";
+import PageHeading from "@components/PageHeading";
 import Grid from "@mui/material/Grid";
-import { StyledPaper } from "../../Components/StyledComponents";
+import { StyledPaper } from "@components/StyledComponents";
 import { QueryBuilder, TemplateReader, useStore } from "@tari-project/tari-extension-query-builder";
 import useThemeStore from "../../store/themeStore";
 import { useCallback, useEffect, useRef } from "react";
@@ -51,7 +51,7 @@ import {
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import { useTheme } from "@mui/material/styles";
-import Loading from "../../Components/Loading";
+import Loading from "@components/Loading";
 import { useTemplateGet } from "../../api/hooks/useTemplate";
 import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
 import FunctionsIcon from "@mui/icons-material/Functions";
@@ -71,7 +71,7 @@ import {
 } from "@tari-project/typescript-bindings";
 import { settingsGet, submitTransactionDryRun, transactionsSubmit, transactionsWaitResult } from "../../utils/json_rpc";
 import { useAccountsList } from "../../api/hooks/useAccounts";
-import CopyAddress from "../../Components/CopyAddress";
+import CopyAddress from "@components/CopyAddress";
 
 const KNOWN_TEMPLATES = [
   {

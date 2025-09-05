@@ -25,7 +25,8 @@ import Button from "@mui/material/Button";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
-import { Stepper, Step, StepLabel } from "@mui/material";
+import IconButton from "@mui/material/IconButton";
+import CloseIcon from "@mui/icons-material/Close";
 import { useAccountsGetBalances, useAccountsTransfer } from "@api/hooks/useAccounts";
 import useAccountStore from "@store/accountStore";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
@@ -42,8 +43,7 @@ import { CURRENCY } from "@utils/constants";
 import FormStep, { SendMoneyFormState } from "../steps/FormStep";
 import ConfirmationStep from "../steps/ConfirmationStep";
 import ResultStep, { TransferResult } from "../steps/ResultStep";
-
-const steps = ["Enter Details", "Confirm Transfer", "Result"];
+import { Divider, Stack, Typography } from "@mui/material";
 
 export default function SendMoney() {
   const [open, setOpen] = useState(false);
@@ -293,6 +293,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
       case 0:
         return (
           <FormStep
+            resource_address={props.resource_address}
             resource_type={props.resource_type}
             badges={badges}
             transferFormState={transferFormState}
@@ -328,15 +329,16 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
 
   return (
     <Dialog open={props.open} onClose={handleClose} maxWidth="md" fullWidth>
-      <DialogTitle>Send {props.resource_address}</DialogTitle>
+      <DialogTitle sx={{ m: 0, p: 2, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <Stack direction="row" alignItems="center" justifyContent="center" width="100%" spacing={2}>
+          <Typography variant="h4">Send Tari</Typography>
+        </Stack>
+        <IconButton aria-label="close" onClick={handleClose}>
+          <CloseIcon />
+        </IconButton>
+      </DialogTitle>
       <DialogContent>
-        <Stepper activeStep={activeStep} sx={{ pt: 3, pb: 5 }}>
-          {steps.map((label) => (
-            <Step key={label}>
-              <StepLabel>{label}</StepLabel>
-            </Step>
-          ))}
-        </Stepper>
+        <Divider />
         {renderStepContent()}
       </DialogContent>
     </Dialog>

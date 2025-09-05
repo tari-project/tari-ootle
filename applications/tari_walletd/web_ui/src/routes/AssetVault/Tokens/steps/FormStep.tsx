@@ -28,9 +28,9 @@ import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import CheckBox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
-import { Divider, InputLabel, Stack, InputAdornment } from "@mui/material";
+import { Divider, InputLabel, Stack, InputAdornment, Typography, Box } from "@mui/material";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
-import { ResourceType } from "@tari-project/typescript-bindings";
+import { ResourceType, ResourceAddress } from "@tari-project/typescript-bindings";
 import { validateAddress, formatDisplayCurrency } from "@utils/helpers";
 import { CURRENCY } from "@utils/constants";
 
@@ -44,6 +44,7 @@ export interface SendMoneyFormState {
 }
 
 interface FormStepProps {
+  resource_address?: ResourceAddress;
   resource_type: ResourceType;
   badges?: string[];
   transferFormState: SendMoneyFormState;
@@ -60,6 +61,7 @@ interface FormStepProps {
 }
 
 export default function FormStep({
+  resource_address,
   resource_type,
   badges,
   transferFormState,
@@ -76,7 +78,7 @@ export default function FormStep({
 }: FormStepProps) {
   const isConfidential = resource_type === "Confidential";
   const isStealth = resource_type === "Stealth";
-  
+
   // Track if the user is currently typing in the amount field
   const [isFocusedAmount, setIsFocusedAmount] = useState(false);
 
@@ -84,29 +86,38 @@ export default function FormStep({
   const hasInsufficientFunds = availableBalance !== undefined && enteredAmount > availableBalance;
 
   const isFormValid = validateAddress(transferFormState.publicKey) && transferFormState.amount && !hasInsufficientFunds;
-  
+
   // Format amount for display
   const formatAmountValue = (amount: string) => {
     if (!amount) return "";
     const num = parseFloat(amount);
     if (isNaN(num)) return amount;
-    
+
     // If user is currently typing, show raw value to avoid cursor jumping
     if (isFocusedAmount) {
       return amount;
     }
-    
+
     // Otherwise, show formatted value
-    const hasDecimals = amount.includes('.') && amount.split('.')[1].length > 0;
-    return num.toLocaleString('en-US', { 
-      minimumFractionDigits: hasDecimals ? 0 : 2, 
-      maximumFractionDigits: CURRENCY.DECIMALS 
+    const hasDecimals = amount.includes(".") && amount.split(".")[1].length > 0;
+    return num.toLocaleString("en-US", {
+      minimumFractionDigits: hasDecimals ? 0 : 2,
+      maximumFractionDigits: CURRENCY.DECIMALS,
     });
   };
 
   return (
     <Form onSubmit={onSubmit}>
       <Stack direction="column" spacing={2} sx={{ py: 2 }}>
+        {resource_address && (
+          <Stack direction="column" spacing={0.5}>
+            <Typography variant="subtitle2" color="text.secondary">
+              Resource Address:
+            </Typography>
+            <Typography variant="body1">{resource_address}</Typography>
+          </Stack>
+        )}
+
         {badges && (
           <>
             <FormControlLabel
@@ -134,17 +145,21 @@ export default function FormStep({
             )}
           </>
         )}
-
-        <TextField
-          name="publicKey"
-          label="Public Key"
-          value={transferFormState.publicKey}
-          inputProps={{ pattern: "^[0-9a-fA-F]*$" }}
-          required
-          onChange={onFormValueChange}
-          style={{ flexGrow: 1 }}
-          disabled={disabled}
-        />
+        <Stack direction="column" spacing={0.5}>
+          <Typography variant="subtitle2" color="text.secondary">
+            To Public Key:
+          </Typography>
+          <TextField
+            name="publicKey"
+            label="To Public Key"
+            value={transferFormState.publicKey}
+            inputProps={{ pattern: "^[0-9a-fA-F]*$" }}
+            required
+            onChange={onFormValueChange}
+            style={{ flexGrow: 1 }}
+            disabled={disabled}
+          />
+        </Stack>
 
         {(isConfidential || isStealth) && (
           <>
@@ -196,7 +211,7 @@ export default function FormStep({
           }
           InputProps={{
             placeholder: "0.0",
-            endAdornment: <InputAdornment position="end">{CURRENCY.SYMBOL}</InputAdornment>
+            endAdornment: <InputAdornment position="end">{CURRENCY.SYMBOL}</InputAdornment>,
           }}
         />
 
@@ -204,9 +219,9 @@ export default function FormStep({
           name="fee"
           label="Fee"
           value={
-            isEstimatingFee 
-              ? "Estimating..." 
-              : transferFormState.fee 
+            isEstimatingFee
+              ? "Estimating..."
+              : transferFormState.fee
                 ? (parseInt(transferFormState.fee) / CURRENCY.DIVISOR).toString()
                 : ""
           }
@@ -215,7 +230,7 @@ export default function FormStep({
           disabled={true}
           style={{ flexGrow: 1 }}
           InputProps={{
-            endAdornment: !isEstimatingFee ? <InputAdornment position="end">{CURRENCY.SYMBOL}</InputAdornment> : null
+            endAdornment: !isEstimatingFee ? <InputAdornment position="end">{CURRENCY.SYMBOL}</InputAdornment> : null,
           }}
         />
 

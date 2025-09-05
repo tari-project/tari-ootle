@@ -250,7 +250,7 @@ export function bigintToDecimalString(int: bigint | Amount, decimalPlaces: numbe
   return `${wholeValues}.${padding}${fractionalValues}`;
 }
 
-export const formatXTM = (amount: number | bigint): string => {
+export const formatCurrency = (amount: number | bigint): string => {
   if (typeof amount === "bigint") {
     // Handle bigint: divide by divisor to get integer and remainder for fractional part
     const divisor = BigInt(CURRENCY.DIVISOR);
@@ -260,17 +260,26 @@ export const formatXTM = (amount: number | bigint): string => {
     // Convert remainder to fractional string padded to CURRENCY.DECIMALS
     const fractionalPart = remainder.toString().padStart(CURRENCY.DECIMALS, "0");
 
-    return `${integerPart.toString()}.${fractionalPart} ${CURRENCY.SYMBOL}`;
+    return `${Number(integerPart).toLocaleString("en-US")}.${fractionalPart} ${CURRENCY.SYMBOL}`;
   } else if (typeof amount === "number") {
     // Handle number: guard against NaN and use existing toFixed logic
     if (isNaN(amount)) {
       return `0 ${CURRENCY.SYMBOL}`;
     }
-    return `${(amount / CURRENCY.DIVISOR).toFixed(CURRENCY.DECIMALS)} ${CURRENCY.SYMBOL}`;
+    const convertedAmount = amount / CURRENCY.DIVISOR;
+    return `${convertedAmount.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: CURRENCY.DECIMALS })} ${CURRENCY.SYMBOL}`;
   } else {
     // Handle invalid types
     return `0 ${CURRENCY.SYMBOL}`;
   }
+};
+
+// Helper function for formatting amounts that are already in display units (XTR)
+export const formatDisplayCurrency = (amount: number): string => {
+  if (isNaN(amount)) {
+    return `0 ${CURRENCY.SYMBOL}`;
+  }
+  return `${amount.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: CURRENCY.DECIMALS })} ${CURRENCY.SYMBOL}`;
 };
 
 export function validateHash(hash: string): boolean {
@@ -314,7 +323,7 @@ const normalizeTimestamp = (rawTimestamp: string | null | undefined): Date | nul
 
 export const formatTimestamp = (rawTimestamp: string | null | undefined): string => {
   const date = normalizeTimestamp(rawTimestamp);
-  
+
   if (!date) return "";
 
   return date.toLocaleString(undefined, {

@@ -20,33 +20,30 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { FormEvent, useEffect, useState } from "react";
-import { Form } from "react-router-dom";
+import { FormEvent, useState, useEffect } from "react";
 import Button from "@mui/material/Button";
-import CheckBox from "@mui/material/Checkbox";
-import TextField from "@mui/material/TextField";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
-import FormControlLabel from "@mui/material/FormControlLabel";
-import Box from "@mui/material/Box";
+import { Stepper, Step, StepLabel } from "@mui/material";
 import { useAccountsGetBalances, useAccountsTransfer } from "@api/hooks/useAccounts";
-import { useTheme } from "@mui/material/styles";
 import useAccountStore from "@store/accountStore";
-import Select from "@mui/material/Select";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
-import MenuItem from "@mui/material/MenuItem";
 import {
   BalanceEntry,
   ConfidentialTransferInputSelection,
   ResourceAddress,
   ResourceType,
   substateIdToString,
-  TransactionResult,
   XTR,
 } from "@tari-project/typescript-bindings";
-import InputLabel from "@mui/material/InputLabel";
 import { transactionsWaitResult } from "@utils/json_rpc";
+import { CURRENCY } from "@utils/constants";
+import FormStep, { SendMoneyFormState } from "../steps/FormStep";
+import ConfirmationStep from "../steps/ConfirmationStep";
+import ResultStep, { TransferResult } from "../steps/ResultStep";
+
+const steps = ["Enter Details", "Confirm Transfer", "Result"];
 
 export default function SendMoney() {
   const [open, setOpen] = useState(false);
@@ -76,7 +73,7 @@ export interface SendMoneyDialogProps {
 }
 
 export function SendMoneyDialog(props: SendMoneyDialogProps) {
-  const INITIAL_VALUES = {
+  const INITIAL_VALUES: SendMoneyFormState = {
     publicKey: "",
     outputToConfidential: false,
     inputSelection: "PreferRevealed",
@@ -84,34 +81,36 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     fee: "",
     badge: null,
   };
-  const isConfidential = props.resource_type === "Confidential";
-  const isStealth = props.resource_type === "Stealth";
+
+  const [activeStep, setActiveStep] = useState(0);
   const [useBadge, setUseBadge] = useState(false);
   const [disabled, setDisabled] = useState(false);
+  const [isEstimatingFee, setIsEstimatingFee] = useState(false);
   const [transferFormState, setTransferFormState] = useState(INITIAL_VALUES);
-  const [validity, setValidity] = useState<object>({
-    publicKey: false,
-    amount: false,
-  });
-  const [allValid, setAllValid] = useState(false);
+  const [transferResult, setTransferResult] = useState<TransferResult | undefined>();
   const { mutateAsync: sendIt } = useAccountsTransfer();
 
   const { account, setPopup } = useAccountStore();
+
   if (!account) {
     return null;
   }
-
-  const theme = useTheme();
 
   const { data } = useAccountsGetBalances(substateIdToString(account.address));
   const badges = data?.balances
     ?.filter((b: BalanceEntry) => b.resource_type === "NonFungible" && BigInt(b.balance) > 0n)
     .map((b: BalanceEntry) => b.resource_address) as string[];
 
+  // Find the available balance for the resource we're trying to send
+  const balanceEntry = data?.balances?.find(
+    (b: BalanceEntry) => b.resource_address === (props.resource_address || XTR),
+  );
+  // Balance is in micro XTR units, convert to XTR for display
+  const availableBalance = balanceEntry?.balance ? Number(balanceEntry.balance) / CURRENCY.DIVISOR : undefined;
+
   const transfer = {
     account: substateIdToString(account.address),
-    amount: parseInt(transferFormState.amount),
-    // HACK: default to XTR2 because the resource is only set when open==true, and we cannot conditionally call hooks i.e. when props.resource_address is set
+    amount: Math.floor((parseFloat(transferFormState.amount) || 0) * CURRENCY.DIVISOR),
     resource_address: props.resource_address || XTR,
     destination_public_key: transferFormState.publicKey,
     resourceType: props.resource_type,
@@ -121,16 +120,28 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   };
 
   function setFormValue(e: React.ChangeEvent<HTMLInputElement>) {
+    const { name, value } = e.target;
+
+    // For amount field, parse the input to allow decimal values
+    let processedValue = value;
+    if (name === "amount" && value) {
+      // Remove currency symbol and extra spaces, but keep numbers and decimal point
+      processedValue = value.replace(/[^\d.]/g, "");
+      // Ensure only one decimal point
+      const parts = processedValue.split(".");
+      if (parts.length > 2) {
+        processedValue = parts[0] + "." + parts.slice(1).join("");
+      }
+    }
+
+    // Clear fee when amount or publicKey changes to trigger re-estimation
+    const shouldClearFee = (name === "amount" || name === "publicKey") && transferFormState.fee;
+
     setTransferFormState({
       ...transferFormState,
-      [e.target.name]: e.target.value,
+      [name]: processedValue,
+      ...(shouldClearFee ? { fee: "" } : {}),
     });
-    if (validity[e.target.name as keyof object] !== undefined) {
-      setValidity({
-        ...validity,
-        [e.target.name]: e.target.validity.valid,
-      });
-    }
   }
 
   function setSelectFormValue(e: SelectChangeEvent<unknown>) {
@@ -147,71 +158,6 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     });
   }
 
-  const onTransfer = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!account) {
-      return;
-    }
-
-    setDisabled(true);
-    if (!isNaN(parseInt(transferFormState.fee))) {
-      sendIt?.({
-        ...transfer,
-        dry_run: false,
-        max_fee: parseInt(transferFormState.fee),
-      })
-        .then(() => {
-          setTransferFormState(INITIAL_VALUES);
-          props.onSendComplete?.();
-          setPopup({ title: "Send successful", error: false });
-        })
-        .catch((e) => {
-          setPopup({ title: "Send failed", error: true, message: e.message });
-        })
-        .finally(() => {
-          setDisabled(false);
-        });
-    } else {
-      sendIt?.({ ...transfer, dry_run: true, max_fee: 3000 })
-        .then((result) => transactionsWaitResult({ transaction_id: result.transaction_id, timeout_secs: null }))
-        .then((resp) => {
-          const result = resp.result?.result;
-          if (!result) {
-            throw new Error("No result in response: " + JSON.stringify(resp));
-          }
-          if (!("Accept" in result)) {
-            setPopup({
-              title: "Fee estimate failed",
-              error: true,
-              // TODO: fix this
-              message: JSON.stringify(
-                unionGet(result, "Reject" as keyof TransactionResult) ||
-                  unionGet(result, "AcceptFeeRejectRest" as keyof TransactionResult)?.[1],
-              ),
-            });
-            return;
-          }
-          // Simple fix for the estimated fee differing between the dry-run and non-dry-run transactions.
-          // Since fees are charged for the transaction byte size and for confidential transfers, the rangeproof
-          // may differ in length and, therefore in fees. The fees may differ typically by 2/3, this more than
-          // accounts for that. See https://github.com/tari-project/tari-ootle/issues/1312
-          // TODO: remove once this is no longer an issue
-          const fee = resp.final_fee + 100;
-          setTransferFormState({ ...transferFormState, fee: fee.toString() });
-        })
-        .catch((e) => {
-          setPopup({ title: "Fee estimate failed", error: true, message: e.message });
-        })
-        .finally(() => {
-          setDisabled(false);
-        });
-    }
-  };
-
-  const handleClose = () => {
-    props.handleClose?.();
-  };
-
   const handleUseBadgeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setUseBadge(e.target.checked);
     if (!e.target.checked) {
@@ -222,113 +168,177 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     }
   };
 
+  const estimateFee = async () => {
+    if (!account || isEstimatingFee || !transferFormState.publicKey.trim() || !transferFormState.amount) {
+      return;
+    }
+
+    setIsEstimatingFee(true);
+
+    try {
+      // Create transfer object with current form state
+      const currentTransfer = {
+        account: substateIdToString(account.address),
+        amount: Math.floor((parseFloat(transferFormState.amount) || 0) * CURRENCY.DIVISOR),
+        resource_address: props.resource_address || XTR,
+        destination_public_key: transferFormState.publicKey,
+        resourceType: props.resource_type,
+        output_to_revealed: !transferFormState.outputToConfidential,
+        input_selection: transferFormState.inputSelection as ConfidentialTransferInputSelection,
+        badge: transferFormState.badge,
+      };
+
+      const result = await sendIt?.({ ...currentTransfer, dry_run: true, max_fee: 3000 });
+      const resp = await transactionsWaitResult({ transaction_id: result.transaction_id, timeout_secs: null });
+      const transactionResult = resp.result?.result;
+
+      if (!transactionResult || !("Accept" in transactionResult)) {
+        throw new Error("Fee estimation failed");
+      }
+
+      const fee = resp.final_fee + 100;
+      setTransferFormState((prevState) => ({ ...prevState, fee: fee.toString() }));
+    } catch (error) {
+      console.error("Fee estimation error:", error);
+      // Don't block the user if fee estimation fails
+    } finally {
+      setIsEstimatingFee(false);
+    }
+  };
+
+  const handleFormSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!account) {
+      return;
+    }
+
+    // Check if required fields are filled
+    if (!transferFormState.publicKey.trim() || !transferFormState.amount) {
+      return;
+    }
+
+    // If no fee is calculated yet, estimate it before proceeding
+    if (!transferFormState.fee) {
+      try {
+        await estimateFee();
+      } catch (error) {
+        console.error("Fee estimation failed:", error);
+        return;
+      }
+    }
+
+    setActiveStep(1);
+  };
+
+  const handleConfirm = async () => {
+    if (!account) {
+      return;
+    }
+
+    setDisabled(true);
+    setActiveStep(2);
+
+    try {
+      await sendIt?.({
+        ...transfer,
+        dry_run: false,
+        max_fee: parseInt(transferFormState.fee),
+      });
+
+      setTransferResult({
+        success: true,
+        message: "Transfer completed successfully",
+      });
+      props.onSendComplete?.();
+    } catch (error) {
+      setTransferResult({
+        success: false,
+        message: error instanceof Error ? error.message : "Transfer failed",
+      });
+    } finally {
+      setDisabled(false);
+    }
+  };
+
+  const handleClose = () => {
+    setActiveStep(0);
+    setTransferFormState(INITIAL_VALUES);
+    setTransferResult(undefined);
+    setUseBadge(false);
+    setDisabled(false);
+    props.handleClose?.();
+  };
+
+  const handleBack = () => {
+    setActiveStep(activeStep - 1);
+  };
+
+  // Auto-estimate fee when user enters valid public key and amount
   useEffect(() => {
-    setAllValid(Object.values(validity).every((v) => v));
-  }, [validity]);
+    const { publicKey, amount } = transferFormState;
+    if (publicKey.trim() && publicKey.match(/^[0-9a-fA-F]+$/) && amount.trim()) {
+      // Small delay to let state update, then estimate fee
+      const timeoutId = setTimeout(() => {
+        estimateFee().catch(() => {
+          // Fee estimation failed, but don't block the user
+        });
+      }, 500);
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [transferFormState.publicKey, transferFormState.amount]);
+
+  const renderStepContent = () => {
+    switch (activeStep) {
+      case 0:
+        return (
+          <FormStep
+            resource_type={props.resource_type}
+            badges={badges}
+            transferFormState={transferFormState}
+            disabled={disabled}
+            useBadge={useBadge}
+            isEstimatingFee={isEstimatingFee}
+            availableBalance={availableBalance}
+            onSubmit={handleFormSubmit}
+            onCancel={handleClose}
+            onFormValueChange={setFormValue}
+            onSelectFormValueChange={setSelectFormValue}
+            onCheckboxFormValueChange={setCheckboxFormValue}
+            onUseBadgeChange={handleUseBadgeChange}
+          />
+        );
+      case 1:
+        return (
+          <ConfirmationStep
+            resource_address={props.resource_address}
+            resource_type={props.resource_type}
+            transferFormState={transferFormState}
+            disabled={disabled}
+            onBack={handleBack}
+            onConfirm={handleConfirm}
+          />
+        );
+      case 2:
+        return <ResultStep disabled={disabled} transferResult={transferResult} onClose={handleClose} />;
+      default:
+        return null;
+    }
+  };
 
   return (
-    <Dialog open={props.open} onClose={handleClose}>
+    <Dialog open={props.open} onClose={handleClose} maxWidth="md" fullWidth>
       <DialogTitle>Send {props.resource_address}</DialogTitle>
-      <DialogContent className="dialog-content">
-        <Form onSubmit={onTransfer} className="flex-container-vertical" style={{ paddingTop: theme.spacing(1) }}>
-          {badges && (
-            <>
-              <FormControlLabel
-                control={<CheckBox name="useBadge" checked={useBadge} onChange={handleUseBadgeChange} />}
-                label="Use Badge"
-              />
-              <InputLabel id="select-badge">Badge</InputLabel>
-              <Select
-                id="select-badge"
-                name="badge"
-                disabled={!useBadge || disabled}
-                displayEmpty
-                value={transferFormState.badge || ""}
-                onChange={setSelectFormValue}
-              >
-                {badges.map((b, i) => (
-                  <MenuItem key={i} value={b}>
-                    {b}
-                  </MenuItem>
-                ))}
-              </Select>
-            </>
-          )}
-          <TextField
-            name="publicKey"
-            label="Public Key"
-            value={transferFormState.publicKey}
-            inputProps={{ pattern: "^[0-9a-fA-F]*$" }}
-            required
-            onChange={setFormValue}
-            style={{ flexGrow: 1 }}
-            disabled={disabled}
-          />
-          {(isConfidential || isStealth) && (
-            <>
-              <FormControlLabel
-                control={
-                  <CheckBox
-                    name="outputToConfidential"
-                    checked={transferFormState.outputToConfidential}
-                    onChange={setCheckboxFormValue}
-                    disabled={disabled}
-                  />
-                }
-                label="Send Confidential Outputs"
-              />
-              <InputLabel id="select-input-selection">Input Selection</InputLabel>
-              <Select
-                name="inputSelection"
-                disabled={disabled}
-                displayEmpty
-                value={transferFormState.inputSelection}
-                onChange={setSelectFormValue}
-              >
-                <MenuItem value="PreferRevealed">Spend revealed funds first, then confidential</MenuItem>
-                <MenuItem value="PreferConfidential">Spend confidential funds first, then revealed</MenuItem>
-                <MenuItem value="ConfidentialOnly">Only spend confidential funds</MenuItem>
-                <MenuItem value="RevealedOnly">Only spend revealed funds</MenuItem>
-              </Select>
-            </>
-          )}
-          <TextField
-            name="amount"
-            label="Amount"
-            value={transferFormState.amount}
-            type="number"
-            onChange={setFormValue}
-            style={{ flexGrow: 1 }}
-            disabled={disabled}
-          />
-          <TextField
-            name="fee"
-            label="Fee"
-            value={transferFormState.fee}
-            placeholder="Enter fee or press Estimate Fee to calculate"
-            onChange={setFormValue}
-            disabled={disabled}
-            style={{ flexGrow: 1 }}
-          />
-          <Box
-            className="flex-container"
-            style={{
-              justifyContent: "flex-end",
-            }}
-          >
-            <Button variant="outlined" onClick={handleClose} disabled={disabled}>
-              Cancel
-            </Button>
-            <Button variant="contained" type="submit" disabled={disabled || !allValid}>
-              {isNaN(parseInt(transferFormState.fee)) ? "Estimate fee" : "Send"}
-            </Button>
-          </Box>
-        </Form>
+      <DialogContent>
+        <Stepper activeStep={activeStep} sx={{ pt: 3, pb: 5 }}>
+          {steps.map((label) => (
+            <Step key={label}>
+              <StepLabel>{label}</StepLabel>
+            </Step>
+          ))}
+        </Stepper>
+        {renderStepContent()}
       </DialogContent>
     </Dialog>
   );
-}
-
-function unionGet<T extends object>(object: T, key: keyof T): T[keyof T] | null {
-  return key in object ? object[key] : null;
 }

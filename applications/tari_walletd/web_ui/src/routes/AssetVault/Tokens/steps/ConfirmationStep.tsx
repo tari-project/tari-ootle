@@ -20,127 +20,97 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Box, Button, Stack, Typography, Avatar, Divider } from "@mui/material";
-import type { Account, NonFungibleId, NonFungibleToken } from "@tari-project/typescript-bindings";
+import { Box, Button, Stack, Typography, Divider } from "@mui/material";
+import type { ResourceAddress, ResourceType } from "@tari-project/typescript-bindings";
 import CopyAddress from "@components/CopyAddress";
-import { useNftTransferStore } from "@store/nftTransferStore";
-import { formatXTM, substateIdToString, displayNftId } from "@utils/helpers";
-import { convertCborValue } from "@utils/cbor";
+import { formatDisplayCurrency, formatCurrency } from "@utils/helpers";
+import { CURRENCY } from "@utils/constants";
+import { SendMoneyFormState } from "./FormStep";
 
 interface ConfirmationStepProps {
-  accounts: Array<{ account: Account }> | undefined;
-  preSelectedNftId?: NonFungibleId;
-  availableNfts?: NonFungibleToken[];
+  resource_address?: ResourceAddress;
+  resource_type: ResourceType;
+  transferFormState: SendMoneyFormState;
+  disabled: boolean;
   onBack: () => void;
   onConfirm: () => void;
 }
 
-function nftIdToString(nftId: NonFungibleId): string {
-  const key = Object.keys(nftId)[0];
-  // @ts-ignore
-  const id = nftId[key].toString();
-  const typeName = getNftIdTypeAsName(nftId);
-  return typeName + "_" + id;
-}
-
-function getNftIdTypeAsName(nftId: NonFungibleId): string {
-  const key = Object.keys(nftId)[0];
-  switch (key) {
-    case "U256":
-      return "uuid";
-    case "String":
-      return "str";
-    case "Uint32":
-      return "u32";
-    case "Uint64":
-      return "u64";
-    default:
-      return "";
-  }
-}
-
 export default function ConfirmationStep({
-  accounts,
-  preSelectedNftId,
-  availableNfts,
+  resource_address,
+  resource_type,
+  transferFormState,
+  disabled,
   onBack,
   onConfirm,
 }: ConfirmationStepProps) {
-  const { transferFormState, disabled } = useNftTransferStore();
-
-  // Find the NFT being transferred to show its image
-  const selectedNft = availableNfts?.find(
-    (nft) => preSelectedNftId && nftIdToString(nft.nft_id) === nftIdToString(preSelectedNftId),
-  );
-
-  const nftMutableData = selectedNft ? convertCborValue(selectedNft.mutable_data) : null;
-  const nftImageUrl = nftMutableData?.image_url;
-
   return (
     <Stack spacing={3} sx={{ py: 2 }}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center">
-        <Stack spacing={4} direction={"row"}>
-          <Stack spacing={2}>
-            {preSelectedNftId && selectedNft ? (
-              <Stack direction="row" spacing={2} alignItems="center">
-                <Avatar
-                  src={nftImageUrl}
-                  sx={{
-                    width: 215,
-                    height: 215,
-                    borderRadius: 1,
-                    backgroundColor: "grey.200",
-                  }}
-                  variant="rounded"
-                  onError={(e: any) => {
-                    e.target.src =
-                      "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjRjVGNUY1Ii8+CjxwYXRoIGQ9Ik0zMCAyNUg1MFY1NUgzMFYyNVoiIGZpbGw9IiNERERERUREIi8+CjxwYXRoIGQ9Ik0zNiAzMUg0NFY0M0gzNlYzMVoiIGZpbGw9IiNCQkJCQkIiLz4KPHR1eHQgeD0iNDAiIHk9IjUyIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iOCIgZmlsbD0iIzk5OTk5OSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+TkZUPC90ZXh0Pgo8L3N2Zz4K";
-                  }}
-                >
-                  NFT
-                </Avatar>
-              </Stack>
-            ) : (
-              <Typography>{preSelectedNftId ? displayNftId(preSelectedNftId) : "Multiple NFTs"}</Typography>
-            )}
-          </Stack>
-          <Stack spacing={2} direction={"column"}>
-            {preSelectedNftId && (
-              <Box>
-                <Typography variant="subtitle2" color="text.secondary">
-                  You are about to send:
-                </Typography>
-                <Typography variant="subtitle1">{displayNftId(preSelectedNftId)}</Typography>
-              </Box>
-            )}
-            <Box>
-              <Typography variant="subtitle2" color="text.secondary">
-                To Account:
-              </Typography>
-              <Typography variant="subtitle1">
-                <CopyAddress address={transferFormState.targetAccountPublicKey} />
-              </Typography>
-            </Box>
+      <Stack spacing={2}>
+        <Box>
+          <Typography variant="h6" color="text.primary" gutterBottom>
+            Confirm Transfer
+          </Typography>
+        </Box>
 
-            <Box>
-              <Typography variant="subtitle2" color="text.secondary">
-                Transaction Fee:
-              </Typography>
-              <Typography>{formatXTM(parseInt(transferFormState.maxFee))}</Typography>
-            </Box>
+        <Box>
+          <Typography variant="subtitle2" color="text.secondary">
+            Resource:
+          </Typography>
+          <Typography variant="body1">{resource_address}</Typography>
+        </Box>
 
-            <Box>
-              <Typography variant="subtitle2" color="text.secondary">
-                Fee paid by:
-              </Typography>
-              <Typography>
-                {accounts?.find((acc) => substateIdToString(acc.account.address) === transferFormState.payerAccount)
-                  ?.account.name || transferFormState.payerAccount}
-              </Typography>
-            </Box>
-          </Stack>
-        </Stack>
+        <Box>
+          <Typography variant="subtitle2" color="text.secondary">
+            To Public Key:
+          </Typography>
+          <Typography variant="body1">
+            <CopyAddress address={transferFormState.publicKey} />
+          </Typography>
+        </Box>
+
+        <Box>
+          <Typography variant="subtitle2" color="text.secondary">
+            Amount:
+          </Typography>
+          <Typography variant="body1">
+            {(() => {
+              const amount = parseFloat(transferFormState.amount) || 0;
+              const hasDecimals = transferFormState.amount.includes('.') && transferFormState.amount.split('.')[1].length > 0;
+              return `${amount.toLocaleString('en-US', { 
+                minimumFractionDigits: hasDecimals ? 0 : 2, 
+                maximumFractionDigits: CURRENCY.DECIMALS 
+              })} ${CURRENCY.SYMBOL}`;
+            })()}
+          </Typography>
+        </Box>
+
+        <Box>
+          <Typography variant="subtitle2" color="text.secondary">
+            Transaction Fee:
+          </Typography>
+          <Typography variant="body1">{formatCurrency(parseInt(transferFormState.fee) || 0)}</Typography>
+        </Box>
+
+        {resource_type === "Confidential" && (
+          <Box>
+            <Typography variant="subtitle2" color="text.secondary">
+              Send Confidential Outputs:
+            </Typography>
+            <Typography variant="body1">{transferFormState.outputToConfidential ? "Yes" : "No"}</Typography>
+          </Box>
+        )}
+
+        {transferFormState.badge && (
+          <Box>
+            <Typography variant="subtitle2" color="text.secondary">
+              Using Badge:
+            </Typography>
+            <Typography variant="body1">{transferFormState.badge}</Typography>
+          </Box>
+        )}
       </Stack>
+
       <Divider />
       <Stack direction="row" justifyContent="space-between" sx={{ mt: 3 }}>
         <Button variant="outlined" onClick={onBack}>

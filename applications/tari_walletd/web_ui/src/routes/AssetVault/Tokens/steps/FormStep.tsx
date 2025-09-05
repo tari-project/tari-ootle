@@ -18,173 +18,214 @@
 //  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
 //  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
-//  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//  USE OF THIS SOFTWARE, SUCH DAMAGE.
 
-import { FormEvent } from "react";
+import { FormEvent, useState } from "react";
 import { Form } from "react-router-dom";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
-import Checkbox from "@mui/material/Checkbox";
-import ListItemText from "@mui/material/ListItemText";
-import { Divider, InputLabel, Stack } from "@mui/material";
+import CheckBox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import { Divider, InputLabel, Stack, InputAdornment } from "@mui/material";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
-import type { NonFungibleId, NonFungibleToken, Account } from "@tari-project/typescript-bindings";
-import { substateIdToString, formatXTM, validateAddress, displayNftId } from "@utils/helpers";
-import { useNftTransferStore } from "@store/nftTransferStore";
+import { ResourceType } from "@tari-project/typescript-bindings";
+import { validateAddress, formatDisplayCurrency } from "@utils/helpers";
+import { CURRENCY } from "@utils/constants";
+
+export interface SendMoneyFormState {
+  publicKey: string;
+  outputToConfidential: boolean;
+  inputSelection: string;
+  amount: string;
+  fee: string;
+  badge: string | null;
+}
 
 interface FormStepProps {
-  account: Account;
-  accounts: Array<{ account: Account }> | undefined;
-  availableNfts: NonFungibleToken[];
-  preSelectedNftId?: NonFungibleId;
+  resource_type: ResourceType;
+  badges?: string[];
+  transferFormState: SendMoneyFormState;
+  disabled: boolean;
+  useBadge: boolean;
   isEstimatingFee: boolean;
+  availableBalance?: number;
   onSubmit: (e: FormEvent) => void;
   onCancel: () => void;
-  onNftsChange: (event: SelectChangeEvent<string[]>) => void;
-  onPayerAccountChange: (event: SelectChangeEvent<string>) => void;
-}
-
-function nftIdToString(nftId: NonFungibleId): string {
-  const key = Object.keys(nftId)[0];
-  // @ts-ignore
-  const id = nftId[key].toString();
-  const typeName = getNftIdTypeAsName(nftId);
-  return typeName + "_" + id;
-}
-
-function getNftIdTypeAsName(nftId: NonFungibleId): string {
-  const key = Object.keys(nftId)[0];
-  switch (key) {
-    case "U256":
-      return "uuid";
-    case "String":
-      return "str";
-    case "Uint32":
-      return "u32";
-    case "Uint64":
-      return "u64";
-    default:
-      return "";
-  }
+  onFormValueChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onSelectFormValueChange: (e: SelectChangeEvent<unknown>) => void;
+  onCheckboxFormValueChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onUseBadgeChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
 export default function FormStep({
-  accounts,
-  availableNfts,
-  preSelectedNftId,
+  resource_type,
+  badges,
+  transferFormState,
+  disabled,
+  useBadge,
   isEstimatingFee,
+  availableBalance,
   onSubmit,
   onCancel,
-  onNftsChange,
-  onPayerAccountChange,
+  onFormValueChange,
+  onSelectFormValueChange,
+  onCheckboxFormValueChange,
+  onUseBadgeChange,
 }: FormStepProps) {
-  const { transferFormState, disabled, updateFormValue } = useNftTransferStore();
+  const isConfidential = resource_type === "Confidential";
+  const isStealth = resource_type === "Stealth";
+  
+  // Track if the user is currently typing in the amount field
+  const [isFocusedAmount, setIsFocusedAmount] = useState(false);
 
-  const setFormValue = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    updateFormValue(name, value, e.target.validity.valid);
+  const enteredAmount = parseFloat(transferFormState.amount) || 0;
+  const hasInsufficientFunds = availableBalance !== undefined && enteredAmount > availableBalance;
+
+  const isFormValid = validateAddress(transferFormState.publicKey) && transferFormState.amount && !hasInsufficientFunds;
+  
+  // Format amount for display
+  const formatAmountValue = (amount: string) => {
+    if (!amount) return "";
+    const num = parseFloat(amount);
+    if (isNaN(num)) return amount;
+    
+    // If user is currently typing, show raw value to avoid cursor jumping
+    if (isFocusedAmount) {
+      return amount;
+    }
+    
+    // Otherwise, show formatted value
+    const hasDecimals = amount.includes('.') && amount.split('.')[1].length > 0;
+    return num.toLocaleString('en-US', { 
+      minimumFractionDigits: hasDecimals ? 0 : 2, 
+      maximumFractionDigits: CURRENCY.DECIMALS 
+    });
   };
 
   return (
     <Form onSubmit={onSubmit}>
       <Stack direction="column" spacing={2} sx={{ py: 2 }}>
-        {accounts && (
+        {badges && (
           <>
-            <InputLabel id="select-payer-account">Account (to pay fees)</InputLabel>
-            <Select
-              id="select-payer-account"
-              name="payerAccount"
-              disabled={disabled}
-              displayEmpty
-              value={
-                transferFormState.payerAccount ||
-                substateIdToString(accounts.find((a) => a.account.is_default)?.account.address) ||
-                ""
-              }
-              onChange={onPayerAccountChange}
-              variant="outlined"
-            >
-              {accounts.map((account) => (
-                <MenuItem key={account.account.name} value={substateIdToString(account.account.address)}>
-                  {account.account.name} {account.account.is_default ? "(default)" : ""}
-                </MenuItem>
-              ))}
-            </Select>
+            <FormControlLabel
+              control={<CheckBox name="useBadge" checked={useBadge} onChange={onUseBadgeChange} />}
+              label="Use Badge"
+            />
+            {useBadge && (
+              <>
+                <InputLabel id="select-badge">Badge</InputLabel>
+                <Select
+                  id="select-badge"
+                  name="badge"
+                  disabled={disabled}
+                  displayEmpty
+                  value={transferFormState.badge || ""}
+                  onChange={onSelectFormValueChange}
+                >
+                  {badges.map((b, i) => (
+                    <MenuItem key={i} value={b}>
+                      {b}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </>
+            )}
           </>
         )}
 
         <TextField
-          name="targetAccountPublicKey"
-          label="Target Account Public Key"
-          value={transferFormState.targetAccountPublicKey}
+          name="publicKey"
+          label="Public Key"
+          value={transferFormState.publicKey}
           inputProps={{ pattern: "^[0-9a-fA-F]*$" }}
           required
-          onChange={setFormValue}
+          onChange={onFormValueChange}
           style={{ flexGrow: 1 }}
           disabled={disabled}
         />
 
-        <TextField
-          name="maxFee"
-          label="Transaction Fee"
-          value={
-            isEstimatingFee
-              ? "Estimating..."
-              : transferFormState.maxFee
-                ? formatXTM(parseInt(transferFormState.maxFee))
-                : "Will be calculated automatically"
-          }
-          placeholder="Fee will be estimated automatically"
-          disabled={true}
-          style={{ flexGrow: 1 }}
-        />
-
-        {!preSelectedNftId ? (
+        {(isConfidential || isStealth) && (
           <>
-            <InputLabel id="nft-select-label">Select NFT(s)</InputLabel>
+            <FormControlLabel
+              control={
+                <CheckBox
+                  name="outputToConfidential"
+                  checked={transferFormState.outputToConfidential}
+                  onChange={onCheckboxFormValueChange}
+                  disabled={disabled}
+                />
+              }
+              label="Send Confidential Outputs"
+            />
+            <InputLabel id="select-input-selection">Input Selection</InputLabel>
             <Select
-              labelId="nft-select-label"
-              name="nfts"
-              id="nft-select"
-              multiple
-              value={transferFormState.nfts.map((nft) => JSON.stringify(nft))}
-              required
+              name="inputSelection"
               disabled={disabled}
-              onChange={onNftsChange}
-              renderValue={(selected) => selected.map((item) => item).join(", ")}
+              displayEmpty
+              value={transferFormState.inputSelection}
+              onChange={onSelectFormValueChange}
             >
-              {availableNfts.map((nft, index) => (
-                <MenuItem key={index} value={JSON.stringify(nft.nft_id)}>
-                  <Checkbox
-                    checked={transferFormState.nfts.some((id) => nftIdToString(id) == nftIdToString(nft.nft_id))}
-                  />
-                  <ListItemText primary={displayNftId(nft.nft_id)} />
-                </MenuItem>
-              ))}
+              <MenuItem value="PreferRevealed">Spend revealed funds first, then confidential</MenuItem>
+              <MenuItem value="PreferConfidential">Spend confidential funds first, then revealed</MenuItem>
+              <MenuItem value="ConfidentialOnly">Only spend confidential funds</MenuItem>
+              <MenuItem value="RevealedOnly">Only spend revealed funds</MenuItem>
             </Select>
           </>
-        ) : (
-          <TextField
-            label="Selected NFT"
-            value={displayNftId(preSelectedNftId)}
-            disabled
-            variant="outlined"
-            style={{ flexGrow: 1 }}
-          />
         )}
+
+        <TextField
+          name="amount"
+          label="Amount"
+          value={formatAmountValue(transferFormState.amount)}
+          type="text"
+          required
+          onChange={onFormValueChange}
+          onFocus={() => setIsFocusedAmount(true)}
+          onBlur={() => setIsFocusedAmount(false)}
+          style={{ flexGrow: 1 }}
+          disabled={disabled}
+          error={hasInsufficientFunds}
+          helperText={
+            hasInsufficientFunds
+              ? `Insufficient funds. Available balance: ${formatDisplayCurrency(availableBalance || 0)}`
+              : availableBalance !== undefined
+                ? `Available balance: ${formatDisplayCurrency(availableBalance)}`
+                : undefined
+          }
+          InputProps={{
+            placeholder: "0.0",
+            endAdornment: <InputAdornment position="end">{CURRENCY.SYMBOL}</InputAdornment>
+          }}
+        />
+
+        <TextField
+          name="fee"
+          label="Fee"
+          value={
+            isEstimatingFee 
+              ? "Estimating..." 
+              : transferFormState.fee 
+                ? (parseInt(transferFormState.fee) / CURRENCY.DIVISOR).toString()
+                : ""
+          }
+          placeholder={isEstimatingFee ? "Estimating..." : "Auto-calculated"}
+          onChange={onFormValueChange}
+          disabled={true}
+          style={{ flexGrow: 1 }}
+          InputProps={{
+            endAdornment: !isEstimatingFee ? <InputAdornment position="end">{CURRENCY.SYMBOL}</InputAdornment> : null
+          }}
+        />
+
         <Divider />
         <Stack direction="row" justifyContent="space-between" sx={{ mt: 3 }}>
           <Button variant="outlined" onClick={onCancel} disabled={disabled}>
             Cancel
           </Button>
-          <Button
-            variant="contained"
-            type="submit"
-            disabled={disabled || !validateAddress(transferFormState.targetAccountPublicKey)}
-          >
-            Continue
+          <Button variant="contained" type="submit" disabled={disabled || !isFormValid}>
+            {isEstimatingFee ? "Estimating..." : transferFormState.fee ? "Continue" : "Continue"}
           </Button>
         </Stack>
       </Stack>

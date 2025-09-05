@@ -21,23 +21,27 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { Typography, Stack, Button, CircularProgress, Fade, Divider } from "@mui/material";
-import { useNftTransferStore } from "@store/nftTransferStore";
 import CancelRoundedIcon from "@mui/icons-material/CancelRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 
+export interface TransferResult {
+  success: boolean;
+  message: string;
+}
+
 interface ResultStepProps {
+  disabled: boolean;
+  transferResult?: TransferResult;
   onClose: () => void;
 }
 
-export default function ResultStep({ onClose }: ResultStepProps) {
-  const { disabled, transferResult } = useNftTransferStore();
-
+export default function ResultStep({ disabled, transferResult, onClose }: ResultStepProps) {
   return (
     <Stack direction="column" spacing={2} alignItems="center" justifyContent="center">
       {disabled ? (
         <>
           <CircularProgress size={60} />
-          <Typography variant="h6">Sending NFT...</Typography>
+          <Typography variant="h6">Sending Money...</Typography>
           <Typography color="text.secondary">Please wait while your transaction is processed.</Typography>
         </>
       ) : transferResult ? (

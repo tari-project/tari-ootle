@@ -1,7 +1,7 @@
 {
-  "openrpc": "1.0.0-rc1",
+  "openrpc": "1.3.2",
   "info": {
-    "version": "1.0.0",
+    "version": "1.3.2",
     "title": "Tari Indexer",
     "license": {
       "name": "MIT"
@@ -12,53 +12,181 @@
       "url": "http://localhost:183000"
     }
   ],
+  "components": {
+  "schemas": {
+    "GetConnectionsResponse": {
+      "type": "object",
+      "properties": {
+        "connections": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/Connection" }
+        }
+      },
+      "required": ["connections"]
+    },
+    "Connection": {
+      "type": "object",
+      "properties": {
+        "connection_id": { "type": "string" },
+        "peer_id": { "type": "string" },
+        "address": { "$ref": "#/components/schemas/Multiaddr" },
+        "direction": { "$ref": "#/components/schemas/ConnectionDirection" },
+        "age": { "$ref": "#/components/schemas/Duration" },
+        "ping_latency": {
+          "anyOf": [
+            { "$ref": "#/components/schemas/Duration" },
+            { "type": "null" }
+          ]
+        },
+        "user_agent": {
+          "type": "string",
+          "nullable": true
+        }
+      },
+      "required": ["connection_id", "peer_id", "address", "direction", "age"]
+    },
+    "Multiaddr": {
+      "type": "string",
+      "description": "A multiaddress encoded as a string, e.g., \"/ip4/127.0.0.1/tcp/4001\""
+    },
+    "ConnectionDirection": {
+      "type": "string",
+      "description": "The direction of the peer connection: inbound or outbound.",
+      "enum": ["Inbound", "Outbound"]
+    },
+    "Duration": {
+      "type": "object",
+      "description": "A duration with seconds and nanoseconds.",
+      "properties": {
+        "secs": { "type": "integer" },
+        "nanos": { "type": "integer" }
+      },
+      "required": ["secs", "nanos"]
+    }
+  }
+},
   "methods": [
     {
       "name": "get_connections",
-      "summary": "",
-      "tags": [],
+      "summary": "Returns a list of active peer connections from the node.",
+      "description": "Retrieves a list of active peer-to-peer connections.\n\nEach connection includes metadata such as the peer ID, address, direction (inbound or outbound), age, and latency.\n\nUseful for debugging or monitoring network health.\n\n**Note:** Error messages returned by this method may be generic ('Something went wrong') in production environments to avoid leaking internal details. For detailed error messages, run in debug mode or CI environment.",
+      "tags": [
+        {"name": "Network",
+         "description": "Methods related to network operations and peer management."}
+      ],
       "params": [],
       "result": {
-        "name": "epoch_stats",
-        "description": "",
-        "schema": {}
-      },
-      "errors": [],
-      "examples": [
-        {
-          "name": "default",
-          "description": "",
-          "params": [],
-          "result": {
-            "name": "example1",
-            "value": {
-              "connections": [
-                {
-                  "address": "/onion3/zqydnqgtapphitwdxr4sfg5kuvv7kbs5ye54yjy2mybi7f7qxd5jeiyd:18141",
-                  "age": 9946,
-                  "direction": false,
-                  "node_id": [
-                    208,
-                    146,
-                    146,
-                    229,
-                    165,
-                    144,
-                    10,
-                    41,
-                    56,
-                    35,
-                    69,
-                    224,
-                    120
-                  ],
-                  "public_key": "b4a0b93ccd3a50ab8f7fb766cc9fea59e574283d69a53fe60d6aa842f42ecd38"
-                }
-              ]
-            }
-          }
+        "name": "Active Peer Connections",
+        "description": "A list of active peer connections with their metadata.",
+        "schema": {
+          "$ref": "#/components/schemas/GetConnectionsResponse"
         }
-      ]
+      },
+      "errors": [
+          {
+            "code": -32001,
+            "message": "Networking service has shut down and cannot handle requests",
+            "data": "NetworkingHandleError::ServiceHasShutdown"
+          },
+          {
+            "code": -32002,
+            "message": "Networking service dropped the request without responding",
+            "data": "NetworkingHandleError::ServiceAbandonedRequest"
+          },
+          {
+            "code": -32003,
+            "message": "Codec IO error",
+            "data": "NetworkingError::CodecError"
+          },
+          {
+            "code": -32004,
+            "message": "Gossipsub publish error",
+            "data": "NetworkingError::GossipPublishError"
+          },
+          {
+            "code": -32005,
+            "message": "Failed to send message to peer",
+            "data": "NetworkingError::SwarmError"
+          },
+          {
+            "code": -32006,
+            "message": "Subscription error",
+            "data": "NetworkingError::SubscriptionError"
+          },
+          {
+            "code": -32007,
+            "message": "Dial error",
+            "data": "NetworkingError::DialError"
+          },
+          {
+            "code": -32008,
+            "message": "Outgoing connection error",
+            "data": "NetworkingError::OutgoingConnectionError"
+          },
+          {
+            "code": -32009,
+            "message": "Messaging error",
+            "data": "NetworkingError::MessagingError"
+          },
+          {
+            "code": -32010,
+            "message": "Failed to open substream",
+            "data": "NetworkingError::FailedToOpenSubstream"
+          },
+          {
+            "code": -32011,
+            "message": "RPC error",
+            "data": "NetworkingError::RpcError"
+          },
+          {
+            "code": -32012,
+            "message": "Transport error",
+            "data": "NetworkingError::TransportError"
+          },
+          {
+            "code": -32013,
+            "message": "Rendezvous client register error",
+            "data": "NetworkingError::RendezvousRegisterError"
+          },
+          {
+            "code": -32014,
+            "message": "Messaging is disabled",
+            "data": "NetworkingError::MessagingDisabled"
+          }
+        ],
+"examples": [
+  {
+    "name": "ExampleGetConnections",
+    "summary": "Demonstrates the result of calling get_connections",
+    "params": [],
+    "result": {
+      "name": "connectionsResult",
+      "value": {
+      "connections": [
+        {
+          "connection_id": "3455",
+          "peer_id": "12D3KooWQkGZ9QdHfX3bUg8K2d2i6RZyrA8QyV9dT7YiZtKxF8k7X",
+          "address": "/ip4/192.168.1.15/tcp/8080",
+          "direction": "Outbound",
+          "age": { "secs": 1200, "nanos": 0 },
+          "ping_latency": { "secs": 0, "nanos": 50000000 },
+          "user_agent": "TariNode/1.0.0"
+        },
+        {
+          "connection_id": "3456",
+          "peer_id": "12D3KooWJ4j7TfVgJw8t6E7aNQwL9p3YvXh5HWTKJj7H6jBf8cBUp",
+          "address": "/onion3/abcdefg1234567.onion:18141",
+          "direction": "Inbound",
+          "age": { "secs": 3600, "nanos": 250000000 },
+          "ping_latency": null,
+          "user_agent": null
+        }
+       ]
+    }
+  }
+}
+]
+
     },
     {
       "name": "get_identity",
@@ -280,9 +408,5 @@
         }
       ]
     }
-  ],
-  "components": {
-    "contentDescriptors": {},
-    "schemas": {}
-  }
+  ]
 }

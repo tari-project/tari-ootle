@@ -249,7 +249,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         success: true,
         message: "Transfer completed successfully",
       });
-      props.onSendComplete?.();
+      // Auto-close after 10 seconds - don't call onSendComplete immediately
     } catch (error) {
       setTransferResult({
         success: false,
@@ -261,12 +261,17 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   };
 
   const handleClose = () => {
+    const wasSuccessful = transferResult?.success;
     setActiveStep(0);
     setTransferFormState(INITIAL_VALUES);
     setTransferResult(undefined);
     setUseBadge(false);
     setDisabled(false);
     props.handleClose?.();
+    // Call onSendComplete only after successful transfer when dialog closes
+    if (wasSuccessful) {
+      props.onSendComplete?.();
+    }
   };
 
   const handleBack = () => {

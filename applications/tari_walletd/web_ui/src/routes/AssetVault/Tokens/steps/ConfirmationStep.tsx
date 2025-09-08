@@ -49,15 +49,32 @@ export default function ConfirmationStep({
       <Stack spacing={2}>
         <Box>
           <Typography variant="h6" color="text.primary" gutterBottom>
-            Confirm Transfer
+            You are about to send:
           </Typography>
         </Box>
 
         <Box>
           <Typography variant="subtitle2" color="text.secondary">
-            Resource:
+            Amount:
           </Typography>
-          <Typography variant="body1">{resource_address}</Typography>
+          <Typography variant="body1">
+            {(() => {
+              const amount = parseFloat(transferFormState.amount) || 0;
+              const hasDecimals =
+                transferFormState.amount.includes(".") && transferFormState.amount.split(".")[1].length > 0;
+              return `${amount.toLocaleString("en-US", {
+                minimumFractionDigits: hasDecimals ? 0 : 2,
+                maximumFractionDigits: CURRENCY.DECIMALS,
+              })} ${CURRENCY.SYMBOL}`;
+            })()}
+          </Typography>
+        </Box>
+
+        <Box>
+          <Typography variant="subtitle2" color="text.secondary">
+            Transaction Fee:
+          </Typography>
+          <Typography variant="body1">{formatCurrency(parseInt(transferFormState.fee) || 0)}</Typography>
         </Box>
 
         <Box>
@@ -71,25 +88,9 @@ export default function ConfirmationStep({
 
         <Box>
           <Typography variant="subtitle2" color="text.secondary">
-            Amount:
+            From:
           </Typography>
-          <Typography variant="body1">
-            {(() => {
-              const amount = parseFloat(transferFormState.amount) || 0;
-              const hasDecimals = transferFormState.amount.includes('.') && transferFormState.amount.split('.')[1].length > 0;
-              return `${amount.toLocaleString('en-US', { 
-                minimumFractionDigits: hasDecimals ? 0 : 2, 
-                maximumFractionDigits: CURRENCY.DECIMALS 
-              })} ${CURRENCY.SYMBOL}`;
-            })()}
-          </Typography>
-        </Box>
-
-        <Box>
-          <Typography variant="subtitle2" color="text.secondary">
-            Transaction Fee:
-          </Typography>
-          <Typography variant="body1">{formatCurrency(parseInt(transferFormState.fee) || 0)}</Typography>
+          <Typography variant="body1">{resource_address}</Typography>
         </Box>
 
         {resource_type === "Confidential" && (

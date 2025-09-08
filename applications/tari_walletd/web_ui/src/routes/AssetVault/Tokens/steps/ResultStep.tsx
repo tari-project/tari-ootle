@@ -21,6 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { Typography, Stack, Button, CircularProgress, Fade, Divider } from "@mui/material";
+import { useEffect } from "react";
 import CancelRoundedIcon from "@mui/icons-material/CancelRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 
@@ -36,8 +37,18 @@ interface ResultStepProps {
 }
 
 export default function ResultStep({ disabled, transferResult, onClose }: ResultStepProps) {
+  useEffect(() => {
+    if (!disabled && transferResult) {
+      const timer = setTimeout(() => {
+        onClose();
+      }, 10000);
+
+      return () => clearTimeout(timer);
+    }
+  }, [disabled, transferResult, onClose]);
+
   return (
-    <Stack direction="column" spacing={2} alignItems="center" justifyContent="center">
+    <Stack direction="column" spacing={2} alignItems="center" justifyContent="center" pt={3}>
       {disabled ? (
         <>
           <CircularProgress size={60} />

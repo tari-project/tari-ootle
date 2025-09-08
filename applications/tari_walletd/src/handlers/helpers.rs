@@ -15,6 +15,7 @@ use tari_ootle_wallet_sdk::{
     storage::WalletStore,
     WalletSdk,
 };
+use tari_ootle_wallet_sdk_services::indexer_jrpc_impl::IndexerJsonRpcNetworkInterface;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::models::ComponentAddress;
@@ -23,7 +24,6 @@ use tari_wallet_daemon_client::ComponentAddressOrName;
 use tokio::sync::broadcast;
 
 use crate::{
-    indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
     jrpc_server::ApplicationErrorCode,
     services::{TransactionFinalizedEvent, WalletEvent},
 };

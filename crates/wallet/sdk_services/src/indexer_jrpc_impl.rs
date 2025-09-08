@@ -44,7 +44,7 @@ use tari_template_lib::{
 use tari_transaction::{Transaction, TransactionId};
 use url::ParseError;
 
-use crate::jrpc_server::ApplicationErrorCode;
+const INVALID_REQUEST_CODE: i64 = 400;
 
 #[derive(Debug, Clone)]
 pub struct IndexerJsonRpcNetworkInterface {
@@ -242,9 +242,7 @@ impl StatusResponseError for IndexerJrpcError {
                     };
                 }
                 match err {
-                    IndexerClientError::RequestFailedWithStatus { code, message }
-                        if *code == ApplicationErrorCode::InvalidRequest as i64 =>
-                    {
+                    IndexerClientError::RequestFailedWithStatus { code, message } if *code == INVALID_REQUEST_CODE => {
                         WalletQueryErrorStatus::TransactionRejected {
                             message: message.clone(),
                         }

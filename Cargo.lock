@@ -11429,6 +11429,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "tari_ootle_wallet_sdk_services"
+version = "0.11.2"
+dependencies = [
+ "reqwest 0.11.27",
+ "tari_engine_types",
+ "tari_indexer_client",
+ "tari_ootle_common_types",
+ "tari_ootle_wallet_sdk",
+ "tari_template_abi",
+ "tari_template_lib",
+ "tari_transaction",
+ "thiserror 1.0.69",
+ "url",
+]
+
+[[package]]
 name = "tari_ootle_wallet_storage_sqlite"
 version = "0.11.2"
 dependencies = [
@@ -11482,11 +11498,11 @@ dependencies = [
  "tari_common_types",
  "tari_crypto",
  "tari_engine_types",
- "tari_indexer_client",
  "tari_ootle_app_utilities",
  "tari_ootle_common_types",
  "tari_ootle_wallet_crypto",
  "tari_ootle_wallet_sdk",
+ "tari_ootle_wallet_sdk_services",
  "tari_ootle_wallet_storage_sqlite",
  "tari_shutdown",
  "tari_template_abi",
@@ -12234,8 +12250,8 @@ dependencies = [
  "tari_engine_types",
  "tari_ootle_common_types",
  "tari_ootle_wallet_sdk",
+ "tari_ootle_wallet_sdk_services",
  "tari_ootle_wallet_storage_sqlite",
- "tari_ootle_walletd",
  "tari_template_builtin",
  "tari_template_lib",
  "tari_transaction",

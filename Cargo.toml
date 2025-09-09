@@ -49,6 +49,7 @@ members = [
     "crates/validator_node_rpc",
     "crates/wallet/crypto",
     "crates/wallet/sdk",
+    "crates/wallet/sdk_services",
     "crates/wallet/storage_sqlite",
     "integration_tests",
     "networking/core",
@@ -89,6 +90,7 @@ tari_ootle_storage = { path = "crates/storage" }
 tari_ootle_storage_sqlite = { path = "crates/storage_sqlite" }
 tari_ootle_wallet_crypto = { path = "crates/wallet/crypto" }
 tari_ootle_wallet_sdk = { path = "crates/wallet/sdk" }
+tari_ootle_wallet_sdk_services = { path = "crates/wallet/sdk_services" }
 tari_ootle_wallet_storage_sqlite = { path = "crates/wallet/storage_sqlite" }
 tari_epoch_manager = { path = "crates/epoch_manager" }
 tari_epoch_oracles = { path = "crates/epoch_oracles" }

@@ -25,7 +25,6 @@ pub mod config;
 mod handlers;
 #[cfg(feature = "web_ui")]
 mod http_ui;
-pub mod indexer_jrpc_impl;
 mod jrpc_server;
 mod notify;
 mod services;
@@ -44,6 +43,7 @@ use tari_ootle_wallet_sdk::{
     WalletSdk,
     WalletSdkConfig,
 };
+use tari_ootle_wallet_sdk_services::indexer_jrpc_impl::IndexerJsonRpcNetworkInterface;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib::constants::XTR;
@@ -51,7 +51,6 @@ use tari_template_lib::constants::XTR;
 use crate::{
     config::ApplicationConfig,
     handlers::{auth::create_authenticator, HandlerContext},
-    indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
     notify::Notify,
     services::{recovery_service, spawn_services},
 };

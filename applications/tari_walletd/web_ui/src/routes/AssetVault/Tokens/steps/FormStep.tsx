@@ -52,6 +52,8 @@ interface FormStepProps {
   useBadge: boolean;
   isEstimatingFee: boolean;
   availableBalance?: number;
+  token_symbol: string;
+  divisibility: number;
   onSubmit: (e: FormEvent) => void;
   onCancel: () => void;
   onFormValueChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -69,6 +71,8 @@ export default function FormStep({
   useBadge,
   isEstimatingFee,
   availableBalance,
+  token_symbol,
+  divisibility,
   onSubmit,
   onCancel,
   onFormValueChange,
@@ -102,7 +106,7 @@ export default function FormStep({
     const hasDecimals = amount.includes(".") && amount.split(".")[1].length > 0;
     return num.toLocaleString("en-US", {
       minimumFractionDigits: hasDecimals ? 0 : 2,
-      maximumFractionDigits: CURRENCY.DECIMALS,
+      maximumFractionDigits: divisibility,
     });
   };
 
@@ -146,9 +150,6 @@ export default function FormStep({
           </>
         )}
         <Stack direction="column" spacing={0.5}>
-          <Typography variant="subtitle2" color="text.secondary">
-            To Public Key:
-          </Typography>
           <TextField
             name="publicKey"
             label="To Public Key"
@@ -211,7 +212,7 @@ export default function FormStep({
           }
           InputProps={{
             placeholder: "0.0",
-            endAdornment: <InputAdornment position="end">{CURRENCY.SYMBOL}</InputAdornment>,
+            endAdornment: <InputAdornment position="end">{token_symbol}</InputAdornment>,
           }}
         />
 
@@ -230,7 +231,7 @@ export default function FormStep({
           disabled={true}
           style={{ flexGrow: 1 }}
           InputProps={{
-            endAdornment: !isEstimatingFee ? <InputAdornment position="end">{CURRENCY.SYMBOL}</InputAdornment> : null,
+            endAdornment: !isEstimatingFee ? <InputAdornment position="end">{token_symbol}</InputAdornment> : null,
           }}
         />
 

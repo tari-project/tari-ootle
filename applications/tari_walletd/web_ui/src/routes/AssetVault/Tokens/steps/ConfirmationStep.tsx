@@ -23,8 +23,7 @@
 import { Box, Button, Stack, Typography, Divider } from "@mui/material";
 import type { ResourceAddress, ResourceType } from "@tari-project/typescript-bindings";
 import CopyAddress from "@components/CopyAddress";
-import { formatCurrency } from "@utils/helpers";
-import { CURRENCY } from "@utils/constants";
+import { formatCurrency, bigintToDecimalString } from "@utils/helpers";
 import { SendMoneyFormState } from "./FormStep";
 
 interface ConfirmationStepProps {
@@ -34,6 +33,8 @@ interface ConfirmationStepProps {
   disabled: boolean;
   onBack: () => void;
   onConfirm: () => void;
+  token_symbol: string;
+  divisibility: number;
 }
 
 export default function ConfirmationStep({
@@ -43,6 +44,8 @@ export default function ConfirmationStep({
   disabled,
   onBack,
   onConfirm,
+  token_symbol,
+  divisibility,
 }: ConfirmationStepProps) {
   return (
     <Stack spacing={3} sx={{ py: 2 }}>
@@ -58,15 +61,7 @@ export default function ConfirmationStep({
             Amount:
           </Typography>
           <Typography variant="body1">
-            {(() => {
-              const amount = parseFloat(transferFormState.amount) || 0;
-              const hasDecimals =
-                transferFormState.amount.includes(".") && transferFormState.amount.split(".")[1].length > 0;
-              return `${amount.toLocaleString("en-US", {
-                minimumFractionDigits: hasDecimals ? 0 : 2,
-                maximumFractionDigits: CURRENCY.DECIMALS,
-              })} ${CURRENCY.SYMBOL}`;
-            })()}
+            {transferFormState.amount} {token_symbol}
           </Typography>
         </Box>
 

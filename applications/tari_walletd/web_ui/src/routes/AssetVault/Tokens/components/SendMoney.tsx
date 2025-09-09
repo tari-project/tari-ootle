@@ -39,7 +39,6 @@ import {
   XTR,
 } from "@tari-project/typescript-bindings";
 import { transactionsWaitResult } from "@utils/json_rpc";
-import { CURRENCY } from "@utils/constants";
 import FormStep, { SendMoneyFormState } from "../steps/FormStep";
 import ConfirmationStep from "../steps/ConfirmationStep";
 import ResultStep, { TransferResult } from "../steps/ResultStep";
@@ -59,6 +58,7 @@ export default function SendMoney() {
         onSendComplete={() => setOpen(false)}
         resource_type="Confidential"
         resource_address={XTR}
+        token_symbol="tXTR"
       />
     </>
   );
@@ -70,6 +70,7 @@ export interface SendMoneyDialogProps {
   resource_type: ResourceType;
   onSendComplete?: () => void;
   handleClose: () => void;
+  token_symbol: string;
 }
 
 export function SendMoneyDialog(props: SendMoneyDialogProps) {
@@ -101,16 +102,48 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     ?.filter((b: BalanceEntry) => b.resource_type === "NonFungible" && BigInt(b.balance) > 0n)
     .map((b: BalanceEntry) => b.resource_address) as string[];
 
+  console.log("data", data);
+  console.log("badges", badges);
+
   // Find the available balance for the resource we're trying to send
   const balanceEntry = data?.balances?.find(
     (b: BalanceEntry) => b.resource_address === (props.resource_address || XTR),
   );
-  // Balance is in micro XTR units, convert to XTR for display
-  const availableBalance = balanceEntry?.balance ? Number(balanceEntry.balance) / CURRENCY.DIVISOR : undefined;
+  
+  // Function to calculate available balance based on input selection
+  const calculateAvailableBalance = () => {
+    if (!balanceEntry) return undefined;
+    
+    const revealedBalance = BigInt(balanceEntry.balance);
+    const confidentialBalance = BigInt(balanceEntry.confidential_balance);
+    const divisor = Math.pow(10, balanceEntry.divisibility);
+    
+    let result;
+    switch (transferFormState.inputSelection) {
+      case "RevealedOnly":
+        result = Number(revealedBalance) / divisor;
+        break;
+      case "ConfidentialOnly":
+        result = Number(confidentialBalance) / divisor;
+        break;
+      case "PreferRevealed":
+      case "PreferConfidential":
+        // For prefer options, show total available (revealed + confidential)
+        result = Number(revealedBalance + confidentialBalance) / divisor;
+        break;
+      default:
+        result = Number(revealedBalance + confidentialBalance) / divisor;
+        break;
+    }
+    
+    return result;
+  };
+  
+  const availableBalance = calculateAvailableBalance();
 
   const transfer = {
     account: substateIdToString(account.address),
-    amount: Math.floor((parseFloat(transferFormState.amount) || 0) * CURRENCY.DIVISOR),
+    amount: Math.floor((parseFloat(transferFormState.amount) || 0) * Math.pow(10, balanceEntry?.divisibility || 6)),
     resource_address: props.resource_address || XTR,
     destination_public_key: transferFormState.publicKey,
     resourceType: props.resource_type,
@@ -179,7 +212,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
       // Create transfer object with current form state
       const currentTransfer = {
         account: substateIdToString(account.address),
-        amount: Math.floor((parseFloat(transferFormState.amount) || 0) * CURRENCY.DIVISOR),
+        amount: Math.floor((parseFloat(transferFormState.amount) || 0) * Math.pow(10, balanceEntry?.divisibility || 6)),
         resource_address: props.resource_address || XTR,
         destination_public_key: transferFormState.publicKey,
         resourceType: props.resource_type,
@@ -306,6 +339,8 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
             useBadge={useBadge}
             isEstimatingFee={isEstimatingFee}
             availableBalance={availableBalance}
+            token_symbol={props.token_symbol}
+            divisibility={balanceEntry?.divisibility || 6}
             onSubmit={handleFormSubmit}
             onCancel={handleClose}
             onFormValueChange={setFormValue}
@@ -323,6 +358,8 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
             disabled={disabled}
             onBack={handleBack}
             onConfirm={handleConfirm}
+            token_symbol={props.token_symbol}
+            divisibility={balanceEntry?.divisibility || 6}
           />
         );
       case 2:

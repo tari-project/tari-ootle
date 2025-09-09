@@ -55,27 +55,34 @@ interface BalanceRowProps {
   onSendClicked?: (resource_address: ResourceAddress, resource_type: ResourceType) => void;
 }
 
-function ConfidentialBalance(props: { show: boolean; balance: Amount; resourceType: string; divisibility: number }) {
-  switch (props.resourceType) {
+interface ConfidentialBalanceProps {
+  show: boolean;
+  balance: Amount;
+  resourceType: string;
+  divisibility: number;
+  token_symbol?: string;
+}
+
+function ConfidentialBalance({ show, resourceType, balance, divisibility, token_symbol }: ConfidentialBalanceProps) {
+  switch (resourceType) {
     case "Confidential":
     case "Stealth":
-      return <>{props.show ? bigintToDecimalString(props.balance, props.divisibility) : "**************"}</>;
+      return <>{show ? bigintToDecimalString(balance, divisibility) + " " + token_symbol : "**************"}</>;
     default:
       return <>--</>;
   }
 }
 
-function BalanceRow(props: BalanceRowProps) {
-  const {
-    token_symbol,
-    resource_address,
-    resource_type,
-    balance,
-    confidential_balance,
-    vault_address,
-    divisibility,
-    onSendClicked,
-  } = props;
+function BalanceRow({
+  token_symbol,
+  resource_address,
+  resource_type,
+  balance,
+  confidential_balance,
+  vault_address,
+  divisibility,
+  onSendClicked,
+}: BalanceRowProps) {
   const showBalance = useAccountStore((state) => state.showBalance);
   return (
     <TableRow key={token_symbol || resource_address}>
@@ -86,13 +93,16 @@ function BalanceRow(props: BalanceRowProps) {
           display={`${token_symbol || shortenSubstateId(resource_address)} ${resource_type}`}
         />
       </DataTableCell>
-      <DataTableCell>{showBalance ? bigintToDecimalString(balance, divisibility) : "*************"}</DataTableCell>
+      <DataTableCell>
+        {showBalance ? bigintToDecimalString(balance, divisibility) + " " + token_symbol : "*************"}
+      </DataTableCell>
       <DataTableCell>
         <ConfidentialBalance
           show={showBalance}
           resourceType={resource_type}
           balance={confidential_balance}
           divisibility={divisibility}
+          token_symbol={token_symbol}
         />
       </DataTableCell>
       <DataTableCell>
@@ -128,6 +138,9 @@ function Tokens({ account }: { account: Account }) {
         onSendComplete={() => setResourceToSend(null)}
         resource_address={resourceToSend?.address}
         resource_type={resourceToSend?.resource_type!}
+        token_symbol={
+          balancesData?.balances.find((b) => b.resource_address === resourceToSend?.address)?.token_symbol || ""
+        }
       />
       <FetchStatusCheck
         isError={balancesIsError}

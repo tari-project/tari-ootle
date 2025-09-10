@@ -45,7 +45,6 @@ export default function ConfirmationStep({
   onBack,
   onConfirm,
   token_symbol,
-  divisibility,
 }: ConfirmationStepProps) {
   return (
     <Stack spacing={3} sx={{ py: 2 }}>
@@ -61,7 +60,8 @@ export default function ConfirmationStep({
             Amount:
           </Typography>
           <Typography variant="body1">
-            {transferFormState.amount} {token_symbol}
+            {transferFormState.amount}
+            {token_symbol ? ` ${token_symbol}` : ""}
           </Typography>
         </Box>
 

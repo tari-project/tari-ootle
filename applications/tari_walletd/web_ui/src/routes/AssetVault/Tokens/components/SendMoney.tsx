@@ -46,6 +46,10 @@ import { Divider, Stack, Typography } from "@mui/material";
 
 export default function SendMoney() {
   const [open, setOpen] = useState(false);
+  const { account } = useAccountStore();
+
+  const { data } = useAccountsGetBalances(account ? substateIdToString(account.address) : "");
+  const xtrBalanceEntry = data?.balances?.find((b) => b.resource_address === XTR);
 
   return (
     <>
@@ -58,7 +62,7 @@ export default function SendMoney() {
         onSendComplete={() => setOpen(false)}
         resource_type="Confidential"
         resource_address={XTR}
-        token_symbol="tXTR"
+        token_symbol={xtrBalanceEntry?.token_symbol || ""}
       />
     </>
   );
@@ -102,22 +106,19 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     ?.filter((b: BalanceEntry) => b.resource_type === "NonFungible" && BigInt(b.balance) > 0n)
     .map((b: BalanceEntry) => b.resource_address) as string[];
 
-  console.log("data", data);
-  console.log("badges", badges);
-
   // Find the available balance for the resource we're trying to send
   const balanceEntry = data?.balances?.find(
     (b: BalanceEntry) => b.resource_address === (props.resource_address || XTR),
   );
-  
+
   // Function to calculate available balance based on input selection
   const calculateAvailableBalance = () => {
     if (!balanceEntry) return undefined;
-    
+
     const revealedBalance = BigInt(balanceEntry.balance);
     const confidentialBalance = BigInt(balanceEntry.confidential_balance);
     const divisor = Math.pow(10, balanceEntry.divisibility);
-    
+
     let result;
     switch (transferFormState.inputSelection) {
       case "RevealedOnly":
@@ -135,10 +136,10 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         result = Number(revealedBalance + confidentialBalance) / divisor;
         break;
     }
-    
+
     return result;
   };
-  
+
   const availableBalance = calculateAvailableBalance();
 
   const transfer = {

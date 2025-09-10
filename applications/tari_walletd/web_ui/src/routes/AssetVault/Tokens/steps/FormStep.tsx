@@ -212,7 +212,7 @@ export default function FormStep({
           }
           InputProps={{
             placeholder: "0.0",
-            endAdornment: <InputAdornment position="end">{token_symbol}</InputAdornment>,
+            endAdornment: token_symbol ? <InputAdornment position="end">{token_symbol}</InputAdornment> : undefined,
           }}
         />
 
@@ -231,7 +231,7 @@ export default function FormStep({
           disabled={true}
           style={{ flexGrow: 1 }}
           InputProps={{
-            endAdornment: !isEstimatingFee ? <InputAdornment position="end">{token_symbol}</InputAdornment> : null,
+            endAdornment: !isEstimatingFee && token_symbol ? <InputAdornment position="end">{token_symbol}</InputAdornment> : null,
           }}
         />
 

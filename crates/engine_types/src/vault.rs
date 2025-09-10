@@ -38,7 +38,7 @@ use crate::{
     resource_container::{ResourceContainer, ResourceError},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Vault {
     resource_container: ResourceContainer,

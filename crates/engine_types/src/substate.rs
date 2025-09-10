@@ -565,7 +565,7 @@ impl_partial_eq!(PublishedTemplateAddress, Template);
 impl_partial_eq!(ValidatorFeePoolAddress, ValidatorFeePool);
 impl_partial_eq!(UtxoAddress, Utxo);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum SubstateValue {
     Component(ComponentHeader),

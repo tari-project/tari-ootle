@@ -9,7 +9,7 @@ use tari_engine_types::{substate::SubstateId, transaction_receipt::TransactionRe
 
 use crate::{displayable::Displayable, shard::Shard, NumPreshards, ShardGroup, SubstateAddress, ToSubstateAddress};
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SubstateRequirement {
     #[cfg_attr(feature = "ts", ts(type = "string"))]

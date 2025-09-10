@@ -9,26 +9,24 @@ use serde::{Deserialize, Serialize};
 use tari_engine_types::{
     hashing::hash_template_code,
     indexed_value::IndexedValueError,
-    instruction::Instruction,
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement, SubstateRequirementRef};
-use tari_template_lib::{
-    args::InstructionArg,
-    models::{ComponentAddress, StealthTransferStatement},
-};
+use tari_template_lib::models::{ComponentAddress, StealthTransferStatement};
 
 use crate::{
+    args::InstructionArg,
     v1::signature::TransactionSignature,
     weight::TransactionWeight,
+    Instruction,
     TransactionSealSignature,
     UnsealedTransactionV1,
 };
 
 const LOG_TARGET: &str = "tari::ootle::transaction::transaction";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionV1 {
     body: UnsealedTransactionV1,

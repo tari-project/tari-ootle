@@ -13,7 +13,6 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_template_lib::{
-    call_args,
     models::{Account, ComponentAddress},
     prelude::ConfidentialOutputStatement,
     types::{
@@ -35,7 +34,7 @@ use tari_template_test_tooling::{
     },
     TemplateTest,
 };
-use tari_transaction::{args, Transaction};
+use tari_transaction::{args, call_args, Transaction};
 use tari_transaction_manifest::ManifestValue;
 use tari_utilities::ByteArray;
 
@@ -428,7 +427,7 @@ fn mint_and_transfer_revealed() {
 
     let (user_account, _, _) = test.create_empty_account();
 
-    test.call_method::<()>(faucet, "mint_revealed", call_args![Amount(123)], vec![]);
+    test.call_method::<()>(faucet, "mint_revealed", call_args![123], vec![]);
     let balance: Amount = test.call_method(faucet, "vault_balance", call_args![], vec![]);
     assert_eq!(balance, Amount::from(123));
 

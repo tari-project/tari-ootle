@@ -6,6 +6,7 @@ use tari_template_abi::rust::fmt;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct UtxoTagByte(u8);
 
 impl UtxoTagByte {

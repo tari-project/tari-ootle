@@ -12,7 +12,7 @@ use tari_template_lib::{
 
 use crate::serde_with;
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct MinotariBurnClaimProof {
     /// This is typically the public nonce that the UTXO was burnt with
@@ -40,25 +40,27 @@ impl Display for MinotariBurnClaimProof {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ClaimBurnOutputData {
     pub encrypted_data: EncryptedData,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct EncodedMerkleProof {
     #[serde(with = "serde_with::base64")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[borsh(serialize_with = "serialize_bytes")]
     pub block_hash: FixedHash,
     #[serde(with = "serde_with::base64")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[borsh(serialize_with = "serialize_bytes")]
     pub encoded_merkle_proof: bounded_vec::BoundedVec<u8, 1, 4096>,
     pub leaf_index: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct AbridgedTransactionKernel {
     pub version: u8,
@@ -66,4 +68,11 @@ pub struct AbridgedTransactionKernel {
     pub lock_height: u64,
     pub excess: PedersenCommitmentBytes,
     pub excess_sig: SchnorrSignatureBytes,
+}
+
+pub(crate) fn serialize_bytes<W: borsh::io::Write, T: AsRef<[u8]>>(
+    obj: &T,
+    writer: &mut W,
+) -> Result<(), borsh::io::Error> {
+    borsh::BorshSerialize::serialize(obj.as_ref(), writer)
 }

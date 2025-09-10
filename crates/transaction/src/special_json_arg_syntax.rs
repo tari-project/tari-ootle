@@ -1,4 +1,4 @@
-//   Copyright 2023 The Tari Project
+//   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::str::FromStr;
@@ -6,14 +6,16 @@ use std::str::FromStr;
 use serde::{Deserialize, Deserializer};
 use serde_json as json;
 use tari_bor::{cbor, encode, to_value};
+use tari_engine_types::{substate::SubstateId, template::parse_template_address};
 use tari_template_lib::{
-    args::{InstructionArg, WorkspaceId},
-    call_arg,
     models::{Metadata, NonFungibleId},
     types::{Amount, ParseIntError, TemplateAddress},
 };
 
-use crate::{substate::SubstateId, template::parse_template_address};
+use crate::{
+    args::{InstructionArg, WorkspaceId},
+    call_arg,
+};
 
 pub fn json_deserialize<'de, D>(d: D) -> Result<Vec<InstructionArg>, D::Error>
 where D: Deserializer<'de> {
@@ -269,14 +271,10 @@ mod tests {
     use serde::Serialize;
     use serde_json::json;
     use tari_bor::decode_exact;
-    use tari_template_lib::{
-        args::WorkspaceOffsetId,
-        call_args,
-        models::{ComponentAddress, ResourceAddress},
-    };
+    use tari_template_lib::models::{ComponentAddress, ResourceAddress};
 
     use super::*;
-    use crate::serde_with;
+    use crate::{args::WorkspaceOffsetId, call_args};
 
     #[test]
     fn struct_test() {
@@ -327,7 +325,6 @@ mod tests {
             boolean: bool,
             array: Vec<String>,
             map: std::collections::HashMap<String, String>,
-            #[serde(with = "serde_with::string::option")]
             opt: Option<ComponentAddress>,
         }
 
@@ -463,7 +460,6 @@ mod tests {
     }
 
     mod convert_json_to_arg {
-
         use super::*;
 
         #[test]

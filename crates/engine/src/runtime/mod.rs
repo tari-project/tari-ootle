@@ -62,14 +62,11 @@ use tari_engine_types::{
     limits,
     lock::LockFlag,
     substate::SubstateValue,
-    ComponentCall,
-    ResourceAddressRef,
     ValidatorFeePoolAddress,
 };
 use tari_template_lib::{
     args::{
         AddressAllocationInvokeArg,
-        AllocatableAddressType,
         AllocateAddressResult,
         BucketAction,
         BucketRef,
@@ -80,7 +77,6 @@ use tari_template_lib::{
         ComponentRef,
         ConsensusAction,
         GenerateRandomAction,
-        InstructionArg,
         InvokeResult,
         LogLevel,
         NonFungibleAction,
@@ -90,12 +86,16 @@ use tari_template_lib::{
         ResourceRef,
         VaultAction,
         WorkspaceAction,
-        WorkspaceId,
-        WorkspaceOffsetId,
     },
     invoke_args,
     models::{BucketId, ComponentAddress, Metadata, NonFungibleAddress, StealthTransferStatement, VaultRef},
     types::EntityId,
+};
+use tari_transaction::{
+    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
+    AllocatableAddressType,
+    ComponentCall,
+    ResourceAddressRef,
 };
 pub use tracker::StateTracker;
 

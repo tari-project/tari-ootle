@@ -17,6 +17,7 @@ use crate::models::{EncryptedData, ViewableBalanceProof};
 ///   is enabled for a resource.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct UnspentOutput {
     pub commitment: PedersenCommitmentBytes,
     /// Public nonce (R) that was used to generate the commitment mask
@@ -31,6 +32,7 @@ pub struct UnspentOutput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct StealthUnspentOutput {
     pub output: UnspentOutput,
     /// The public key that must prove ownership of this UTXO. This is typically a one time "stealth" public key

@@ -28,14 +28,10 @@ use std::{
 use anyhow::{anyhow, Context};
 use tari_engine_types::{
     confidential::{AbridgedTransactionKernel, ClaimBurnOutputData, EncodedMerkleProof, MinotariBurnClaimProof},
-    instruction::Instruction,
     substate::SubstateId,
-    ComponentCall,
-    ResourceAddressRef,
 };
 use tari_ootle_common_types::{SubstateRequirement, SubstateRequirementRef, VersionedSubstateId};
 use tari_template_lib::{
-    args::{AllocatableAddressType, InstructionArg, WorkspaceId, WorkspaceOffsetId},
     auth::OwnerRule,
     models::{
         ComponentAddress,
@@ -58,7 +54,14 @@ use tari_template_lib::{
         ObjectKey,
     },
 };
-use tari_transaction::Transaction;
+use tari_transaction::{
+    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
+    AllocatableAddressType,
+    ComponentCall,
+    Instruction,
+    ResourceAddressRef,
+    Transaction,
+};
 
 use crate::{
     encoding::{decode_from_slice, encode_to_vec},

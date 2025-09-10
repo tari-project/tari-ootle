@@ -1215,6 +1215,7 @@ checksum = "ad8646f98db542e39fc66e68a20b2144f6a732636df7c2354e74645faaa433ce"
 dependencies = [
  "borsh-derive",
  "cfg_aliases 0.2.1",
+ "indexmap 2.9.0",
 ]
 
 [[package]]
@@ -10616,6 +10617,7 @@ dependencies = [
 name = "tari_bor"
 version = "0.10.4"
 dependencies = [
+ "borsh",
  "ciborium",
  "ciborium-io",
  "serde",
@@ -11961,16 +11963,18 @@ name = "tari_transaction"
 version = "0.11.2"
 dependencies = [
  "borsh",
+ "hex",
  "indexmap 2.9.0",
  "log",
  "rand 0.8.5",
  "serde",
+ "serde_json",
  "tari_bor",
- "tari_common_types",
  "tari_crypto",
  "tari_engine_types",
  "tari_ootle_common_types",
  "tari_template_lib",
+ "thiserror 1.0.69",
  "ts-rs",
 ]
 
@@ -12047,6 +12051,7 @@ dependencies = [
  "tari_engine_types",
  "tari_template_builtin",
  "tari_template_lib",
+ "tari_transaction",
  "thiserror 1.0.69",
 ]
 

@@ -17,14 +17,14 @@ use tari_template_lib::{
 
 use crate::crypto::PrivateOutput;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Utxo {
     pub output: Option<UtxoOutput>,
     pub is_frozen: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UtxoOutput {
     pub output: PrivateOutput,
@@ -75,7 +75,19 @@ impl Utxo {
 
 const TAG: u64 = BinaryTag::Utxo.as_u64();
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    borsh::BorshSerialize,
+    borsh::BorshDeserialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UtxoAddress(BorTag<UtxoAddressContents, TAG>);
 
@@ -176,18 +188,6 @@ impl Display for UtxoId {
 pub struct UtxoAddressContents {
     resource_address: ResourceAddress,
     id: UtxoId,
-}
-
-impl borsh::BorshSerialize for UtxoAddress {
-    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        ::borsh::BorshSerialize::serialize(self.0.inner(), writer)
-    }
-}
-
-impl borsh::BorshDeserialize for UtxoAddress {
-    fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
-        Ok(Self(BorTag::new(borsh::BorshDeserialize::deserialize_reader(reader)?)))
-    }
 }
 
 #[cfg(test)]

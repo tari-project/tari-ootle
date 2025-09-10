@@ -2,11 +2,10 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine::runtime::RuntimeError;
-use tari_engine_types::instruction::Instruction;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::{call_args, models::ComponentAddress, types::Amount};
+use tari_template_lib::{models::ComponentAddress, types::Amount};
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
-use tari_transaction::{args, Transaction};
+use tari_transaction::{args, call_args, Instruction, Transaction};
 
 #[test]
 fn basic_emit_event() {

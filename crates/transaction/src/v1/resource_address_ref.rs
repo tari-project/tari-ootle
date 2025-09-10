@@ -4,12 +4,11 @@
 use std::fmt::{Display, Formatter};
 
 use tari_bor::{Deserialize, Serialize};
-use tari_template_lib::{
-    args::{WorkspaceId, WorkspaceOffsetId},
-    models::ResourceAddress,
-};
+use tari_template_lib::models::ResourceAddress;
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+use crate::args::{WorkspaceId, WorkspaceOffsetId};
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum ResourceAddressRef {
     Address(ResourceAddress),

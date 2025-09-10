@@ -29,31 +29,28 @@ use tari_engine_types::{
     component::derive_component_address_from_public_key,
     entity_id_provider::EntityIdProvider,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
-    instruction::Instruction,
     instruction_result::InstructionResult,
     lock::LockFlag,
     virtual_substate::VirtualSubstates,
-    ComponentCall,
-    ResourceAddressRef,
 };
 use tari_ootle_common_types::services::template_provider::TemplateProvider;
 use tari_template_abi::{FunctionDef, Type};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    args::{
-        AllocatableAddressType,
-        AllocateAddressResult,
-        InstructionArg,
-        WorkspaceAction,
-        WorkspaceId,
-        WorkspaceOffsetId,
-    },
+    args::{AllocateAddressResult, WorkspaceAction},
     auth::{ComponentAccessRules, OwnerRule},
-    call_arg,
-    call_args,
     invoke_args,
     models::{Bucket, NonFungibleAddress, StealthTransferStatement},
     types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
+};
+use tari_transaction::{
+    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
+    call_arg,
+    call_args,
+    AllocatableAddressType,
+    ComponentCall,
+    Instruction,
+    ResourceAddressRef,
 };
 
 use crate::{

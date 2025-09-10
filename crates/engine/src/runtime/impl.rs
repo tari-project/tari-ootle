@@ -42,8 +42,6 @@ use tari_engine_types::{
     resource_container::{ResourceContainer, ResourceError},
     substate::{SubstateId, SubstateValue},
     vault::Vault,
-    ComponentCall,
-    ResourceAddressRef,
     Utxo,
     UtxoAddress,
     UtxoOutput,
@@ -55,7 +53,6 @@ use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRES
 use tari_template_lib::{
     args::{
         AddressAllocationInvokeArg,
-        AllocatableAddressType,
         AllocateAddressResult,
         BucketAction,
         BucketRef,
@@ -71,7 +68,6 @@ use tari_template_lib::{
         CreateResourceArg,
         FreezeResourceArg,
         GenerateRandomAction,
-        InstructionArg,
         InvokeResult,
         LogLevel,
         MintResourceArg,
@@ -91,12 +87,10 @@ use tari_template_lib::{
         VaultFreezeFlag,
         VaultWithdrawArg,
         WorkspaceAction,
-        WorkspaceId,
-        WorkspaceOffsetId,
     },
     auth::{AuthHook, AuthHookCaller, ComponentAccessRules, OwnerRule, ResourceAccessRules, ResourceAuthAction},
-    call_args,
     constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR},
+    invoke_args,
     models::{
         BucketId,
         ClaimedOutputTombstoneAddress,
@@ -115,6 +109,12 @@ use tari_template_lib::{
     resource::{IMAGE_URL, TOKEN_SYMBOL},
     template::BuiltinTemplate,
     types::{crypto::UtxoTagByte, Amount, EntityId, TemplateAddress},
+};
+use tari_transaction::{
+    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
+    AllocatableAddressType,
+    ComponentCall,
+    ResourceAddressRef,
 };
 
 use super::{working_state::WorkingState, Runtime};
@@ -293,7 +293,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
         // The signature of a call back is (action: ResourceAuthAction, auth_caller: AuthCaller)
         let ret = self
-            .invoke_component_method(auth_hook.component_address, &auth_hook.method, call_args![
+            .invoke_component_method(auth_hook.component_address, &auth_hook.method, invoke_args![
                 action,
                 auth_caller
             ])
@@ -317,7 +317,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         &self,
         component_address: ComponentAddress,
         method: &str,
-        args: Vec<InstructionArg>,
+        args: Vec<Vec<u8>>,
     ) -> Result<InstructionResult, RuntimeError> {
         let call_runtime = Runtime::new(Arc::new(self.clone()));
         TransactionProcessor::call_method(
@@ -325,7 +325,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             &call_runtime,
             component_address.into(),
             method,
-            args,
+            args.into_iter().map(InstructionArg::Literal).collect(),
         )
         .map_err(|e| RuntimeError::CrossTemplateCallMethodError {
             component_address,
@@ -338,7 +338,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         &self,
         template_address: &TemplateAddress,
         function: &str,
-        args: Vec<InstructionArg>,
+        args: Vec<Vec<u8>>,
     ) -> Result<InstructionResult, RuntimeError> {
         // we are initializing a new runtime for the nested call
         let call_runtime = Runtime::new(Arc::new(self.clone()));
@@ -347,7 +347,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             &call_runtime,
             template_address,
             function,
-            args,
+            args.into_iter().map(InstructionArg::Literal).collect(),
         )
         .map_err(|e| RuntimeError::CrossTemplateCallFunctionError {
             template_address: *template_address,

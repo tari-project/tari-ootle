@@ -45,7 +45,7 @@ mod dangling_template {
 
         pub fn reentrant_withdraw(&mut self, amount: Amount) -> Bucket {
             let bucket1 = self.withdraw(amount);
-            let bucket2 = ComponentManager::current().call("withdraw", call_args![amount]);
+            let bucket2 = ComponentManager::current().call("withdraw", args![amount]);
             self.deposit(bucket1);
             bucket2
         }
@@ -53,17 +53,17 @@ mod dangling_template {
         pub fn reentrant_access(&mut self) {
             self.is_allowed = false;
             // The component state is not yet updated, so this would succeed if the engine allowed it
-            ComponentManager::current().call("assert_is_allowed", call_args![])
+            ComponentManager::current().call("assert_is_allowed", args![])
         }
 
         pub fn reentrant_access_mut(&mut self) {
             self.is_allowed = false;
             // The component state is not yet updated, so this would succeed if the engine allowed it
-            ComponentManager::current().call("reentrant_access_mut", call_args![])
+            ComponentManager::current().call("reentrant_access_mut", args![])
         }
 
         pub fn reentrant_access_immutable(&self) {
-            ComponentManager::current().call("assert_is_allowed", call_args![])
+            ComponentManager::current().call("assert_is_allowed", args![])
         }
 
         pub fn assert_is_allowed(&self) {

@@ -19,6 +19,7 @@ const TAG: u64 = BinaryTag::ClaimedOutputTombstoneAddress.as_u64();
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(transparent)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct ClaimedOutputTombstoneAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl ClaimedOutputTombstoneAddress {
@@ -85,25 +86,5 @@ impl FromStr for ClaimedOutputTombstoneAddress {
 impl AsRef<[u8]> for ClaimedOutputTombstoneAddress {
     fn as_ref(&self) -> &[u8] {
         self.as_bytes()
-    }
-}
-
-#[cfg(feature = "borsh")]
-mod borsh {
-    use std::io::Read;
-
-    use super::*;
-
-    impl ::borsh::BorshSerialize for ClaimedOutputTombstoneAddress {
-        fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-            ::borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
-        }
-    }
-
-    impl ::borsh::BorshDeserialize for ClaimedOutputTombstoneAddress {
-        fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
-            let key = ::borsh::BorshDeserialize::deserialize_reader(reader)?;
-            Ok(ClaimedOutputTombstoneAddress::new(ObjectKey::from_array(key)))
-        }
     }
 }

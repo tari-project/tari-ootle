@@ -9,7 +9,6 @@ use tari_engine_types::{
     confidential::MinotariBurnClaimProof,
     hashing::{hasher32, EngineHashDomainLabel},
     indexed_value::IndexedValueError,
-    instruction::Instruction,
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
 };
@@ -32,12 +31,13 @@ use crate::{
     transaction_id::TransactionId,
     v1::UnsealedTransactionV1,
     weight::TransactionWeight,
+    Instruction,
     TransactionSealSignature,
     TransactionSignature,
     TransactionV1,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Transaction {
     V1(TransactionV1),
@@ -298,10 +298,9 @@ impl Display for Transaction {
 #[cfg(test)]
 mod tests {
     use rand::rngs::OsRng;
-    use tari_common_types::types::PrivateKey;
     use tari_crypto::{
         keys::{PublicKey as _, SecretKey},
-        ristretto::RistrettoPublicKey,
+        ristretto::{RistrettoPublicKey, RistrettoSecretKey},
         tari_utilities::ByteArray,
     };
     use tari_engine_types::ToByteType;
@@ -309,7 +308,7 @@ mod tests {
     use tari_template_lib::types::TemplateAddress;
 
     use super::*;
-    use crate::args;
+    use crate::{args, call_args};
 
     fn create_transaction() -> TransactionBuilder {
         Transaction::builder()
@@ -320,7 +319,7 @@ mod tests {
                 2,
                 3,
                 "string",
-                tari_template_lib::call_args![1, 2]
+                call_args![1, 2]
             ])
             .call_function(TemplateAddress::from_array([1; 32]), "function", args![
                 1,
@@ -348,12 +347,12 @@ mod tests {
 
     #[test]
     fn it_correctly_signs_and_verifies() {
-        let secret = PrivateKey::random(&mut OsRng);
+        let secret = RistrettoSecretKey::random(&mut OsRng);
         let public_key = RistrettoPublicKey::from_secret_key(&secret);
         let subject = create_transaction().build_and_seal(&secret);
         assert!(subject.verify_all_signatures());
 
-        let secret2 = PrivateKey::random(&mut OsRng);
+        let secret2 = RistrettoSecretKey::random(&mut OsRng);
         let subject = create_transaction()
             .add_signature(&public_key.to_byte_type(), &secret2)
             .build_and_seal(&secret);

@@ -6,14 +6,12 @@ use std::vec;
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine::runtime::{AssertError, RuntimeError};
 use tari_template_lib::{
-    args::WorkspaceOffsetId,
-    call_args,
     models::{ComponentAddress, NonFungibleAddress, ResourceAddress},
     prelude::XTR,
     types::Amount,
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
-use tari_transaction::{args, Instruction, Transaction};
+use tari_transaction::{args, args::WorkspaceOffsetId, call_args, Instruction, Transaction};
 
 const FAUCET_WITHDRAWAL_AMOUNT: u32 = 1000;
 

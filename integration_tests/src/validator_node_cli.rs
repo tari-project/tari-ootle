@@ -5,13 +5,12 @@ use std::{collections::HashMap, path::PathBuf, str::FromStr};
 
 use tari_engine_types::{
     commit_result::RejectReason,
-    instruction::Instruction,
     substate::{SubstateDiff, SubstateId},
     ToByteType,
 };
 use tari_ootle_common_types::SubstateRequirement;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::call_args;
+use tari_transaction::{call_args, Instruction};
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 use tari_validator_node_cli::{
     command::transaction::{handle_submit, submit_transaction, CliArg, CliInstruction, CommonSubmitArgs, SubmitArgs},

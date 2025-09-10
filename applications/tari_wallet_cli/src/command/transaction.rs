@@ -35,7 +35,6 @@ use tari_bor::decode_exact;
 use tari_engine::abi::Type;
 use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason, TransactionResult},
-    instruction::Instruction,
     instruction_result::InstructionResult,
     parse_template_address,
     substate::{SubstateDiff, SubstateId, SubstateValue},
@@ -43,14 +42,20 @@ use tari_engine_types::{
 use tari_ootle_common_types::{Epoch, SubstateAddress, SubstateRequirement};
 use tari_ootle_wallet_sdk::apis::confidential_transfer::ConfidentialTransferInputSelection;
 use tari_template_lib::{
-    args::InstructionArg,
-    call_arg,
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
     models::{BucketId, NonFungibleAddress, NonFungibleId},
     prelude::{ResourceAddress, RistrettoPublicKeyBytes},
     types::{Amount, TemplateAddress},
 };
-use tari_transaction::{args, Transaction, TransactionId, UnsignedTransaction};
+use tari_transaction::{
+    args,
+    args::InstructionArg,
+    call_arg,
+    Instruction,
+    Transaction,
+    TransactionId,
+    UnsignedTransaction,
+};
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 use tari_wallet_daemon_client::{
     types::{

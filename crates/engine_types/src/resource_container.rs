@@ -24,7 +24,7 @@ use tari_template_lib::{
 use crate::{confidential, crypto::PrivateOutput, substate::SubstateId, ToByteType};
 
 /// Instances of a single resource kept in Buckets and Vaults
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum ResourceContainer {
     Fungible {

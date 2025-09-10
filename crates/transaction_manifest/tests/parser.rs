@@ -22,12 +22,12 @@
 
 use std::{collections::HashMap, fs};
 
-use tari_engine_types::{instruction::Instruction, substate::SubstateId};
+use tari_engine_types::substate::SubstateId;
 use tari_template_lib::{
-    call_args,
     models::{ComponentAddress, ResourceAddress},
     types::{ObjectKey, TemplateAddress},
 };
+use tari_transaction::{call_args, Instruction};
 use tari_transaction_manifest::{parse_manifest, ManifestInstructions};
 
 #[test]
@@ -68,7 +68,7 @@ fn manifest_smoke_test() {
         Instruction::CallMethod {
             call: test_faucet_component.into(),
             method: "take_free_coins".to_string(),
-            args: call_args![Amount(1_000)],
+            args: call_args![1_000],
         },
         Instruction::PutLastInstructionOutputOnWorkspace { key: 1 },
         Instruction::CallMethod {
@@ -79,7 +79,7 @@ fn manifest_smoke_test() {
         Instruction::CallMethod {
             call: account_component.into(),
             method: "withdraw".to_string(),
-            args: call_args![xtr_resource, Amount(1_000)],
+            args: call_args![xtr_resource, 1_000],
         },
         Instruction::PutLastInstructionOutputOnWorkspace { key: 2 },
         Instruction::CallMethod {

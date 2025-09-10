@@ -14,7 +14,6 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_template_lib::{
-    call_args,
     models::{ComponentAddress, ResourceAddress},
     prelude::{PedersenCommitmentBytes, SchnorrSignatureBytes},
 };
@@ -28,7 +27,7 @@ use tari_template_test_tooling::{
     wallet_crypto::MaskAndValue,
     TemplateTest,
 };
-use tari_transaction::{args, Transaction};
+use tari_transaction::{args, call_args, Transaction};
 
 const TEMPLATE_PATHS: &[&str] = &["tests/templates/stealth"];
 const TEMPLATE_NAME: &str = "StealthFaucet";

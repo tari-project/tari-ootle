@@ -12,16 +12,15 @@ use tari_crypto::{
 };
 use tari_engine_types::{
     hashing::{engine_hasher64, EngineHashDomainLabel},
-    instruction::Instruction,
     FromByteType,
     ToByteType,
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
-use crate::{UnsealedTransactionV1, UnsignedTransactionV1};
+use crate::{Instruction, UnsealedTransactionV1, UnsignedTransactionV1};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionSealSignature {
     public_key: RistrettoPublicKeyBytes,
@@ -76,7 +75,7 @@ impl TransactionSealSignature {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionSignature {
     public_key: RistrettoPublicKeyBytes,
@@ -132,7 +131,7 @@ impl TransactionSignature {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, borsh::BorshSerialize)]
 struct TransactionSignatureFields<'a> {
     network: u8,
     fee_instructions: &'a [Instruction],

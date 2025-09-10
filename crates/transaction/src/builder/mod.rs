@@ -9,32 +9,33 @@ mod tests;
 mod workspace_ids;
 
 pub use named_component_call::*;
-use tari_common_types::types::PrivateKey;
+use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::{
     confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
-    instruction::Instruction,
     substate::SubstateId,
-    ComponentCall,
-    ResourceAddressRef,
     ValidatorFeePoolAddress,
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib::{
-    args::{AllocatableAddressType, InstructionArg, WorkspaceOffsetId},
     auth::OwnerRule,
-    call_args,
     models::{ResourceAddress, StealthTransferStatement},
     prelude::AccessRules,
     types::{crypto::RistrettoPublicKeyBytes, Amount, TemplateAddress},
 };
 
 use crate::{
+    args::{InstructionArg, WorkspaceOffsetId},
     builder::{
         named_args::{parse_workspace_key, BuilderWorkspaceKey, NamedArg, ParseWorkspaceKeyError},
         named_resource_ref::NamedResourceRef,
         workspace_ids::WorkspaceIds,
     },
+    call_args,
     unsigned_transaction::UnsignedTransaction,
+    AllocatableAddressType,
+    ComponentCall,
+    Instruction,
+    ResourceAddressRef,
     Transaction,
     TransactionSignature,
     UnsealedTransactionV1,
@@ -389,7 +390,7 @@ impl TransactionBuilder {
         self.unsigned_transaction
     }
 
-    pub fn add_signature(mut self, sealed_signer: &RistrettoPublicKeyBytes, secret_key: &PrivateKey) -> Self {
+    pub fn add_signature(mut self, sealed_signer: &RistrettoPublicKeyBytes, secret_key: &RistrettoSecretKey) -> Self {
         let signature = match &self.unsigned_transaction {
             UnsignedTransaction::V1(tx) => TransactionSignature::sign_v1(secret_key, sealed_signer, tx),
         };
@@ -419,7 +420,7 @@ impl TransactionBuilder {
         builder.unsigned_transaction.build(builder.signatures)
     }
 
-    pub fn build_and_seal(self, secret_key: &PrivateKey) -> Transaction {
+    pub fn build_and_seal(self, secret_key: &RistrettoSecretKey) -> Transaction {
         self.build().seal(secret_key)
     }
 

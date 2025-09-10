@@ -32,11 +32,9 @@ use clap::{Args, Subcommand};
 use tari_engine::abi::Type;
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
-    instruction::Instruction,
     instruction_result::InstructionResult,
     parse_template_address,
     substate::{SubstateDiff, SubstateId, SubstateValue},
-    ComponentCall,
 };
 use tari_ootle_common_types::{
     displayable::{DisplayContainer, Displayable},
@@ -46,12 +44,19 @@ use tari_ootle_common_types::{
 };
 use tari_sidechain::QuorumDecision;
 use tari_template_lib::{
-    args::InstructionArg,
     models::{BucketId, NonFungibleAddress, NonFungibleId},
     prelude::ResourceAddress,
     types::{Amount, TemplateAddress},
 };
-use tari_transaction::{arg, builder::named_args::NamedArg, Transaction, TransactionId};
+use tari_transaction::{
+    arg,
+    args::InstructionArg,
+    builder::named_args::NamedArg,
+    ComponentCall,
+    Instruction,
+    Transaction,
+    TransactionId,
+};
 use tari_transaction_manifest::parse_manifest;
 use tari_validator_node_client::{
     types::{

@@ -73,7 +73,7 @@ fn mint_faucet_nft(
 ) -> ExecuteResult {
     test.build_and_execute(
         Transaction::builder()
-            .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![Amount(1), metadata])
+            .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![1, metadata])
             .put_last_instruction_output_on_workspace("my_nft")
             .call_method(account, "deposit", args![Workspace("my_nft")]),
         vec![owner_token],

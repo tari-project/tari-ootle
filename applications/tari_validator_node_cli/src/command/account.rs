@@ -23,7 +23,8 @@
 use std::path::Path;
 
 use clap::{Args, Subcommand};
-use tari_engine_types::{instruction::Instruction, ToByteType};
+use tari_engine_types::ToByteType;
+use tari_transaction::Instruction;
 use tari_validator_node_client::{types::SubmitTransactionResponse, ValidatorNodeClient};
 
 use crate::{

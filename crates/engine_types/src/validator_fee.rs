@@ -21,7 +21,20 @@ use crate::resource_container::{ResourceContainer, ResourceError};
 
 const TAG: u64 = BinaryTag::ValidatorNodeFeePool.as_u64();
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    borsh::BorshSerialize,
+    borsh::BorshDeserialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ValidatorFeePoolAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
@@ -83,20 +96,7 @@ impl FromStr for ValidatorFeePoolAddress {
     }
 }
 
-impl borsh::BorshSerialize for ValidatorFeePoolAddress {
-    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
-    }
-}
-
-impl borsh::BorshDeserialize for ValidatorFeePoolAddress {
-    fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
-        let key = borsh::BorshDeserialize::deserialize_reader(reader)?;
-        Ok(Self::from_array(key))
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ValidatorFeePool {
     #[cfg_attr(feature = "ts", ts(type = "ArrayBuffer"))]

@@ -733,7 +733,7 @@ pub async fn handle_create_free_test_coins(
                         builder.create_account_with_bucket(account_public_key.to_byte_type(), "faucet_funds")
                     }
                 })
-                .call_method(*account.address(), "pay_fee", args![Amount(max_fee)])
+                .call_method(*account.address(), "pay_fee", args![max_fee])
         })
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .build_and_seal(&account_secret_key.key);

@@ -23,7 +23,7 @@
 //! The prelude contains all the commonly used types and functions that are used. To use it, add the import `use
 //! tari_template_lib::prelude::*;`
 
-pub use tari_bor::Value;
+pub use tari_bor;
 pub use tari_template_lib_types::{
     crypto::{
         BalanceProofSignature,
@@ -42,7 +42,6 @@ pub use tari_template_macros::template_non_wasm as template;
 pub use crate::{
     args::{VaultFreezeFlag, VaultFreezeFlags},
     auth::{ComponentAccessRules as AccessRules, RestrictedAccessRule::*, *},
-    call_args,
     caller_context::CallerContext,
     component::{Component, ComponentManager},
     consensus::Consensus,
@@ -51,7 +50,7 @@ pub use crate::{
     error,
     events::emit_event,
     info,
-    invoke_args,
+    invoke_args as args,
     log,
     models::{
         Account,

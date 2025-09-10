@@ -34,7 +34,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{displayable::Displayable, optional::IsNotFoundError};
 use tari_template_lib::{
-    args::{VaultFreezeFlag, WorkspaceId, WorkspaceOffsetId},
+    args::VaultFreezeFlag,
     models::{
         AddressAllocationId,
         BucketId,
@@ -47,6 +47,7 @@ use tari_template_lib::{
     },
     types::{Amount, TemplateAddress},
 };
+use tari_transaction::args::{WorkspaceId, WorkspaceOffsetId};
 
 use super::workspace::WorkspaceError;
 use crate::{

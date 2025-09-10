@@ -32,7 +32,7 @@ mod template {
     }
 
     impl NftFaucet {
-        pub fn mint(&mut self, amount: Amount, mutable_data: Value) -> Bucket {
+        pub fn mint(&mut self, amount: Amount, mutable_data: tari_bor::Value) -> Bucket {
             if amount.is_zero() || amount.is_negative() {
                 panic!("Amount must be greater than zero");
             }

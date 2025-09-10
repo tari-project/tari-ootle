@@ -36,6 +36,7 @@ const TAG: u64 = BinaryTag::ResourceAddress.as_u64();
 /// The globally-unique identifier of a resource.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct ResourceAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl ResourceAddress {
@@ -93,26 +94,6 @@ impl AsRef<[u8]> for ResourceAddress {
 }
 
 newtype_struct_serde_impl!(ResourceAddress, BorTag<ObjectKey, TAG>);
-
-#[cfg(feature = "borsh")]
-mod borsh_impl {
-    use std::io::Read;
-
-    use super::*;
-
-    impl borsh::BorshSerialize for ResourceAddress {
-        fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-            borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
-        }
-    }
-
-    impl borsh::BorshDeserialize for ResourceAddress {
-        fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
-            let key = borsh::BorshDeserialize::deserialize_reader(reader)?;
-            Ok(ResourceAddress::new(ObjectKey::from_array(key)))
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

@@ -26,7 +26,6 @@ use serde::{Deserialize, Serialize};
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult},
     confidential::MinotariBurnClaimProof,
-    instruction::Instruction,
     serde_with,
     substate::{Substate, SubstateId},
     ValidatorFeePoolAddress,
@@ -48,7 +47,7 @@ use tari_template_lib::{
     prelude::{ComponentAddress, ConfidentialWithdrawProof, ResourceType, RistrettoPublicKeyBytes},
     types::{crypto::PedersenCommitmentBytes, Amount, TemplateAddress},
 };
-use tari_transaction::{Transaction, TransactionId, UnsignedTransaction};
+use tari_transaction::{Instruction, Transaction, TransactionId, UnsignedTransaction};
 use time::PrimitiveDateTime;
 use webauthn_rs_proto::{
     PublicKeyCredential,

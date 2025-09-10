@@ -27,7 +27,6 @@ use tari_engine::{
 };
 use tari_engine_types::{
     commit_result::{ExecuteResult, RejectReason},
-    instruction::Instruction,
     substate::{SubstateDiff, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
     ToByteType,
@@ -35,13 +34,19 @@ use tari_engine_types::{
 use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::SubstateType, SubstateRequirement};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, XTR_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
-    args::InstructionArg,
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS},
     models::{ComponentAddress, NonFungibleAddress},
     prelude::RistrettoPublicKeyBytes,
     types::{Amount, TemplateAddress},
 };
-use tari_transaction::{args, builder::named_args::BuilderWorkspaceKey, Transaction, TransactionBuilder};
+use tari_transaction::{
+    args,
+    args::InstructionArg,
+    builder::named_args::BuilderWorkspaceKey,
+    Instruction,
+    Transaction,
+    TransactionBuilder,
+};
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 
 use crate::{

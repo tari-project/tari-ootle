@@ -7,16 +7,14 @@ use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{
     indexed_value::{IndexedValue, IndexedValueError},
-    instruction::Instruction,
     substate::SubstateId,
-    ComponentCall,
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib::models::ComponentAddress;
 
-use crate::builder::TransactionBuilder;
+use crate::{builder::TransactionBuilder, ComponentCall, Instruction};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UnsignedTransactionV1 {
     pub network: u8,

@@ -32,7 +32,6 @@ use tari_engine_types::{
     vault::Vault,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
     FromByteType,
-    ResourceAddressRef,
     ToByteType,
     Utxo,
     UtxoAddress,
@@ -58,6 +57,7 @@ use tari_template_lib::{
     prelude::{AuthHookCaller, ResourceAddressAllocation, PUBLIC_IDENTITY_RESOURCE_ADDRESS},
     types::{Amount, EntityId, Hash, TemplateAddress},
 };
+use tari_transaction::ResourceAddressRef;
 
 use super::workspace::Workspace;
 use crate::{

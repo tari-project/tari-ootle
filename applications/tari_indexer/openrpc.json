@@ -1,7 +1,7 @@
 {
   "openrpc": "1.3.2",
   "info": {
-    "version": "1.3.2",
+    "version": "0.3.0",
     "title": "Tari Indexer",
     "license": {
       "name": "MIT"
@@ -9,7 +9,7 @@
   },
   "servers": [
     {
-      "url": "http://localhost:183000"
+      "url": "http://localhost:18300"
     }
   ],
   "components": {
@@ -39,8 +39,10 @@
           ]
         },
         "user_agent": {
-          "type": "string",
-          "nullable": true
+          "anyOf": [
+            { "type": "string" },
+            { "type": "null" }
+          ]
         }
       },
       "required": ["connection_id", "peer_id", "address", "direction", "age"]

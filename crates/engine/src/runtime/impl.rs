@@ -2299,7 +2299,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         self.tracker.write_with(|state_mut| {
             // 2. Create a tombstone
             let address = ClaimedOutputTombstoneAddress::from_commitment(claim.commitment);
-            state_mut.new_substate(address, ClaimedOutputTombstone {})?;
+            state_mut.new_substate(address, ClaimedOutputTombstone { value: claim.value })?;
 
             // 3. Create the stealth UTXO
             let address = UtxoAddress::new(XTR, claim.commitment.into());

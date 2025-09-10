@@ -25,4 +25,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct ClaimedOutputTombstone {}
+pub struct ClaimedOutputTombstone {
+    pub value: u64,
+}

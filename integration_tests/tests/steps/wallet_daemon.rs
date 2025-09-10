@@ -60,9 +60,15 @@ async fn when_i_claim_burn_via_wallet_daemon_it_fails(
     account_name: String,
     wallet_daemon_name: String,
 ) {
-    let _result = claim_burn(world, proof_name, account_name, wallet_daemon_name)
+    let result = claim_burn(world, proof_name, account_name, wallet_daemon_name)
         .await
-        .unwrap_err();
+        .unwrap();
+
+    assert!(
+        result.any_reject().is_some(),
+        "Expected transaction to fail, but it succeeded: {:?}",
+        result
+    );
 }
 
 #[when(expr = "I claim fees for validator {word} into account {word} using the wallet daemon {word}")]

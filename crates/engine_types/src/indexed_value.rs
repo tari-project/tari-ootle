@@ -9,12 +9,12 @@ use tari_template_lib::{
     models::{
         BinaryTag,
         BucketId,
+        ClaimedOutputTombstoneAddress,
         ComponentAddressAllocation,
         NonFungibleAddressContents,
         ProofId,
         ResourceAddress,
         ResourceAddressAllocation,
-        UnclaimedConfidentialOutputAddress,
         VaultId,
     },
     prelude::{ComponentAddress, Metadata, NonFungibleAddress},
@@ -150,7 +150,7 @@ pub struct IndexedWellKnownTypes {
     non_fungible_addresses: Vec<NonFungibleAddress>,
     vault_ids: Vec<VaultId>,
     metadata: Vec<Metadata>,
-    unclaimed_confidential_output_address: Vec<UnclaimedConfidentialOutputAddress>,
+    unclaimed_confidential_output_address: Vec<ClaimedOutputTombstoneAddress>,
     published_template_addresses: Vec<PublishedTemplateAddress>,
     validator_node_fee_pools: Vec<ValidatorFeePoolAddress>,
     #[serde(default)]
@@ -229,7 +229,7 @@ impl IndexedWellKnownTypes {
                     WellKnownTariValue::VaultId(addr) => {
                         found = *address == addr;
                     },
-                    WellKnownTariValue::UnclaimedConfidentialOutputAddress(addr) => {
+                    WellKnownTariValue::ClaimedOutputTombstoneAddress(addr) => {
                         found = *address == addr;
                     },
                     WellKnownTariValue::PublishedTemplateAddress(addr) => {
@@ -393,7 +393,7 @@ pub enum WellKnownTariValue {
     Metadata(Metadata),
     VaultId(VaultId),
     ProofId(ProofId),
-    UnclaimedConfidentialOutputAddress(UnclaimedConfidentialOutputAddress),
+    ClaimedOutputTombstoneAddress(ClaimedOutputTombstoneAddress),
     PublishedTemplateAddress(PublishedTemplateAddress),
     ValidatorNodeFeePool(ValidatorFeePoolAddress),
     ComponentAddressAllocation(ComponentAddressAllocation),
@@ -440,9 +440,9 @@ impl FromTagAndValue for WellKnownTariValue {
                 let value: u32 = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::ProofId(value.into()))
             },
-            BinaryTag::UnclaimedConfidentialOutputAddress => {
+            BinaryTag::ClaimedOutputTombstoneAddress => {
                 let value: ObjectKey = value.deserialized().map_err(BorError::from)?;
-                Ok(Self::UnclaimedConfidentialOutputAddress(value.into()))
+                Ok(Self::ClaimedOutputTombstoneAddress(value.into()))
             },
             BinaryTag::TemplateAddress => {
                 let value: Hash = value.deserialized().map_err(BorError::from)?;
@@ -478,7 +478,7 @@ pub struct IndexedValueVisitor {
     non_fungible_addresses: Vec<NonFungibleAddress>,
     vault_ids: Vec<VaultId>,
     metadata: Vec<Metadata>,
-    unclaimed_confidential_output_addresses: Vec<UnclaimedConfidentialOutputAddress>,
+    unclaimed_confidential_output_addresses: Vec<ClaimedOutputTombstoneAddress>,
     published_templates: Vec<PublishedTemplateAddress>,
     validator_node_fee_pools: Vec<ValidatorFeePoolAddress>,
     utxos: Vec<UtxoAddress>,
@@ -536,7 +536,7 @@ impl ValueVisitor<WellKnownTariValue> for IndexedValueVisitor {
             WellKnownTariValue::ProofId(proof_id) => {
                 self.proofs.push(proof_id);
             },
-            WellKnownTariValue::UnclaimedConfidentialOutputAddress(address) => {
+            WellKnownTariValue::ClaimedOutputTombstoneAddress(address) => {
                 self.unclaimed_confidential_output_addresses.push(address);
             },
             WellKnownTariValue::PublishedTemplateAddress(template) => {

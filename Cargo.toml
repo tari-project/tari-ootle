@@ -160,7 +160,7 @@ axum = "0.6"
 axum-jrpc = "0.3.2"
 base64 = "0.20.0"
 bigdecimal = "0.4.1"
-bincode = "2.0.0-rc.3"
+bincode = "2.0.1"
 bitflags = "2.9.2"
 blake2 = "0.10.6"
 borsh = { version = "1.5", default-features = false }
@@ -290,30 +290,30 @@ overflow-checks = true
 #tari_jellyfish = { git = "https://github.com/account/tari.git", branch = "my-branch" }
 
 # Uncomment this to use local paths instead of git dependencies
-#[patch."https://github.com/tari-project/tari.git"]
-#minotari_app_grpc = { path = "../tari/applications/minotari_app_grpc" }
-#minotari_wallet_grpc_client = { path = "../tari/clients/rust/wallet_grpc_client" }
-#minotari_node_grpc_client = { path = "../tari/clients/rust/base_node_grpc_client" }
-#tari_common = { path = "../tari/common" }
-#tari_common_types = { path = "../tari/base_layer/common_types" }
-#tari_common_sqlite = { path = "../tari/common_sqlite" }
-#tari_comms = { path = "../tari/comms/core" }
-#tari_comms_rpc_macros = { path = "../tari/comms/rpc_macros" }
-#tari_transaction_components = { path = "../tari/base_layer/transaction_components" }
-#tari_node_components = { path = "../tari/base_layer/node_components" }
-#tari_transaction_key_manager = { path = "../tari/base_layer/transaction_key_manager" }
-#tari_mmr = { path = "../tari/base_layer/mmr" }
-#tari_p2p = { path = "../tari/base_layer/p2p" }
-#tari_shutdown = { path = "../tari/infrastructure/shutdown" }
-#tari_script = { path = "../tari/infrastructure/tari_script" }
-#minotari_wallet = { path = "../tari/base_layer/wallet" }
-#minotari_console_wallet = { path = "../tari/applications/minotari_console_wallet" }
-#minotari_app_utilities = { path = "../tari/applications/minotari_app_utilities" }
-#minotari_node = { path = "../tari/applications/minotari_node" }
-#tari_service_framework = { path = "../tari/base_layer/service_framework" }
-#tari_comms_dht = { path = "../tari/comms/dht" }
-#tari_metrics = { path = "../tari/infrastructure/metrics" }
-#tari_hashing = { path = "../tari/hashing" }
-#tari_libtor = { path = "../tari/infrastructure/libtor" }
-#tari_sidechain = { path = "../tari/base_layer/sidechain" }
-#tari_jellyfish = { path = "../tari/infrastructure/jellyfish" }
+[patch."https://github.com/tari-project/tari.git"]
+minotari_app_grpc = { path = "../tari/applications/minotari_app_grpc" }
+minotari_wallet_grpc_client = { path = "../tari/clients/rust/wallet_grpc_client" }
+minotari_node_grpc_client = { path = "../tari/clients/rust/base_node_grpc_client" }
+tari_common = { path = "../tari/common" }
+tari_common_types = { path = "../tari/base_layer/common_types" }
+tari_common_sqlite = { path = "../tari/common_sqlite" }
+tari_comms = { path = "../tari/comms/core" }
+tari_comms_rpc_macros = { path = "../tari/comms/rpc_macros" }
+tari_transaction_components = { path = "../tari/base_layer/transaction_components" }
+tari_node_components = { path = "../tari/base_layer/node_components" }
+tari_transaction_key_manager = { path = "../tari/base_layer/transaction_key_manager" }
+tari_mmr = { path = "../tari/base_layer/mmr" }
+tari_p2p = { path = "../tari/base_layer/p2p" }
+tari_shutdown = { path = "../tari/infrastructure/shutdown" }
+tari_script = { path = "../tari/infrastructure/tari_script" }
+tari_hashing = { path = "../tari/hashing" }
+minotari_wallet = { path = "../tari/base_layer/wallet" }
+minotari_console_wallet = { path = "../tari/applications/minotari_console_wallet" }
+minotari_app_utilities = { path = "../tari/applications/minotari_app_utilities" }
+minotari_node = { path = "../tari/applications/minotari_node" }
+tari_service_framework = { path = "../tari/base_layer/service_framework" }
+tari_comms_dht = { path = "../tari/comms/dht" }
+tari_metrics = { path = "../tari/infrastructure/metrics" }
+tari_libtor = { path = "../tari/infrastructure/libtor" }
+tari_sidechain = { path = "../tari/base_layer/sidechain" }
+tari_jellyfish = { path = "../tari/infrastructure/jellyfish" }

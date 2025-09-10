@@ -9,7 +9,7 @@ use std::{
 
 use tari_bor::{BorTag, Deserialize, Serialize};
 use tari_template_lib::{
-    models::BinaryTag,
+    models::{address_prefixes, BinaryTag},
     types::{crypto::RistrettoPublicKeyBytes, Hash, KeyParseError, ObjectKey},
 };
 
@@ -60,7 +60,7 @@ impl<T: Into<Hash>> From<T> for PublishedTemplateAddress {
 
 impl Display for PublishedTemplateAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "template_{}", self.as_object_key())
+        write!(f, "{}_{}", address_prefixes::TEMPLATE, self.as_object_key())
     }
 }
 

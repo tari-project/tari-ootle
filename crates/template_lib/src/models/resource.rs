@@ -28,7 +28,7 @@ use tari_template_abi::rust::{
 };
 use tari_template_lib_types::{EntityId, KeyParseError, ObjectKey};
 
-use super::BinaryTag;
+use super::{address_prefixes, BinaryTag};
 use crate::{newtype_struct_serde_impl, prelude::STEALTH_TARI_RESOURCE_ADDRESS};
 
 const TAG: u64 = BinaryTag::ResourceAddress.as_u64();
@@ -82,7 +82,7 @@ impl<T: Into<ObjectKey>> From<T> for ResourceAddress {
 
 impl Display for ResourceAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "resource_{}", *self.0)
+        write!(f, "{}_{}", address_prefixes::RESOURCE, *self.0)
     }
 }
 

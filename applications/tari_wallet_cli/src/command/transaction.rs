@@ -517,7 +517,7 @@ pub fn print_substate_diff(diff: &SubstateDiff) {
             SubstateValue::NonFungible(_) => {
                 println!("      ▶ NFT: {}", id);
             },
-            SubstateValue::UnclaimedConfidentialOutput(_) => {
+            SubstateValue::ClaimedOutputTombstone(_) => {
                 println!("      ▶ Layer 1 commitment: {}", id);
             },
             SubstateValue::Template(_) => {
@@ -820,7 +820,7 @@ impl CliArg {
                 SubstateId::Component(v) => call_arg!(v),
                 SubstateId::Resource(v) => call_arg!(v),
                 SubstateId::Vault(v) => call_arg!(v),
-                SubstateId::UnclaimedConfidentialOutput(v) => call_arg!(v),
+                SubstateId::ClaimedOutputTombstone(v) => call_arg!(v),
                 SubstateId::NonFungible(v) => call_arg!(v),
                 SubstateId::TransactionReceipt(v) => call_arg!(v),
                 SubstateId::Template(v) => call_arg!(v),

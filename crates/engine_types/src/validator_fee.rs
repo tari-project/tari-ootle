@@ -13,7 +13,7 @@ use tari_bor::BorTag;
 use tari_template_lib::{
     auth::{OwnerRule, Ownership},
     constants::XTR,
-    models::BinaryTag,
+    models::{address_prefixes, BinaryTag},
     types::{crypto::RistrettoPublicKeyBytes, Amount, Hash, KeyParseError, ObjectKey},
 };
 
@@ -56,7 +56,7 @@ impl From<[u8; 32]> for ValidatorFeePoolAddress {
 
 impl Display for ValidatorFeePoolAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "vnfp_{}", self.as_object_key())
+        write!(f, "{}_{}", address_prefixes::VALIDATOR_FEE_POOL, self.as_object_key())
     }
 }
 

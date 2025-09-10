@@ -28,7 +28,10 @@ use std::{
 use tari_bor::BorTag;
 use tari_template_lib_types::{EntityId, KeyParseError, ObjectKey};
 
-use crate::{models::BinaryTag, newtype_struct_serde_impl};
+use crate::{
+    models::{address_prefixes, BinaryTag},
+    newtype_struct_serde_impl,
+};
 
 const TAG: u64 = BinaryTag::ComponentAddress.as_u64();
 
@@ -87,7 +90,7 @@ impl<T: Into<ObjectKey>> From<T> for ComponentAddress {
 
 impl Display for ComponentAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "component_{}", *self.0)
+        write!(f, "{}_{}", address_prefixes::COMPONENT, *self.0)
     }
 }
 

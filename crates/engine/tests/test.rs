@@ -897,7 +897,7 @@ mod emoji_id {
         emoji_id: &EmojiId,
         price: Amount,
         owner_proof: NonFungibleAddress,
-    ) -> Result<FinalizeResult, anyhow::Error> {
+    ) -> Result<FinalizeResult, String> {
         let transaction = Transaction::builder()
             .call_method(account_address, "withdraw", args![faucet_resource, price])
             .put_last_instruction_output_on_workspace("payment")
@@ -908,7 +908,7 @@ mod emoji_id {
 
         let result = test.execute_and_commit_on_success(transaction, vec![owner_proof]);
         if let Some(reason) = result.finalize.result.any_reject() {
-            return Err(anyhow::anyhow!("Minting emoji id failed: {reason}"));
+            return Err(format!("Minting emoji id failed: {reason}"));
         }
         Ok(result.finalize)
     }

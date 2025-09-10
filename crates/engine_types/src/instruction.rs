@@ -14,7 +14,7 @@ use tari_template_lib::{
 
 use crate::{
     component_call::ComponentCall,
-    confidential::TariStealthClaim,
+    confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
     resource_address_ref::ResourceAddressRef,
     ValidatorFeePoolAddress,
 };
@@ -24,7 +24,7 @@ use crate::{
 pub enum Instruction {
     CreateAccount {
         #[cfg_attr(feature = "ts", ts(type = "string"))]
-        public_key_address: RistrettoPublicKeyBytes,
+        owner_public_key: RistrettoPublicKeyBytes,
         owner_rule: Option<OwnerRule>,
         access_rules: Option<AccessRules>,
         workspace_id: Option<WorkspaceOffsetId>,
@@ -55,7 +55,8 @@ pub enum Instruction {
         message: String,
     },
     ClaimBurn {
-        claim: Box<TariStealthClaim>,
+        claim: Box<MinotariBurnClaimProof>,
+        output_data: ClaimBurnOutputData,
     },
     ClaimValidatorFees {
         #[cfg_attr(feature = "ts", ts(type = "string"))]
@@ -94,14 +95,17 @@ impl Instruction {
     }
 
     pub fn referenced_template(&self) -> Option<&TemplateAddress> {
-        if let Self::CallFunction {
-            address: template_address,
-            ..
-        } = self
-        {
-            return Some(template_address);
+        match self {
+            Self::CallFunction { address, .. } => Some(address),
+            _ => None,
         }
-        None
+    }
+
+    pub fn claim_burn(&self) -> Option<&MinotariBurnClaimProof> {
+        match self {
+            Self::ClaimBurn { claim, .. } => Some(claim),
+            _ => None,
+        }
     }
 }
 
@@ -110,7 +114,7 @@ impl Display for Instruction {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::CreateAccount {
-                public_key_address,
+                owner_public_key: public_key_address,
                 owner_rule,
                 access_rules,
                 workspace_id,
@@ -152,15 +156,8 @@ impl Display for Instruction {
             Self::EmitLog { level, message } => {
                 write!(f, "EmitLog {{ level: {level}, message: {message} }}")
             },
-            Self::ClaimBurn { claim } => {
-                write!(
-                    f,
-                    "ClaimBurn {{ commitment_address: {}, proof_of_knowledge: nonce({}), u({}) v({}) }}",
-                    claim.output_address,
-                    claim.proof_of_knowledge.public_nonce(),
-                    claim.proof_of_knowledge.u(),
-                    claim.proof_of_knowledge.v(),
-                )
+            Self::ClaimBurn { claim, .. } => {
+                write!(f, "ClaimBurn {{ {claim} }}",)
             },
             Self::ClaimValidatorFees { address } => {
                 write!(f, "ClaimValidatorFees {{ address: {} }}", address)

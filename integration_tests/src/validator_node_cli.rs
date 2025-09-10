@@ -166,7 +166,7 @@ pub(crate) fn add_substate_ids(world: &mut TariWorld, outputs_name: String, diff
                 });
                 counters[3] += 1;
             },
-            SubstateId::UnclaimedConfidentialOutput(_) => {
+            SubstateId::ClaimedOutputTombstone(_) => {
                 outputs.insert(format!("layer_one_commitments/{}", counters[4]), SubstateRequirement {
                     substate_id: addr.clone(),
                     version: Some(data.version()),

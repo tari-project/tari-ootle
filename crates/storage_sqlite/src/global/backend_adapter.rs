@@ -42,6 +42,7 @@ use diesel::{
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
 use log::debug;
 use serde::{de::DeserializeOwned, Serialize};
+use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{
     committee::{Committee, CommitteeMember},
     hashing::ValidatorNodeBalancedMerkleTree,
@@ -54,6 +55,7 @@ use tari_ootle_common_types::{
 use tari_ootle_storage::{
     global::{
         models::ValidatorNode,
+        BlockHeaderModel,
         DbEpoch,
         DbLayer1Transaction,
         DbTemplate,
@@ -899,6 +901,50 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             })?;
 
         Ok(())
+    }
+
+    fn insert_block_header(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        header: BlockHeaderModel,
+    ) -> Result<(), Self::Error> {
+        use crate::global::schema::block_headers;
+
+        diesel::insert_into(block_headers::table)
+            .values((
+                block_headers::epoch.eq(header.epoch.as_u64() as i64),
+                block_headers::height.eq(header.height as i64),
+                block_headers::block_hash.eq(header.block_hash.as_bytes()),
+                block_headers::kernel_merkle_root.eq(header.kernel_merkle_root.as_bytes()),
+                block_headers::validator_node_merkle_root.eq(header.validator_node_merkle_root.as_bytes()),
+            ))
+            .execute(tx.connection())
+            .map_err(|source| SqliteStorageError::DieselError {
+                source,
+                operation: "insert::block_header".to_string(),
+            })?;
+
+        Ok(())
+    }
+
+    fn get_block_header_by_hash(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        epoch: Epoch,
+        block_hash: &FixedHash,
+    ) -> Result<BlockHeaderModel, Self::Error> {
+        use crate::global::schema::block_headers;
+
+        let header = block_headers::table
+            .filter(block_headers::block_hash.eq(block_hash.as_bytes()))
+            .filter(block_headers::epoch.le(epoch.as_u64() as i64))
+            .first::<models::BlockHeaderModel>(tx.connection())
+            .map_err(|source| SqliteStorageError::DieselError {
+                source,
+                operation: "get::block_header_by_hash".to_string(),
+            })?;
+
+        header.try_into()
     }
 }
 

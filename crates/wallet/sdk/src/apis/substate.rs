@@ -179,7 +179,7 @@ where
                                 continue;
                             }
                         },
-                        SubstateValue::UnclaimedConfidentialOutput(_) => {},
+                        SubstateValue::ClaimedOutputTombstone(_) => {},
                         SubstateValue::Template(_) => {},
                         SubstateValue::Utxo(_) => {
                             let addr = substate_id.substate_id().as_utxo_address().ok_or_else(|| {

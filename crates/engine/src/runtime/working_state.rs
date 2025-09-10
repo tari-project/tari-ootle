@@ -53,7 +53,6 @@ use tari_template_lib::{
         ResourceAddress,
         StealthInputsStatement,
         StealthTransferStatement,
-        UnclaimedConfidentialOutputAddress,
         VaultId,
     },
     prelude::{AuthHookCaller, ResourceAddressAllocation, PUBLIC_IDENTITY_RESOURCE_ADDRESS},
@@ -94,7 +93,6 @@ pub(super) struct WorkingState {
 
     store: WorkingStateStore,
 
-    claimed_confidential_outputs: Vec<UnclaimedConfidentialOutputAddress>,
     virtual_substates: VirtualSubstates,
     validator_fee_withdrawals: Vec<ValidatorFeeWithdrawal>,
 
@@ -125,7 +123,6 @@ impl WorkingState {
 
             store: WorkingStateStore::new(state_store),
 
-            claimed_confidential_outputs: Vec::new(),
             last_instruction_output: None,
 
             workspace: Workspace::default(),
@@ -319,14 +316,6 @@ impl WorkingState {
         Ok(non_fungible)
     }
 
-    pub fn claim_confidential_output(&mut self, addr: &UnclaimedConfidentialOutputAddress) -> Result<(), RuntimeError> {
-        if self.claimed_confidential_outputs.contains(addr) {
-            return Err(RuntimeError::ConfidentialOutputAlreadyClaimed { address: *addr });
-        }
-        self.claimed_confidential_outputs.push(*addr);
-        Ok(())
-    }
-
     pub fn get_locked_substate(&self, lock: &LockedSubstate) -> Result<&SubstateValue, RuntimeError> {
         let (_, substate) = self.store.get_locked_substate(lock.lock_id())?;
         Ok(substate)
@@ -430,10 +419,9 @@ impl WorkingState {
         // being empty)
         let call_scope = self.base_call_scope();
         if !call_scope.orphans().is_empty() {
-            return Err(TransactionCommitError::OrphanedSubstates {
+            return Err(RuntimeError::OrphanedSubstates {
                 substates: call_scope.orphans().iter().map(ToString::to_string).collect(),
-            }
-            .into());
+            });
         }
 
         Ok(())
@@ -1416,11 +1404,6 @@ impl WorkingState {
         for downed_utxo in downed_utxos {
             let spent_utxo = self.store.get_unmodified_substate(&downed_utxo.clone().into())?;
             substate_diff.down(SubstateId::Utxo(downed_utxo), spent_utxo.version());
-        }
-
-        // Special case: unclaimed confidential outputs are downed without being upped if claimed
-        for claimed in &self.claimed_confidential_outputs {
-            substate_diff.down(SubstateId::UnclaimedConfidentialOutput(*claimed), 0);
         }
 
         substate_diff.up(

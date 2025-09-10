@@ -71,7 +71,6 @@ use tari_ootle_storage::{
         ForeignProposal,
         ForeignProposalAtom,
         LeaderFee,
-        MintConfidentialOutputAtom,
         SubstateCreated,
         SubstateDestroyed,
         SubstateRecord,
@@ -648,9 +647,6 @@ impl From<&Command> for proto::consensus::Command {
             Command::ForeignProposal(foreign_proposal) => {
                 proto::consensus::command::Command::ForeignProposal(foreign_proposal.into())
             },
-            Command::MintConfidentialOutput(atom) => {
-                proto::consensus::command::Command::MintConfidentialOutput(atom.into())
-            },
             Command::EvictNode(atom) => proto::consensus::command::Command::EvictNode(atom.into()),
             Command::EndEpoch => proto::consensus::command::Command::EndEpoch(true),
         };
@@ -672,9 +668,6 @@ impl TryFrom<proto::consensus::Command> for Command {
             proto::consensus::command::Command::SomeAccept(tx) => Command::SomeAccept(tx.try_into()?),
             proto::consensus::command::Command::ForeignProposal(foreign_proposal) => {
                 Command::ForeignProposal(foreign_proposal.try_into()?)
-            },
-            proto::consensus::command::Command::MintConfidentialOutput(atom) => {
-                Command::MintConfidentialOutput(atom.try_into()?)
             },
             proto::consensus::command::Command::EvictNode(atom) => Command::EvictNode(atom.try_into()?),
             proto::consensus::command::Command::EndEpoch(_) => Command::EndEpoch,
@@ -755,27 +748,6 @@ impl TryFrom<proto::consensus::ForeignProposalAtom> for ForeignProposalAtom {
             block_id: BlockId::try_from(value.block_id)?,
             shard_group: ShardGroup::decode_from_u32(value.shard_group)
                 .ok_or_else(|| anyhow!("Block shard_group ({}) is not a valid", value.shard_group))?,
-        })
-    }
-}
-
-// -------------------------------- MintConfidentialOutputAtom -------------------------------- //
-
-impl From<&MintConfidentialOutputAtom> for proto::consensus::MintConfidentialOutputAtom {
-    fn from(value: &MintConfidentialOutputAtom) -> Self {
-        Self {
-            commitment: value.commitment.as_bytes().to_vec(),
-        }
-    }
-}
-
-impl TryFrom<proto::consensus::MintConfidentialOutputAtom> for MintConfidentialOutputAtom {
-    type Error = anyhow::Error;
-
-    fn try_from(value: proto::consensus::MintConfidentialOutputAtom) -> Result<Self, Self::Error> {
-        use tari_template_lib::models::UnclaimedConfidentialOutputAddress;
-        Ok(Self {
-            commitment: UnclaimedConfidentialOutputAddress::from_bytes(&value.commitment)?,
         })
     }
 }

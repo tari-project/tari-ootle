@@ -52,7 +52,6 @@ use super::{
     EvictNodeAtom,
     ForeignProposalAtom,
     ForeignProposalRecord,
-    MintConfidentialOutputAtom,
     PendingShardStateTreeDiff,
     SubstateDestroyedProof,
     SubstateRecord,
@@ -264,10 +263,6 @@ impl Block {
 
     pub fn all_node_evictions(&self) -> impl Iterator<Item = &EvictNodeAtom> + '_ {
         self.commands.iter().filter_map(|c| c.evict_node())
-    }
-
-    pub fn all_confidential_output_mints(&self) -> impl Iterator<Item = &MintConfidentialOutputAtom> + '_ {
-        self.commands.iter().filter_map(|c| c.mint_confidential_output())
     }
 
     pub fn all_local_accept(&self) -> impl Iterator<Item = &TransactionAtom> + '_ {
@@ -789,7 +784,7 @@ impl Block {
             let outputs = execution.resulting_outputs();
             let outputs = outputs
                 .iter()
-                .map(|lock| lock.versioned_substate_id().as_ref())
+                .map(|lock| lock.versioned_substate_id().as_versioned_ref())
                 .filter(|id| self.shard_group().contains_or_global(&id.to_shard(num_preshards)));
 
             let substates = SubstateRecord::get_all(tx, outputs)?;
@@ -1071,7 +1066,6 @@ where
     tx.transaction_pool_state_updates_remove_any_by_block_id(block_id)?;
     tx.block_transaction_executions_remove_any_by_block_id(block_id)?;
     tx.foreign_proposals_clear_proposed_in(block_id).optional()?;
-    tx.burnt_utxos_clear_proposed_block(block_id)?;
     tx.lock_conflicts_remove_by_block_id(block_id)?;
 
     Block::delete_record(tx, block_id)?;

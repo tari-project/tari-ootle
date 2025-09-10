@@ -347,7 +347,7 @@ impl VersionedSubstateId {
         Self::new(self.substate_id, self.version + 1)
     }
 
-    pub fn as_ref(&self) -> VersionedSubstateIdRef<'_> {
+    pub fn as_versioned_ref(&self) -> VersionedSubstateIdRef<'_> {
         VersionedSubstateIdRef {
             substate_id: &self.substate_id,
             version: self.version,
@@ -411,6 +411,12 @@ impl TryFrom<SubstateRequirement> for VersionedSubstateId {
 
 impl Borrow<SubstateId> for VersionedSubstateId {
     fn borrow(&self) -> &SubstateId {
+        &self.substate_id
+    }
+}
+
+impl AsRef<SubstateId> for VersionedSubstateId {
+    fn as_ref(&self) -> &SubstateId {
         &self.substate_id
     }
 }

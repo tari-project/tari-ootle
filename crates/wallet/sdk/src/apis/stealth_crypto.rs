@@ -5,8 +5,8 @@ use std::ops::RangeInclusive;
 
 use log::*;
 use tari_crypto::{
-    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey},
-    signatures::CommitmentSignature,
+    commitment::HomomorphicCommitmentFactory,
+    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
 use tari_engine_types::{
     crypto::{get_commitment_factory, ElgamalVerifiableBalance, PrivateOutput, ValueLookupTable},
@@ -27,7 +27,7 @@ use tari_ootle_wallet_crypto::{
 };
 use tari_template_lib::{
     models::{ConfidentialOutputStatement, EncryptedData, StealthTransferStatement},
-    prelude::{crypto::CommitmentSignatureBytes, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes},
     types::{crypto::UtxoTagByte, Amount},
 };
 
@@ -188,14 +188,14 @@ impl StealthCryptoApi {
     pub fn validate_burn_claim_ownership_proof(
         &self,
         network: Network,
-        ownership_proof: &CommitmentSignatureBytes,
+        ownership_proof: &SchnorrSignatureBytes,
         commitment: &PedersenCommitmentBytes,
+        value: u64,
         account_owner_pk: &RistrettoPublicKeyBytes,
     ) -> bool {
         // NOTE: .as_bytes() used because the tari_crypto borsh implementations serialize fixed length bytes as variable
         // length bytes of size 32
         let message = ownership_proof_hasher64(network)
-            .chain(&ownership_proof.public_nonce().as_bytes())
             .chain(&commitment.as_bytes())
             .chain(&account_owner_pk.as_bytes())
             .finalize();
@@ -205,12 +205,16 @@ impl StealthCryptoApi {
             return false;
         };
 
-        let Ok(proof_of_knowledge) = CommitmentSignature::try_from_byte_type(ownership_proof) else {
+        let Ok(proof_of_knowledge) = RistrettoSchnorr::try_from_byte_type(ownership_proof) else {
             warn!(target: LOG_TARGET, "Claim burn failed - malformed proof of knowledge");
             return false;
         };
 
-        if !proof_of_knowledge.verify_challenge(&commitment, &message, get_commitment_factory()) {
+        let value_commit = get_commitment_factory().commit_value(&RistrettoSecretKey::default(), value);
+        // k.G = C - v.H
+        let signer_pk = commitment.as_public_key() - value_commit.as_public_key();
+
+        if !proof_of_knowledge.verify(&signer_pk, message) {
             warn!(target: LOG_TARGET, "Claim burn failed - signature verification failed");
             return false;
         }

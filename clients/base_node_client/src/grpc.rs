@@ -22,7 +22,6 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use async_trait::async_trait;
 use log::*;
 use minotari_app_grpc::tari_rpc::{self as grpc, GetShardKeyRequest, GetValidatorNodeChangesRequest};
 use minotari_node_grpc_client::BaseNodeGrpcClient;
@@ -93,7 +92,6 @@ impl GrpcBaseNodeClient {
     }
 }
 
-#[async_trait]
 impl BaseNodeClient for GrpcBaseNodeClient {
     async fn test_connection(&mut self) -> Result<(), BaseNodeClientError> {
         self.connection().await?;
@@ -261,7 +259,7 @@ impl BaseNodeClient for GrpcBaseNodeClient {
         Ok(templates)
     }
 
-    async fn get_header_by_hash(&mut self, block_hash: FixedHash) -> Result<BlockHeader, BaseNodeClientError> {
+    async fn get_header_by_hash(&mut self, block_hash: &FixedHash) -> Result<BlockHeader, BaseNodeClientError> {
         let inner = self.connection().await?;
         let request = grpc::GetHeaderByHashRequest {
             hash: block_hash.to_vec(),

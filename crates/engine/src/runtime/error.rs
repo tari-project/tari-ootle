@@ -20,9 +20,6 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::fmt::Display;
-
-use anyhow::anyhow;
 use tari_bor::BorError;
 use tari_engine_types::{
     commit_result::RejectReason,
@@ -41,11 +38,11 @@ use tari_template_lib::{
     models::{
         AddressAllocationId,
         BucketId,
+        ClaimedOutputTombstoneAddress,
         ComponentAddress,
         NonFungibleId,
         ProofId,
         ResourceAddress,
-        UnclaimedConfidentialOutputAddress,
         VaultId,
     },
     types::{Amount, TemplateAddress},
@@ -63,9 +60,6 @@ pub enum RuntimeError {
     EncodingError(#[from] BorError),
     #[error("Indexed value error: {0}")]
     IndexedValueError(#[from] IndexedValueError),
-    // TODO: proper error
-    #[error("State DB error: {0}")]
-    StateDbError(#[from] anyhow::Error),
     #[error("State storage error: {0}")]
     StateStoreError(#[from] StateStoreError),
     #[error("Workspace error: {0}")]
@@ -106,9 +100,7 @@ pub enum RuntimeError {
     #[error("Component not found with address '{address}'")]
     ComponentNotFound { address: ComponentAddress },
     #[error("Layer one commitment not found with address '{address}'")]
-    LayerOneCommitmentNotFound {
-        address: UnclaimedConfidentialOutputAddress,
-    },
+    LayerOneCommitmentNotFound { address: ClaimedOutputTombstoneAddress },
     #[error("Invalid argument {argument}: {reason}")]
     InvalidArgument { argument: &'static str, reason: String },
     #[error("Invalid number of arguments: expected {expected}, but got {len}")]
@@ -184,16 +176,10 @@ pub enum RuntimeError {
     InvalidMethodAccessRule { template_name: String, details: String },
     #[error("Runtime module error: {0}")]
     ModuleError(#[from] RuntimeModuleError),
-    #[error("Invalid claiming signature: {details}")]
-    InvalidClaimingSignature { details: String },
-    #[error("Invalid range proof")]
-    InvalidRangeProof,
-    #[error("Invalid substate type")]
-    InvalidSubstateType,
+    #[error("Invalid burn claim proof: {details}")]
+    InvalidClaimProof { details: String },
     #[error("Layer one commitment already claimed with address '{address}'")]
-    ConfidentialOutputAlreadyClaimed {
-        address: UnclaimedConfidentialOutputAddress,
-    },
+    ConfidentialOutputAlreadyClaimed { address: ClaimedOutputTombstoneAddress },
     #[error("Template {template_address} not found")]
     TemplateNotFound { template_address: TemplateAddress },
     #[error("Insufficient fees paid: required {required_fee}, paid {fees_paid}")]
@@ -290,10 +276,6 @@ pub enum RuntimeError {
 }
 
 impl RuntimeError {
-    pub fn state_db_error<T: Display>(err: T) -> Self {
-        RuntimeError::StateDbError(anyhow!("{}", err))
-    }
-
     pub fn to_reject_reason(&self) -> RejectReason {
         match self {
             Self::SubstateNotFound { id } => RejectReason::OneOrMoreInputsNotFound(format!("Substate {id} not found",)),
@@ -352,8 +334,6 @@ pub enum TransactionCommitError {
     DanglingLockedValueInVault { vault_id: VaultId, locked_amount: Amount },
     #[error("{count} dangling address allocations remain after transaction execution")]
     DanglingAddressAllocations { count: usize },
-    #[error("{} orphaned substate(s) detected: {}", .substates.len(), .substates.join(", "))]
-    OrphanedSubstates { substates: Vec<String> },
     #[error("{count} dangling items in workspace after transaction execution")]
     WorkspaceNotEmpty { count: usize },
     #[error(transparent)]

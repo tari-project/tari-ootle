@@ -10,19 +10,18 @@ use serde::{Deserialize, Serialize};
 use tari_bor::BorTag;
 use tari_template_lib_types::{crypto::PedersenCommitmentBytes, KeyParseError, ObjectKey};
 
-use crate::models::BinaryTag;
+use crate::models::{address_prefixes, BinaryTag};
 
-const TAG: u64 = BinaryTag::UnclaimedConfidentialOutputAddress.as_u64();
+const TAG: u64 = BinaryTag::ClaimedOutputTombstoneAddress.as_u64();
 
-/// The global identifier of a unclaimed confidential output in the Tari network.
-/// This substate is created when a L1 UTXO is detected as burnt, and consumed when a user submits a valid claim burn
-/// transaction.
+/// The global identifier of a claimed layer-one output in the Tari network.
+/// This substate is created when a L1 UTXO is claimed to prevent double claims.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[serde(transparent)]
-pub struct UnclaimedConfidentialOutputAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
+pub struct ClaimedOutputTombstoneAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
-impl UnclaimedConfidentialOutputAddress {
+impl ClaimedOutputTombstoneAddress {
     pub fn new(key: ObjectKey) -> Self {
         Self(BorTag::new(key))
     }
@@ -31,7 +30,7 @@ impl UnclaimedConfidentialOutputAddress {
         Ok(Self(BorTag::new(ObjectKey::from_hex(hex)?)))
     }
 
-    pub fn from_commitment(commitment_bytes: &PedersenCommitmentBytes) -> Self {
+    pub fn from_commitment(commitment_bytes: PedersenCommitmentBytes) -> Self {
         Self(BorTag::new(ObjectKey::from_array(commitment_bytes.into_array())))
     }
 
@@ -48,13 +47,13 @@ impl UnclaimedConfidentialOutputAddress {
     }
 }
 
-impl From<ObjectKey> for UnclaimedConfidentialOutputAddress {
+impl From<ObjectKey> for ClaimedOutputTombstoneAddress {
     fn from(key: ObjectKey) -> Self {
         Self(BorTag::new(key))
     }
 }
 
-impl TryFrom<&[u8]> for UnclaimedConfidentialOutputAddress {
+impl TryFrom<&[u8]> for ClaimedOutputTombstoneAddress {
     type Error = KeyParseError;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
@@ -62,28 +61,28 @@ impl TryFrom<&[u8]> for UnclaimedConfidentialOutputAddress {
     }
 }
 
-impl From<[u8; ObjectKey::LENGTH]> for UnclaimedConfidentialOutputAddress {
+impl From<[u8; ObjectKey::LENGTH]> for ClaimedOutputTombstoneAddress {
     fn from(value: [u8; ObjectKey::LENGTH]) -> Self {
         Self(BorTag::new(ObjectKey::from_array(value)))
     }
 }
 
-impl Display for UnclaimedConfidentialOutputAddress {
+impl Display for ClaimedOutputTombstoneAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "commitment_{}", self.0.inner())
+        write!(f, "{}_{}", address_prefixes::CLAIMED_OUTPUT_TOMBSTONE, self.0.inner())
     }
 }
 
-impl FromStr for UnclaimedConfidentialOutputAddress {
+impl FromStr for ClaimedOutputTombstoneAddress {
     type Err = KeyParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let s = s.strip_prefix("commitment_").unwrap_or(s);
+        let s = s.strip_prefix("tombstone_").unwrap_or(s);
         Self::from_hex(s)
     }
 }
 
-impl AsRef<[u8]> for UnclaimedConfidentialOutputAddress {
+impl AsRef<[u8]> for ClaimedOutputTombstoneAddress {
     fn as_ref(&self) -> &[u8] {
         self.as_bytes()
     }
@@ -95,16 +94,16 @@ mod borsh {
 
     use super::*;
 
-    impl ::borsh::BorshSerialize for UnclaimedConfidentialOutputAddress {
+    impl ::borsh::BorshSerialize for ClaimedOutputTombstoneAddress {
         fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
             ::borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
         }
     }
 
-    impl ::borsh::BorshDeserialize for UnclaimedConfidentialOutputAddress {
+    impl ::borsh::BorshDeserialize for ClaimedOutputTombstoneAddress {
         fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
             let key = ::borsh::BorshDeserialize::deserialize_reader(reader)?;
-            Ok(UnclaimedConfidentialOutputAddress::new(ObjectKey::from_array(key)))
+            Ok(ClaimedOutputTombstoneAddress::new(ObjectKey::from_array(key)))
         }
     }
 }

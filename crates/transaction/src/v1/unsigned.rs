@@ -133,9 +133,6 @@ impl UnsignedTransactionV1 {
                         substates.extend(value.referenced_substates().filter(|id| !id.is_virtual()));
                     }
                 },
-                Instruction::ClaimBurn { claim } => {
-                    substates.insert(SubstateId::UnclaimedConfidentialOutput(claim.output_address));
-                },
                 Instruction::ClaimValidatorFees { address, .. } => {
                     substates.insert(SubstateId::ValidatorFeePool(*address));
                 },

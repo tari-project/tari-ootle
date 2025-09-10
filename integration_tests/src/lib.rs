@@ -49,15 +49,15 @@ use tari_transaction_components::{
     key_manager::{TariKeyId, TransactionKeyManagerInterface},
 };
 use tari_transaction_key_manager::{create_memory_db_key_manager, MemoryDbKeyManager};
-use tari_wallet_daemon_client::types::ExtClaimBurnProof;
 use template::RegisteredTemplate;
 use validator_node::ValidatorNodeProcess;
 use wallet::WalletProcess;
 use wallet_daemon::TariWalletDaemonProcess;
 
-use crate::logging::get_base_dir;
+use crate::{claim_proof::CucumberClaimProof, logging::get_base_dir};
 
 pub mod base_node;
+pub mod claim_proof;
 pub mod helpers;
 pub mod http_server;
 pub mod indexer;
@@ -85,7 +85,7 @@ pub struct TariWorld {
     pub http_server: Option<MockHttpServer>,
     pub template_mock_server_port: Option<u16>,
     pub current_scenario_name: Option<String>,
-    pub claim_proofs: HashMap<String, ExtClaimBurnProof>,
+    pub claim_proofs: HashMap<String, CucumberClaimProof>,
     pub substate_ids: IndexMap<String, SubstateId>,
     pub num_databases_saved: usize,
     pub account_keys: IndexMap<String, RistrettoPublicKeyBytes>,

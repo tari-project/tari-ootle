@@ -25,12 +25,13 @@
 
 mod account;
 mod address_allocation;
+pub mod address_prefixes;
 mod binary_tag;
 mod bucket;
+mod claimed_l1_commitment;
 mod component;
 mod confidential_proof;
 mod encrypted_data;
-mod layer_one_commitment;
 mod metadata;
 mod non_fungible;
 mod proof;
@@ -45,10 +46,10 @@ pub use account::*;
 pub use address_allocation::*;
 pub use binary_tag::*;
 pub use bucket::*;
+pub use claimed_l1_commitment::*;
 pub use component::*;
 pub use confidential_proof::*;
 pub use encrypted_data::*;
-pub use layer_one_commitment::*;
 pub use metadata::*;
 pub use non_fungible::*;
 pub use proof::*;

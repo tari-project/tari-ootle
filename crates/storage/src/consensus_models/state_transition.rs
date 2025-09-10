@@ -64,6 +64,7 @@ bitflags! {
         const TEMPLATE = 0x0000_0020;
         const VALIDATOR_FEE_POOL = 0x0000_0040;
         const UTXO = 0x0000_0080;
+        const CLAIMED_OUTPUT_TOMBSTONE = 0x0000_0100;
     }
 }
 
@@ -78,8 +79,7 @@ impl SubstateValueFilterFlags {
             SubstateId::Template(_) => self.contains(SubstateValueFilterFlags::TEMPLATE),
             SubstateId::ValidatorFeePool(_) => self.contains(SubstateValueFilterFlags::VALIDATOR_FEE_POOL),
             SubstateId::Utxo(_) => self.contains(SubstateValueFilterFlags::UTXO),
-            // TODO: remove once UnclaimedConfidentialOutput is removed
-            SubstateId::UnclaimedConfidentialOutput(_) => false,
+            SubstateId::ClaimedOutputTombstone(_) => self.contains(SubstateValueFilterFlags::CLAIMED_OUTPUT_TOMBSTONE),
         }
     }
 }

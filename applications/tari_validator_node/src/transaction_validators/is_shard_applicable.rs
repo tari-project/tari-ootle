@@ -6,25 +6,25 @@ use tari_transaction::Transaction;
 
 use crate::{transaction_validators::TransactionValidationError, validator::Validator};
 
-const LOG_TARGET: &str = "tari::ootle::mempool::validators::has_involved_shards";
+const LOG_TARGET: &str = "tari::ootle::mempool::validators::is_shard_applicable";
 
-/// Refuse to process the transaction if it does not have any inputs.
-/// We make an exception (for now) for CreateFreeTestCoins transactions, which have no inputs.
+/// Refuse to process the transaction if it does not apply to any shard (i.e. does not have any inputs or claim burn
+/// tombstones).
 #[derive(Debug, Clone, Default)]
-pub struct HasInputs;
+pub struct IsShardApplicable;
 
-impl HasInputs {
+impl IsShardApplicable {
     pub fn new() -> Self {
         Self
     }
 }
 
-impl Validator<Transaction> for HasInputs {
+impl Validator<Transaction> for IsShardApplicable {
     type Context = ();
     type Error = TransactionValidationError;
 
     fn validate(&self, _context: &(), transaction: &Transaction) -> Result<(), Self::Error> {
-        if transaction.all_inputs_iter().next().is_none() {
+        if !transaction.is_shard_applicable() {
             warn!(target: LOG_TARGET, "HasInputs - FAIL: No input shards");
             return Err(TransactionValidationError::NoInputs {
                 transaction_id: transaction.calculate_id(),

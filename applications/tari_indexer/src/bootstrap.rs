@@ -179,7 +179,6 @@ pub async fn spawn_services(
         global_db.clone(),
         keypair.public_key().to_byte_type(),
         epoch_event_oracle,
-        Noop,
         template_queue_sender,
         Noop,
         shutdown.clone(),
@@ -314,6 +313,7 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + 'static>(
             .as_ref()
             .map(|p| p.to_byte_type()),
         config.indexer.sidechain_id.as_ref().map(|p| p.to_byte_type()),
+        config.network,
     ))
 }
 

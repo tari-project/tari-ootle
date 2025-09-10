@@ -10,7 +10,7 @@ use std::{
 use borsh::{BorshDeserialize, BorshSerialize};
 use tari_bor::{BorTag, Deserialize, Serialize};
 use tari_template_lib::{
-    models::{BinaryTag, ResourceAddress},
+    models::{address_prefixes, BinaryTag, ResourceAddress},
     prelude::{from_hex, serde_helpers, KeyParseError, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     types::{crypto::UtxoTagByte, hex::write_hex_fmt},
 };
@@ -108,7 +108,13 @@ impl FromStr for UtxoAddress {
 
 impl Display for UtxoAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "utxo_{}_{}", self.resource_address().as_object_key(), self.id())
+        write!(
+            f,
+            "{}_{}_{}",
+            address_prefixes::UTXO,
+            self.resource_address().as_object_key(),
+            self.id()
+        )
     }
 }
 

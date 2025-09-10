@@ -70,7 +70,7 @@ use crate::{
     },
     state_store::memory::ReadOnlyMemoryStateStore,
     template::LoadedTemplate,
-    traits::Invokable,
+    traits::{ClaimProofVerifier, Invokable},
     transaction::{TransactionError, TransactionProcessorConfig},
     wasm::{WasmModule, WasmProcess},
 };
@@ -86,6 +86,7 @@ pub struct TransactionProcessor<TTemplateProvider> {
     auth_params: AuthParams,
     virtual_substates: VirtualSubstates,
     modules: Vec<Arc<dyn RuntimeModule>>,
+    claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
 }
 
 impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> TransactionProcessor<TTemplateProvider> {
@@ -96,6 +97,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         auth_params: AuthParams,
         virtual_substates: VirtualSubstates,
         modules: Vec<Arc<dyn RuntimeModule>>,
+        claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
     ) -> Self {
         Self {
             config,
@@ -104,6 +106,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             auth_params,
             virtual_substates,
             modules,
+            claim_burn_proof_verifier,
         }
     }
 
@@ -119,6 +122,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             auth_params,
             virtual_substates,
             modules,
+            claim_burn_proof_verifier,
         } = self;
 
         let initial_auth_scope = AuthorizationScope::new(auth_params.initial_ownership_proofs);
@@ -156,7 +160,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             entity_id_provider,
             modules,
             MAX_CALL_DEPTH,
-            config.network,
+            claim_burn_proof_verifier,
         )?;
 
         let runtime = Runtime::new(Arc::new(runtime_interface));
@@ -258,7 +262,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         debug!(target: LOG_TARGET, "instruction = {:?}", instruction);
         match instruction {
             Instruction::CreateAccount {
-                public_key_address,
+                owner_public_key: public_key_address,
                 owner_rule,
                 access_rules,
                 workspace_id,
@@ -292,9 +296,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 runtime.interface().emit_log(level, message)?;
                 Ok(InstructionResult::empty())
             },
-            Instruction::ClaimBurn { claim } => {
-                // Need to call it on the runtime so that a bucket is created.
-                runtime.interface().claim_burn(*claim)?;
+            Instruction::ClaimBurn { claim, output_data } => {
+                runtime.interface().claim_burn(*claim, output_data)?;
                 Ok(InstructionResult::empty())
             },
             Instruction::ClaimValidatorFees { address } => {

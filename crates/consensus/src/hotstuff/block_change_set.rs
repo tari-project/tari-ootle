@@ -10,14 +10,13 @@ use std::{
 use indexmap::IndexMap;
 use log::*;
 use tari_consensus_types::{BlockId, HighPc, HighTc, LeafBlock};
-use tari_engine_types::{substate::SubstateId, template_lib_models::UnclaimedConfidentialOutputAddress};
+use tari_engine_types::{substate::SubstateId, template_lib_models::ClaimedOutputTombstoneAddress};
 use tari_ootle_common_types::{displayable::Displayable, optional::Optional, shard::Shard, NodeHeight, ShardGroup};
 use tari_ootle_storage::{
     consensus_models::{
         Block,
         BlockDiff,
         BlockTransactionExecution,
-        BurntUtxo,
         Evidence,
         ForeignProposalRecord,
         ForeignProposalStatus,
@@ -106,7 +105,7 @@ pub struct ProposedBlockChangeSet {
     transaction_changes: IndexMap<TransactionId, TransactionChangeSet>,
     new_transactions_to_sequence: Vec<TransactionPoolRecord>,
     proposed_foreign_proposals: Vec<BlockId>,
-    proposed_utxo_mints: Vec<UnclaimedConfidentialOutputAddress>,
+    proposed_utxo_mints: Vec<ClaimedOutputTombstoneAddress>,
     no_vote_reason: Option<NoVoteReason>,
     evict_nodes: Vec<RistrettoPublicKeyBytes>,
 }
@@ -251,7 +250,7 @@ impl ProposedBlockChangeSet {
         &self.proposed_foreign_proposals
     }
 
-    pub fn set_utxo_mint_proposed_in(&mut self, mint: UnclaimedConfidentialOutputAddress) -> &mut Self {
+    pub fn set_utxo_mint_proposed_in(&mut self, mint: ClaimedOutputTombstoneAddress) -> &mut Self {
         self.proposed_utxo_mints.push(mint);
         self
     }
@@ -520,10 +519,6 @@ impl ProposedBlockChangeSet {
                 ForeignProposalStatus::Proposed,
                 Some(self.block.block_id()),
             )?;
-        }
-
-        for mint in &self.proposed_utxo_mints {
-            BurntUtxo::set_proposed_in_block(tx, mint, &self.block.block_id)?;
         }
 
         for node in &self.evict_nodes {

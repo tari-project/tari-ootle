@@ -84,7 +84,7 @@ impl TransactionV1 {
         self.body.verify_all_signatures(self.seal_signature.public_key())
     }
 
-    pub fn inputs(&self) -> &IndexSet<SubstateRequirement> {
+    pub(crate) fn inputs(&self) -> &IndexSet<SubstateRequirement> {
         self.body.inputs()
     }
 

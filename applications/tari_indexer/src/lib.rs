@@ -53,17 +53,20 @@ use substate_manager::SubstateManager;
 use tari_common::exit_codes::{ExitCode, ExitError};
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_engine::transaction::TransactionProcessorConfig;
-use tari_engine_types::confidential::UnclaimedConfidentialOutput;
 use tari_epoch_manager::{
-    traits::{EpochManagerSpec, EpochUtxoStore, LayerOneTransactionSubmitter},
+    traits::{EpochManagerSpec, LayerOneTransactionSubmitter},
     EpochManagerEvent,
     EpochManagerReader,
 };
 use tari_epoch_oracles::EpochOracle;
 use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::NetworkingService;
-use tari_ootle_app_utilities::{keypair::setup_keypair_prompt, template_download_queue::TemplateDownloadQueue};
-use tari_ootle_common_types::{layer_one_transaction::LayerOneTransactionDef, Epoch, PeerAddress};
+use tari_ootle_app_utilities::{
+    claim_burn_proof_verifier::TariClaimBurnProofVerifier,
+    keypair::setup_keypair_prompt,
+    template_download_queue::TemplateDownloadQueue,
+};
+use tari_ootle_common_types::{layer_one_transaction::LayerOneTransactionDef, PeerAddress};
 use tari_ootle_storage::global::{DbFactory, GlobalDb};
 use tari_ootle_storage_sqlite::{global::SqliteGlobalDbAdapter, SqliteDbFactory};
 use tari_shutdown::ShutdownSignal;
@@ -122,11 +125,12 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
 
     // dry run
     let dry_run_transaction_processor = DryRunTransactionProcessor::new(
-        TransactionProcessorConfig::new(config.network)
+        TransactionProcessorConfig::new()
             .with_template_binary_max_size_bytes(consensus_constants.template_binary_max_size_bytes),
         services.epoch_manager.clone(),
         services.validator_node_client_factory.clone(),
         services.template_manager.clone(),
+        TariClaimBurnProofVerifier::new(config.network, services.global_db.clone()),
     );
 
     // Run the event manager
@@ -257,18 +261,9 @@ impl EpochManagerSpec for IndexerEpochManagerSpec {
     type EpochEventOracle = EpochOracle<GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>>;
     type LayerOneSubmitter = Noop;
     type TemplateDownloader = TemplateDownloadQueue;
-    type UtxoStore = Noop;
 }
 
 pub struct Noop;
-
-impl EpochUtxoStore for Noop {
-    type Error = Infallible;
-
-    fn add_unclaimed_utxo(&mut self, _epoch: Epoch, _substate: UnclaimedConfidentialOutput) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
 
 impl LayerOneTransactionSubmitter for Noop {
     type Error = Infallible;

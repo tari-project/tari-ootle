@@ -20,10 +20,15 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use log::{debug, info};
-use tari_engine::{fees::FeeTable, state_store::new_memory_store, transaction::TransactionProcessorConfig};
+use tari_engine::{
+    fees::FeeTable,
+    state_store::new_memory_store,
+    traits::ClaimProofVerifier,
+    transaction::TransactionProcessorConfig,
+};
 use tari_engine_types::{
     commit_result::ExecuteResult,
     substate::{Substate, SubstateId},
@@ -51,6 +56,7 @@ pub struct DryRunTransactionProcessor {
     epoch_manager: EpochManagerHandle<PeerAddress>,
     client_provider: TariValidatorNodeRpcClientFactory,
     template_manager: TemplateManager<PeerAddress>,
+    claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
 }
 
 impl DryRunTransactionProcessor {
@@ -59,12 +65,14 @@ impl DryRunTransactionProcessor {
         epoch_manager: EpochManagerHandle<PeerAddress>,
         client_provider: TariValidatorNodeRpcClientFactory,
         template_manager: TemplateManager<PeerAddress>,
+        claim_burn_proof_verifier: impl ClaimProofVerifier + Send + Sync + 'static,
     ) -> Self {
         Self {
             config,
             epoch_manager,
             client_provider,
             template_manager,
+            claim_burn_proof_verifier: Arc::new(claim_burn_proof_verifier),
         }
     }
 
@@ -114,7 +122,12 @@ impl DryRunTransactionProcessor {
             FeeTable::zero_rated()
         };
 
-        TariTransactionProcessor::new(self.config.clone(), self.template_manager.clone(), fee_table)
+        TariTransactionProcessor::new(
+            self.config.clone(),
+            self.template_manager.clone(),
+            fee_table,
+            self.claim_burn_proof_verifier.clone(),
+        )
     }
 
     fn transaction_includes_fees(transaction: &Transaction) -> bool {

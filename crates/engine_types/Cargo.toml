@@ -19,6 +19,7 @@ tari_template_lib = { workspace = true, features = ["borsh"] }
 base64 = "0.21.0"
 blake2 = { workspace = true }
 borsh = { workspace = true }
+bounded-vec = { workspace = true, features = ["serde"] }
 rand = { workspace = true }
 digest = { workspace = true }
 hex = { workspace = true, features = ["serde"] }

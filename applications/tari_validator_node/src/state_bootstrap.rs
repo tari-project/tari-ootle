@@ -50,7 +50,7 @@ pub fn has_bootstrapped<TTx: StateStoreReadTransaction>(tx: &TTx) -> Result<bool
     // Assume that if the public identity resource exists, then the rest of the state has been bootstrapped
     SubstateRecord::exists(
         tx,
-        VersionedSubstateId::new(PUBLIC_IDENTITY_RESOURCE_ADDRESS, 0).as_ref(),
+        VersionedSubstateId::new(PUBLIC_IDENTITY_RESOURCE_ADDRESS, 0).as_versioned_ref(),
     )
 }
 

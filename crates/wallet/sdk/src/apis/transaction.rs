@@ -366,7 +366,7 @@ where
                             if let Some(resource) = tx.substates_get(&vault.resource_address.into()).optional()? {
                                 tx.substates_upsert_child(
                                     &vault.account_address.into(),
-                                    resource.substate_id.as_ref(),
+                                    resource.substate_id.as_versioned_ref(),
                                     HashSet::new(),
                                 )?;
                             }
@@ -429,7 +429,7 @@ where
                             if let Some(resource) = tx.substates_get(&vault.resource_address.into()).optional()? {
                                 tx.substates_upsert_child(
                                     &vault.account_address.into(),
-                                    resource.substate_id.as_ref(),
+                                    resource.substate_id.as_versioned_ref(),
                                     HashSet::new(),
                                 )?;
                             }
@@ -455,7 +455,7 @@ where
                     }
                     continue;
                 },
-                SubstateId::UnclaimedConfidentialOutput(_) => {
+                SubstateId::ClaimedOutputTombstone(_) => {
                     tx.substates_upsert_root(
                         VersionedSubstateIdRef::new(id, substate.version()),
                         [XTR.into()].into_iter().collect(),

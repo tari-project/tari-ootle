@@ -11,7 +11,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tari_bor::BorTag;
 use tari_template_lib::{
-    models::BinaryTag,
+    models::{address_prefixes, BinaryTag},
     types::{Hash, KeyParseError, ObjectKey},
 };
 
@@ -54,7 +54,7 @@ impl<T: Into<Hash>> From<T> for TransactionReceiptAddress {
 
 impl Display for TransactionReceiptAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "txreceipt_{}", self.as_object_key())
+        write!(f, "{}_{}", address_prefixes::TRANSACTION_RECEIPT, self.as_object_key())
     }
 }
 

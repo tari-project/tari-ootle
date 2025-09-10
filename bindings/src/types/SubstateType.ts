@@ -4,7 +4,7 @@ export type SubstateType =
   | "Component"
   | "Resource"
   | "Vault"
-  | "UnclaimedConfidentialOutput"
+  | "ClaimedOutputTombstone"
   | "NonFungible"
   | "TransactionReceipt"
   | "ValidatorFeePool"

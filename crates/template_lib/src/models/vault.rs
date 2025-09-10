@@ -35,6 +35,7 @@ use tari_template_abi::{
 use tari_template_lib_types::{EntityId, KeyParseError, ObjectKey};
 
 use super::{
+    address_prefixes,
     BinaryTag,
     Bucket,
     ConfidentialWithdrawProof,
@@ -95,7 +96,7 @@ impl From<ObjectKey> for VaultId {
 
 impl Display for VaultId {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "vault_{}", *self.0)
+        write!(f, "{}_{}", address_prefixes::VAULT, *self.0)
     }
 }
 

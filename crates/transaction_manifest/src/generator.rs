@@ -169,7 +169,7 @@ impl ManifestInstructionGenerator {
                                 SubstateId::TransactionReceipt(addr) => Ok(call_arg!(*addr)),
                                 SubstateId::Vault(addr) => Ok(call_arg!(*addr)),
                                 SubstateId::NonFungible(addr) => Ok(call_arg!(addr)),
-                                SubstateId::UnclaimedConfidentialOutput(addr) => Ok(call_arg!(*addr)),
+                                SubstateId::ClaimedOutputTombstone(addr) => Ok(call_arg!(*addr)),
                                 SubstateId::Template(addr) => Ok(call_arg!(*addr)),
                                 SubstateId::ValidatorFeePool(addr) => Ok(call_arg!(*addr)),
                                 SubstateId::Utxo(addr) => Ok(call_arg!(*addr)),

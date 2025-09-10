@@ -383,7 +383,7 @@ fn print_substate_diff(diff: &SubstateDiff) {
             SubstateValue::NonFungible(_) => {
                 println!("      ▶ NFT: {}", address);
             },
-            SubstateValue::UnclaimedConfidentialOutput(_hash) => {
+            SubstateValue::ClaimedOutputTombstone(_hash) => {
                 println!("     ! layer one commitment: Should never happen");
             },
             SubstateValue::ValidatorFeePool(fee_pool) => {
@@ -728,7 +728,7 @@ impl CliArg {
                 SubstateId::Component(v) => arg!(v),
                 SubstateId::Resource(v) => arg!(v),
                 SubstateId::Vault(v) => arg!(v),
-                SubstateId::UnclaimedConfidentialOutput(v) => arg!(v),
+                SubstateId::ClaimedOutputTombstone(v) => arg!(v),
                 SubstateId::NonFungible(v) => arg!(v),
                 SubstateId::TransactionReceipt(v) => arg!(v),
                 SubstateId::Template(v) => arg!(v),

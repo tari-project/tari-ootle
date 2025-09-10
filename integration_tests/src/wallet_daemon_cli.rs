@@ -24,21 +24,17 @@ use std::{collections::HashMap, str::FromStr, time::Duration};
 
 use anyhow::{anyhow, bail};
 use serde_json::json;
-use tari_crypto::{
-    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
-    signatures::CommitmentSignature,
-};
-use tari_engine_types::{substate::SubstateId, ToByteType};
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_ootle_wallet_sdk::{
-    apis::{confidential_transfer::ConfidentialTransferInputSelection, key_manager::KeyBranch},
+    apis::confidential_transfer::ConfidentialTransferInputSelection,
     models::{Account, AccountWithPublicKey, NonFungibleToken},
 };
 use tari_template_lib::{
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
-    prelude::{PedersenCommitmentBytes, ResourceAddress, RistrettoPublicKeyBytes, XTR},
+    prelude::{ResourceAddress, RistrettoPublicKeyBytes, XTR},
     resource::TOKEN_SYMBOL,
-    types::{crypto::RangeProofBytes, Amount},
+    types::Amount,
 };
 use tari_transaction::UnsignedTransaction;
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
@@ -51,13 +47,9 @@ use tari_wallet_daemon_client::{
         AccountsCreateRequest,
         AccountsGetBalancesRequest,
         AccountsTransferRequest,
-        ClaimBurnProof,
-        ClaimBurnRequest,
-        ClaimBurnResponse,
         ClaimValidatorFeesRequest,
         ClaimValidatorFeesResponse,
         ConfidentialTransferRequest,
-        ExtClaimBurnProof,
         ListNftsRequest,
         MintFaucetNftRequest,
         RevealFundsRequest,
@@ -77,36 +69,6 @@ use crate::{
     validator_node_cli::add_substate_ids,
     TariWorld,
 };
-
-pub async fn claim_burn(
-    world: &mut TariWorld,
-    account_name: String,
-    commitment: PedersenCommitmentBytes,
-    range_proof: RangeProofBytes,
-    ownership_proof: CommitmentSignature<RistrettoPublicKey, RistrettoSecretKey>,
-    reciprocal_claim_public_key: RistrettoPublicKey,
-    wallet_daemon_name: String,
-    max_fee: u64,
-) -> Result<ClaimBurnResponse, WalletDaemonClientError> {
-    let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
-    let resp = client.create_key(KeyBranch::Nonce).await?;
-
-    let claim_burn_request = ClaimBurnRequest {
-        account: ComponentAddressOrName::Name(account_name),
-        claim_proof: ExtClaimBurnProof {
-            claim_proof: ClaimBurnProof {
-                commitment,
-                ownership_proof: ownership_proof.to_byte_type(),
-                reciprocal_claim_public_key: reciprocal_claim_public_key.to_byte_type(),
-                range_proof,
-            },
-            owner_nonce_key_index: resp.id,
-        },
-        max_fee: Some(max_fee),
-    };
-
-    client.claim_burn(claim_burn_request).await
-}
 
 pub async fn claim_fees(
     world: &mut TariWorld,

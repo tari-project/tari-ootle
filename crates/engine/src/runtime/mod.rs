@@ -57,7 +57,7 @@ use tari_bor::decode_exact;
 use tari_engine_types::{
     commit_result::FinalizeResult,
     component::ComponentHeader,
-    confidential::TariStealthClaim,
+    confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
     indexed_value::IndexedValue,
     limits,
     lock::LockFlag,
@@ -163,7 +163,7 @@ pub trait RuntimeInterface: Send + Sync {
 
     fn set_last_instruction_output(&self, value: IndexedValue) -> Result<(), RuntimeError>;
 
-    fn claim_burn(&self, claim: TariStealthClaim) -> Result<(), RuntimeError>;
+    fn claim_burn(&self, claim: MinotariBurnClaimProof, output_data: ClaimBurnOutputData) -> Result<(), RuntimeError>;
 
     fn claim_validator_fees(&self, address: ValidatorFeePoolAddress) -> Result<(), RuntimeError>;
 

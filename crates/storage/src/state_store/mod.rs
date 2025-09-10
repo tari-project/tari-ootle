@@ -23,7 +23,7 @@ use tari_consensus_types::{
     TcId,
     TimeoutCertificate,
 };
-use tari_engine_types::{confidential::UnclaimedConfidentialOutput, substate::SubstateId};
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{
     shard::Shard,
     Epoch,
@@ -37,7 +37,7 @@ use tari_ootle_common_types::{
     VersionedSubstateIdRef,
 };
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, StateTreePayload, Version};
-use tari_template_lib::{models::UnclaimedConfidentialOutputAddress, types::crypto::RistrettoPublicKeyBytes};
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 use time::PrimitiveDateTime;
 
@@ -46,7 +46,6 @@ use crate::{
         Block,
         BlockDiff,
         BlockTransactionExecution,
-        BurntUtxo,
         EpochCheckpoint,
         Evidence,
         ForeignParkedProposal,
@@ -326,19 +325,6 @@ pub trait StateStoreReadTransaction: Sized {
         transaction_id: &TransactionId,
     ) -> Result<SubstatePledges, StorageError>;
 
-    // -------------------------------- BurntUtxos -------------------------------- //
-    fn burnt_utxos_get(
-        &self,
-        commitment: &UnclaimedConfidentialOutputAddress,
-    ) -> Result<UnclaimedConfidentialOutput, StorageError>;
-    fn burnt_utxos_get_all_unproposed(
-        &self,
-        leaf_block: &BlockId,
-        limit: usize,
-    ) -> Result<HashMap<UnclaimedConfidentialOutputAddress, UnclaimedConfidentialOutput>, StorageError>;
-
-    fn burnt_utxos_count(&self) -> Result<u64, StorageError>;
-
     // -------------------------------- Foreign parked block -------------------------------- //
     fn foreign_parked_blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError>;
 
@@ -549,20 +535,6 @@ pub trait StateStoreWriteTransaction {
 
     // -------------------------------- Epoch checkpoint -------------------------------- //
     fn epoch_checkpoint_save(&mut self, checkpoint: &EpochCheckpoint) -> Result<(), StorageError>;
-
-    // -------------------------------- BurntUtxo -------------------------------- //
-    fn burnt_utxos_insert(&mut self, burnt_utxo: &BurntUtxo) -> Result<(), StorageError>;
-    fn burnt_utxos_set_proposed_block(
-        &mut self,
-        commitment: &UnclaimedConfidentialOutputAddress,
-        proposed_in_block: &BlockId,
-    ) -> Result<(), StorageError>;
-    fn burnt_utxos_clear_proposed_block(&mut self, proposed_in_block: &BlockId) -> Result<(), StorageError>;
-    fn burnt_utxos_delete(
-        &mut self,
-        commitment: &UnclaimedConfidentialOutputAddress,
-        proposed_in_block: &BlockId,
-    ) -> Result<(), StorageError>;
 
     // -------------------------------- Lock conflicts -------------------------------- //
     fn lock_conflicts_insert_all<'a, I: IntoIterator<Item = (&'a TransactionId, &'a Vec<LockConflict>)>>(

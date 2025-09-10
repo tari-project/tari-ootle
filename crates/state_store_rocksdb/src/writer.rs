@@ -42,7 +42,7 @@ use tari_consensus_types::{
     QcId,
     TimeoutCertificate,
 };
-use tari_engine_types::{substate::SubstateId, template_lib_models::UnclaimedConfidentialOutputAddress};
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{
     optional::Optional,
     shard::Shard,
@@ -57,7 +57,6 @@ use tari_ootle_storage::{
     consensus_models::{
         Block,
         BlockTransactionExecution,
-        BurntUtxo,
         EpochCheckpoint,
         Evidence,
         ForeignParkedProposal,
@@ -115,8 +114,6 @@ use crate::{
             LeafBlockCf,
             LockedBlockCf,
         },
-        burnt_utxo,
-        burnt_utxo::BurntUtxoCf,
         certificates::{proposal::ProposalCertificateCf, timeout::TimeoutCertificateCf},
         chain,
         chain::PendingChainIndex,
@@ -1541,76 +1538,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         self.db()
             .cf(EpochCheckpointCf)?
             .put(&(checkpoint.epoch(), shard_group), checkpoint, OPERATION)?;
-
-        Ok(())
-    }
-
-    fn burnt_utxos_insert(&mut self, burnt_utxo: &BurntUtxo) -> Result<(), StorageError> {
-        const OPERATION: &str = "burnt_utxos_insert";
-
-        self.db()
-            .cf(BurntUtxoCf)?
-            .put(&burnt_utxo.commitment, &burnt_utxo.output, OPERATION)?;
-
-        if let Some(proposed_in_block) = burnt_utxo.proposed_in_block {
-            self.db().cf(burnt_utxo::ProposedInBlockIndex)?.put(
-                &(proposed_in_block, burnt_utxo.commitment),
-                &(),
-                OPERATION,
-            )?;
-        }
-
-        Ok(())
-    }
-
-    fn burnt_utxos_set_proposed_block(
-        &mut self,
-        commitment: &UnclaimedConfidentialOutputAddress,
-        proposed_in_block: &BlockId,
-    ) -> Result<(), StorageError> {
-        const OPERATION: &str = "burnt_utxos_set_proposed_block";
-
-        if !self.db().cf(BurntUtxoCf)?.exists(commitment, OPERATION)? {
-            return Err(StorageError::NotFound {
-                item: "burnt_utxos",
-                key: commitment.to_string(),
-            });
-        }
-
-        self.db()
-            .cf(burnt_utxo::ProposedInBlockIndex)?
-            .put(&(*proposed_in_block, *commitment), &(), OPERATION)?;
-
-        Ok(())
-    }
-
-    fn burnt_utxos_clear_proposed_block(&mut self, proposed_in_block: &BlockId) -> Result<(), StorageError> {
-        const OPERATION: &str = "burnt_utxos_clear_proposed_block";
-
-        let cf = self.db().cf(burnt_utxo::ProposedInBlockIndex)?;
-        let query = self.db().cf(burnt_utxo::ByProposedInBlockIdQuery)?;
-        let iter = query.query_prefix_range_key_iterator(Ordering::Ascending, proposed_in_block);
-
-        for result in iter {
-            let key = result?;
-            cf.delete(&key, OPERATION)?;
-        }
-
-        Ok(())
-    }
-
-    fn burnt_utxos_delete(
-        &mut self,
-        commitment: &UnclaimedConfidentialOutputAddress,
-        proposed_in_block: &BlockId,
-    ) -> Result<(), StorageError> {
-        const OPERATION: &str = "burnt_utxos_delete";
-
-        self.db().cf(BurntUtxoCf)?.delete_or_not_found(commitment, OPERATION)?;
-
-        self.db()
-            .cf(burnt_utxo::ProposedInBlockIndex)?
-            .delete(&(*proposed_in_block, *commitment), OPERATION)?;
 
         Ok(())
     }

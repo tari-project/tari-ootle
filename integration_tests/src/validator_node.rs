@@ -37,9 +37,10 @@ use tari_ootle_app_utilities::{
 };
 use tari_ootle_common_types::{
     layer_one_transaction::{LayerOneTransactionDef, ValidatorRegistrationParams},
+    optional::Optional,
     Network,
 };
-use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
+use tari_ootle_wallet_sdk::models::AccountWithPublicKey;
 use tari_shutdown::Shutdown;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_validator_node::{run_validator_node, ApplicationConfig, ValidatorNodeConfig};
@@ -47,6 +48,7 @@ use tari_validator_node_client::{
     types::{LayerOneTransactionParams, PrepareLayerOneTransactionRequest},
     ValidatorNodeClient,
 };
+use tari_wallet_daemon_client::types::AccountsCreateRequest;
 use tokio::task;
 
 use crate::{
@@ -135,8 +137,28 @@ pub async fn spawn_validator_node(
     let mut wallet_client = walletd.get_authed_client().await;
 
     // get the default wallet account public key
-    let key = wallet_client.create_key(KeyBranch::Account).await.unwrap();
-    world.wallet_keys.insert(claim_fee_key_name, key.id);
+    let account = match wallet_client.accounts_get_default().await.optional().unwrap() {
+        Some(account) => AccountWithPublicKey {
+            account: account.account,
+            owner_public_key: account.public_key,
+        },
+        None => {
+            let resp = wallet_client
+                .create_account(AccountsCreateRequest {
+                    account_name: None,
+                    is_default: None,
+                    key_id: None,
+                })
+                .await
+                .unwrap();
+
+            AccountWithPublicKey {
+                account: resp.account,
+                owner_public_key: resp.public_key,
+            }
+        },
+    };
+    world.wallet_keys.insert(claim_fee_key_name, account.account.key_index);
 
     // let wallet_account_pub = wallet_client.accounts_get_default().await.unwrap().public_key;
     let name = validator_node_name.clone();
@@ -185,7 +207,7 @@ pub async fn spawn_validator_node(
             config.validator_node.p2p.listener_port = port;
 
             config.validator_node.fee_claim_public_key =
-                RistrettoPublicKey::try_from_byte_type(&key.public_key).unwrap();
+                RistrettoPublicKey::try_from_byte_type(&account.owner_public_key).unwrap();
 
             // Add all other VNs as peer seeds
             config.peer_seeds.peer_seeds = StringList::from(peer_seeds);

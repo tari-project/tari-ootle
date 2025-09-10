@@ -3,7 +3,7 @@
 
 use tari_bor::cbor;
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
-use tari_engine::state_store::StateWriter;
+use tari_engine::state_store::{StateStoreError, StateWriter};
 use tari_engine_types::{
     component::{ComponentBody, ComponentHeader},
     id_provider::{IdProvider, ObjectIds},
@@ -15,13 +15,68 @@ use tari_engine_types::{
 use tari_template_builtin::NFT_FAUCET_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     auth::{ComponentAccessRules, OwnerRule, ResourceAccessRules},
-    constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS},
+    constants::{
+        NFT_FAUCET_COMPONENT_ADDRESS,
+        NFT_FAUCET_RESOURCE_ADDRESS,
+        PUBLIC_IDENTITY_RESOURCE_ADDRESS,
+        STEALTH_TARI_RESOURCE_ADDRESS,
+    },
+    models::Metadata,
     prelude::{ResourceType, RistrettoPublicKeyBytes, TemplateAddress},
+    resource::TOKEN_SYMBOL,
     rule,
     types::{Amount, EntityId, Hash},
 };
 
 use crate::{template_test::test_nft_faucet_component, test_faucet_component};
+
+pub fn add_tari_resources<T: StateWriter>(state_db: &mut T) -> Result<(), StateStoreError> {
+    let id = SubstateId::Resource(PUBLIC_IDENTITY_RESOURCE_ADDRESS);
+    let mut metadata = Metadata::new();
+    metadata.insert(TOKEN_SYMBOL, "ID".to_string());
+    // Create the resource for badges
+    state_db.set_state(
+        id,
+        Substate::new(
+            0,
+            Resource::new(
+                ResourceType::NonFungible,
+                None,
+                OwnerRule::None,
+                ResourceAccessRules::deny_all(),
+                metadata,
+                None,
+                None,
+                0,
+                false,
+            ),
+        ),
+    )?;
+
+    // Create the second layer tari resource
+    let id = SubstateId::Resource(STEALTH_TARI_RESOURCE_ADDRESS);
+    let mut metadata = Metadata::new();
+    metadata.insert(TOKEN_SYMBOL, "tXTR".to_string());
+    state_db.set_state(
+        id,
+        Substate::new(
+            0,
+            Resource::new(
+                ResourceType::Stealth,
+                None,
+                OwnerRule::None,
+                ResourceAccessRules::new(),
+                metadata,
+                None,
+                None,
+                6,
+                true,
+            ),
+        ),
+    )?;
+
+    Ok(())
+}
 
 pub fn initialize_builtin_faucet_state<TStore: StateWriter>(
     store: &mut TStore,

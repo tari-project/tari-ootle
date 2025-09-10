@@ -132,6 +132,10 @@ impl NetworkWideStateSync {
     async fn start_sync_round(&mut self) -> Result<(), NetworkStateSyncError> {
         info!(target: LOG_TARGET, "🌍️ Starting network-wide state sync round...");
         let sync_plan = self.initialize_sync_plan().await?;
+        if sync_plan.network_description().epoch.is_zero() {
+            info!(target: LOG_TARGET, "🌍️ Current epoch is zero, skipping sync round.");
+            return Ok(());
+        }
         self.start_sync(sync_plan).await?;
         self.stats.log_stats();
         self.stats.reset();
@@ -178,7 +182,7 @@ impl NetworkWideStateSync {
             .epoch()
             .checked_sub(Epoch(1))
             .ok_or_else(|| NetworkStateSyncError::InvariantError {
-                details: "current epoch is zero, there are on checkpoints to sync".to_string(),
+                details: "current epoch is zero, there are no checkpoints to sync".to_string(),
             })?;
         let committee_pools = sync_plan_mut.committee_pools().clone();
 

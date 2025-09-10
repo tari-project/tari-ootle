@@ -27,7 +27,7 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use tari_engine_types::{
-    confidential::TariStealthClaim,
+    confidential::{AbridgedTransactionKernel, ClaimBurnOutputData, EncodedMerkleProof, MinotariBurnClaimProof},
     instruction::Instruction,
     substate::SubstateId,
     ComponentCall,
@@ -46,11 +46,10 @@ use tari_template_lib::{
         UnspentOutput,
         ViewableBalanceProof,
     },
-    prelude::{AccessRules, Scalar32Bytes},
+    prelude::AccessRules,
     types::{
         crypto::{
             BalanceProofSignature,
-            CommitmentSignatureBytes,
             PedersenCommitmentBytes,
             RangeProofBytes,
             RistrettoPublicKeyBytes,
@@ -63,10 +62,7 @@ use tari_transaction::Transaction;
 
 use crate::{
     encoding::{decode_from_slice, encode_to_vec},
-    proto::{
-        self,
-        transaction::{instruction::InstructionType, OptionalVersion},
-    },
+    proto::{self, transaction::OptionalVersion},
     utils::checked_copy_fixed,
     NewTransactionMessage,
 };
@@ -111,64 +107,6 @@ impl From<&Transaction> for proto::transaction::Transaction {
     }
 }
 
-//---------------------------------- UnsignedTransaction --------------------------------------------//
-
-// impl TryFrom<proto::transaction::UnsignedTransactionV1> for UnsignedTransactionV1 {
-//     type Error = anyhow::Error;
-//
-//     fn try_from(request: proto::transaction::UnsignedTransactionV1) -> Result<Self, Self::Error> {
-//         let instructions = request
-//             .instructions
-//             .into_iter()
-//             .map(TryInto::try_into)
-//             .collect::<Result<Vec<_>, _>>()?;
-//
-//         let fee_instructions = request
-//             .fee_instructions
-//             .into_iter()
-//             .map(TryInto::try_into)
-//             .collect::<Result<Vec<_>, _>>()?;
-//
-//         let inputs = request
-//             .inputs
-//             .into_iter()
-//             .map(TryInto::try_into)
-//             .collect::<Result<_, _>>()?;
-//
-//         let min_epoch = request.min_epoch.map(|epoch| Epoch(epoch.epoch));
-//         let max_epoch = request.max_epoch.map(|epoch| Epoch(epoch.epoch));
-//         Ok(Self {
-//             fee_instructions,
-//             instructions,
-//             inputs,
-//             min_epoch,
-//             max_epoch,
-//         })
-//     }
-// }
-//
-// impl From<&UnsignedTransactionV1> for proto::transaction::UnsignedTransaction {
-//     fn from(transaction: &UnsignedTransactionV1) -> Self {
-//         let inputs = transaction.inputs().iter().map(Into::into).collect();
-//         let min_epoch = transaction
-//             .min_epoch()
-//             .map(|epoch| proto::common::Epoch { epoch: epoch.0 });
-//         let max_epoch = transaction
-//             .max_epoch()
-//             .map(|epoch| proto::common::Epoch { epoch: epoch.0 });
-//         let fee_instructions = transaction.fee_instructions().iter().cloned().map(Into::into).collect();
-//         let instructions = transaction.instructions().iter().cloned().map(Into::into).collect();
-//
-//         proto::transaction::UnsignedTransaction {
-//             fee_instructions,
-//             instructions,
-//             inputs,
-//             min_epoch,
-//             max_epoch,
-//         }
-//     }
-// }
-
 // -------------------------------- AllocatableAddressType -------------------------------- //
 
 impl TryFrom<proto::transaction::AllocatableAddressType> for AllocatableAddressType {
@@ -200,24 +138,85 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
     type Error = anyhow::Error;
 
     #[allow(clippy::too_many_lines)]
-    fn try_from(request: proto::transaction::Instruction) -> Result<Self, Self::Error> {
-        let substate_type = request.allocatable_address_type();
-        let args = request
-            .args
-            .into_iter()
-            .map(|a| a.try_into())
-            .collect::<Result<_, _>>()?;
-        let instruction_type =
-            InstructionType::try_from(request.instruction_type).map_err(|e| anyhow!("invalid instruction_type {e}"))?;
-
-        let instruction = match instruction_type {
-            InstructionType::CreateAccount => Instruction::CreateAccount {
-                public_key_address: RistrettoPublicKeyBytes::from_bytes(&request.create_account_public_key)
+    fn try_from(value: proto::transaction::Instruction) -> Result<Self, Self::Error> {
+        use proto::transaction::instruction::Instruction::*;
+        match value.instruction {
+            None => Err(anyhow!("instruction not provided")),
+            Some(CallFunction(call_function)) => Ok(Instruction::CallFunction {
+                address: call_function.template_address.try_into()?,
+                function: call_function.function,
+                args: call_function
+                    .args
+                    .into_iter()
+                    .map(|a| a.try_into())
+                    .collect::<Result<_, _>>()?,
+            }),
+            Some(CallMethod(call_method)) => Ok(Instruction::CallMethod {
+                call: call_method
+                    .component_call
+                    .ok_or_else(|| anyhow!("component_call not provided"))?
+                    .try_into()?,
+                method: call_method.method,
+                args: call_method
+                    .args
+                    .into_iter()
+                    .map(|a| a.try_into())
+                    .collect::<Result<_, _>>()?,
+            }),
+            Some(PutLastInstructionOutputOnWorkspace(id)) => Ok(Instruction::PutLastInstructionOutputOnWorkspace {
+                key: u16::try_from(id).context("workspace_put_key overflowed")?,
+            }),
+            Some(EmitLog(emit_lgo)) => Ok(Instruction::EmitLog {
+                level: emit_lgo.log_level.parse()?,
+                message: emit_lgo.log_message,
+            }),
+            Some(ClaimBurn(claim_burn)) => Ok(Instruction::ClaimBurn {
+                claim: Box::new(MinotariBurnClaimProof {
+                    burn_public_key: claim_burn
+                        .public_key
+                        .as_slice()
+                        .try_into()
+                        .map_err(|e| anyhow!("claim_burn_public_key: {}", e))?,
+                    commitment: claim_burn
+                        .commitment
+                        .as_slice()
+                        .try_into()
+                        .map_err(|e| anyhow!("claim_burn_commitment_address: {}", e))?,
+                    ownership_proof: claim_burn
+                        .proof_of_knowledge
+                        .ok_or_else(|| anyhow!("claim_burn_proof_of_knowledge not provided"))?
+                        .try_into()
+                        .map_err(|e| anyhow!("claim_burn_proof_of_knowledge: {}", e))?,
+                    encoded_merkle_proof: claim_burn
+                        .encoded_merkle_proof
+                        .ok_or_else(|| anyhow!("claim_burn_encoded_merkle_proof not provided"))?
+                        .try_into()?,
+                    kernel: claim_burn
+                        .kernel
+                        .ok_or_else(|| anyhow!("claim_burn_kernel not provided"))?
+                        .try_into()?,
+                    value: claim_burn.value,
+                }),
+                output_data: ClaimBurnOutputData {
+                    encrypted_data: EncryptedData::try_from(claim_burn.encrypted_data)
+                        .map_err(|len| anyhow!("Invalid length ({len}) of encrypted_value bytes"))?,
+                },
+            }),
+            Some(ClaimValidatorFees(claim_fees)) => Ok(Instruction::ClaimValidatorFees {
+                address: claim_fees
+                    .fee_pool_address
+                    .as_slice()
+                    .try_into()
+                    .map_err(|e| anyhow!("claim_validator_fees_address: {e}"))?,
+            }),
+            Some(DropAllProofsInWorkspace(_)) => Ok(Instruction::DropAllProofsInWorkspace),
+            Some(CreateAccount(create_account)) => Ok(Instruction::CreateAccount {
+                owner_public_key: RistrettoPublicKeyBytes::from_bytes(&create_account.public_key)
                     .map_err(|e| anyhow!("create_account_public_key: {}", e))?,
-                owner_rule: request.create_account_owner_rule.map(TryInto::try_into).transpose()?,
-                access_rules: request.create_account_access_rules.map(TryInto::try_into).transpose()?,
-                workspace_id: request
-                    .create_account_workspace_id
+                owner_rule: create_account.owner_rule.map(TryInto::try_into).transpose()?,
+                access_rules: create_account.access_rules.map(TryInto::try_into).transpose()?,
+                workspace_id: create_account
+                    .workspace_id
                     .map(|offset_id| {
                         let offset = offset_id.offset.map(|o| usize::try_from(o.offset)).transpose()?;
                         let id = WorkspaceId::try_from(offset_id.id)?;
@@ -225,212 +224,207 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                     })
                     .transpose()
                     .context("create_account_workspace_id overflowed")?,
-            },
-            InstructionType::Function => {
-                let function = request.function;
-                Instruction::CallFunction {
-                    address: request.template_address.try_into()?,
-                    function,
-                    args,
-                }
-            },
-            InstructionType::Method => {
-                let method = request.method;
-                let call = request
-                    .component_call
-                    .ok_or_else(|| anyhow!("component_call not provided"))?
-                    .try_into()?;
-                Instruction::CallMethod { call, method, args }
-            },
-            InstructionType::PutOutputInWorkspace => Instruction::PutLastInstructionOutputOnWorkspace {
-                key: u16::try_from(request.workspace_put_key).context("workspace_put_key overflowed")?,
-            },
-            InstructionType::EmitLog => Instruction::EmitLog {
-                level: request.log_level.parse()?,
-                message: request.log_message,
-            },
-            InstructionType::ClaimBurn => Instruction::ClaimBurn {
-                claim: Box::new(TariStealthClaim {
-                    burn_public_key: request
-                        .claim_burn_public_key
-                        .as_slice()
-                        .try_into()
-                        .map_err(|e| anyhow!("claim_burn_public_key: {}", e))?,
-                    output_address: request
-                        .claim_burn_commitment_address
-                        .as_slice()
-                        .try_into()
-                        .map_err(|e| anyhow!("claim_burn_commitment_address: {}", e))?,
-                    range_proof: RangeProofBytes::try_from(request.claim_burn_range_proof)
-                        .context("invalid range proof")?,
-                    proof_of_knowledge: request
-                        .claim_burn_proof_of_knowledge
-                        .ok_or_else(|| anyhow!("claim_burn_proof_of_knowledge not provided"))?
-                        .try_into()
-                        .map_err(|e| anyhow!("claim_burn_proof_of_knowledge: {}", e))?,
-                    transfer_statement: request.claim_burn_transfer.map(TryInto::try_into).transpose()?,
-                }),
-            },
-            InstructionType::ClaimValidatorFees => Instruction::ClaimValidatorFees {
-                address: request
-                    .claim_validator_fees_address
-                    .as_slice()
-                    .try_into()
-                    .map_err(|e| anyhow!("claim_validator_fees_address: {e}"))?,
-            },
-            InstructionType::DropAllProofsInWorkspace => Instruction::DropAllProofsInWorkspace,
-            InstructionType::AssertBucketContains => {
-                let resource_address = ObjectKey::try_from(request.resource_address)?.into();
-                Instruction::AssertBucketContains {
-                    key: request
-                        .assert_bucket_workspace_id
+            }),
+            Some(AssertBucketContains(assert_contains)) => {
+                let resource_address = ObjectKey::try_from(assert_contains.resource_address)?.into();
+                Ok(Instruction::AssertBucketContains {
+                    key: assert_contains
+                        .bucket
                         .ok_or_else(|| anyhow!("assert_bucket_workspace_id not provided"))?
                         .try_into()?,
                     resource_address,
-                    min_amount: request.min_amount.unwrap_or_default().into(),
-                }
+                    min_amount: assert_contains.min_amount.unwrap_or_default().into(),
+                })
             },
-            InstructionType::PublishTemplate => Instruction::PublishTemplate {
-                binary: request.template_binary,
+            Some(PublishTemplate(publish_template)) => Ok(Instruction::PublishTemplate {
+                binary: publish_template.binary,
+            }),
+            Some(AllocateAddress(allocate_addr)) => {
+                let address_type = allocate_addr.address_type();
+                Ok(Instruction::AllocateAddress {
+                    allocatable_type: address_type
+                        .try_into()
+                        .map_err(|e| anyhow!("invalid allocatable_address_type {e}"))?,
+                    workspace_id: WorkspaceId::try_from(allocate_addr.workspace_id)
+                        .context("allocate_address_workspace_id overflowed")?,
+                })
             },
-            InstructionType::AllocateAddress => Instruction::AllocateAddress {
-                allocatable_type: substate_type.try_into()?,
-                workspace_id: WorkspaceId::try_from(request.allocate_address_workspace_id)
-                    .context("allocate_address_workspace_id overflowed")?,
-            },
-            InstructionType::StealthTransfer => Instruction::StealthTransfer {
-                resource_address_ref: request
-                    .stealth_transfer_resource_address
+            Some(StealthTransfer(transfer)) => Ok(Instruction::StealthTransfer {
+                resource_address_ref: transfer
+                    .resource_address
                     .map(TryInto::try_into)
                     .transpose()?
                     .ok_or_else(|| anyhow!("stealth_transfer_resource_address not provided"))?,
-                statement: request
-                    .stealth_transfer_statement
+                statement: transfer
+                    .statement
                     .ok_or_else(|| anyhow!("stealth_transfer_statement not provided"))?
                     .try_into()
                     .context("stealth_transfer_statement conversion failed")?,
-                revealed_input_bucket: request
-                    .stealth_transfer_revealed_input_bucket
-                    .map(TryInto::try_into)
-                    .transpose()?,
-            },
-            InstructionType::PayFee => Instruction::PayFee {
-                statement: request
-                    .pay_fee_stealth_transfer_statement
+                revealed_input_bucket: transfer.revealed_input_bucket.map(TryInto::try_into).transpose()?,
+            }),
+            Some(PayFee(pay_fee)) => Ok(Instruction::PayFee {
+                statement: pay_fee
+                    .statement
                     .ok_or_else(|| anyhow!("pay_fee_stealth_transfer_statement not provided"))?
                     .try_into()
                     .context("pay_fee_stealth_transfer_statement conversion failed")?,
-                revealed_input_bucket: request
-                    .pay_fee_revealed_input_bucket
-                    .map(TryInto::try_into)
-                    .transpose()?,
-            },
-        };
-
-        Ok(instruction)
+                revealed_input_bucket: pay_fee.revealed_input_bucket.map(TryInto::try_into).transpose()?,
+            }),
+        }
     }
 }
 
 impl From<Instruction> for proto::transaction::Instruction {
+    #[allow(clippy::too_many_lines)]
     fn from(instruction: Instruction) -> Self {
-        let mut result = proto::transaction::Instruction::default();
-
         match instruction {
             Instruction::CreateAccount {
-                public_key_address,
+                owner_public_key,
                 owner_rule,
                 access_rules,
                 workspace_id,
             } => {
-                result.instruction_type = InstructionType::CreateAccount as i32;
-                result.create_account_public_key = public_key_address.to_vec();
-                result.create_account_owner_rule = owner_rule.map(Into::into);
-                result.create_account_access_rules = access_rules.map(Into::into);
-                result.create_account_workspace_id = workspace_id.map(Into::into);
+                let owner_rule = owner_rule.map(Into::into);
+                let access_rules = access_rules.map(Into::into);
+                let workspace_id = workspace_id.map(Into::into);
+                proto::transaction::Instruction {
+                    instruction: Some(proto::transaction::instruction::Instruction::CreateAccount(
+                        proto::transaction::CreateAccount {
+                            public_key: owner_public_key.as_bytes().to_vec(),
+                            owner_rule,
+                            access_rules,
+                            workspace_id,
+                        },
+                    )),
+                }
             },
             Instruction::CallFunction {
-                address: template_address,
+                address,
                 function,
                 args,
             } => {
-                result.instruction_type = InstructionType::Function as i32;
-                result.template_address = template_address.to_vec();
-                result.function = function;
-                result.args = args.into_iter().map(|a| a.into()).collect();
+                let args = args.into_iter().map(Into::into).collect();
+                proto::transaction::Instruction {
+                    instruction: Some(proto::transaction::instruction::Instruction::CallFunction(
+                        proto::transaction::CallFunction {
+                            template_address: address.as_slice().to_vec(),
+                            function,
+                            args,
+                        },
+                    )),
+                }
             },
             Instruction::CallMethod { call, method, args } => {
-                result.instruction_type = InstructionType::Method as i32;
-                result.component_call = Some(call.into());
-                result.method = method;
-                result.args = args.into_iter().map(|a| a.into()).collect();
+                let call = Some(call.into());
+                let args = args.into_iter().map(Into::into).collect();
+                proto::transaction::Instruction {
+                    instruction: Some(proto::transaction::instruction::Instruction::CallMethod(
+                        proto::transaction::CallMethod {
+                            component_call: call,
+                            method,
+                            args,
+                        },
+                    )),
+                }
             },
-            Instruction::PutLastInstructionOutputOnWorkspace { key } => {
-                result.instruction_type = InstructionType::PutOutputInWorkspace as i32;
-                result.workspace_put_key = u32::from(key);
+            Instruction::PutLastInstructionOutputOnWorkspace { key } => proto::transaction::Instruction {
+                instruction: Some(
+                    proto::transaction::instruction::Instruction::PutLastInstructionOutputOnWorkspace(key.into()),
+                ),
             },
-            Instruction::EmitLog { level, message } => {
-                result.instruction_type = InstructionType::EmitLog as i32;
-                result.log_level = level.to_string();
-                result.log_message = message;
+            Instruction::EmitLog { level, message } => proto::transaction::Instruction {
+                instruction: Some(proto::transaction::instruction::Instruction::EmitLog(
+                    proto::transaction::EmitLog {
+                        log_level: level.to_string(),
+                        log_message: message,
+                    },
+                )),
             },
-            Instruction::ClaimBurn { claim } => {
-                result.instruction_type = InstructionType::ClaimBurn as i32;
-                result.claim_burn_commitment_address = claim.output_address.as_bytes().to_vec();
-                result.claim_burn_range_proof = claim.range_proof.into_vec();
-                result.claim_burn_proof_of_knowledge = Some(claim.proof_of_knowledge.into());
-                result.claim_burn_public_key = claim.burn_public_key.to_vec();
-                result.claim_burn_transfer = claim.transfer_statement.map(Into::into);
+            Instruction::ClaimBurn { claim, output_data } => proto::transaction::Instruction {
+                instruction: Some(proto::transaction::instruction::Instruction::ClaimBurn(
+                    proto::transaction::ClaimBurn {
+                        public_key: claim.burn_public_key.as_bytes().to_vec(),
+                        commitment: claim.commitment.as_bytes().to_vec(),
+                        proof_of_knowledge: Some(claim.ownership_proof.into()),
+                        encoded_merkle_proof: Some(claim.encoded_merkle_proof.into()),
+                        kernel: Some(claim.kernel.into()),
+                        value: claim.value,
+                        encrypted_data: output_data.encrypted_data.as_bytes().to_vec(),
+                    },
+                )),
             },
-            Instruction::ClaimValidatorFees { address } => {
-                result.instruction_type = InstructionType::ClaimValidatorFees as i32;
-                result.claim_validator_fees_address = address.as_slice().to_vec();
+            Instruction::ClaimValidatorFees { address } => proto::transaction::Instruction {
+                instruction: Some(proto::transaction::instruction::Instruction::ClaimValidatorFees(
+                    proto::transaction::ClaimValidatorFees {
+                        fee_pool_address: address.as_slice().to_vec(),
+                    },
+                )),
             },
-            Instruction::DropAllProofsInWorkspace => {
-                result.instruction_type = InstructionType::DropAllProofsInWorkspace as i32;
+            Instruction::DropAllProofsInWorkspace => proto::transaction::Instruction {
+                instruction: Some(proto::transaction::instruction::Instruction::DropAllProofsInWorkspace(
+                    true,
+                )),
             },
             Instruction::AssertBucketContains {
                 key,
                 resource_address,
                 min_amount,
-            } => {
-                result.instruction_type = InstructionType::AssertBucketContains as i32;
-                result.assert_bucket_workspace_id = Some(key.into());
-                result.resource_address = resource_address.as_bytes().to_vec();
-                result.min_amount = Some(min_amount.into());
+            } => proto::transaction::Instruction {
+                instruction: Some(proto::transaction::instruction::Instruction::AssertBucketContains(
+                    proto::transaction::AssertBucketContains {
+                        bucket: Some(key.into()),
+                        resource_address: resource_address.as_bytes().to_vec(),
+                        min_amount: Some(min_amount.into()),
+                    },
+                )),
             },
-            Instruction::PublishTemplate { binary } => {
-                result.instruction_type = InstructionType::PublishTemplate as i32;
-                result.template_binary = binary;
+            Instruction::PublishTemplate { binary } => proto::transaction::Instruction {
+                instruction: Some(proto::transaction::instruction::Instruction::PublishTemplate(
+                    proto::transaction::PublishTemplate { binary },
+                )),
             },
             Instruction::AllocateAddress {
                 allocatable_type,
                 workspace_id,
-            } => {
-                result.instruction_type = InstructionType::AllocateAddress as i32;
-                let substate_type: proto::transaction::AllocatableAddressType = allocatable_type.into();
-                result.allocatable_address_type = substate_type as i32;
-                result.allocate_address_workspace_id = u32::from(workspace_id);
+            } => proto::transaction::Instruction {
+                instruction: Some(proto::transaction::instruction::Instruction::AllocateAddress(
+                    proto::transaction::AllocateAddress {
+                        address_type: proto::transaction::AllocatableAddressType::from(allocatable_type).into(),
+                        workspace_id: u32::from(workspace_id),
+                    },
+                )),
             },
             Instruction::StealthTransfer {
-                resource_address_ref: resource_address,
+                resource_address_ref,
                 statement,
                 revealed_input_bucket,
             } => {
-                result.instruction_type = InstructionType::StealthTransfer as i32;
-                result.stealth_transfer_resource_address = Some(resource_address.into());
-                result.stealth_transfer_statement = Some(statement.into());
-                result.stealth_transfer_revealed_input_bucket = revealed_input_bucket.map(Into::into);
+                let revealed_input_bucket = revealed_input_bucket.map(Into::into);
+                proto::transaction::Instruction {
+                    instruction: Some(proto::transaction::instruction::Instruction::StealthTransfer(
+                        proto::transaction::StealthTransfer {
+                            resource_address: Some(resource_address_ref.into()),
+                            statement: Some(statement.into()),
+                            revealed_input_bucket,
+                        },
+                    )),
+                }
             },
             Instruction::PayFee {
                 statement,
                 revealed_input_bucket,
             } => {
-                result.instruction_type = InstructionType::PayFee as i32;
-                result.pay_fee_stealth_transfer_statement = Some(statement.into());
-                result.pay_fee_revealed_input_bucket = revealed_input_bucket.map(Into::into);
+                let revealed_input_bucket = revealed_input_bucket.map(Into::into);
+                proto::transaction::Instruction {
+                    instruction: Some(proto::transaction::instruction::Instruction::PayFee(
+                        proto::transaction::PayFee {
+                            statement: Some(statement.into()),
+                            revealed_input_bucket,
+                        },
+                    )),
+                }
             },
         }
-        result
     }
 }
 
@@ -613,31 +607,6 @@ impl From<&VersionedSubstateId> for proto::transaction::VersionedSubstateId {
     }
 }
 
-// -------------------------------- CommitmentSignature -------------------------------- //
-
-impl TryFrom<proto::transaction::CommitmentSignature> for CommitmentSignatureBytes {
-    type Error = anyhow::Error;
-
-    fn try_from(val: proto::transaction::CommitmentSignature) -> Result<Self, Self::Error> {
-        let u = Scalar32Bytes::from_bytes(&val.signature_u).context("Invalid u signature")?;
-        let v = Scalar32Bytes::from_bytes(&val.signature_v).context("Invalid v signature")?;
-        let public_nonce =
-            PedersenCommitmentBytes::from_bytes(&val.public_nonce_commitment).context("Invalid public nonce")?;
-
-        Ok(Self::new(public_nonce, u, v))
-    }
-}
-
-impl From<CommitmentSignatureBytes> for proto::transaction::CommitmentSignature {
-    fn from(val: CommitmentSignatureBytes) -> Self {
-        Self {
-            public_nonce_commitment: val.public_nonce().to_vec(),
-            signature_u: val.u().to_vec(),
-            signature_v: val.v().to_vec(),
-        }
-    }
-}
-
 // // -------------------------------- ConfidentialWithdrawProof -------------------------------- //
 
 impl TryFrom<proto::transaction::ConfidentialWithdrawProof> for ConfidentialWithdrawProof {
@@ -658,7 +627,7 @@ impl TryFrom<proto::transaction::ConfidentialWithdrawProof> for ConfidentialWith
                 .ok_or_else(|| anyhow!("output_proof is missing"))?
                 .try_into()?,
             balance_proof: BalanceProofSignature::from_bytes(&val.balance_proof)
-                .map_err(|e| anyhow!("Invalid balance proof signature: {}", e.to_error_string()))?,
+                .map_err(|e| anyhow!("Invalid balance proof signature: {}", e))?,
         })
     }
 }
@@ -710,10 +679,7 @@ impl TryFrom<proto::transaction::UnspentOutput> for UnspentOutput {
     fn try_from(val: proto::transaction::UnspentOutput) -> Result<Self, Self::Error> {
         let sender_public_nonce = Some(val.sender_public_nonce)
             .filter(|v| !v.is_empty())
-            .map(|v| {
-                RistrettoPublicKeyBytes::from_bytes(&v)
-                    .map_err(|e| anyhow!("Invalid sender_public_nonce: {}", e.to_error_string()))
-            })
+            .map(|v| RistrettoPublicKeyBytes::from_bytes(&v).map_err(|e| anyhow!("Invalid sender_public_nonce: {}", e)))
             .transpose()?
             .ok_or_else(|| anyhow!("sender_public_nonce is missing"))?;
 
@@ -721,7 +687,7 @@ impl TryFrom<proto::transaction::UnspentOutput> for UnspentOutput {
             commitment: checked_copy_fixed(&val.commitment)
                 .ok_or_else(|| anyhow!("Invalid length of commitment bytes"))?,
             sender_public_nonce,
-            encrypted_data: EncryptedData::try_from(val.encrypted_value)
+            encrypted_data: EncryptedData::try_from(val.encrypted_data)
                 .map_err(|len| anyhow!("Invalid length ({len}) of encrypted_value bytes"))?,
             minimum_value_promise: val.minimum_value_promise,
             viewable_balance_proof: val.viewable_balance_proof.map(TryInto::try_into).transpose()?,
@@ -734,7 +700,7 @@ impl From<UnspentOutput> for proto::transaction::UnspentOutput {
         Self {
             commitment: val.commitment.to_vec(),
             sender_public_nonce: val.sender_public_nonce.as_bytes().to_vec(),
-            encrypted_value: val.encrypted_data.as_ref().to_vec(),
+            encrypted_data: val.encrypted_data.as_ref().to_vec(),
             minimum_value_promise: val.minimum_value_promise,
             viewable_balance_proof: val.viewable_balance_proof.map(Into::into),
         }
@@ -751,7 +717,7 @@ impl TryFrom<proto::transaction::StealthUnspentOutput> for tari_template_lib::mo
             .ok_or_else(|| anyhow!("stealth unspent output not provided"))?
             .try_into()?;
         let owner_public_key = RistrettoPublicKeyBytes::from_bytes(&val.owner_public_key)
-            .map_err(|e| anyhow!("Invalid owner public key: {}", e.to_error_string()))?;
+            .map_err(|e| anyhow!("Invalid owner public key: {}", e))?;
         let tag_byte = val
             .tag_byte
             .try_into()
@@ -825,7 +791,7 @@ impl TryFrom<proto::transaction::StealthTransferStatement> for tari_template_lib
                 .ok_or_else(|| anyhow!("output_statement not provided"))?
                 .try_into()?,
             balance_proof: BalanceProofSignature::from_bytes(&value.balance_proof)
-                .map_err(|e| anyhow!("Invalid balance proof signature: {}", e.to_error_string()))?,
+                .map_err(|e| anyhow!("Invalid balance proof signature: {}", e))?,
         })
     }
 }
@@ -988,6 +954,66 @@ impl From<WorkspaceOffsetId> for proto::transaction::WorkspaceOffsetId {
             offset: value.offset().map(|o| proto::transaction::OptionOffset {
                 offset: u64::try_from(o).expect("WorkspaceOffsetId offset overflowed"),
             }),
+        }
+    }
+}
+
+// -------------------------------- EncodedMerkleProof -------------------------------- //
+
+impl TryFrom<proto::transaction::EncodedMerkleProof> for EncodedMerkleProof {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::transaction::EncodedMerkleProof) -> Result<Self, Self::Error> {
+        Ok(Self {
+            block_hash: value.block_hash.try_into().context("Invalid block hash")?,
+            encoded_merkle_proof: value
+                .encoded_proof
+                .try_into()
+                .map_err(|e| anyhow!("Invalid encoded merkle proof: {}", e))?,
+            leaf_index: value.leaf_index,
+        })
+    }
+}
+
+impl From<EncodedMerkleProof> for proto::transaction::EncodedMerkleProof {
+    fn from(value: EncodedMerkleProof) -> Self {
+        Self {
+            block_hash: value.block_hash.as_slice().to_vec(),
+            encoded_proof: value.encoded_merkle_proof.to_vec(),
+            leaf_index: value.leaf_index,
+        }
+    }
+}
+
+// -------------------------------- AbridgedKernel -------------------------------- //
+
+impl TryFrom<proto::transaction::AbridgedKernel> for AbridgedTransactionKernel {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::transaction::AbridgedKernel) -> Result<Self, Self::Error> {
+        Ok(Self {
+            version: u8::try_from(value.version).map_err(|e| anyhow!("Invalid kernel version: {}", e))?,
+            fee: value.fee,
+            lock_height: value.lock_height,
+            excess: PedersenCommitmentBytes::from_bytes(&value.excess)
+                .map_err(|e| anyhow!("Invalid excess commitment: {}", e))?,
+            excess_sig: value
+                .excess_sig
+                .ok_or_else(|| anyhow!("excess_sig not provided"))?
+                .try_into()
+                .map_err(|e| anyhow!("Invalid excess signature: {}", e))?,
+        })
+    }
+}
+
+impl From<AbridgedTransactionKernel> for proto::transaction::AbridgedKernel {
+    fn from(value: AbridgedTransactionKernel) -> Self {
+        Self {
+            version: value.version.into(),
+            fee: value.fee,
+            lock_height: value.lock_height,
+            excess: value.excess.as_bytes().to_vec(),
+            excess_sig: Some(value.excess_sig.into()),
         }
     }
 }

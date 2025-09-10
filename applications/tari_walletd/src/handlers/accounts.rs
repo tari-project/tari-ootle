@@ -3,7 +3,6 @@
 
 use std::{array, collections::HashSet};
 
-use anyhow::anyhow;
 use axum::headers::authorization::Bearer;
 use indexmap::IndexMap;
 use log::*;
@@ -11,7 +10,7 @@ use rand::rngs::OsRng;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
     component::derive_component_address_from_public_key,
-    confidential::TariStealthClaim,
+    confidential::ClaimBurnOutputData,
     substate::SubstateId,
     FromByteType,
     ToByteType,
@@ -33,8 +32,7 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
-    models::UnclaimedConfidentialOutputAddress,
+    constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
     prelude::ResourceType,
     types::Amount,
 };
@@ -69,7 +67,6 @@ use tari_wallet_daemon_client::{
         ClaimBurnResponse,
         ConfidentialTransferRequest,
         ConfidentialTransferResponse,
-        ExtClaimBurnProof,
         RevealFundsRequest,
         RevealFundsResponse,
         StealthTransferRequest,
@@ -523,15 +520,10 @@ pub async fn handle_claim_burn(
 
     let max_fee = max_fee.unwrap_or(DEFAULT_FEE);
 
-    let ExtClaimBurnProof {
+    let ClaimBurnProof {
         owner_nonce_key_index,
-        claim_proof:
-            ClaimBurnProof {
-                reciprocal_claim_public_key,
-                commitment,
-                ownership_proof,
-                range_proof,
-            },
+        encrypted_data: claimed_encrypted_data,
+        claim_proof,
     } = claim_proof;
 
     let accounts_api = sdk.accounts_api();
@@ -545,8 +537,9 @@ pub async fn handle_claim_burn(
 
     if !sdk.stealth_crypto_api().validate_burn_claim_ownership_proof(
         network,
-        &ownership_proof,
-        &commitment,
+        &claim_proof.ownership_proof,
+        &claim_proof.commitment,
+        claim_proof.value,
         &claim_nonce_keypair.public_key.to_byte_type(),
     ) {
         return Err(invalid_params(
@@ -555,44 +548,17 @@ pub async fn handle_claim_burn(
         ));
     }
 
-    let mut inputs = vec![];
-
     info!(
         target: LOG_TARGET,
         "ℹ️ Signing claim burn with key {}. NOTE: This must be the same as the claiming key used in the burn transaction for this to succeed.",
         account.owner_public_key
     );
 
-    // Add all versioned account child addresses as inputs
-    // add the commitment substate id as input to the claim burn transaction
-    let address = UnclaimedConfidentialOutputAddress::from_commitment(&commitment);
-    inputs.push(SubstateRequirement::unversioned(address));
-
-    info!(
-        target: LOG_TARGET,
-        "Loaded {} inputs for claim burn transaction on account: {:?}",
-        inputs.len(),
-        account
-    );
-
-    // We have to unmask the commitment to allow us to reveal funds for the fee payment
-    let ValidatorScanResult { substate: output, .. } = sdk
-        .substate_api()
-        .fetch_substate_from_network(&address.into(), None)
-        .await?;
-    let output = output.into_unclaimed_confidential_output().ok_or_else(|| {
-        anyhow!(
-            "Expected the indexer to return an unclaimed confidential output substate for {}, but another substate \
-             type was returned",
-            address,
-        )
-    })?;
-
-    let reciprocal_claim_public_key_expanded = RistrettoPublicKey::try_from_byte_type(&reciprocal_claim_public_key)
+    let reciprocal_claim_public_key_expanded = RistrettoPublicKey::try_from_byte_type(&claim_proof.burn_public_key)
         .map_err(|e| invalid_params("claim_proof.reciprocal_claim_public_key", Some(e)))?;
     let unmasked_output = sdk.stealth_crypto_api().unblind_output(
-        &output.commitment,
-        &output.encrypted_data,
+        &claim_proof.commitment,
+        &claimed_encrypted_data,
         claim_nonce_keypair.secret_key(),
         &reciprocal_claim_public_key_expanded,
     )?;
@@ -664,44 +630,25 @@ pub async fn handle_claim_burn(
         array::from_ref(&output_statement),
         max_fee,
     )?;
+    // We'll create an output with the same encrypted data that was used on L1 burn. Note that this is not strictly
+    // necessary. The engine will create the output with whatever you give it, so we could reencrypt.
+    let output_data = ClaimBurnOutputData {
+        encrypted_data: claimed_encrypted_data,
+    };
 
     let transaction = context
         .transaction_builder()
         .with_fee_instructions_builder(|fee_builder| {
             fee_builder
-                .claim_burn(TariStealthClaim {
-                    burn_public_key: reciprocal_claim_public_key,
-                    output_address: address,
-                    range_proof,
-                    proof_of_knowledge: ownership_proof,
-                    transfer_statement: None,
-                })
+                .claim_burn(claim_proof, output_data)
                 .pay_fee_stealth(pay_fee_and_mint_output)
         })
-        .with_inputs(inputs)
+        .add_input(XTR)
         .build_and_seal(claim_nonce_keypair.secret_key());
 
-    let mut events = context.notifier().subscribe();
     let tx_id = context.transaction_service().submit_transaction(transaction).await?;
 
-    // Wait for the monitor to pick up the new or updated account
-    let finalized = wait_for_result(&mut events, tx_id).await?;
-    // let finalized = wait_for_result(&mut events, tx_id).await?;
-    if let Some(reject) = finalized.finalize.fee_reject() {
-        return Err(anyhow::anyhow!("Fee transaction rejected: {}", reject));
-    }
-    if let Some(reason) = finalized.finalize.any_reject() {
-        return Err(anyhow::anyhow!(
-            "Fee transaction succeeded (fees charged) however the transaction failed: {}",
-            reason
-        ));
-    }
-
-    Ok(ClaimBurnResponse {
-        transaction_id: tx_id,
-        fee: finalized.final_fee,
-        result: finalized.finalize,
-    })
+    Ok(ClaimBurnResponse { transaction_id: tx_id })
 }
 
 /// Takes tXTR from the testnet faucet and deposits them into an existing account.
@@ -736,6 +683,7 @@ pub async fn handle_create_free_test_coins(
     );
 
     let mut inputs = vec![
+        SubstateRequirement::unversioned(XTR),
         SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
         SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
     ];

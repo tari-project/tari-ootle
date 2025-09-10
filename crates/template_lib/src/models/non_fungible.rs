@@ -10,7 +10,7 @@ use tari_template_abi::{
 };
 use tari_template_lib_types::{serde_helpers, Hash};
 
-use super::BinaryTag;
+use super::{address_prefixes, BinaryTag};
 use crate::{
     args::{InvokeResult, NonFungibleAction, NonFungibleInvokeArg},
     constants::PUBLIC_IDENTITY_RESOURCE_ADDRESS,
@@ -303,7 +303,7 @@ impl From<RistrettoPublicKeyBytes> for NonFungibleAddress {
 
 impl Display for NonFungibleAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "nft_")?;
+        write!(f, "{}_", address_prefixes::NON_FUNGIBLE)?;
         for byte in self.resource_address().as_bytes() {
             write!(f, "{:02x}", byte)?;
         }

@@ -3,18 +3,24 @@
 
 use std::time::Duration;
 
+use anyhow::anyhow;
 use cucumber::{given, then, when};
-use minotari_app_grpc::tari_rpc::{GetBalanceRequest, SubmitValidatorEvictionProofRequest, ValidateRequest};
+use integration_tests::{claim_proof::CucumberClaimProof, util::cucumber_log};
+use minotari_app_grpc::{
+    tari_rpc,
+    tari_rpc::{GetBalanceRequest, SubmitValidatorEvictionProofRequest, ValidateRequest},
+};
+use tari_engine_types::confidential::{AbridgedTransactionKernel, EncodedMerkleProof, MinotariBurnClaimProof};
 use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
 use tari_template_lib::{
-    prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
-    types::crypto::{CommitmentSignatureBytes, RangeProofBytes},
+    models::EncryptedData,
+    prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
 };
 use tari_transaction_components::{
     tari_amount::T,
     transaction_components::{memo_field::TxType, MemoField},
 };
-use tari_wallet_daemon_client::types::{ClaimBurnProof, ExtClaimBurnProof};
+use tari_wallet_daemon_client::types::ClaimBurnProof;
 use tokio::time::sleep;
 
 use crate::{spawn_wallet, TariWorld};
@@ -41,10 +47,11 @@ async fn when_i_burn_on_wallet(
     let mut client = walletd.get_authed_client().await;
     let nonce = client.create_key(KeyBranch::Nonce).await.unwrap();
 
+    let amount = amount * T;
     let mut client = wallet.create_client().await;
     let resp = client
         .create_burn_transaction(minotari_app_grpc::tari_rpc::CreateBurnTransactionRequest {
-            amount: (amount * T).as_u64(),
+            amount: amount.as_u64(),
             fee_per_gram: 1,
             payment_id: MemoField::new_open("Burn".as_bytes().to_vec(), TxType::Burn)
                 .unwrap()
@@ -57,21 +64,136 @@ async fn when_i_burn_on_wallet(
         .into_inner();
 
     assert!(resp.is_success);
-    let ownership_proof = resp.ownership_proof.unwrap();
-    world.claim_proofs.insert(proof_name, ExtClaimBurnProof {
-        claim_proof: ClaimBurnProof {
-            reciprocal_claim_public_key: RistrettoPublicKeyBytes::from_bytes(&resp.reciprocal_claim_public_key)
-                .unwrap(),
-            commitment: PedersenCommitmentBytes::from_bytes(&resp.commitment).unwrap(),
-            ownership_proof: CommitmentSignatureBytes::new(
-                PedersenCommitmentBytes::from_bytes(&ownership_proof.public_nonce).unwrap(),
-                Scalar32Bytes::from_bytes(&ownership_proof.u).unwrap(),
-                Scalar32Bytes::from_bytes(&ownership_proof.v).unwrap(),
-            ),
-            range_proof: RangeProofBytes::try_from(resp.range_proof).unwrap(),
-        },
-        owner_nonce_key_index: nonce.id,
+
+    world.claim_proofs.insert(proof_name, CucumberClaimProof::Pending {
+        commitment: PedersenCommitmentBytes::from_bytes(&resp.commitment).unwrap(),
+        nonce_id: nonce.id,
     });
+}
+
+#[when(expr = "I wait for proof {word} to confirm on wallet {word}")]
+#[allow(clippy::too_many_lines)]
+async fn when_i_wait_for_proof_to_confirm_on_wallet(
+    world: &mut TariWorld,
+    proof_name: String,
+    wallet_name: String,
+) -> anyhow::Result<()> {
+    let proof = world.claim_proofs.get(&proof_name).unwrap_or_else(|| {
+        panic!("Claim proof {} not found", proof_name);
+    });
+
+    let CucumberClaimProof::Pending { commitment, nonce_id } = proof else {
+        // Already confirmed
+        return Ok(());
+    };
+
+    let wallet = world
+        .wallets
+        .get(&wallet_name)
+        .unwrap_or_else(|| panic!("Wallet {} not found", wallet_name));
+
+    let mut client = wallet.create_client().await;
+
+    const ATTEMPTS: usize = 60;
+    let mut remaining_attempts = ATTEMPTS;
+    loop {
+        let resp = client
+            .get_burn_claim_proof(tari_rpc::GetBurnClaimProofRequest {
+                commitment: commitment.as_bytes().to_vec(),
+            })
+            .await
+            .unwrap()
+            .into_inner();
+
+        let Some(merkle_proof) = resp.merkle_proof else {
+            cucumber_log("Proof not yet confirmed, waiting...");
+            if remaining_attempts == 0 {
+                panic!("Proof not confirmed after maximum ({ATTEMPTS}) attempts");
+            }
+            remaining_attempts -= 1;
+            sleep(Duration::from_secs(1)).await;
+            continue;
+        };
+
+        let claim_proof = resp.claim_proof.ok_or_else(|| anyhow!("No claim proof in response"))?;
+        let ownership_proof = claim_proof
+            .ownership_proof
+            .ok_or_else(|| anyhow!("No ownership proof in response"))?;
+        let commitment = PedersenCommitmentBytes::from_bytes(&claim_proof.commitment)
+            .map_err(|e| anyhow!("commitment parse error: {e}"))?;
+
+        let ownership_proof = SchnorrSignatureBytes::new(
+            RistrettoPublicKeyBytes::from_bytes(&ownership_proof.public_nonce)
+                .map_err(|e| anyhow!("sig public_nonce parse error {e}"))?,
+            Scalar32Bytes::from_bytes(&ownership_proof.signature).map_err(|e| anyhow!("sig parse error {e}"))?,
+        );
+
+        let reciprocal_claim_public_key = RistrettoPublicKeyBytes::from_bytes(&claim_proof.reciprocal_claim_public_key)
+            .map_err(|e| anyhow!("reciprocal_claim_public_key parse error {e}"))?;
+        let kernel = resp.kernel.ok_or_else(|| anyhow!("No kernel in response"))?;
+        let kernel = AbridgedTransactionKernel {
+            version: kernel.version as u8,
+            fee: kernel.fee,
+            lock_height: kernel.lock_height,
+            excess: kernel
+                .excess
+                .as_slice()
+                .try_into()
+                .map_err(|e| anyhow!("excess parse error: {e}"))?,
+            excess_sig: {
+                let excess_sig = kernel
+                    .excess_sig
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("No excess_sig in response"))?;
+
+                SchnorrSignatureBytes::new(
+                    excess_sig
+                        .public_nonce
+                        .as_slice()
+                        .try_into()
+                        .map_err(|e| anyhow!("excess_sig parse error: {e}"))?,
+                    excess_sig
+                        .signature
+                        .as_slice()
+                        .try_into()
+                        .map_err(|e| anyhow!("excess_sig parse error: {e}"))?,
+                )
+            },
+        };
+
+        let proof = ClaimBurnProof {
+            claim_proof: MinotariBurnClaimProof {
+                burn_public_key: reciprocal_claim_public_key,
+                commitment,
+                ownership_proof,
+                encoded_merkle_proof: EncodedMerkleProof {
+                    block_hash: merkle_proof.block_hash.as_slice().try_into().map_err(|e| {
+                        anyhow!(
+                            "Block hash length {} is out of bounds: {e}",
+                            merkle_proof.block_hash.len()
+                        )
+                    })?,
+                    encoded_merkle_proof: merkle_proof
+                        .encoded_proof
+                        .try_into()
+                        .map_err(|e| anyhow!("Encoded merkle proof length is out of bounds: {e}"))?,
+                    leaf_index: merkle_proof.leaf_index,
+                },
+                kernel,
+                value: resp.value,
+            },
+            owner_nonce_key_index: *nonce_id,
+            encrypted_data: EncryptedData::try_from(resp.encrypted_data)
+                .map_err(|e| anyhow!("Encrypted data length is out of bounds: {e}",))?,
+        };
+
+        world.claim_proofs.insert(proof_name, CucumberClaimProof::Confirmed {
+            proof: Box::new(proof.clone()),
+        });
+        break;
+    }
+
+    Ok(())
 }
 
 #[when(expr = "wallet {word} has at least {int} {word}")]

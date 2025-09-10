@@ -27,8 +27,8 @@ export function substateIdToString(substateId: SubstateId | string | null | unde
   if ("Vault" in substateId) {
     return substateId.Vault;
   }
-  if ("UnclaimedConfidentialOutput" in substateId) {
-    return substateId.UnclaimedConfidentialOutput;
+  if ("ClaimedOutputTombstone" in substateId) {
+    return substateId.ClaimedOutputTombstone;
   }
   if ("NonFungible" in substateId) {
     const nft = substateId.NonFungible;
@@ -60,8 +60,8 @@ export function stringToSubstateId(substateId: string): SubstateId {
       return { Resource: rest };
     case "vault":
       return { Vault: rest };
-    case "commitment":
-      return { UnclaimedConfidentialOutput: rest };
+    case "tombstone":
+      return { ClaimedOutputTombstone: rest };
     case "txreceipt":
       return { TransactionReceipt: rest };
     case "vnfp":

@@ -24,7 +24,7 @@ import { Box, Button, Stack, Typography, Avatar, Divider } from "@mui/material";
 import type { Account, NonFungibleId, NonFungibleToken } from "@tari-project/typescript-bindings";
 import CopyAddress from "@components/CopyAddress";
 import { useNftTransferStore } from "@store/nftTransferStore";
-import { formatXTM, substateIdToString, displayNftId } from "@utils/helpers";
+import { formatCurrency, substateIdToString, displayNftId } from "@utils/helpers";
 import { convertCborValue } from "@utils/cbor";
 
 interface ConfirmationStepProps {
@@ -126,7 +126,7 @@ export default function ConfirmationStep({
               <Typography variant="subtitle2" color="text.secondary">
                 Transaction Fee:
               </Typography>
-              <Typography>{formatXTM(parseInt(transferFormState.maxFee))}</Typography>
+              <Typography>{formatCurrency(parseInt(transferFormState.maxFee))}</Typography>
             </Box>
 
             <Box>

@@ -26,7 +26,7 @@ import { useTheme } from "@mui/material/styles";
 import { useAccountsCreateFreeTestCoins } from "@api/hooks/useAccounts";
 import ClaimBurn from "./ClaimBurn";
 import useAccountStore from "@store/accountStore";
-import SendMoney from "./SendMoney";
+import SendMoney from "../Tokens/components/SendMoney";
 import ClaimFees from "./ClaimFees";
 import PublishTemplate from "./PublishTemplate";
 import { substateIdToString } from "@tari-project/typescript-bindings";

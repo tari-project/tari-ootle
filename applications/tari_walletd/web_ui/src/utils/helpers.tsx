@@ -252,24 +252,20 @@ export function bigintToDecimalString(int: bigint | Amount, decimalPlaces: numbe
 
 export const formatCurrency = (amount: number | bigint): string => {
   if (typeof amount === "bigint") {
-    // Handle bigint: divide by divisor to get integer and remainder for fractional part
     const divisor = BigInt(CURRENCY.DIVISOR);
     const integerPart = amount / divisor;
     const remainder = amount % divisor;
 
-    // Convert remainder to fractional string padded to CURRENCY.DECIMALS
     const fractionalPart = remainder.toString().padStart(CURRENCY.DECIMALS, "0");
 
     return `${Number(integerPart).toLocaleString("en-US")}.${fractionalPart} ${CURRENCY.SYMBOL}`;
   } else if (typeof amount === "number") {
-    // Handle number: guard against NaN and use existing toFixed logic
     if (isNaN(amount)) {
       return `0 ${CURRENCY.SYMBOL}`;
     }
     const convertedAmount = amount / CURRENCY.DIVISOR;
     return `${convertedAmount.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: CURRENCY.DECIMALS })} ${CURRENCY.SYMBOL}`;
   } else {
-    // Handle invalid types
     return `0 ${CURRENCY.SYMBOL}`;
   }
 };

@@ -34,7 +34,7 @@ import AssetVault from "@routes/AssetVault/AssetVault";
 import SettingsPage from "@routes/Settings/Settings";
 import Auth, { AUTH_TOKEN_FOR_NONE_AUTH } from "@routes/Auth/Auth";
 import Webauthn from "@routes/WebauthnRegistration/Webauthn";
-import useAuthStore from "@store/authStore";
+import useAuthStore from "./services/store/authStore";
 import { useEffect } from "react";
 import { useAuthMethod } from "@api/hooks/useAuth";
 import AccessToken from "@routes/AccessToken/AccessToken";

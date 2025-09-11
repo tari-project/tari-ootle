@@ -1,4 +1,4 @@
-//  Copyright 2022. The Tari Project
+//  Copyright 2025. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,43 +20,47 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useAccountsGetDefault } from "@api/hooks/useAccounts";
-import useAccountStore from "@store/accountStore";
-import Onboarding from "@routes/Onboarding/Onboarding";
-import MyAssets from "./Components/MyAssets";
-import { useEffect } from "react";
-import FetchStatusCheck from "@components/FetchStatusCheck";
-import useAuthStore from "@store/authStore";
-import { useWalletInfo } from "@api/hooks/useWalletInfo";
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
-function AssetVault() {
-  const account = useAccountStore((state) => state.account);
-  const setAccount = useAccountStore((state) => state.setAccount);
-  const setPublicKey = useAccountStore((state) => state.setPublicKey);
-  const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
-  const authStore = useAuthStore();
-  const { data: walletInfo } = useWalletInfo();
+const DEFAULT_CODE = `
+// use template_xxx as TemplateName;
 
-  useEffect(() => {
-    if (!isError && defaultAccount) {
-      setAccount(defaultAccount.account);
-      setPublicKey(defaultAccount.public_key);
-    }
+fn main() {
+   // TemplateName::call_something();
+   // let account = var!["account"];
+   // let bucket = account.withdraw(1000);
+}`;
 
-    if (error) {
-      // This can happen when the token is invalid
-      console.error(error);
-      authStore.clearToken();
-    }
-  }, [defaultAccount, isError]);
-
-  console.log("walletInfo", walletInfo);
-
-  return (
-    <FetchStatusCheck errorMessage={""} isError={false} isLoading={isLoading}>
-      {account ? <MyAssets /> : <Onboarding />}
-    </FetchStatusCheck>
-  );
+interface Store {
+  code: string;
+  setCode: (code: string) => void;
+  variables: Record<string, string>;
+  addVariable: (key: string, value: string) => void;
+  removeVariable: (key: string) => void;
 }
 
-export default AssetVault;
+const useManifestCodeStore = create<Store>()(
+  persist<Store>(
+    (set) => ({
+      code: DEFAULT_CODE,
+      setCode: (code: string) => set(() => ({ code })),
+      variables: {},
+      addVariable: (key: string, value: string) =>
+        set((state) => ({
+          variables: {
+            ...state.variables,
+            [key]: value,
+          },
+        })),
+      removeVariable: (key: string) =>
+        set((state) => {
+          const { [key]: _, ...rest } = state.variables;
+          return { variables: rest };
+        }),
+    }),
+    { name: "manifest-code" },
+  ),
+);
+
+export default useManifestCodeStore;

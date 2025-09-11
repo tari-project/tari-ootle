@@ -25,7 +25,7 @@ import PageHeading from "@components/PageHeading";
 import Grid from "@mui/material/Grid";
 import { StyledPaper } from "@components/StyledComponents";
 import { QueryBuilder, TemplateReader, useStore } from "@tari-project/tari-extension-query-builder";
-import useThemeStore from "../../store/themeStore";
+import useThemeStore from "@store/themeStore";
 import { useCallback, useEffect, useRef } from "react";
 import {
   Button,
@@ -52,15 +52,15 @@ import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import { useTheme } from "@mui/material/styles";
 import Loading from "@components/Loading";
-import { useTemplateGet } from "../../api/hooks/useTemplate";
+import { useTemplateGet } from "@api/hooks/useTemplate";
 import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
 import FunctionsIcon from "@mui/icons-material/Functions";
 import SettingsEthernetIcon from "@mui/icons-material/SettingsEthernet";
 import { GeneratedCodeType, TariNetwork, TransactionProps } from "@tari-project/tari-extension-common";
-import { substateIdToString } from "../../utils/helpers";
+import { substateIdToString } from "@utils/helpers";
 import CloseIcon from "@mui/icons-material/Close";
 import { Highlight } from "prism-react-renderer";
-import useFlowEditorStore, { INITIAL_FLOW_STATE } from "../../store/flowEditorStore";
+import useFlowEditorStore, { INITIAL_FLOW_STATE } from "@store/flowEditorStore";
 import {
   shortenString,
   UnsignedTransactionV1,
@@ -70,7 +70,7 @@ import {
   TESTNET_XTR_FAUCET_ADDRESS,
 } from "@tari-project/typescript-bindings";
 import { settingsGet, submitTransactionDryRun, transactionsSubmit, transactionsWaitResult } from "../../utils/json_rpc";
-import { useAccountsList } from "../../api/hooks/useAccounts";
+import { useAccountsList } from "@api/hooks/useAccounts";
 import CopyAddress from "@components/CopyAddress";
 
 const KNOWN_TEMPLATES = [

@@ -20,43 +20,33 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useAccountsGetDefault } from "@api/hooks/useAccounts";
-import useAccountStore from "@store/accountStore";
-import Onboarding from "@routes/Onboarding/Onboarding";
-import MyAssets from "./Components/MyAssets";
-import { useEffect } from "react";
-import FetchStatusCheck from "@components/FetchStatusCheck";
-import useAuthStore from "@store/authStore";
-import { useWalletInfo } from "@api/hooks/useWalletInfo";
+import { create } from "zustand";
+import { Account } from "@tari-project/typescript-bindings";
 
-function AssetVault() {
-  const account = useAccountStore((state) => state.account);
-  const setAccount = useAccountStore((state) => state.setAccount);
-  const setPublicKey = useAccountStore((state) => state.setPublicKey);
-  const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
-  const authStore = useAuthStore();
-  const { data: walletInfo } = useWalletInfo();
-
-  useEffect(() => {
-    if (!isError && defaultAccount) {
-      setAccount(defaultAccount.account);
-      setPublicKey(defaultAccount.public_key);
-    }
-
-    if (error) {
-      // This can happen when the token is invalid
-      console.error(error);
-      authStore.clearToken();
-    }
-  }, [defaultAccount, isError]);
-
-  console.log("walletInfo", walletInfo);
-
-  return (
-    <FetchStatusCheck errorMessage={""} isError={false} isLoading={isLoading}>
-      {account ? <MyAssets /> : <Onboarding />}
-    </FetchStatusCheck>
-  );
+interface Store {
+  showBalance: boolean;
+  setShowBalance: (show: boolean) => void;
+  account: Account | null;
+  setAccount: (account: Account) => void;
+  publicKey: string;
+  setPublicKey: (publicKey: string) => void;
+  indexer: string;
+  setIndexer: (indexer: string) => void;
+  popup: any;
+  setPopup: (popup: any) => void;
 }
 
-export default AssetVault;
+const useAccountStore = create<Store>()((set) => ({
+  showBalance: true,
+  setShowBalance: (show) => set({ showBalance: show }),
+  account: null,
+  setAccount: (account) => set({ account: account }),
+  publicKey: "",
+  setPublicKey: (publicKey) => set({ publicKey: publicKey }),
+  indexer: "",
+  setIndexer: (indexer) => set({ indexer: indexer }),
+  popup: { visible: false },
+  setPopup: (popup) => set({ popup: { visible: true, ...popup } }),
+}));
+
+export default useAccountStore;

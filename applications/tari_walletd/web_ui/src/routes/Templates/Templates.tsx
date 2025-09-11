@@ -1,9 +1,9 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-import { useListTemplatesAuthored } from "../../api/hooks/useTemplatesAuthored";
+import { useListTemplatesAuthored } from "@api/hooks/useTemplatesAuthored";
 import { useEffect, useState } from "react";
-import { useAccountsList } from "../../api/hooks/useAccounts";
+import { useAccountsList } from "@api/hooks/useAccounts";
 import InputLabel from "@mui/material/InputLabel";
 import Select, { SelectChangeEvent } from "@mui/material/Select/Select";
 import {
@@ -32,7 +32,7 @@ import { Collapse, TablePagination } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import { SlCheck, SlClose } from "react-icons/sl";
 import { handleChangePage, handleChangeRowsPerPage } from "../../utils/helpers";
-import useAccountStore from "../../store/accountStore";
+import useAccountStore from "@store/accountStore";
 
 function getTypeAsString(funcType: FuncType): string {
   if (typeof funcType === "string") {

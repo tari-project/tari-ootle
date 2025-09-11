@@ -20,43 +20,46 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useAccountsGetDefault } from "@api/hooks/useAccounts";
-import useAccountStore from "@store/accountStore";
-import Onboarding from "@routes/Onboarding/Onboarding";
-import MyAssets from "./Components/MyAssets";
-import { useEffect } from "react";
-import FetchStatusCheck from "@components/FetchStatusCheck";
-import useAuthStore from "@store/authStore";
-import { useWalletInfo } from "@api/hooks/useWalletInfo";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { ApiError } from "@api/helpers/types";
+import queryClient from "@api/queryClient";
+import { keysCreate, keysList, keysSetActive } from "@utils/json_rpc";
+import { KeyBranch } from "@tari-project/typescript-bindings";
 
-function AssetVault() {
-  const account = useAccountStore((state) => state.account);
-  const setAccount = useAccountStore((state) => state.setAccount);
-  const setPublicKey = useAccountStore((state) => state.setPublicKey);
-  const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
-  const authStore = useAuthStore();
-  const { data: walletInfo } = useWalletInfo();
+export const useKeysList = (branch: KeyBranch) => {
+  return useQuery({
+    queryKey: ["keys_list", branch],
+    queryFn: () => {
+      return keysList({ branch });
+    },
+  });
+};
 
-  useEffect(() => {
-    if (!isError && defaultAccount) {
-      setAccount(defaultAccount.account);
-      setPublicKey(defaultAccount.public_key);
-    }
+export const useKeysCreate = (branch: KeyBranch) => {
+  return useMutation({
+    mutationFn: () => keysCreate({ branch, specific_index: null }),
+    onError: (error: ApiError) => {
+      error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["keys_list"] });
+    },
+  });
+};
 
-    if (error) {
-      // This can happen when the token is invalid
-      console.error(error);
-      authStore.clearToken();
-    }
-  }, [defaultAccount, isError]);
+export const useKeysSetActive = () => {
+  const setActive = async (index: number) => {
+    const result = await keysSetActive({ index });
+    return result;
+  };
 
-  console.log("walletInfo", walletInfo);
-
-  return (
-    <FetchStatusCheck errorMessage={""} isError={false} isLoading={isLoading}>
-      {account ? <MyAssets /> : <Onboarding />}
-    </FetchStatusCheck>
-  );
-}
-
-export default AssetVault;
+  return useMutation({
+    mutationFn: setActive,
+    onError: (error: ApiError) => {
+      error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["keys_list"] });
+    },
+  });
+};

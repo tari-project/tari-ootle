@@ -20,43 +20,33 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useAccountsGetDefault } from "@api/hooks/useAccounts";
-import useAccountStore from "@store/accountStore";
-import Onboarding from "@routes/Onboarding/Onboarding";
-import MyAssets from "./Components/MyAssets";
-import { useEffect } from "react";
-import FetchStatusCheck from "@components/FetchStatusCheck";
-import useAuthStore from "@store/authStore";
-import { useWalletInfo } from "@api/hooks/useWalletInfo";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { ApiError } from "@api/helpers/types";
+import queryClient from "@api/queryClient";
+import { authGetAllJwt, authRevoke } from "@utils/json_rpc";
 
-function AssetVault() {
-  const account = useAccountStore((state) => state.account);
-  const setAccount = useAccountStore((state) => state.setAccount);
-  const setPublicKey = useAccountStore((state) => state.setPublicKey);
-  const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
-  const authStore = useAuthStore();
-  const { data: walletInfo } = useWalletInfo();
+export const useGetAllTokens = () => {
+  return useQuery({
+    queryKey: ["jwts_list"],
+    queryFn: () => {
+      return authGetAllJwt({});
+    },
+  });
+};
 
-  useEffect(() => {
-    if (!isError && defaultAccount) {
-      setAccount(defaultAccount.account);
-      setPublicKey(defaultAccount.public_key);
-    }
-
-    if (error) {
-      // This can happen when the token is invalid
+export const useAuthRevokeToken = () => {
+  const revokeToken = async (token: number) => {
+    const result = await authRevoke({ permission_token_id: token });
+    return result;
+  };
+  return useMutation({
+    mutationFn: revokeToken,
+    onError: (error: ApiError) => {
+      error;
       console.error(error);
-      authStore.clearToken();
-    }
-  }, [defaultAccount, isError]);
-
-  console.log("walletInfo", walletInfo);
-
-  return (
-    <FetchStatusCheck errorMessage={""} isError={false} isLoading={isLoading}>
-      {account ? <MyAssets /> : <Onboarding />}
-    </FetchStatusCheck>
-  );
-}
-
-export default AssetVault;
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["jwts_list"] });
+    },
+  });
+};

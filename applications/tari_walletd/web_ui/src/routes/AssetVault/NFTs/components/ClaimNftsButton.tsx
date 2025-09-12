@@ -25,10 +25,12 @@ import { useMintTestnetFaucetNfts } from "@api/hooks/useAccounts";
 import useAccountStore from "@store/accountStore";
 import { substateIdToString } from "@tari-project/typescript-bindings";
 import queryClient from "@api/queryClient";
+import { useErrorNotification } from "../../../../contexts/ErrorNotificationContext";
 
 function ClaimNftsButton() {
-  const { mutate: claimTestnetFaucetNfts } = useMintTestnetFaucetNfts();
+  const { mutate: claimTestnetFaucetNfts, isPending } = useMintTestnetFaucetNfts();
   const account = useAccountStore((state) => state.account);
+  const { showError, showSuccess } = useErrorNotification();
 
   if (!account) {
     return <></>;
@@ -47,6 +49,7 @@ function ClaimNftsButton() {
       {
         onSuccess: (resp: any) => {
           console.log(resp);
+          showSuccess("Successfully claimed NFTs!");
           // Invalidate NFT queries to refresh the list
           queryClient.invalidateQueries({
             predicate: (query) => {
@@ -55,13 +58,23 @@ function ClaimNftsButton() {
             },
           });
         },
+        onError: (error: any) => {
+          console.error("Error claiming NFTs:", error);
+          // Show user-friendly error message
+          const errorMessage = error?.message || "Failed to claim NFTs. Please ensure you have sufficient funds to pay for transaction fees.";
+          showError(errorMessage);
+        },
       },
     );
   };
 
   return (
-    <Button variant="outlined" onClick={() => onClaimTestnetNfts()}>
-      Claim Testnet NFTs
+    <Button 
+      variant="outlined" 
+      onClick={() => onClaimTestnetNfts()}
+      disabled={isPending}
+    >
+      {isPending ? "Claiming..." : "Claim Testnet NFTs"}
     </Button>
   );
 }

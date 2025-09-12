@@ -43,6 +43,7 @@ import Templates from "@routes/Templates/Templates";
 import Manifest from "@routes/Manifest/Manifest";
 import FlowEditor from "@routes/FlowEditor/FlowEditor";
 import { useCurrencySync } from "@store/hooks/useCurrencySync";
+import { ErrorNotificationProvider } from "./contexts/ErrorNotificationContext";
 
 export const breadcrumbRoutes = [
   {
@@ -196,10 +197,11 @@ function App() {
   }, [authMethod, authMethodsIsError]);
 
   return (
-    <div>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<GuardedRoute component={AssetVault} isAuthenticated={isAuthenticated} />} />
+    <ErrorNotificationProvider>
+      <div>
+        <Routes>
+          <Route path="/" element={<Layout />}>
+            <Route index element={<GuardedRoute component={AssetVault} isAuthenticated={isAuthenticated} />} />
           <Route path="auth" element={<Auth />} />
           <Route path="auth/webauthn" element={<Webauthn />} />
           <Route
@@ -266,6 +268,7 @@ function App() {
         </Route>
       </Routes>
     </div>
+    </ErrorNotificationProvider>
   );
 }
 

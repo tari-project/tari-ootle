@@ -23,6 +23,7 @@
 import { ChangeEvent } from "react";
 import type { Amount, SubstateId, NonFungibleId } from "@tari-project/typescript-bindings";
 import { CURRENCY } from "@utils/constants";
+import useCurrencyStore from "@store/currencyStore";
 
 export const renderJson = (json: any) => {
   if (Array.isArray(json)) {
@@ -251,6 +252,8 @@ export function bigintToDecimalString(int: bigint | Amount, decimalPlaces: numbe
 }
 
 export const formatCurrency = (amount: number | bigint): string => {
+  const currencySymbol = useCurrencyStore.getState().currencySymbol;
+
   if (typeof amount === "bigint") {
     const divisor = BigInt(CURRENCY.DIVISOR);
     const integerPart = amount / divisor;
@@ -258,24 +261,26 @@ export const formatCurrency = (amount: number | bigint): string => {
 
     const fractionalPart = remainder.toString().padStart(CURRENCY.DECIMALS, "0");
 
-    return `${Number(integerPart).toLocaleString("en-US")}.${fractionalPart} ${CURRENCY.SYMBOL}`;
+    return `${Number(integerPart).toLocaleString("en-US")}.${fractionalPart} ${currencySymbol}`;
   } else if (typeof amount === "number") {
     if (isNaN(amount)) {
-      return `0 ${CURRENCY.SYMBOL}`;
+      return `0 ${currencySymbol}`;
     }
     const convertedAmount = amount / CURRENCY.DIVISOR;
-    return `${convertedAmount.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: CURRENCY.DECIMALS })} ${CURRENCY.SYMBOL}`;
+    return `${convertedAmount.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: CURRENCY.DECIMALS })} ${currencySymbol}`;
   } else {
-    return `0 ${CURRENCY.SYMBOL}`;
+    return `0 ${currencySymbol}`;
   }
 };
 
 // Helper function for formatting amounts that are already in display units (XTR)
 export const formatDisplayCurrency = (amount: number): string => {
+  const currencySymbol = useCurrencyStore.getState().currencySymbol;
+
   if (isNaN(amount)) {
-    return `0 ${CURRENCY.SYMBOL}`;
+    return `0 ${currencySymbol}`;
   }
-  return `${amount.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: CURRENCY.DECIMALS })} ${CURRENCY.SYMBOL}`;
+  return `${amount.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: CURRENCY.DECIMALS })} ${currencySymbol}`;
 };
 
 export function validateHash(hash: string): boolean {

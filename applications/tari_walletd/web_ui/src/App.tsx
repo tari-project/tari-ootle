@@ -42,6 +42,7 @@ import { jwtDecode } from "jwt-decode";
 import Templates from "@routes/Templates/Templates";
 import Manifest from "@routes/Manifest/Manifest";
 import FlowEditor from "@routes/FlowEditor/FlowEditor";
+import { useCurrencySync } from "@store/hooks/useCurrencySync";
 
 export const breadcrumbRoutes = [
   {
@@ -159,6 +160,8 @@ function App() {
   const authStore = useAuthStore();
   const { authToken } = authStore;
   let isAuthenticated = !!authToken;
+
+  useCurrencySync();
 
   useEffect(() => {
     if (isTokenExpired(authToken) && authToken !== AUTH_TOKEN_FOR_NONE_AUTH) {

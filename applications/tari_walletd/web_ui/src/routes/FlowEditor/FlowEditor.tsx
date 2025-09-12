@@ -161,7 +161,7 @@ function FlowEditor() {
 
   useEffect(() => {
     if (dataAccountsList?.accounts && dataAccountsList.accounts.length > 0) {
-      const defaultAcc = dataAccountsList.accounts.find((acc) => acc.account.is_default);
+      const defaultAcc = dataAccountsList.accounts.find((acc: any) => acc.account.is_default);
       setAccount(defaultAcc || dataAccountsList.accounts[0]);
     }
   }, [dataAccountsList]);
@@ -178,7 +178,7 @@ function FlowEditor() {
 
   const onAccountChange = (e: SelectChangeEvent<string>) => {
     const selected = dataAccountsList?.accounts.find(
-      (acc) => substateIdToString(acc.account.address) === e.target.value,
+      (acc: any) => substateIdToString(acc.account.address) === e.target.value,
     );
     setAccount(selected);
   };
@@ -322,7 +322,7 @@ function FlowEditor() {
               value={account ? substateIdToString(account.account.address) : ""}
               onChange={onAccountChange}
             >
-              {dataAccountsList?.accounts?.map((acc) => (
+              {dataAccountsList?.accounts?.map((acc: any) => (
                 <MenuItem key={substateIdToString(acc.account.address)} value={substateIdToString(acc.account.address)}>
                   {acc.account.name || substateIdToString(acc.account.address)}
                 </MenuItem>
@@ -415,7 +415,7 @@ function FlowEditor() {
           </Typography>
         )}
         <List>
-          {methods.map((m, i) => (
+          {methods.map((m: any, i: number) => (
             <ListItem
               key={i}
               sx={{ display: "flex", alignItems: "center", gap: 1, cursor: "grab" }}

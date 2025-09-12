@@ -139,13 +139,14 @@ function Tokens({ account }: { account: Account }) {
         resource_address={resourceToSend?.address}
         resource_type={resourceToSend?.resource_type!}
         token_symbol={
-          balancesData?.balances.find((b) => b.resource_address === resourceToSend?.address)?.token_symbol || ""
+          balancesData?.balances.find((b: BalanceEntry) => b.resource_address === resourceToSend?.address)
+            ?.token_symbol || ""
         }
       />
       <FetchStatusCheck
-        isError={balancesIsError}
-        errorMessage={balancesError?.message || "Error fetching data"}
-        isLoading={balancesIsFetching && !balancesData?.balances.length}
+        isError={balancesIsError as boolean}
+        errorMessage={(balancesError as { message?: string })?.message || "Error fetching data"}
+        isLoading={(balancesIsFetching as boolean) && !balancesData?.balances.length}
       >
         <TableContainer>
           <Table>
@@ -181,7 +182,12 @@ function Tokens({ account }: { account: Account }) {
                     confidential_balance={confidential_balance}
                     vault_address={vault_address ?? undefined} // convert null to undefined
                     divisibility={divisibility}
-                    onSendClicked={handleSendResourceClicked}
+                    onSendClicked={
+                      handleSendResourceClicked as (
+                        resource_address: ResourceAddress,
+                        resource_type: ResourceType,
+                      ) => void
+                    }
                   />
                 ),
               )}

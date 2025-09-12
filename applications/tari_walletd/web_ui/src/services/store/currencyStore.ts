@@ -1,4 +1,4 @@
-//  Copyright 2022. The Tari Project
+//  Copyright 2025. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,61 +20,16 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import Typography from "@mui/material/Typography";
-import Box from "@mui/material/Box";
-import { useTheme } from "@mui/material/styles";
-import IndexerSettings from "./IndexerSettings";
-import { Divider } from "@mui/material";
-import React, { useEffect, useState } from "react";
-import { settingsGet } from "@utils/json_rpc";
+import { create } from "zustand";
 
-function GeneralSettings() {
-  const theme = useTheme();
-  const items = [
-    {
-      label: "Network",
-      content: <NetworkSettings />,
-    },
-    {
-      label: "Indexer Url",
-      content: <IndexerSettings />,
-    },
-  ];
-
-  const renderedItems = items.map((item, i) => {
-    return (
-      <React.Fragment key={i}>
-        <Typography>{item.label}</Typography>
-        <Box>{item.content}</Box>
-        <Divider />
-      </React.Fragment>
-    );
-  });
-
-  return (
-    <Box
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: theme.spacing(3),
-        paddingTop: theme.spacing(3),
-      }}
-    >
-      {renderedItems}
-    </Box>
-  );
+interface CurrencyStore {
+  currencySymbol: string;
+  setCurrencySymbol: (symbol: string) => void;
 }
 
-function NetworkSettings() {
-  const [network, setNetwork] = useState("");
+const useCurrencyStore = create<CurrencyStore>((set) => ({
+  currencySymbol: "XTR",
+  setCurrencySymbol: (symbol) => set({ currencySymbol: symbol }),
+}));
 
-  useEffect(() => {
-    settingsGet().then((res) => {
-      setNetwork(res.network.name);
-    });
-  }, []);
-
-  return <Typography>{network}</Typography>;
-}
-
-export default GeneralSettings;
+export default useCurrencyStore;

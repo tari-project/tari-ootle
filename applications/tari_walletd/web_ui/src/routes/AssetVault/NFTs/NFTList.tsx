@@ -31,6 +31,8 @@ import {
   TableHead,
   TablePagination,
   TableRow,
+  Typography,
+  Box,
 } from "@mui/material";
 import type { ListNftsResponse, NonFungibleToken } from "@tari-project/typescript-bindings";
 import React, { useState } from "react";
@@ -105,7 +107,25 @@ export default function NFTList(props: NftListProps) {
           </Stack>
         </Stack>
 
-        {viewMode === "grid" ? (
+        {displayedNfts.length === 0 && !nftsListIsFetching ? (
+          <Box
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              py: 8,
+              textAlign: "center",
+            }}
+          >
+            <Typography variant="h6" color="text.secondary" gutterBottom>
+              No NFTs found
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              You don't have any NFTs in this account yet. Try claiming some testnet NFTs to get started.
+            </Typography>
+          </Box>
+        ) : viewMode === "grid" ? (
           <Grid container spacing={3}>
             {displayedNfts.map((nft: NonFungibleToken, index: number) => (
               <NftCard key={`${nft.nft_id}-${index}`} nft={nft} />

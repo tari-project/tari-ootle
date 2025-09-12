@@ -60,7 +60,7 @@ export const useNftsTransfer = (request: TransferNftRequest) => {
           return typeof key === "string" && (
             key === "nfts" || 
             key === "list_nfts" || 
-            key.startsWith("nfts_list_")
+            key === "nfts_list"
           );
         }
       });

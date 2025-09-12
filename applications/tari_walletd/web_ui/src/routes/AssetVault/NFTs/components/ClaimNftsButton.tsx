@@ -45,18 +45,14 @@ function ClaimNftsButton() {
         maxFee: 2000,
       },
       {
-        onSuccess: (resp) => {
+        onSuccess: (resp: any) => {
           console.log(resp);
           // Invalidate NFT queries to refresh the list
-          queryClient.invalidateQueries({ 
+          queryClient.invalidateQueries({
             predicate: (query) => {
               const key = query.queryKey[0];
-              return typeof key === "string" && (
-                key === "nfts" || 
-                key === "list_nfts" || 
-                key.startsWith("nfts_list_")
-              );
-            }
+              return typeof key === "string" && (key === "nfts" || key === "list_nfts" || key === "nfts_list");
+            },
           });
         },
       },

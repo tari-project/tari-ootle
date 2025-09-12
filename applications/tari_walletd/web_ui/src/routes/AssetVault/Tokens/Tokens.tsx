@@ -26,7 +26,7 @@ import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
-import { Typography, Box } from "@mui/material";
+import { Typography, Box, Stack } from "@mui/material";
 import { useState } from "react";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import { DataTableCell } from "@components/StyledComponents";
@@ -35,6 +35,7 @@ import useAccountStore from "@store/accountStore";
 import { bigintToDecimalString, shortenSubstateId, substateIdToString } from "@utils/helpers";
 import { Button } from "@mui/material";
 import { SendMoneyDialog } from "./components/SendMoney";
+import ClaimCoinsButton from "./components/ClaimCoinsButton";
 import {
   ResourceAddress,
   ResourceType,
@@ -152,72 +153,78 @@ function Tokens({ account }: { account: Account }) {
         errorMessage={(balancesError as { message?: string })?.message || "Error fetching data"}
         isLoading={(balancesIsFetching as boolean) && !balancesData?.balances.length}
       >
-        {!hasBalances && !balancesIsFetching ? (
-          <Box
-            sx={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              py: 8,
-              textAlign: "center",
-            }}
-          >
-            <Typography variant="h6" color="text.secondary" gutterBottom>
-              No tokens found
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              This account doesn't have any tokens yet. You can receive tokens by sharing your account address or get testnet tokens from a faucet.
-            </Typography>
-          </Box>
-        ) : (
-          <TableContainer>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Vault</TableCell>
-                  <TableCell>Resource</TableCell>
-                  <TableCell>Revealed Balance</TableCell>
-                  <TableCell>Confidential Balance</TableCell>
-                  <TableCell></TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {balancesData?.balances.map(
-                  (
-                    {
-                      resource_address,
-                      balance,
-                      resource_type,
-                      confidential_balance,
-                      token_symbol,
-                      vault_address,
-                      divisibility,
-                    }: BalanceEntry,
-                    i: number,
-                  ) => (
-                    <BalanceRow
-                      key={i}
-                      token_symbol={token_symbol || ""}
-                      resource_address={resource_address}
-                      resource_type={resource_type}
-                      balance={balance}
-                      confidential_balance={confidential_balance}
-                      vault_address={vault_address ?? undefined} // convert null to undefined
-                      divisibility={divisibility}
-                      onSendClicked={
-                        handleSendResourceClicked as (
-                          resource_address: ResourceAddress,
-                          resource_type: ResourceType,
-                        ) => void
-                      }
-                    />
-                  ),
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        )}
+        <Stack gap={2} direction="column">
+          <Stack direction="row" alignItems="center" justifyContent="flex-end">
+            <ClaimCoinsButton />
+          </Stack>
+
+          {!hasBalances && !balancesIsFetching ? (
+            <Box
+              sx={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                py: 8,
+                textAlign: "center",
+              }}
+            >
+              <Typography variant="h6" color="text.secondary" gutterBottom>
+                No tokens found
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                This account doesn't have any tokens yet. Try claiming some testnet coins to get started.
+              </Typography>
+            </Box>
+          ) : (
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Vault</TableCell>
+                    <TableCell>Resource</TableCell>
+                    <TableCell>Revealed Balance</TableCell>
+                    <TableCell>Confidential Balance</TableCell>
+                    <TableCell></TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {balancesData?.balances.map(
+                    (
+                      {
+                        resource_address,
+                        balance,
+                        resource_type,
+                        confidential_balance,
+                        token_symbol,
+                        vault_address,
+                        divisibility,
+                      }: BalanceEntry,
+                      i: number,
+                    ) => (
+                      <BalanceRow
+                        key={i}
+                        token_symbol={token_symbol || ""}
+                        resource_address={resource_address}
+                        resource_type={resource_type}
+                        balance={balance}
+                        confidential_balance={confidential_balance}
+                        vault_address={vault_address ?? undefined} // convert null to undefined
+                        divisibility={divisibility}
+                        onSendClicked={
+                          handleSendResourceClicked as (
+                            resource_address: ResourceAddress,
+                            resource_type: ResourceType,
+                          ) => void
+                        }
+                      />
+                    ),
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </Stack>
       </FetchStatusCheck>
     </>
   );

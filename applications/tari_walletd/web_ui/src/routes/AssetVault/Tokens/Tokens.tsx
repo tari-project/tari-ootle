@@ -151,14 +151,14 @@ function Tokens({ account }: { account: Account }) {
       <FetchStatusCheck
         isError={balancesIsError as boolean}
         errorMessage={(balancesError as { message?: string })?.message || "Error fetching data"}
-        isLoading={(balancesIsFetching as boolean) && !balancesData?.balances.length}
+        isLoading={(balancesIsFetching as boolean) && !balancesData}
       >
         <Stack gap={2} direction="column">
           <Stack direction="row" alignItems="center" justifyContent="flex-end">
             <ClaimCoinsButton />
           </Stack>
 
-          {!hasBalances && !balancesIsFetching ? (
+          {balancesData && !hasBalances ? (
             <Box
               sx={{
                 display: "flex",

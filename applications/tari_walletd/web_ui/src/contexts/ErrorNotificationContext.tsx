@@ -85,7 +85,14 @@ export const ErrorNotificationProvider: React.FC<{ children: React.ReactNode }> 
           }}
           anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
         >
-          <Alert onClose={clearNotification} severity={notification.severity} sx={{ width: "100%" }}>
+          <Alert
+            onClose={clearNotification}
+            severity={notification.severity}
+            sx={{
+              width: "100%",
+              borderRadius: 6,
+            }}
+          >
             {notification.message}
           </Alert>
         </Snackbar>

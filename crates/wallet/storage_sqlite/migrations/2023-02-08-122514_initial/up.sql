@@ -264,4 +264,5 @@ CREATE TABLE utxo_process_queue
     created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE UNIQUE INDEX utxo_process_queue_resource_tag_public_nonce_uniq ON utxo_process_queue (resource_address, utxo_tag, public_nonce);
+CREATE UNIQUE INDEX utxo_process_queue_account_resource_tag_nonce_uniq
+    ON utxo_process_queue (account_key_index, resource_address, utxo_tag, public_nonce);

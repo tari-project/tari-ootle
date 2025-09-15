@@ -1432,12 +1432,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                     utxo_process_queue::public_nonce.eq(serialize_hex(unspent.public_nonce)),
                     utxo_process_queue::resource_address.eq(resource_address.to_string()),
                 ))
-                .on_conflict((
-                    utxo_process_queue::resource_address,
-                    utxo_process_queue::utxo_tag,
-                    utxo_process_queue::public_nonce,
-                ))
-                .do_nothing()
+                .on_conflict_do_nothing()
                 .execute(self.connection())
                 .map_err(|e| WalletStorageError::general(OPERATION, e))?;
         }

@@ -37,8 +37,6 @@ pub enum KeyBranch {
     ConfidentialMasks,
     /// Used to generate nonces that need to be recreated later, e.g. to derive the DH secret for claim burn
     Nonce,
-    /// The view key branch, used to derive an encryption key for wallet recovery.
-    ViewKey,
 }
 
 impl KeyBranch {
@@ -50,7 +48,6 @@ impl KeyBranch {
             Self::StealthMasks => "stealth_masks",
             Self::ConfidentialMasks => "confidential_masks",
             Self::Nonce => "nonce",
-            Self::ViewKey => "view_key",
         }
     }
 }

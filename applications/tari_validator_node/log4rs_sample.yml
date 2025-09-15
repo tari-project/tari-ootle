@@ -53,7 +53,7 @@ appenders:
         count: 5
         pattern: "{{log_dir}}/log/validator-node/ootle.{}.log"
     encoder:
-      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [{X(node-public-key)},{X(node-id)}] {l:5} {m} // {f}:{L}{n}"
+      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m} // {f}:{L}{n}"
 
   # An appender named "ootle" that writes to a file with a custom pattern encoder
   engine:
@@ -70,7 +70,7 @@ appenders:
         count: 5
         pattern: "{{log_dir}}/log/validator-node/engine.{}.log"
     encoder:
-      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [{X(node-public-key)},{X(node-id)}] {l:5} {m} // {f}:{L}{n}"
+      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m} // {f}:{L}{n}"
 
   # An appender named "ootle" that writes to a file with a custom pattern encoder
   consensus:
@@ -87,7 +87,7 @@ appenders:
         count: 5
         pattern: "{{log_dir}}/log/validator-node/consensus.{}.log"
     encoder:
-      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [{X(node-public-key)},{X(node-id)}] {l:5} {m} // {f}:{L}{n}"
+      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m} // {f}:{L}{n}"
 
   # An appender named "libp2p" that writes to a file with a custom pattern encoder
   libp2p:

@@ -145,7 +145,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   const transfer = {
     account: substateIdToString(account.address),
     amount: Math.floor((parseFloat(transferFormState.amount) || 0) * Math.pow(10, balanceEntry?.divisibility || 6)),
-    resource_address: props.resource_address || XTR,
+    resource_address: props.resource_address!,
     destination_public_key: transferFormState.publicKey,
     resourceType: props.resource_type,
     output_to_revealed: !transferFormState.outputToConfidential,
@@ -311,21 +311,6 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   const handleBack = () => {
     setActiveStep(activeStep - 1);
   };
-
-  // Auto-estimate fee when user enters valid public key and amount
-  useEffect(() => {
-    const { publicKey, amount } = transferFormState;
-    if (publicKey.trim() && publicKey.match(/^[0-9a-fA-F]+$/) && amount.trim()) {
-      // Small delay to let state update, then estimate fee
-      const timeoutId = setTimeout(() => {
-        estimateFee().catch(() => {
-          // Fee estimation failed, but don't block the user
-        });
-      }, 500);
-
-      return () => clearTimeout(timeoutId);
-    }
-  }, [transferFormState.publicKey, transferFormState.amount]);
 
   const renderStepContent = () => {
     switch (activeStep) {

@@ -26,12 +26,13 @@ use std::convert::TryFrom;
 use tari_ootle_storage::time::PrimitiveDateTime;
 
 use crate::{
-    storage_sqlite::{models::substate::Substate as SubstateRow, schema::substates},
+    storage_sqlite::{models::substate::SubstateRecord as SubstateRow, schema::substates},
     substate_manager::SubstateResponse,
 };
 
 #[derive(Debug, Identifiable, Queryable)]
-pub struct Substate {
+#[diesel(table_name = substates)]
+pub struct SubstateRecord {
     pub id: i32,
     pub address: String,
     pub version: i32,
@@ -43,7 +44,7 @@ pub struct Substate {
     pub created_at: PrimitiveDateTime,
 }
 
-impl TryFrom<Substate> for SubstateResponse {
+impl TryFrom<SubstateRecord> for SubstateResponse {
     type Error = anyhow::Error;
 
     fn try_from(row: SubstateRow) -> Result<Self, Self::Error> {

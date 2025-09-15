@@ -109,8 +109,6 @@ use crate::{
         KeysSetActiveResponse,
         PublishTemplateRequest,
         PublishTemplateResponse,
-        RevealFundsRequest,
-        RevealFundsResponse,
         SettingsGetResponse,
         StealthTransferRequest,
         StealthTransferResponse,
@@ -344,13 +342,6 @@ impl WalletDaemonClient {
         req: T,
     ) -> Result<ClaimBurnResponse, WalletDaemonClientError> {
         self.send_request("accounts.claim_burn", req.borrow()).await
-    }
-
-    pub async fn accounts_reveal_funds<T: Borrow<RevealFundsRequest>>(
-        &mut self,
-        req: T,
-    ) -> Result<RevealFundsResponse, WalletDaemonClientError> {
-        self.send_request("accounts.reveal_funds", req.borrow()).await
     }
 
     pub async fn create_transfer_proof<T: Borrow<ProofsGenerateRequest>>(

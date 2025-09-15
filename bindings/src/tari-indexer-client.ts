@@ -4,6 +4,7 @@
 export * from "./types/tari-indexer-client/IndexerSubmitTransactionResponse";
 export * from "./types/tari-indexer-client/GetTemplateDefinitionRequest";
 export * from "./types/tari-indexer-client/TemplateMetadata";
+export * from "./types/tari-indexer-client/GetUnspentUtxosResponse";
 export * from "./types/tari-indexer-client/GetUtxoUpdatesRequest";
 export * from "./types/tari-indexer-client/ListSubstatesResponse";
 export * from "./types/tari-indexer-client/IndexerAddPeerResponse";
@@ -32,6 +33,7 @@ export * from "./types/tari-indexer-client/NonFungibleSubstate";
 export * from "./types/tari-indexer-client/ListTemplatesRequest";
 export * from "./types/tari-indexer-client/IndexerGetTransactionResultResponse";
 export * from "./types/tari-indexer-client/IndexerConnectionDirection";
+export * from "./types/tari-indexer-client/GetUnspentUtxosRequest";
 export * from "./types/tari-indexer-client/IndexerGetIdentityResponse";
 export * from "./types/tari-indexer-client/IndexerGetTransactionResultRequest";
 export * from "./types/tari-indexer-client/IndexerReadyResponse";

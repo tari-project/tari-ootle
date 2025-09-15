@@ -60,7 +60,6 @@ use tari_wallet_daemon_client::{
         ExtClaimBurnProof,
         ListNftsRequest,
         MintFaucetNftRequest,
-        RevealFundsRequest,
         StealthTransferRequest,
         TransactionSubmitRequest,
         TransactionWaitResultRequest,
@@ -135,29 +134,6 @@ pub async fn claim_fees(
     };
 
     client.claim_validator_fees(request).await
-}
-
-pub async fn reveal_burned_funds(world: &mut TariWorld, account_name: String, amount: u64, wallet_daemon_name: String) {
-    let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
-
-    let request = RevealFundsRequest {
-        account: Some(ComponentAddressOrName::Name(account_name)),
-        amount_to_reveal: amount.into(),
-        max_fee: Some(5000),
-        pay_fee_from_reveal: true,
-    };
-
-    let resp = client
-        .accounts_reveal_funds(request)
-        .await
-        .expect("Failed to request reveal funds");
-
-    let wait_req = TransactionWaitResultRequest {
-        transaction_id: resp.transaction_id,
-        timeout_secs: Some(120),
-    };
-    let wait_resp = client.wait_transaction_result(wait_req).await.unwrap();
-    assert!(wait_resp.result.unwrap().result.is_accept());
 }
 
 pub async fn transfer_confidential(

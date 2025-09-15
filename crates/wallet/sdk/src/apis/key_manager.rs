@@ -28,14 +28,17 @@ pub enum KeyBranch {
     Account,
     /// The transaction key branch, used to sign transactions that do not need to be signed with the account key.
     Transaction,
-    /// The view key branch, used to derive a view key for resources.
-    ViewKey,
+    /// The Elgamal encryption view key branch, used to derive a view key for resources with "viewable balance"
+    /// enabled.
+    ElgamalEncryptionViewKey,
     /// The stealth masks branch, used to derive masks for stealth addresses.
     StealthMasks,
     /// The confidential masks branch, used to derive masks for confidential transactions.
     ConfidentialMasks,
     /// Used to generate nonces that need to be recreated later, e.g. to derive the DH secret for claim burn
     Nonce,
+    /// The view key branch, used to derive an encryption key for wallet recovery.
+    ViewKey,
 }
 
 impl KeyBranch {
@@ -43,10 +46,11 @@ impl KeyBranch {
         match self {
             Self::Account => "account",
             Self::Transaction => "transactions",
-            Self::ViewKey => "view_key",
+            Self::ElgamalEncryptionViewKey => "elgamal_view_key",
             Self::StealthMasks => "stealth_masks",
             Self::ConfidentialMasks => "confidential_masks",
             Self::Nonce => "nonce",
+            Self::ViewKey => "view_key",
         }
     }
 }
@@ -252,6 +256,14 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         WalletKeyManager::from(self.cipher_seed.clone(), branch.as_ref().to_string(), index)
     }
 }
+
+impl<TStore> Clone for KeyManagerApi<'_, TStore> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<TStore> Copy for KeyManagerApi<'_, TStore> {}
 
 #[derive(Debug, thiserror::Error)]
 pub enum KeyManagerApiError {

@@ -3,18 +3,19 @@
 
 use std::str::FromStr;
 
-use diesel::internal::derives::multiconnection::time::PrimitiveDateTime;
-use tari_engine_types::{Utxo, UtxoAddress};
-use tari_ootle_common_types::{shard::Shard, StateVersion, UtxoSpent, UtxoUnspent, UtxoUpdate};
-use tari_ootle_storage::StorageError;
+use tari_engine_types::{Utxo, UtxoAddress, UtxoId, UtxoOutput};
+use tari_ootle_common_types::StateVersion;
+use tari_ootle_storage::{time::PrimitiveDateTime, StorageError};
+use tari_ootle_wallet_sdk::models::{UtxoBurnt, UtxoSpent, UtxoUnspent, WalletUtxoUpdate};
+use tari_template_lib::prelude::{PedersenCommitmentBytes, ResourceAddress};
 
-use crate::storage_sqlite::{schema::utxos, serialization::deserialize_json};
+use crate::storage_sqlite::{schema::utxos, serialization::deserialize_bincode};
 
 #[derive(AsChangeset, Default)]
 #[diesel(table_name = utxos)]
 pub(crate) struct UtxoRecordUpdate {
     pub version: Option<i32>,
-    pub output: Option<Option<String>>,
+    pub output: Option<Option<Vec<u8>>>,
     pub state_version: Option<i64>,
     pub is_spent: Option<bool>,
     pub is_burnt: Option<bool>,
@@ -24,13 +25,14 @@ pub(crate) struct UtxoRecordUpdate {
 #[derive(Insertable)]
 #[diesel(table_name = utxos)]
 pub(crate) struct UtxoRecordInsert {
-    pub address: String,
+    pub commitment: String,
+    pub public_nonce: String,
     pub version: i32,
     pub shard: i32,
     pub resource_address: String,
     pub state_version: i64,
-    pub output: Option<String>,
-    pub utxo_tag_byte: Option<i32>,
+    pub output: Option<Vec<u8>>,
+    pub utxo_tag: i32,
     pub is_spent: bool,
     pub is_burnt: bool,
     pub is_frozen: bool,
@@ -38,59 +40,97 @@ pub(crate) struct UtxoRecordInsert {
 #[derive(Queryable)]
 #[diesel(table_name = utxos)]
 pub(crate) struct UtxoRecord {
-    #[allow(dead_code)]
-    pub id: i32,
-    pub address: String,
+    pub _id: i32,
+    pub commitment: String,
+    pub _public_nonce: String,
     pub version: i32,
-    #[allow(dead_code)]
     pub resource_address: String,
-    pub shard: i32,
+    pub _shard: i32,
     pub state_version: i64,
-    pub output: Option<String>,
-    #[allow(dead_code)]
-    pub utxo_tag_byte: Option<i32>,
-    pub is_spent: bool,
-    #[allow(dead_code)]
+    pub output: Option<Vec<u8>>,
+    pub _utxo_tag: i32,
+    pub _is_spent: bool,
     pub is_burnt: bool,
     pub is_frozen: bool,
-    #[allow(dead_code)]
-    pub created_at: PrimitiveDateTime,
+    pub _created_at: PrimitiveDateTime,
 }
 
 impl UtxoRecord {
-    pub fn try_convert(self) -> Result<UtxoUpdate, StorageError> {
-        let address = UtxoAddress::from_str(&self.address).map_err(|e| StorageError::DecodingError {
-            operation: "UtxoRecord::try_convert",
-            item: "Utxo",
-            details: format!("Failed to parse SubstateId from string: {}", e),
-        })?;
+    pub fn try_convert_to_update(self) -> Result<(StateVersion, WalletUtxoUpdate), StorageError> {
+        let id = self.to_utxo_id()?;
+        match self.output {
+            None => {
+                // Spent or burnt
+                if self.is_burnt {
+                    Ok((
+                        StateVersion::new(self.state_version as u64),
+                        WalletUtxoUpdate::Burnt(UtxoBurnt {
+                            id,
+                            version: self.version as u32,
+                        }),
+                    ))
+                } else {
+                    Ok((
+                        StateVersion::new(self.state_version as u64),
+                        WalletUtxoUpdate::Spent(UtxoSpent {
+                            id,
+                            version: self.version as u32,
+                        }),
+                    ))
+                }
+            },
+            Some(ref output) => {
+                let output = deserialize_bincode::<UtxoOutput, _>(output).map_err(|e| StorageError::DecodingError {
+                    operation: "UtxoRecord::try_convert",
+                    item: "Utxo",
+                    details: format!("Failed to parse Utxo from string: {}", e),
+                })?;
 
-        let update = if self.is_spent {
-            UtxoUpdate::Spent(UtxoSpent {
-                address,
-                version: self.version as u32,
-                shard: Shard::from(self.shard as u32),
-                state_version: StateVersion::new(self.state_version as u64),
-            })
-        } else {
-            UtxoUpdate::Unspent(UtxoUnspent {
-                address,
-                version: self.version as u32,
-                shard: Shard::from(self.shard as u32),
-                state_version: StateVersion::new(self.state_version as u64),
-                utxo: Utxo {
-                    output: self.output.as_ref().map(deserialize_json).transpose().map_err(|e| {
-                        StorageError::DecodingError {
-                            operation: "UtxoRecord::try_convert",
-                            item: "Utxo",
-                            details: format!("Failed to parse Utxo from string: {}", e),
-                        }
-                    })?,
-                    is_frozen: self.is_frozen,
-                },
-            })
+                Ok((
+                    StateVersion::new(self.state_version as u64),
+                    WalletUtxoUpdate::Unspent(UtxoUnspent {
+                        public_nonce: output.output.public_nonce,
+                        tag: output.tag,
+                    }),
+                ))
+            },
+        }
+    }
+
+    pub fn try_convert_to_utxo(self) -> Result<(UtxoAddress, Utxo), StorageError> {
+        let address = self.to_address()?;
+        let utxo = Utxo {
+            output: self.output.as_ref().map(deserialize_bincode).transpose().map_err(|e| {
+                StorageError::DecodingError {
+                    operation: "UtxoRecord::try_convert",
+                    item: "Utxo",
+                    details: format!("Failed to parse Utxo from string: {}", e),
+                }
+            })?,
+            is_frozen: self.is_frozen,
         };
 
-        Ok(update)
+        Ok((address, utxo))
+    }
+
+    fn to_utxo_id(&self) -> Result<UtxoId, StorageError> {
+        let commitment =
+            PedersenCommitmentBytes::from_hex(&self.commitment).map_err(|e| StorageError::DecodingError {
+                operation: "UtxoRecord::to_address",
+                item: "UtxoAddress",
+                details: format!("Failed to parse Commitment from string: {}", e),
+            })?;
+        Ok(commitment.into())
+    }
+
+    fn to_address(&self) -> Result<UtxoAddress, StorageError> {
+        let resource_address =
+            ResourceAddress::from_str(&self.resource_address).map_err(|e| StorageError::DecodingError {
+                operation: "UtxoRecord::to_address",
+                item: "UtxoAddress",
+                details: format!("Failed to parse ResourceAddress from string: {}", e),
+            })?;
+        let id = self.to_utxo_id()?;
+        Ok(UtxoAddress::new(resource_address, id))
     }
 }

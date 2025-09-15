@@ -2,7 +2,7 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use tari_bor::{Deserialize, Serialize};
-use tari_template_lib_types::crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTagByte};
+use tari_template_lib_types::crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag};
 
 use crate::models::{EncryptedData, ViewableBalanceProof};
 
@@ -36,5 +36,5 @@ pub struct StealthUnspentOutput {
     /// The public key that must prove ownership of this UTXO. This is typically a one time "stealth" public key
     /// selected by the client.
     pub owner_public_key: RistrettoPublicKeyBytes,
-    pub tag: UtxoTagByte,
+    pub tag: UtxoTag,
 }

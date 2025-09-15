@@ -21,6 +21,11 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 pub mod models;
+mod reader;
 mod schema;
 mod serialization;
-pub mod store_factory;
+mod store_factory;
+mod writer;
+
+pub use store_factory::*;
+pub use writer::*;

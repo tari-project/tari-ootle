@@ -430,7 +430,12 @@ where
             .blinded_output_amount
             .is_positive()
             .then(|| {
-                self.create_output_statement(&destination_pk, params.blinded_output_amount, resource_view_key.clone())
+                self.create_output_statement(
+                    &destination_pk,
+                    params.blinded_output_amount,
+                    &params.resource_address,
+                    resource_view_key.clone(),
+                )
             })
             .transpose()?;
 
@@ -448,7 +453,14 @@ where
         // Generate fee change outputs if required
         let fee_change_output_statement = fee_change
             .is_positive()
-            .then(|| self.create_output_statement(&owner_account.to_ristretto_public_key(), fee_change, None))
+            .then(|| {
+                self.create_output_statement(
+                    &owner_account.to_ristretto_public_key(),
+                    fee_change,
+                    &params.resource_address,
+                    None,
+                )
+            })
             .transpose()
             .inspect_err(|e| {
                 warn!(target: LOG_TARGET, "Unlocking fee fund locks after error: {}", e);
@@ -618,7 +630,7 @@ where
             self.key_manager_api
                 .derive_account_key(params.owner_account.key_index())?
         } else {
-            // Since we don't require account auth, use a throw away nonce to sign the transaction
+            // Since we don't require account auth, use a throwaway nonce to sign the transaction
             self.key_manager_api.next_key(KeyBranch::Nonce)?
         };
 
@@ -709,7 +721,8 @@ where
             }
         })?;
 
-        let change = self.create_output_statement(&change_public_key, change_amount, resource_view_key)?;
+        let change =
+            self.create_output_statement(&change_public_key, change_amount, &resource_address, resource_view_key)?;
 
         self.add_unconfirmed_output_from_statement(lock_id, account, resource_address, &change)?;
 
@@ -753,26 +766,27 @@ where
     fn create_output_statement(
         &self,
         dest_public_key: &RistrettoPublicKey,
-        confidential_amount: Amount,
+        amount: Amount,
+        resource_address: &ResourceAddress,
         resource_view_key: Option<RistrettoPublicKey>,
     ) -> Result<UnblindedStealthOutputStatement, StealthTransferApiError> {
-        let network = self.config_api.get_network()?;
-        if !confidential_amount.is_positive() {
+        if !amount.is_positive() {
             return Err(StealthTransferApiError::InvalidParameter {
-                param: "confidential_amount",
-                reason: "Confidential amount must be positive".to_string(),
+                param: "amount",
+                reason: format!("Amount must be positive, got {}", amount),
             });
         }
 
+        let network = self.config_api.get_network()?;
         let mask = self.key_manager_api.next_key(KeyBranch::StealthMasks)?;
 
         let (nonce_secret, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
         let encrypted_data = self.crypto_api.encrypt_value_and_mask(
-            confidential_amount
+            amount
                 .to_u64_checked()
                 .ok_or_else(|| StealthTransferApiError::AmountOverflow {
-                    param: "confidential_amount",
-                    details: "Confidential amount exceeds u64. This is currently a limitation due to the format of \
+                    param: "amount",
+                    details: "Stealth amount exceeds u64::MAX. This is currently a limitation due to the format of \
                               EncryptedData"
                         .to_string(),
                 })?,
@@ -786,19 +800,24 @@ where
             self.crypto_api
                 .derive_stealth_owner_public_key(network, dest_public_key, &nonce_secret);
 
-        let derived_tag = self
-            .crypto_api
-            .derive_stealth_output_tag(network, &dest_public_key.to_byte_type());
+        let statement = UnblindedOutputStatement {
+            amount,
+            mask: mask.key,
+            sender_public_nonce: public_nonce,
+            encrypted_data,
+            minimum_value_promise: 0,
+            resource_view_key,
+        };
+
+        let derived_tag = self.crypto_api.derive_stealth_output_tag_for_recipient(
+            network,
+            &nonce_secret,
+            dest_public_key,
+            resource_address,
+        );
 
         Ok(UnblindedStealthOutputStatement {
-            statement: UnblindedOutputStatement {
-                amount: confidential_amount,
-                mask: mask.key,
-                sender_public_nonce: public_nonce,
-                encrypted_data,
-                minimum_value_promise: 0,
-                resource_view_key,
-            },
+            statement,
             output_owner_public_key,
             tag: derived_tag,
         })

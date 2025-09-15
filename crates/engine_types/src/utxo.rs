@@ -12,7 +12,7 @@ use tari_bor::{BorTag, Deserialize, Serialize};
 use tari_template_lib::{
     models::{BinaryTag, ResourceAddress},
     prelude::{from_hex, serde_helpers, KeyParseError, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
-    types::{crypto::UtxoTagByte, hex::write_hex_fmt},
+    types::{crypto::UtxoTag, hex::write_hex_fmt},
 };
 
 use crate::crypto::PrivateOutput;
@@ -31,7 +31,7 @@ pub struct UtxoOutput {
     /// The public key that must prove ownership of this UTXO. This is typically a one time "stealth" public key but is
     /// selected by the client.
     pub owner_public_key: RistrettoPublicKeyBytes,
-    pub tag: UtxoTagByte,
+    pub tag: UtxoTag,
 }
 
 impl Utxo {
@@ -44,6 +44,10 @@ impl Utxo {
 
     pub fn output(&self) -> Option<&UtxoOutput> {
         self.output.as_ref()
+    }
+
+    pub fn into_output(self) -> Option<UtxoOutput> {
+        self.output
     }
 
     pub fn owner_public_key(&self) -> Option<&RistrettoPublicKeyBytes> {
@@ -68,7 +72,7 @@ impl Utxo {
     }
 
     /// Returns the UTXO’s tag byte if the UTXO has not been burnt.
-    pub fn tag(&self) -> Option<UtxoTagByte> {
+    pub fn tag(&self) -> Option<UtxoTag> {
         self.output.as_ref().map(|o| o.tag)
     }
 }
@@ -141,6 +145,11 @@ impl UtxoId {
 
     pub fn into_commitment_bytes(self) -> PedersenCommitmentBytes {
         PedersenCommitmentBytes::from_array(self.0)
+    }
+
+    pub fn to_commitment_hex_string(&self) -> String {
+        // to_string happens to return the hex encoding of the commitment bytes. If that changes, so will this.
+        self.to_string()
     }
 }
 

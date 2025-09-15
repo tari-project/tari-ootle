@@ -163,7 +163,7 @@ mod tests {
     use tari_engine_types::stealth::validate_stealth_outputs_statement;
     use tari_template_lib::{
         models::EncryptedData,
-        types::{crypto::UtxoTagByte, Amount},
+        types::{crypto::UtxoTag, Amount},
     };
 
     use super::*;
@@ -182,7 +182,7 @@ mod tests {
                     resource_view_key: None,
                 },
                 output_owner_public_key: RistrettoPublicKey::default(),
-                tag: UtxoTagByte::new(0),
+                tag: UtxoTag::new(0),
             }],
             Amount::zero(),
         )

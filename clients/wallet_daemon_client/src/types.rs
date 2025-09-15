@@ -613,30 +613,6 @@ pub struct ProofsCancelResponse {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
-pub struct RevealFundsRequest {
-    /// Account with funds to reveal
-    #[serde(deserialize_with = "opt_string_or_struct")]
-    pub account: Option<ComponentAddressOrName>,
-    /// Amount to reveal
-    pub amount_to_reveal: Amount,
-    /// Pay fee from revealed funds. If false, previously revealed funds in the account are used.
-    pub pay_fee_from_reveal: bool,
-    /// The amount of fees to add to the transaction. Any fees not charged are refunded.
-    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
-    pub max_fee: Option<u64>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
-pub struct RevealFundsResponse {
-    pub transaction_id: TransactionId,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub fee: u64,
-    pub result: FinalizeResult,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountsCreateFreeTestCoinsRequest {
     pub account: ComponentAddressOrName,
     pub amount: Amount,

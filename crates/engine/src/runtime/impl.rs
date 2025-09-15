@@ -123,7 +123,7 @@ use tari_template_lib::{
     prelude::{ResourceType, RistrettoPublicKeyBytes},
     resource::{IMAGE_URL, TOKEN_SYMBOL},
     template::BuiltinTemplate,
-    types::{crypto::UtxoTagByte, Amount, EntityId, TemplateAddress},
+    types::{crypto::UtxoTag, Amount, EntityId, TemplateAddress},
 };
 
 use super::{working_state::WorkingState, Runtime};
@@ -2352,7 +2352,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     viewable_balance: None,
                 },
                 owner_public_key: self.transaction_signer_public_key,
-                tag: UtxoTagByte::new(0),
+                tag: UtxoTag::new(0),
             });
 
             state_mut.new_substate(address, utxo)?;

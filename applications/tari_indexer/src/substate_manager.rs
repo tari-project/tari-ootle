@@ -20,30 +20,35 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashSet, convert::TryInto};
+use std::convert::TryInto;
 
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
-use tari_engine_types::substate::{SubstateId, SubstateValue};
+use tari_engine_types::{
+    substate::{SubstateId, SubstateValue},
+    Utxo,
+    UtxoId,
+};
 use tari_epoch_manager::service::EpochManagerHandle;
-use tari_indexer_client::types::ListSubstateItem;
-use tari_indexer_lib::{substate_scanner::SubstateScanner, NonFungibleSubstate};
+use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate};
+use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_ootle_common_types::{
     shard::Shard,
     substate_type::SubstateType,
     PeerAddress,
     StateVersion,
-    UtxoUpdate,
     VersionedSubstateIdRef,
 };
+use tari_ootle_wallet_sdk::models::WalletUtxoUpdate;
 use tari_template_lib::{
     models::ResourceAddress,
-    types::{crypto::UtxoTagByte, TemplateAddress},
+    prelude::{crypto::UtxoTag, RistrettoPublicKeyBytes},
+    types::TemplateAddress,
 };
 use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClientFactory};
 
 use crate::{
-    storage_sqlite::store_factory::{IndexerStore, IndexerStoreReadTransaction, SqliteIndexerStore},
+    storage_sqlite::{IndexerStore, IndexerStoreReadTransaction, SqliteIndexerStore},
     substate_file_cache::SubstateFileCache,
 };
 
@@ -100,15 +105,34 @@ impl SubstateManager {
         resource_address: ResourceAddress,
         shard: Shard,
         from_state_version: StateVersion,
-        filter_tag_bytes: &HashSet<UtxoTagByte>,
         limit: u32,
-    ) -> Result<(StateVersion, Vec<UtxoUpdate>), anyhow::Error> {
-        let (max_version, updates) = self.substate_store.with_read_tx(|tx| {
-            let updates = tx.utxos_get_updates(resource_address, shard, from_state_version, filter_tag_bytes, limit)?;
-            let max_state_version = tx.utxos_get_max_state_version(resource_address, shard)?;
-            Ok::<_, anyhow::Error>((max_state_version, updates))
-        })?;
-        Ok((max_version, updates))
+    ) -> Result<(StateVersion, Vec<WalletUtxoUpdate>), anyhow::Error> {
+        let updates = self
+            .substate_store
+            .with_read_tx(|tx| tx.utxos_get_updates(resource_address, shard, from_state_version, limit))?;
+        Ok(updates)
+    }
+
+    pub fn get_max_state_version(
+        &self,
+        resource_address: &ResourceAddress,
+        shard: Shard,
+    ) -> Result<StateVersion, anyhow::Error> {
+        let max_version = self
+            .substate_store
+            .with_read_tx(|tx| tx.utxos_get_max_state_version(*resource_address, shard))?;
+        Ok(max_version)
+    }
+
+    pub fn get_unspent_utxos(
+        &self,
+        resource_address: &ResourceAddress,
+        public_nonce_and_tag: &[(UtxoTag, RistrettoPublicKeyBytes)],
+    ) -> Result<Vec<(UtxoId, Utxo)>, anyhow::Error> {
+        let utxos = self
+            .substate_store
+            .with_read_tx(|tx| tx.utxos_get_unspent_by_public_nonce_and_tag(resource_address, public_nonce_and_tag))?;
+        Ok(utxos)
     }
 
     pub async fn get_substate(

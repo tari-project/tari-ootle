@@ -6,6 +6,25 @@ use std::any::type_name;
 use serde::Serialize;
 use tari_ootle_storage::StorageError;
 
+pub fn serialize_bincode<T: Serialize + ?Sized>(t: &T) -> Result<Vec<u8>, StorageError> {
+    bincode::serde::encode_to_vec(t, bincode::config::standard()).map_err(|e| StorageError::EncodingError {
+        operation: "serialize_bincode",
+        item: type_name::<T>(),
+        details: e.to_string(),
+    })
+}
+
+pub fn deserialize_bincode<T: serde::de::DeserializeOwned, S: AsRef<[u8]>>(s: S) -> Result<T, StorageError> {
+    let (t, _) = bincode::serde::decode_from_slice(s.as_ref(), bincode::config::standard()).map_err(|e| {
+        StorageError::DecodingError {
+            operation: "deserialize_bincode",
+            item: type_name::<T>(),
+            details: e.to_string(),
+        }
+    })?;
+    Ok(t)
+}
+
 pub fn serialize_json<T: Serialize + ?Sized>(t: &T) -> Result<String, StorageError> {
     serde_json::to_string(t).map_err(|e| StorageError::EncodingError {
         operation: "serialize_json",

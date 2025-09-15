@@ -48,8 +48,6 @@ import type {
   PublishTemplateRequest,
   PublishTemplateResponse,
   rejectReasonToString,
-  RevealFundsRequest,
-  RevealFundsResponse,
   SettingsGetResponse,
   SettingsSetRequest,
   SettingsSetResponse, StealthTransferRequest, StealthTransferResponse,
@@ -176,10 +174,6 @@ export class WalletDaemonClient {
 
   public accountsAssociateStealthResource(params: AccountsAssociateStealthResourceRequest): Promise<AccountsAssociateStealthResourceResponse> {
     return this.__invokeRpc("accounts.associate_stealth_resource", params);
-  }
-
-  public accountsRevealFunds(params: RevealFundsRequest): Promise<RevealFundsResponse> {
-    return this.__invokeRpc("accounts.reveal_funds", params);
   }
 
   public accountsGetBalances(params: AccountsGetBalancesRequest): Promise<AccountsGetBalancesResponse> {

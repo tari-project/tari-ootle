@@ -54,7 +54,7 @@ use tari_template_lib::{
             PedersenCommitmentBytes,
             RangeProofBytes,
             RistrettoPublicKeyBytes,
-            UtxoTagByte,
+            UtxoTag,
         },
         ObjectKey,
     },
@@ -752,15 +752,11 @@ impl TryFrom<proto::transaction::StealthUnspentOutput> for tari_template_lib::mo
             .try_into()?;
         let owner_public_key = RistrettoPublicKeyBytes::from_bytes(&val.owner_public_key)
             .map_err(|e| anyhow!("Invalid owner public key: {}", e.to_error_string()))?;
-        let tag_byte = val
-            .tag_byte
-            .try_into()
-            .map_err(|e| anyhow!("Invalid tag byte: {}", e))?;
 
         Ok(tari_template_lib::models::StealthUnspentOutput {
             output,
             owner_public_key,
-            tag: UtxoTagByte::new(tag_byte),
+            tag: UtxoTag::new(val.tag_byte),
         })
     }
 }
@@ -770,7 +766,7 @@ impl From<tari_template_lib::models::StealthUnspentOutput> for proto::transactio
         Self {
             output: Some(val.output.into()),
             owner_public_key: val.owner_public_key.as_bytes().to_vec(),
-            tag_byte: val.tag.as_byte().into(),
+            tag_byte: val.tag.value(),
         }
     }
 }

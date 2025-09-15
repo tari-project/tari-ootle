@@ -12,6 +12,7 @@ use tari_engine_types::{
     ToByteType,
     Utxo,
     UtxoAddress,
+    UtxoOutput,
 };
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
@@ -307,14 +308,15 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         Ok(())
     }
 
-    pub fn update_utxo_status_from_utxo(
+    pub fn update_utxo_status(
         &self,
         address: &UtxoAddress,
-        utxo: &Utxo,
+        is_burnt: Option<bool>,
+        status: Option<OutputStatus>,
+        is_frozen: Option<bool>,
     ) -> Result<(), StealthOutputsApiError> {
-        self.store.with_write_tx(|tx| {
-            tx.stealth_outputs_update(address, Some(utxo.is_burnt()), None, Some(utxo.is_frozen()))
-        })?;
+        self.store
+            .with_write_tx(|tx| tx.stealth_outputs_update(address, is_burnt, status, is_frozen))?;
         Ok(())
     }
 
@@ -385,7 +387,8 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                     // need for this case?
                 },
                 None => {
-                    if utxo.is_burnt() {
+                    let is_frozen = utxo.is_frozen();
+                    let Some(output) = utxo.output() else {
                         debug!(
                             target: LOG_TARGET,
                             "Unknown Utxo output is burnt for commitment: {}. Skipping.",
@@ -395,7 +398,14 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                     };
 
                     // Output does not exist. Validate it and add it to the store
-                    match self.validate_utxo(&all_used_account_keys, network, *resource_address, commitment, utxo) {
+                    match self.validate_utxo(
+                        &all_used_account_keys,
+                        network,
+                        *resource_address,
+                        commitment,
+                        output,
+                        is_frozen,
+                    ) {
                         Ok(Some(output)) => {
                             found_utxos_count += 1;
                             tx.stealth_outputs_insert(&output)?;
@@ -433,13 +443,15 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     pub fn validate_utxo(
         &self,
         all_used_account_keys: &[KeyPair],
         network: Network,
         resource_address: ResourceAddress,
         commitment: PedersenCommitmentBytes,
-        utxo: &Utxo,
+        output: &UtxoOutput,
+        is_frozen: bool,
     ) -> Result<Option<StealthOutputModel>, StealthOutputsApiError> {
         // Validate the commitment is well-formed.
         let _output_commitment = PedersenCommitment::try_from_byte_type(&commitment).map_err(|e| {
@@ -448,12 +460,6 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                 reason: format!("Invalid output commitment bytes: {}", e),
             }
         })?;
-        let is_burnt = utxo.is_burnt();
-        let is_frozen = utxo.is_frozen();
-        let Some(output) = utxo.output() else {
-            // We can't validate a burnt output
-            return Ok(None);
-        };
 
         let output_stealth_public_nonce =
             RistrettoPublicKey::try_from_byte_type(&output.output.public_nonce).map_err(|e| {
@@ -472,7 +478,6 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
             output_stealth_public_nonce,
         );
 
-        // TODO: limit accounts to those matching a tag
         for wallet_key in all_used_account_keys {
             let unblinded_result = self.crypto_api.unblind_output(
                 &commitment,
@@ -536,7 +541,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                 encrypted_data: output.output.encrypted_data.clone(),
                 tag_byte: output.tag,
                 status,
-                is_burnt,
+                is_burnt: false,
                 is_frozen,
                 is_on_chain: true,
                 lock_id: None,

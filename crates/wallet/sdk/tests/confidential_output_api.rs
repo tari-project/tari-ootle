@@ -1,23 +1,21 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    collections::{HashMap, HashSet},
-    convert::Infallible,
-    str::FromStr,
-};
+use std::{collections::HashMap, convert::Infallible, str::FromStr};
 
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, tari_utilities::SafePassword};
 use tari_engine_types::{
     crypto::{commit_amount_checked, get_commitment_factory},
     substate::SubstateId,
     ToByteType,
+    Utxo,
+    UtxoId,
 };
-use tari_ootle_common_types::{optional::Optional, shard::Shard, Network, StateVersion, UtxoQueryResponse};
+use tari_ootle_common_types::{optional::Optional, shard::Shard, Network, StateVersion};
 use tari_ootle_wallet_sdk::{
-    models::{ConfidentialOutputModel, OutputStatus, WalletLockId},
+    models::{ConfidentialOutputModel, OutputStatus, UtxoUpdateSet, WalletLockId},
     network::{SubstateQueryResult, TransactionQueryResult, WalletNetworkInterface},
-    storage::{WalletStore, WalletStoreReader},
+    storage::{TagAndPublicNoncePair, WalletStore, WalletStoreReader},
     WalletSdk,
     WalletSdkConfig,
 };
@@ -26,7 +24,6 @@ use tari_template_abi::TemplateDef;
 use tari_template_lib::{
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
     models::{ComponentAddress, EncryptedData, ResourceAddress, VaultId},
-    prelude::crypto::UtxoTagByte,
     resource::ResourceType,
     types::{crypto::PedersenCommitmentBytes, Amount, TemplateAddress},
 };
@@ -296,8 +293,15 @@ impl WalletNetworkInterface for PanicNetworkInterface {
         &self,
         _resource_address: ResourceAddress,
         _shard_state_versions: HashMap<Shard, StateVersion>,
-        _filter_tag_bytes: HashSet<UtxoTagByte>,
-    ) -> Result<UtxoQueryResponse, Self::Error> {
+    ) -> Result<UtxoUpdateSet, Self::Error> {
         panic!("PanicNetworkInterface called")
+    }
+
+    async fn get_unspent_utxos(
+        &self,
+        _resource_address: ResourceAddress,
+        _tag_and_nonce_pairs: Vec<TagAndPublicNoncePair>,
+    ) -> Result<Vec<(UtxoId, Utxo)>, Self::Error> {
+        panic!("PanicNetworkInterface get_unspent_utxos called")
     }
 }

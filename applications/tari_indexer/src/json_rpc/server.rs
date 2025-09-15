@@ -78,6 +78,7 @@ async fn handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: Js
         "inspect_substate" => handlers.inspect_substate(value).await,
         "get_non_fungibles" => handlers.get_non_fungibles(value).await,
         "get_utxo_updates" => handlers.get_utxo_updates(value).await,
+        "get_unspent_utxos" => handlers.get_unspent_utxos(value).await,
 
         // Transactions
         "submit_transaction" => handlers.submit_transaction(value).await,

@@ -60,7 +60,7 @@ export function stringToSubstateId(substateId: string): SubstateId {
       return { Resource: rest };
     case "vault":
       return { Vault: rest };
-    case "commitment":
+    case "tombstone":
       return { UnclaimedConfidentialOutput: rest };
     case "txreceipt":
       return { TransactionReceipt: rest };

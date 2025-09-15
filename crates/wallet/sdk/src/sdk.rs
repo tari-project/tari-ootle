@@ -32,7 +32,6 @@ use crate::{
         resources::ResourcesApi,
         stealth_crypto::StealthCryptoApi,
         stealth_outputs::StealthOutputsApi,
-        stealth_scanner::StealthScannerApi,
         stealth_transfer::StealthTransferApi,
         substate::SubstatesApi,
         template::TemplateApi,
@@ -128,16 +127,16 @@ where
         ConfigApi::new(&self.store)
     }
 
-    pub fn get_config(&self) -> &WalletSdkConfig {
+    pub fn sdk_config(&self) -> &WalletSdkConfig {
         &self.config
+    }
+
+    pub fn network(&self) -> Network {
+        self.config.network
     }
 
     pub fn get_network_interface(&self) -> &TNetworkInterface {
         &self.network_interface
-    }
-
-    pub fn get_network_interface_mut(&mut self) -> &mut TNetworkInterface {
-        &mut self.network_interface
     }
 
     /// Returns the KeyManager API for the wallet.
@@ -209,17 +208,6 @@ where
             self.store(),
             self.key_manager_api(),
             self.stealth_crypto_api(),
-            self.config_api(),
-        )
-    }
-
-    pub fn stealth_scanner_api(&self) -> StealthScannerApi<'_, TStore, TNetworkInterface> {
-        StealthScannerApi::new(
-            &self.store,
-            self.stealth_crypto_api(),
-            self.key_manager_api(),
-            self.stealth_outputs_api(),
-            &self.network_interface,
             self.config_api(),
         )
     }

@@ -75,7 +75,8 @@ impl ConfidentialCryptoApi {
         public_nonce: &RistrettoPublicKey,
         secret: &PrivateKey,
     ) -> Result<EncryptedData, ConfidentialCryptoApiError> {
-        let data = encrypt_value_and_mask(amount, mask, public_nonce, secret)?;
+        let key = kdfs::encrypted_data_dh_kdf_aead(secret, public_nonce);
+        let data = encrypt_value_and_mask(amount, mask, &key)?;
         Ok(data)
     }
 

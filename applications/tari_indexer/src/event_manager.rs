@@ -26,7 +26,7 @@ use log::*;
 use tari_engine_types::{events::Event, substate::SubstateId};
 use tari_template_lib::{models::Metadata, types::Hash};
 
-use crate::storage_sqlite::store_factory::{IndexerStore, IndexerStoreReadTransaction, SqliteIndexerStore};
+use crate::storage_sqlite::{IndexerStore, IndexerStoreReadTransaction, SqliteIndexerStore};
 
 const LOG_TARGET: &str = "tari::indexer::event_manager";
 

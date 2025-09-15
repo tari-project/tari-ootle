@@ -92,13 +92,14 @@ diesel::table! {
 diesel::table! {
     utxos (id) {
         id -> Integer,
-        address -> Text,
+        commitment -> Text,
+        public_nonce -> Text,
         version -> Integer,
         resource_address -> Text,
         shard -> Integer,
         state_version -> BigInt,
-        output -> Nullable<Text>,
-        utxo_tag_byte -> Nullable<Integer>,
+        output -> Nullable<Binary>,
+        utxo_tag -> Integer,
         is_spent -> Bool,
         is_burnt -> Bool,
         is_frozen -> Bool,

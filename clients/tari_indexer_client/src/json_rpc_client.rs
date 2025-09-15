@@ -39,6 +39,8 @@ use crate::{
         GetTemplateDefinitionResponse,
         GetTransactionResultRequest,
         GetTransactionResultResponse,
+        GetUnspentUtxosRequest,
+        GetUnspentUtxosResponse,
         GetUtxoUpdatesRequest,
         GetUtxoUpdatesResponse,
         IndexerReadyResponse,
@@ -139,6 +141,13 @@ impl IndexerJsonRpcClient {
         req: GetUtxoUpdatesRequest,
     ) -> Result<GetUtxoUpdatesResponse, IndexerClientError> {
         self.send_request("get_utxo_updates", req).await
+    }
+
+    pub async fn get_unspent_utxos(
+        &mut self,
+        req: GetUnspentUtxosRequest,
+    ) -> Result<GetUnspentUtxosResponse, IndexerClientError> {
+        self.send_request("get_unspent_utxos", req).await
     }
 
     pub async fn wait_until_ready(&mut self) -> Result<IndexerReadyResponse, IndexerClientError> {

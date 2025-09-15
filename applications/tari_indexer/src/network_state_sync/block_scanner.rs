@@ -19,7 +19,10 @@ use crate::{
     block_data::BlockData,
     storage_sqlite::{
         models::{NewScannedBlockId, NewSubstate},
-        store_factory::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreWriteTransaction, SqliteIndexerStore},
+        IndexerStore,
+        IndexerStoreReadTransaction,
+        IndexerStoreWriteTransaction,
+        SqliteIndexerStore,
     },
 };
 

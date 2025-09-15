@@ -1,4 +1,4 @@
-//  Copyright 2022. The Tari Project
+//  Copyright 2025. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,25 +20,38 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import Stack from "@mui/material/Stack";
-import ClaimBurn from "./ClaimBurn";
-import useAccountStore from "@store/accountStore";
-import ClaimFees from "./ClaimFees";
-import PublishTemplate from "./PublishTemplate";
+import { DialogTitle, IconButton, Stack, Typography, Divider } from "@mui/material";
+import CloseIcon from "@mui/icons-material/Close";
 
-function ActionMenu() {
-  const account = useAccountStore((state) => state.account);
-  if (!account) {
-    return null;
-  }
+interface PopupTitleProps {
+  title: string;
+  onClose?: () => void;
+}
 
+function PopupTitle({ title, onClose }: PopupTitleProps) {
   return (
-    <Stack direction="row" spacing={1} marginBottom={2}>
-      <ClaimFees />
-      <ClaimBurn />
-      <PublishTemplate />
-    </Stack>
+    <DialogTitle sx={{}}>
+      <Stack direction="row" alignItems="baseline" justifyContent="space-between" width="100%">
+        <Stack direction="row" alignItems="baseline" justifyContent="center" width="100%" spacing={2}>
+          <Typography
+            variant="h4"
+            sx={{
+              textTransform: "uppercase",
+              fontSize: "1.1rem",
+            }}
+          >
+            {title}
+          </Typography>
+        </Stack>
+        {onClose && (
+          <IconButton aria-label="close" onClick={onClose}>
+            <CloseIcon />
+          </IconButton>
+        )}
+      </Stack>
+      <Divider sx={{ marginTop: 2 }} />
+    </DialogTitle>
   );
 }
 
-export default ActionMenu;
+export default PopupTitle;

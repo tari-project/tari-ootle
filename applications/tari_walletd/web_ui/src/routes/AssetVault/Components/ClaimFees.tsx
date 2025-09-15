@@ -26,7 +26,6 @@ import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
-import DialogTitle from "@mui/material/DialogTitle";
 import Box from "@mui/material/Box";
 import { useAccountsList } from "@api/hooks/useAccounts";
 import { useTheme } from "@mui/material/styles";
@@ -42,8 +41,7 @@ import {
   substateIdToString,
   TransactionResult,
 } from "@tari-project/typescript-bindings";
-import { FileContent } from "use-file-picker/types";
-import { toHexString } from "@utils/helpers";
+import PopupTitle from "@/components/PopupTitle";
 
 interface FormState {
   account: string | null;
@@ -214,7 +212,7 @@ export default function ClaimFees() {
         Claim Fees
       </Button>
       <Dialog open={open} onClose={handleClose}>
-        <DialogTitle>Claim Fees</DialogTitle>
+        <PopupTitle onClose={handleClose} title="Claim Fees" />
         <DialogContent className="dialog-content">
           <Form onSubmit={onClaim} className="flex-container-vertical" style={{ paddingTop: theme.spacing(1) }}>
             <FormControl>

@@ -68,8 +68,10 @@ function SelectAccount() {
           labelId="account-select-label"
           id="account-select"
           value={
-            dataAccountsList?.accounts.some((info: AccountInfo) => info.account.address === account?.address)
-              ? substateIdToString(account!.address)
+            account && dataAccountsList?.accounts.some((info: AccountInfo) => info.account.address === account?.address)
+              ? substateIdToString(account.address)
+              : dataAccountsList?.accounts.length
+              ? substateIdToString(dataAccountsList.accounts[0].account.address)
               : "addAccount"
           }
           label="Account"

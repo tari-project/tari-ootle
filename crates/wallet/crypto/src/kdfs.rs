@@ -9,11 +9,11 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
 use tari_ootle_common_types::{base_layer_hashing::encrypted_data_hasher, Network};
-use tari_template_lib::{prelude::RistrettoPublicKeyBytes, types::crypto::UtxoTagByte};
+use tari_template_lib::{models::ResourceAddress, types::crypto::UtxoTag};
 use tari_utilities::{hidden_type, safe_array::SafeArray, Hidden};
 use zeroize::Zeroize;
 
-use crate::hashers::stealth_owner_hasher64;
+use crate::hashers::{stealth_output_tag_hasher64, stealth_owner_hasher64};
 
 pub(crate) const AEAD_KEY_LEN: usize = size_of::<Key>();
 
@@ -21,12 +21,19 @@ pub(crate) const AEAD_KEY_LEN: usize = size_of::<Key>();
 hidden_type!(EncryptedDataKey, SafeArray<u8, AEAD_KEY_LEN>);
 hidden_type!(SafeKey64, SafeArray<u8, 64>);
 
+fn dh(
+    public_key: &RistrettoPublicKey,
+    private_key: &RistrettoSecretKey,
+) -> DiffieHellmanSharedSecret<RistrettoPublicKey> {
+    DiffieHellmanSharedSecret::<RistrettoPublicKey>::new(private_key, public_key)
+}
+
 /// Generate a decryption key from a private key and nonce
 pub fn encrypted_data_dh_kdf_aead(
     private_key: &RistrettoSecretKey,
     public_nonce: &RistrettoPublicKey,
 ) -> RistrettoSecretKey {
-    let shared_secret = DiffieHellmanSharedSecret::<RistrettoPublicKey>::new(private_key, public_nonce);
+    let shared_secret = dh(public_nonce, private_key);
     let mut aead_key = SafeKey64::from(SafeArray::default());
     // Must match base layer burn
     encrypted_data_hasher()
@@ -42,42 +49,55 @@ pub fn owner_stealth_dh_secret(
     private_key: &RistrettoSecretKey,
     public_nonce: &RistrettoPublicKey,
 ) -> RistrettoSecretKey {
-    // c = H(k * r.G)
-    let shared_secret = DiffieHellmanSharedSecret::<RistrettoPublicKey>::new(private_key, public_nonce);
+    // c = H(r.G * k)
+    let c = stealth_owner_dh(network, public_nonce, private_key);
+    // c + k
+    c + private_key
+}
+
+fn stealth_owner_dh(
+    network: Network,
+    public_key: &RistrettoPublicKey,
+    secret_nonce: &RistrettoSecretKey,
+) -> RistrettoSecretKey {
+    let shared_secret = dh(public_key, secret_nonce);
     let result = stealth_owner_hasher64(network)
         .chain(shared_secret.as_bytes())
         .finalize();
 
-    let c = RistrettoSecretKey::from_uniform_bytes(result.as_ref())
-        .expect("key length != RistrettoSecretKey::WIDE_REDUCTION_LEN");
-
-    // c + k
-    c + private_key
+    RistrettoSecretKey::from_uniform_bytes(result.as_ref())
+        .expect("key length != RistrettoSecretKey::WIDE_REDUCTION_LEN")
 }
+
 pub fn owner_stealth_dh_stealth_address(
     network: Network,
     public_key: &RistrettoPublicKey,
     secret_nonce: &RistrettoSecretKey,
 ) -> RistrettoPublicKey {
-    // c = H(r * k.G)
-    let shared_secret = DiffieHellmanSharedSecret::<RistrettoPublicKey>::new(secret_nonce, public_key);
-    let result = stealth_owner_hasher64(network)
-        .chain(shared_secret.as_bytes())
-        .finalize();
-
-    let c = RistrettoSecretKey::from_uniform_bytes(result.as_ref())
-        .expect("key length != RistrettoSecretKey::WIDE_REDUCTION_LEN");
-
+    // c = H(k.G * r)
+    let c = stealth_owner_dh(network, public_key, secret_nonce);
+    // C = c.G
     let c_g = RistrettoPublicKey::from_secret_key(&c);
-
     // c.G + k.G
     c_g + public_key
 }
 
-pub fn derive_stealth_output_tag(network: Network, owner_public_key: &RistrettoPublicKeyBytes) -> UtxoTagByte {
-    let result = stealth_owner_hasher64(network).chain(owner_public_key).finalize();
+pub fn utxo_tag_stealth_dh(
+    network: Network,
+    public_key: &RistrettoPublicKey,
+    secret_nonce: &RistrettoSecretKey,
+    resource_address: &ResourceAddress,
+) -> UtxoTag {
+    let shared_secret = dh(public_key, secret_nonce);
+    let result = stealth_output_tag_hasher64(network)
+        .chain(shared_secret.as_bytes())
+        .chain(resource_address)
+        .finalize();
 
-    UtxoTagByte::new(result[0])
+    let mut buf = [0u8; size_of::<u32>()];
+    buf.copy_from_slice(&result[..size_of::<u32>()]);
+    let tag = u32::from_le_bytes(buf);
+    UtxoTag::new(tag)
 }
 
 #[cfg(test)]

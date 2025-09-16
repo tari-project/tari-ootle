@@ -26,13 +26,14 @@ use tari_ootle_wallet_crypto::{
     WalletCryptoError,
 };
 use tari_template_lib::{
-    models::{ConfidentialOutputStatement, EncryptedData, StealthTransferStatement},
+    models::{ConfidentialOutputStatement, EncryptedData, ResourceAddress, StealthTransferStatement},
     prelude::{crypto::CommitmentSignatureBytes, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
-    types::{crypto::UtxoTagByte, Amount},
+    types::{crypto::UtxoTag, Amount},
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet::sdk::stealth_crypto";
 
+#[derive(Debug, Clone, Copy)]
 pub struct StealthCryptoApi;
 
 impl StealthCryptoApi {
@@ -75,12 +76,24 @@ impl StealthCryptoApi {
         Ok(stmt)
     }
 
-    pub fn derive_stealth_output_tag(
+    pub fn derive_stealth_output_tag_for_recipient(
         &self,
         network: Network,
-        dest_public_key: &RistrettoPublicKeyBytes,
-    ) -> UtxoTagByte {
-        kdfs::derive_stealth_output_tag(network, dest_public_key)
+        nonce_secret: &RistrettoSecretKey,
+        dest_public_key: &RistrettoPublicKey,
+        resource_address: &ResourceAddress,
+    ) -> UtxoTag {
+        kdfs::utxo_tag_stealth_dh(network, dest_public_key, nonce_secret, resource_address)
+    }
+
+    pub fn derive_stealth_output_tag_from_sender(
+        &self,
+        network: Network,
+        secret_key: &RistrettoSecretKey,
+        public_nonce: &RistrettoPublicKey,
+        resource_address: &ResourceAddress,
+    ) -> UtxoTag {
+        kdfs::utxo_tag_stealth_dh(network, public_nonce, secret_key, resource_address)
     }
 
     pub fn derive_stealth_owner_public_key(
@@ -108,7 +121,8 @@ impl StealthCryptoApi {
         public_nonce: &RistrettoPublicKey,
         secret: &RistrettoSecretKey,
     ) -> Result<EncryptedData, StealthCryptoApiError> {
-        let data = encrypt_value_and_mask(amount, mask, public_nonce, secret)?;
+        let encryption_key = kdfs::encrypted_data_dh_kdf_aead(secret, public_nonce);
+        let data = encrypt_value_and_mask(amount, mask, &encryption_key)?;
         Ok(data)
     }
 

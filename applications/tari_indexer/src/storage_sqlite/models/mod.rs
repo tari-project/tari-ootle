@@ -24,8 +24,10 @@ mod events;
 mod key_value;
 mod substate;
 mod utxo;
+mod utxo_update;
 
 pub use events::*;
 pub use key_value::*;
 pub use substate::*;
 pub(crate) use utxo::*;
+pub(crate) use utxo_update::*;

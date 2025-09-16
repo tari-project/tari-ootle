@@ -38,6 +38,25 @@ diesel::table! {
 }
 
 diesel::table! {
+    confidential_outputs (id) {
+        id -> Integer,
+        account_id -> Integer,
+        vault_id -> Integer,
+        commitment -> Text,
+        value -> BigInt,
+        sender_public_nonce -> Nullable<Text>,
+        encryption_secret_key_index -> BigInt,
+        public_asset_tag -> Nullable<Text>,
+        status -> Text,
+        locked_at -> Nullable<Timestamp>,
+        lock_id -> Nullable<Integer>,
+        encrypted_data -> Binary,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     config (id) {
         id -> Integer,
         key -> Text,
@@ -76,25 +95,6 @@ diesel::table! {
         data -> Text,
         mutable_data -> Text,
         is_burnt -> Bool,
-        created_at -> Timestamp,
-        updated_at -> Timestamp,
-    }
-}
-
-diesel::table! {
-    outputs (id) {
-        id -> Integer,
-        account_id -> Integer,
-        vault_id -> Integer,
-        commitment -> Text,
-        value -> BigInt,
-        sender_public_nonce -> Nullable<Text>,
-        encryption_secret_key_index -> BigInt,
-        public_asset_tag -> Nullable<Text>,
-        status -> Text,
-        locked_at -> Nullable<Timestamp>,
-        lock_id -> Nullable<Integer>,
-        encrypted_data -> Binary,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }
@@ -188,6 +188,17 @@ diesel::table! {
 }
 
 diesel::table! {
+    utxo_process_queue (id) {
+        id -> Integer,
+        account_key_index -> BigInt,
+        resource_address -> Text,
+        utxo_tag -> Integer,
+        public_nonce -> Text,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     vaults (id) {
         id -> Integer,
         account_id -> Integer,
@@ -224,9 +235,9 @@ diesel::table! {
     }
 }
 
+diesel::joinable!(confidential_outputs -> accounts (account_id));
+diesel::joinable!(confidential_outputs -> vaults (vault_id));
 diesel::joinable!(non_fungible_tokens -> vaults (vault_id));
-diesel::joinable!(outputs -> accounts (account_id));
-diesel::joinable!(outputs -> vaults (vault_id));
 diesel::joinable!(shard_state_versions -> accounts (account_id));
 diesel::joinable!(shard_state_versions -> resources (resource_id));
 diesel::joinable!(vaults -> accounts (account_id));
@@ -237,16 +248,17 @@ diesel::allow_tables_to_appear_in_same_query!(
     accounts,
     auth_status,
     authored_templates,
+    confidential_outputs,
     config,
     key_manager_states,
     locks,
     non_fungible_tokens,
-    outputs,
     resources,
     shard_state_versions,
     stealth_outputs,
     substates,
     transactions,
+    utxo_process_queue,
     vaults,
     webauthn_registration_passkeys,
     webauthn_registrations,

@@ -2,11 +2,9 @@
 import type { ResourceAddress } from "../ResourceAddress";
 import type { Shard } from "../Shard";
 import type { StateVersion } from "../StateVersion";
-import type { UtxoTagByte } from "../UtxoTagByte";
 
 export type GetUtxoUpdatesRequest = {
   shard_state_versions: Array<[Shard, StateVersion]>;
-  filter_tag_bytes: Array<UtxoTagByte>;
   resource_address: ResourceAddress;
   per_shard_limit: number;
 };

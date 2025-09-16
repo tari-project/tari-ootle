@@ -29,13 +29,12 @@ use tari_wallet_daemon_client::{
         AccountsCreateOrGetRequest,
         AccountsCreateRequest,
         AccountsGetBalancesRequest,
-        RevealFundsRequest,
     },
     ComponentAddressOrName,
     WalletDaemonClient,
 };
 
-use crate::{command::transaction::summarize_finalize_result, table::Table, table_row};
+use crate::{table::Table, table_row};
 
 #[derive(Debug, Subcommand, Clone)]
 pub enum AccountsSubcommand {
@@ -46,8 +45,6 @@ pub enum AccountsSubcommand {
     List,
 
     Get(GetArgs),
-    #[clap(alias = "reveal")]
-    RevealFunds(RevealFundsArgs),
     #[clap(alias = "faucet")]
     CreateFreeTestCoins(CreateFreeTestCoinsArgs),
     #[clap(alias = "default")]
@@ -79,21 +76,6 @@ pub struct GetArgs {
 }
 
 #[derive(Debug, Args, Clone)]
-pub struct RevealFundsArgs {
-    /// Amount of funds to reveal
-    reveal_amount: u64,
-    /// The account name where the funds will be revealed
-    account: Option<ComponentAddressOrName>,
-    /// The fee to pay for the reveal transaction
-    #[clap(long, short = 'f')]
-    max_fee: Option<u32>,
-    /// If set, the fee will be paid from the revealed funds instead of from the account resulting in less revealed
-    /// funds than requested.
-    #[clap(long, default_value_t = true)]
-    pay_from_reveal: bool,
-}
-
-#[derive(Debug, Args, Clone)]
 pub struct CreateFreeTestCoinsArgs {
     pub account: Option<ComponentAddressOrName>,
     #[clap(long, short, alias = "amount")]
@@ -117,7 +99,6 @@ impl AccountsSubcommand {
                 handle_list(&mut client).await?;
             },
             AccountsSubcommand::Get(args) => handle_get(args, &mut client).await?,
-            AccountsSubcommand::RevealFunds(args) => handle_reveal_funds(args, &mut client).await?,
             AccountsSubcommand::CreateFreeTestCoins(args) => handle_create_free_test_coins(args, &mut client).await?,
             AccountsSubcommand::SetDefault(args) => handle_set_default(args, &mut client).await?,
         }
@@ -255,32 +236,6 @@ async fn handle_get(args: GetArgs, client: &mut WalletDaemonClient) -> Result<()
         resp.account.address
     );
     println!();
-
-    Ok(())
-}
-
-pub async fn handle_reveal_funds(args: RevealFundsArgs, client: &mut WalletDaemonClient) -> Result<(), anyhow::Error> {
-    let RevealFundsArgs {
-        account,
-        reveal_amount,
-        max_fee,
-        pay_from_reveal,
-    } = args;
-
-    println!("Submitting reveal transaction...");
-    let resp = client
-        .accounts_reveal_funds(RevealFundsRequest {
-            account,
-            amount_to_reveal: reveal_amount.into(),
-            max_fee: max_fee.map(Into::into),
-            pay_fee_from_reveal: pay_from_reveal,
-        })
-        .await?;
-
-    println!("Transaction: {}", resp.transaction_id);
-    println!("Fee: {}", resp.fee);
-    println!();
-    summarize_finalize_result(&resp.result);
 
     Ok(())
 }

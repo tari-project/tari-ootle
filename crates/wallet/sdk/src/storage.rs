@@ -6,7 +6,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use tari_engine_types::{resource::Resource, substate::SubstateId, UtxoAddress};
+use tari_engine_types::{resource::Resource, substate::SubstateId, UtxoAddress, UtxoId};
 use tari_ootle_common_types::{
     optional::IsNotFoundError,
     shard::Shard,
@@ -24,7 +24,7 @@ use tari_template_lib::{
         ResourceType,
         RistrettoPublicKeyBytes,
     },
-    types::{Amount, TemplateAddress},
+    types::{crypto::UtxoTag, Amount, TemplateAddress},
 };
 use tari_transaction::{Transaction, TransactionId};
 use webauthn_rs::prelude::Passkey;
@@ -43,6 +43,7 @@ use crate::models::{
     StealthOutputModel,
     SubstateModel,
     TransactionStatus,
+    UtxoUnspent,
     VaultModel,
     WalletLockId,
     WalletTransaction,
@@ -288,7 +289,14 @@ pub trait WalletStoreReader {
         account: &ComponentAddress,
         resource: &ResourceAddress,
     ) -> Result<HashMap<Shard, StateVersion>, WalletStorageError>;
+
+    fn utxo_process_queue_fetch_batch(
+        &mut self,
+        batch_size: usize,
+    ) -> Result<HashMap<ResourceAddress, HashMap<TagAndPublicNoncePair, u64>>, WalletStorageError>;
 }
+
+pub type TagAndPublicNoncePair = (UtxoTag, RistrettoPublicKeyBytes);
 
 pub trait WalletStoreWriter {
     fn commit(self) -> Result<(), WalletStorageError>;
@@ -399,7 +407,11 @@ pub trait WalletStoreWriter {
         lock_id: WalletLockId,
     ) -> Result<StealthOutputModel, WalletStorageError>;
     fn stealth_outputs_insert(&mut self, output: &StealthOutputModel) -> Result<(), WalletStorageError>;
-    fn stealth_outputs_mark_as_spent(&mut self, address: &UtxoAddress) -> Result<(), WalletStorageError>;
+    fn stealth_outputs_mark_as_spent(
+        &mut self,
+        resource_address: &ResourceAddress,
+        id: &UtxoId,
+    ) -> Result<(), WalletStorageError>;
     /// Mark outputs locked by this lock id as finalized
     fn stealth_outputs_finalize_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
     /// Release outputs that were locked and remove pending unconfirmed outputs for this lock
@@ -440,5 +452,17 @@ pub trait WalletStoreWriter {
         account: &ComponentAddress,
         resource_address: &ResourceAddress,
         shard_state_versions: I,
+    ) -> Result<(), WalletStorageError>;
+
+    fn utxo_process_queue_extend<I: IntoIterator<Item = (u64, UtxoUnspent)>>(
+        &mut self,
+        resource_address: &ResourceAddress,
+        items: I,
+    ) -> Result<(), WalletStorageError>;
+    fn utxo_process_queue_remove_item(
+        &mut self,
+        resource_address: ResourceAddress,
+        tag: UtxoTag,
+        public_nonce: RistrettoPublicKeyBytes,
     ) -> Result<(), WalletStorageError>;
 }

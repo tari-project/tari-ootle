@@ -70,8 +70,6 @@ use tari_wallet_daemon_client::{
         ConfidentialTransferRequest,
         ConfidentialTransferResponse,
         ExtClaimBurnProof,
-        RevealFundsRequest,
-        RevealFundsResponse,
         StealthTransferRequest,
         StealthTransferResponse,
     },
@@ -368,145 +366,6 @@ pub async fn handle_get_default(
 }
 
 #[allow(clippy::too_many_lines)]
-pub async fn handle_reveal_funds(
-    context: &HandlerContext,
-    token: Option<&Bearer>,
-    req: RevealFundsRequest,
-) -> Result<RevealFundsResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::Admin])?;
-    let sdk = context.wallet_sdk().clone();
-    let notifier = context.notifier().clone();
-    let transaction_service = context.transaction_service().clone();
-
-    // If the caller aborts the request early, this async block would be aborted at any await point. To avoid this, we
-    // spawn a task that will continue running.
-    let ctx = context.clone();
-    task::spawn(async move {
-        let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
-
-        let max_fee = req.max_fee.unwrap_or(DEFAULT_FEE);
-        let amount_to_reveal = req.amount_to_reveal +
-            if req.pay_fee_from_reveal {
-                max_fee.into()
-            } else {
-                0.into()
-            };
-
-        let lock_id = sdk.stealth_outputs_api().create_lock()?;
-
-        let (inputs, input_amount) = sdk.stealth_outputs_api().lock_outputs_for_at_least_amount(
-            account.address(),
-            &STEALTH_TARI_RESOURCE_ADDRESS,
-            lock_id,
-            amount_to_reveal,
-        )?;
-
-        let account_key = sdk.key_manager_api().derive_account_key(account.key_index())?;
-        let account_public_key = RistrettoPublicKey::from_secret_key(&account_key.key);
-
-        let output_mask = sdk.key_manager_api().next_key(KeyBranch::StealthMasks)?;
-
-        let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
-        let remaining_confidential_amount = input_amount - amount_to_reveal;
-        let encrypted_data = sdk.stealth_crypto_api().encrypt_value_and_mask(
-            remaining_confidential_amount.to_u64_checked().unwrap(),
-            &output_mask.key,
-            &public_nonce,
-            &account_key.key,
-        )?;
-
-        let network = sdk.config_api().get_network()?;
-        let tag = sdk
-            .stealth_crypto_api()
-            .derive_stealth_output_tag(network, &account.owner_public_key);
-        let stealth_address =
-            sdk.stealth_crypto_api()
-                .derive_stealth_owner_public_key(network, &account_public_key, &nonce);
-
-        let output_statement = UnblindedStealthOutputStatement {
-            statement: UnblindedOutputStatement {
-                amount: remaining_confidential_amount,
-                mask: output_mask.key,
-                sender_public_nonce: public_nonce,
-                minimum_value_promise: 0,
-                encrypted_data,
-                resource_view_key: None,
-            },
-            output_owner_public_key: stealth_address,
-            tag,
-        };
-
-        let inputs = sdk
-            .stealth_outputs_api()
-            .resolve_output_masks_for_spending(account.account(), inputs)?;
-
-        let transfer = sdk.stealth_crypto_api().generate_transfer_statement(
-            inputs.iter().map(|i| &i.statement),
-            Amount::zero(),
-            array::from_ref(&output_statement),
-            amount_to_reveal,
-        )?;
-
-        info!(
-            target: LOG_TARGET,
-            "Locked {} inputs ({}) for reveal funds transaction on account: {}",
-            inputs.len(),
-            input_amount,
-            account,
-        );
-
-        let account_address = *account.address();
-
-        let mut builder = ctx.transaction_builder();
-        if req.pay_fee_from_reveal {
-            builder = builder.with_fee_instructions_builder(|builder| {
-                builder
-                    .stealth_transfer(STEALTH_TARI_RESOURCE_ADDRESS, transfer)
-                    .put_last_instruction_output_on_workspace("revealed")
-                    .call_method(account_address, "deposit", args![Workspace("revealed")])
-                    .call_method(account_address, "pay_fee", args![max_fee])
-            });
-        } else {
-            builder = builder
-                .fee_transaction_pay_from_component(account_address, max_fee)
-                .stealth_transfer(STEALTH_TARI_RESOURCE_ADDRESS, transfer)
-                .put_last_instruction_output_on_workspace("revealed")
-                .call_method(account_address, "deposit", args![Workspace("revealed")]);
-        }
-
-        // Add the account component
-        let account_substate = sdk.substate_api().get_substate(&account.account.address.into())?;
-        // Add all versioned account child addresses as inputs
-        let child_addresses = sdk
-            .substate_api()
-            .load_dependent_substates(&[&account.account.address.into()])?;
-        let mut inputs = Vec::with_capacity(child_addresses.len() + 1);
-        inputs.push(SubstateRequirement::from(account_substate.substate_id));
-        inputs.extend(child_addresses);
-
-        let transaction = builder.with_inputs(inputs).build_and_seal(&account_key.key);
-
-        sdk.stealth_outputs_api()
-            .locks_set_transaction_id(lock_id, transaction.calculate_id())?;
-
-        let mut events = notifier.subscribe();
-        let tx_id = transaction_service.submit_transaction(transaction).await?;
-
-        let finalized = wait_for_result(&mut events, tx_id).await?;
-        if let Some(reason) = finalized.finalize.fee_reject() {
-            return Err(anyhow::anyhow!("Transaction failed: {}", reason));
-        }
-
-        Ok(RevealFundsResponse {
-            transaction_id: tx_id,
-            fee: finalized.final_fee,
-            result: finalized.finalize,
-        })
-    })
-    .await?
-}
-
-#[allow(clippy::too_many_lines)]
 pub async fn handle_claim_burn(
     context: &HandlerContext,
     token: Option<&Bearer>,
@@ -629,9 +488,12 @@ pub async fn handle_claim_burn(
         &nonce,
     )?;
 
-    let tag = sdk
-        .stealth_crypto_api()
-        .derive_stealth_output_tag(network, &account.owner_public_key);
+    let tag = sdk.stealth_crypto_api().derive_stealth_output_tag_for_recipient(
+        network,
+        &nonce,
+        &account_owner_public_key,
+        &STEALTH_TARI_RESOURCE_ADDRESS,
+    );
 
     // Create stealth address - used during spend time
     let stealth_output_owner_public_key =

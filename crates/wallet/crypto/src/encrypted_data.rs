@@ -50,12 +50,10 @@ pub fn unblind_output(
 pub fn encrypt_value_and_mask(
     amount: u64,
     mask: &RistrettoSecretKey,
-    public_nonce: &RistrettoPublicKey,
-    secret: &RistrettoSecretKey,
+    encryption_key: &RistrettoSecretKey,
 ) -> Result<EncryptedData, WalletCryptoError> {
-    let key = kdfs::encrypted_data_dh_kdf_aead(secret, public_nonce);
     let commitment = get_commitment_factory().commit_value(mask, amount).to_byte_type();
-    let encrypted_data = encrypt_data(&key, &commitment, amount, mask)?;
+    let encrypted_data = encrypt_data(encryption_key, &commitment, amount, mask)?;
     Ok(encrypted_data)
 }
 

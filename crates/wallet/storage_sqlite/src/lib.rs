@@ -3,7 +3,6 @@
 #[macro_use]
 extern crate diesel;
 
-mod helpers;
 mod models;
 mod reader;
 mod schema;

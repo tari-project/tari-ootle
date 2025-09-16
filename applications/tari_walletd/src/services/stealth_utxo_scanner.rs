@@ -16,7 +16,10 @@ use tari_ootle_wallet_sdk::{
     WalletSdk,
 };
 use tari_template_lib::{models::ComponentAddress, prelude::ResourceAddress};
-use tokio::{sync::mpsc, task::JoinHandle};
+use tokio::{
+    sync::{mpsc, watch},
+    task::JoinHandle,
+};
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::stealth_utxo_scanner";
 
@@ -24,6 +27,7 @@ const MAX_CONCURRENT_SCANS: usize = 10;
 
 pub struct UtxoScannerHandle {
     tx: mpsc::UnboundedSender<UtxoScanRequest>,
+    notify_sub: watch::Receiver<()>,
 }
 
 impl UtxoScannerHandle {
@@ -34,6 +38,10 @@ impl UtxoScannerHandle {
         }) {
             warn!(target: LOG_TARGET, "❓️ NEVER HAPPEN: UTXO scan request channel disconnected: {}", e);
         }
+    }
+
+    pub(crate) fn subscribe_notifications(&self) -> watch::Receiver<()> {
+        self.notify_sub.clone()
     }
 }
 
@@ -49,12 +57,13 @@ where
 {
     pub fn new(sdk: WalletSdk<TStore, TNetworkInterface>) -> Self {
         Self {
-            scanner: StealthUtxoScanner::new(sdk),
+            scanner: StealthUtxoScanner::new(sdk.clone()),
         }
     }
 
     pub fn spawn(self) -> (JoinHandle<anyhow::Result<()>>, UtxoScannerHandle) {
         let (tx, rx) = mpsc::unbounded_channel();
+        let notify_sub = self.scanner.subscribe_notifications();
 
         let handle = tokio::spawn(async move {
             let mut worker = self;
@@ -62,7 +71,7 @@ where
             Ok(())
         });
 
-        (handle, UtxoScannerHandle { tx })
+        (handle, UtxoScannerHandle { tx, notify_sub })
     }
 
     async fn run(&mut self, mut work_queue: mpsc::UnboundedReceiver<UtxoScanRequest>) {
@@ -80,7 +89,7 @@ where
                     };
                 },
                 _ = poll_fut => {
-                    // Poll completed - continue
+                    // All work completed - continue
                 },
             }
         }
@@ -94,6 +103,7 @@ type ScanResult = anyhow::Result<()>;
 pub struct StealthUtxoScanner<TStore, TNetworkInterface> {
     in_progress_work: futures_bounded::FuturesMap<UtxoScanRequest, ScanResult>,
     sdk: WalletSdk<TStore, TNetworkInterface>,
+    notify_tx: watch::Sender<()>,
 }
 
 impl<TStore, TNetworkInterface> StealthUtxoScanner<TStore, TNetworkInterface>
@@ -103,10 +113,16 @@ where
     TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
 {
     pub(self) fn new(sdk: WalletSdk<TStore, TNetworkInterface>) -> Self {
+        let (notify_tx, _) = watch::channel::<()>(());
         Self {
             in_progress_work: futures_bounded::FuturesMap::new(Duration::from_secs(300), MAX_CONCURRENT_SCANS),
             sdk,
+            notify_tx,
         }
+    }
+
+    pub fn subscribe_notifications(&self) -> watch::Receiver<()> {
+        self.notify_tx.subscribe()
     }
 
     pub(self) fn enqueue_work(&mut self, task: UtxoScanRequest) {
@@ -116,7 +132,10 @@ where
             info!(target: LOG_TARGET, "🔍️ Scan for {} is already in progress, ignoring request", task);
             return;
         }
-        match self.in_progress_work.try_push(task, do_work(self.sdk.clone(), task)) {
+        match self
+            .in_progress_work
+            .try_push(task, do_work(self.sdk.clone(), self.notify_tx.clone(), task))
+        {
             Ok(()) => {},
             Err(PushError::BeyondCapacity(_)) => {
                 warn!(
@@ -133,14 +152,26 @@ where
 
     pub(self) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         let (task, result) = ready!(self.in_progress_work.poll_unpin(cx));
-        info!(target: LOG_TARGET, "🔍️ Completed scan for {}: {:?}", task, result);
-
+        match result {
+            Ok(Ok(_)) => {
+                info!(target: LOG_TARGET, "🔍️ Completed scan for {}", task);
+            },
+            Ok(Err(e)) => {
+                warn!(target: LOG_TARGET, "❓️ Error during UTXO scan for {}: {}", task, e);
+            },
+            Err(_) => {
+                warn!(target: LOG_TARGET, "❓️ UTXO scan for {} timed out", task);
+            },
+        }
+        // NOTE: do not return Ready here. The caller is polling in a loop, and if there is no work to do, the loop will
+        // spin.
         Poll::Pending
     }
 }
 
 async fn do_work<TStore, TNetworkInterface>(
     sdk: WalletSdk<TStore, TNetworkInterface>,
+    notify_tx: watch::Sender<()>,
     task: UtxoScanRequest,
 ) -> ScanResult
 where
@@ -150,8 +181,8 @@ where
 {
     info!(target: LOG_TARGET, "🔍 Scanning for UTXOs for {}", task);
     let account = sdk.accounts_api().get_account_by_address(&task.account_address)?;
-    sdk.stealth_scanner_api()
-        .scan_and_recover_utxos(&account, &task.resource_address)
+    tari_ootle_wallet_sdk_services::utxo_scanner::UtxoScanner::new(sdk)
+        .scan_and_recover_utxos(&account, &task.resource_address, &notify_tx)
         .await?;
 
     Ok(())

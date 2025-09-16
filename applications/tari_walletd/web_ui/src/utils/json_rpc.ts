@@ -65,8 +65,6 @@ import type {
   MintFaucetNftResponse,
   PublishTemplateRequest,
   PublishTemplateResponse,
-  RevealFundsRequest,
-  RevealFundsResponse,
   SettingsGetResponse,
   SettingsSetRequest,
   SettingsSetResponse,
@@ -267,8 +265,6 @@ export const transactionsSubmitManifest = (
 ): Promise<TransactionSubmitManifestResponse> => client().then((c) => c.submitTransactionManifest(request));
 
 // accounts
-export const accountsRevealFunds = (request: RevealFundsRequest): Promise<RevealFundsResponse> =>
-  client().then((c) => c.accountsRevealFunds(request));
 export const accountsClaimBurn = (request: ClaimBurnRequest): Promise<ClaimBurnResponse> =>
   client().then((c) => c.accountsClaimBurn(request));
 export const accountsCreate = (request: AccountsCreateRequest): Promise<AccountsCreateResponse> =>

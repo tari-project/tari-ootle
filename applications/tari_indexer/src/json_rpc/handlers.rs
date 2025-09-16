@@ -54,6 +54,8 @@ use tari_indexer_client::types::{
     GetTemplateDefinitionResponse,
     GetTransactionResultRequest,
     GetTransactionResultResponse,
+    GetUnspentUtxosRequest,
+    GetUnspentUtxosResponse,
     GetUtxoUpdatesRequest,
     GetUtxoUpdatesResponse,
     IndexerReadyResponse,
@@ -66,7 +68,6 @@ use tari_indexer_client::types::{
     ListSubstatesResponse,
     ListTemplatesRequest,
     ListTemplatesResponse,
-    NonFungibleSubstate,
     SubmitTransactionRequest,
     SubmitTransactionResponse,
     TemplateMetadata,
@@ -86,6 +87,7 @@ use tari_ootle_storage::{
     time::{PrimitiveDateTime, UtcDateTime},
 };
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
+use tari_ootle_wallet_sdk::models::{UtxoStateUpdateSet, UtxoUpdateSet};
 use tari_template_manager::{
     implementation::TemplateManager,
     interface::{TemplateExecutable, TemplateManagerError},
@@ -97,7 +99,7 @@ use crate::{
     dry_run::processor::DryRunTransactionProcessor,
     json_rpc::error::internal_error,
     network_client::NetworkClientError,
-    storage_sqlite::store_factory::SqliteIndexerStore,
+    storage_sqlite::SqliteIndexerStore,
     substate_manager::SubstateManager,
     transaction_manager::{error::TransactionManagerError, TransactionManager},
 };
@@ -433,19 +435,12 @@ impl JsonRpcHandlers {
             )
         })?;
 
-        let res = self
+        let non_fungibles = self
             .substate_manager
             .get_non_fungibles_by_resource_address(request.address, limit, offset)
             .map_err(|e| Self::internal_error(answer_id, format!("Error getting non fungibles: {}", e)))?;
         Ok(JsonRpcResponse::success(answer_id, GetNonFungiblesResponse {
-            non_fungibles: res
-                .into_iter()
-                .map(|v| NonFungibleSubstate {
-                    address: v.address,
-                    version: v.version,
-                    substate: v.substate,
-                })
-                .collect(),
+            non_fungibles,
         }))
     }
 
@@ -496,18 +491,12 @@ impl JsonRpcHandlers {
             ));
         }
 
-        let mut utxo_updates = Vec::new();
+        let mut utxo_updates = HashMap::new();
         let mut per_shard_high_watermark = Vec::with_capacity(req.shard_state_versions.len());
         for (shard, state_version) in req.shard_state_versions {
-            let (max_version, updates) = self
+            let (max_state_version, updates) = self
                 .substate_manager
-                .get_utxo_updates(
-                    req.resource_address,
-                    shard,
-                    state_version,
-                    &req.filter_tag_bytes,
-                    req.per_shard_limit,
-                )
+                .get_utxo_updates(req.resource_address, shard, state_version, req.per_shard_limit)
                 .map_err(|e| {
                     Self::internal_error(
                         answer_id,
@@ -517,17 +506,70 @@ impl JsonRpcHandlers {
                         ),
                     )
                 })?;
-            if max_version.as_u64() > 0 {
+
+            // TODO: this is on the hot path, figure out a better way to let the client know the max shard versions
+            // without sending it each time
+            let current_tip_version = self
+                .substate_manager
+                .get_max_state_version(&req.resource_address, shard)
+                .map_err(|e| {
+                    Self::internal_error(
+                        answer_id,
+                        format!(
+                            "Error getting max state version for resource_address {}, shard {}: {}",
+                            req.resource_address, shard, e
+                        ),
+                    )
+                })?;
+            if current_tip_version.as_u64() > 0 {
                 // Save a little over the wire initially by not sending 0 watermarks
-                per_shard_high_watermark.push((shard, max_version));
+                per_shard_high_watermark.push((shard, current_tip_version));
             }
-            utxo_updates.extend(updates);
+            if !updates.is_empty() {
+                utxo_updates.insert(shard, UtxoStateUpdateSet {
+                    updates,
+                    max_state_version,
+                });
+            }
         }
 
         Ok(JsonRpcResponse::success(answer_id, GetUtxoUpdatesResponse {
-            utxo_updates,
-            per_shard_high_watermark,
+            updates: UtxoUpdateSet {
+                shard_updates: utxo_updates,
+                per_shard_high_watermark,
+            },
         }))
+    }
+
+    pub async fn get_unspent_utxos(&self, value: JsonRpcExtractor) -> JrpcResult {
+        let answer_id = value.get_answer_id();
+        let req: GetUnspentUtxosRequest = value.parse_params()?;
+        if req.tag_and_nonce_pairs.len() > 1000 {
+            return Err(JsonRpcResponse::error(
+                answer_id,
+                JsonRpcError::new(
+                    JsonRpcErrorReason::InvalidParams,
+                    "cannot query more than 1000 UTXOs".to_string(),
+                    Value::Null,
+                ),
+            ));
+        }
+        let utxos = self
+            .substate_manager
+            .get_unspent_utxos(&req.resource_address, &req.tag_and_nonce_pairs)
+            .map_err(|e| {
+                Self::internal_error(
+                    answer_id,
+                    format!(
+                        "Error getting UTXOs for resource_address {}, with {} tag/nonce pair(s): {}",
+                        req.resource_address,
+                        req.tag_and_nonce_pairs.len(),
+                        e
+                    ),
+                )
+            })?;
+
+        Ok(JsonRpcResponse::success(answer_id, GetUnspentUtxosResponse { utxos }))
     }
 
     pub async fn submit_transaction(&self, value: JsonRpcExtractor) -> JrpcResult {

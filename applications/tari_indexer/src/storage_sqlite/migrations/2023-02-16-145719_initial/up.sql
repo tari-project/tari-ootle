@@ -119,19 +119,20 @@ CREATE UNIQUE INDEX epoch_checkpoints_uniq_epoch_shard_group ON epoch_checkpoint
 create table utxos
 (
     id               integer   not NULL primary key AUTOINCREMENT,
-    address          text      not NULL,
+    commitment       text      not NULL,
+    public_nonce     text      not NULL,
     version          int       not NULL,
     resource_address text      not NULL,
     shard            int       not NULL,
     state_version    bigint    not NULL,
-    output           text      NULL,
-    utxo_tag_byte    int       NULL,
+    output           blob      NULL,
+    utxo_tag         int       not NULL,
     is_spent         boolean   not NULL,
     is_burnt         boolean   not NULL,
     is_frozen        boolean   not NULL,
     created_at       timestamp not null default current_timestamp
 );
 
-CREATE INDEX utxos_shard_tag_resource_state_version_idx
-    ON utxos (shard, utxo_tag_byte, resource_address, state_version);
+CREATE INDEX utxos_resource_state_version_shard_idx ON utxos (resource_address, state_version, shard);
+CREATE UNIQUE INDEX utxos_resource_public_nonce_utxo_tag_uniq_partial ON utxos (resource_address, public_nonce, utxo_tag) WHERE is_spent = false;
 

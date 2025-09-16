@@ -1,10 +1,11 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use diesel::dsl;
 use tari_ootle_wallet_sdk::{models::StealthOutputModel, storage::WalletStorageError};
 use tari_template_lib::{
     models::{ComponentAddress, EncryptedData},
-    prelude::crypto::UtxoTagByte,
+    prelude::crypto::UtxoTag,
     types::{amount, crypto::RistrettoPublicKeyBytes},
 };
 use time::PrimitiveDateTime;
@@ -69,15 +70,7 @@ impl StealthOutput {
                     details: format!("Corrupt db: invalid encrypted data length {len}"),
                 }
             })?,
-            tag_byte: UtxoTagByte::new(
-                self.tag_byte
-                    .try_into()
-                    .map_err(|_| WalletStorageError::DecodingError {
-                        operation: "try_into_output",
-                        item: "output",
-                        details: format!("Corrupt db: invalid tag byte '{}'", self.tag_byte),
-                    })?,
-            ),
+            tag_byte: UtxoTag::new(self.tag_byte as u32),
             status: self.status.parse().map_err(|_| WalletStorageError::DecodingError {
                 operation: "try_into_output",
                 item: "output",
@@ -91,11 +84,11 @@ impl StealthOutput {
     }
 }
 
-#[derive(AsChangeset, Default)]
+#[derive(AsChangeset)]
 #[diesel(table_name = stealth_outputs)]
 pub(crate) struct StealthOutputUpdate<'a> {
     pub status: Option<&'a str>,
     pub is_burnt: Option<bool>,
     pub is_frozen: Option<bool>,
-    pub updated_at: Option<PrimitiveDateTime>,
+    pub updated_at: dsl::now,
 }

@@ -281,7 +281,9 @@ pub async fn handle_view_vault_balance(
         .ok_or_else(|| invalid_params("vault_id", Some("Vault does not contain a confidential resource")))?;
 
     // Get view secret key
-    let view_key = sdk.key_manager_api().derive_key(KeyBranch::ViewKey, req.view_key_id)?;
+    let view_key = sdk
+        .key_manager_api()
+        .derive_key(KeyBranch::ElgamalEncryptionViewKey, req.view_key_id)?;
 
     let value_range = req.minimum_expected_value.unwrap_or(0)..=req.maximum_expected_value.unwrap_or(10_000_000_000);
 

@@ -40,7 +40,7 @@ use tari_validator_node_rpc::client::{
 
 use crate::{
     network_client::TariNetworkClient,
-    storage_sqlite::store_factory::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreWriteTransaction},
+    storage_sqlite::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreWriteTransaction},
     transaction_manager::error::TransactionManagerError,
 };
 

@@ -51,6 +51,7 @@ members = [
     "crates/wallet/sdk",
     "crates/wallet/sdk_services",
     "crates/wallet/storage_sqlite",
+    "crates/ootle_address",
     "integration_tests",
     "networking/core",
     "networking/swarm",
@@ -83,6 +84,7 @@ tari_bor = { version = "0.10.4", path = "crates/tari_bor", default-features = fa
 tari_consensus = { path = "crates/consensus" }
 tari_consensus_types = { path = "crates/consensus_types" }
 tari_ootle_common_types = { path = "crates/common_types" }
+tari_ootle_address = { path = "crates/ootle_address" }
 tari_engine = { path = "crates/engine" }
 tari_engine_types = { path = "crates/engine_types" }
 tari_ootle_p2p = { path = "crates/p2p" }
@@ -166,7 +168,7 @@ blake2 = "0.10.6"
 borsh = { version = "1.5", default-features = false }
 bytes = "1.10.0"
 bnum = "0.13.0"
-bs58 = "0.5.1"
+bech32 = "0.11.0"
 bounded-vec = "0.9.0"
 cargo_toml = "0.20.5"
 ciborium = { version = "0.2.2", default-features = false }

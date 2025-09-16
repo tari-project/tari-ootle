@@ -34,7 +34,12 @@ import { useAccountsGetBalances, useAccountNFTsList, useAccountsGet } from "@api
 import { ApiError } from "@api/helpers/types";
 import { DataTableCell } from "@components/StyledComponents";
 import FetchStatusCheck from "@components/FetchStatusCheck";
-import { BalanceEntry, substateIdToString } from "@tari-project/typescript-bindings";
+import {
+  BalanceEntry,
+  decodeOotleAddress,
+  decodeOotleAddressOrNull,
+  substateIdToString,
+} from "@tari-project/typescript-bindings";
 import NftList from "@routes/AssetVault/NFTs/NFTList";
 import CopyAddress from "@components/CopyAddress";
 import { Form, useParams } from "react-router-dom";
@@ -158,8 +163,9 @@ function AccountDetailsLayout() {
               <TableHead>
                 <TableRow>
                   <TableCell>Name</TableCell>
+                  <TableCell>Component</TableCell>
                   <TableCell>Address</TableCell>
-                  <TableCell>Public key</TableCell>
+                  <TableCell>Public Key</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -169,7 +175,16 @@ function AccountDetailsLayout() {
                     <CopyAddress address={substateIdToString(accountsData?.account.component_address)} />
                   </DataTableCell>
                   <DataTableCell>
-                    {accountsData?.address && <CopyAddress address={accountsData?.address!} />}
+                    {" "}
+                    {accountsData?.address && <CopyAddress address={accountsData?.address!} />}{" "}
+                  </DataTableCell>
+                  <DataTableCell>
+                    {" "}
+                    {accountsData?.address && (
+                      <CopyAddress
+                        address={decodeOotleAddressOrNull(accountsData?.address!)?.accountPublicKey || "<decode error>"}
+                      />
+                    )}{" "}
                   </DataTableCell>
                 </TableRow>
               </TableBody>

@@ -12,10 +12,8 @@ pub mod stealth;
 mod unblinded_statement;
 mod value_lookup;
 
-mod ootle_address;
 pub mod viewable_balance_proof;
 
 pub use error::*;
-pub use ootle_address::*;
 pub use unblinded_statement::*;
 pub use value_lookup::*;

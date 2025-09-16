@@ -4,7 +4,7 @@
 use std::fmt::{Display, Formatter};
 
 use tari_bor::{Deserialize, Serialize};
-use tari_ootle_wallet_crypto::OotleAddress;
+use tari_ootle_address::OotleAddress;
 use tari_template_lib::{models::ComponentAddress, prelude::RistrettoPublicKeyBytes};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

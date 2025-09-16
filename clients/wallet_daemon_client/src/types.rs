@@ -30,6 +30,7 @@ use tari_engine_types::{
     substate::{Substate, SubstateId},
     ValidatorFeePoolAddress,
 };
+use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{
     shard::Shard,
     substate_type::SubstateType,
@@ -37,7 +38,6 @@ use tari_ootle_common_types::{
     SubstateAddress,
     SubstateRequirement,
 };
-use tari_ootle_wallet_crypto::OotleAddress;
 use tari_ootle_wallet_sdk::{
     apis::{confidential_transfer::ConfidentialTransferInputSelection, key_manager::KeyBranch},
     models::{Account, AuthoredTemplateModel, NonFungibleToken, TransactionStatus, WalletLockId, WalletTransaction},

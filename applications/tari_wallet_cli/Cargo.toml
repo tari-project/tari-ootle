@@ -18,6 +18,7 @@ tari_transaction = { workspace = true }
 tari_transaction_manifest = { workspace = true }
 tari_bor = { workspace = true, default-features = true }
 tari_ootle_wallet_sdk = { workspace = true }
+tari_ootle_address = { workspace = true }
 
 anyhow = { workspace = true }
 base64 = { workspace = true }

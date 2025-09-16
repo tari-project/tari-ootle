@@ -31,7 +31,7 @@ use crate::{
     apis::{
         accounts::AccountsApiError,
         config::{ConfigApi, ConfigApiError},
-        key_manager::{KeyManagerApi, KeyManagerApiError},
+        key_manager::{KeyBranch, KeyManagerApi, KeyManagerApiError},
         stealth_crypto::{StealthCryptoApi, StealthCryptoApiError},
         stealth_transfer::InputToSpend,
     },
@@ -331,7 +331,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
     ) -> Result<(), StealthOutputsApiError> {
         let all_used_view_only_keys = self
             .key_manager_api
-            .get_all_view_keys()?
+            .get_all_keys(KeyBranch::ViewOnlyKey)?
             .into_iter()
             .map(|k| k.key_pair)
             .collect::<Vec<_>>();

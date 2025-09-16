@@ -7,6 +7,7 @@ use digest::crypto_common::rand_core::OsRng;
 use log::*;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine_types::{substate::SubstateId, ConvertFromByteType, FromByteType, ToByteType, UtxoAddress};
+use tari_ootle_address::{OotleAddress, RistrettoOotleAddress};
 use tari_ootle_common_types::{
     displayable::Displayable,
     optional::{IsNotFoundError, Optional},
@@ -15,8 +16,6 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_wallet_crypto::{
     MaskAndValue,
-    OotleAddress,
-    RistrettoOotleAddress,
     UnblindedOutputStatement,
     UnblindedStealthInputStatement,
     UnblindedStealthOutputStatement,
@@ -436,8 +435,10 @@ where
                 param: "resource_view_key",
                 reason: format!("Invalid resource view key: {e}"),
             })?;
-        let destination_address =
-            RistrettoOotleAddress::convert_from_byte_type(&params.destination_address).expect("already validated");
+        let destination_address = params
+            .destination_address
+            .try_from_byte_type()
+            .expect("already validated");
 
         let output_statement = params
             .blinded_output_amount

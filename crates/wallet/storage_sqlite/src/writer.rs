@@ -183,7 +183,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
 
     // -------------------------------- KeyManager -------------------------------- //
 
-    fn key_manager_insert(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError> {
+    fn key_manager_insert_or_ignore(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError> {
         use crate::schema::key_manager_states;
         let index =
             i64::try_from(index).map_err(|_| WalletStorageError::general("key_manager_insert", "index is negative"))?;
@@ -206,6 +206,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
 
         diesel::insert_into(key_manager_states::table)
             .values(value_set)
+            .on_conflict_do_nothing()
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("key_manager_insert", e))?;
 

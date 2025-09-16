@@ -176,9 +176,9 @@ function Accounts() {
               <TableHead>
                 <TableRow>
                   <TableCell>Name</TableCell>
-                  <TableCell>Address</TableCell>
+                  <TableCell>Component</TableCell>
                   <TableCell>Key index</TableCell>
-                  <TableCell>Public key</TableCell>
+                  <TableCell>Address</TableCell>
                   <TableCell>Details</TableCell>
                 </TableRow>
               </TableHead>

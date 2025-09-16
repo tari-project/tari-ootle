@@ -40,8 +40,9 @@ use tari_engine_types::{
     parse_template_address,
     substate::{SubstateDiff, SubstateId, SubstateValue},
 };
+use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{Epoch, SubstateAddress, SubstateRequirement};
-use tari_ootle_wallet_sdk::{apis::confidential_transfer::ConfidentialTransferInputSelection, crypto::OotleAddress};
+use tari_ootle_wallet_sdk::apis::confidential_transfer::ConfidentialTransferInputSelection;
 use tari_template_lib::{
     args::InstructionArg,
     call_arg,

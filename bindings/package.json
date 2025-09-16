@@ -28,7 +28,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "bs58": "^6.0.0"
+    "bech32": "^2.0.0"
   },
   "devDependencies": {
     "shx": "^0.3.4",

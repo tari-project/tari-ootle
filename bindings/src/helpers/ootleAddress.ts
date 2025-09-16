@@ -3,10 +3,9 @@
 
 import { OotleAddress } from "../types/OotleAddress";
 import { Network } from "../types/Network";
-import bs58 from "bs58";
-import { NetworkByte } from "./NetworkByte";
+import { bech32m, Decoded } from "bech32";
 
-export const BASE58_ENCODED_LENGTH = 89;
+const MAX_LENGTH_LIMIT = 118;
 
 export type DecodedOotleAddress = {
   network: Network;
@@ -14,39 +13,58 @@ export type DecodedOotleAddress = {
   viewOnlyKey: string;
 };
 
+export enum NetworkHrp {
+  MainNet = "xtr_",
+  StageNet = "xtr_stg_",
+  NextNet = "xtr_nxt_",
+  LocalNet = "xtr_loc_",
+  Igor = "xtr_igr_",
+  Esmeralda = "xtr_esm_",
+}
+
+export function decodeOotleAddressOrNull(address: OotleAddress): DecodedOotleAddress | null {
+  try {
+    return decodeOotleAddress(address);
+  } catch (e) {
+    console.warn("decodeOotleAddressOrNull: decode error:", e, address);
+    return null;
+  }
+}
+
 export function decodeOotleAddress(address: OotleAddress): DecodedOotleAddress {
-  const decoded = bs58.decode(address);
-  if (decoded.length !== 65) {
-    throw new Error(`Invalid Ootle address length: ${decoded.length}, expected 65`);
+  const { prefix, words }: Decoded = bech32m.decode(address, MAX_LENGTH_LIMIT);
+  const data = bech32m.fromWords(words);
+
+  if (data.length != 64) {
+    throw new Error(`Invalid Ootle address length: ${data.length}, expected 64`);
   }
 
-  const networkByte = decoded[0];
-  const accountPublicKey = buf2hex(decoded.slice(1, 33));
-  const viewOnlyKey = buf2hex(decoded.slice(33, 65));
+  const accountPublicKey = buf2hex(data.slice(0, 32));
+  const viewOnlyKey = buf2hex(data.slice(32, 64));
 
   let network: Network;
-  switch (networkByte) {
-    case NetworkByte.MainNet:
+  switch (prefix) {
+    case NetworkHrp.MainNet:
       network = "mainnet";
       break;
-    case NetworkByte.StageNet:
+    case NetworkHrp.StageNet:
       network = "stagenet";
       break;
-    case NetworkByte.NextNet:
+    case NetworkHrp.NextNet:
       network = "nextnet";
       break;
-    case NetworkByte.LocalNet:
+    case NetworkHrp.LocalNet:
       network = "localnet";
       break;
-    case NetworkByte.Igor:
+    case NetworkHrp.Igor:
       network = "igor";
       break;
-    case NetworkByte.Esmeralda:
+    case NetworkHrp.Esmeralda:
       network = "esmeralda";
       break;
 
     default:
-      throw new Error("Invalid network byte in Ootle address");
+      throw new Error("Invalid network prefix in Ootle address");
   }
 
   return {
@@ -56,61 +74,56 @@ export function decodeOotleAddress(address: OotleAddress): DecodedOotleAddress {
   };
 }
 
-export function encodeOotleAddress(parsed: DecodedOotleAddress): OotleAddress {
-  let networkByte: number;
-  switch (parsed.network) {
+export function encodeOotleAddress(decoded: DecodedOotleAddress): OotleAddress {
+  let networkHrp: string;
+  switch (decoded.network) {
     case "mainnet":
-      networkByte = NetworkByte.MainNet;
+      networkHrp = NetworkHrp.MainNet;
       break;
     case "stagenet":
-      networkByte = NetworkByte.StageNet;
+      networkHrp = NetworkHrp.StageNet;
       break;
     case "nextnet":
-      networkByte = NetworkByte.NextNet;
+      networkHrp = NetworkHrp.NextNet;
       break;
     case "localnet":
-      networkByte = NetworkByte.LocalNet;
+      networkHrp = NetworkHrp.LocalNet;
       break;
     case "igor":
-      networkByte = NetworkByte.Igor;
+      networkHrp = NetworkHrp.Igor;
       break;
     case "esmeralda":
-      networkByte = NetworkByte.Esmeralda;
+      networkHrp = NetworkHrp.Esmeralda;
       break;
     default:
-      throw new Error("Invalid network");
+      throw new Error(`Invalid network: ${decoded.network}`);
   }
 
-  if (parsed.accountPublicKey.length !== 64 || parsed.viewOnlyKey.length !== 64) {
+  if (decoded.accountPublicKey.length !== 64 || decoded.viewOnlyKey.length !== 64) {
     throw new Error("Public keys must be 32 bytes (64 hex characters) long");
   }
 
-  const accountPubKeyBytes = hex2buf(parsed.accountPublicKey);
-  const viewOnlyKeyBytes = hex2buf(parsed.viewOnlyKey);
+  const accountPubKeyBytes = hex2buf(decoded.accountPublicKey);
+  const viewOnlyKeyBytes = hex2buf(decoded.viewOnlyKey);
 
-  const addressBytes = new Uint8Array(1 + accountPubKeyBytes.length + viewOnlyKeyBytes.length);
-  addressBytes[0] = networkByte;
-  addressBytes.set(accountPubKeyBytes, 1);
-  addressBytes.set(viewOnlyKeyBytes, 1 + accountPubKeyBytes.length);
-
-  return bs58.encode(addressBytes) as OotleAddress;
+  const addressBytes = new Uint8Array(accountPubKeyBytes.length + viewOnlyKeyBytes.length);
+  addressBytes.set(accountPubKeyBytes, 0);
+  addressBytes.set(viewOnlyKeyBytes, accountPubKeyBytes.length);
+  const words = bech32m.toWords(addressBytes);
+  return bech32m.encode(networkHrp, words, MAX_LENGTH_LIMIT) as OotleAddress;
 }
 
-const BASE58_RE = /^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/;
+const HEX = /[\da-fA-F]{2}/i;
 
-function isBase58(s: string) {
-  return s.length && BASE58_RE.test(s);
-}
-
-const HEX = /[\da-fA-F]/i;
-
-function buf2hex(buffer: Uint8Array) {
-  return [...buffer].map((x) => x.toString(16).padStart(2, "0")).join("");
+function buf2hex(buffer: number[]) {
+  return buffer.map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 
 function hex2buf(string: string): Uint8Array<ArrayBufferLike> {
-  if ("fromHex" in Uint8Array && typeof Uint8Array.fromHex === "function") {
-    return Uint8Array.fromHex(string);
+  // Check if Uint8Array.fromHex is available (most modern browsers)
+  const fromHex = (Uint8Array as any).fromHex;
+  if (typeof fromHex === "function") {
+    return fromHex(string);
   }
 
   const stringLength = string.length;
@@ -133,22 +146,17 @@ export function validateOotleAddress(address: string): boolean {
   }
   // Trim whitespace for consistent validation
   const trimmedAddress = address.trim();
-  if (trimmedAddress.length != BASE58_ENCODED_LENGTH) {
+  if (trimmedAddress.length > MAX_LENGTH_LIMIT) {
     console.debug(
-      `validateOotleAddress: Invalid length ${trimmedAddress.length}, expected ${BASE58_ENCODED_LENGTH} for address ${address}`,
+      `validateOotleAddress: Invalid length ${trimmedAddress.length}, expected ${MAX_LENGTH_LIMIT} for address ${address}`,
     );
     return false;
   }
 
-  if (!isBase58(address)) {
-    console.debug(`validateOotleAddress: Address ${address} contains invalid Base58 characters`);
-    return false;
-  }
-
   try {
-    decodeOotleAddress(address);
+    decodeOotleAddress(trimmedAddress);
   } catch (e) {
-    console.error("validateOotleAddress: decode error:", e, address);
+    console.error("validateOotleAddress: decode error:", e, trimmedAddress);
     return false;
   }
 

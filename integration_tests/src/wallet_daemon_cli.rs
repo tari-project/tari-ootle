@@ -29,8 +29,8 @@ use tari_crypto::{
     signatures::CommitmentSignature,
 };
 use tari_engine_types::{substate::SubstateId, ToByteType};
+use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
-use tari_ootle_wallet_crypto::OotleAddress;
 use tari_ootle_wallet_sdk::{
     apis::{confidential_transfer::ConfidentialTransferInputSelection, key_manager::KeyBranch},
     models::{Account, AccountWithAddress, NonFungibleToken},

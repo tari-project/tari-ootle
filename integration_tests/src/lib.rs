@@ -41,8 +41,8 @@ use tari_common_types::{
 };
 use tari_crypto::keys::SecretKey;
 use tari_engine_types::substate::SubstateId;
+use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::SubstateRequirement;
-use tari_ootle_wallet_crypto::OotleAddress;
 use tari_sidechain::EvictionProof;
 use tari_transaction_components::{
     consensus::ConsensusManager,

@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
-use tari_ootle_wallet_crypto::RistrettoOotleAddress;
+use tari_ootle_address::RistrettoOotleAddress;
 use tari_transaction_components::key_manager::tari_key_manager::DerivedKey;
 
 use crate::apis::key_manager::KeyBranch;

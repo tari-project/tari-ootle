@@ -224,10 +224,11 @@ export const useAccountsList = (offset: number, limit: number, enabled: boolean 
   });
 };
 
-export const useAccountsGetBalances = (account: ComponentAddress, refresh: boolean = false) => {
+export const useAccountsGetBalances = (account?: ComponentAddress, refresh: boolean = false) => {
   return useQuery({
+    enabled: !!account,
     queryKey: [`accounts_balances_${account}`],
-    queryFn: () => accountsGetBalances({ account: { ComponentAddress: account }, refresh }),
+    queryFn: () => accountsGetBalances({ account: { ComponentAddress: account! }, refresh }),
     refetchInterval: 5000,
     structuralSharing: (oldData, newData) => {
       if (!oldData || !newData) return newData;

@@ -14,7 +14,7 @@ minotari_node = { workspace = true }
 tari_validator_node = { workspace = true, default-features = false }
 tari_indexer = { workspace = true, default-features = false }
 tari_ootle_walletd = { workspace = true, default-features = false }
-tari_ootle_wallet_crypto = { workspace = true }
+tari_ootle_address = { workspace = true }
 
 tari_transaction_components = { workspace = true }
 tari_transaction_key_manager = { workspace = true }

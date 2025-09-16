@@ -964,6 +964,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bech32"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d965446196e3b7decd44aa7ee49e31d630118f90ef12f97900f262eb915c951d"
+
+[[package]]
 name = "bigdecimal"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5018,9 +5024,9 @@ dependencies = [
  "tari_engine_types",
  "tari_indexer",
  "tari_indexer_client",
+ "tari_ootle_address",
  "tari_ootle_app_utilities",
  "tari_ootle_common_types",
- "tari_ootle_wallet_crypto",
  "tari_ootle_wallet_sdk",
  "tari_ootle_walletd",
  "tari_p2p",
@@ -11256,6 +11262,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "tari_ootle_address"
+version = "0.11.2"
+dependencies = [
+ "bech32",
+ "bincode 2.0.1",
+ "serde",
+ "serde_json",
+ "tari_crypto",
+ "tari_engine_types",
+ "tari_ootle_common_types",
+ "tari_template_lib_types",
+ "thiserror 1.0.69",
+ "ts-rs",
+]
+
+[[package]]
 name = "tari_ootle_app_utilities"
 version = "0.11.2"
 dependencies = [
@@ -11398,6 +11420,7 @@ dependencies = [
  "tari_bor",
  "tari_engine",
  "tari_engine_types",
+ "tari_ootle_address",
  "tari_ootle_common_types",
  "tari_ootle_wallet_sdk",
  "tari_template_lib",
@@ -11416,13 +11439,10 @@ dependencies = [
 name = "tari_ootle_wallet_crypto"
 version = "0.11.2"
 dependencies = [
- "bincode 2.0.1",
  "blake2",
- "bs58 0.5.1",
  "chacha20poly1305",
  "digest",
  "rand 0.8.5",
- "serde",
  "serde_json",
  "tari_crypto",
  "tari_engine_types",
@@ -11432,7 +11452,6 @@ dependencies = [
  "tari_template_test_tooling",
  "tari_utilities",
  "thiserror 1.0.69",
- "ts-rs",
  "zeroize",
 ]
 
@@ -11452,6 +11471,7 @@ dependencies = [
  "tari_consensus_types",
  "tari_crypto",
  "tari_engine_types",
+ "tari_ootle_address",
  "tari_ootle_common_types",
  "tari_ootle_wallet_crypto",
  "tari_ootle_wallet_storage_sqlite",
@@ -12246,8 +12266,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tari_engine_types",
+ "tari_ootle_address",
  "tari_ootle_common_types",
- "tari_ootle_wallet_crypto",
  "tari_ootle_wallet_sdk",
  "tari_template_abi",
  "tari_template_lib",

@@ -69,11 +69,12 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
 
   const { account } = useAccountStore();
 
+  const { data } = useAccountsGetBalances(account?.component_address);
+
   if (!account) {
     return null;
   }
 
-  const { data } = useAccountsGetBalances(substateIdToString(account.component_address));
   const badges = data?.balances
     ?.filter((b: BalanceEntry) => b.resource_type === "NonFungible" && BigInt(b.balance) > 0n)
     .map((b: BalanceEntry) => b.resource_address) as string[];

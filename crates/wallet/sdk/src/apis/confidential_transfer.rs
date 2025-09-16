@@ -7,9 +7,10 @@ use digest::crypto_common::rand_core::OsRng;
 use log::*;
 use tari_bor::{Deserialize, Serialize};
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
-use tari_engine_types::{ConvertFromByteType, FromByteType, ToByteType};
+use tari_engine_types::{FromByteType, ToByteType};
+use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{optional::IsNotFoundError, SubstateRequirement};
-use tari_ootle_wallet_crypto::{MaskAndValue, OotleAddress, UnblindedOutputStatement};
+use tari_ootle_wallet_crypto::{MaskAndValue, UnblindedOutputStatement};
 use tari_template_lib::{
     models::{ComponentAddress, ResourceAddress, VaultId},
     types::Amount,
@@ -267,7 +268,7 @@ where
         // Generate outputs
         let resource_view_key = resource
             .view_key()
-            .map(RistrettoPublicKey::convert_from_byte_type)
+            .map(|k| k.try_from_byte_type())
             .transpose()
             .map_err(|e| ConfidentialTransferApiError::InvalidParameter {
                 param: "resource_view_key",

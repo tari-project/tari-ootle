@@ -21,47 +21,48 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import Button from "@mui/material/Button";
-import { useMintTestnetFaucetNfts } from "@api/hooks/useAccounts";
+import { useAccountsCreateFreeTestCoins } from "@api/hooks/useAccounts";
 import useAccountStore from "@store/accountStore";
-import { substateIdToString } from "@tari-project/typescript-bindings";
+import { substateIdToString, AccountsCreateFreeTestCoinsResponse } from "@tari-project/typescript-bindings";
 import queryClient from "@api/queryClient";
-import { useErrorNotification } from "../../../../contexts/ErrorNotificationContext";
+import { useErrorNotification } from "@/contexts/ErrorNotificationContext";
 
-function ClaimNftsButton() {
-  const { mutate: claimTestnetFaucetNfts, isPending } = useMintTestnetFaucetNfts();
+function ClaimCoinsButton() {
+  const { mutate: claimTestnetFaucetFunds, isPending } = useAccountsCreateFreeTestCoins();
   const account = useAccountStore((state) => state.account);
+  const setAccount = useAccountStore((state) => state.setAccount);
+  const setPublicKey = useAccountStore((state) => state.setPublicKey);
   const { showError, showSuccess } = useErrorNotification();
 
   if (!account) {
     return <></>;
   }
 
-  const onClaimTestnetNfts = () => {
-    claimTestnetFaucetNfts(
+  const onClaimFreeCoins = () => {
+    claimTestnetFaucetFunds(
       {
         account: { ComponentAddress: substateIdToString(account.address) },
-        numberToMint: 5,
-        mutableData: {
-          image_url: "https://img.freepik.com/free-vector/gradient-isometric-nft-concept_52683-62009.jpg?w=740",
-        },
-        maxFee: 2000,
+        amount: 1_000_000_000,
+        fee: 1000,
       },
       {
-        onSuccess: (resp: any) => {
-          console.log(resp);
-          showSuccess("Successfully claimed NFTs!");
-          // Invalidate NFT queries to refresh the list
+        onSuccess: (resp: AccountsCreateFreeTestCoinsResponse) => {
+          setAccount(resp.account);
+          setPublicKey(resp.public_key);
+          showSuccess("Successfully claimed testnet coins!");
           queryClient.invalidateQueries({
             predicate: (query) => {
               const key = query.queryKey[0];
-              return typeof key === "string" && (key === "nfts" || key === "list_nfts" || key === "nfts_list");
+              return (
+                typeof key === "string" &&
+                (key === "balances" || key === "accounts_balances" || key.startsWith("accounts_get_balances"))
+              );
             },
           });
         },
         onError: (error: any) => {
-          console.error("Error claiming NFTs:", error);
-          // Show user-friendly error message
-          const errorMessage = error?.message || "Failed to claim NFTs. Please ensure you have sufficient funds to pay for transaction fees.";
+          console.error("Error claiming coins:", error);
+          const errorMessage = error?.message || "Failed to claim testnet coins. Please try again.";
           showError(errorMessage);
         },
       },
@@ -69,14 +70,10 @@ function ClaimNftsButton() {
   };
 
   return (
-    <Button 
-      variant="outlined" 
-      onClick={() => onClaimTestnetNfts()}
-      disabled={isPending}
-    >
-      {isPending ? "Claiming..." : "Claim Testnet NFTs"}
+    <Button variant="outlined" onClick={() => onClaimFreeCoins()} disabled={isPending}>
+      {isPending ? "Claiming..." : "Claim Testnet Coins"}
     </Button>
   );
 }
 
-export default ClaimNftsButton;
+export default ClaimCoinsButton;

@@ -24,9 +24,6 @@ import { FormEvent, useState, useEffect } from "react";
 import Button from "@mui/material/Button";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
-import DialogTitle from "@mui/material/DialogTitle";
-import IconButton from "@mui/material/IconButton";
-import CloseIcon from "@mui/icons-material/Close";
 import { useAccountsGetBalances, useAccountsTransfer } from "@api/hooks/useAccounts";
 import useAccountStore from "@store/accountStore";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
@@ -42,14 +39,14 @@ import { transactionsWaitResult } from "@utils/json_rpc";
 import FormStep, { SendMoneyFormState } from "../steps/FormStep";
 import ConfirmationStep from "../steps/ConfirmationStep";
 import ResultStep, { TransferResult } from "../steps/ResultStep";
-import { Divider, Stack, Typography } from "@mui/material";
+import PopupTitle from "@/components/PopupTitle";
 
 export default function SendMoney() {
   const [open, setOpen] = useState(false);
   const { account } = useAccountStore();
 
   const { data } = useAccountsGetBalances(account ? substateIdToString(account.address) : "");
-  const xtrBalanceEntry = data?.balances?.find((b) => b.resource_address === XTR);
+  const xtrBalanceEntry = data?.balances?.find((b: BalanceEntry) => b.resource_address === XTR);
 
   return (
     <>
@@ -357,18 +354,8 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
 
   return (
     <Dialog open={props.open} onClose={handleClose} maxWidth="md" fullWidth>
-      <DialogTitle sx={{ m: 0, p: 2, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <Stack direction="row" alignItems="center" justifyContent="center" width="100%" spacing={2}>
-          <Typography variant="h4">Send Tari</Typography>
-        </Stack>
-        <IconButton aria-label="close" onClick={handleClose}>
-          <CloseIcon />
-        </IconButton>
-      </DialogTitle>
-      <DialogContent>
-        <Divider />
-        {renderStepContent()}
-      </DialogContent>
+      <PopupTitle onClose={handleClose} title="Send Tari" />
+      <DialogContent>{renderStepContent()}</DialogContent>
     </Dialog>
   );
 }

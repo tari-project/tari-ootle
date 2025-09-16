@@ -1,4 +1,4 @@
-//  Copyright 2022. The Tari Project
+//  Copyright 2025. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,43 +20,16 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useAccountsGetDefault } from "@api/hooks/useAccounts";
-import useAccountStore from "@store/accountStore";
-import Onboarding from "@routes/Onboarding/Onboarding";
-import MyAssets from "./Components/MyAssets";
-import { useEffect } from "react";
-import FetchStatusCheck from "@components/FetchStatusCheck";
-import useAuthStore from "@store/authStore";
-import { useWalletInfo } from "@api/hooks/useWalletInfo";
+import { create } from "zustand";
 
-function AssetVault() {
-  const account = useAccountStore((state) => state.account);
-  const setAccount = useAccountStore((state) => state.setAccount);
-  const setPublicKey = useAccountStore((state) => state.setPublicKey);
-  const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
-  const authStore = useAuthStore();
-  const { data: walletInfo } = useWalletInfo();
-
-  useEffect(() => {
-    if (!isError && defaultAccount) {
-      setAccount(defaultAccount.account);
-      setPublicKey(defaultAccount.public_key);
-    }
-
-    if (error) {
-      // This can happen when the token is invalid
-      console.error(error);
-      authStore.clearToken();
-    }
-  }, [defaultAccount, isError]);
-
-  console.log("walletInfo", walletInfo);
-
-  return (
-    <FetchStatusCheck errorMessage={""} isError={false} isLoading={isLoading}>
-      {account ? <MyAssets /> : <Onboarding />}
-    </FetchStatusCheck>
-  );
+interface CurrencyStore {
+  currencySymbol: string;
+  setCurrencySymbol: (symbol: string) => void;
 }
 
-export default AssetVault;
+const useCurrencyStore = create<CurrencyStore>((set) => ({
+  currencySymbol: "XTR",
+  setCurrencySymbol: (symbol) => set({ currencySymbol: symbol }),
+}));
+
+export default useCurrencyStore;

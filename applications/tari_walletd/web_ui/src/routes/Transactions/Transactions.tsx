@@ -40,7 +40,7 @@ import FetchStatusCheck from "@components/FetchStatusCheck";
 import StatusChip from "@components/StatusChip";
 import { DataTableCell } from "@components/StyledComponents";
 import { useGetAllTransactions } from "@api/hooks/useTransactions";
-import { emptyRows, handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
+import { emptyRows, handleChangePage, handleChangeRowsPerPage, formatCurrency } from "@utils/helpers";
 import { Account, WalletTransaction } from "@tari-project/typescript-bindings";
 import TimeChip from "./TimeChip";
 
@@ -101,7 +101,9 @@ export default function Transactions({ account }: { account: Account; ownerPubli
                       <DataTableCell>
                         <StatusChip status={status} showTitle />
                       </DataTableCell>
-                      <DataTableCell>{fee_receipt?.total_fees_paid.toString() || "--"}</DataTableCell>
+                      <DataTableCell>
+                        {fee_receipt?.total_fees_paid ? formatCurrency(fee_receipt.total_fees_paid) : "--"}
+                      </DataTableCell>
                       <DataTableCell>
                         <IconButton
                           component={Link}

@@ -30,8 +30,8 @@
       "@utils/*": ["./src/utils/*"],
       "@assets/*": ["./src/assets/*"],
       "@hooks/*": ["./src/hooks/*"],
-      "@api/*": ["./src/api/*"],
-      "@store/*": ["./src/store/*"],
+      "@api/*": ["./src/services/api/*"],
+      "@store/*": ["./src/services/store/*"],
       "@theme/*": ["./src/theme/*"]
     }
   },

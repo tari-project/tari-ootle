@@ -20,59 +20,24 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import { useTheme } from "@mui/material/styles";
-import { useAccountsCreateFreeTestCoins } from "@api/hooks/useAccounts";
+import Stack from "@mui/material/Stack";
 import ClaimBurn from "./ClaimBurn";
 import useAccountStore from "@store/accountStore";
-import SendMoney from "../Tokens/components/SendMoney";
 import ClaimFees from "./ClaimFees";
 import PublishTemplate from "./PublishTemplate";
-import { substateIdToString } from "@tari-project/typescript-bindings";
 
 function ActionMenu() {
-  const { mutate: claimTestnetFaucetFunds } = useAccountsCreateFreeTestCoins();
   const account = useAccountStore((state) => state.account);
-  const setAccount = useAccountStore((state) => state.setAccount);
-  const setPublicKey = useAccountStore((state) => state.setPublicKey);
-  const theme = useTheme();
   if (!account) {
     return null;
   }
 
-  const onClaimFreeCoins = () => {
-    claimTestnetFaucetFunds(
-      {
-        account: { ComponentAddress: substateIdToString(account.address) },
-        amount: 1_000_000_000,
-        fee: 1000,
-      },
-      {
-        onSuccess: (resp) => {
-          setAccount(resp.account);
-          setPublicKey(resp.public_key);
-        },
-      },
-    );
-  };
-
   return (
-    <Box
-      style={{
-        display: "flex",
-        gap: theme.spacing(1),
-        marginBottom: theme.spacing(2),
-      }}
-    >
-      <SendMoney />
+    <Stack direction="row" spacing={1} marginBottom={2}>
       <ClaimFees />
-      <Button variant="outlined" onClick={onClaimFreeCoins}>
-        Claim Testnet Coins
-      </Button>
       <ClaimBurn />
       <PublishTemplate />
-    </Box>
+    </Stack>
   );
 }
 

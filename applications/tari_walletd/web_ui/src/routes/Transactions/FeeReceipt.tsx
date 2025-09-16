@@ -22,6 +22,7 @@
 
 import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Box, Typography, Chip } from "@mui/material";
 import { DataTableCell } from "@components/StyledComponents";
+import { formatCurrency } from "@/utils/helpers";
 
 export default function FeeReceipt({ data }: { data: any }) {
   if (!data) {
@@ -35,8 +36,8 @@ export default function FeeReceipt({ data }: { data: any }) {
   }
 
   const feeItems = [
-    { label: "Total Fee Payment", value: data.total_fee_payment, color: "primary" as const },
-    { label: "Total Fees Paid", value: data.total_fees_paid, color: "success" as const },
+    { label: "Total Fee Payment", value: formatCurrency(data.total_fee_payment), color: "primary" as const },
+    { label: "Total Fees Paid", value: formatCurrency(data.total_fees_paid), color: "success" as const },
   ];
 
   const costBreakdownItems = data.cost_breakdown?.breakdown

@@ -26,7 +26,6 @@ import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
-import DialogTitle from "@mui/material/DialogTitle";
 import Box from "@mui/material/Box";
 import { useAccountsList } from "@api/hooks/useAccounts";
 import { useTheme } from "@mui/material/styles";
@@ -35,12 +34,19 @@ import Select from "@mui/material/Select";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
 import MenuItem from "@mui/material/MenuItem";
 import { useFilePicker } from "use-file-picker";
-import { ResourceAddress, ResourceType, substateIdToString } from "@tari-project/typescript-bindings";
+import {
+  ResourceAddress,
+  ResourceType,
+  substateIdToString,
+  PublishTemplateResponse,
+  AccountInfo,
+} from "@tari-project/typescript-bindings";
 import InputLabel from "@mui/material/InputLabel";
 import { usePublishTemplate } from "@api/hooks/useTransactions";
 import { FileAmountLimitValidator, FileSizeValidator, FileTypeValidator } from "use-file-picker/validators";
 import { FileContent } from "use-file-picker/types";
 import { base64FromArrayBuffer } from "@utils/helpers";
+import PopupTitle from "@/components/PopupTitle";
 
 export default function PublishTemplate() {
   const [open, setOpen] = useState(false);
@@ -135,7 +141,7 @@ function PublishTemplateDialog(props: DialogProps) {
       detect_inputs: true,
       dry_run: isDryRun,
     })
-      .then((resp) => {
+      .then((resp: PublishTemplateResponse) => {
         if (isDryRun) {
           setFormState({ ...formState, maxFee: resp.dry_run_fee! });
         } else {
@@ -144,7 +150,7 @@ function PublishTemplateDialog(props: DialogProps) {
           setPopup({ title: "Publish template transaction submitted", error: false });
         }
       })
-      .catch((e) => {
+      .catch((e: Error) => {
         setPopup({ title: "Publish failed", error: true, message: e.message });
       })
       .finally(() => {
@@ -198,7 +204,7 @@ function PublishTemplateDialog(props: DialogProps) {
   });
 
   useEffect(() => {
-    let account = accounts?.find((a) => a.account.is_default)?.account.name || null;
+    let account = accounts?.find((a: AccountInfo) => a.account.is_default)?.account.name || null;
     if (account) {
       setFormState({ ...INITIAL_VALUES, account });
       setValidity({ ...validity, account: true });
@@ -207,7 +213,7 @@ function PublishTemplateDialog(props: DialogProps) {
 
   return (
     <Dialog open={props.open} onClose={handleClose}>
-      <DialogTitle>Publish Template</DialogTitle>
+      <PopupTitle onClose={handleClose} title="Publish Template" />
       <DialogContent className="dialog-content">
         <Form onSubmit={onSubmit} className="flex-container-vertical" style={{ paddingTop: theme.spacing(1) }}>
           {accounts && (
@@ -218,11 +224,11 @@ function PublishTemplateDialog(props: DialogProps) {
                 name="account"
                 disabled={disabled}
                 displayEmpty
-                value={formState.account || accounts.find((a) => a.account.is_default) || ""}
+                value={formState.account || accounts.find((a: AccountInfo) => a.account.is_default) || ""}
                 onChange={setSelectFormValue}
                 variant="outlined"
               >
-                {accounts.map((account, i) => (
+                {accounts.map((account: AccountInfo, i: number) => (
                   <MenuItem key={i} value={substateIdToString(account.account.address)}>
                     {account.account.name} {account.account.is_default ? "(default)" : ""}
                   </MenuItem>

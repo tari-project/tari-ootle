@@ -46,7 +46,7 @@ import { useState } from "react";
 import { IoCloseCircleOutline } from "react-icons/io5";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import { AccordionIconButton, CodeBlock, DataTableCell } from "@components/StyledComponents";
-import { useAuthRevokeToken, useGetAllTokens } from "../../../api/hooks/useTokens";
+import { useAuthRevokeToken, useGetAllTokens } from "@api/hooks/useTokens";
 import type { Claims, JrpcPermission, JrpcPermissions } from "@tari-project/typescript-bindings";
 import { jrpcPermissionToString } from "@tari-project/typescript-bindings";
 import CopyAddress from "@components/CopyAddress";

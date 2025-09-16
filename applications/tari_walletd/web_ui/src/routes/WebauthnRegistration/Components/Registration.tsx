@@ -11,7 +11,7 @@ import { FormEvent, useState } from "react";
 import { webauthnFinishRegistration, webauthnStartRegistration } from "../../../utils/json_rpc";
 import { Buffer } from "buffer";
 import Loading from "@components/Loading";
-import useAuthStore from "../../../store/authStore";
+import useAuthStore from "@store/authStore";
 
 const WEBAUTHN_RP_ID = import.meta.env.VITE_DAEMON_WEBAUTHN_RP_ID || window.location.hostname;
 

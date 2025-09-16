@@ -12,7 +12,7 @@ import Button from "@mui/material/Button";
 import { unauthenticated_client, webauthnStartAuth } from "../../../utils/json_rpc";
 import { Buffer } from "buffer";
 import { WebauthnFinishAuthRequest } from "@tari-project/typescript-bindings";
-import useAuthStore from "../../../store/authStore";
+import useAuthStore from "@store/authStore";
 
 const getCredential = async (challenge: any, allowCredentials: any) => {
   const publicKeyCredentialRequestOptions: PublicKeyCredentialRequestOptions = {

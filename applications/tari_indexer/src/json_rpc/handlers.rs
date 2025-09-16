@@ -20,7 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashMap, fmt::Display, ops::Deref, sync::Arc};
+use std::{collections::HashMap, fmt::Display, ops::Deref};
 
 use axum_jrpc::{
     error::{JsonRpcError, JsonRpcErrorReason},
@@ -54,6 +54,10 @@ use tari_indexer_client::types::{
     GetTemplateDefinitionResponse,
     GetTransactionResultRequest,
     GetTransactionResultResponse,
+    GetUnspentUtxosRequest,
+    GetUnspentUtxosResponse,
+    GetUtxoUpdatesRequest,
+    GetUtxoUpdatesResponse,
     IndexerReadyResponse,
     IndexerTransactionFinalizedResult,
     InspectSubstateRequest,
@@ -64,22 +68,30 @@ use tari_indexer_client::types::{
     ListSubstatesResponse,
     ListTemplatesRequest,
     ListTemplatesResponse,
-    NonFungibleSubstate,
     SubmitTransactionRequest,
     SubmitTransactionResponse,
     TemplateMetadata,
-    TransactionEntry,
 };
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
 use tari_ootle_app_utilities::keypair::RistrettoKeypair;
-use tari_ootle_common_types::{optional::Optional, public_key_to_peer_id, PeerAddress, SubstateRequirement};
+use tari_ootle_common_types::{
+    optional::Optional,
+    public_key_to_peer_id,
+    NumPreshards,
+    PeerAddress,
+    SubstateRequirement,
+};
 use tari_ootle_p2p::TariMessagingSpec;
 use tari_ootle_storage::{
-    global::GlobalDb,
+    global::{GlobalDb, TemplateStatus},
     time::{PrimitiveDateTime, UtcDateTime},
 };
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
-use tari_template_manager::{implementation::TemplateManager, interface::TemplateExecutable};
+use tari_ootle_wallet_sdk::models::{UtxoStateUpdateSet, UtxoUpdateSet};
+use tari_template_manager::{
+    implementation::TemplateManager,
+    interface::{TemplateExecutable, TemplateManagerError},
+};
 use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClientFactory, TransactionResultStatus};
 
 use crate::{
@@ -87,7 +99,7 @@ use crate::{
     dry_run::processor::DryRunTransactionProcessor,
     json_rpc::error::internal_error,
     network_client::NetworkClientError,
-    storage_sqlite::store_factory::SqliteIndexerStore,
+    storage_sqlite::SqliteIndexerStore,
     substate_manager::SubstateManager,
     transaction_manager::{error::TransactionManagerError, TransactionManager},
 };
@@ -97,7 +109,7 @@ const LOG_TARGET: &str = "tari::indexer::json_rpc::handlers";
 pub struct JsonRpcHandlers {
     keypair: RistrettoKeypair,
     networking: NetworkingHandle<TariMessagingSpec>,
-    substate_manager: Arc<SubstateManager>,
+    substate_manager: SubstateManager,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     transaction_manager:
         TransactionManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SqliteIndexerStore>,
@@ -109,7 +121,7 @@ pub struct JsonRpcHandlers {
 impl JsonRpcHandlers {
     pub fn new(
         services: &Services,
-        substate_manager: Arc<SubstateManager>,
+        substate_manager: SubstateManager,
         transaction_manager: TransactionManager<
             EpochManagerHandle<PeerAddress>,
             TariValidatorNodeRpcClientFactory,
@@ -266,8 +278,7 @@ impl JsonRpcHandlers {
 
         let substates = self
             .substate_manager
-            .list_substates(filter_by_type, filter_by_template, limit, offset)
-            .await
+            .get_stored_substates_by_filters(filter_by_type, filter_by_template, limit, offset)
             .map_err(|e| {
                 warn!(target: LOG_TARGET, "Error getting substate: {}", e);
                 Self::internal_error(answer_id, format!("Error getting substate: {}", e))
@@ -424,20 +435,141 @@ impl JsonRpcHandlers {
             )
         })?;
 
-        let res = self
+        let non_fungibles = self
             .substate_manager
             .get_non_fungibles_by_resource_address(request.address, limit, offset)
             .map_err(|e| Self::internal_error(answer_id, format!("Error getting non fungibles: {}", e)))?;
         Ok(JsonRpcResponse::success(answer_id, GetNonFungiblesResponse {
-            non_fungibles: res
-                .into_iter()
-                .map(|v| NonFungibleSubstate {
-                    address: v.address,
-                    version: v.version,
-                    substate: v.substate,
-                })
-                .collect(),
+            non_fungibles,
         }))
+    }
+
+    pub async fn get_utxo_updates(&self, value: JsonRpcExtractor) -> JrpcResult {
+        let answer_id = value.get_answer_id();
+        let req: GetUtxoUpdatesRequest = value.parse_params()?;
+        if req.per_shard_limit > 1000 {
+            return Err(JsonRpcResponse::error(
+                answer_id,
+                JsonRpcError::new(
+                    JsonRpcErrorReason::InvalidParams,
+                    "per_shard_limit cannot be greater than 1000".to_string(),
+                    Value::Null,
+                ),
+            ));
+        }
+
+        if req.shard_state_versions.len() > NumPreshards::MAX_SHARD.as_u32() as usize {
+            return Err(JsonRpcResponse::error(
+                answer_id,
+                JsonRpcError::new(
+                    JsonRpcErrorReason::InvalidParams,
+                    format!(
+                        "shard_state_versions cannot contain more than {} entries",
+                        NumPreshards::MAX_SHARD.as_u32()
+                    ),
+                    Value::Null,
+                ),
+            ));
+        }
+
+        if req
+            .shard_state_versions
+            .keys()
+            .any(|shard| shard.is_global() || *shard > NumPreshards::MAX_SHARD)
+        {
+            return Err(JsonRpcResponse::error(
+                answer_id,
+                JsonRpcError::new(
+                    JsonRpcErrorReason::InvalidParams,
+                    format!(
+                        "shard_state_versions contains invalid shard. Cannot query UTXOs in global shard or greater \
+                         than max shard {} exceeded",
+                        NumPreshards::MAX_SHARD.as_u32()
+                    ),
+                    Value::Null,
+                ),
+            ));
+        }
+
+        let mut utxo_updates = HashMap::new();
+        let mut per_shard_high_watermark = Vec::with_capacity(req.shard_state_versions.len());
+        for (shard, state_version) in req.shard_state_versions {
+            let (max_state_version, updates) = self
+                .substate_manager
+                .get_utxo_updates(req.resource_address, shard, state_version, req.per_shard_limit)
+                .map_err(|e| {
+                    Self::internal_error(
+                        answer_id,
+                        format!(
+                            "Error getting UTXO updates for resource_address {}, shard {}, state_version {}: {}",
+                            req.resource_address, shard, state_version, e
+                        ),
+                    )
+                })?;
+
+            // TODO: this is on the hot path, figure out a better way to let the client know the max shard versions
+            // without sending it each time
+            let current_tip_version = self
+                .substate_manager
+                .get_max_state_version(&req.resource_address, shard)
+                .map_err(|e| {
+                    Self::internal_error(
+                        answer_id,
+                        format!(
+                            "Error getting max state version for resource_address {}, shard {}: {}",
+                            req.resource_address, shard, e
+                        ),
+                    )
+                })?;
+            if current_tip_version.as_u64() > 0 {
+                // Save a little over the wire initially by not sending 0 watermarks
+                per_shard_high_watermark.push((shard, current_tip_version));
+            }
+            if !updates.is_empty() {
+                utxo_updates.insert(shard, UtxoStateUpdateSet {
+                    updates,
+                    max_state_version,
+                });
+            }
+        }
+
+        Ok(JsonRpcResponse::success(answer_id, GetUtxoUpdatesResponse {
+            updates: UtxoUpdateSet {
+                shard_updates: utxo_updates,
+                per_shard_high_watermark,
+            },
+        }))
+    }
+
+    pub async fn get_unspent_utxos(&self, value: JsonRpcExtractor) -> JrpcResult {
+        let answer_id = value.get_answer_id();
+        let req: GetUnspentUtxosRequest = value.parse_params()?;
+        if req.tag_and_nonce_pairs.len() > 1000 {
+            return Err(JsonRpcResponse::error(
+                answer_id,
+                JsonRpcError::new(
+                    JsonRpcErrorReason::InvalidParams,
+                    "cannot query more than 1000 UTXOs".to_string(),
+                    Value::Null,
+                ),
+            ));
+        }
+        let utxos = self
+            .substate_manager
+            .get_unspent_utxos(&req.resource_address, &req.tag_and_nonce_pairs)
+            .map_err(|e| {
+                Self::internal_error(
+                    answer_id,
+                    format!(
+                        "Error getting UTXOs for resource_address {}, with {} tag/nonce pair(s): {}",
+                        req.resource_address,
+                        req.tag_and_nonce_pairs.len(),
+                        e
+                    ),
+                )
+            })?;
+
+        Ok(JsonRpcResponse::success(answer_id, GetUnspentUtxosResponse { utxos }))
     }
 
     pub async fn submit_transaction(&self, value: JsonRpcExtractor) -> JrpcResult {
@@ -480,6 +612,17 @@ impl JsonRpcHandlers {
                         ),
                     )
                 },
+                TransactionManagerError::InvalidTransaction {
+                    transaction_id,
+                    details,
+                } => JsonRpcResponse::error(
+                    answer_id,
+                    JsonRpcError::new(
+                        JsonRpcErrorReason::ApplicationError(400),
+                        format!("Transaction {} is invalid: {}", transaction_id, details),
+                        json::Value::Null,
+                    ),
+                ),
                 e => Self::internal_error(answer_id, e),
             })?;
 
@@ -535,7 +678,22 @@ impl JsonRpcHandlers {
             .template_manager
             .fetch_template(&request.template_address)
             .optional()
-            .map_err(|e| Self::internal_error(answer_id, e))?
+            .map_err(|err| {
+                // If it's pending, we return a 404 to the client - this allows them to retry later
+                if matches!(err, TemplateManagerError::TemplateUnavailable {
+                    status: Some(TemplateStatus::Pending)
+                }) {
+                    Self::not_found(
+                        answer_id,
+                        format!(
+                            "Template with address {} is still being downloaded. Try again later.",
+                            request.template_address
+                        ),
+                    )
+                } else {
+                    Self::internal_error(answer_id, format!("Error fetching template: {}", err))
+                }
+            })?
             .ok_or_else(|| {
                 Self::not_found(
                     answer_id,
@@ -636,15 +794,7 @@ impl JsonRpcHandlers {
             .list_recent_transactions(req.last_id, limit as usize)
             .map_err(|e| Self::internal_error(answer_id, e))?;
 
-        let resp = ListRecentTransactionsResponse {
-            transactions: transactions
-                .into_iter()
-                .map(|t| TransactionEntry {
-                    transaction_id: t.calculate_id(),
-                    transaction: t,
-                })
-                .collect(),
-        };
+        let resp = ListRecentTransactionsResponse { transactions };
         Ok(JsonRpcResponse::success(answer_id, resp))
     }
 

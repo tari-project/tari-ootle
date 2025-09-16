@@ -20,14 +20,14 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import PageHeading from "../../Components/PageHeading";
+import PageHeading from "@components/PageHeading";
 import Grid from "@mui/material/Grid";
-import { StyledPaper } from "../../Components/StyledComponents";
+import { StyledPaper } from "@components/StyledComponents";
 import Transactions from "./Transactions";
-import useAccountStore from "../../store/accountStore";
+import useAccountStore from "@store/accountStore";
 
 function TransactionsLayout() {
-  const account = useAccountStore((state) => state.account);
+  const { account, publicKey } = useAccountStore();
   return (
     <>
       <Grid item xs={12} md={12} lg={12}>
@@ -35,7 +35,7 @@ function TransactionsLayout() {
       </Grid>
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
-          <Transactions account={account!} />
+          <Transactions account={account!} ownerPublicKey={publicKey!} />
         </StyledPaper>
       </Grid>
     </>

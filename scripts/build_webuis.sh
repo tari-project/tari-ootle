@@ -26,7 +26,7 @@ function usage() {
   echo "Usage: $0 [-h|--help] [-t|--check-typescript] [-k|--skip-bindings]"
   echo "  -h|--help    This help"
   echo "  -t|--check-typescript    Check that typescript compiles without building"
-  echo "  -k|--skip-bindings     Skip generating bindings (only build the typescript)"
+  echo "  -b|--build-bindings     Generating bindings"
   exit 1
 }
 
@@ -40,13 +40,13 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       usage
       ;;
-    -kt|-tk)
+    -bt|-tb)
       check_typescript=true
-      skip_bindings=true
+      build_bindings=true
       shift
       ;;
-    -k|--skip-bindings)
-      skip_bindings=true
+    -b|--build-bindings)
+      build_bindings=true
       shift
       ;;
     -t|--check-typescript)
@@ -61,7 +61,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 pushd $base_path/bindings > /dev/null
-if [ -z "${skip_bindings}" ]; then
+if [ ! -z "${build_bindings}" ]; then
 	# Build bindings
 	echo "Building Bindings..."
 	pnpm install
@@ -77,6 +77,7 @@ function build() {
   pushd $base_path/$1 > /dev/null
   pnpm install > /dev/null
   if [ -z ${check_typescript+x} ]; then
+    pnpm run clean-dist
     pnpm run build
   else
     npx tsc

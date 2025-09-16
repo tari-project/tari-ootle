@@ -23,16 +23,33 @@
 use std::{cmp, convert::TryFrom, ops::Deref};
 
 use borsh::BorshSerialize;
+use bounded_vec::{witnesses, BoundedVec};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Default, Deserialize, Serialize, BorshSerialize)]
+type BoundedByteVec<const MAX: usize> = BoundedVec<u8, 0, MAX, witnesses::Empty<MAX>>;
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
 pub struct MaxSizeBytes<const MAX: usize> {
-    inner: Vec<u8>,
+    inner: BoundedByteVec<MAX>,
 }
 
 impl<const MAX: usize> MaxSizeBytes<MAX> {
     pub fn into_vec(self) -> Vec<u8> {
-        self.inner
+        // NOTE: to_vec consumes the instance, BoundedVec does not use the correct naming i.e. into_vec.
+        self.inner.to_vec()
+    }
+
+    pub fn from_vec(vec: Vec<u8>) -> Result<Self, MaxSizeBytesError> {
+        if vec.len() > MAX {
+            Err(MaxSizeBytesError::MaxSizeBytesLengthError {
+                expected: MAX,
+                actual: vec.len(),
+            })
+        } else {
+            Ok(Self {
+                inner: BoundedByteVec::from_vec(vec).expect("len <= MAX"),
+            })
+        }
     }
 
     pub fn from_bytes_checked<T: AsRef<[u8]>>(bytes: T) -> Option<Self> {
@@ -40,7 +57,9 @@ impl<const MAX: usize> MaxSizeBytes<MAX> {
         if b.len() > MAX {
             None
         } else {
-            Some(Self { inner: b.to_vec() })
+            Some(Self {
+                inner: BoundedByteVec::from_vec(b.to_vec()).expect("len <= MAX"),
+            })
         }
     }
 
@@ -48,14 +67,14 @@ impl<const MAX: usize> MaxSizeBytes<MAX> {
         let b = bytes.as_ref();
         let len = cmp::min(b.len(), MAX);
         Self {
-            inner: b.get(..len).expect("len <= bytes.len()").to_vec(),
+            inner: BoundedByteVec::from_vec(b.get(..len).expect("len <= bytes.len()").to_vec()).expect("len <= MAX"),
         }
     }
 }
 
 impl<const MAX: usize> From<MaxSizeBytes<MAX>> for Vec<u8> {
     fn from(value: MaxSizeBytes<MAX>) -> Self {
-        value.inner
+        value.into_vec()
     }
 }
 
@@ -63,14 +82,7 @@ impl<const MAX: usize> TryFrom<Vec<u8>> for MaxSizeBytes<MAX> {
     type Error = MaxSizeBytesError;
 
     fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
-        if value.len() > MAX {
-            Err(MaxSizeBytesError::MaxSizeBytesLengthError {
-                expected: MAX,
-                actual: value.len(),
-            })
-        } else {
-            Ok(MaxSizeBytes { inner: value })
-        }
+        MaxSizeBytes::from_vec(value)
     }
 }
 
@@ -78,20 +90,16 @@ impl<const MAX: usize> TryFrom<&[u8]> for MaxSizeBytes<MAX> {
     type Error = MaxSizeBytesError;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        if value.len() > MAX {
-            Err(MaxSizeBytesError::MaxSizeBytesLengthError {
-                expected: MAX,
-                actual: value.len(),
-            })
-        } else {
-            Ok(MaxSizeBytes { inner: value.to_vec() })
-        }
+        MaxSizeBytes::from_bytes_checked(value).ok_or(MaxSizeBytesError::MaxSizeBytesLengthError {
+            expected: MAX,
+            actual: value.len(),
+        })
     }
 }
 
 impl<const MAX: usize> AsRef<[u8]> for MaxSizeBytes<MAX> {
     fn as_ref(&self) -> &[u8] {
-        &self.inner
+        self.inner.as_slice()
     }
 }
 
@@ -99,7 +107,31 @@ impl<const MAX: usize> Deref for MaxSizeBytes<MAX> {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
-        &self.inner
+        self.inner.as_slice()
+    }
+}
+
+impl<const MAX: usize> BorshSerialize for MaxSizeBytes<MAX> {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        BorshSerialize::serialize(self.inner.as_slice(), writer)
+    }
+}
+
+impl<const MAX: usize> PartialOrd for MaxSizeBytes<MAX> {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<const MAX: usize> Ord for MaxSizeBytes<MAX> {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        self.inner.as_slice().cmp(other.inner.as_slice())
+    }
+}
+
+impl<const MAX: usize> Default for MaxSizeBytes<MAX> {
+    fn default() -> Self {
+        Self::from_vec(vec![]).expect("0 <= MAX")
     }
 }
 

@@ -20,11 +20,11 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_ootle_common_types::Epoch;
+use tari_ootle_common_types::{Epoch, ShardGroup};
 use tari_ootle_storage::consensus_models::EpochCheckpoint;
 
 use crate::{
-    codecs::{DefaultVersionedCodec, EpochCodec},
+    codecs::{DefaultVersionedCodec, EpochCodec, ShardGroupCodec},
     traits::Cf,
     versioned_types::VersionedEpochCheckpoint,
 };
@@ -32,12 +32,20 @@ use crate::{
 pub struct EpochCheckpointCf;
 
 impl Cf for EpochCheckpointCf {
-    type Key = Epoch;
-    type KeyCodec = EpochCodec;
+    type Key = (Epoch, ShardGroup);
+    type KeyCodec = (EpochCodec, ShardGroupCodec);
     type Value = EpochCheckpoint;
     type ValueCodec = DefaultVersionedCodec<VersionedEpochCheckpoint>;
 
     fn name() -> &'static str {
         "epoch_checkpoints"
     }
+}
+
+pub struct ByEpochQuery;
+
+impl crate::traits::QueryCf for ByEpochQuery {
+    type Cf = EpochCheckpointCf;
+    type Key = Epoch;
+    type KeyCodec = EpochCodec;
 }

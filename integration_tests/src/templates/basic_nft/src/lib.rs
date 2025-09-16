@@ -48,8 +48,8 @@ mod sparkle_nft_template {
                 resource_address,
                 vault,
             })
-                .with_access_rules(AccessRules::allow_all())
-                .create()
+            .with_access_rules(AccessRules::allow_all())
+            .create()
         }
 
         pub fn new_with_initial_nft(nft: NonFungibleId) -> Component<Self> {
@@ -65,12 +65,12 @@ mod sparkle_nft_template {
                 resource_address: bucket.resource_address(),
                 vault: Vault::from_bucket(bucket),
             })
-                .with_access_rules(AccessRules::allow_all())
-                .create()
+            .with_access_rules(AccessRules::allow_all())
+            .create()
         }
 
         pub fn take_initial_nft(&mut self) -> Bucket {
-            self.vault.withdraw(Amount(1))
+            self.vault.withdraw(1)
         }
 
         pub fn mint(&mut self, name: String, url: String) -> Bucket {
@@ -119,7 +119,7 @@ mod sparkle_nft_template {
                 bucket.resource_address() == self.resource_address,
                 "Cannot burn bucket not from this collection"
             );
-            debug!("Burning bucket {} containing {}", bucket.id(), bucket.amount());
+            debug!("Burning bucket containing {}", bucket.amount());
             // This is all that's required, typically the template would not need to include a burn function because a
             // native instruction can be used instead
             bucket.burn();

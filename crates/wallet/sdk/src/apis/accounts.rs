@@ -1,6 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::collections::HashSet;
+
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
     component::derive_component_address_from_public_key,
@@ -35,6 +37,10 @@ pub struct AccountsApi<'a, TStore, TNetworkInterface> {
     key_manager_api: KeyManagerApi<'a, TStore>,
 }
 
+pub fn derive_account_address_from_public_key(public_key: &RistrettoPublicKeyBytes) -> ComponentAddress {
+    derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, public_key)
+}
+
 impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetworkInterface> {
     pub fn new(
         store: &'a TStore,
@@ -46,6 +52,10 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
             substates_api,
             key_manager_api,
         }
+    }
+
+    pub fn derive_account_address_from_public_key(&self, public_key: &RistrettoPublicKeyBytes) -> ComponentAddress {
+        derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, public_key)
     }
 
     pub fn create_account(
@@ -118,6 +128,16 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
         })
     }
 
+    pub fn associate_stealth_resource(
+        &self,
+        account_address: &ComponentAddress,
+        stealth_resource_address: ResourceAddress,
+    ) -> Result<(), AccountsApiError> {
+        self.store
+            .with_write_tx(|tx| tx.accounts_add_stealth_resource(account_address, stealth_resource_address))?;
+        Ok(())
+    }
+
     pub fn get_many(&self, offset: u64, limit: u64) -> Result<Vec<Account>, AccountsApiError> {
         let mut tx = self.store.create_read_tx()?;
         let accounts = tx.accounts_get_many(offset, limit)?;
@@ -180,6 +200,29 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
 
     pub fn get_account_by_address(&self, address: &ComponentAddress) -> Result<AccountWithPublicKey, AccountsApiError> {
         let account = self.store.with_read_tx(|tx| tx.accounts_get(address))?;
+        let (_, pk) = self.key_manager_api.derive_account_keypair(account.key_index)?;
+        Ok(AccountWithPublicKey {
+            account,
+            owner_public_key: pk.to_byte_type(),
+        })
+    }
+
+    pub fn get_associated_stealth_resources(
+        &self,
+        address: &ComponentAddress,
+    ) -> Result<HashSet<ResourceAddress>, AccountsApiError> {
+        let resources = self
+            .store
+            .with_read_tx(|tx| tx.accounts_get_associated_stealth_resources(address))?;
+        Ok(resources)
+    }
+
+    pub fn get_account_by_public_key(
+        &self,
+        public_key: &RistrettoPublicKeyBytes,
+    ) -> Result<AccountWithPublicKey, AccountsApiError> {
+        let account_address = derive_account_address_from_public_key(public_key);
+        let account = self.store.with_read_tx(|tx| tx.accounts_get(&account_address))?;
         let (_, pk) = self.key_manager_api.derive_account_keypair(account.key_index)?;
         Ok(AccountWithPublicKey {
             account,
@@ -302,11 +345,13 @@ where
 
         match self
             .substates_api
-            .scan_for_substate(&account_component.into(), None)
+            .fetch_substate_from_network(&account_component.into(), None)
             .await
             .optional()?
         {
-            Some(ValidatorScanResult { address, substate, .. }) => {
+            Some(ValidatorScanResult {
+                id: address, substate, ..
+            }) => {
                 let indexed_component = substate
                     .component()
                     .map(|c| IndexedWellKnownTypes::from_value(c.state()))

@@ -9,7 +9,6 @@ license.workspace = true
 
 [dependencies]
 tari_bor = { workspace = true, features = ["json_encoding"] }
-tari_common_types = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 tari_ootle_wallet_sdk = { workspace = true }
 tari_engine_types = { workspace = true }
@@ -32,6 +31,7 @@ libsqlite3-sys = { workspace = true, features = ["bundled"] }
 
 [dev-dependencies]
 tari_ootle_common_types = { workspace = true }
+tari_crypto = { workspace = true }
 
 [package.metadata.cargo-machete]
 ignored = [

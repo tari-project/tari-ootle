@@ -3,9 +3,9 @@
 
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
-use tari_core::transactions::{tari_amount::MicroMinotari, transaction_components::TransactionOutput};
 use tari_ootle_common_types::{Epoch, SubstateAddress};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_transaction_components::{tari_amount::MicroMinotari, transaction_components::TransactionOutput};
 
 #[derive(Debug, Clone)]
 pub struct BaseLayerMetadata {
@@ -27,11 +27,7 @@ pub struct BlockInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/base-node-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "base-node-client/"))]
 pub struct BaseLayerValidatorNode {
     pub public_key: RistrettoPublicKeyBytes,
     pub shard_key: SubstateAddress,

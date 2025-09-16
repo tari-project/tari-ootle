@@ -40,7 +40,7 @@ impl Runner {
             .build_and_seal(&key.key);
 
         let finalize = self.submit_transaction_and_wait(transaction).await?;
-        let diff = finalize.result.accept().unwrap();
+        let diff = finalize.result.any_accept().unwrap();
 
         let component_address = diff
             .up_iter()

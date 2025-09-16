@@ -14,7 +14,7 @@ use tari_template_lib::{
     auth::{OwnerRule, Ownership},
     constants::XTR,
     models::BinaryTag,
-    types::{crypto::RistrettoPublicKeyBytes, Hash, KeyParseError, ObjectKey},
+    types::{crypto::RistrettoPublicKeyBytes, Amount, Hash, KeyParseError, ObjectKey},
 };
 
 use crate::resource_container::{ResourceContainer, ResourceError};
@@ -22,11 +22,7 @@ use crate::resource_container::{ResourceContainer, ResourceError};
 const TAG: u64 = BinaryTag::ValidatorNodeFeePool.as_u64();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ValidatorFeePoolAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl ValidatorFeePoolAddress {
@@ -101,11 +97,7 @@ impl borsh::BorshDeserialize for ValidatorFeePoolAddress {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ValidatorFeePool {
     #[cfg_attr(feature = "ts", ts(type = "ArrayBuffer"))]
     pub claim_public_key: RistrettoPublicKeyBytes,
@@ -176,22 +168,16 @@ impl ValidatorFeePool {
         }
         let amount = self.amount;
         self.amount = 0;
-        Ok(ResourceContainer::Confidential {
+        Ok(ResourceContainer::Stealth {
             address: XTR,
-            commitments: Default::default(),
             revealed_amount: amount.into(),
-            locked_commitments: Default::default(),
-            locked_revealed_amount: Default::default(),
+            locked_amount: Amount::zero(),
         })
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ValidatorFeeWithdrawal {
     pub address: ValidatorFeePoolAddress,
     pub amount: u64,

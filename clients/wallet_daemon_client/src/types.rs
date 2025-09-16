@@ -38,12 +38,8 @@ use tari_ootle_common_types::{
     SubstateRequirement,
 };
 use tari_ootle_wallet_sdk::{
-    apis::{
-        confidential_transfer::ConfidentialTransferInputSelection,
-        key_manager::KeyBranch,
-        stealth_transfer::StealthTransferInputSelection,
-    },
-    models::{Account, AuthoredTemplateModel, NonFungibleToken, OutputLockId, TransactionStatus, WalletTransaction},
+    apis::{confidential_transfer::ConfidentialTransferInputSelection, key_manager::KeyBranch},
+    models::{Account, AuthoredTemplateModel, NonFungibleToken, TransactionStatus, WalletLockId, WalletTransaction},
 };
 use tari_template_abi::{FunctionDef, TemplateDef};
 use tari_template_lib::{
@@ -72,11 +68,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct CallInstructionRequest {
     pub instructions: Vec<Instruction>,
     #[serde(deserialize_with = "string_or_struct")]
@@ -93,7 +85,7 @@ pub struct CallInstructionRequest {
     pub new_outputs: Option<u8>,
     #[serde(default)]
     #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
-    pub proof_ids: Vec<OutputLockId>,
+    pub proof_ids: Vec<WalletLockId>,
     #[serde(default)]
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub min_epoch: Option<u64>,
@@ -103,11 +95,7 @@ pub struct CallInstructionRequest {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransactionSubmitRequest {
     pub transaction: UnsignedTransaction,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
@@ -121,7 +109,7 @@ pub struct TransactionSubmitRequest {
     #[serde(default = "return_true")]
     pub detect_inputs_use_unversioned: bool,
     #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
-    pub proof_ids: Vec<OutputLockId>,
+    pub proof_ids: Vec<WalletLockId>,
 }
 
 const fn return_true() -> bool {
@@ -129,21 +117,13 @@ const fn return_true() -> bool {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransactionSubmitResponse {
     pub transaction_id: TransactionId,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransactionSubmitDryRunRequest {
     pub transaction: UnsignedTransaction,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
@@ -151,26 +131,18 @@ pub struct TransactionSubmitDryRunRequest {
     pub detect_inputs: bool,
     pub detect_inputs_use_unversioned: bool,
     #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
-    pub proof_ids: Vec<OutputLockId>,
+    pub proof_ids: Vec<WalletLockId>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransactionSubmitDryRunResponse {
     pub transaction_id: TransactionId,
     pub result: ExecuteResult,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransactionSubmitManifestRequest {
     pub manifest: String,
     pub variables: HashMap<String, String>,
@@ -182,22 +154,14 @@ pub struct TransactionSubmitManifestRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransactionSubmitManifestResponse {
     pub transaction_id: TransactionId,
     pub result: Option<ExecuteResult>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct PublishTemplateRequest {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "serde_with::base64")]
@@ -213,11 +177,7 @@ pub struct PublishTemplateRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct PublishTemplateResponse {
     pub transaction_id: TransactionId,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
@@ -225,66 +185,44 @@ pub struct PublishTemplateResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransactionGetRequest {
     pub transaction_id: TransactionId,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransactionGetResponse {
     pub transaction: Transaction,
     pub result: Option<FinalizeResult>,
     pub status: TransactionStatus,
+    pub invalid_reason: Option<String>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub last_update_time: PrimitiveDateTime,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransactionGetAllRequest {
     pub status: Option<TransactionStatus>,
     pub component: Option<ComponentAddress>,
+    pub signer_public_key: Option<RistrettoPublicKeyBytes>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransactionGetAllResponse {
     pub transactions: Vec<WalletTransaction>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransactionGetResultRequest {
     pub transaction_id: TransactionId,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransactionGetResultResponse {
     pub transaction_id: TransactionId,
     pub status: TransactionStatus,
@@ -292,11 +230,7 @@ pub struct TransactionGetResultResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransactionWaitResultRequest {
     pub transaction_id: TransactionId,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
@@ -304,11 +238,7 @@ pub struct TransactionWaitResultRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransactionWaitResultResponse {
     pub transaction_id: TransactionId,
     pub result: Option<FinalizeResult>,
@@ -319,11 +249,7 @@ pub struct TransactionWaitResultResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransactionClaimBurnResponse {
     pub transaction_id: TransactionId,
     pub inputs: Vec<SubstateAddress>,
@@ -331,21 +257,13 @@ pub struct TransactionClaimBurnResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct KeysListRequest {
     pub branch: KeyBranch,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct KeysListResponse {
     /// (index, public key, is_active)
     #[cfg_attr(feature = "ts", ts(type = "Array<[number, string, boolean]>"))]
@@ -353,32 +271,20 @@ pub struct KeysListResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct KeysSetActiveRequest {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub index: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct KeysSetActiveResponse {
     pub public_key: RistrettoPublicKeyBytes,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct KeysCreateRequest {
     pub branch: KeyBranch,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
@@ -386,11 +292,7 @@ pub struct KeysCreateRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct KeysCreateResponse {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub id: u64,
@@ -399,11 +301,7 @@ pub struct KeysCreateResponse {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountsCreateRequest {
     pub account_name: Option<String>,
     pub is_default: Option<bool>,
@@ -412,11 +310,7 @@ pub struct AccountsCreateRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountsCreateResponse {
     pub account: Account,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
@@ -424,11 +318,7 @@ pub struct AccountsCreateResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountsCreateOrGetRequest {
     pub account: Option<ComponentAddressOrName>,
     pub is_default: Option<bool>,
@@ -437,11 +327,7 @@ pub struct AccountsCreateOrGetRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountsCreateOrGetResponse {
     pub account: Account,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
@@ -450,11 +336,7 @@ pub struct AccountsCreateOrGetResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountsListRequest {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub offset: u64,
@@ -463,11 +345,7 @@ pub struct AccountsListRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountInfo {
     pub account: Account,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
@@ -475,11 +353,7 @@ pub struct AccountInfo {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountsListResponse {
     pub accounts: Vec<AccountInfo>,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
@@ -487,11 +361,7 @@ pub struct AccountsListResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountsGetBalancesRequest {
     #[serde(deserialize_with = "opt_string_or_struct")]
     pub account: Option<ComponentAddressOrName>,
@@ -500,24 +370,16 @@ pub struct AccountsGetBalancesRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountsGetBalancesResponse {
     pub address: ComponentAddress,
     pub balances: Vec<BalanceEntry>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct BalanceEntry {
-    pub vault_address: VaultId,
+    pub vault_address: Option<VaultId>,
     pub resource_address: ResourceAddress,
     pub balance: Amount,
     pub resource_type: ResourceType,
@@ -553,42 +415,26 @@ impl BalanceEntry {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountGetRequest {
     #[serde(deserialize_with = "string_or_struct")]
     pub name_or_address: ComponentAddressOrName,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountGetDefaultRequest {
     // Intentionally empty. Fields may be added in the future.
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountGetByKeyIndexRequest {
     pub key_index: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountGetResponse {
     pub account: Account,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
@@ -596,30 +442,18 @@ pub struct AccountGetResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountSetDefaultRequest {
     #[serde(deserialize_with = "string_or_struct")]
     pub account: ComponentAddressOrName,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountSetDefaultResponse {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountsTransferRequest {
     #[serde(deserialize_with = "opt_string_or_struct")]
     pub account: Option<ComponentAddressOrName>,
@@ -633,11 +467,7 @@ pub struct AccountsTransferRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountsTransferResponse {
     pub transaction_id: TransactionId,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
@@ -648,11 +478,7 @@ pub struct AccountsTransferResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ProofsGenerateRequest {
     pub amount: Amount,
     pub reveal_amount: Amount,
@@ -665,73 +491,45 @@ pub struct ProofsGenerateRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ProofsGenerateResponse {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub proof_id: OutputLockId,
+    pub proof_id: WalletLockId,
     pub proof: ConfidentialWithdrawProof,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ProofsFinalizeRequest {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub proof_id: OutputLockId,
+    pub proof_id: WalletLockId,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ProofsFinalizeResponse {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ProofsCancelRequest {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub proof_id: OutputLockId,
+    pub proof_id: WalletLockId,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ConfidentialCreateOutputProofRequest {
     pub amount: Amount,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ConfidentialCreateOutputProofResponse {
     pub proof: ConfidentialOutputStatement,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ConfidentialTransferRequest {
     #[serde(deserialize_with = "opt_string_or_struct")]
     pub account: Option<ComponentAddressOrName>,
@@ -747,11 +545,7 @@ pub struct ConfidentialTransferRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ConfidentialTransferResponse {
     pub transaction_id: TransactionId,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
@@ -760,11 +554,7 @@ pub struct ConfidentialTransferResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ConfidentialViewVaultBalanceRequest {
     pub vault_id: VaultId,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
@@ -776,35 +566,31 @@ pub struct ConfidentialViewVaultBalanceRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ConfidentialViewVaultBalanceResponse {
     #[cfg_attr(feature = "ts", ts(type = "Record<string, number | null>"))]
     pub balances: HashMap<PedersenCommitmentBytes, Option<u64>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ClaimBurnRequest {
     pub account: ComponentAddressOrName,
-    pub claim_proof: ClaimBurnProof,
+    pub claim_proof: ExtClaimBurnProof,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub max_fee: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub struct ExtClaimBurnProof {
+    pub claim_proof: ClaimBurnProof,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub owner_nonce_key_index: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ClaimBurnProof {
     pub reciprocal_claim_public_key: RistrettoPublicKeyBytes,
     pub commitment: PedersenCommitmentBytes,
@@ -813,11 +599,7 @@ pub struct ClaimBurnProof {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ClaimBurnResponse {
     pub transaction_id: TransactionId,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
@@ -826,51 +608,11 @@ pub struct ClaimBurnResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ProofsCancelResponse {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
-pub struct RevealFundsRequest {
-    /// Account with funds to reveal
-    #[serde(deserialize_with = "opt_string_or_struct")]
-    pub account: Option<ComponentAddressOrName>,
-    /// Amount to reveal
-    pub amount_to_reveal: Amount,
-    /// Pay fee from revealed funds. If false, previously revealed funds in the account are used.
-    pub pay_fee_from_reveal: bool,
-    /// The amount of fees to add to the transaction. Any fees not charged are refunded.
-    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
-    pub max_fee: Option<u64>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
-pub struct RevealFundsResponse {
-    pub transaction_id: TransactionId,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub fee: u64,
-    pub result: FinalizeResult,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountsCreateFreeTestCoinsRequest {
     pub account: ComponentAddressOrName,
     pub amount: Amount,
@@ -879,11 +621,7 @@ pub struct AccountsCreateFreeTestCoinsRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountsCreateFreeTestCoinsResponse {
     pub account: Account,
     pub transaction_id: TransactionId,
@@ -896,21 +634,13 @@ pub struct AccountsCreateFreeTestCoinsResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct WebRtcStart {
     pub jwt: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct WebRtcStartRequest {
     pub signaling_server_token: String,
     #[cfg_attr(feature = "ts", ts(type = "object"))]
@@ -919,19 +649,11 @@ pub struct WebRtcStartRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct WebRtcStartResponse {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AuthLoginRequest {
     pub permissions: Vec<String>,
     #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number} | null"))]
@@ -943,11 +665,7 @@ pub struct AuthLoginRequest {
 pub type EncodedJwtString = Zeroizing<String>;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AuthLoginResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub auth_token: EncodedJwtString,
@@ -956,11 +674,7 @@ pub struct AuthLoginResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AuthLoginAcceptRequest {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub auth_token: EncodedJwtString,
@@ -968,59 +682,35 @@ pub struct AuthLoginAcceptRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AuthLoginAcceptResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub permissions_token: EncodedJwtString,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AuthLoginDenyRequest {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub auth_token: EncodedJwtString,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AuthLoginDenyResponse {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AuthRevokeTokenRequest {
     pub permission_token_id: i32,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AuthRevokeTokenResponse {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct MintFaucetNftRequest {
     pub account: ComponentAddressOrName,
     #[cfg_attr(feature = "ts", ts(type = "object"))]
@@ -1031,11 +721,7 @@ pub struct MintFaucetNftRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct MintFaucetNftResponse {
     pub transaction_id: TransactionId,
     pub finalize: FinalizeResult,
@@ -1043,11 +729,7 @@ pub struct MintFaucetNftResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct GetNftRequest {
     pub resource_address: ResourceAddress,
     pub nft_id: NonFungibleId,
@@ -1056,11 +738,7 @@ pub struct GetNftRequest {
 pub type GetNftResponse = NonFungibleToken;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ListNftsRequest {
     #[serde(deserialize_with = "opt_string_or_struct")]
     pub account: Option<ComponentAddressOrName>,
@@ -1071,50 +749,30 @@ pub struct ListNftsRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ListNftsResponse {
     pub nfts: Vec<NonFungibleToken>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AuthGetAllJwtRequest {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AuthGetAllJwtResponse {
     pub jwt: Vec<Claims>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct GetValidatorFeesRequest {
     pub account_or_key: AccountOrKeyIndex,
     pub shard_group: Option<ShardGroup>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub enum AccountOrKeyIndex {
     /// Query by account. None signifies the default account.
     Account(Option<ComponentAddressOrName>),
@@ -1123,21 +781,13 @@ pub enum AccountOrKeyIndex {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct GetValidatorFeesResponse {
     pub fees: HashMap<Shard, FeePoolDetails>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct FeePoolDetails {
     pub address: ValidatorFeePoolAddress,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
@@ -1145,11 +795,7 @@ pub struct FeePoolDetails {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ClaimValidatorFeesRequest {
     #[serde(default, deserialize_with = "opt_string_or_struct")]
     pub account: Option<ComponentAddressOrName>,
@@ -1162,11 +808,7 @@ pub struct ClaimValidatorFeesRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ClaimValidatorFeesResponse {
     pub transaction_id: TransactionId,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
@@ -1175,51 +817,31 @@ pub struct ClaimValidatorFeesResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct SettingsSetRequest {
     pub indexer_url: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct SettingsSetResponse {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct SettingsGetResponse {
     pub indexer_url: String,
     pub network: NetworkInfo,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct NetworkInfo {
     pub name: String,
     pub byte: u8,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct SubstatesListRequest {
     #[serde(default, deserialize_with = "serde_with::string::option::deserialize")]
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
@@ -1232,43 +854,27 @@ pub struct SubstatesListRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct SubstatesListResponse {
     pub substates: Vec<WalletSubstateRecord>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct SubstatesGetRequest {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub substate_id: SubstateId,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct SubstatesGetResponse {
     pub record: Option<WalletSubstateRecord>,
     pub substate: Option<Substate>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct WalletSubstateRecord {
     pub substate_id: SubstateId,
     pub parent_id: Option<SubstateId>,
@@ -1280,31 +886,19 @@ pub struct WalletSubstateRecord {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TemplatesGetRequest {
     pub template_address: TemplateAddress,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TemplatesGetResponse {
     pub template_definition: TemplateDef,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TemplatesListAuthoredRequest {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub author_public_key: RistrettoPublicKeyBytes,
@@ -1314,11 +908,7 @@ pub struct TemplatesListAuthoredRequest {
     pub page_size: u64,
 }
 
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AuthoredTemplate {
     pub author_public_key: RistrettoPublicKeyBytes,
@@ -1341,11 +931,7 @@ impl From<&AuthoredTemplateModel> for AuthoredTemplate {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TemplatesListAuthoredResponse {
     pub templates: Vec<AuthoredTemplate>,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
@@ -1353,19 +939,11 @@ pub struct TemplatesListAuthoredResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AuthGetMethodRequest {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 #[serde(rename_all = "lowercase")]
 pub enum AuthMethod {
     None,
@@ -1373,51 +951,31 @@ pub enum AuthMethod {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AuthGetMethodResponse {
     pub method: AuthMethod,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct WebauthnAlreadyRegisteredRequest {
     pub username: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct WebauthnAlreadyRegisteredResponse {
     pub registered: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct WebauthnStartRegisterRequest {
     pub username: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct WebauthnStartRegisterResponse {
     /// Unique ID of the current registration Session.
     pub session_id: String,
@@ -1427,11 +985,7 @@ pub struct WebauthnStartRegisterResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct WebauthnFinishRegisterRequest {
     /// Session ID received from [`WebauthnStartRegisterResponse`].
     pub session_id: String,
@@ -1441,29 +995,17 @@ pub struct WebauthnFinishRegisterRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct WebauthnFinishRegisterResponse {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct WebauthnStartAuthRequest {
     pub username: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct WebauthnStartAuthResponse {
     /// Session ID.
     pub session_id: String,
@@ -1473,11 +1015,7 @@ pub struct WebauthnStartAuthResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct WebauthnFinishAuthRequest {
     /// Session ID received from [`WebauthnStartAuthResponse`].
     pub session_id: String,
@@ -1487,19 +1025,11 @@ pub struct WebauthnFinishAuthRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct WalletGetInfoRequest {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct WalletGetInfoResponse {
     pub version: String,
     pub network: String,
@@ -1507,11 +1037,7 @@ pub struct WalletGetInfoResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransferNftRequest {
     pub resource_address: ResourceAddress,
     pub nfts: Vec<NonFungibleId>,
@@ -1527,11 +1053,7 @@ pub struct TransferNftRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransferNftResponse {
     pub transaction_id: TransactionId,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
@@ -1542,15 +1064,10 @@ pub struct TransferNftResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct StealthTransferRequest {
     pub owner_account: ComponentAddressOrName,
-    pub revealed_to_account: Option<ComponentAddress>,
-    pub input_selection: StealthTransferInputSelection,
+    pub input_selection: ConfidentialTransferInputSelection,
     pub resource_address: ResourceAddress,
     pub destination_public_key: RistrettoPublicKeyBytes,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
@@ -1561,11 +1078,18 @@ pub struct StealthTransferRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct StealthTransferResponse {
     pub transaction_id: TransactionId,
 }
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub struct AccountsAssociateStealthResourceRequest {
+    pub account: ComponentAddressOrName,
+    pub resource_address: ResourceAddress,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub struct AccountsAssociateStealthResourceResponse {}

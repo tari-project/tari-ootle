@@ -42,7 +42,13 @@ const BreadcrumbsComponent: React.FC<BreadcrumbsProps> = ({ items }) => {
     const breadcrumbLabel = breadcrumb.props.children;
     const { label, path, dynamic } = match.route;
     return (
-      <Link key={breadcrumbLabel} component={RouterLink} to={path} underline="none" color="inherit">
+      <Link
+        key={breadcrumbLabel}
+        component={RouterLink}
+        to={path}
+        underline="none"
+        color="inherit"
+      >
         {dynamic ? breadcrumbLabel.toLowerCase() : label}
       </Link>
     );

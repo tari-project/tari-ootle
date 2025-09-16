@@ -1,17 +1,16 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use diesel::dsl;
 use tari_ootle_wallet_sdk::{models::StealthOutputModel, storage::WalletStorageError};
 use tari_template_lib::{
-    models::EncryptedData,
-    types::{
-        amount,
-        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
-    },
+    models::{ComponentAddress, EncryptedData},
+    prelude::crypto::UtxoTag,
+    types::{amount, crypto::RistrettoPublicKeyBytes},
 };
 use time::PrimitiveDateTime;
 
-use crate::schema::stealth_outputs;
+use crate::{schema::stealth_outputs, serialization::deserialize_hex_try_from};
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
 #[diesel(table_name = stealth_outputs)]
@@ -27,20 +26,18 @@ pub struct StealthOutput {
     pub locked_by_proof: Option<i32>,
     pub encryption_secret_key_index: i64,
     pub encrypted_data: Vec<u8>,
+    pub tag_byte: i32,
+    pub is_burnt: bool,
+    pub is_frozen: bool,
+    pub is_on_chain: bool,
     pub created_at: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
 }
 
 impl StealthOutput {
-    pub(crate) fn try_convert(self, owner_account_str: &str) -> Result<StealthOutputModel, WalletStorageError> {
+    pub(crate) fn try_convert(self, owner_account: ComponentAddress) -> Result<StealthOutputModel, WalletStorageError> {
         Ok(StealthOutputModel {
-            owner_account: owner_account_str
-                .parse()
-                .map_err(|e| WalletStorageError::DecodingError {
-                    operation: "try_into_output",
-                    item: "output",
-                    details: format!("Corrupt db: invalid owner account address '{owner_account_str}': {e}"),
-                })?,
+            owner_account,
             resource_address: self
                 .resource_address
                 .parse()
@@ -49,12 +46,10 @@ impl StealthOutput {
                     item: "output",
                     details: format!("Corrupt db: invalid resource address '{}'", self.resource_address),
                 })?,
-            commitment: PedersenCommitmentBytes::from_hex(&self.commitment).map_err(|_| {
-                WalletStorageError::DecodingError {
-                    operation: "outputs_lock_smallest_amount",
-                    item: "output commitment",
-                    details: "Corrupt db: invalid hex representation".to_string(),
-                }
+            commitment: deserialize_hex_try_from(&self.commitment).map_err(|_| WalletStorageError::DecodingError {
+                operation: "try_into_output",
+                item: "output commitment",
+                details: "Corrupt db: invalid hex representation".to_string(),
             })?,
             value: amount![&self.value],
             sender_public_nonce: RistrettoPublicKeyBytes::from_hex(&self.sender_public_nonce).map_err(|_| {
@@ -75,12 +70,25 @@ impl StealthOutput {
                     details: format!("Corrupt db: invalid encrypted data length {len}"),
                 }
             })?,
+            tag_byte: UtxoTag::new(self.tag_byte as u32),
             status: self.status.parse().map_err(|_| WalletStorageError::DecodingError {
                 operation: "try_into_output",
                 item: "output",
                 details: format!("Corrupt db: invalid output status '{}'", self.status),
             })?,
-            lock_id: self.locked_by_proof.map(|proof| proof as u64),
+            is_burnt: self.is_burnt,
+            is_frozen: self.is_frozen,
+            is_on_chain: self.is_on_chain,
+            lock_id: self.locked_by_proof,
         })
     }
+}
+
+#[derive(AsChangeset)]
+#[diesel(table_name = stealth_outputs)]
+pub(crate) struct StealthOutputUpdate<'a> {
+    pub status: Option<&'a str>,
+    pub is_burnt: Option<bool>,
+    pub is_frozen: Option<bool>,
+    pub updated_at: dsl::now,
 }

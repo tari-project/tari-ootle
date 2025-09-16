@@ -52,7 +52,16 @@ use tari_engine_types::{
     commit_result::AbortReason,
     substate::{SubstateId, SubstateValue},
 };
-use tari_ootle_common_types::{shard::Shard, Epoch, ExtraData, NodeHeight, ShardGroup, ValidatorMetadata};
+use tari_ootle_common_types::{
+    shard::Shard,
+    Epoch,
+    ExtraData,
+    NodeHeight,
+    ShardGroup,
+    ShardStateVersions,
+    StateVersion,
+    ValidatorMetadata,
+};
 use tari_ootle_storage::{
     consensus_models,
     consensus_models::{
@@ -63,6 +72,7 @@ use tari_ootle_storage::{
         ForeignProposalAtom,
         LeaderFee,
         MintConfidentialOutputAtom,
+        SubstateCreated,
         SubstateDestroyed,
         SubstateRecord,
         TransactionAtom,
@@ -968,12 +978,11 @@ impl TryFrom<proto::consensus::Substate> for SubstateRecord {
             // TODO: Should we add this to the proto?
             state_hash: Default::default(),
 
-            created_at_epoch: Epoch(value.created_epoch),
-            created_justify: value.created_justify.as_slice().try_into()?,
-            created_block: value.created_block.try_into()?,
-
+            created: value
+                .created
+                .ok_or_else(|| anyhow!("Substate created metadata not provided"))?
+                .try_into()?,
             destroyed: value.destroyed.map(TryInto::try_into).transpose()?,
-            created_by_shard: Shard::from(value.created_by_shard),
         })
     }
 }
@@ -985,40 +994,58 @@ impl From<SubstateRecord> for proto::consensus::Substate {
             version: value.version,
             substate: value.substate_value.as_ref().map(|s| s.to_bytes()).unwrap_or_default(),
 
-            created_justify: value.created_justify.as_bytes().to_vec(),
-            created_block: value.created_block.as_bytes().to_vec(),
-            created_epoch: value.created_at_epoch.as_u64(),
-            created_by_shard: value.created_by_shard.as_u32(),
-
+            created: Some(value.created().into()),
             destroyed: value.destroyed.map(Into::into),
         }
     }
 }
 
-// -------------------------------- SubstateDestroyed -------------------------------- //
-impl TryFrom<proto::consensus::SubstateDestroyed> for SubstateDestroyed {
+// -------------------------------- SubstateCreatedMetadata -------------------------------- //
+impl TryFrom<proto::consensus::SubstateCreatedMetadata> for SubstateCreated {
     type Error = anyhow::Error;
 
-    fn try_from(value: proto::consensus::SubstateDestroyed) -> Result<Self, Self::Error> {
+    fn try_from(value: proto::consensus::SubstateCreatedMetadata) -> Result<Self, Self::Error> {
         Ok(Self {
-            justify: value.justify.as_slice().try_into()?,
-            by_block: NodeHeight(value.block_height),
             at_epoch: value
-                .epoch
+                .at_epoch
                 .map(Into::into)
                 .ok_or_else(|| anyhow!("Epoch not provided"))?,
-            by_shard: Shard::from(value.shard),
+            in_shard: Shard::from(value.in_shard),
+            at_state_version: value.at_state_version,
         })
     }
 }
 
-impl From<SubstateDestroyed> for proto::consensus::SubstateDestroyed {
+impl From<&SubstateCreated> for proto::consensus::SubstateCreatedMetadata {
+    fn from(value: &SubstateCreated) -> Self {
+        Self {
+            at_epoch: Some(value.at_epoch.into()),
+            in_shard: value.in_shard.as_u32(),
+            at_state_version: value.at_state_version,
+        }
+    }
+}
+
+// -------------------------------- SubstateDestroyedMetadata -------------------------------- //
+impl TryFrom<proto::consensus::SubstateDestroyedMetadata> for SubstateDestroyed {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::SubstateDestroyedMetadata) -> Result<Self, Self::Error> {
+        Ok(Self {
+            at_epoch: value
+                .at_epoch
+                .map(Into::into)
+                .ok_or_else(|| anyhow!("Epoch not provided"))?,
+            at_state_version: value.at_state_version,
+        })
+    }
+}
+
+impl From<SubstateDestroyed> for proto::consensus::SubstateDestroyedMetadata {
     fn from(value: SubstateDestroyed) -> Self {
         Self {
-            justify: value.justify.as_bytes().to_vec(),
-            block_height: value.by_block.as_u64(),
-            epoch: Some(value.at_epoch.into()),
-            shard: value.by_shard.as_u32(),
+            at_epoch: Some(value.at_epoch.into()),
+            at_state_version: value.at_state_version,
         }
     }
 }
@@ -1042,5 +1069,34 @@ impl TryFrom<proto::consensus::SyncRequest> for SyncRequestMessage {
             epoch: Epoch(value.epoch),
             block_height: NodeHeight(value.block_height),
         })
+    }
+}
+
+// -------------------------------- ShardStateVersions -------------------------------- //
+impl From<&ShardStateVersions> for proto::consensus::ShardStateVersions {
+    fn from(value: &ShardStateVersions) -> Self {
+        Self {
+            versions: value.as_slice().iter().map(|v| v.as_u64()).collect(),
+        }
+    }
+}
+
+impl TryFrom<proto::consensus::ShardStateVersions> for ShardStateVersions {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::ShardStateVersions) -> Result<Self, Self::Error> {
+        if value.versions.is_empty() {
+            return Err(anyhow!("ShardStateVersions cannot be empty"));
+        }
+        if value.versions.len() > ShardStateVersions::MAX_LEN {
+            return Err(anyhow!(
+                "ShardStateVersions cannot have more than {} versions, got {}",
+                ShardStateVersions::MAX_LEN,
+                value.versions.len()
+            ));
+        }
+
+        ShardStateVersions::from_vec(value.versions.into_iter().map(StateVersion::new).collect())
+            .map_err(|e| anyhow!("Failed to convert ShardStateVersions: {}", e))
     }
 }

@@ -1,6 +1,8 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::io::Read;
+
 use anyhow::anyhow;
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::BlockId;
@@ -21,31 +23,31 @@ pub struct SubstateLockKeyCodec<T> {
 }
 
 impl<T> SubstateLockKeyCodec<T> {
-    fn decode_transaction_id(&self, reader: &mut &[u8]) -> Result<TransactionId, RocksDbStorageError> {
+    fn decode_transaction_id<R: Read>(&self, reader: &mut R) -> Result<TransactionId, RocksDbStorageError> {
         let buf = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
-            source: anyhow!("SubstateLockKeyCodec: Invalid bytes len={} for FixedHash", reader.len()),
+            source: anyhow!("SubstateLockKeyCodec: Invalid bytes for FixedHash"),
         })?;
         Ok(TransactionId::new(buf))
     }
 
-    fn decode_block_id(&self, reader: &mut &[u8]) -> Result<BlockId, RocksDbStorageError> {
+    fn decode_block_id<R: Read>(&self, reader: &mut R) -> Result<BlockId, RocksDbStorageError> {
         let buf = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
-            source: anyhow!("SubstateLockKeyCodec: Invalid bytes len={} for FixedHash", reader.len()),
+            source: anyhow!("SubstateLockKeyCodec: Invalid bytes for FixedHash"),
         })?;
         Ok(BlockId::new(FixedHash::new(buf)))
     }
 
-    fn decode_substate_id(&self, reader: &mut &[u8]) -> Result<SubstateId, RocksDbStorageError> {
-        let substate_id = self.substate_id_codec.decode_reader(reader)?;
-        Ok(substate_id)
+    fn decode_substate_id<R: Read>(&self, reader: &mut R) -> Result<SubstateId, RocksDbStorageError> {
+        self.substate_id_codec
+            .decode_reader(reader)
+            .map_err(|e| RocksDbStorageError::DecodeError {
+                source: anyhow!("SubstateLockKeyCodec: Failed to decode SubstateId: {}", e),
+            })
     }
 
-    fn decode_block_height(&self, reader: &mut &[u8]) -> Result<NodeHeight, RocksDbStorageError> {
+    fn decode_block_height<R: Read>(&self, reader: &mut R) -> Result<NodeHeight, RocksDbStorageError> {
         let height = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
-            source: anyhow!(
-                "SubstateLockKeyCodec: Invalid bytes len={} for NodeHeight",
-                reader.len()
-            ),
+            source: anyhow!("SubstateLockKeyCodec: Invalid bytes for NodeHeight"),
         })?;
         Ok(NodeHeight(u64::from_be_bytes(height)))
     }
@@ -65,8 +67,7 @@ impl DbCodec<SubstateLockKey> for SubstateLockKeyCodec<(TransactionId, SubstateI
         ]))
     }
 
-    fn decode(&self, mut bytes: &[u8]) -> Result<SubstateLockKey, RocksDbStorageError> {
-        let reader = &mut bytes;
+    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<SubstateLockKey, RocksDbStorageError> {
         let transaction_id = self.decode_transaction_id(reader)?;
         let substate_id = self.decode_substate_id(reader)?;
         let block_id = self.decode_block_id(reader)?;
@@ -94,8 +95,7 @@ impl DbCodec<SubstateLockKey> for SubstateLockKeyCodec<(BlockId, SubstateId, Tra
         ]))
     }
 
-    fn decode(&self, mut bytes: &[u8]) -> Result<SubstateLockKey, RocksDbStorageError> {
-        let reader = &mut bytes;
+    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<SubstateLockKey, RocksDbStorageError> {
         let block_id = self.decode_block_id(reader)?;
         let substate_id = self.decode_substate_id(reader)?;
         let transaction_id = self.decode_transaction_id(reader)?;
@@ -124,8 +124,7 @@ impl DbCodec<SubstateLockKey> for SubstateLockKeyCodec<(SubstateId, TransactionI
         ]))
     }
 
-    fn decode(&self, mut bytes: &[u8]) -> Result<SubstateLockKey, RocksDbStorageError> {
-        let reader = &mut bytes;
+    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<SubstateLockKey, RocksDbStorageError> {
         let substate_id = self.decode_substate_id(reader)?;
         let transaction_id = self.decode_transaction_id(reader)?;
         let block_id = self.decode_block_id(reader)?;

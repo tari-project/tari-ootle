@@ -18,11 +18,7 @@ pub type I192 = bnum::BInt<3>; // 3 x 64 bits = 192 bits
 /// This allows Tari to support a massive number tokens within resources.
 /// e.g. 2 ETH = 2 x 10^18 Gwei.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Amount(#[cfg_attr(feature = "ts", ts(type = "string | number"))] pub(super) I192);
 
 impl Amount {
@@ -54,10 +50,6 @@ impl Amount {
     /// Creates a new `Amount` from an `i64` value.
     pub const fn new(amount: I192) -> Self {
         Self(amount)
-    }
-
-    pub fn from_u64(amount: u64) -> Self {
-        Self::new(I192::from(amount))
     }
 
     /// A value of zero.

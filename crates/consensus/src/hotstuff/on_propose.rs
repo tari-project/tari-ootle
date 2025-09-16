@@ -26,7 +26,7 @@ use tari_ootle_common_types::{
     Epoch,
     ExtraData,
     NodeHeight,
-    SubstateAddress,
+    VersionedSubstateIdRef,
 };
 use tari_ootle_storage::{
     consensus_models::{
@@ -450,8 +450,8 @@ where TConsensusSpec: ConsensusSpec
         // This relies on the UTXO commands being ordered after transaction commands
         for (commitment, output) in batch.burnt_utxos {
             let substate_id = commitment.into();
-            let addr = SubstateAddress::from_substate_id(&substate_id, 0);
-            let shard = addr.to_shard(local_committee_info.num_preshards());
+            let id = VersionedSubstateIdRef::new(&substate_id, 0);
+            let shard = id.to_shard(local_committee_info.num_preshards());
             let change = SubstateChange::Up {
                 id: substate_id,
                 shard,
@@ -486,7 +486,7 @@ where TConsensusSpec: ConsensusSpec
             tx,
             local_committee_info.shard_group(),
             pending_tree_diffs,
-            substate_store.diff()
+            substate_store.changes()
                 .iter()
                 // Calculate for local shards only and the global shard
                 .filter(|ch| local_committee_info.shard_group().contains_or_global(&ch.shard())),
@@ -674,7 +674,7 @@ where TConsensusSpec: ConsensusSpec
                             self.config.consensus_constants.fee_exhaust_divisor,
                         );
                         pool_tx.set_leader_fee(leader_fee);
-                        let diff = execution.result().finalize.result.accept().ok_or_else(|| {
+                        let diff = execution.result().finalize.result.any_accept().ok_or_else(|| {
                             HotStuffError::InvariantError(format!(
                                 "prepare_transaction: Transaction {} has COMMIT decision but execution failed when \
                                  proposing",
@@ -879,7 +879,7 @@ where TConsensusSpec: ConsensusSpec
                     tx_rec.transaction_id(),
                 ))
             })?;
-        let diff = execution.result().finalize.accept().ok_or_else(|| {
+        let diff = execution.result().finalize.any_accept().ok_or_else(|| {
             HotStuffError::InvariantError(format!(
                 "local_accept_transaction: Transaction {} has COMMIT decision but execution failed when proposing",
                 tx_rec.transaction_id(),

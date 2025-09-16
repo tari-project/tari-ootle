@@ -21,4 +21,6 @@ pub trait RuntimeModule: Send + Sync {
 pub enum RuntimeModuleError {
     #[error("BOR error: {0}")]
     Bor(#[from] tari_bor::BorError),
+    #[error("Overflow error: {0}")]
+    Overflow(String),
 }

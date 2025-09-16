@@ -29,13 +29,24 @@ use reqwest::Url;
 use tari_common::configuration::CommonConfig;
 use tari_ootle_common_types::Network;
 use tari_ootle_walletd::{
-    cli::Cli,
-    config::{ApplicationConfig, WalletDaemonConfig},
+    config::{ApplicationConfig, WalletDaemonAuth, WalletDaemonConfig},
     run_tari_ootle_walletd,
 };
 use tari_shutdown::Shutdown;
+use tari_transaction::TransactionId;
 use tari_wallet_daemon_client::{
-    types::{AuthLoginAcceptRequest, AuthLoginRequest, AuthLoginResponse},
+    error::WalletDaemonClientError,
+    types::{
+        AuthLoginAcceptRequest,
+        AuthLoginRequest,
+        AuthLoginResponse,
+        ClaimBurnRequest,
+        ClaimBurnResponse,
+        ExtClaimBurnProof,
+        TransactionWaitResultRequest,
+        TransactionWaitResultResponse,
+    },
+    ComponentAddressOrName,
     WalletDaemonClient,
 };
 use tokio::task;
@@ -57,13 +68,9 @@ pub struct TariWalletDaemonProcess {
 
 pub async fn spawn_wallet_daemon(world: &mut TariWorld, wallet_daemon_name: String, indexer_name: String) {
     let (signaling_server_port, json_rpc_port) = get_os_assigned_ports();
-    let base_dir = get_base_dir_for_scenario(
-        "wallet_daemon",
-        world.current_scenario_name.as_ref().unwrap(),
-        &wallet_daemon_name,
-    );
+    let base_dir = get_base_dir_for_scenario("wallet_daemon", world.get_current_scenario_name(), &wallet_daemon_name);
 
-    let indexer_jrpc_port = world.indexers.get(&indexer_name).unwrap().json_rpc_port;
+    let indexer_jrpc_port = world.get_indexer(&indexer_name).json_rpc_port;
     let shutdown = Shutdown::new();
     let shutdown_signal = shutdown.to_signal();
 
@@ -81,11 +88,11 @@ pub async fn spawn_wallet_daemon(world: &mut TariWorld, wallet_daemon_name: Stri
     config.ootle_wallet_daemon.signaling_server_address = Some(signaling_server_addr);
     config.ootle_wallet_daemon.indexer_json_rpc_url = indexer_url.parse().unwrap();
     config.ootle_wallet_daemon.network = Network::LocalNet;
-    let mut cli = Cli::init();
+    config.ootle_wallet_daemon.authentication = WalletDaemonAuth::None;
+    config.ootle_wallet_daemon.override_keyring_password = Some("secret".into());
     // Avoid using keyring in cucumber tests
-    cli.override_keyring_password = Some("secret".into());
 
-    let handle = task::spawn(run_tari_ootle_walletd(cli, config, shutdown_signal));
+    let handle = task::spawn(run_tari_ootle_walletd(config, None, shutdown_signal));
 
     // Wait for node to start up
     let handle = wait_listener_on_local_port(handle, json_rpc_port).await;
@@ -108,7 +115,7 @@ impl TariWalletDaemonProcess {
         self.shutdown.trigger();
     }
 
-    pub fn get_client(&self) -> WalletDaemonClient {
+    fn get_client(&self) -> WalletDaemonClient {
         let endpoint = Url::parse(&format!("http://127.0.0.1:{}", self.json_rpc_port)).unwrap();
         WalletDaemonClient::connect(endpoint, None).unwrap()
     }
@@ -133,5 +140,32 @@ impl TariWalletDaemonProcess {
             .unwrap();
         client.set_auth_token(auth_response.permissions_token);
         client
+    }
+
+    pub async fn claim_burn(
+        &self,
+        account_name: &str,
+        claim_proof: ExtClaimBurnProof,
+    ) -> Result<ClaimBurnResponse, WalletDaemonClientError> {
+        let mut client = self.get_authed_client().await;
+
+        let req = ClaimBurnRequest {
+            account: ComponentAddressOrName::Name(account_name.into()),
+            claim_proof,
+            max_fee: Some(5000),
+        };
+
+        client.claim_burn(req).await
+    }
+
+    pub async fn wait_for_transaction_result(&self, tx_id: TransactionId) -> TransactionWaitResultResponse {
+        let mut client = self.get_authed_client().await;
+        client
+            .wait_transaction_result(TransactionWaitResultRequest {
+                transaction_id: tx_id,
+                timeout_secs: Some(30),
+            })
+            .await
+            .unwrap()
     }
 }

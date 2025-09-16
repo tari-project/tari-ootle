@@ -15,6 +15,7 @@ use tari_ootle_wallet_sdk::{
     storage::WalletStore,
     WalletSdk,
 };
+use tari_ootle_wallet_sdk_services::indexer_jrpc_impl::IndexerJsonRpcNetworkInterface;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::models::ComponentAddress;
@@ -23,7 +24,6 @@ use tari_wallet_daemon_client::ComponentAddressOrName;
 use tokio::sync::broadcast;
 
 use crate::{
-    indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
     jrpc_server::ApplicationErrorCode,
     services::{TransactionFinalizedEvent, WalletEvent},
 };
@@ -112,7 +112,7 @@ pub fn get_account<TStore, TNetworkInterface>(
     accounts_api: &AccountsApi<'_, TStore, TNetworkInterface>,
 ) -> Result<AccountWithPublicKey, AccountsApiError>
 where
-    TStore: tari_ootle_wallet_sdk::storage::WalletStore,
+    TStore: WalletStore,
 {
     match account {
         ComponentAddressOrName::ComponentAddress(address) => Ok(accounts_api.get_account_by_address(address)?),
@@ -140,7 +140,7 @@ pub fn get_account_or_default<TStore, TNetworkInterface>(
     accounts_api: &AccountsApi<'_, TStore, TNetworkInterface>,
 ) -> Result<AccountWithPublicKey, anyhow::Error>
 where
-    TStore: tari_ootle_wallet_sdk::storage::WalletStore,
+    TStore: WalletStore,
 {
     let result;
     if let Some(a) = account {
@@ -192,12 +192,10 @@ pub(super) fn invalid_request<T: Display>(details: T) -> anyhow::Error {
 }
 
 pub(super) fn transaction_rejected<T: Display>(details: T) -> anyhow::Error {
-    axum_jrpc::error::JsonRpcError::new(
-        axum_jrpc::error::JsonRpcErrorReason::ApplicationError(ApplicationErrorCode::TransactionRejected as i32),
+    application_error(
+        ApplicationErrorCode::TransactionRejected,
         format!("Transaction rejected: {details}"),
-        serde_json::Value::Null,
     )
-    .into()
 }
 
 pub(super) fn general_error<T: Display>(details: T) -> anyhow::Error {

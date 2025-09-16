@@ -146,6 +146,43 @@ pub enum ValidatorNodeChange {
     },
 }
 
+#[cfg(feature = "service")]
+impl TryFrom<minotari_app_grpc::tari_rpc::ValidatorNodeChange> for ValidatorNodeChange {
+    type Error = anyhow::Error;
+
+    fn try_from(value: minotari_app_grpc::tari_rpc::ValidatorNodeChange) -> Result<Self, Self::Error> {
+        use anyhow::Context;
+        match value.change {
+            Some(minotari_app_grpc::tari_rpc::validator_node_change::Change::Add(add)) => {
+                let registration = add
+                    .registration
+                    .ok_or_else(|| anyhow::anyhow!("ValidatorNodeChange Add missing registration field"))?;
+                let claim_public_key = RistrettoPublicKeyBytes::from_bytes(&registration.claim_public_key)
+                    .context("Invalid claim_public_key")?;
+                let validator_node_public_key = RistrettoPublicKeyBytes::from_bytes(&registration.public_key)
+                    .context("Invalid validator_node_public_key")?;
+                Ok(ValidatorNodeChange::Add {
+                    claim_public_key,
+                    validator_node_public_key,
+                    activation_epoch: Epoch(add.activation_epoch),
+                    minimum_value_promise: add.minimum_value_promise,
+                    shard_key: {
+                        let hash = FixedHash::try_from(add.shard_key.as_slice()).context("Invalid shard key hash")?;
+                        SubstateAddress::from_hash_and_version(hash, 0)
+                    },
+                })
+            },
+            Some(minotari_app_grpc::tari_rpc::validator_node_change::Change::Remove(remove)) => {
+                Ok(ValidatorNodeChange::Remove {
+                    public_key: RistrettoPublicKeyBytes::from_bytes(&remove.public_key)
+                        .context("invalid public key in ValidatorNodeChange::Remove")?,
+                })
+            },
+            None => Err(anyhow::anyhow!("ValidatorNodeChange missing change field")),
+        }
+    }
+}
+
 impl Display for ValidatorNodeChange {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

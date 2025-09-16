@@ -57,12 +57,13 @@ use tari_bor::decode_exact;
 use tari_engine_types::{
     commit_result::FinalizeResult,
     component::ComponentHeader,
-    confidential::ConfidentialClaim,
+    confidential::TariStealthClaim,
     indexed_value::IndexedValue,
     limits,
     lock::LockFlag,
     substate::SubstateValue,
     ComponentCall,
+    ResourceAddressRef,
     ValidatorFeePoolAddress,
 };
 use tari_template_lib::{
@@ -93,15 +94,7 @@ use tari_template_lib::{
         WorkspaceOffsetId,
     },
     invoke_args,
-    models::{
-        BucketId,
-        ComponentAddress,
-        Metadata,
-        NonFungibleAddress,
-        ResourceAddress,
-        StealthTransferStatement,
-        VaultRef,
-    },
+    models::{BucketId, ComponentAddress, Metadata, NonFungibleAddress, StealthTransferStatement, VaultRef},
     types::EntityId,
 };
 pub use tracker::StateTracker;
@@ -170,7 +163,7 @@ pub trait RuntimeInterface: Send + Sync {
 
     fn set_last_instruction_output(&self, value: IndexedValue) -> Result<(), RuntimeError>;
 
-    fn claim_burn(&self, claim: ConfidentialClaim) -> Result<(), RuntimeError>;
+    fn claim_burn(&self, claim: TariStealthClaim) -> Result<(), RuntimeError>;
 
     fn claim_validator_fees(&self, address: ValidatorFeePoolAddress) -> Result<(), RuntimeError>;
 
@@ -208,10 +201,16 @@ pub trait RuntimeInterface: Send + Sync {
 
     fn stealth_transfer(
         &self,
-        resource_address: ResourceAddress,
+        resource_address: ResourceAddressRef,
         statement: StealthTransferStatement,
         revealed_funds_bucket: Option<BucketId>,
     ) -> Result<Option<BucketId>, RuntimeError>;
+
+    fn pay_fee(
+        &self,
+        statement: StealthTransferStatement,
+        revealed_funds_bucket: Option<BucketId>,
+    ) -> Result<(), RuntimeError>;
 }
 
 #[derive(Clone)]

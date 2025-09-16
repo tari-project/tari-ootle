@@ -219,11 +219,7 @@ impl Display for ForeignProposalRecord {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, PartialOrd, Ord, BorshSerialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ForeignProposalAtom {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub block_id: BlockId,

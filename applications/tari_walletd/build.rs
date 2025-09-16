@@ -27,6 +27,7 @@ const NPM_COMMANDS: &[(&str, &[&str])] = &[
     ("../../bindings", &["run", "build-dev"]),
     ("../../clients/javascript/wallet_daemon_client", &["install"]),
     ("../../clients/javascript/wallet_daemon_client", &["run", "build"]),
+    ("./web_ui", &["clean-dist"]),
     ("./web_ui", &["install"]),
     ("./web_ui", &["run", "build"]),
 ];

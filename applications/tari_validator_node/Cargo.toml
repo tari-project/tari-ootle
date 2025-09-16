@@ -18,7 +18,7 @@ web_ui = []
 minotari_app_utilities = { workspace = true }
 tari_common = { workspace = true }
 tari_common_types = { workspace = true }
-tari_core = { workspace = true, default-features = false, features = ["transactions"] }
+tari_transaction_components = { workspace = true }
 tari_crypto = { workspace = true }
 tari_epoch_oracles = { workspace = true, features = ["base_layer"] }
 tari_validator_node_rpc = { workspace = true }
@@ -37,7 +37,6 @@ tari_validator_node_client = { workspace = true }
 tari_base_node_client = { workspace = true }
 tari_template_manager = { workspace = true }
 tari_epoch_manager = { workspace = true, features = ["service"] }
-tari_indexer_lib = { workspace = true }
 tari_rpc_state_sync = { workspace = true }
 tari_bor = { workspace = true, default-features = true }
 tari_consensus = { workspace = true }
@@ -46,7 +45,7 @@ tari_networking = { workspace = true }
 tari_rpc_framework = { workspace = true }
 tari_template_builtin = { workspace = true }
 tari_swarm = { workspace = true }
-tari_sidechain = { workspace = true }
+tari_state_tree = { workspace = true }
 
 sqlite_message_logger = { workspace = true }
 

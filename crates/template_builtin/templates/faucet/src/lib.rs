@@ -5,11 +5,11 @@ use tari_template_lib::prelude::*;
 
 #[template]
 mod template {
-
     use super::*;
 
     pub struct XtrFaucet {
         vault: Vault,
+        resource_manager: ResourceManager,
     }
 
     impl XtrFaucet {
@@ -23,11 +23,16 @@ mod template {
         pub fn take_confidential(
             &self,
             amount: Amount,
-            output: ConfidentialOutputStatement,
+            output: StealthOutputsStatement,
             balance_proof: BalanceProofSignature,
-        ) -> Bucket {
-            // Withdraws revealed funds into the given confidential output
-            let proof = ConfidentialWithdrawProof::revealed_to_confidential(amount, output, balance_proof);
+        ) -> Option<Bucket> {
+            let revealed_bucket = self.vault.withdraw(amount);
+            let transfer = StealthTransferStatement {
+                inputs_statement: StealthInputsStatement::new_revealed(amount),
+                outputs_statement: output,
+                balance_proof,
+            };
+
             debug!("Withdrawing {} coins from faucet into confidential output", amount);
             let signer = CallerContext::transaction_signer_public_key();
             emit_event("take", [
@@ -35,7 +40,9 @@ mod template {
                 ("confidential", "true".to_string()),
                 ("signer", signer.to_string()),
             ]);
-            self.vault.withdraw_confidential(proof)
+
+            self.resource_manager
+                .stealth_transfer_with_opt_input_bucket(transfer, Some(revealed_bucket))
         }
     }
 }

@@ -1,9 +1,9 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-import useAuthStore from "../../store/authStore";
+import useAuthStore from "@store/authStore";
 import Grid from "@mui/material/Grid";
-import CopyToClipboard from "../../Components/CopyToClipboard";
+import CopyToClipboard from "@components/CopyToClipboard";
 import Typography from "@mui/material/Typography";
 import TextField from "@mui/material/TextField/TextField";
 

@@ -6,13 +6,13 @@ use std::sync::Arc;
 use digest::crypto_common::rand_core::{OsRng, RngCore};
 use log::{info, warn};
 use passwords::PasswordGenerator;
-use tari_crypto::tari_utilities::SafePassword;
-use tari_key_manager::{
+use tari_common_types::seeds::{
     cipher_seed::CipherSeed,
-    error::KeyManagerError,
+    error::CipherError,
     mnemonic::{Mnemonic, MnemonicLanguage},
-    SeedWords,
+    seed_words::SeedWords,
 };
+use tari_crypto::tari_utilities::SafePassword;
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
     Network,
@@ -27,8 +27,9 @@ use crate::{
         confidential_outputs::ConfidentialOutputsApi,
         confidential_transfer::ConfidentialTransferApi,
         config::{ConfigApi, ConfigApiError, ConfigKey},
-        key_manager::KeyManagerApi,
+        key_manager::{KeyManagerApi, KeyManagerApiError},
         non_fungible_tokens::NonFungibleTokensApi,
+        resources::ResourcesApi,
         stealth_crypto::StealthCryptoApi,
         stealth_outputs::StealthOutputsApi,
         stealth_transfer::StealthTransferApi,
@@ -126,16 +127,16 @@ where
         ConfigApi::new(&self.store)
     }
 
-    pub fn get_config(&self) -> &WalletSdkConfig {
+    pub fn sdk_config(&self) -> &WalletSdkConfig {
         &self.config
+    }
+
+    pub fn network(&self) -> Network {
+        self.config.network
     }
 
     pub fn get_network_interface(&self) -> &TNetworkInterface {
         &self.network_interface
-    }
-
-    pub fn get_network_interface_mut(&mut self) -> &mut TNetworkInterface {
-        &mut self.network_interface
     }
 
     /// Returns the KeyManager API for the wallet.
@@ -162,6 +163,10 @@ where
 
     pub fn accounts_api(&self) -> AccountsApi<'_, TStore, TNetworkInterface> {
         AccountsApi::new(&self.store, self.substate_api(), self.key_manager_api())
+    }
+
+    pub fn resources_api(&self) -> ResourcesApi<'_, TStore> {
+        ResourcesApi::new(&self.store)
     }
 
     pub fn confidential_crypto_api(&self) -> ConfidentialCryptoApi {
@@ -202,7 +207,7 @@ where
         StealthOutputsApi::new(
             self.store(),
             self.key_manager_api(),
-            self.confidential_crypto_api(),
+            self.stealth_crypto_api(),
             self.config_api(),
         )
     }
@@ -337,7 +342,9 @@ pub enum WalletSdkError {
     #[error("OS Keyring error: {0}")]
     KeyRing(#[from] keyring::Error),
     #[error("Key manager error: {0}")]
-    KeyManager(#[from] KeyManagerError),
+    KeyManager(#[from] KeyManagerApiError),
+    #[error("Cipher error: {0}")]
+    CipherError(#[from] CipherError),
     #[error("Failed to generate password for cipher seed: {0}")]
     PasswordGeneration(String),
     #[error(
@@ -356,10 +363,11 @@ impl IsNotFoundError for WalletSdkError {
         match self {
             Self::WalletStorageError(e) => e.is_not_found_error(),
             Self::ConfigApiError(e) => e.is_not_found_error(),
+            Self::KeyManager(e) => e.is_not_found_error(),
             Self::KeyRing(keyring::Error::NoEntry) => true,
             Self::KeyRing(_) |
+            Self::CipherError(_) |
             Self::PasswordGeneration(_) |
-            Self::KeyManager(_) |
             Self::InvariantError { .. } |
             Self::FailedToAccessKeyRing |
             Self::NetworkParseError(_) => false,

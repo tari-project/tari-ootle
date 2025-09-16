@@ -102,8 +102,6 @@ pub struct CommonSubmitArgs {
     pub dump_outputs_into: Option<String>,
     #[clap(long, short = 'a')]
     pub account_template_address: Option<String>,
-    #[clap(long)]
-    pub dry_run: bool,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -252,7 +250,7 @@ pub async fn submit_transaction(
     // Convert to shard id
     let inputs = inputs.into_iter().collect::<Vec<_>>();
 
-    summarize_request(&instructions, &inputs, 1, common.dry_run);
+    summarize_request(&instructions, &inputs);
     println!();
 
     let transaction = Transaction::builder()
@@ -260,10 +258,7 @@ pub async fn submit_transaction(
         .with_inputs(inputs)
         .build_and_seal(&key.secret_key);
 
-    let request = SubmitTransactionRequest {
-        transaction,
-        is_dry_run: common.dry_run,
-    };
+    let request = SubmitTransactionRequest { transaction };
 
     let mut resp = client.submit_transaction(request).await?;
 
@@ -284,7 +279,7 @@ pub async fn submit_transaction(
         .await?;
         let result = transaction_execution.result();
         if transaction_execution.decision().is_commit() {
-            if let Some(diff) = result.finalize.result.accept() {
+            if let Some(diff) = result.finalize.result.any_accept() {
                 component_manager.commit_diff(diff)?;
             }
         }
@@ -332,12 +327,7 @@ async fn wait_for_transaction_result(
     }
 }
 
-fn summarize_request(instructions: &[Instruction], inputs: &[SubstateRequirement], fee: u64, is_dry_run: bool) {
-    if is_dry_run {
-        println!("NOTE: Dry run is enabled. This transaction will not be processed by the network.");
-        println!();
-    }
-    println!("Fee: {}", fee);
+fn summarize_request(instructions: &[Instruction], inputs: &[SubstateRequirement]) {
     println!("Inputs:");
     if inputs.is_empty() {
         println!("  None");

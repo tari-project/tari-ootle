@@ -1,28 +1,29 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{convert::Infallible, str::FromStr};
+use std::{collections::HashMap, convert::Infallible, str::FromStr};
 
-use async_trait::async_trait;
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, tari_utilities::SafePassword};
 use tari_engine_types::{
     crypto::{commit_amount_checked, get_commitment_factory},
     substate::SubstateId,
     ToByteType,
+    Utxo,
+    UtxoId,
 };
-use tari_ootle_common_types::{optional::Optional, Network};
+use tari_ootle_common_types::{optional::Optional, shard::Shard, Network, StateVersion};
 use tari_ootle_wallet_sdk::{
-    models::{ConfidentialOutputModel, OutputLockId, OutputStatus},
+    models::{ConfidentialOutputModel, OutputStatus, UtxoUpdateSet, WalletLockId},
     network::{SubstateQueryResult, TransactionQueryResult, WalletNetworkInterface},
-    storage::{WalletStore, WalletStoreReader},
+    storage::{TagAndPublicNoncePair, WalletStore, WalletStoreReader},
     WalletSdk,
     WalletSdkConfig,
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_abi::TemplateDef;
 use tari_template_lib::{
-    constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-    models::{ComponentAddress, EncryptedData, VaultId},
+    constants::STEALTH_TARI_RESOURCE_ADDRESS,
+    models::{ComponentAddress, EncryptedData, ResourceAddress, VaultId},
     resource::ResourceType,
     types::{crypto::PedersenCommitmentBytes, Amount, TemplateAddress},
 };
@@ -36,18 +37,18 @@ fn outputs_locked_and_released() {
     let commitment_49 = test.add_unspent_output(49);
     let _commitment_100 = test.add_unspent_output(100);
 
-    let proof_id = test.new_proof();
+    let lock_id = test.new_lock();
     let (inputs, total_value) = test
         .sdk()
         .confidential_outputs_api()
-        .lock_outputs_by_amount(proof_id, &Test::test_vault_address(), 50)
+        .lock_outputs_by_amount(lock_id, &Test::test_vault_address(), 50)
         .unwrap();
     assert_eq!(total_value, 74);
     assert_eq!(inputs.len(), 2);
 
     let locked = test
         .store()
-        .with_read_tx(|tx| tx.outputs_get_locked_by_lock_id(proof_id))
+        .with_read_tx(|tx| tx.outputs_get_locked_by_lock_id(lock_id))
         .unwrap();
 
     assert!(locked.iter().any(|l| l.commitment == commitment_25));
@@ -56,12 +57,12 @@ fn outputs_locked_and_released() {
 
     test.sdk
         .confidential_outputs_api()
-        .release_proof_outputs(proof_id)
+        .release_locked_outputs(lock_id)
         .unwrap();
 
     let locked = test
         .store()
-        .with_read_tx(|tx| tx.outputs_get_locked_by_lock_id(proof_id))
+        .with_read_tx(|tx| tx.outputs_get_locked_by_lock_id(lock_id))
         .unwrap();
     assert_eq!(locked.len(), 0);
 }
@@ -75,7 +76,7 @@ fn outputs_locked_and_finalized() {
     let commitment_100 = test.add_unspent_output(100);
 
     let outputs_api = test.sdk().confidential_outputs_api();
-    let proof_id = test.new_proof();
+    let proof_id = test.new_lock();
 
     let (inputs, total_value) = outputs_api
         .lock_outputs_by_amount(proof_id, &Test::test_vault_address(), 50)
@@ -114,7 +115,7 @@ fn outputs_locked_and_finalized() {
     let balance = test.get_unspent_balance();
     assert_eq!(balance, 100);
 
-    outputs_api.finalize_outputs_for_proof(proof_id).unwrap();
+    outputs_api.finalize_outputs_for_lock(proof_id).unwrap();
 
     {
         let mut tx = test.store().create_read_tx().unwrap();
@@ -160,8 +161,8 @@ impl Test {
             .add_vault(
                 Test::test_account_address(),
                 Test::test_vault_address(),
-                CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-                ResourceType::Confidential,
+                STEALTH_TARI_RESOURCE_ADDRESS,
+                ResourceType::Stealth,
                 Some("TEST".to_string()),
                 6,
             )
@@ -210,9 +211,8 @@ impl Test {
         commitment
     }
 
-    pub fn new_proof(&self) -> OutputLockId {
-        let outputs_api = self.sdk.confidential_outputs_api();
-        outputs_api.add_output_lock(&Self::test_vault_address()).unwrap()
+    pub fn new_lock(&self) -> WalletLockId {
+        self.sdk.confidential_outputs_api().create_lock().unwrap()
     }
 
     pub fn get_unspent_balance(&self) -> Amount {
@@ -237,7 +237,6 @@ impl Test {
 struct PanicNetworkInterface;
 
 // TODO: test the substate scanning in the SDK
-#[async_trait]
 impl WalletNetworkInterface for PanicNetworkInterface {
     type Error = Infallible;
 
@@ -248,12 +247,12 @@ impl WalletNetworkInterface for PanicNetworkInterface {
         _version: Option<u32>,
         _local_search_only: bool,
     ) -> Result<SubstateQueryResult, Self::Error> {
-        panic!("PanicIndexer called")
+        panic!("PanicNetworkInterface called")
     }
 
     #[allow(clippy::diverging_sub_expression)]
     async fn submit_transaction(&self, _transaction: Transaction) -> Result<TransactionId, Self::Error> {
-        panic!("PanicIndexer called")
+        panic!("PanicNetworkInterface called")
     }
 
     #[allow(clippy::diverging_sub_expression)]
@@ -261,7 +260,7 @@ impl WalletNetworkInterface for PanicNetworkInterface {
         &self,
         _transaction: Transaction,
     ) -> Result<TransactionQueryResult, Self::Error> {
-        panic!("PanicIndexer called")
+        panic!("PanicNetworkInterface called")
     }
 
     #[allow(clippy::diverging_sub_expression)]
@@ -269,11 +268,11 @@ impl WalletNetworkInterface for PanicNetworkInterface {
         &self,
         _transaction_id: TransactionId,
     ) -> Result<TransactionQueryResult, Self::Error> {
-        panic!("PanicIndexer called")
+        panic!("PanicNetworkInterface called")
     }
 
     async fn fetch_template_definition(&self, _template_address: TemplateAddress) -> Result<TemplateDef, Self::Error> {
-        panic!("PanicIndexer called")
+        panic!("PanicNetworkInterface called")
     }
 
     async fn list_substates(
@@ -283,10 +282,26 @@ impl WalletNetworkInterface for PanicNetworkInterface {
         _limit: Option<u64>,
         _offset: Option<u64>,
     ) -> Result<tari_ootle_wallet_sdk::network::SubstateListResult, Self::Error> {
-        panic!("PanicIndexer called")
+        panic!("PanicNetworkInterface called")
     }
 
     async fn wait_until_ready(&self) -> Result<(), Self::Error> {
-        panic!("PanicIndexer called")
+        panic!("PanicNetworkInterface called")
+    }
+
+    async fn query_stealth_utxo_updates(
+        &self,
+        _resource_address: ResourceAddress,
+        _shard_state_versions: HashMap<Shard, StateVersion>,
+    ) -> Result<UtxoUpdateSet, Self::Error> {
+        panic!("PanicNetworkInterface called")
+    }
+
+    async fn get_unspent_utxos(
+        &self,
+        _resource_address: ResourceAddress,
+        _tag_and_nonce_pairs: Vec<TagAndPublicNoncePair>,
+    ) -> Result<Vec<(UtxoId, Utxo)>, Self::Error> {
+        panic!("PanicNetworkInterface get_unspent_utxos called")
     }
 }

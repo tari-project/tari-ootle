@@ -72,6 +72,28 @@ impl FungibleResourceBuilder {
         }
     }
 
+    /// Allows for chaining of builder methods even when conditionally applying builder methods.
+    ///
+    /// ## Example
+    ///
+    /// ```ignore
+    /// use tari_template_lib::prelude::*;
+    /// let resource = ResourceBuilder::fungible()
+    ///    .with_owner_rule(rule!(allow_all))
+    ///   .then(|builder| {
+    ///     if some_condition {
+    ///        builder.do_something_on_some_condition(..)
+    ///     } else {
+    ///        // or do nothing
+    ///        builder
+    ///     }
+    ///   })
+    ///   .build();
+    /// ```
+    pub fn then<F: FnOnce(Self) -> Self>(self, f: F) -> Self {
+        f(self)
+    }
+
     /// Sets up who will be the owner of the resource.
     ///
     /// By default, the owner is the signer of the resource creation transaction ([`OwnerRule::OwnedBySigner`]).

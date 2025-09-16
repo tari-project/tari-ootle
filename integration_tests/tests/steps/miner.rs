@@ -30,11 +30,15 @@ pub async fn miner_mines_new_blocks(world: &mut TariWorld, miner_name: String, n
         let mut iter_count = 0;
         while tip.height_of_longest_chain < start_tip + num_blocks {
             tip = client.get_tip_info().await.unwrap();
-            tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             if iter_count > 100 {
                 panic!("Timed out waiting for tip height to reach {}", start_tip + num_blocks);
             }
             iter_count += 1;
         }
+        eprintln!(
+            "Base node {} reached tip height {}",
+            bn.name, tip.height_of_longest_chain
+        );
     }
 }

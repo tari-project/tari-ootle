@@ -22,11 +22,11 @@
 
 use reqwest::Url;
 use tari_common_types::types::FixedHash;
+use tari_engine::template::LoadedTemplate;
 use tari_epoch_manager::traits::TemplateDownloader;
 use tari_ootle_common_types::Epoch;
 use tari_ootle_storage::global::TemplateStatus;
 use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
-use tari_validator_node_client::types::TemplateAbi;
 use tokio::sync::{mpsc, oneshot};
 
 use super::{
@@ -59,7 +59,7 @@ impl TemplateManagerHandle {
         rx.await.map_err(|_| TemplateManagerError::ChannelClosed)?
     }
 
-    pub async fn load_template_abi(&self, address: TemplateAddress) -> Result<TemplateAbi, TemplateManagerError> {
+    pub async fn load_template_abi(&self, address: TemplateAddress) -> Result<LoadedTemplate, TemplateManagerError> {
         let (tx, rx) = oneshot::channel();
         self.request_tx
             .send(TemplateManagerRequest::LoadTemplateAbi { address, reply: tx })

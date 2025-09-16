@@ -1,15 +1,28 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use log::{info, warn};
-use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
-use tari_engine_types::{FromByteType, ToByteType, UtxoOutput};
-use tari_key_manager::key_manager::DerivedKey;
-use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
+use log::{debug, info, warn};
+use tari_crypto::{
+    keys::PublicKey,
+    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey},
+};
+use tari_engine_types::{
+    component::derive_component_address_from_public_key,
+    FromByteType,
+    ToByteType,
+    Utxo,
+    UtxoAddress,
+    UtxoOutput,
+};
+use tari_ootle_common_types::{
+    optional::{IsNotFoundError, Optional},
+    Network,
+};
 use tari_ootle_wallet_crypto::{kdfs, MaskAndValue, UnblindedStealthInputStatement};
+use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    models::{ResourceAddress, VaultId},
-    prelude::{ComponentAddress, PedersenCommitmentBytes},
+    models::{ComponentAddress, ResourceAddress, VaultId},
+    prelude::PedersenCommitmentBytes,
     types::Amount,
 };
 use tari_transaction::TransactionId;
@@ -17,20 +30,21 @@ use tari_transaction::TransactionId;
 use crate::{
     apis::{
         accounts::AccountsApiError,
-        confidential_crypto::{ConfidentialCryptoApi, ConfidentialCryptoApiError},
         config::{ConfigApi, ConfigApiError},
-        key_manager::{KeyManagerApi, KeyManagerApiError},
+        key_manager::{KeyBranch, KeyManagerApi, KeyManagerApiError},
+        stealth_crypto::{StealthCryptoApi, StealthCryptoApiError},
+        stealth_transfer::InputToSpend,
     },
-    models::{AccountWithPublicKey, OutputLockId, OutputStatus, StealthOutputModel},
+    models::{Account, KeyPair, OutputStatus, StealthBalance, StealthOutputModel, WalletLockId},
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
-const LOG_TARGET: &str = "tari::wallet::apis::stealth_outputs";
+const LOG_TARGET: &str = "tari::ootle::wallet::apis::stealth_outputs";
 
 pub struct StealthOutputsApi<'a, TStore> {
     store: &'a TStore,
     key_manager_api: KeyManagerApi<'a, TStore>,
-    crypto_api: ConfidentialCryptoApi,
+    crypto_api: StealthCryptoApi,
     config_api: ConfigApi<'a, TStore>,
 }
 
@@ -38,7 +52,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
     pub fn new(
         store: &'a TStore,
         key_manager_api: KeyManagerApi<'a, TStore>,
-        crypto_api: ConfidentialCryptoApi,
+        crypto_api: StealthCryptoApi,
         config_api: ConfigApi<'a, TStore>,
     ) -> Self {
         Self {
@@ -49,9 +63,13 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         }
     }
 
-    pub fn lock_outputs_by_amount<A: Into<Amount>>(
+    /// Locks as many outputs required to reach at least the specified amount. If there are insufficient funds, an
+    /// `InsufficientFunds` error is returned and no outputs are locked.
+    pub fn lock_outputs_for_at_least_amount<A: Into<Amount>>(
         &self,
-        lock_id: OutputLockId,
+        account_address: &ComponentAddress,
+        resource_address: &ResourceAddress,
+        lock_id: WalletLockId,
         amount: A,
     ) -> Result<(Vec<StealthOutputModel>, Amount), StealthOutputsApiError> {
         let amount = amount
@@ -62,7 +80,8 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                 reason: "Amount must be non-negative".to_string(),
             })?;
         self.store.with_write_tx(|tx| {
-            let (outputs, total_output_amount) = self.lock_outputs_internal(tx, amount, lock_id)?;
+            let (outputs, total_output_amount) =
+                self.lock_outputs_internal(tx, account_address, resource_address, amount, lock_id)?;
 
             if total_output_amount < amount {
                 return Err(StealthOutputsApiError::InsufficientFunds);
@@ -72,20 +91,36 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         })
     }
 
+    pub fn locks_set_transaction_id(
+        &self,
+        lock_id: WalletLockId,
+        transaction_id: TransactionId,
+    ) -> Result<(), StealthOutputsApiError> {
+        self.store
+            .with_write_tx(|tx| tx.locks_link_transaction(lock_id, transaction_id))?;
+        Ok(())
+    }
+
+    /// Locks as many outputs required to reach at least the specified amount. If there are insufficient funds, all
+    /// available outputs will be locked and returned along with the total amount locked.
     pub fn lock_outputs_until_partial_amount(
         &self,
+        account_address: &ComponentAddress,
+        resource_address: &ResourceAddress,
         amount: Amount,
-        locked_by_id: OutputLockId,
+        locked_by_id: WalletLockId,
     ) -> Result<(Vec<StealthOutputModel>, Amount), StealthOutputsApiError> {
         self.store
-            .with_write_tx(|tx| self.lock_outputs_internal(tx, amount, locked_by_id))
+            .with_write_tx(|tx| self.lock_outputs_internal(tx, account_address, resource_address, amount, locked_by_id))
     }
 
     fn lock_outputs_internal<TTx: WalletStoreWriter>(
         &self,
         tx: &mut TTx,
+        account_address: &ComponentAddress,
+        resource_address: &ResourceAddress,
         amount: Amount,
-        locked_by_id: OutputLockId,
+        locked_by_id: WalletLockId,
     ) -> Result<(Vec<StealthOutputModel>, Amount), StealthOutputsApiError> {
         if amount.is_negative() {
             return Err(StealthOutputsApiError::InvalidParameter {
@@ -96,13 +131,21 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         let mut total_output_amount = Amount::zero();
         let mut outputs = Vec::new();
         while total_output_amount < amount {
-            let output = tx.stealth_outputs_lock_smallest_amount(locked_by_id).optional()?;
+            let output = tx
+                .stealth_outputs_lock_smallest_amount(account_address, resource_address, locked_by_id)
+                .optional()?;
             match output {
                 Some(output) => {
                     total_output_amount += output.value;
                     outputs.push(output);
                 },
                 None => {
+                    debug!(
+                        target: LOG_TARGET,
+                        "No more outputs available to lock. Total locked amount: {}, required amount: {}",
+                        total_output_amount,
+                        amount
+                    );
                     break;
                 },
             }
@@ -111,48 +154,54 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         Ok((outputs, total_output_amount))
     }
 
-    pub fn add_output(&self, output: StealthOutputModel) -> Result<(), StealthOutputsApiError> {
+    pub fn add_output(&self, output: &StealthOutputModel) -> Result<(), StealthOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
         tx.stealth_outputs_insert(output)?;
         tx.commit()?;
         Ok(())
     }
 
-    pub fn create_lock_for_resource(
+    pub fn lock_funds_in_vault<A: Into<Amount>>(
         &self,
-        resource_address: &ResourceAddress,
-    ) -> Result<OutputLockId, StealthOutputsApiError> {
-        let lock_id = self
-            .store
-            .with_write_tx(|tx| tx.output_locks_insert(resource_address))?;
+        lock_id: WalletLockId,
+        vault_id: &VaultId,
+        amount_to_lock: A,
+    ) -> Result<(), StealthOutputsApiError> {
+        self.store
+            .with_write_tx(|tx| tx.vaults_lock_revealed_funds(lock_id, vault_id, amount_to_lock.into()))?;
+        Ok(())
+    }
+
+    pub fn create_lock(&self) -> Result<WalletLockId, StealthOutputsApiError> {
+        let lock_id = self.store.with_write_tx(|tx| tx.locks_create())?;
         Ok(lock_id)
     }
 
-    pub fn release_proof_outputs(&self, lock_id: OutputLockId) -> Result<(), StealthOutputsApiError> {
+    pub fn release_locked_outputs(&self, lock_id: WalletLockId) -> Result<(), StealthOutputsApiError> {
         self.store.with_write_tx(|tx| {
-            tx.output_locks_delete(lock_id)?;
             tx.outputs_release_by_lock_id(lock_id)?;
+            tx.locks_delete(lock_id)?;
             Ok(())
         })
     }
 
-    pub fn finalize_outputs(&self, lock_id: OutputLockId) -> Result<(), StealthOutputsApiError> {
+    pub fn finalize_outputs(&self, lock_id: WalletLockId) -> Result<(), StealthOutputsApiError> {
         self.store.with_write_tx(|tx| {
-            tx.output_locks_delete(lock_id)?;
             tx.stealth_outputs_finalize_by_lock_id(lock_id)?;
+            tx.locks_delete(lock_id)?;
             Ok(())
         })
     }
 
     pub fn resolve_output_masks_for_spending(
         &self,
-        owner_account: &AccountWithPublicKey,
+        owner_account: &Account,
         outputs: Vec<StealthOutputModel>,
-    ) -> Result<Vec<UnblindedStealthInputStatement>, StealthOutputsApiError> {
+    ) -> Result<Vec<InputToSpend>, StealthOutputsApiError> {
         let network = self.config_api.get_network()?;
         // Derive owner secret - the sender does not know the owner secret
         let owner_key_part = self.key_manager_api.derive_account_key(owner_account.key_index())?;
-        let mut outputs_with_masks = Vec::with_capacity(outputs.len());
+        let mut inputs_with_masks = Vec::with_capacity(outputs.len());
         for output in outputs {
             // Derive the account secret, of which the public key is used by senders to encrypt the value and mask.
             let decryption_key_part = self
@@ -175,32 +224,38 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                 &output.encrypted_data,
             )?;
 
-            let stealth_secret = kdfs::owner_stealth_dh_secret(network, &owner_key_part.key, &nonce);
+            let stealth_secret = self
+                .crypto_api
+                .derive_stealth_owner_secret(network, &owner_key_part.key, &nonce);
 
-            outputs_with_masks.push(UnblindedStealthInputStatement {
-                mask_and_value: MaskAndValue {
-                    value: output.value,
-                    mask,
+            inputs_with_masks.push(InputToSpend {
+                statement: UnblindedStealthInputStatement {
+                    mask_and_value: MaskAndValue {
+                        value: output.value,
+                        mask,
+                    },
+                    owner_secret: stealth_secret,
+                    public_nonce: nonce,
                 },
-                owner_secret: stealth_secret,
-                public_nonce: nonce,
+                is_on_chain: output.is_on_chain,
             });
         }
-        Ok(outputs_with_masks)
+        Ok(inputs_with_masks)
     }
 
-    pub fn lock_revealed_funds(
+    pub fn lock_revealed_funds<A: Into<Amount>>(
         &self,
-        lock_id: OutputLockId,
-        amount_to_lock: Amount,
+        lock_id: WalletLockId,
+        vault_id: &VaultId,
+        amount_to_lock: A,
     ) -> Result<(), StealthOutputsApiError> {
         self.store
-            .with_write_tx(|tx| tx.vaults_lock_revealed_funds(lock_id, amount_to_lock))?;
+            .with_write_tx(|tx| tx.vaults_lock_revealed_funds(lock_id, vault_id, amount_to_lock.into()))?;
 
         Ok(())
     }
 
-    pub fn finalize_locked_revealed_funds(&self, lock_id: OutputLockId) -> Result<(), StealthOutputsApiError> {
+    pub fn finalize_locked_revealed_funds(&self, lock_id: WalletLockId) -> Result<(), StealthOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
         tx.vaults_finalized_locked_revealed_funds(lock_id)?;
         tx.commit()?;
@@ -208,47 +263,159 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         Ok(())
     }
 
-    pub fn release_revealed_funds(&self, lock_id: OutputLockId) -> Result<(), StealthOutputsApiError> {
+    pub fn release_revealed_funds(&self, lock_id: WalletLockId) -> Result<(), StealthOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
-        tx.vaults_unlock_revealed_funds(lock_id)?;
+        tx.vaults_release_lock_revealed_funds(lock_id)?;
         tx.commit()?;
 
         Ok(())
     }
 
-    pub fn get_unspent_balance(&self, vault_id: &VaultId) -> Result<Amount, StealthOutputsApiError> {
-        let mut tx = self.store.create_read_tx()?;
-        let balance = tx.outputs_get_unspent_balance(vault_id)?;
-        Ok(balance.into())
+    pub fn get_unspent_outputs_by_account(
+        &self,
+        account_address: &ComponentAddress,
+    ) -> Result<Vec<StealthOutputModel>, StealthOutputsApiError> {
+        let balance = self
+            .store
+            .with_read_tx(|tx| tx.stealth_outputs_get_unspent_by_account(account_address))?;
+        Ok(balance)
     }
 
-    pub fn verify_and_update_outputs<'i, I: IntoIterator<Item = (&'i PedersenCommitmentBytes, &'i UtxoOutput)>>(
+    pub fn get_unspent_balance(
         &self,
-        account: &AccountWithPublicKey,
-        resource_address: ResourceAddress,
+        resource_address: &ResourceAddress,
+    ) -> Result<StealthBalance, StealthOutputsApiError> {
+        let balance = self
+            .store
+            .with_read_tx(|tx| tx.stealth_outputs_get_unspent_balance(resource_address))?;
+        Ok(balance)
+    }
+
+    pub fn upsert_utxo(&self, utxo: &StealthOutputModel) -> Result<(), StealthOutputsApiError> {
+        self.store.with_write_tx(|tx| {
+            // TODO(perf): consider a dedicated exists query
+            let exists = tx
+                .stealth_outputs_get_by_commitment(&utxo.resource_address, &utxo.commitment)
+                .optional()?
+                .is_some();
+            if exists {
+                let address = utxo.to_utxo_address();
+                tx.stealth_outputs_update(&address, Some(utxo.is_burnt), Some(utxo.status), Some(utxo.is_frozen))
+            } else {
+                tx.stealth_outputs_insert(utxo)
+            }
+        })?;
+        Ok(())
+    }
+
+    pub fn update_utxo_status(
+        &self,
+        address: &UtxoAddress,
+        is_burnt: Option<bool>,
+        status: Option<OutputStatus>,
+        is_frozen: Option<bool>,
+    ) -> Result<(), StealthOutputsApiError> {
+        self.store
+            .with_write_tx(|tx| tx.stealth_outputs_update(address, is_burnt, status, is_frozen))?;
+        Ok(())
+    }
+
+    pub fn utxo_exists(&self, address: &UtxoAddress) -> Result<bool, StealthOutputsApiError> {
+        let exists = self
+            .store
+            .with_read_tx(|tx| {
+                // TODO(perf): consider a dedicated exists query
+                tx.stealth_outputs_get_by_commitment(address.resource_address(), &address.id().into_commitment_bytes())
+                    .optional()
+            })?
+            .is_some();
+        Ok(exists)
+    }
+
+    pub fn verify_and_update_outputs<'i, I: IntoIterator<Item = (UtxoAddress, &'i Utxo)>>(
+        &self,
         outputs: I,
     ) -> Result<(), StealthOutputsApiError> {
-        let key = self.key_manager_api.derive_account_key(account.key_index())?;
-        let mut tx = self.store.create_write_tx()?;
+        let all_used_account_keys = self.key_manager_api.get_all_keys(KeyBranch::Account)?;
+        let all_used_account_keys = all_used_account_keys
+            .into_iter()
+            .map(|k| k.key_pair)
+            .collect::<Vec<_>>();
+        let network = self.config_api.get_network()?;
 
-        for (commitment, output) in outputs {
+        let mut tx = self.store.create_write_tx()?;
+        let mut found_utxos_count = 0usize;
+        let mut num_outputs = 0usize;
+        for (addr, utxo) in outputs {
+            num_outputs += 1;
+            let commitment = addr.id().into_commitment_bytes();
+            let resource_address = addr.resource_address();
+            debug!(
+                target: LOG_TARGET,
+                "Validating UTXO for address: {}",
+                addr,
+            );
             match tx
-                .stealth_outputs_get_by_commitment(&resource_address, commitment)
+                .stealth_outputs_get_by_commitment(resource_address, &commitment)
                 .optional()?
             {
                 Some(_) => {
                     info!(
                         target: LOG_TARGET,
-                        "Output already exists in the wallet. Skipping. (commitment: {})",
+                        "Output already exists in the wallet. Updating. (commitment: {})",
                         commitment
                     );
-                    // Output exists. We should never have the case this is marked as spent. Should we check that?
+                    if utxo.is_burnt() {
+                        info!(
+                            target: LOG_TARGET,
+                            "🔥 Owned output is burnt with commitment: {}.",
+                            commitment
+                        );
+                    }
+                    if utxo.is_frozen() {
+                        info!(
+                            target: LOG_TARGET,
+                            "❄️ Owned output is frozen with commitment: {}.",
+                            commitment
+                        );
+                    }
+
+                    // Update is_burnt and is_frozen status to false->true or true->false
+                    tx.stealth_outputs_update(&addr, Some(utxo.is_burnt()), None, Some(utxo.is_frozen()))?;
+
+                    // Output exists. We should never have the case this is marked as spent. TODO: Any other checks we
+                    // need for this case?
                 },
                 None => {
+                    let is_frozen = utxo.is_frozen();
+                    let Some(output) = utxo.output() else {
+                        debug!(
+                            target: LOG_TARGET,
+                            "Unknown Utxo output is burnt for commitment: {}. Skipping.",
+                            commitment
+                        );
+                        continue;
+                    };
+
                     // Output does not exist. Validate it and add it to the store
-                    match self.validate_output(*account.address(), resource_address, &key, *commitment, output) {
-                        Ok(output) => {
-                            tx.stealth_outputs_insert(output)?;
+                    match self.validate_utxo(
+                        &all_used_account_keys,
+                        network,
+                        *resource_address,
+                        commitment,
+                        output,
+                        is_frozen,
+                    ) {
+                        Ok(Some(output)) => {
+                            found_utxos_count += 1;
+                            tx.stealth_outputs_insert(&output)?;
+                        },
+                        Ok(None) => {
+                            debug!(
+                                target: LOG_TARGET,
+                                "❓️ wallet does not know how to extract the value and mask for this output. Assuming it is not owned. (commitment: {})",
+                                commitment
+                            );
                         },
                         Err(e) => {
                             warn!(
@@ -264,17 +431,28 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         }
         tx.commit()?;
 
+        if num_outputs > 0 {
+            info!(
+                target: LOG_TARGET,
+                "✅️ Found {}/{} stealth outputs owned by this wallet.",
+                found_utxos_count,
+                num_outputs,
+            );
+        }
+
         Ok(())
     }
 
-    fn validate_output(
+    #[allow(clippy::too_many_lines)]
+    pub fn validate_utxo(
         &self,
-        account_address: ComponentAddress,
+        all_used_account_keys: &[KeyPair],
+        network: Network,
         resource_address: ResourceAddress,
-        key: &DerivedKey<RistrettoPublicKey>,
         commitment: PedersenCommitmentBytes,
-        utxo: &UtxoOutput,
-    ) -> Result<StealthOutputModel, StealthOutputsApiError> {
+        output: &UtxoOutput,
+        is_frozen: bool,
+    ) -> Result<Option<StealthOutputModel>, StealthOutputsApiError> {
         // Validate the commitment is well-formed.
         let _output_commitment = PedersenCommitment::try_from_byte_type(&commitment).map_err(|e| {
             StealthOutputsApiError::InvalidParameter {
@@ -284,56 +462,93 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         })?;
 
         let output_stealth_public_nonce =
-            RistrettoPublicKey::try_from_byte_type(&utxo.output.public_nonce).map_err(|e| {
+            RistrettoPublicKey::try_from_byte_type(&output.output.public_nonce).map_err(|e| {
                 StealthOutputsApiError::InvalidParameter {
                     param: "stealth_public_nonce",
                     reason: format!("Failed to parse stealth public nonce: {}", e),
                 }
             })?;
 
-        let unblinded_result = self.crypto_api.unblind_output(
-            &commitment,
-            &utxo.output.encrypted_data,
-            &key.key,
-            &output_stealth_public_nonce,
-        );
-        let (value, status) = match unblinded_result {
-            Ok(output) => (output.value, OutputStatus::Unspent),
-            Err(e) => {
-                warn!(
-                    target: LOG_TARGET,
-                    "Failed to unblind output. (commitment: {}, error: {})",
-                    commitment,
-                    e
-                );
-                (Amount::zero(), OutputStatus::Invalid)
-            },
-        };
-
-        Ok(StealthOutputModel {
-            owner_account: account_address,
-            // Note that this is not validated and depends on the caller ensuring the resource address belongs to the
-            // stealth output.
+        debug!(
+            target: LOG_TARGET,
+            "Validating output using {} key(s) for resource address: {}, commitment: {}, public nonce: {}",
+            all_used_account_keys.len(),
             resource_address,
             commitment,
-            value,
-            sender_public_nonce: output_stealth_public_nonce.to_byte_type(),
-            encryption_secret_key_index: key.key_index,
-            encrypted_data: utxo.output.encrypted_data.clone(),
-            status,
-            lock_id: None,
-        })
-    }
+            output_stealth_public_nonce,
+        );
 
-    pub fn set_transaction_hash_for_lock(
-        &self,
-        lock_id: OutputLockId,
-        transaction_id: TransactionId,
-    ) -> Result<(), StealthOutputsApiError> {
-        let mut tx = self.store.create_write_tx()?;
-        tx.output_locks_set_transaction_id(lock_id, transaction_id)?;
-        tx.commit()?;
-        Ok(())
+        for wallet_key in all_used_account_keys {
+            let unblinded_result = self.crypto_api.unblind_output(
+                &commitment,
+                &output.output.encrypted_data,
+                &wallet_key.secret_key.key,
+                &output_stealth_public_nonce,
+            );
+            let (value, status) = match unblinded_result {
+                Ok(mask_and_value) => {
+                    let stealth_secret = self.crypto_api.derive_stealth_owner_secret(
+                        network,
+                        &wallet_key.secret_key.key,
+                        &output_stealth_public_nonce,
+                    );
+                    let stealth_address = RistrettoPublicKey::from_secret_key(&stealth_secret);
+                    if output.owner_public_key == stealth_address.to_byte_type() {
+                        (mask_and_value.value, OutputStatus::Unspent)
+                    } else {
+                        warn!(
+                            target: LOG_TARGET,
+                            "Output owner public key does not match the expected stealth address. (expected: {}, actual: {}). Utxo cannot be spent by this wallet.",
+                            stealth_address,
+                            output.owner_public_key
+                        );
+                        (mask_and_value.value, OutputStatus::Invalid)
+                    }
+                },
+                Err(e) => {
+                    debug!(
+                        target: LOG_TARGET,
+                        "Failed to unblind output for key {}. (commitment: {}, error: {})",
+                        wallet_key.secret_key.key_index,
+                        commitment,
+                        e
+                    );
+                    continue;
+                },
+            };
+
+            let owner_account = derive_component_address_from_public_key(
+                &ACCOUNT_TEMPLATE_ADDRESS,
+                &wallet_key.public_key.to_byte_type(),
+            );
+            info!(
+                target: LOG_TARGET,
+                "🟢 Unblinded output for account {}. (commitment: {}, value: {})",
+                owner_account,
+                commitment,
+                value,
+            );
+
+            return Ok(Some(StealthOutputModel {
+                owner_account,
+                // Note that this is not validated and depends on the caller ensuring the resource address belongs to
+                // the stealth output.
+                resource_address,
+                commitment,
+                value,
+                sender_public_nonce: output_stealth_public_nonce.to_byte_type(),
+                encryption_secret_key_index: wallet_key.key_index(),
+                encrypted_data: output.output.encrypted_data.clone(),
+                tag_byte: output.tag,
+                status,
+                is_burnt: false,
+                is_frozen,
+                is_on_chain: true,
+                lock_id: None,
+            }));
+        }
+
+        Ok(None)
     }
 }
 
@@ -341,8 +556,8 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
 pub enum StealthOutputsApiError {
     #[error("Store error: {0}")]
     StoreError(#[from] WalletStorageError),
-    #[error("Confidential crypto error: {0}")]
-    ConfidentialCrypto(#[from] ConfidentialCryptoApiError),
+    #[error("Crypto error: {0}")]
+    Crypto(#[from] StealthCryptoApiError),
     #[error("Insufficient funds")]
     InsufficientFunds,
     #[error("Key manager error: {0}")]

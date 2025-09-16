@@ -41,6 +41,7 @@ message Instruction {
     PUBLISH_TEMPLATE = 9;
     ALLOCATE_ADDRESS = 10;
     STEALTH_TRANSFER = 11;
+    PAY_FEE = 12;
   }
   InstructionType instruction_type = 1;
 
@@ -67,7 +68,7 @@ message Instruction {
   bytes claim_burn_range_proof = 11;
   CommitmentSignature claim_burn_proof_of_knowledge = 12;
   bytes claim_burn_public_key = 13;
-  ConfidentialWithdrawProof claim_burn_withdraw_proof = 14;
+  StealthTransferStatement claim_burn_transfer = 14;
 
   // ClaimValidatorFees
   bytes claim_validator_fees_address = 15;
@@ -91,15 +92,25 @@ message Instruction {
   uint32 allocate_address_workspace_id = 25;
 
   // StealthTransfer
-  bytes stealth_transfer_resource_address = 26;
+  ResourceAddressRef stealth_transfer_resource_address = 26;
   StealthTransferStatement stealth_transfer_statement = 27;
   WorkspaceOffsetId stealth_transfer_revealed_input_bucket = 28;
+
+  StealthTransferStatement pay_fee_stealth_transfer_statement = 29;
+  WorkspaceOffsetId pay_fee_revealed_input_bucket = 30;
 }
 
 message ComponentCall {
   oneof call {
     bytes address = 1;
     uint32 allocation = 2;
+  }
+}
+
+message ResourceAddressRef {
+  oneof inner {
+    bytes address = 1;
+    WorkspaceOffsetId workspace = 2;
   }
 }
 
@@ -180,7 +191,7 @@ message AccessRules {
 }
 
 message StealthTransferStatement {
-  repeated StealthInput inputs = 1;
+  StealthInputsStatement inputs_statement = 1;
   StealthOutputsStatement outputs_statement = 2;
   bytes balance_proof = 3;
 }
@@ -199,10 +210,16 @@ message StealthOutputsStatement {
 message StealthUnspentOutput {
   UnspentOutput output = 1;
   bytes owner_public_key = 2;
+  uint32 tag_byte = 3;
 }
 
 message StealthInput {
   bytes commitment = 1;
   tari.ootle.common.Signature owner_proof = 2;
+}
+
+message StealthInputsStatement {
+  repeated StealthInput inputs = 1;
+  tari.ootle.common.Amount revealed_amount = 2;
 }
 

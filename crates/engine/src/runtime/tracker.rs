@@ -102,13 +102,13 @@ impl StateTracker {
         })
     }
 
-    pub fn add_event(&self, event: Event) {
+    pub fn add_event(&self, event: Event) -> Result<(), RuntimeError> {
         debug!(target: LOG_TARGET, "Emit: {event}");
-        self.write_with(|state| state.push_event(event));
+        self.write_with(|state| state.push_event(event))
     }
 
-    pub fn add_log(&self, log: LogEntry) {
-        self.write_with(|state| state.push_log(log));
+    pub fn add_log(&self, log: LogEntry) -> Result<(), RuntimeError> {
+        self.write_with(|state| state.push_log(log))
     }
 
     pub fn take_events(&self) -> Vec<Event> {
@@ -210,7 +210,7 @@ impl StateTracker {
                 "component",
                 "created",
                 Metadata::from([("module_name".to_string(), module_name)]),
-            ));
+            ))?;
 
             debug!(target: LOG_TARGET, "New component created: {}", component_address);
             Ok(component_address)
@@ -270,7 +270,7 @@ impl StateTracker {
 
         self.write_with(|state| {
             debug!(target: LOG_TARGET, "Add fee: source: {:?}, amount: {}", source, amount);
-            state.fee_state_mut().fee_charges.insert(source, amount);
+            state.fee_state_mut().add_charge(source, amount);
         })
     }
 
@@ -327,7 +327,8 @@ impl StateTracker {
             self.write_with(|state| {
                 let fee_state = state.fee_state().clone();
                 *state = checkpoint;
-                // Preserve fee state across resets
+                // Preserve fee state across resets so that we can charge for fees incurred during execution before the
+                // failure
                 *state.fee_state_mut() = fee_state;
             });
             Ok(())

@@ -14,8 +14,8 @@ use tari_ootle_wallet_crypto::{
     UnblindedStealthOutputStatement,
 };
 use tari_template_lib::{
-    models::{EncryptedData, StealthMintStatement, StealthOutputsStatement, StealthTransferStatement},
-    types::Amount,
+    models::{EncryptedData, StealthOutputsStatement, StealthTransferStatement},
+    types::{crypto::UtxoTag, Amount},
 };
 
 pub fn generate_stealth_output_statement<I: IntoIterator<Item = A>, A: Into<Amount>>(
@@ -29,15 +29,28 @@ pub fn generate_stealth_output_statement<I: IntoIterator<Item = A>, A: Into<Amou
     )
 }
 
-pub fn generate_mint_statement<I: IntoIterator<Item = A>, A: Into<Amount>>(
+pub fn generate_mint_statement<I: IntoIterator<Item = A>, A: Into<Amount> + Copy>(
     stealth_output_amounts: I,
     revealed_output_amount: A,
-    view_key: Option<RistrettoPublicKey>,
-) -> (StealthMintStatement, Vec<RistrettoSecretKey>) {
-    let amounts = stealth_output_amounts.into_iter().map(Into::into).collect::<Vec<_>>();
-    let (stmt, masks) = generate_stealth_statement_internal(&amounts, revealed_output_amount.into(), view_key);
-    let stmt = stealth::create_mint_statement(stmt, &masks, &amounts).unwrap();
-    (stmt, masks)
+    view_key: Option<&RistrettoPublicKey>,
+) -> StealthUnblindedTransferData {
+    let stealth_output_amounts = stealth_output_amounts.into_iter().map(Into::into).collect::<Vec<_>>();
+    let total_revealed_inputs = stealth_output_amounts.iter().copied().sum::<Amount>() + revealed_output_amount.into();
+    match view_key {
+        Some(view_key) => generate_transfer_data_with_view_key(
+            &[],
+            total_revealed_inputs,
+            stealth_output_amounts,
+            revealed_output_amount.into(),
+            view_key,
+        ),
+        None => generate_transfer_data(
+            &[],
+            total_revealed_inputs,
+            stealth_output_amounts,
+            revealed_output_amount.into(),
+        ),
+    }
 }
 
 pub fn generate_stealth_statement_with_view_key<I: IntoIterator<Item = A>, A: Into<Amount>>(
@@ -74,10 +87,11 @@ fn generate_stealth_statement_internal(
                 resource_view_key: view_key.clone(),
             },
             output_owner_public_key: RistrettoPublicKey::from_secret_key(mask),
+            tag: UtxoTag::new(0),
         })
         .collect::<Vec<_>>();
 
-    let stmt = stealth::create_output_statement(&output_statements, revealed_output_amount).unwrap();
+    let stmt = stealth::create_outputs_statement(&output_statements, revealed_output_amount).unwrap();
     (stmt, masks)
 }
 
@@ -164,6 +178,7 @@ fn generate_transfer_data_internal<I: IntoIterator<Item = A>, A: Into<Amount>>(
             UnblindedStealthOutputStatement {
                 statement,
                 output_owner_public_key,
+                tag: UtxoTag::new(0),
             }
         })
         .collect::<Vec<_>>();

@@ -1,9 +1,9 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-import { useListTemplatesAuthored } from "../../api/hooks/useTemplatesAuthored";
+import { useListTemplatesAuthored } from "@api/hooks/useTemplatesAuthored";
 import { useEffect, useState } from "react";
-import { useAccountsList } from "../../api/hooks/useAccounts";
+import { useAccountsList } from "@api/hooks/useAccounts";
 import InputLabel from "@mui/material/InputLabel";
 import Select, { SelectChangeEvent } from "@mui/material/Select/Select";
 import {
@@ -23,8 +23,8 @@ import TableRow from "@mui/material/TableRow";
 import TableCell from "@mui/material/TableCell";
 import TableBody from "@mui/material/TableBody";
 import TableContainer from "@mui/material/TableContainer";
-import CopyAddress from "../../Components/CopyAddress";
-import { AccordionIconButton, DataTableCell } from "../../Components/StyledComponents";
+import CopyAddress from "@components/CopyAddress";
+import { AccordionIconButton, DataTableCell } from "@components/StyledComponents";
 import Grid from "@mui/material/Grid";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
@@ -32,7 +32,7 @@ import { Collapse, TablePagination } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import { SlCheck, SlClose } from "react-icons/sl";
 import { handleChangePage, handleChangeRowsPerPage } from "../../utils/helpers";
-import useAccountStore from "../../store/accountStore";
+import useAccountStore from "@store/accountStore";
 
 function getTypeAsString(funcType: FuncType): string {
   if (typeof funcType === "string") {
@@ -146,7 +146,7 @@ function Templates() {
                     <>
                       <TableRow key={`template-${index}-1`}>
                         <DataTableCell>
-                          <CopyAddress address={template.address} />
+                          <CopyAddress address={`template_${template.address}`} />
                         </DataTableCell>
                         <DataTableCell>{template.name}</DataTableCell>
                         <TableCell>{template.tari_version}</TableCell>

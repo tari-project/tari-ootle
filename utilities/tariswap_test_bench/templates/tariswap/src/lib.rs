@@ -226,8 +226,11 @@ mod tariswap {
         fn check_resource_is_fungible(resource: ResourceAddress) {
             let resource_type = ResourceManager::get(resource).resource_type();
             assert!(
-                matches!(resource_type, ResourceType::Fungible | ResourceType::Confidential),
-                "Resource {} is not fungible nor confidential",
+                matches!(
+                    resource_type,
+                    ResourceType::Fungible | ResourceType::Confidential | ResourceType::Stealth
+                ),
+                "Resource {} is not fungible (fungible, stealth, confidential)",
                 resource
             );
         }

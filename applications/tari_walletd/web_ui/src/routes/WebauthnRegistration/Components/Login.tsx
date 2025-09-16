@@ -4,7 +4,7 @@
 import { useTheme } from "@mui/material/styles";
 import { FormEvent, useState } from "react";
 import { Form, useNavigate, useSearchParams } from "react-router-dom";
-import Loading from "../../../Components/Loading";
+import Loading from "@components/Loading";
 import Typography from "@mui/material/Typography";
 import Grid from "@mui/material/Grid";
 import Box from "@mui/material/Box";
@@ -12,7 +12,7 @@ import Button from "@mui/material/Button";
 import { unauthenticated_client, webauthnStartAuth } from "../../../utils/json_rpc";
 import { Buffer } from "buffer";
 import { WebauthnFinishAuthRequest } from "@tari-project/typescript-bindings";
-import useAuthStore from "../../../store/authStore";
+import useAuthStore from "@store/authStore";
 
 const getCredential = async (challenge: any, allowCredentials: any) => {
   const publicKeyCredentialRequestOptions: PublicKeyCredentialRequestOptions = {

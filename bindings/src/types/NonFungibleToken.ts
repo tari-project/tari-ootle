@@ -9,5 +9,5 @@ export type NonFungibleToken = {
   resource_address: ResourceAddress;
   data: any;
   mutable_data: any;
-  is_burned: boolean;
+  is_burnt: boolean;
 };

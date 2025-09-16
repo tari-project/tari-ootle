@@ -58,7 +58,12 @@ const CopyToClipboard = ({ copy }: CopyProps) => {
           />
         </Tooltip>
       </IconButton>
-      <Snackbar open={open} onClose={() => setOpen(false)} autoHideDuration={2000} message="Copied to clipboard" />
+      <Snackbar
+        open={open}
+        onClose={() => setOpen(false)}
+        autoHideDuration={2000}
+        message="Copied to clipboard"
+      />
     </>
   );
 };

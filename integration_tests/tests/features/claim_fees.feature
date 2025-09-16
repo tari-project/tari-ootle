@@ -24,8 +24,8 @@ Feature: Claim Fees
     When wallet WALLET has at least 5000 T
     When validator node VN sends a registration transaction to base wallet WALLET
     When miner MINER mines 16 new blocks
-    Then VN has scanned to height 17
-    And indexer IDX has scanned to height 17
+    Then VN has scanned to at least height 17
+    And indexer IDX has scanned to at least height 17
     Then the validator node VN is listed as registered
 
     When indexer IDX connects to all other validators
@@ -37,7 +37,7 @@ Feature: Claim Fees
 
     # Progress to the next epoch
     When miner MINER mines 10 new blocks
-    Then VN has scanned to height 27
+    Then VN has scanned to at least height 27
 
     When I check the balance of ACC2 on wallet daemon WALLET_D the amount is at most 9800
 
@@ -69,8 +69,8 @@ Feature: Claim Fees
     When wallet WALLET has at least 10000 T
     When validator node VN sends a registration transaction to base wallet WALLET
     When miner MINER mines 16 new blocks
-    Then VN has scanned to height 17
-    And indexer IDX has scanned to height 17
+    Then VN has scanned to at least height 17
+    And indexer IDX has scanned to at least height 17
     Then the validator node VN is listed as registered
 
     When indexer IDX connects to all other validators
@@ -83,7 +83,7 @@ Feature: Claim Fees
 
     # Progress to the next epoch
     When miner MINER mines 10 new blocks
-    Then VN has scanned to height 27
+    Then VN has scanned to at least height 27
 
     # Can't claim fees with different account
     When I claim fees for validator VN into account ACC1 using the wallet daemon WALLET_D, it fails

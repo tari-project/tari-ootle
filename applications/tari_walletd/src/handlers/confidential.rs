@@ -59,8 +59,7 @@ pub async fn handle_create_transfer_proof(
     let vault = sdk
         .accounts_api()
         .get_vault_by_resource(account.address(), &req.resource_address)?;
-    let proof_id = sdk.confidential_outputs_api().add_output_lock(&vault.id)?;
-    // Lock inputs we're going to spend
+    let lock_id = sdk.confidential_outputs_api().create_lock()?;
 
     let amount_to_transfer = req.amount.checked_add_positive(req.reveal_amount).ok_or_else(|| {
         invalid_request(format!(
@@ -68,15 +67,16 @@ pub async fn handle_create_transfer_proof(
             req.amount, req.reveal_amount
         ))
     })?;
+    // Lock inputs we're going to spend
     let (inputs, total_input_value) =
         sdk.confidential_outputs_api()
-            .lock_outputs_by_amount(proof_id, &vault.id, amount_to_transfer)?;
+            .lock_outputs_by_amount(lock_id, &vault.id, amount_to_transfer)?;
 
     info!(
         target: LOG_TARGET,
         "Locked {} inputs for proof {} worth {} µT",
         inputs.len(),
-        proof_id,
+        lock_id,
         total_input_value
     );
 
@@ -101,24 +101,14 @@ pub async fn handle_create_transfer_proof(
         &account_secret.key,
     )?;
 
-    let resource = sdk
-        .substate_api()
-        .scan_for_substate(&req.resource_address.into(), None)
-        .await?;
-    let resource_view_key = resource
-        .substate
-        .as_resource()
-        .ok_or_else(|| {
-            anyhow::anyhow!("Indexer returned a non-resource substate when scanning for a resource address")
-        })?
-        .to_view_key_public_key()
-        .map_err(|_| {
-            JsonRpcError::new(
-                JsonRpcErrorReason::InvalidRequest,
-                "Invalid resource address".to_string(),
-                json!({}),
-            )
-        })?;
+    let resource = sdk.substate_api().fetch_resource(req.resource_address).await?;
+    let resource_view_key = resource.to_view_key_public_key().map_err(|_| {
+        JsonRpcError::new(
+            JsonRpcErrorReason::InvalidRequest,
+            "Invalid resource address".to_string(),
+            json!({}),
+        )
+    })?;
 
     let output_statement = UnblindedOutputStatement {
         amount: req.amount,
@@ -171,7 +161,7 @@ pub async fn handle_create_transfer_proof(
             encrypted_data: encrypted_data.clone(),
             public_asset_tag: None,
             status: OutputStatus::LockedUnconfirmed,
-            lock_id: Some(proof_id),
+            lock_id: Some(lock_id),
         })?;
 
         Some(UnblindedOutputStatement {
@@ -198,7 +188,10 @@ pub async fn handle_create_transfer_proof(
         Amount::zero(),
     )?;
 
-    Ok(ProofsGenerateResponse { proof_id, proof })
+    Ok(ProofsGenerateResponse {
+        proof_id: lock_id,
+        proof,
+    })
 }
 
 pub async fn handle_finalize_transfer(
@@ -211,8 +204,7 @@ pub async fn handle_finalize_transfer(
 
     sdk.confidential_outputs_api()
         .finalize_locked_revealed_funds(req.proof_id)?;
-    sdk.confidential_outputs_api()
-        .finalize_outputs_for_proof(req.proof_id)?;
+    sdk.confidential_outputs_api().finalize_outputs_for_lock(req.proof_id)?;
     Ok(ProofsCancelResponse {})
 }
 
@@ -223,7 +215,8 @@ pub async fn handle_cancel_transfer(
 ) -> Result<ProofsCancelResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
-    sdk.confidential_outputs_api().release_proof_outputs(req.proof_id)?;
+    sdk.confidential_outputs_api().release_revealed_funds(req.proof_id)?;
+    sdk.confidential_outputs_api().release_locked_outputs(req.proof_id)?;
     Ok(ProofsCancelResponse {})
 }
 
@@ -274,7 +267,10 @@ pub async fn handle_view_vault_balance(
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
 
-    let substate = sdk.substate_api().scan_for_substate(&req.vault_id.into(), None).await?;
+    let substate = sdk
+        .substate_api()
+        .fetch_substate_from_network(&req.vault_id.into(), None)
+        .await?;
     let vault = substate
         .substate
         .as_vault()
@@ -285,7 +281,9 @@ pub async fn handle_view_vault_balance(
         .ok_or_else(|| invalid_params("vault_id", Some("Vault does not contain a confidential resource")))?;
 
     // Get view secret key
-    let view_key = sdk.key_manager_api().derive_key(KeyBranch::ViewKey, req.view_key_id)?;
+    let view_key = sdk
+        .key_manager_api()
+        .derive_key(KeyBranch::ElgamalEncryptionViewKey, req.view_key_id)?;
 
     let value_range = req.minimum_expected_value.unwrap_or(0)..=req.maximum_expected_value.unwrap_or(10_000_000_000);
 

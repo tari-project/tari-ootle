@@ -20,5 +20,14 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-pub mod events;
-pub mod substate;
+mod events;
+mod key_value;
+mod substate;
+mod utxo;
+mod utxo_update;
+
+pub use events::*;
+pub use key_value::*;
+pub use substate::*;
+pub(crate) use utxo::*;
+pub(crate) use utxo_update::*;

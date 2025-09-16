@@ -3,6 +3,7 @@
 
 use axum::headers::authorization::Bearer;
 use tari_ootle_wallet_sdk::WalletSdk;
+use tari_ootle_wallet_sdk_services::indexer_jrpc_impl::IndexerJsonRpcNetworkInterface;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_shutdown::ShutdownSignal;
 use tari_transaction::{Transaction, TransactionBuilder};
@@ -15,7 +16,6 @@ use crate::{
         jwt::{JwtApi, JwtApiError},
         WalletAuthenticator,
     },
-    indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
     notify::Notify,
     services::{AccountMonitorHandle, TransactionServiceHandle, WalletEvent, WebauthnService},
 };

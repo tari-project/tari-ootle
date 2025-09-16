@@ -28,11 +28,7 @@ use tari_template_lib_types::serde_helpers;
 pub type WorkspaceId = u16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct WorkspaceOffsetId {
     id: WorkspaceId,
     offset: Option<usize>,
@@ -79,11 +75,7 @@ impl fmt::Display for WorkspaceOffsetId {
 /// Represents an argument that can be passed to a transaction instruction. Either a literal value or a reference to a
 /// item on the runtime's workspace.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum InstructionArg {
     /// The argument is in the transaction execution's workspace, which means it is the result of a previous
     /// instruction

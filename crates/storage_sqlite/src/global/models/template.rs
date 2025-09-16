@@ -66,7 +66,7 @@ impl TryInto<DbTemplate> for TemplateModel {
                 .map_err(|_| TemplateConversionError::InvalidPublicKeyBytes)?,
             template_name: self.template_name,
             expected_hash: self.expected_hash.try_into()?,
-            template_address: TemplateAddress::try_from_vec(self.template_address)?,
+            template_address: TemplateAddress::try_from_slice(&self.template_address)?,
             template_type: self.template_type.parse().expect("DB template type corrupted"),
             code: self.code,
             url: self.url,

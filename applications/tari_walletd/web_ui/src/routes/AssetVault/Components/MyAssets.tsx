@@ -24,23 +24,24 @@ import Grid from "@mui/material/Grid";
 import Box from "@mui/material/Box";
 import Divider from "@mui/material/Divider";
 import Typography from "@mui/material/Typography";
+import IconButton from "@mui/material/IconButton";
 import { useTheme } from "@mui/material/styles";
-import { InnerHeading, StyledPaper } from "../../../Components/StyledComponents";
-import { refreshAccountsBalances } from "../../../api/hooks/useAccounts";
-import useAccountStore from "../../../store/accountStore";
-import Transactions from "../../Transactions/Transactions";
+import { InnerHeading, StyledPaper } from "@components/StyledComponents";
+import { refreshAccountsBalances } from "@api/hooks/useAccounts";
+import useAccountStore from "@store/accountStore";
+import Transactions from "@routes/Transactions/Transactions";
 import AccountBalance from "./AccountBalance";
 import AccountDetails from "./AccountDetails";
 import ActionMenu from "./ActionMenu";
 import Assets from "./Assets";
 import SelectAccount from "./SelectAccount";
 import { substateIdToString } from "@tari-project/typescript-bindings";
-import { Button } from "@mui/material";
 import { Refresh } from "@mui/icons-material";
+import queryClient from "@api/queryClient";
 
 function MyAssets() {
   const theme = useTheme();
-  const { account } = useAccountStore();
+  const { account, publicKey } = useAccountStore();
 
   if (!account) {
     return <>Loading...</>;
@@ -49,6 +50,12 @@ function MyAssets() {
   const refreshBalances = refreshAccountsBalances(substateIdToString(account.address));
   const handleRefreshClicked = () => {
     refreshBalances.mutate();
+    queryClient.invalidateQueries({
+      predicate: (query) => {
+        const key = query.queryKey[0];
+        return typeof key === "string" && (key === "nfts" || key === "list_nfts" || key === "nfts_list");
+      },
+    });
   };
 
   return (
@@ -112,14 +119,18 @@ function MyAssets() {
         <StyledPaper>
           <InnerHeading>
             Assets
-            <Button
+            <IconButton
               title="Refresh all accounts"
-              variant="text"
-              disabled={refreshBalances.isLoading}
+              color="primary"
+              disabled={refreshBalances.isPending}
               onClick={handleRefreshClicked}
+              size="small"
+              sx={{
+                marginLeft: theme.spacing(1),
+              }}
             >
               <Refresh />
-            </Button>
+            </IconButton>
           </InnerHeading>
           <Assets account={account} />
         </StyledPaper>
@@ -127,7 +138,7 @@ function MyAssets() {
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
           <InnerHeading>Transactions</InnerHeading>
-          <Transactions account={account} />
+          <Transactions account={account} ownerPublicKey={publicKey} />
         </StyledPaper>
       </Grid>
     </>

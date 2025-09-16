@@ -12,7 +12,7 @@ use ts_rs::TS;
 use crate::{DerivableFromPublicKey, NodeAddressable, ToPeerId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(feature = "ts", derive(TS), ts(export))]
 pub struct PeerAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] PeerId);
 
 impl PeerAddress {

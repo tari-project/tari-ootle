@@ -20,7 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{net::SocketAddr, sync::Arc};
+use std::net::SocketAddr;
 
 use async_graphql::{
     http::{playground_source, GraphQLPlaygroundConfig},
@@ -51,8 +51,8 @@ const LOG_TARGET: &str = "tari::indexer::graphql";
 
 pub async fn run_graphql(
     preferred_address: SocketAddr,
-    substate_manager: Arc<SubstateManager>,
-    event_manager: Arc<EventManager>,
+    substate_manager: SubstateManager,
+    event_manager: EventManager,
 ) -> Result<(), anyhow::Error> {
     let schema = Schema::build(EventQuery, EmptyMutation, EmptySubscription)
         .data(substate_manager)

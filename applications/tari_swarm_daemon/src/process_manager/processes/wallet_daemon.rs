@@ -2,15 +2,10 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use anyhow::anyhow;
+use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_wallet_daemon_client::{
-    types::{
-        AccountGetResponse,
-        AuthLoginAcceptRequest,
-        AuthLoginRequest,
-        AuthLoginResponse,
-        WebauthnFinishAuthRequest,
-    },
+    types::{AuthLoginAcceptRequest, AuthLoginRequest, AuthLoginResponse, WebauthnFinishAuthRequest},
     WalletDaemonClient,
 };
 
@@ -34,7 +29,7 @@ impl WalletDaemonProcess {
             .allocated_ports()
             .get("jrpc")
             .ok_or_else(|| anyhow!("No wallet JSON-RPC port allocated"))?;
-        let mut client = WalletDaemonClient::connect(format!("http://localhost:{port}"), None)?;
+        let mut client = WalletDaemonClient::connect(format!("http://localhost:{port}/json_rpc"), None)?;
         let AuthLoginResponse { auth_token, .. } = client
             .auth_request(AuthLoginRequest {
                 permissions: vec!["Admin".to_string()],
@@ -53,14 +48,10 @@ impl WalletDaemonProcess {
         Ok(client)
     }
 
-    pub async fn get_account_public_key(
-        &self,
-        name: String,
-        webauthn_finish_auth_request: Option<WebauthnFinishAuthRequest>,
-    ) -> anyhow::Result<RistrettoPublicKeyBytes> {
-        let mut client = self.connect_client(webauthn_finish_auth_request).await?;
-        let AccountGetResponse { public_key, .. } = client.accounts_get(name.into()).await?;
-        Ok(public_key)
+    pub async fn create_nonce_key(&self) -> anyhow::Result<(RistrettoPublicKeyBytes, u64)> {
+        let mut client = self.connect_client(None).await?;
+        let response = client.create_key(KeyBranch::Nonce).await.map_err(|e| anyhow!(e))?;
+        Ok((response.public_key, response.id))
     }
 
     pub fn instance(&self) -> &Instance {

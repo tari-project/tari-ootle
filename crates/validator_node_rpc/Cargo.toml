@@ -20,7 +20,6 @@ tari_bor = { workspace = true, default-features = true }
 tari_consensus_types = { workspace = true }
 
 anyhow = { workspace = true }
-async-trait = { workspace = true }
 prost = { workspace = true }
 serde = { workspace = true, default-features = true }
 thiserror = { workspace = true }

@@ -21,14 +21,9 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { ChangeEvent } from "react";
-import type {
-  Amount,
-  ClaimBurnProof,
-  FinalizeResult,
-  SubstateId,
-  Transaction,
-  TransactionStatus,
-} from "@tari-project/typescript-bindings";
+import type { Amount, SubstateId, NonFungibleId } from "@tari-project/typescript-bindings";
+import { CURRENCY } from "@utils/constants";
+import useCurrencyStore from "@store/currencyStore";
 
 export const renderJson = (json: any) => {
   if (Array.isArray(json)) {
@@ -154,7 +149,7 @@ export function emptyRows(page: number, rowsPerPage: number, array: Array<any> |
 }
 
 export function handleChangePage(
-  event: unknown,
+  _event: unknown,
   newPage: number,
   setPage: React.Dispatch<React.SetStateAction<number>>,
 ) {
@@ -254,4 +249,111 @@ export function bigintToDecimalString(int: bigint | Amount, decimalPlaces: numbe
 
   const padding = "0".repeat(decimalPlaces - fractionalValues.length);
   return `${wholeValues}.${padding}${fractionalValues}`;
+}
+
+export const formatCurrency = (amount: number | bigint): string => {
+  const currencySymbol = useCurrencyStore.getState().currencySymbol;
+
+  if (typeof amount === "bigint") {
+    const divisor = BigInt(CURRENCY.DIVISOR);
+    const integerPart = amount / divisor;
+    const remainder = amount % divisor;
+
+    const fractionalPart = remainder.toString().padStart(CURRENCY.DECIMALS, "0");
+
+    return `${Number(integerPart).toLocaleString("en-US")}.${fractionalPart} ${currencySymbol}`;
+  } else if (typeof amount === "number") {
+    if (isNaN(amount)) {
+      return `0 ${currencySymbol}`;
+    }
+    const convertedAmount = amount / CURRENCY.DIVISOR;
+    return `${convertedAmount.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: CURRENCY.DECIMALS })} ${currencySymbol}`;
+  } else {
+    return `0 ${currencySymbol}`;
+  }
+};
+
+// Helper function for formatting amounts that are already in display units (XTR)
+export const formatDisplayCurrency = (amount: number): string => {
+  const currencySymbol = useCurrencyStore.getState().currencySymbol;
+
+  if (isNaN(amount)) {
+    return `0 ${currencySymbol}`;
+  }
+  return `${amount.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: CURRENCY.DECIMALS })} ${currencySymbol}`;
+};
+
+export function validateHash(hash: string): boolean {
+  const regex = /^[a-fA-F0-9]{64}$/;
+  return regex.test(hash);
+}
+
+export function validateAddress(address: string): boolean {
+  if (!address || typeof address !== "string") {
+    return false;
+  }
+
+  // Trim whitespace and convert to lowercase for consistent validation
+  const cleanAddress = address.trim().toLowerCase();
+
+  // Check if it's a valid 64-character hexadecimal string (32 bytes)
+  const regex = /^[a-f0-9]{64}$/;
+  return regex.test(cleanAddress);
+}
+
+const normalizeTimestamp = (rawTimestamp: string | null | undefined): Date | null => {
+  if (!rawTimestamp) return null;
+
+  let formatted = rawTimestamp;
+
+  if (!formatted.includes("T")) {
+    formatted = formatted.replace(" ", "T");
+  }
+
+  if (formatted.endsWith(".0")) {
+    formatted = formatted.slice(0, -2);
+  }
+
+  if (!/[Z+\-]\d{2}:?\d{2}$/.test(formatted)) {
+    formatted += "Z";
+  }
+
+  const date = new Date(formatted);
+  return isNaN(date.getTime()) ? null : date;
+};
+
+export const formatTimestamp = (rawTimestamp: string | null | undefined): string => {
+  const date = normalizeTimestamp(rawTimestamp);
+
+  if (!date) return "";
+
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+};
+
+export const parseTimestamp = (rawTimestamp: string | null | undefined): Date | null => {
+  return normalizeTimestamp(rawTimestamp);
+};
+
+export function displayNftId(nftId: NonFungibleId): string {
+  if ("U256" in nftId) {
+    return `NFT #${shortenString(toHexString(nftId.U256))}`;
+  }
+  if ("Uint64" in nftId) {
+    return `NFT #${nftId.Uint64}`;
+  }
+  if ("Uint32" in nftId) {
+    return `NFT #${nftId.Uint32}`;
+  }
+  if ("String" in nftId) {
+    return `NFT #${nftId.String}`;
+  }
+
+  return `NFT #${JSON.stringify(nftId)}`;
 }

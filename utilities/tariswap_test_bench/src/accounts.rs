@@ -44,7 +44,7 @@ impl Runner {
             .build_and_seal(&key.key);
 
         let finalize = self.submit_transaction_and_wait(transaction).await?;
-        let diff = finalize.result.accept().unwrap();
+        let diff = finalize.result.any_accept().unwrap();
         let account = diff
             .up_iter()
             .find_map(|(addr, _)| addr.as_component_address())
@@ -56,14 +56,9 @@ impl Runner {
             .unwrap();
 
         self.sdk.accounts_api().add_account(None, &account, 0, true, true)?;
-        self.sdk.accounts_api().add_vault(
-            account,
-            vault,
-            XTR,
-            ResourceType::Confidential,
-            Some("XTR".to_string()),
-            6,
-        )?;
+        self.sdk
+            .accounts_api()
+            .add_vault(account, vault, XTR, ResourceType::Stealth, Some("XTR".to_string()), 6)?;
         let account = self.sdk.accounts_api().get_account_by_address(&account)?;
 
         Ok(account.account)
@@ -105,7 +100,7 @@ impl Runner {
             .build_and_seal(&key.key);
 
         let finalize = self.submit_transaction_and_wait(transaction).await?;
-        let diff = finalize.result.accept().unwrap();
+        let diff = finalize.result.any_accept().unwrap();
         let mut accounts = Vec::with_capacity(num_accounts);
 
         for owner in owners {
@@ -180,7 +175,7 @@ impl Runner {
             let result = self.submit_transaction_and_wait(transaction).await?;
             let accounts_and_state = result
                 .result
-                .accept()
+                .any_accept()
                 .unwrap()
                 .up_iter()
                 .filter(|(addr, _)| {
@@ -198,7 +193,7 @@ impl Runner {
                 for vault_id in indexed.vault_ids() {
                     let vault = result
                         .result
-                        .accept()
+                        .any_accept()
                         .unwrap()
                         .up_iter()
                         .find(|(addr, _)| addr == vault_id)

@@ -41,7 +41,9 @@ function Info({ identity }: { identity: IndexerGetIdentityResponse }) {
             </TableRow>
             <TableRow>
               <TableCell>Listen addresses</TableCell>
-              <DataTableCell>{identity.public_addresses?.join(", ")}</DataTableCell>
+              <DataTableCell>
+                {identity.public_addresses?.join(", ")}
+              </DataTableCell>
             </TableRow>
             <TableRow>
               <TableCell>Public key</TableCell>

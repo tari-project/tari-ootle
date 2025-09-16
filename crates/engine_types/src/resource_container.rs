@@ -25,11 +25,7 @@ use crate::{confidential, crypto::PrivateOutput, substate::SubstateId, ToByteTyp
 
 /// Instances of a single resource kept in Buckets and Vaults
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum ResourceContainer {
     Fungible {
         address: ResourceAddress,
@@ -281,8 +277,8 @@ impl ResourceContainer {
             (this, other) => {
                 return Err(ResourceError::ResourceTypeMismatch {
                     operate: "deposit",
-                    expected: this.resource_type(),
                     given: other.resource_type(),
+                    expected: this.resource_type(),
                 })
             },
         }
@@ -357,7 +353,7 @@ impl ResourceContainer {
         }
     }
 
-    pub fn recall_all(&mut self) -> Result<Self, ResourceError> {
+    pub fn withdraw_all(&mut self) -> Result<Self, ResourceError> {
         match self {
             Self::Fungible { .. } | Self::NonFungible { .. } | Self::Stealth { .. } => self.withdraw(self.amount()),
             Self::Confidential {
@@ -870,7 +866,7 @@ impl ResourceContainer {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ResourceError {
-    #[error("Attempted to {operate} a {expected} resource, but the resource type is {given}")]
+    #[error("Attempted to {operate} a {given} resource, but the container resource type is {expected}")]
     ResourceTypeMismatch {
         operate: &'static str,
         expected: ResourceType,

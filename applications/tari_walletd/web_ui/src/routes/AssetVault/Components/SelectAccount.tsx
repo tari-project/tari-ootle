@@ -30,12 +30,14 @@ import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import Select, { SelectChangeEvent } from "@mui/material/Select";
 import Dialog from "./AddAccount";
-import useAccountStore from "../../../store/accountStore";
-import { useAccountsList } from "../../../api/hooks/useAccounts";
+import useAccountStore from "@store/accountStore";
+import { useAccountsList } from "@api/hooks/useAccounts";
 import { AccountInfo, substateIdToString } from "@tari-project/typescript-bindings";
 
 function SelectAccount() {
-  const { account, setAccount, setPublicKey } = useAccountStore();
+  const account = useAccountStore((state) => state.account);
+  const setAccount = useAccountStore((state) => state.setAccount);
+  const setPublicKey = useAccountStore((state) => state.setPublicKey);
   const { data: dataAccountsList } = useAccountsList(0, 10);
   const [dialogOpen, setDialogOpen] = useState(false);
   const theme = useTheme();
@@ -66,8 +68,10 @@ function SelectAccount() {
           labelId="account-select-label"
           id="account-select"
           value={
-            dataAccountsList?.accounts.some((info: AccountInfo) => info.account.address === account?.address)
-              ? substateIdToString(account!.address)
+            account && dataAccountsList?.accounts.some((info: AccountInfo) => info.account.address === account?.address)
+              ? substateIdToString(account.address)
+              : dataAccountsList?.accounts.length
+              ? substateIdToString(dataAccountsList.accounts[0].account.address)
               : "addAccount"
           }
           label="Account"

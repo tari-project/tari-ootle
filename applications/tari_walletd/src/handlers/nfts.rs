@@ -67,12 +67,11 @@ pub async fn handle_list(
     token: Option<&Bearer>,
     req: ListNftsRequest,
 ) -> Result<ListNftsResponse, anyhow::Error> {
+    context.check_auth(token, &[JrpcPermission::Admin])?;
     let ListNftsRequest { account, limit, offset } = req;
     let sdk = context.wallet_sdk();
     let account = get_account_or_default(account.as_ref(), &sdk.accounts_api())?;
     let account = account.account;
-    let sdk = context.wallet_sdk();
-    context.check_auth(token, &[JrpcPermission::Admin])?;
 
     let non_fungible_api = sdk.non_fungible_api();
 
@@ -150,11 +149,11 @@ async fn try_find_target_account(
     let sdk = context.wallet_sdk();
     let existing_account = sdk
         .substate_api()
-        .scan_for_substate(&SubstateId::Component(target_account_address), None)
+        .fetch_substate_from_network(&SubstateId::Component(target_account_address), None)
         .await
         .optional()?;
 
-    let Some(ValidatorScanResult { address, substate }) = existing_account else {
+    let Some(ValidatorScanResult { id: address, substate }) = existing_account else {
         return Ok(false);
     };
     inputs.insert(address.into());
@@ -184,7 +183,7 @@ async fn try_find_target_account(
                 // TODO(perf): slow with lots of vaults
                 let vault = sdk
                     .substate_api()
-                    .scan_for_substate(&SubstateId::Vault(*vault_id), None)
+                    .fetch_substate_from_network(&SubstateId::Vault(*vault_id), None)
                     .await
                     .optional()?;
 

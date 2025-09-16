@@ -6,7 +6,7 @@
 import type {
   AccountGetDefaultRequest,
   AccountGetRequest,
-  AccountGetResponse,
+  AccountGetResponse, AccountsAssociateStealthResourceRequest, AccountsAssociateStealthResourceResponse,
   AccountsCreateFreeTestCoinsRequest,
   AccountsCreateFreeTestCoinsResponse,
   AccountsCreateRequest,
@@ -48,11 +48,9 @@ import type {
   PublishTemplateRequest,
   PublishTemplateResponse,
   rejectReasonToString,
-  RevealFundsRequest,
-  RevealFundsResponse,
   SettingsGetResponse,
   SettingsSetRequest,
-  SettingsSetResponse,
+  SettingsSetResponse, StealthTransferRequest, StealthTransferResponse,
   stringToSubstateId,
   substateIdToString,
   SubstatesGetRequest,
@@ -174,8 +172,8 @@ export class WalletDaemonClient {
     return this.__invokeRpc("accounts.claim_burn", params);
   }
 
-  public accountsRevealFunds(params: RevealFundsRequest): Promise<RevealFundsResponse> {
-    return this.__invokeRpc("accounts.reveal_funds", params);
+  public accountsAssociateStealthResource(params: AccountsAssociateStealthResourceRequest): Promise<AccountsAssociateStealthResourceResponse> {
+    return this.__invokeRpc("accounts.associate_stealth_resource", params);
   }
 
   public accountsGetBalances(params: AccountsGetBalancesRequest): Promise<AccountsGetBalancesResponse> {
@@ -196,6 +194,10 @@ export class WalletDaemonClient {
 
   public confidentialTransfer(params: ConfidentialTransferRequest): Promise<ConfidentialTransferResponse> {
     return this.__invokeRpc("accounts.confidential_transfer", params);
+  }
+
+  public stealthTransfer(params: StealthTransferRequest): Promise<StealthTransferResponse> {
+    return this.__invokeRpc("accounts.stealth_transfer", params);
   }
 
   public accountsGetDefault(params: AccountGetDefaultRequest): Promise<AccountGetResponse> {

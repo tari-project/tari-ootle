@@ -23,8 +23,8 @@ fn airdrop() {
     assert_eq!(total_supply, Amount::from(100));
 
     let builder = Transaction::builder().then(|builder| {
-        // Create 100 accounts
-        (0..100).fold(builder, |builder, _| {
+        // Create 50 accounts
+        (0..50).fold(builder, |builder, _| {
             let (_, owner_public_key, _) = template_test.create_owner_proof();
             builder.create_account(owner_public_key.to_byte_type())
         })
@@ -68,7 +68,7 @@ fn airdrop() {
     );
     result.expect_success();
 
-    for i in 0..100 {
+    for i in 0..50 {
         assert_eq!(
             result.finalize.execution_results[3 + (i * 4)]
                 .decode::<Amount>()

@@ -2,7 +2,7 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use tari_bor::{Deserialize, Serialize};
-use tari_template_lib_types::crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes};
+use tari_template_lib_types::crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag};
 
 use crate::models::{EncryptedData, ViewableBalanceProof};
 
@@ -16,11 +16,7 @@ use crate::models::{EncryptedData, ViewableBalanceProof};
 /// - **viewable_balance_proof** - an optional verifiable balance proof that must be provided and valid if the view key
 ///   is enabled for a resource.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UnspentOutput {
     pub commitment: PedersenCommitmentBytes,
     /// Public nonce (R) that was used to generate the commitment mask
@@ -34,14 +30,11 @@ pub struct UnspentOutput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct StealthUnspentOutput {
     pub output: UnspentOutput,
     /// The public key that must prove ownership of this UTXO. This is typically a one time "stealth" public key
     /// selected by the client.
     pub owner_public_key: RistrettoPublicKeyBytes,
+    pub tag: UtxoTag,
 }

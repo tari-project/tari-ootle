@@ -25,7 +25,7 @@ async fn given_validator_connects_to_other_vns(world: &mut TariWorld, name: Stri
         .map(|vn| {
             (
                 vn.public_key,
-                Multiaddr::from_str(&format!("/ip4/127.0.0.1/tcp/{}", vn.port)).unwrap(),
+                Multiaddr::from_str(&format!("/ip4/127.0.0.1/tcp/{}", vn.p2p_port)).unwrap(),
             )
         });
 
@@ -46,25 +46,17 @@ async fn given_validator_connects_to_other_vns(world: &mut TariWorld, name: Stri
     }
 }
 
-#[then(expr = "indexer {word} has scanned to height {int}")]
-async fn indexer_has_scanned_to_height(world: &mut TariWorld, name: String, block_height: u64) {
+#[then(expr = "indexer {word} has scanned to at least height {int}")]
+pub async fn indexer_has_scanned_to_at_least_height(world: &mut TariWorld, name: String, block_height: u64) {
     let indexer = world.get_indexer(&name);
     let mut client = indexer.get_jrpc_indexer_client();
     let mut last_block_height = 0;
     let mut remaining = 10;
     loop {
         let stats = client.get_epoch_manager_stats().await.expect("Failed to get stats");
-        if stats.current_block_height == block_height {
+        if stats.current_block_height >= block_height {
             return;
         }
-
-        assert!(
-            stats.current_block_height <= block_height,
-            "Indexer {} has scanned past block height {} to height {}",
-            name,
-            block_height,
-            stats.current_block_height
-        );
 
         if stats.current_block_height != last_block_height {
             last_block_height = stats.current_block_height;

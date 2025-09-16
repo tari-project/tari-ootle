@@ -12,33 +12,26 @@ use tari_bor::{BorTag, Deserialize, Serialize};
 use tari_template_lib::{
     models::{BinaryTag, ResourceAddress},
     prelude::{from_hex, serde_helpers, KeyParseError, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
-    types::hex::write_hex_fmt,
+    types::{crypto::UtxoTag, hex::write_hex_fmt},
 };
 
 use crate::crypto::PrivateOutput;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Utxo {
     pub output: Option<UtxoOutput>,
     pub is_frozen: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UtxoOutput {
     pub output: PrivateOutput,
     /// The public key that must prove ownership of this UTXO. This is typically a one time "stealth" public key but is
     /// selected by the client.
     pub owner_public_key: RistrettoPublicKeyBytes,
+    pub tag: UtxoTag,
 }
 
 impl Utxo {
@@ -51,6 +44,10 @@ impl Utxo {
 
     pub fn output(&self) -> Option<&UtxoOutput> {
         self.output.as_ref()
+    }
+
+    pub fn into_output(self) -> Option<UtxoOutput> {
+        self.output
     }
 
     pub fn owner_public_key(&self) -> Option<&RistrettoPublicKeyBytes> {
@@ -73,16 +70,17 @@ impl Utxo {
     pub fn is_burnt(&self) -> bool {
         self.output.is_none()
     }
+
+    /// Returns the UTXO’s tag byte if the UTXO has not been burnt.
+    pub fn tag(&self) -> Option<UtxoTag> {
+        self.output.as_ref().map(|o| o.tag)
+    }
 }
 
 const TAG: u64 = BinaryTag::Utxo.as_u64();
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UtxoAddress(BorTag<UtxoAddressContents, TAG>);
 
 impl UtxoAddress {
@@ -127,11 +125,7 @@ impl From<UtxoAddressContents> for UtxoAddress {
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
 )]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UtxoId(
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "serde_helpers::fixed_hex")]
@@ -151,6 +145,11 @@ impl UtxoId {
 
     pub fn into_commitment_bytes(self) -> PedersenCommitmentBytes {
         PedersenCommitmentBytes::from_array(self.0)
+    }
+
+    pub fn to_commitment_hex_string(&self) -> String {
+        // to_string happens to return the hex encoding of the commitment bytes. If that changes, so will this.
+        self.to_string()
     }
 }
 
@@ -176,11 +175,7 @@ impl Display for UtxoId {
 #[derive(
     Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord, BorshSerialize, BorshDeserialize,
 )]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UtxoAddressContents {
     resource_address: ResourceAddress,
     id: UtxoId,

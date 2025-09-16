@@ -218,7 +218,7 @@ impl<TMsg: MessageSpec> NetworkingHandle<TMsg> {
     }
 
     pub async fn open_substream(
-        &mut self,
+        &self,
         peer_id: PeerId,
         protocol_id: &StreamProtocol,
     ) -> Result<NegotiatedSubstream<Substream>, NetworkingError> {
@@ -236,7 +236,7 @@ impl<TMsg: MessageSpec> NetworkingHandle<TMsg> {
     }
 
     pub async fn open_framed_substream(
-        &mut self,
+        &self,
         peer_id: PeerId,
         protocol_id: &StreamProtocol,
         max_frame_size: usize,
@@ -245,12 +245,12 @@ impl<TMsg: MessageSpec> NetworkingHandle<TMsg> {
         Ok(framing::canonical(substream.stream, max_frame_size))
     }
 
-    pub async fn connect_rpc<T>(&mut self, peer_id: PeerId) -> Result<T, NetworkingError>
+    pub async fn connect_rpc<T>(&self, peer_id: PeerId) -> Result<T, NetworkingError>
     where T: From<RpcClient> + NamedProtocolService {
         self.connect_rpc_using_builder(RpcClientBuilder::new(peer_id)).await
     }
 
-    pub async fn connect_rpc_using_builder<T>(&mut self, builder: RpcClientBuilder<T>) -> Result<T, NetworkingError>
+    pub async fn connect_rpc_using_builder<T>(&self, builder: RpcClientBuilder<T>) -> Result<T, NetworkingError>
     where T: From<RpcClient> + NamedProtocolService {
         let protocol = StreamProtocol::new(T::PROTOCOL_NAME);
         debug!(

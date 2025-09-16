@@ -6,9 +6,10 @@ use tari_engine_types::{
     confidential::UnclaimedConfidentialOutput,
     template_lib_models::UnclaimedConfidentialOutputAddress,
 };
+use tari_template_lib_types::ObjectKey;
 
 use crate::{
-    codecs::{BlockIdCodec, BytesCodec, DefaultVersionedCodec, TupleBytesCodec, UnitCodec},
+    codecs::{BlockIdCodec, BytesCodec, DefaultVersionedCodec, FixedBytesCodec, UnitCodec},
     traits::{Cf, QueryCf, VersionedUnclaimedConfidentialOutput},
 };
 
@@ -29,7 +30,7 @@ pub struct ProposedInBlockIndex;
 
 impl Cf for ProposedInBlockIndex {
     type Key = (BlockId, UnclaimedConfidentialOutputAddress);
-    type KeyCodec = TupleBytesCodec<Self::Key>;
+    type KeyCodec = (BlockIdCodec, FixedBytesCodec<{ ObjectKey::LENGTH }>);
     type Value = ();
     type ValueCodec = UnitCodec;
 

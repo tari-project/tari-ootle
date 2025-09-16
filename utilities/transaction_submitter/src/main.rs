@@ -102,10 +102,7 @@ async fn stress_test(args: StressTestArgs) -> anyhow::Result<Option<StressTestRe
         bounded_spawn
             .spawn(async move {
                 match client
-                    .submit_transaction(SubmitTransactionRequest {
-                        transaction,
-                        is_dry_run: false,
-                    })
+                    .submit_transaction(SubmitTransactionRequest { transaction })
                     .await
                 {
                     Ok(SubmitTransactionResponse { transaction_id, .. }) => {
@@ -192,7 +189,7 @@ async fn fetch_result_summary(
                     {
                         Ok(Some(result)) => {
                             let exec_result = result.transaction_execution.result();
-                            let result = if let Some(diff) = exec_result.finalize.result.accept() {
+                            let result = if let Some(diff) = exec_result.finalize.result.any_accept() {
                                 TxFinalized {
                                     is_committed: true,
                                     is_error: false,

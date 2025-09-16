@@ -27,10 +27,11 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use tari_engine_types::{
-    confidential::ConfidentialClaim,
+    confidential::TariStealthClaim,
     instruction::Instruction,
     substate::SubstateId,
     ComponentCall,
+    ResourceAddressRef,
 };
 use tari_ootle_common_types::{SubstateRequirement, SubstateRequirementRef, VersionedSubstateId};
 use tari_template_lib::{
@@ -53,6 +54,7 @@ use tari_template_lib::{
             PedersenCommitmentBytes,
             RangeProofBytes,
             RistrettoPublicKeyBytes,
+            UtxoTag,
         },
         ObjectKey,
     },
@@ -248,8 +250,8 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                 message: request.log_message,
             },
             InstructionType::ClaimBurn => Instruction::ClaimBurn {
-                claim: Box::new(ConfidentialClaim {
-                    public_key: request
+                claim: Box::new(TariStealthClaim {
+                    burn_public_key: request
                         .claim_burn_public_key
                         .as_slice()
                         .try_into()
@@ -266,7 +268,7 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                         .ok_or_else(|| anyhow!("claim_burn_proof_of_knowledge not provided"))?
                         .try_into()
                         .map_err(|e| anyhow!("claim_burn_proof_of_knowledge: {}", e))?,
-                    withdraw_proof: request.claim_burn_withdraw_proof.map(TryInto::try_into).transpose()?,
+                    transfer_statement: request.claim_burn_transfer.map(TryInto::try_into).transpose()?,
                 }),
             },
             InstructionType::ClaimValidatorFees => Instruction::ClaimValidatorFees {
@@ -297,7 +299,11 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                     .context("allocate_address_workspace_id overflowed")?,
             },
             InstructionType::StealthTransfer => Instruction::StealthTransfer {
-                resource_address: ObjectKey::try_from(request.stealth_transfer_resource_address)?.into(),
+                resource_address_ref: request
+                    .stealth_transfer_resource_address
+                    .map(TryInto::try_into)
+                    .transpose()?
+                    .ok_or_else(|| anyhow!("stealth_transfer_resource_address not provided"))?,
                 statement: request
                     .stealth_transfer_statement
                     .ok_or_else(|| anyhow!("stealth_transfer_statement not provided"))?
@@ -305,6 +311,17 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                     .context("stealth_transfer_statement conversion failed")?,
                 revealed_input_bucket: request
                     .stealth_transfer_revealed_input_bucket
+                    .map(TryInto::try_into)
+                    .transpose()?,
+            },
+            InstructionType::PayFee => Instruction::PayFee {
+                statement: request
+                    .pay_fee_stealth_transfer_statement
+                    .ok_or_else(|| anyhow!("pay_fee_stealth_transfer_statement not provided"))?
+                    .try_into()
+                    .context("pay_fee_stealth_transfer_statement conversion failed")?,
+                revealed_input_bucket: request
+                    .pay_fee_revealed_input_bucket
                     .map(TryInto::try_into)
                     .transpose()?,
             },
@@ -361,8 +378,8 @@ impl From<Instruction> for proto::transaction::Instruction {
                 result.claim_burn_commitment_address = claim.output_address.as_bytes().to_vec();
                 result.claim_burn_range_proof = claim.range_proof.into_vec();
                 result.claim_burn_proof_of_knowledge = Some(claim.proof_of_knowledge.into());
-                result.claim_burn_public_key = claim.public_key.to_vec();
-                result.claim_burn_withdraw_proof = claim.withdraw_proof.map(Into::into);
+                result.claim_burn_public_key = claim.burn_public_key.to_vec();
+                result.claim_burn_transfer = claim.transfer_statement.map(Into::into);
             },
             Instruction::ClaimValidatorFees { address } => {
                 result.instruction_type = InstructionType::ClaimValidatorFees as i32;
@@ -395,14 +412,22 @@ impl From<Instruction> for proto::transaction::Instruction {
                 result.allocate_address_workspace_id = u32::from(workspace_id);
             },
             Instruction::StealthTransfer {
-                resource_address,
+                resource_address_ref: resource_address,
                 statement,
                 revealed_input_bucket,
             } => {
                 result.instruction_type = InstructionType::StealthTransfer as i32;
-                result.stealth_transfer_resource_address = resource_address.as_bytes().to_vec();
+                result.stealth_transfer_resource_address = Some(resource_address.into());
                 result.stealth_transfer_statement = Some(statement.into());
                 result.stealth_transfer_revealed_input_bucket = revealed_input_bucket.map(Into::into);
+            },
+            Instruction::PayFee {
+                statement,
+                revealed_input_bucket,
+            } => {
+                result.instruction_type = InstructionType::PayFee as i32;
+                result.pay_fee_stealth_transfer_statement = Some(statement.into());
+                result.pay_fee_revealed_input_bucket = revealed_input_bucket.map(Into::into);
             },
         }
         result
@@ -476,6 +501,51 @@ impl From<ComponentCall> for proto::transaction::ComponentCall {
             },
             ComponentCall::Workspace(id) => proto::transaction::ComponentCall {
                 call: Some(proto::transaction::component_call::Call::Allocation(u32::from(id))),
+            },
+        }
+    }
+}
+
+// -------------------------------- ResourceAddressRef -------------------------------- //
+impl TryFrom<proto::transaction::ResourceAddressRef> for ResourceAddressRef {
+    type Error = anyhow::Error;
+
+    fn try_from(val: proto::transaction::ResourceAddressRef) -> Result<Self, Self::Error> {
+        let inner = val
+            .inner
+            .ok_or_else(|| anyhow!("ResourceAddressRef inner not provided"))?;
+        match inner {
+            proto::transaction::resource_address_ref::Inner::Address(address) => {
+                Ok(ResourceAddressRef::Address(ObjectKey::try_from_slice(&address)?.into()))
+            },
+            proto::transaction::resource_address_ref::Inner::Workspace(workspace_id) => {
+                Ok(ResourceAddressRef::Workspace(
+                    workspace_id
+                        .try_into()
+                        .context("ResourceAddressRef::Workspace conversion failed")?,
+                ))
+            },
+        }
+    }
+}
+
+impl From<ResourceAddressRef> for proto::transaction::ResourceAddressRef {
+    fn from(val: ResourceAddressRef) -> Self {
+        match val {
+            ResourceAddressRef::Address(address) => proto::transaction::ResourceAddressRef {
+                inner: Some(proto::transaction::resource_address_ref::Inner::Address(
+                    address.as_bytes().to_vec(),
+                )),
+            },
+            ResourceAddressRef::Workspace(workspace_id) => proto::transaction::ResourceAddressRef {
+                inner: Some(proto::transaction::resource_address_ref::Inner::Workspace(
+                    proto::transaction::WorkspaceOffsetId {
+                        id: u32::from(workspace_id.id()),
+                        offset: workspace_id
+                            .offset()
+                            .map(|o| proto::transaction::OptionOffset { offset: o as u64 }),
+                    },
+                )),
             },
         }
     }
@@ -686,6 +756,7 @@ impl TryFrom<proto::transaction::StealthUnspentOutput> for tari_template_lib::mo
         Ok(tari_template_lib::models::StealthUnspentOutput {
             output,
             owner_public_key,
+            tag: UtxoTag::new(val.tag_byte),
         })
     }
 }
@@ -695,6 +766,7 @@ impl From<tari_template_lib::models::StealthUnspentOutput> for proto::transactio
         Self {
             output: Some(val.output.into()),
             owner_public_key: val.owner_public_key.as_bytes().to_vec(),
+            tag_byte: val.tag.value(),
         }
     }
 }
@@ -739,14 +811,11 @@ impl TryFrom<proto::transaction::StealthTransferStatement> for tari_template_lib
     type Error = anyhow::Error;
 
     fn try_from(value: proto::transaction::StealthTransferStatement) -> Result<Self, Self::Error> {
-        let inputs = value
-            .inputs
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<Vec<_>, _>>()?;
-
         Ok(Self {
-            inputs,
+            inputs_statement: value
+                .inputs_statement
+                .ok_or_else(|| anyhow!("Inputs statement not provided"))?
+                .try_into()?,
             outputs_statement: value
                 .outputs_statement
                 .ok_or_else(|| anyhow!("output_statement not provided"))?
@@ -760,9 +829,36 @@ impl TryFrom<proto::transaction::StealthTransferStatement> for tari_template_lib
 impl From<tari_template_lib::models::StealthTransferStatement> for proto::transaction::StealthTransferStatement {
     fn from(value: tari_template_lib::models::StealthTransferStatement) -> Self {
         Self {
-            inputs: value.inputs.iter().map(Into::into).collect(),
+            inputs_statement: Some(value.inputs_statement.into()),
             outputs_statement: Some(value.outputs_statement.into()),
             balance_proof: value.balance_proof.to_bytes(),
+        }
+    }
+}
+
+// -------------------------------- StealthInputsStatement -------------------------------- //
+impl TryFrom<proto::transaction::StealthInputsStatement> for tari_template_lib::models::StealthInputsStatement {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::transaction::StealthInputsStatement) -> Result<Self, Self::Error> {
+        let inputs = value
+            .inputs
+            .into_iter()
+            .map(|input| input.try_into().context("Invalid stealth input"))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Self {
+            inputs,
+            revealed_amount: value.revealed_amount.unwrap_or_default().into(),
+        })
+    }
+}
+
+impl From<tari_template_lib::models::StealthInputsStatement> for proto::transaction::StealthInputsStatement {
+    fn from(value: tari_template_lib::models::StealthInputsStatement) -> Self {
+        Self {
+            inputs: value.inputs.iter().map(Into::into).collect(),
+            revealed_amount: Some(value.revealed_amount.into()),
         }
     }
 }

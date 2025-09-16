@@ -34,11 +34,7 @@ use tari_template_lib::{
 use crate::FromByteType;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Resource {
     resource_type: ResourceType,
     owner_rule: OwnerRule,
@@ -81,6 +77,30 @@ impl Resource {
             divisibility,
             view_key,
             auth_hook,
+        }
+    }
+
+    pub fn load(
+        resource_type: ResourceType,
+        owner_key: Option<RistrettoPublicKeyBytes>,
+        owner_rule: OwnerRule,
+        access_rules: ResourceAccessRules,
+        metadata: Metadata,
+        view_key: Option<RistrettoPublicKeyBytes>,
+        auth_hook: Option<AuthHook>,
+        divisibility: u8,
+        total_supply: Option<Amount>,
+    ) -> Self {
+        Self {
+            resource_type,
+            owner_rule,
+            owner_key,
+            access_rules,
+            metadata,
+            total_supply,
+            view_key,
+            auth_hook,
+            divisibility,
         }
     }
 

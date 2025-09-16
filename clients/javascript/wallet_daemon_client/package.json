@@ -15,7 +15,8 @@
   },
   "scripts": {
     "build": "tsc --project tsconfig.prod.json",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "clean-dist": "rm -rf dist && rm -f tsconfig.tsbuildinfo"
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

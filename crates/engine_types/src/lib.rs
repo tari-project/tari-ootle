@@ -33,21 +33,21 @@ pub mod entity_id_provider;
 pub mod id_provider;
 
 mod argument_parser;
-mod instruction_call;
+mod component_call;
 pub mod json_cbor;
 pub mod published_template;
+mod resource_address_ref;
 mod substate_serde;
 mod utxo;
 mod validator_fee;
 
 pub use argument_parser::parse_arg;
 pub use byte_types::*;
-pub use instruction_call::*;
+pub use component_call::*;
+pub use resource_address_ref::*;
 pub use template::{calculate_template_binary_hash, parse_template_address};
 pub use utxo::*;
 pub use validator_fee::*;
-mod read_only;
-pub use read_only::*;
 pub mod template_lib_models {
     pub use tari_template_lib::models::*;
 }

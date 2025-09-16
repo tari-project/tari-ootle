@@ -43,11 +43,11 @@ impl KeysSubcommand {
         use KeysSubcommand::*;
         match self {
             New => {
-                let key = client.create_key(KeyBranch::Transaction).await?;
+                let key = client.create_key(KeyBranch::Account).await?;
                 println!("New key pair {} created", key.public_key);
             },
             List => {
-                let resp = client.list_keys(KeyBranch::Transaction).await?;
+                let resp = client.list_keys(KeyBranch::Account).await?;
                 if resp.keys.is_empty() {
                     println!("No keys found. Use 'keys create' to create a new key pair");
                     return Ok(());
@@ -58,7 +58,7 @@ impl KeysSubcommand {
                 let resp = client.set_active_key(index).await?;
                 println!("Key {} ({}) is now active", index, resp.public_key);
 
-                let resp = client.list_keys(KeyBranch::Transaction).await?;
+                let resp = client.list_keys(KeyBranch::Account).await?;
                 print_keys(resp.keys);
             },
         }

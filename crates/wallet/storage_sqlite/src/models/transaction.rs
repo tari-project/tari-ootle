@@ -3,13 +3,14 @@
 
 use std::{str::FromStr, time::Duration};
 
+use diesel::Identifiable;
 use log::*;
-use tari_ootle_common_types::{displayable::Displayable, Epoch};
+use tari_ootle_common_types::displayable::Displayable;
 use tari_ootle_wallet_sdk::{
     models::{TransactionStatus, WalletTransaction},
     storage::WalletStorageError,
 };
-use tari_transaction::{UnsealedTransactionV1, UnsignedTransactionV1};
+use tari_transaction::Transaction;
 use time::PrimitiveDateTime;
 
 use crate::{
@@ -21,59 +22,33 @@ const LOG_TARGET: &str = "tari::ootle::wallet::storage_sqlite::models::transacti
 
 #[derive(Debug, Clone, Queryable, Identifiable)]
 #[diesel(table_name = transactions)]
-pub struct Transaction {
+pub struct TransactionRecord {
     pub id: i32,
-    pub hash: String,
-    pub network: i32,
-    pub instructions: String,
-    pub fee_instructions: String,
-    pub inputs: String,
-    pub signatures: String,
-    pub seal_signature: String,
-    pub is_seal_signer_authorized: bool,
+    pub transaction_id: String,
+    pub transaction_json: String,
+    pub _referenced_components: String,
+    pub _signers: String,
     pub result: Option<String>,
     pub qcs: Option<String>,
     pub final_fee: Option<i64>,
     pub status: String,
-    pub is_dry_run: bool,
-    pub min_epoch: Option<i64>,
-    pub max_epoch: Option<i64>,
+    pub dry_run: bool,
     pub executed_time_ms: Option<i64>,
     pub finalized_time: Option<PrimitiveDateTime>,
     pub new_account_info: Option<String>,
     pub invalid_reason: Option<String>,
-    pub updated_at: PrimitiveDateTime,
     pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
 }
 
-impl Transaction {
+impl TransactionRecord {
     pub fn try_into_wallet_transaction(self) -> Result<WalletTransaction, WalletStorageError> {
-        let signatures = deserialize_json(&self.signatures)?;
-        let inputs = deserialize_json(&self.inputs)?;
-        let seal_signature = deserialize_json(&self.seal_signature)?;
+        let transaction = deserialize_json::<Transaction>(&self.transaction_json)?;
+        let is_dry_run = transaction.is_dry_run();
 
         Ok(WalletTransaction {
-            id: deserialize_hex_try_from(&self.hash)?,
-            transaction: tari_transaction::Transaction::new(
-                UnsealedTransactionV1::new(
-                    UnsignedTransactionV1 {
-                        network: self.network.try_into().map_err(|_| WalletStorageError::DecodingError {
-                            operation: "transaction_get",
-                            item: "network",
-                            details: format!("Invalid network value {}", self.network),
-                        })?,
-                        fee_instructions: deserialize_json(&self.fee_instructions)?,
-                        instructions: deserialize_json(&self.instructions)?,
-                        inputs,
-                        min_epoch: self.min_epoch.map(|epoch| Epoch(epoch as u64)),
-                        max_epoch: self.max_epoch.map(|epoch| Epoch(epoch as u64)),
-                        is_seal_signer_authorized: true,
-                        dry_run: self.is_dry_run,
-                    },
-                    signatures,
-                ),
-                seal_signature,
-            ),
+            id: deserialize_hex_try_from(&self.transaction_id)?,
+            transaction,
             status: TransactionStatus::from_str(&self.status).map_err(|e| WalletStorageError::DecodingError {
                 operation: "transaction_get",
                 item: "status",
@@ -84,7 +59,7 @@ impl Transaction {
             qcs: self.qcs.map(|q| deserialize_json(&q)).transpose()?.unwrap_or_default(),
             new_account_info: self.new_account_info.as_deref().map(deserialize_json).transpose()?,
             invalid_reason: self.invalid_reason,
-            is_dry_run: self.is_dry_run,
+            is_dry_run,
             execution_time: self
                 .executed_time_ms
                 .map(|t| u64::try_from(t).map(Duration::from_millis).unwrap_or_default()),
@@ -94,10 +69,7 @@ impl Transaction {
                 .map(Duration::try_from)
                 .transpose()
                 .inspect_err(|e| {
-                    // TODO: in local testing, created_at > finalized_time happens a lot.
-                    // Could be accurate and due to slight delays in inserting in SQLite + super fast finality.
-                    // But we should investigate this further.
-                    debug!(
+                    warn!(
                         target: LOG_TARGET,
                         "Failed to convert finalized time to duration {} - {}: {}",
                         self.finalized_time.display(),

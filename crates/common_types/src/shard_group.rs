@@ -15,11 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::{shard::Shard, uint::U256, NumPreshards, SubstateAddress};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, BorshSerialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ShardGroup {
     start: Shard,
     end_inclusive: Shard,
@@ -109,6 +105,10 @@ impl ShardGroup {
         })
     }
 
+    pub fn shard_iter_with_global(self) -> impl Iterator<Item = Shard> + 'static {
+        iter::once(Shard::global()).chain(self.shard_iter())
+    }
+
     /// Returns the intersection of two shard groups, if they overlap.
     pub fn intersection(&self, other: &ShardGroup) -> Option<Self> {
         if self.overlaps_shard_group(other) {
@@ -129,7 +129,7 @@ impl ShardGroup {
     }
 
     pub fn contains(&self, shard: &Shard) -> bool {
-        self.as_range().contains(shard)
+        self.as_range_inclusive().contains(shard)
     }
 
     pub fn contains_or_global(&self, shard: &Shard) -> bool {
@@ -143,7 +143,7 @@ impl ShardGroup {
         self.start <= other.end_inclusive && self.end_inclusive >= other.start
     }
 
-    pub fn as_range(&self) -> RangeInclusive<Shard> {
+    pub const fn as_range_inclusive(&self) -> RangeInclusive<Shard> {
         self.start..=self.end_inclusive
     }
 

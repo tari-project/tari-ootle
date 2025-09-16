@@ -36,17 +36,18 @@ mod http_ui;
 mod block_data;
 mod event_data;
 mod event_manager;
-mod event_scanner;
 mod json_rpc;
 mod network_client;
+mod network_state_sync;
 mod storage_sqlite;
+mod substate_file_cache;
 mod substate_manager;
 mod transaction_manager;
 
-use std::{convert::Infallible, fs, future, future::Future, sync::Arc};
+use std::{convert::Infallible, fs, future, future::Future};
 
-use event_scanner::{EventFilter, EventScanner};
 use log::*;
+use network_state_sync::BlockScanner;
 use serde::Serialize;
 use substate_manager::SubstateManager;
 use tari_common::exit_codes::{ExitCode, ExitError};
@@ -61,11 +62,7 @@ use tari_epoch_manager::{
 use tari_epoch_oracles::EpochOracle;
 use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::NetworkingService;
-use tari_ootle_app_utilities::{
-    keypair::setup_keypair_prompt,
-    substate_file_cache::SubstateFileCache,
-    template_download_queue::TemplateDownloadQueue,
-};
+use tari_ootle_app_utilities::{keypair::setup_keypair_prompt, template_download_queue::TemplateDownloadQueue};
 use tari_ootle_common_types::{layer_one_transaction::LayerOneTransactionDef, Epoch, PeerAddress};
 use tari_ootle_storage::global::{DbFactory, GlobalDb};
 use tari_ootle_storage_sqlite::{global::SqliteGlobalDbAdapter, SqliteDbFactory};
@@ -79,6 +76,7 @@ use crate::{
     event_manager::EventManager,
     graphql::server::run_graphql,
     json_rpc::{spawn_json_rpc, JsonRpcHandlers},
+    substate_file_cache::SubstateFileCache,
     transaction_manager::TransactionManager,
 };
 
@@ -98,7 +96,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         .map_err(|e| ExitError::new(ExitCode::DatabaseError, e))?;
 
     let consensus_constants = ConsensusConstants::from(config.network);
-    let services: Services = spawn_services(
+    let services = spawn_services(
         &config,
         shutdown_signal.clone(),
         keypair.clone(),
@@ -113,13 +111,13 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
     let substate_cache = SubstateFileCache::new(substate_cache_dir)
         .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Substate cache error: {}", e)))?;
 
-    let substate_scanner = Arc::new(SubstateScanner::new(
+    let substate_scanner = SubstateScanner::new(
         services.epoch_manager.clone(),
         services.validator_node_client_factory.clone(),
         substate_cache,
-    ));
+    );
 
-    let substate_manager = Arc::new(SubstateManager::new(substate_scanner.clone(), services.store.clone()));
+    let substate_manager = SubstateManager::new(substate_scanner.clone(), services.store.clone());
     let transaction_manager = TransactionManager::new(services.network_client.clone(), services.store.clone());
 
     // dry run
@@ -132,13 +130,13 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
     );
 
     // Run the event manager
-    let event_manager = Arc::new(EventManager::new(services.store.clone(), substate_scanner.clone()));
+    let event_manager = EventManager::new(services.store.clone());
 
     // Run the GraphQL API
     let graphql_address = config.indexer.graphql_address;
     if let Some(address) = graphql_address {
         info!(target: LOG_TARGET, "🌐 Started GraphQL server on {}", address);
-        task::spawn(run_graphql(address, substate_manager.clone(), event_manager.clone()));
+        task::spawn(run_graphql(address, substate_manager.clone(), event_manager));
     }
 
     // Run the JSON-RPC API
@@ -147,7 +145,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         info!(target: LOG_TARGET, "🌐 Started JSON-RPC server on {}", jrpc_address);
         let handlers = JsonRpcHandlers::new(
             &services,
-            substate_manager.clone(),
+            substate_manager,
             transaction_manager,
             services.global_db.clone(),
             services.template_manager.clone(),
@@ -197,32 +195,28 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
     info!(target: LOG_TARGET, "🕸️ Web UI not enabled. Run with --features web_ui to enable it.");
 
     // Run the event scanner
-    let event_filters: Vec<EventFilter> = config
-        .indexer
-        .event_filters
-        .into_iter()
-        .map(TryInto::try_into)
-        .collect::<Result<_, _>>()
-        .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Invalid event filters: {}", e)))?;
-    let event_scanner = EventScanner::new(
+    let event_scanner = BlockScanner::new(
         services.epoch_manager.clone(),
         services.validator_node_client_factory.clone(),
         services.store.clone(),
-        services.template_manager_service.clone(),
-        event_filters,
     );
 
     // Create pid to allow watchers to know that the process has started
     fs::write(config.common.base_path.join("pid"), std::process::id().to_string())
         .map_err(|e| ExitError::new(ExitCode::IOError, e))?;
 
+    let mut scanning_interval = time::interval(config.indexer.scanning_interval);
+    // Skip - because we assume that the reason we missed it is because of scanning
+    scanning_interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+
     loop {
         tokio::select! {
             // keep scanning the dan layer for new events
-            _ = time::sleep(config.indexer.scanning_interval) => {
-                match event_scanner.scan_events().await {
+            _ = scanning_interval.tick() => {
+                // TODO: shutdown while scanning
+                match event_scanner.scan().await {
                     Ok(0) => {},
-                    Ok(cnt) => info!(target: LOG_TARGET, "Scanned {} events(s) successfully", cnt),
+                    Ok(cnt) => info!(target: LOG_TARGET, "Scanned {} block(s) successfully", cnt),
                     Err(e) =>  error!(target: LOG_TARGET, "Event auto-scan failed: {}", e),
                 };
             },

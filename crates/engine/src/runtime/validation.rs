@@ -10,10 +10,10 @@ pub(crate) fn check_stealth_transfer_limits(
     limits: &StealthLimits,
     statement: &StealthTransferStatement,
 ) -> Result<(), ArgumentValidationError> {
-    if statement.inputs.len() > limits.max_inputs {
+    if statement.inputs_statement.inputs.len() > limits.max_inputs {
         return Err(ArgumentValidationError::MaxStealthInputsExceeded {
             max_inputs: limits.max_inputs,
-            actual_inputs: statement.inputs.len(),
+            actual_inputs: statement.inputs_statement.inputs.len(),
         });
     }
     check_stealth_outputs_limits(limits, &statement.outputs_statement)?;

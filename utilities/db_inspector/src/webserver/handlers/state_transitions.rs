@@ -29,11 +29,10 @@ pub async fn list(
     let mut table = TableResponse::new([
         Column::new("epoch", "Epoch"),
         Column::new("shard", "Shard"),
-        Column::new("seq", "Seq"),
+        Column::new("state_version", "State Version"),
         Column::new("substate_id", "Substate ID"),
         Column::new("version", "Version"),
         Column::new("transition", "Transition"),
-        Column::new("substate_address", "Substate Address"),
     ]);
     let tx = db.read_only_context();
 
@@ -53,25 +52,38 @@ pub async fn list(
         cf.range_iterator(ordering, empty.as_slice()..)
     };
 
-    let page_size = req.limit.unwrap_or(1_000);
-    let skip = req.page.unwrap_or(0) * page_size;
-    for result in iter.skip(skip).take(page_size) {
-        let (id, data) = result?;
-        let encoded_key = cf.encode_key(&id);
-        let substate = substate_cf.get(&data.substate_address, OPERATION).optional()?;
-        table.add_row(json!({
-            "id": hex::encode(encoded_key),
-            "epoch": id.epoch(),
-            "shard": id.shard(),
-            "seq": id.seq(),
-            "substate_id": substate.as_ref().map(|s| s.substate_id()),
-            "version": substate.as_ref().map(|s| s.version()),
-            "transition": data.transition,
-            "substate_address": data.substate_address,
-        }));
+    let row_limit = req.limit.unwrap_or(1_000);
+    let row_skip = req.page.unwrap_or(0).saturating_mul(row_limit);
+    let mut skipped = 0usize;
+    let mut emitted = 0usize;
+    let mut count = 0usize;
+    for result in iter {
+        let ((shard, state_version), data) = result?;
+        let encoded_key = cf.encode_key(&(shard, state_version));
+        let key_hex = hex::encode(&encoded_key);
+        for (i, transition) in data.transitions.into_iter().enumerate() {
+            if skipped < row_skip {
+                skipped += 1;
+                continue;
+            }
+            if emitted < row_limit {
+                let substate = substate_cf.get(&transition.substate_address, OPERATION).optional()?;
+                table.add_row(json!({
+                    "id": format!("{}-{}", key_hex, i),
+                    "epoch": data.epoch,
+                    "shard": shard,
+                    "state_version": state_version,
+                    "substate_id": substate.as_ref().map(|s| s.substate_id()),
+                    "version": substate.as_ref().map(|s| s.version()),
+                    "transition": transition.transition,
+                }));
+                emitted += 1;
+            }
+
+            count += 1;
+        }
     }
-    let total = cf.count(OPERATION)?;
-    table.set_total_entries(total);
+    table.set_total_entries(count);
 
     Ok(Json(table))
 }

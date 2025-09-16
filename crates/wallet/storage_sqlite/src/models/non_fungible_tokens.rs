@@ -19,7 +19,7 @@ pub struct NonFungibleToken {
     pub resource_address: String,
     pub data: String,
     pub mutable_data: String,
-    pub is_burned: bool,
+    pub is_burnt: bool,
     pub created_at: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
 }
@@ -60,7 +60,7 @@ impl NonFungibleToken {
                 }
             })?,
             vault_id,
-            is_burned: self.is_burned,
+            is_burnt: self.is_burnt,
         })
     }
 }

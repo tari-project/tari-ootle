@@ -105,7 +105,7 @@ where
             .result
             .finalize
             .result
-            .accept()
+            .any_accept()
             .map(|diff| {
                 diff.up_iter()
                     .map(|(addr, substate)| {

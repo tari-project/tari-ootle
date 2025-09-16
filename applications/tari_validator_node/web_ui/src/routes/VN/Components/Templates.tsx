@@ -43,12 +43,12 @@ import SearchFilter from "../../../Components/SearchFilter";
 import Typography from "@mui/material/Typography";
 import Fade from "@mui/material/Fade";
 import { emptyRows } from "../../../utils/helpers";
-import type { TemplateMetadata } from "@tari-project/typescript-bindings";
+import type { VNTemplateMetadata } from "@tari-project/typescript-bindings";
 
-type ColumnKey = keyof TemplateMetadata;
+type ColumnKey = keyof VNTemplateMetadata;
 
 function Templates() {
-  const [templates, setTemplates] = useState<TemplateMetadata[]>([]);
+  const [templates, setTemplates] = useState<VNTemplateMetadata[]>([]);
   const [lastSort, setLastSort] = useState({ column: "", order: -1 });
 
   useEffect(() => {
@@ -98,7 +98,7 @@ function Templates() {
             {
               title: "Template Address",
               value: "id",
-              filterFn: (value: string, row: TemplateMetadata) =>
+              filterFn: (value: string, row: VNTemplateMetadata) =>
                 row.address.toLowerCase().includes(value.toLowerCase()),
             },
           ]}
@@ -138,14 +138,14 @@ function Templates() {
           <TableBody>
             {templates
               .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-              .map(({ address, binary_sha, name }, i) => (
+              .map(({ address, name }, i) => (
                 <TableRow key={i}>
                   <DataTableCell>
                     <Link to={`/templates/${address}`} state={[address]}
                           style={{ textDecoration: "none" }}>
-                      {shortenString(address)}
+                      template_{shortenString(address)}
                     </Link>
-                    <CopyToClipboard copy={address} />
+                    <CopyToClipboard copy={`template_${address}`} />
                   </DataTableCell>
                   <DataTableCell>{name}</DataTableCell>
                   <DataTableCell style={{ textAlign: "center" }}>Active</DataTableCell>

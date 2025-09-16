@@ -2,35 +2,33 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 mod account;
-pub use account::Account;
 
 mod config;
-pub use config::Config;
 
 mod output;
-pub use output::ConfidentialOutput;
 
 mod substate;
-pub use substate::Substate;
 
 mod transaction;
-pub use transaction::Transaction;
 
 mod vault;
-pub use vault::Vault;
-
-mod non_fungible_tokens;
-
-pub use non_fungible_tokens::NonFungibleToken;
 
 mod authored_template;
-mod proof;
+mod non_fungible_tokens;
+mod resource;
+mod stealth_output;
+mod utxo_process_queue;
 mod webauthn_registrations;
 
-pub use authored_template::AuthoredTemplate;
-// Currently only used internally
-pub(crate) use proof::OutputLock;
-pub use webauthn_registrations::*;
-
-mod stealth_output;
+pub use account::*;
+pub use authored_template::*;
+pub use config::*;
+pub use non_fungible_tokens::*;
+pub use output::*;
+pub use resource::*;
 pub use stealth_output::*;
+pub use substate::Substate;
+pub use transaction::*;
+pub use utxo_process_queue::*;
+pub use vault::Vault;
+pub use webauthn_registrations::*;

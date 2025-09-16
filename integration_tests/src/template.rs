@@ -76,12 +76,12 @@ pub async fn publish_template(
     // look for the new UP template substate
     let template_id = finalize_result
         .result
-        .accept()
+        .any_accept()
         .and_then(|result| result.up_iter().find_map(|(substate_id, _)| substate_id.as_template()))
         .map(|id| id.as_hash())
         .ok_or_else(|| anyhow!("Transaction result did not contain a published template!"))?;
 
-    Ok(TemplateAddress::try_from_vec(template_id.to_vec())?)
+    Ok(TemplateAddress::try_from_slice(template_id.as_slice())?)
 }
 
 pub async fn send_template_registration(
@@ -124,7 +124,7 @@ pub async fn send_template_registration(
 
     // store the template address for future reference
     let resp = client.create_template_registration(request).await?.into_inner();
-    Ok(TemplateAddress::try_from_vec(resp.template_address).unwrap())
+    Ok(TemplateAddress::try_from_slice(&resp.template_address).unwrap())
 }
 
 pub fn compile_wasm_template(template_name: String) -> Result<Hash, anyhow::Error> {

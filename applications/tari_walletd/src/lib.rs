@@ -25,15 +25,15 @@ pub mod config;
 mod handlers;
 #[cfg(feature = "web_ui")]
 mod http_ui;
-pub mod indexer_jrpc_impl;
 mod jrpc_server;
 mod notify;
 mod services;
 mod webrtc;
 
-use std::{fs, panic, process};
+use std::{fs, panic, pin, process};
 
 use log::*;
+use tari_common_types::seeds::seed_words::SeedWords;
 use tari_ootle_common_types::{optional::Optional, NumPreshards};
 use tari_ootle_wallet_sdk::{
     apis::{
@@ -43,14 +43,14 @@ use tari_ootle_wallet_sdk::{
     WalletSdk,
     WalletSdkConfig,
 };
+use tari_ootle_wallet_sdk_services::indexer_jrpc_impl::IndexerJsonRpcNetworkInterface;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_shutdown::ShutdownSignal;
+use tari_template_lib::constants::XTR;
 
 use crate::{
-    cli::Cli,
     config::ApplicationConfig,
     handlers::{auth::create_authenticator, HandlerContext},
-    indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
     notify::Notify,
     services::{recovery_service, spawn_services},
 };
@@ -62,34 +62,45 @@ const DEFAULT_FEE: u64 = 1500;
 const NUM_PRESHARDS: NumPreshards = NumPreshards::current();
 
 pub async fn run_tari_ootle_walletd(
-    cli: Cli,
     config: ApplicationConfig,
+    seed_words: Option<&SeedWords>,
     shutdown_signal: ShutdownSignal,
 ) -> Result<(), anyhow::Error> {
     // Uncomment to enable tokio tracing via tokio-console
     // console_subscriber::init();
 
     let wallet_store = init_wallet_store(&config)?;
-    let mut wallet_sdk = initialize_wallet_sdk(&cli, &config, wallet_store.clone())?;
+    let mut wallet_sdk = initialize_wallet_sdk(&config, wallet_store.clone())?;
 
-    let needs_seed_recovery = wallet_sdk.initialize_cipher_seed(cli.wallet_restore.seed_words.as_ref())?;
+    let needs_seed_recovery = wallet_sdk.initialize_cipher_seed(seed_words)?;
 
-    wallet_sdk
-        .key_manager_api()
-        .get_or_create_initial(KeyBranch::Transaction)?;
+    wallet_sdk.key_manager_api().get_or_create_initial(KeyBranch::Account)?;
+
+    tokio::spawn({
+        let wallet_sdk = wallet_sdk.clone();
+        async move {
+            // Ensures that the XTR resource is available in the substate cache
+            if let Err(err) = wallet_sdk.substate_api().fetch_resource(XTR).await {
+                error!(target: LOG_TARGET, "Failed to fetch XTR resource: {}", err);
+            }
+        }
+    });
 
     let notify = Notify::new(100);
     let services = spawn_services(shutdown_signal.clone(), notify.clone(), wallet_sdk.clone());
 
-    // trigger resource scanning if needed
+    // trigger account scanning if needed
     if needs_seed_recovery {
-        let scanner = recovery_service::Service::new(
+        let scanner = recovery_service::AccountRecoveryService::new(
             wallet_sdk.clone(),
             services.account_monitor_handle.clone(),
             config.ootle_wallet_daemon.recovery_abandon_count,
-            shutdown_signal.clone(),
         );
-        tokio::spawn(scanner.scan());
+        let shutdown_signal = shutdown_signal.clone();
+        tokio::spawn(async move {
+            let scan_pinned = pin::pin!(scanner.scan());
+            shutdown_signal.select(scan_pinned).await;
+        });
     }
 
     let jrpc_address = config.ootle_wallet_daemon.json_rpc_address.unwrap();
@@ -148,7 +159,15 @@ pub async fn run_tari_ootle_walletd(
             res??;
         },
         res = services.services_fut => {
-            res?;
+            match res {
+                Ok(_) => {
+                    info!(target: LOG_TARGET, "All services have shut down");
+                },
+                Err(err) => {
+                    error!(target: LOG_TARGET, "🚨 A service has crashed: {}. Shutting down", err);
+                    return Err(err);
+                },
+            }
         },
     }
     Ok(())
@@ -161,13 +180,12 @@ pub fn init_wallet_store(config: &ApplicationConfig) -> anyhow::Result<SqliteWal
 }
 
 pub fn initialize_wallet_sdk(
-    cli: &Cli,
     config: &ApplicationConfig,
     store: SqliteWalletStore,
 ) -> anyhow::Result<WalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>> {
     let sdk_config = WalletSdkConfig {
         network: config.ootle_wallet_daemon.network,
-        override_keyring_password: cli.override_keyring_password.clone(),
+        override_keyring_password: config.ootle_wallet_daemon.override_keyring_password.clone(),
     };
     let config_api = ConfigApi::new(&store);
     let indexer_jrpc_endpoint = if let Some(indexer_url) = config_api.get(ConfigKey::IndexerUrl).optional()? {

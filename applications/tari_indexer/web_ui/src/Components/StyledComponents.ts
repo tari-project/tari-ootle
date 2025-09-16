@@ -25,21 +25,22 @@ import TableCell from "@mui/material/TableCell";
 import { styled } from "@mui/material/styles";
 import Box from "@mui/material/Box";
 import IconButton from "@mui/material/IconButton";
-import theme from "../theme/theme";
 import Typography from "@mui/material/Typography";
 
 interface IAccordionIconButton {
   open: boolean;
 }
 
-export const AccordionIconButton = styled(IconButton)<IAccordionIconButton>`
-  background-color: ${({ open }) => (open ? theme.palette.primary.main : "#fff")};
-  color: ${({ open }) => (open ? "#fff" : theme.palette.primary.main)};
-  &:hover {
-    background-color: ${theme.palette.primary.main};
-    color: #fff;
-  }
-`;
+export const AccordionIconButton = styled(IconButton)<IAccordionIconButton>(
+  ({ theme, open }) => ({
+    backgroundColor: open ? theme.palette.primary.main : "#fff",
+    color: open ? "#fff" : theme.palette.primary.main,
+    "&:hover": {
+      backgroundColor: theme.palette.primary.main,
+      color: "#fff",
+    },
+  })
+);
 
 export const StyledPaper = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(3),
@@ -51,7 +52,7 @@ export const DataTableCell = styled(TableCell)(({ theme }) => ({
 }));
 
 export const CodeBlock = styled(Box)(({ theme }) => ({
-  backgroundColor: "#F5F5F7",
+  backgroundColor: theme.palette.divider,
   borderRadius: theme.shape.borderRadius,
   padding: theme.spacing(3),
   maxHeight: "400px",
@@ -69,7 +70,7 @@ export const BoxHeading = styled(Box)(({ theme }) => ({
 
 export const BoxHeading2 = styled(Box)(({ theme }) => ({
   padding: theme.spacing(2),
-  borderBottom: "1px solid #f5f5f5",
+  borderBottom: `1px solid ${theme.palette.divider}`,
 }));
 
 export const SubHeading = styled(Typography)(() => ({

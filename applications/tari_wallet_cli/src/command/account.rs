@@ -20,12 +20,8 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{fs, io, path::PathBuf};
-
-use anyhow::anyhow;
 use clap::{Args, Subcommand};
-use serde_json as json;
-use tari_ootle_common_types::optional::Optional;
+use tari_ootle_common_types::displayable::Displayable;
 use tari_wallet_daemon_client::{
     types::{
         AccountInfo,
@@ -33,15 +29,12 @@ use tari_wallet_daemon_client::{
         AccountsCreateOrGetRequest,
         AccountsCreateRequest,
         AccountsGetBalancesRequest,
-        ClaimBurnProof,
-        ClaimBurnRequest,
-        RevealFundsRequest,
     },
     ComponentAddressOrName,
     WalletDaemonClient,
 };
 
-use crate::{command::transaction::summarize_finalize_result, table::Table, table_row};
+use crate::{table::Table, table_row};
 
 #[derive(Debug, Subcommand, Clone)]
 pub enum AccountsSubcommand {
@@ -52,9 +45,6 @@ pub enum AccountsSubcommand {
     List,
 
     Get(GetArgs),
-    ClaimBurn(ClaimBurnArgs),
-    #[clap(alias = "reveal")]
-    RevealFunds(RevealFundsArgs),
     #[clap(alias = "faucet")]
     CreateFreeTestCoins(CreateFreeTestCoinsArgs),
     #[clap(alias = "default")]
@@ -86,36 +76,6 @@ pub struct GetArgs {
 }
 
 #[derive(Debug, Args, Clone)]
-pub struct ClaimBurnArgs {
-    #[clap(long, short = 'a', alias = "account")]
-    account: Option<ComponentAddressOrName>,
-    #[clap(long, short = 'i', alias = "input")]
-    proof_file: Option<PathBuf>,
-    /// Optional proof JSON from the L1 console wallet. If not provided, you will be prompted to enter it.
-    #[clap(long, short = 'j', alias = "json")]
-    proof_json: Option<serde_json::Value>,
-    #[clap(long, short = 'f')]
-    fee: Option<u32>,
-    #[clap(long)]
-    key_id: Option<u64>,
-}
-
-#[derive(Debug, Args, Clone)]
-pub struct RevealFundsArgs {
-    /// Amount of funds to reveal
-    reveal_amount: u64,
-    /// The account name where the funds will be revealed
-    account: Option<ComponentAddressOrName>,
-    /// The fee to pay for the reveal transaction
-    #[clap(long, short = 'f')]
-    max_fee: Option<u32>,
-    /// If set, the fee will be paid from the revealed funds instead of from the account resulting in less revealed
-    /// funds than requested.
-    #[clap(long, default_value_t = true)]
-    pay_from_reveal: bool,
-}
-
-#[derive(Debug, Args, Clone)]
 pub struct CreateFreeTestCoinsArgs {
     pub account: Option<ComponentAddressOrName>,
     #[clap(long, short, alias = "amount")]
@@ -139,8 +99,6 @@ impl AccountsSubcommand {
                 handle_list(&mut client).await?;
             },
             AccountsSubcommand::Get(args) => handle_get(args, &mut client).await?,
-            AccountsSubcommand::ClaimBurn(args) => handle_claim_burn(args, &mut client).await?,
-            AccountsSubcommand::RevealFunds(args) => handle_reveal_funds(args, &mut client).await?,
             AccountsSubcommand::CreateFreeTestCoins(args) => handle_create_free_test_coins(args, &mut client).await?,
             AccountsSubcommand::SetDefault(args) => handle_set_default(args, &mut client).await?,
         }
@@ -191,98 +149,12 @@ async fn handle_get_balances(args: GetBalancesArgs, client: &mut WalletDaemonCli
     table.set_titles(vec!["VaultId", "Resource", "Balance"]);
     for balance in resp.balances {
         table.add_row(table_row!(
-            balance.vault_address,
+            balance.vault_address.display(),
             format!("{} {:?}", balance.resource_address, balance.resource_type),
             balance.to_balance_string()
         ));
     }
     table.print_stdout();
-    Ok(())
-}
-
-pub async fn handle_claim_burn(args: ClaimBurnArgs, client: &mut WalletDaemonClient) -> Result<(), anyhow::Error> {
-    let ClaimBurnArgs {
-        account,
-        proof_json,
-        fee,
-        proof_file,
-        key_id,
-    } = args;
-
-    let claim_proof: ClaimBurnProof = if let Some(proof_json) = proof_json {
-        json::from_value(proof_json).map_err(|e| anyhow!("Failed to serialize proof JSON: {}", e))?
-    } else if let Some(proof_file) = proof_file {
-        let mut file = fs::File::open(proof_file).map_err(|e| anyhow!("Failed to read proof file: {}", e))?;
-        json::from_reader(&mut file).map_err(|e| anyhow!("Failed to parse proof JSON: {}", e))?
-    } else {
-        println!(
-            "Please paste console wallet JSON output from claim_burn call in the terminal: Press <Ctrl/Cmd + d> once \
-             done"
-        );
-
-        json::from_reader(&mut io::stdin()).map_err(|e| anyhow!("Failed to parse proof JSON: {}", e))?
-    };
-
-    println!("✅ Claim burn submitted");
-    let existing_account = match account {
-        Some(account) => {
-            let account_name = account.name().map(|s| s.to_string());
-            match client.accounts_get(account).await.optional()? {
-                Some(resp) => resp.account,
-                None => {
-                    let resp = client
-                        .create_account(AccountsCreateRequest {
-                            account_name,
-                            is_default: None,
-                            key_id,
-                        })
-                        .await?;
-                    resp.account
-                },
-            }
-        },
-        None => {
-            let existing_for_key = match key_id {
-                Some(id) => client
-                    .accounts_get_by_key_index(id)
-                    .await
-                    .optional()?
-                    .map(|resp| resp.account),
-                None => None,
-            };
-            match existing_for_key {
-                Some(account) => account,
-                None => {
-                    println!("No account found for the provided key_id or key_id is None. Creating a new account...");
-                    let resp = client
-                        .create_account(AccountsCreateRequest {
-                            account_name: None,
-                            is_default: None,
-                            key_id,
-                        })
-                        .await?;
-
-                    resp.account
-                },
-            }
-        },
-    };
-
-    let req = ClaimBurnRequest {
-        account: existing_account.address.into(),
-        claim_proof,
-        max_fee: fee.map(Into::into),
-    };
-
-    let resp = client
-        .claim_burn(req)
-        .await
-        .map_err(|e| anyhow!("Failed to claim burn with error = {}", e.to_string()))?;
-
-    println!("Total transaction fee: {}", resp.fee);
-    println!();
-
-    summarize_finalize_result(&resp.result);
     Ok(())
 }
 
@@ -364,32 +236,6 @@ async fn handle_get(args: GetArgs, client: &mut WalletDaemonClient) -> Result<()
         resp.account.address
     );
     println!();
-
-    Ok(())
-}
-
-pub async fn handle_reveal_funds(args: RevealFundsArgs, client: &mut WalletDaemonClient) -> Result<(), anyhow::Error> {
-    let RevealFundsArgs {
-        account,
-        reveal_amount,
-        max_fee,
-        pay_from_reveal,
-    } = args;
-
-    println!("Submitting reveal transaction...");
-    let resp = client
-        .accounts_reveal_funds(RevealFundsRequest {
-            account,
-            amount_to_reveal: reveal_amount.into(),
-            max_fee: max_fee.map(Into::into),
-            pay_fee_from_reveal: pay_from_reveal,
-        })
-        .await?;
-
-    println!("Transaction: {}", resp.transaction_id);
-    println!("Fee: {}", resp.fee);
-    println!();
-    summarize_finalize_result(&resp.result);
 
     Ok(())
 }

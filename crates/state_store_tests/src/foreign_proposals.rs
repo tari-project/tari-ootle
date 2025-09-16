@@ -33,6 +33,8 @@ fn foreign_proposals_operations(db: impl StateStore) {
     let proposal1 = create_foreign_proposal(*zero_block.id(), EPOCH);
     tx.foreign_proposals_save(&proposal1).unwrap();
 
+    let shard_group = ShardGroup::all_shards(NumPreshards::P64);
+
     let block1 = Block::create(
         network,
         *zero_block.id(),
@@ -40,7 +42,7 @@ fn foreign_proposals_operations(db: impl StateStore) {
         None,
         NodeHeight(2),
         EPOCH,
-        ShardGroup::all_shards(NumPreshards::P64),
+        shard_group,
         Default::default(),
         [Command::ForeignProposal(proposal1.to_atom())]
             .iter()
@@ -65,7 +67,7 @@ fn foreign_proposals_operations(db: impl StateStore) {
         None,
         NodeHeight(2),
         EPOCH,
-        ShardGroup::all_shards(NumPreshards::P64),
+        shard_group,
         Default::default(),
         Default::default(),
         Default::default(),

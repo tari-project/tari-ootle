@@ -20,9 +20,29 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody } from "@mui/material";
-import { DataTableCell } from "../../Components/StyledComponents";
+import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Chip } from "@mui/material";
+import { DataTableCell } from "@components/StyledComponents";
 import type { LogEntry } from "@tari-project/typescript-bindings";
+
+function getLogLevelColor(
+  level: string,
+): "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning" {
+  switch (level.toLowerCase()) {
+    case "error":
+      return "error";
+    case "warn":
+    case "warning":
+      return "warning";
+    case "info":
+      return "info";
+    case "debug":
+      return "secondary";
+    case "trace":
+      return "default";
+    default:
+      return "primary";
+  }
+}
 
 export default function Logs({ data }: { data: Array<LogEntry> }) {
   return (
@@ -30,7 +50,7 @@ export default function Logs({ data }: { data: Array<LogEntry> }) {
       <Table>
         <TableHead>
           <TableRow>
-            <TableCell>Level</TableCell>
+            <TableCell width={150}>Level</TableCell>
             <TableCell>Message</TableCell>
           </TableRow>
         </TableHead>
@@ -38,7 +58,9 @@ export default function Logs({ data }: { data: Array<LogEntry> }) {
           {data.map(({ level, message }: LogEntry, index: number) => {
             return (
               <TableRow key={index}>
-                <DataTableCell>{level}</DataTableCell>
+                <DataTableCell>
+                  <Chip label={level} size="small" color={getLogLevelColor(level)} variant="outlined" />
+                </DataTableCell>
                 <DataTableCell>{message}</DataTableCell>
               </TableRow>
             );

@@ -26,7 +26,7 @@ use std::{fs, future, io, panic, str::FromStr, time::Duration};
 use anyhow::bail;
 use cucumber::{gherkin::Step, given, then, when, writer, writer::Verbosity, ScenarioType, World, WriterExt};
 use integration_tests::{
-    http_server::{spawn_template_http_server, MockHttpServer},
+    http_server::MockHttpServer,
     logging::{create_log_config_file, get_base_dir},
     miner::{mine_blocks, register_miner_process},
     validator_node_cli,
@@ -59,11 +59,10 @@ async fn main() {
 
     // Start the mock server that continues to run for the duration of the tests
     let mut shutdown = Shutdown::new();
-    let mock_port = spawn_template_http_server(shutdown.to_signal()).await;
 
     let file = fs::File::create("cucumber-output-junit.xml").unwrap();
     let cucumber_fut = TariWorld::cucumber()
-        .max_concurrent_scenarios(5)
+        .max_concurrent_scenarios(2)
         .with_writer(writer::Tee::new(
             writer::JUnit::new(file, Verbosity::ShowWorldAndDocString).normalized(),
             // following config needed to use eprint statements in the tests
@@ -81,7 +80,7 @@ async fn main() {
             Box::pin(async move {
                 // Each scenario gets a mock connection. As each connection is dropped after the scenario, all the mock
                 // urls are deregistered
-                world.http_server = Some(MockHttpServer::connect(mock_port).await);
+                world.http_server = Some(MockHttpServer::connect().await);
             })
         })
         .after(move |_feature, _rule, scenario, _finished, maybe_world| {
@@ -393,7 +392,7 @@ async fn call_wallet_daemon_method_and_check_result(
         .unwrap_or_else(|| panic!("Failed to call first() on results: {:?}", resp));
     match result.return_type {
         Type::U32 => {
-            let u32_result: u32 = result.decode().unwrap();
+            let u32_result: u32 = result.decode()?;
             assert_eq!(u32_result.to_string(), expected_result);
         },
         _ => todo!(),
@@ -592,11 +591,6 @@ async fn submit_manifest_with_inputs(
     validator_node_cli::submit_manifest(world, vn_name, outputs_name, manifest, inputs, key_name).await;
 }
 
-#[when(expr = "account {word} reveals {int} burned tokens via wallet daemon {word}")]
-async fn reveal_burned_funds(world: &mut TariWorld, account_name: String, amount: u64, wallet_daemon_name: String) {
-    wallet_daemon_cli::reveal_burned_funds(world, account_name, amount, wallet_daemon_name).await;
-}
-
 #[when(regex = r#"^I submit a transaction manifest via wallet daemon (\w+) with inputs "([^"]+)" named "(\w+)"$"#)]
 async fn submit_transaction_manifest_via_wallet_daemon(
     world: &mut TariWorld,
@@ -678,7 +672,7 @@ async fn given_all_validator_connects_to_other_vns(world: &mut TariWorld) {
         .map(|vn| {
             (
                 vn.public_key,
-                Multiaddr::from_str(&format!("/ip4/127.0.0.1/tcp/{}", vn.port)).unwrap(),
+                Multiaddr::from_str(&format!("/ip4/127.0.0.1/tcp/{}", vn.p2p_port)).unwrap(),
             )
         })
         .collect::<Vec<_>>();

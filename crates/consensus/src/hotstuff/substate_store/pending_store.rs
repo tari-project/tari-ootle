@@ -1,7 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{borrow::Cow, collections::HashMap, fmt::Display};
+use std::{borrow::Cow, collections::HashMap, fmt::Display, iter};
 
 use indexmap::IndexMap;
 use log::*;
@@ -42,7 +42,7 @@ pub struct PendingSubstateStore<'store, 'tx, TStore: StateStore + 'store + 'tx> 
     /// Map from substate id to the index in the diff list of the latest change
     head: HashMap<SubstateId, usize>,
     /// Append only list of changes ordered oldest to newest
-    diff: Vec<SubstateChange>,
+    changes: Vec<SubstateChange>,
     new_locks: IndexMap<SubstateId, Vec<SubstateLock>>,
     parent_block: LeafBlock,
     num_preshards: NumPreshards,
@@ -54,7 +54,7 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
             store,
             pending: HashMap::new(),
             head: HashMap::new(),
-            diff: Vec::new(),
+            changes: Vec::new(),
             new_locks: IndexMap::new(),
             parent_block,
             num_preshards,
@@ -78,15 +78,15 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
             .ok_or_else(|| SubstateStoreError::SubstateNotFound {
                 id: VersionedSubstateId::new(id.clone(), 0),
             })?;
-        if let Some(destroyed) = substate.destroyed() {
+        if substate.is_destroyed() {
             return Ok(SubstateChange::Down {
                 id: VersionedSubstateId::new(id.clone(), substate.version()),
-                shard: destroyed.by_shard,
+                shard: substate.shard(),
             });
         }
         Ok(SubstateChange::Up {
             id: id.clone(),
-            shard: substate.created_by_shard,
+            shard: substate.shard(),
             substate: Box::new(
                 substate
                     .into_substate()
@@ -131,7 +131,7 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
         let Some(change) = self.get_latest_change_from_store(substate_id).optional()? else {
             debug!(target: LOG_TARGET, "Creating substate in place: {} v0", substate_id);
             let value = creator(None)?;
-            let id = SubstateAddress::from_substate_id(substate_id, 0);
+            let id = VersionedSubstateIdRef::new(substate_id, 0);
             let up = SubstateChange::Up {
                 shard: id.to_shard(num_preshards),
                 substate: Box::new(Substate::new(0, value)),
@@ -254,8 +254,8 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingS
             if id.is_validator_fee_pool() {
                 continue;
             }
-            let addr = SubstateAddress::from_substate_id(id, substate.version());
-            let shard = addr.to_shard(self.num_preshards);
+            let vid = VersionedSubstateIdRef::new(id, substate.version());
+            let shard = vid.to_shard(self.num_preshards);
             debug!(target: LOG_TARGET, "🔼️ Up: {} v{} {} value hash: {}", id, substate.version(), shard, substate.to_value_hash());
             self.put(SubstateChange::Up {
                 id: id.clone(),
@@ -309,7 +309,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
         if let Some(ch) = self
             .head
             .get(id)
-            .map(|&pos| self.diff.get(pos).expect("diff and head are not in sync"))
+            .map(|&pos| self.changes.get(pos).expect("diff and head are not in sync"))
         {
             return Ok(LatestSubstateVersion {
                 version: ch.versioned_substate_id().version(),
@@ -353,13 +353,13 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
     fn get_head_change(&self, id: &SubstateId) -> Option<&SubstateChange> {
         self.head
             .get(id)
-            .map(|&pos| self.diff.get(pos).expect("diff and head are not in sync"))
+            .map(|&pos| self.changes.get(pos).expect("diff and head are not in sync"))
     }
 
     fn get_head_change_mut(&mut self, id: &SubstateId) -> Option<&mut SubstateChange> {
         self.head
             .get(id)
-            .map(|&pos| self.diff.get_mut(pos).expect("diff and head are not in sync"))
+            .map(|&pos| self.changes.get_mut(pos).expect("diff and head are not in sync"))
     }
 
     pub fn get_latest_change(&self, id: &SubstateId) -> Result<SubstateChange, SubstateStoreError> {
@@ -697,15 +697,15 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
     fn get_pending(&self, addr: &SubstateAddress) -> Option<&SubstateChange> {
         self.pending
             .get(addr)
-            .map(|&pos| self.diff.get(pos).expect("pending map and diff are out of sync"))
+            .map(|&pos| self.changes.get(pos).expect("pending map and diff are out of sync"))
     }
 
     fn insert(&mut self, change: SubstateChange) {
-        let index = self.diff.len();
+        let index = self.changes.len();
         self.pending.insert(change.to_substate_address(), index);
         self.head
             .insert(change.versioned_substate_id().substate_id().clone(), index);
-        self.diff.push(change)
+        self.changes.push(change)
     }
 
     pub fn get_latest_lock_by_id(
@@ -853,12 +853,47 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
         &self.new_locks
     }
 
-    pub fn diff(&self) -> &Vec<SubstateChange> {
-        &self.diff
+    pub fn changes(&self) -> &Vec<SubstateChange> {
+        &self.changes
+    }
+
+    pub fn generate_shard_state_change_bitmap(&self) -> Vec<bool> {
+        let shard_group = self.parent_block.shard_group();
+        let mut bitmap = iter::repeat_n(false, shard_group.len() + 1).collect::<Vec<_>>();
+        debug!(
+            target: LOG_TARGET,
+            "Generating shard state change bitmap (len:{})for shard group {}",
+            bitmap.len(),
+            shard_group,
+        );
+        for ch in &self.changes {
+            let shard = ch.shard();
+            if !shard_group.contains_or_global(&shard) {
+                continue;
+            }
+            if shard.is_global() {
+                bitmap[0] = true;
+                continue;
+            }
+
+            let index = shard
+                .as_u32()
+                .checked_sub(shard_group.start().as_u32())
+                // All values are previously validated
+                .expect("BUG(to_partial_shard_state_versions): Shard less than shard group start")
+                as usize +
+                1;
+            assert!(
+                index < bitmap.len(),
+                "BUG(to_partial_shard_state_versions): (index: {index}, shard: {shard}, shard group: {shard_group})"
+            );
+            bitmap[index] = true;
+        }
+        bitmap
     }
 
     pub fn into_parts(self) -> (Vec<SubstateChange>, IndexMap<SubstateId, Vec<SubstateLock>>) {
-        (self.diff, self.new_locks)
+        (self.changes, self.new_locks)
     }
 }
 

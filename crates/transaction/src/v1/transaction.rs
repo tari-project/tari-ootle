@@ -7,22 +7,17 @@ use indexmap::IndexSet;
 use log::*;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{
-    confidential::ConfidentialClaim,
     hashing::hash_template_code,
     indexed_value::IndexedValueError,
     instruction::Instruction,
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
 };
-use tari_ootle_common_types::{
-    Epoch,
-    NumPreshards,
-    ShardGroup,
-    SubstateAddress,
-    SubstateRequirement,
-    SubstateRequirementRef,
+use tari_ootle_common_types::{Epoch, SubstateRequirement, SubstateRequirementRef};
+use tari_template_lib::{
+    args::InstructionArg,
+    models::{ComponentAddress, StealthTransferStatement},
 };
-use tari_template_lib::{args::InstructionArg, models::ComponentAddress};
 
 use crate::{
     v1::signature::TransactionSignature,
@@ -34,11 +29,7 @@ use crate::{
 const LOG_TARGET: &str = "tari::ootle::transaction::transaction";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionV1 {
     body: UnsealedTransactionV1,
     seal_signature: TransactionSealSignature,
@@ -125,16 +116,6 @@ impl TransactionV1 {
         self.inputs().iter().map(Into::into)
     }
 
-    pub fn to_all_involved_shards(&self, num_shards: NumPreshards, num_committees: u32) -> HashSet<ShardGroup> {
-        self.all_inputs_iter()
-            .map(|id| {
-                // version doesnt affect shard
-                let addr = SubstateAddress::from_substate_id(id.substate_id(), 0);
-                addr.to_shard_group(num_shards, num_committees)
-            })
-            .collect()
-    }
-
     pub fn all_published_templates_iter(&self) -> impl Iterator<Item = (PublishedTemplateAddress, &[u8])> + '_ {
         let sealed_pk = self.seal_signature.public_key();
         self.instructions()
@@ -190,6 +171,8 @@ impl Display for TransactionV1 {
 
 fn calc_instruction_weight(instruction: &Instruction) -> u64 {
     const BINARY_WEIGHT_DIVISOR: u64 = 3;
+    // TODO: formalize costing numbers
+    const CLAIM_FIXED_COST: u64 = 1100;
     match instruction {
         Instruction::CreateAccount {
             access_rules,
@@ -203,17 +186,20 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::CallMethod { args, .. } => calc_args_weight(args),
         Instruction::PutLastInstructionOutputOnWorkspace { .. } => 0, // Call already costs
         Instruction::EmitLog { message, .. } => message.len() as u64 / BINARY_WEIGHT_DIVISOR,
-        Instruction::ClaimBurn { .. } => size_of::<ConfidentialClaim>() as u64,
+        Instruction::ClaimBurn { .. } => CLAIM_FIXED_COST,
         Instruction::ClaimValidatorFees { .. } => 1,
         Instruction::DropAllProofsInWorkspace => 1,
         Instruction::AssertBucketContains { .. } => 1,
         Instruction::PublishTemplate { binary } => binary.len() as u64 / BINARY_WEIGHT_DIVISOR,
         Instruction::AllocateAddress { .. } => 1,
-        Instruction::StealthTransfer { statement, .. } => {
-            // TODO: weight inputs and outputs accordingly
-            statement.inputs.len() as u64 + statement.outputs_statement.outputs.len() as u64
-        },
+        Instruction::StealthTransfer { statement, .. } => calc_stealth_statement_weight(statement),
+        Instruction::PayFee { statement, .. } => calc_stealth_statement_weight(statement),
     }
+}
+
+fn calc_stealth_statement_weight(statement: &StealthTransferStatement) -> u64 {
+    // TODO: weight inputs and outputs accordingly - currently outputs cost 2x inputs
+    statement.inputs_statement.inputs.len() as u64 + (statement.outputs_statement.outputs.len() as u64 * 2)
 }
 
 fn calc_args_weight(args: &[InstructionArg]) -> u64 {

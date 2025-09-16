@@ -76,6 +76,8 @@ use crate::{
         AccountGetResponse,
         AccountSetDefaultRequest,
         AccountSetDefaultResponse,
+        AccountsAssociateStealthResourceRequest,
+        AccountsAssociateStealthResourceResponse,
         AccountsCreateOrGetRequest,
         AccountsCreateOrGetResponse,
         AccountsCreateRequest,
@@ -107,9 +109,9 @@ use crate::{
         KeysSetActiveResponse,
         PublishTemplateRequest,
         PublishTemplateResponse,
-        RevealFundsRequest,
-        RevealFundsResponse,
         SettingsGetResponse,
+        StealthTransferRequest,
+        StealthTransferResponse,
         TransactionGetAllRequest,
         TransactionGetAllResponse,
         TransactionGetRequest,
@@ -247,6 +249,14 @@ impl WalletDaemonClient {
         self.send_request("accounts.create_or_get", request.borrow()).await
     }
 
+    pub async fn associate_stealth_resource<T: Borrow<AccountsAssociateStealthResourceRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<AccountsAssociateStealthResourceResponse, WalletDaemonClientError> {
+        self.send_request("accounts.associate_stealth_resource", request.borrow())
+            .await
+    }
+
     pub async fn get_account_balances<T: Borrow<AccountsGetBalancesRequest>>(
         &mut self,
         request: T,
@@ -320,18 +330,18 @@ impl WalletDaemonClient {
         self.send_request("accounts.confidential_transfer", req.borrow()).await
     }
 
+    pub async fn accounts_stealth_transfer<T: Borrow<StealthTransferRequest>>(
+        &mut self,
+        req: T,
+    ) -> Result<StealthTransferResponse, WalletDaemonClientError> {
+        self.send_request("accounts.stealth_transfer", req.borrow()).await
+    }
+
     pub async fn claim_burn<T: Borrow<ClaimBurnRequest>>(
         &mut self,
         req: T,
     ) -> Result<ClaimBurnResponse, WalletDaemonClientError> {
         self.send_request("accounts.claim_burn", req.borrow()).await
-    }
-
-    pub async fn accounts_reveal_funds<T: Borrow<RevealFundsRequest>>(
-        &mut self,
-        req: T,
-    ) -> Result<RevealFundsResponse, WalletDaemonClientError> {
-        self.send_request("accounts.reveal_funds", req.borrow()).await
     }
 
     pub async fn create_transfer_proof<T: Borrow<ProofsGenerateRequest>>(

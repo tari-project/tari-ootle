@@ -56,7 +56,6 @@ impl ProcessDefinition for MinotariNode {
             .arg(format!("-pbase_node.http_wallet_query_service.port={http_api_port}"))
             .args([
                 "--non-interactive",
-                "--enable-grpc",
                 "--enable-mining",
                 "--enable-second-layer",
                 "-pbase_node.p2p.allow_test_addresses=true",

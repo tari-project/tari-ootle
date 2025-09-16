@@ -5,7 +5,7 @@ use std::{collections::HashSet, fmt, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
-use tari_consensus_types::{BlockId, LeafBlock, ProposalCertificate, QcId};
+use tari_consensus_types::LeafBlock;
 use tari_engine_types::{
     serde_with,
     substate::{hash_substate, Substate, SubstateId, SubstateValue},
@@ -14,22 +14,23 @@ use tari_ootle_common_types::{
     displayable::Displayable,
     shard::Shard,
     Epoch,
-    NodeHeight,
     SubstateAddress,
     SubstateRequirement,
     VersionedSubstateId,
     VersionedSubstateIdRef,
 };
+use tari_state_tree::{SubstateTreeChange, Version};
 use tari_transaction::TransactionId;
 
-use crate::{consensus_models::SubstateLock, StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
+use crate::{
+    consensus_models::{substate_update_batch::SubstateUpdateBatch, SubstateLock, SubstateTransition},
+    StateStoreReadTransaction,
+    StateStoreWriteTransaction,
+    StorageError,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SubstateRecord {
     pub substate_id: SubstateId,
     pub version: u32,
@@ -37,28 +38,8 @@ pub struct SubstateRecord {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "serde_with::hex")]
     pub state_hash: FixedHash,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub created_justify: QcId,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub created_block: BlockId,
-    pub created_by_shard: Shard,
-    pub created_at_epoch: Epoch,
+    pub created: SubstateCreated,
     pub destroyed: Option<SubstateDestroyed>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
-pub struct SubstateDestroyed {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub justify: QcId,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub by_block: NodeHeight,
-    pub at_epoch: Epoch,
-    pub by_shard: Shard,
 }
 
 impl SubstateRecord {
@@ -66,10 +47,7 @@ impl SubstateRecord {
         substate_id: SubstateId,
         version: u32,
         value: V,
-        created_by_shard: Shard,
-        created_at_epoch: Epoch,
-        created_block: BlockId,
-        created_justify: QcId,
+        created: SubstateCreated,
     ) -> Self {
         let value = value.into();
         Self {
@@ -77,10 +55,7 @@ impl SubstateRecord {
             version,
             state_hash: value.to_value_hash(version),
             substate_value: value.into_value(),
-            created_justify,
-            created_by_shard,
-            created_at_epoch,
-            created_block,
+            created,
             destroyed: None,
         }
     }
@@ -117,16 +92,25 @@ impl SubstateRecord {
         Some(Substate::new(self.version, self.substate_value?))
     }
 
+    pub fn into_substate_value_or_hash(self) -> SubstateValueOrHash {
+        self.substate_value
+            .map(Into::into)
+            .unwrap_or_else(|| self.state_hash.into())
+    }
+
     pub fn version(&self) -> u32 {
         self.version
     }
 
-    pub fn created_block(&self) -> BlockId {
-        self.created_block
+    /// Returns the shard this substate is in.
+    /// WARN: you cant trust this if this is deserialized from an untrusted source, this should be validated by locally
+    /// calculating which shard this substate falls.
+    pub fn shard(&self) -> Shard {
+        self.created.in_shard
     }
 
-    pub fn created_justify(&self) -> &QcId {
-        &self.created_justify
+    pub fn created(&self) -> &SubstateCreated {
+        &self.created
     }
 
     pub fn destroyed(&self) -> Option<&SubstateDestroyed> {
@@ -143,6 +127,23 @@ impl SubstateRecord {
 
     pub fn state_hash(&self) -> &FixedHash {
         &self.state_hash
+    }
+
+    pub fn into_transition(self) -> SubstateTransition {
+        if self.is_up() {
+            SubstateTransition::Up {
+                id: self.substate_id,
+                version: self.version,
+                substate_or_hash: self
+                    .substate_value
+                    .map(Into::into)
+                    .unwrap_or_else(|| self.state_hash.into()),
+            }
+        } else {
+            SubstateTransition::Down {
+                id: VersionedSubstateId::new(self.substate_id, self.version),
+            }
+        }
     }
 }
 
@@ -166,8 +167,11 @@ impl SubstateRecord {
         tx.substate_locks_remove_many_for_transactions(transaction_ids)
     }
 
-    pub fn create<TTx: StateStoreWriteTransaction>(&self, tx: &mut TTx) -> Result<(), StorageError> {
-        tx.substates_create(self)?;
+    pub fn commit_batch<TTx: StateStoreWriteTransaction>(
+        tx: &mut TTx,
+        updates: SubstateUpdateBatch,
+    ) -> Result<(), StorageError> {
+        tx.substates_commit_batch(updates)?;
         Ok(())
     }
 
@@ -258,39 +262,6 @@ impl SubstateRecord {
         Ok(rec)
     }
 
-    pub fn get_created_proposal_certificate<TTx: StateStoreReadTransaction>(
-        &self,
-        tx: &TTx,
-    ) -> Result<ProposalCertificate, StorageError> {
-        tx.proposal_certificates_get(self.created_at_epoch, self.created_justify())
-    }
-
-    pub fn get_destroyed_proposal_certificate<TTx: StateStoreReadTransaction>(
-        &self,
-        tx: &TTx,
-    ) -> Result<Option<ProposalCertificate>, StorageError> {
-        self.destroyed()
-            .map(|destroyed| tx.proposal_certificates_get(destroyed.at_epoch, &destroyed.justify))
-            .transpose()
-    }
-
-    pub fn destroy<TTx: StateStoreWriteTransaction>(
-        tx: &mut TTx,
-        versioned_substate_id: VersionedSubstateId,
-        shard: Shard,
-        epoch: Epoch,
-        destroyed_by_block: NodeHeight,
-        destroyed_justify: &QcId,
-    ) -> Result<(), StorageError> {
-        tx.substates_down(
-            versioned_substate_id,
-            shard,
-            epoch,
-            destroyed_by_block,
-            destroyed_justify,
-        )
-    }
-
     pub fn prune_downed_values<TTx: StateStoreWriteTransaction>(
         tx: &mut TTx,
         epoch: Epoch,
@@ -316,6 +287,24 @@ impl SubstateDestroyedProof {
     pub fn to_versioned_substate_id(&self) -> VersionedSubstateId {
         VersionedSubstateId::new(self.substate_id.clone(), self.version)
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct SubstateCreated {
+    // TODO: consider removing this field, it's not used
+    pub at_epoch: Epoch,
+    // Note: This field not strictly necessary, since the shard can be derived from (SubstateId, Version) and
+    // NumPreshards. But the cost is negligible, and it makes the metadata more self-contained.
+    pub in_shard: Shard,
+    pub at_state_version: Version,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct SubstateDestroyed {
+    pub at_epoch: Epoch,
+    pub at_state_version: Version,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -405,18 +394,18 @@ impl From<SubstateRecord> for SubstateData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SubstateUpdate {
+pub enum SubstateUpdateProof {
     Create(SubstateCreatedProof),
     Destroy(SubstateDestroyedProof),
 }
 
-impl SubstateUpdate {
+impl SubstateUpdateProof {
     pub fn is_create(&self) -> bool {
         matches!(self, Self::Create(_))
     }
 
     pub fn is_destroy(&self) -> bool {
-        matches!(self, Self::Destroy { .. })
+        matches!(self, Self::Destroy(_))
     }
 
     pub fn substate_id(&self) -> &SubstateId {
@@ -443,15 +432,30 @@ impl SubstateUpdate {
             _ => None,
         }
     }
+
+    pub fn to_tree_change(&self) -> SubstateTreeChange {
+        match self {
+            Self::Create(create) => {
+                let id = create.substate.as_versioned_substate_id_ref();
+                SubstateTreeChange::Up {
+                    id: id.to_owned(),
+                    value_hash: create.substate.to_value_hash(),
+                }
+            },
+            Self::Destroy(destroy) => SubstateTreeChange::Down {
+                id: destroy.to_versioned_substate_id(),
+            },
+        }
+    }
 }
 
-impl From<SubstateCreatedProof> for SubstateUpdate {
+impl From<SubstateCreatedProof> for SubstateUpdateProof {
     fn from(value: SubstateCreatedProof) -> Self {
         Self::Create(value)
     }
 }
 
-impl Display for SubstateUpdate {
+impl Display for SubstateUpdateProof {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Create(proof) => write!(f, "Create: {}(v{})", proof.substate.substate_id, proof.substate.version),

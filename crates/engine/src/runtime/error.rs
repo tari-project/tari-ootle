@@ -198,6 +198,8 @@ pub enum RuntimeError {
     TemplateNotFound { template_address: TemplateAddress },
     #[error("Insufficient fees paid: required {required_fee}, paid {fees_paid}")]
     InsufficientFeesPaid { required_fee: u64, fees_paid: u64 },
+    #[error("No fees paid from stealth transfer: {details}")]
+    NoFeesPaid { details: String },
     #[error("No fee checkpoint")]
     NoFeeCheckpoint,
     #[error("Component address must be sequential. Index before {index} was not found")]
@@ -282,6 +284,9 @@ pub enum RuntimeError {
 
     #[error("Assert error: {0}")]
     AssertError(#[from] AssertError),
+
+    #[error("Limit error: {details}")]
+    LimitError { details: String },
 }
 
 impl RuntimeError {

@@ -82,6 +82,28 @@ impl ConfidentialResourceBuilder {
         }
     }
 
+    /// Allows for chaining of builder methods even when conditionally applying builder methods.
+    ///
+    /// ## Example
+    ///
+    /// ```ignore
+    /// use tari_template_lib::prelude::*;
+    /// let resource = ResourceBuilder::confidential()
+    ///    .with_owner_rule(rule!(allow_all))
+    ///   .then(|builder| {
+    ///     if some_condition {
+    ///        builder.do_something_on_some_condition(..)
+    ///     } else {
+    ///        // or do nothing
+    ///        builder
+    ///     }
+    ///   })
+    ///   .build();
+    /// ```
+    pub fn then<F: FnOnce(Self) -> Self>(self, f: F) -> Self {
+        f(self)
+    }
+
     /// Sets up who will be the owner of the resource.
     ///
     /// By default, the owner is the signer of the resource creation transaction ([`OwnerRule::OwnedBySigner`]).
@@ -115,8 +137,15 @@ impl ConfidentialResourceBuilder {
     /// 
     /// # Note
     /// It is not currently possible to change the view key after the resource is created.
-    pub fn with_view_key(mut self, view_key: RistrettoPublicKeyBytes) -> Self {
-        self.view_key = Some(view_key);
+    pub fn with_view_key(self, view_key: RistrettoPublicKeyBytes) -> Self {
+        self.with_view_key_opt(Some(view_key))
+    }
+
+    /// Optionally, specify a view key for the confidential resource. This allows anyone with the secret view key to uncover
+    /// the balance of commitments generated for the resource.
+    /// NOTE: it is not currently possible to change the view key after the resource is created.
+    pub fn with_view_key_opt(mut self, view_key: Option<RistrettoPublicKeyBytes>) -> Self {
+        self.view_key = view_key;
         self
     }
 

@@ -15,7 +15,7 @@ pub use value_lookup::*;
 
 pub mod stealth;
 
-mod balance_proof;
+pub mod balance_proof;
 mod bullet_proof;
 pub mod encrypted_data;
 pub mod hashers;

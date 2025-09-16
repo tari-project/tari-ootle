@@ -29,17 +29,13 @@ use tari_template_abi::rust::{
 use tari_template_lib_types::{EntityId, KeyParseError, ObjectKey};
 
 use super::BinaryTag;
-use crate::{newtype_struct_serde_impl, prelude::CONFIDENTIAL_TARI_RESOURCE_ADDRESS};
+use crate::{newtype_struct_serde_impl, prelude::STEALTH_TARI_RESOURCE_ADDRESS};
 
 const TAG: u64 = BinaryTag::ResourceAddress.as_u64();
 
 /// The globally-unique identifier of a resource.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ResourceAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl ResourceAddress {
@@ -65,7 +61,7 @@ impl ResourceAddress {
     }
 
     pub fn is_tari(&self) -> bool {
-        *self == CONFIDENTIAL_TARI_RESOURCE_ADDRESS
+        *self == STEALTH_TARI_RESOURCE_ADDRESS
     }
 }
 

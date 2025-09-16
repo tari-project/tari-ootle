@@ -11,11 +11,7 @@ use tari_template_abi::rust::{
 use crate::serde_helpers;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct EntityId(
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "serde_helpers::fixed_hex")]
@@ -115,11 +111,7 @@ impl Display for EntityId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ComponentKey(
     #[serde(with = "serde_helpers::fixed_hex")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
@@ -182,8 +174,8 @@ impl ObjectKey {
         Ok(())
     }
 
-    pub fn try_from_vec(data: Vec<u8>) -> Result<Self, KeyParseError> {
-        Self::try_from(data.as_slice())
+    pub fn try_from_slice(data: &[u8]) -> Result<Self, KeyParseError> {
+        Self::try_from(data)
     }
 
     pub fn as_entity_id(&self) -> EntityId {

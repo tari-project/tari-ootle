@@ -6,11 +6,7 @@ use tari_template_lib_types::TemplateAddress;
 
 use crate::models::ComponentAddress;
 
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AuthHook {
     pub component_address: ComponentAddress,

@@ -1,6 +1,8 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::io::Read;
+
 use anyhow::anyhow;
 use tari_state_tree::{NibblePath, NodeKey, Version};
 
@@ -35,8 +37,7 @@ impl DbCodec<NodeKey> for NodeKeyCodec {
         self.encode_node_key(key)
     }
 
-    fn decode(&self, mut bytes: &[u8]) -> Result<NodeKey, RocksDbStorageError> {
-        let reader = &mut bytes;
+    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<NodeKey, RocksDbStorageError> {
         let buf = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
             source: anyhow!("Invalid version bytes"),
         })?;
@@ -73,7 +74,7 @@ impl<'a> DbCodec<&'a NodeKey> for NodeKeyCodec {
         self.encode_node_key(key)
     }
 
-    fn decode(&self, _bytes: &[u8]) -> Result<&'a NodeKey, RocksDbStorageError> {
+    fn decode_reader<R: Read>(&self, _reader: &mut R) -> Result<&'a NodeKey, RocksDbStorageError> {
         unreachable!("decode should not be called on NodeKeyCodec with a reference")
     }
 }

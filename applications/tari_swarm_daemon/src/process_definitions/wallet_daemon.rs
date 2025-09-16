@@ -11,7 +11,7 @@ use crate::process_definitions::{ProcessContext, ProcessDefinition};
 
 pub const WALLET_DAEMON_AUTH_SETTINGS_KEY: &str = "wallet_daemon_auth";
 pub const WALLET_DAEMON_SEED_WORDS_SETTINGS_KEY: &str = "wallet_daemon_seed_words";
-const OVERRIDE_KEYRING_PASSWORD_SETTINGS_KEY: &str = "override_keyring_password";
+pub const OVERRIDE_KEYRING_PASSWORD_SETTINGS_KEY: &str = "override_keyring_password";
 const ARGS_SETTINGS_KEY: &str = "args";
 const WALLET_DAEMON_AUTH_DEFAULT: &str = "none";
 
@@ -41,7 +41,7 @@ impl ProcessDefinition for WalletDaemon {
             .next()
             .ok_or_else(|| anyhow!("Indexer should be started before wallet daemon"))?;
         let indexer_url = format!(
-            "http://127.0.0.1:{}",
+            "http://127.0.0.1:{}/json_rpc",
             indexer
                 .instance()
                 .allocated_ports()
@@ -71,7 +71,9 @@ impl ProcessDefinition for WalletDaemon {
         }
 
         if let Some(override_keyring_password) = context.get_setting(OVERRIDE_KEYRING_PASSWORD_SETTINGS_KEY) {
-            command.arg(format!("--override-keyring-password='{override_keyring_password}'"));
+            command
+                .arg("--override-keyring-password")
+                .arg(override_keyring_password);
         }
 
         if let Some(args) = context.get_setting(ARGS_SETTINGS_KEY) {

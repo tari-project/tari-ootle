@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use log::*;
 use tari_engine_types::{
     indexed_value::{IndexedValueError, IndexedWellKnownTypes},
+    resource::Resource,
     substate::{SubstateId, SubstateValue},
     transaction_receipt::TransactionReceiptAddress,
 };
@@ -17,7 +18,7 @@ use tari_ootle_common_types::{
     VersionedSubstateId,
     VersionedSubstateIdRef,
 };
-use tari_template_lib::{constants::XTR, types::TemplateAddress};
+use tari_template_lib::{constants::XTR, models::ResourceAddress, types::TemplateAddress};
 
 use crate::{
     models::SubstateModel,
@@ -101,10 +102,10 @@ where
                         parent_id
                     );
                     let ValidatorScanResult {
-                        address: substate_id,
+                        id: substate_id,
                         substate,
                         ..
-                    } = self.scan_for_substate(parent_id, None).await?;
+                    } = self.fetch_substate_from_network(parent_id, None).await?;
 
                     match &substate {
                         SubstateValue::Component(data) => {
@@ -117,8 +118,8 @@ where
                                 if unversioned {
                                     substate_ids.insert(addr.into());
                                 } else {
-                                    let ValidatorScanResult { address: addr, .. } =
-                                        self.scan_for_substate(&addr, None).await?;
+                                    let ValidatorScanResult { id: addr, .. } =
+                                        self.fetch_substate_from_network(&addr, None).await?;
                                     substate_ids.insert(addr.into());
                                 }
                             }
@@ -146,8 +147,8 @@ where
                             if unversioned {
                                 substate_ids.insert(resx_addr.into());
                             } else {
-                                let ValidatorScanResult { address: id, .. } =
-                                    self.scan_for_substate(&resx_addr, None).await?;
+                                let ValidatorScanResult { id, .. } =
+                                    self.fetch_substate_from_network(&resx_addr, None).await?;
                                 substate_ids.insert(id.into());
                             }
                         },
@@ -167,8 +168,8 @@ where
                                 substate_ids.insert(resx_addr.into());
                             } else {
                                 // NonFungible substates are always v0
-                                let ValidatorScanResult { address: id, .. } =
-                                    self.scan_for_substate(&resx_addr, None).await?;
+                                let ValidatorScanResult { id, .. } =
+                                    self.fetch_substate_from_network(&resx_addr, None).await?;
                                 substate_ids.insert(id.into());
                             }
                         },
@@ -195,8 +196,8 @@ where
                             if unversioned {
                                 substate_ids.insert(resx_addr.into());
                             } else {
-                                let ValidatorScanResult { address: id, .. } =
-                                    self.scan_for_substate(&resx_addr, None).await?;
+                                let ValidatorScanResult { id, .. } =
+                                    self.fetch_substate_from_network(&resx_addr, None).await?;
                                 substate_ids.insert(id.into());
                             }
                         },
@@ -215,24 +216,25 @@ where
         Ok(substate_ids)
     }
 
-    pub async fn scan_for_substate(
+    pub async fn fetch_substate_from_network(
         &self,
         address: &SubstateId,
         version_hint: Option<u32>,
     ) -> Result<ValidatorScanResult, SubstateApiError> {
         debug!(
             target: LOG_TARGET,
-            "Scanning for substate {} at version {}",
+            "Fetching for substate {} at version {}",
             address,
             version_hint.display()
         );
 
+        // TODO: cache?
         let resp = self
             .network_interface
             .query_substate(address, version_hint, false)
             .await
             .optional()
-            .map_err(|e| SubstateApiError::NetworkIndexerError(e.into()))?
+            .map_err(|e| SubstateApiError::NetworkInterfaceError(e.into()))?
             .ok_or_else(|| SubstateApiError::SubstateDoesNotExist {
                 address: address.clone(),
             })?;
@@ -242,9 +244,26 @@ where
             "Found substate {} at version {}", address, resp.version
         );
         Ok(ValidatorScanResult {
-            address: VersionedSubstateId::new(address.clone(), resp.version),
+            id: VersionedSubstateId::new(address.clone(), resp.version),
             substate: resp.substate,
         })
+    }
+
+    pub async fn fetch_resource(&self, address: ResourceAddress) -> Result<Resource, SubstateApiError> {
+        if let Some(resource) = self.store.with_read_tx(|tx| tx.resources_get(&address)).optional()? {
+            return Ok(resource.into());
+        }
+        let ValidatorScanResult { substate, .. } = self.fetch_substate_from_network(&address.into(), None).await?;
+
+        let resource = substate
+            .as_resource()
+            .ok_or_else(|| {
+                SubstateApiError::InvalidValidatorNodeResponse(format!("Substate at {} is not a Resource", address))
+            })?
+            .clone();
+        self.store
+            .with_write_tx(|tx| tx.resources_upsert(&address, &resource))?;
+        Ok(resource)
     }
 
     pub fn save_root<I: IntoIterator<Item = SubstateId>>(
@@ -291,8 +310,8 @@ where
 pub enum SubstateApiError {
     #[error("Store error: {0}")]
     StoreError(#[from] WalletStorageError),
-    #[error("Network network_interface error: {0}")]
-    NetworkIndexerError(anyhow::Error),
+    #[error("Network interface error: {0}")]
+    NetworkInterfaceError(anyhow::Error),
     #[error("Invalid validator node response: {0}")]
     InvalidValidatorNodeResponse(String),
     #[error("Substate {address} does not exist")]
@@ -309,7 +328,7 @@ impl IsNotFoundError for SubstateApiError {
 }
 
 pub struct ValidatorScanResult {
-    pub address: VersionedSubstateId,
+    pub id: VersionedSubstateId,
     pub substate: SubstateValue,
 }
 
@@ -333,8 +352,9 @@ fn get_dependent_substates<TTx: WalletStoreReader>(
         }
         debug!(
             target: LOG_TARGET,
-            "Adding substate {} to dependent substates",
-            child.substate_id
+            "substate {} owned by {}",
+            child.substate_id,
+            parent.substate_id
         );
         substate_ids.insert(child.substate_id.into());
         for child in child.referenced_substates {
@@ -353,8 +373,8 @@ fn get_dependent_substates_inner<TTx: WalletStoreReader>(
     };
     debug!(
         target: LOG_TARGET,
-        "Adding substate {} to dependent substates",
-        substate.substate_id
+        "Getting dependent substates for {}",
+        substate.substate_id,
     );
     substate_ids.insert(substate.substate_id.into());
 
@@ -362,8 +382,9 @@ fn get_dependent_substates_inner<TTx: WalletStoreReader>(
         if let Some(addr) = child.as_non_fungible_address() {
             debug!(
                 target: LOG_TARGET,
-                "Adding substate {} to dependent substates",
-                child
+                "NonFungible substate {} owned by {}",
+                child,
+                id
             );
             // Ensure that the associated resource is also included
             substate_ids.insert(SubstateRequirement::unversioned(*addr.resource_address()));
@@ -376,8 +397,9 @@ fn get_dependent_substates_inner<TTx: WalletStoreReader>(
         get_dependent_substates_inner(tx, &child, substate_ids)?;
         debug!(
             target: LOG_TARGET,
-            "Adding substate {} to dependent substates",
-            child
+            "Child substate {} owned by {}",
+            child,
+            id
         );
         substate_ids.insert(child.into());
     }

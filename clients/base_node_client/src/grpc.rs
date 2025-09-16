@@ -27,13 +27,10 @@ use log::*;
 use minotari_app_grpc::tari_rpc::{self as grpc, GetShardKeyRequest, GetValidatorNodeChangesRequest};
 use minotari_node_grpc_client::BaseNodeGrpcClient;
 use tari_common_types::types::FixedHash;
-use tari_core::{
-    base_node::comms_interface::ValidatorNodeChange,
-    blocks::BlockHeader,
-    transactions::transaction_components::CodeTemplateRegistration,
-};
+use tari_node_components::blocks::BlockHeader;
 use tari_ootle_common_types::{Epoch, SubstateAddress};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+use tari_transaction_components::transaction_components::CodeTemplateRegistration;
 use tari_utilities::ByteArray;
 use url::Url;
 
@@ -130,7 +127,7 @@ impl BaseNodeClient for GrpcBaseNodeClient {
         &mut self,
         epoch: Epoch,
         sidechain_id: Option<&RistrettoPublicKeyBytes>,
-    ) -> Result<Vec<ValidatorNodeChange>, BaseNodeClientError> {
+    ) -> Result<Vec<minotari_app_grpc::tari_rpc::ValidatorNodeChange>, BaseNodeClientError> {
         let client = self.connection().await?;
         let result = client
             .get_validator_node_changes(GetValidatorNodeChangesRequest {
@@ -140,14 +137,7 @@ impl BaseNodeClient for GrpcBaseNodeClient {
             .await?
             .into_inner();
 
-        let changes = result
-            .changes
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()
-            .map_err(|err| {
-                BaseNodeClientError::InvalidPeerMessage(format!("Error converting validator node changes: {}", err))
-            })?;
+        let changes = result.changes;
         Ok(changes)
     }
 

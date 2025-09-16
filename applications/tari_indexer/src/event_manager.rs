@@ -20,71 +20,24 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::BTreeMap, str::FromStr, sync::Arc};
+use std::{collections::BTreeMap, str::FromStr};
 
 use log::*;
-use tari_crypto::tari_utilities::message_format::MessageFormat;
 use tari_engine_types::{events::Event, substate::SubstateId};
-use tari_epoch_manager::service::EpochManagerHandle;
-use tari_indexer_lib::substate_scanner::SubstateScanner;
-use tari_ootle_app_utilities::substate_file_cache::SubstateFileCache;
-use tari_ootle_common_types::PeerAddress;
-use tari_template_lib::{
-    models::Metadata,
-    types::{Hash, TemplateAddress},
-};
-use tari_transaction::TransactionId;
-use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
+use tari_template_lib::{models::Metadata, types::Hash};
 
-use crate::storage_sqlite::{
-    models::events::NewEvent,
-    store_factory::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreWriteTransaction, SqliteIndexerStore},
-};
+use crate::storage_sqlite::{IndexerStore, IndexerStoreReadTransaction, SqliteIndexerStore};
 
 const LOG_TARGET: &str = "tari::indexer::event_manager";
 
+#[derive(Debug, Clone)]
 pub struct EventManager {
     substate_store: SqliteIndexerStore,
-    _substate_scanner:
-        Arc<SubstateScanner<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SubstateFileCache>>,
 }
 
 impl EventManager {
-    pub fn new(
-        substate_store: SqliteIndexerStore,
-        substate_scanner: Arc<
-            SubstateScanner<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SubstateFileCache>,
-        >,
-    ) -> Self {
-        Self {
-            substate_store,
-            _substate_scanner: substate_scanner,
-        }
-    }
-
-    pub fn save_event_to_db(
-        &self,
-        substate_id: &SubstateId,
-        template_address: TemplateAddress,
-        tx_hash: TransactionId,
-        topic: String,
-        payload: &Metadata,
-        version: u64,
-        timestamp: u64,
-    ) -> Result<(), anyhow::Error> {
-        self.substate_store.with_write_tx(|tx| {
-            let new_event = NewEvent {
-                substate_id: Some(substate_id.to_string()),
-                template_address: template_address.to_string(),
-                tx_hash: tx_hash.to_string(),
-                topic,
-                payload: payload.to_json().expect("Failed to convert to JSON"),
-                version: version as i32,
-                timestamp: timestamp as i64,
-            };
-            tx.save_event(new_event)
-        })?;
-        Ok(())
+    pub fn new(substate_store: SqliteIndexerStore) -> Self {
+        Self { substate_store }
     }
 
     pub async fn get_events_from_db(

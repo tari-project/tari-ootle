@@ -38,11 +38,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ExecuteResult {
     /// The finalized result to commit. If the fee transaction succeeds but the transaction fails, this will be accept.
     pub finalize: FinalizeResult,
@@ -135,11 +131,7 @@ impl ExecuteResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct FinalizeResult {
     pub transaction_hash: Hash,
     pub events: Vec<Event>,
@@ -180,8 +172,8 @@ impl FinalizeResult {
 
     /// Returns the accept diff if the transaction was accepted, otherwise None.
     /// Acceptance includes fee-only acceptance.
-    pub fn accept(&self) -> Option<&SubstateDiff> {
-        self.result.accept()
+    pub fn any_accept(&self) -> Option<&SubstateDiff> {
+        self.result.any_accept()
     }
 
     pub fn into_accept(self) -> Option<SubstateDiff> {
@@ -222,11 +214,7 @@ impl FinalizeResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum TransactionResult {
     Accept(SubstateDiff),
     AcceptFeeRejectRest(SubstateDiff, RejectReason),
@@ -242,7 +230,7 @@ impl TransactionResult {
         matches!(self, Self::Reject(_))
     }
 
-    pub fn accept(&self) -> Option<&SubstateDiff> {
+    pub fn any_accept(&self) -> Option<&SubstateDiff> {
         match self {
             Self::Accept(substate_diff) => Some(substate_diff),
             Self::AcceptFeeRejectRest(substate_diff, _) => Some(substate_diff),
@@ -309,11 +297,7 @@ impl Display for TransactionResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum RejectReason {
     ExecutionFailure(String),
     OneOrMoreInputsNotFound(String),
@@ -358,11 +342,7 @@ impl Display for RejectReason {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize, BorshSerialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum AbortReason {
     ForeignPledgeInputConflict,
     LockInputsFailed,

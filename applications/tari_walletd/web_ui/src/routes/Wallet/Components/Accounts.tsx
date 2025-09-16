@@ -42,28 +42,32 @@ import { AccountInfo, substateIdToString, shortenSubstateId } from "@tari-projec
 import CopyAddress from "@components/CopyAddress";
 
 function Account(account: AccountInfo, index: number) {
+  const {
+    account: { name, component_address },
+    address,
+  } = account;
   return (
     <TableRow key={index}>
       <DataTableCell>
         <Link
-          to={`/accounts/${substateIdToString(account.account.address)}`}
+          to={`/accounts/${substateIdToString(component_address)}`}
           style={{
             textDecoration: "none",
             color: "inherit",
           }}
         >
-          {account.account.name || shortenSubstateId(account.account.address)}
+          {name || shortenSubstateId(component_address)}
         </Link>
       </DataTableCell>
       <DataTableCell>
-        <CopyAddress address={substateIdToString(account.account.address)} />
+        <CopyAddress address={substateIdToString(component_address)} />
       </DataTableCell>
       <DataTableCell>{account.account.key_index}</DataTableCell>
       <DataTableCell>
-        <CopyAddress address={account.public_key} />
+        <CopyAddress address={address} />
       </DataTableCell>
       <DataTableCell>
-        <IconButton component={Link} to={`/accounts/${substateIdToString(account.account.address)}`}>
+        <IconButton component={Link} to={`/accounts/${substateIdToString(component_address)}`}>
           <ChevronRight />
         </IconButton>
       </DataTableCell>
@@ -96,8 +100,8 @@ function Accounts() {
     });
   };
 
-  const onSubmitAddAccount = () => {
-    mutateAddAccount(
+  const onSubmitAddAccount = async () => {
+    await mutateAddAccount(
       {
         accountName: accountFormState.accountName,
       },

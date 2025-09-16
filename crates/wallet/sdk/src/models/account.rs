@@ -4,15 +4,14 @@
 use std::fmt::{Display, Formatter};
 
 use tari_bor::{Deserialize, Serialize};
-use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::FromByteType;
+use tari_ootle_wallet_crypto::OotleAddress;
 use tari_template_lib::{models::ComponentAddress, prelude::RistrettoPublicKeyBytes};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Account {
     pub name: Option<String>,
-    pub address: ComponentAddress,
+    pub component_address: ComponentAddress,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub key_index: u64,
     pub is_confirmed_on_chain: bool,
@@ -21,7 +20,7 @@ pub struct Account {
 
 impl Account {
     pub fn address(&self) -> &ComponentAddress {
-        &self.address
+        &self.component_address
     }
 
     pub fn key_index(&self) -> u64 {
@@ -44,26 +43,30 @@ impl Account {
 impl Display for Account {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.name {
-            Some(ref name) => write!(f, "{} ({})", name, self.address),
-            None => write!(f, "{}", self.address),
+            Some(ref name) => write!(f, "{} ({})", name, self.component_address),
+            None => write!(f, "{}", self.component_address),
         }
     }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct AccountWithPublicKey {
+pub struct AccountWithAddress {
     pub account: Account,
-    pub owner_public_key: RistrettoPublicKeyBytes,
+    pub address: OotleAddress,
 }
 
-impl AccountWithPublicKey {
+impl AccountWithAddress {
     pub fn account(&self) -> &Account {
         &self.account
     }
 
-    pub fn address(&self) -> &ComponentAddress {
-        &self.account.address
+    pub fn component_address(&self) -> &ComponentAddress {
+        &self.account.component_address
+    }
+
+    pub fn address(&self) -> &OotleAddress {
+        &self.address
     }
 
     pub fn key_index(&self) -> u64 {
@@ -71,12 +74,11 @@ impl AccountWithPublicKey {
     }
 
     pub fn owner_public_key(&self) -> &RistrettoPublicKeyBytes {
-        &self.owner_public_key
+        self.address.account_public_key()
     }
 
-    pub fn to_ristretto_public_key(&self) -> RistrettoPublicKey {
-        RistrettoPublicKey::try_from_byte_type(&self.owner_public_key)
-            .expect("BUG: Malformed public key bytes in account")
+    pub fn view_only_public_key(&self) -> &RistrettoPublicKeyBytes {
+        self.address.view_only_key()
     }
 
     pub fn is_confirmed_on_chain(&self) -> bool {
@@ -84,9 +86,9 @@ impl AccountWithPublicKey {
     }
 }
 
-impl Display for AccountWithPublicKey {
+impl Display for AccountWithAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} (pubkey: {})", self.account, self.owner_public_key)
+        write!(f, "{} ({})", self.account, self.address)
     }
 }
 

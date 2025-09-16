@@ -34,18 +34,14 @@ import { useAccountsGetBalances, useAccountNFTsList, useAccountsGet } from "@api
 import { ApiError } from "@api/helpers/types";
 import { DataTableCell } from "@components/StyledComponents";
 import FetchStatusCheck from "@components/FetchStatusCheck";
-import { AccountGetResponse, BalanceEntry, substateIdToString } from "@tari-project/typescript-bindings";
+import { BalanceEntry, substateIdToString } from "@tari-project/typescript-bindings";
 import NftList from "@routes/AssetVault/NFTs/NFTList";
 import CopyAddress from "@components/CopyAddress";
-import useAccountStore from "@store/accountStore";
 import { Form, useParams } from "react-router-dom";
-import { accountsAssociateStealthResource, accountsGet } from "@utils/json_rpc";
+import { accountsAssociateStealthResource } from "@utils/json_rpc";
 import Loading from "@components/Loading";
-import Button from "@mui/material/Button";
 import { IoAdd } from "react-icons/io5";
-import Box from "@mui/material/Box";
-import Fade from "@mui/material/Fade";
-import TextField from "@mui/material/TextField/TextField";
+import { Box, Fade, TextField, Button } from "@mui/material";
 import { handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
 
 function BalanceRow(props: BalanceEntry) {
@@ -170,10 +166,10 @@ function AccountDetailsLayout() {
                 <TableRow>
                   <DataTableCell>{accountsData?.account?.name || "<No Name>"}</DataTableCell>
                   <DataTableCell>
-                    <CopyAddress address={substateIdToString(accountsData?.account.address)} />
+                    <CopyAddress address={substateIdToString(accountsData?.account.component_address)} />
                   </DataTableCell>
                   <DataTableCell>
-                    {accountsData?.public_key && <CopyAddress address={accountsData?.account.address!} />}
+                    {accountsData?.address && <CopyAddress address={accountsData?.address!} />}
                   </DataTableCell>
                 </TableRow>
               </TableBody>

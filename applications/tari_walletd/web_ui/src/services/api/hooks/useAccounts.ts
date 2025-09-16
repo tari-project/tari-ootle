@@ -38,13 +38,13 @@ import {
 } from "@utils/json_rpc";
 import { ApiError } from "@api/helpers/types";
 import queryClient from "@api/queryClient";
-import type {
+import {
   AccountOrKeyIndex,
-  ClaimBurnProof,
   ClaimBurnRequest,
   ComponentAddress,
   ComponentAddressOrName,
   ConfidentialTransferInputSelection,
+  decodeOotleAddress,
   ResourceType,
 } from "@tari-project/typescript-bindings";
 
@@ -91,7 +91,7 @@ export interface TransferParams {
   account: ComponentAddress;
   amount: number;
   resource_address: string;
-  destination_public_key: string;
+  destination_address: string;
   max_fee: number | null;
   resourceType: ResourceType;
   output_to_revealed: boolean;
@@ -105,12 +105,13 @@ export const useAccountsTransfer = () => {
     mutationFn: (params: TransferParams) => {
       const account = { ComponentAddress: params.account };
       const max_fee = params.max_fee || DEFAULT_MAX_FEE;
+      const parsedAddress = decodeOotleAddress(params.destination_address);
       if (params.resourceType === "Confidential") {
         let transferRequest = {
           account,
           amount: params.amount,
           resource_address: params.resource_address,
-          destination_public_key: params.destination_public_key,
+          destination_address: params.destination_address,
           max_fee,
           proof_from_badge_resource: params.badge,
           input_selection: params.input_selection,
@@ -123,7 +124,7 @@ export const useAccountsTransfer = () => {
           owner_account: account,
           input_selection: params.input_selection,
           resource_address: params.resource_address,
-          destination_public_key: params.destination_public_key,
+          destination_address: params.destination_address,
           max_fee,
           blinded_output_amount: params.output_to_revealed ? 0 : params.amount,
           revealed_output_amount: params.output_to_revealed ? params.amount : 0,
@@ -136,7 +137,7 @@ export const useAccountsTransfer = () => {
           account,
           amount: params.amount,
           resource_address: params.resource_address,
-          destination_public_key: params.destination_public_key,
+          destination_public_key: parsedAddress.accountPublicKey,
           max_fee,
           proof_from_badge_resource: params.badge,
           input_selection: params.input_selection,

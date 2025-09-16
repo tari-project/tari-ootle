@@ -23,7 +23,7 @@
 import { Box, Button, Stack, Typography, Divider } from "@mui/material";
 import type { ResourceAddress, ResourceType } from "@tari-project/typescript-bindings";
 import CopyAddress from "@components/CopyAddress";
-import { formatCurrency, bigintToDecimalString } from "@utils/helpers";
+import { formatCurrency } from "@utils/helpers";
 import { SendMoneyFormState } from "./FormStep";
 
 interface ConfirmationStepProps {
@@ -74,10 +74,10 @@ export default function ConfirmationStep({
 
         <Box>
           <Typography variant="subtitle2" color="text.secondary">
-            To Public Key:
+            To Address:
           </Typography>
           <Typography variant="body1">
-            <CopyAddress address={transferFormState.publicKey} />
+            <CopyAddress address={transferFormState.address} />
           </Typography>
         </Box>
 

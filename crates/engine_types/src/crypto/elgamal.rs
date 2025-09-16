@@ -16,7 +16,7 @@ use tari_template_lib::{models::ViewableBalanceProof, types::crypto::RistrettoPu
 use crate::{
     crypto::{get_commitment_factory, messages, value_lookup_table::ValueLookupTable},
     resource_container::ResourceError,
-    FromByteType,
+    ConvertFromByteType,
     ToByteType,
 };
 
@@ -134,12 +134,12 @@ pub struct CompressedElgamalVerifiableBalance {
     pub public_nonce: RistrettoPublicKeyBytes,
 }
 
-impl FromByteType<CompressedElgamalVerifiableBalance> for ElgamalVerifiableBalance {
+impl ConvertFromByteType<CompressedElgamalVerifiableBalance> for ElgamalVerifiableBalance {
     type Error = tari_utilities::ByteArrayError;
 
-    fn try_from_byte_type(bytes: &CompressedElgamalVerifiableBalance) -> Result<Self, Self::Error> {
-        let encrypted = RistrettoPublicKey::try_from_byte_type(&bytes.encrypted)?;
-        let public_nonce = RistrettoPublicKey::try_from_byte_type(&bytes.public_nonce)?;
+    fn convert_from_byte_type(bytes: &CompressedElgamalVerifiableBalance) -> Result<Self, Self::Error> {
+        let encrypted = RistrettoPublicKey::convert_from_byte_type(&bytes.encrypted)?;
+        let public_nonce = RistrettoPublicKey::convert_from_byte_type(&bytes.public_nonce)?;
         Ok(ElgamalVerifiableBalance {
             encrypted,
             public_nonce,
@@ -230,8 +230,8 @@ impl TryFrom<&CompressedElgamalVerifiableBalance> for ElgamalVerifiableBalance {
     type Error = tari_utilities::ByteArrayError;
 
     fn try_from(value: &CompressedElgamalVerifiableBalance) -> Result<Self, Self::Error> {
-        let encrypted = RistrettoPublicKey::try_from_byte_type(&value.encrypted)?;
-        let public_nonce = RistrettoPublicKey::try_from_byte_type(&value.public_nonce)?;
+        let encrypted = RistrettoPublicKey::convert_from_byte_type(&value.encrypted)?;
+        let public_nonce = RistrettoPublicKey::convert_from_byte_type(&value.public_nonce)?;
         Ok(ElgamalVerifiableBalance {
             encrypted,
             public_nonce,

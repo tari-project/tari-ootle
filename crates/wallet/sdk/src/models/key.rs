@@ -2,11 +2,14 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
+use tari_ootle_wallet_crypto::RistrettoOotleAddress;
 use tari_transaction_components::key_manager::tari_key_manager::DerivedKey;
+
+use crate::apis::key_manager::KeyBranch;
 
 #[derive(Clone)]
 pub struct WalletKey {
-    pub branch: String,
+    pub branch: KeyBranch,
     pub key_pair: KeyPair,
     pub is_active: bool,
 }
@@ -19,6 +22,12 @@ impl WalletKey {
     pub fn public_key(&self) -> &RistrettoPublicKey {
         &self.key_pair.public_key
     }
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct DerivedAddress {
+    pub address: RistrettoOotleAddress,
+    pub key_index: u64,
 }
 
 #[derive(Clone)]

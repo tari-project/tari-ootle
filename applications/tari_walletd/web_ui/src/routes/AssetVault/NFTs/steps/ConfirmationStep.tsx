@@ -118,7 +118,7 @@ export default function ConfirmationStep({
                 To Account:
               </Typography>
               <Typography variant="subtitle1">
-                <CopyAddress address={transferFormState.targetAccountPublicKey} />
+                <CopyAddress address={transferFormState.targetAccountAddress} />
               </Typography>
             </Box>
 
@@ -134,8 +134,9 @@ export default function ConfirmationStep({
                 Fee paid by:
               </Typography>
               <Typography>
-                {accounts?.find((acc) => substateIdToString(acc.account.address) === transferFormState.payerAccount)
-                  ?.account.name || transferFormState.payerAccount}
+                {accounts?.find(
+                  (acc) => substateIdToString(acc.account.component_address) === transferFormState.payerAccount,
+                )?.account.name || transferFormState.payerAccount}
               </Typography>
             </Box>
           </Stack>

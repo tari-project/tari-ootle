@@ -252,7 +252,7 @@ export function bigintToDecimalString(int: bigint | Amount, decimalPlaces: numbe
 }
 
 export const formatCurrency = (amount: number | bigint): string => {
-  const currencySymbol = useCurrencyStore.getState().currencySymbol;
+  const { currencySymbol } = useCurrencyStore.getState();
 
   if (typeof amount === "bigint") {
     const divisor = BigInt(CURRENCY.DIVISOR);
@@ -267,7 +267,10 @@ export const formatCurrency = (amount: number | bigint): string => {
       return `0 ${currencySymbol}`;
     }
     const convertedAmount = amount / CURRENCY.DIVISOR;
-    return `${convertedAmount.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: CURRENCY.DECIMALS })} ${currencySymbol}`;
+    return `${convertedAmount.toLocaleString("en-US", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: CURRENCY.DECIMALS,
+    })} ${currencySymbol}`;
   } else {
     return `0 ${currencySymbol}`;
   }
@@ -280,25 +283,15 @@ export const formatDisplayCurrency = (amount: number): string => {
   if (isNaN(amount)) {
     return `0 ${currencySymbol}`;
   }
-  return `${amount.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: CURRENCY.DECIMALS })} ${currencySymbol}`;
+  return `${amount.toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: CURRENCY.DECIMALS,
+  })} ${currencySymbol}`;
 };
 
 export function validateHash(hash: string): boolean {
   const regex = /^[a-fA-F0-9]{64}$/;
   return regex.test(hash);
-}
-
-export function validateAddress(address: string): boolean {
-  if (!address || typeof address !== "string") {
-    return false;
-  }
-
-  // Trim whitespace and convert to lowercase for consistent validation
-  const cleanAddress = address.trim().toLowerCase();
-
-  // Check if it's a valid 64-character hexadecimal string (32 bytes)
-  const regex = /^[a-f0-9]{64}$/;
-  return regex.test(cleanAddress);
 }
 
 const normalizeTimestamp = (rawTimestamp: string | null | undefined): Date | null => {

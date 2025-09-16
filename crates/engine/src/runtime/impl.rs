@@ -48,7 +48,7 @@ use tari_engine_types::{
     substate::{SubstateId, SubstateValue},
     vault::Vault,
     ComponentCall,
-    FromByteType,
+    ConvertFromByteType,
     ResourceAddressRef,
     Utxo,
     UtxoAddress,
@@ -2314,14 +2314,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             .chain(&self.transaction_signer_public_key.as_bytes())
             .finalize();
 
-        let commitment = PedersenCommitment::try_from_byte_type(&unclaimed_output.commitment).map_err(|e| {
+        let commitment = PedersenCommitment::convert_from_byte_type(&unclaimed_output.commitment).map_err(|e| {
             warn!(target: LOG_TARGET, "Claim burn failed - malformed commitment: {}", e);
             RuntimeError::InvalidClaimingSignature {
                 details: "malformed commitment".to_string(),
             }
         })?;
 
-        let proof_of_knowledge = CommitmentSignature::try_from_byte_type(&proof_of_knowledge).map_err(|e| {
+        let proof_of_knowledge = CommitmentSignature::convert_from_byte_type(&proof_of_knowledge).map_err(|e| {
             warn!(target: LOG_TARGET, "Claim burn failed - malformed proof of knowledge: {}", e);
             RuntimeError::InvalidClaimingSignature {
                 details: "malformed proof of knowledge".to_string(),

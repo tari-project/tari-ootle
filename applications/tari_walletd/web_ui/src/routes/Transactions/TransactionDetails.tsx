@@ -53,7 +53,7 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import Loading from "@components/Loading";
 import Error from "@components/Error";
-import { FinalizeResult, TransactionResult, TransactionSignature } from "@tari-project/typescript-bindings";
+import { FinalizeResult, TransactionResult } from "@tari-project/typescript-bindings";
 import { getRejectReasonFromTransactionResult, rejectReasonToString } from "@tari-project/typescript-bindings";
 import { BsQuestionCircle } from "react-icons/bs";
 import { formatCurrency } from "@/utils/helpers";
@@ -132,11 +132,7 @@ export default function TransactionDetails() {
       } else {
         reason = txResult.Reject;
       }
-      if (typeof reason === "string") {
-        return reason;
-      } else {
-        return JSON.stringify(reason);
-      }
+      return rejectReasonToString(reason);
     };
 
     const seal_signature = data.transaction.V1?.seal_signature;

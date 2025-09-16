@@ -31,7 +31,7 @@ use std::{
 use log::*;
 use tari_common_types::types::FixedHash;
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::FromByteType;
+use tari_engine_types::ConvertFromByteType;
 use tari_ootle_common_types::{
     committee::{Committee, CommitteeInfo, CommitteeMember},
     displayable::Displayable,
@@ -161,7 +161,7 @@ where TSpec: EpochManagerSpec
     ) -> Result<(), EpochManagerError> {
         info!(target: LOG_TARGET, "Registering validator node for epoch {}", activation_epoch);
 
-        let Ok(vn_pk) = RistrettoPublicKey::try_from_byte_type(&validator_public_key) else {
+        let Ok(vn_pk) = RistrettoPublicKey::convert_from_byte_type(&validator_public_key) else {
             return Err(EpochManagerError::InvalidPublicKeyBytes {
                 public_key: validator_public_key,
             });
@@ -335,7 +335,7 @@ where TSpec: EpochManagerSpec
             let vn = self
                 .get_validator_node_by_public_key(epoch, &member.public_key)?
                 .ok_or_else(|| EpochManagerError::ValidatorNodeNotRegistered {
-                    address: RistrettoPublicKey::try_from_byte_type(&member.public_key)
+                    address: RistrettoPublicKey::convert_from_byte_type(&member.public_key)
                         .ok()
                         .and_then(|pk| TSpec::Addr::try_from_public_key(&pk))
                         .map(|a| a.to_string())
@@ -432,7 +432,7 @@ where TSpec: EpochManagerSpec
         let vn = self
             .get_validator_node_by_public_key(epoch, &self.node_public_key)?
             .ok_or_else(|| EpochManagerError::ValidatorNodeNotRegistered {
-                address: RistrettoPublicKey::try_from_byte_type(&self.node_public_key)
+                address: RistrettoPublicKey::convert_from_byte_type(&self.node_public_key)
                     .ok()
                     .and_then(|pk| TSpec::Addr::try_from_public_key(&pk))
                     .map(|a| a.to_string())

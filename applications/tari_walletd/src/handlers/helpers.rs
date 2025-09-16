@@ -10,7 +10,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_wallet_sdk::{
     apis::accounts::{AccountsApi, AccountsApiError},
-    models::AccountWithPublicKey,
+    models::AccountWithAddress,
     network::{StatusResponseError, WalletNetworkInterface},
     storage::WalletStore,
     WalletSdk,
@@ -76,8 +76,8 @@ pub async fn wait_for_result_and_account(
                     event.status,
                 ));
             },
-            WalletEvent::AccountCreatedOnChain(event) if event.account.address == *account_address => {
-                maybe_account = Some(event.account.address);
+            WalletEvent::AccountCreatedOnChain(event) if event.account.component_address == *account_address => {
+                maybe_account = Some(event.account.component_address);
             },
             WalletEvent::AccountChangedOnChain(event) if event.account_address == *account_address => {
                 maybe_account = Some(event.account_address);
@@ -96,13 +96,13 @@ pub async fn wait_for_result_and_account(
 pub fn get_account_with_inputs(
     account: Option<&ComponentAddressOrName>,
     sdk: &WalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>,
-) -> Result<(AccountWithPublicKey, HashSet<SubstateRequirement>), anyhow::Error> {
+) -> Result<(AccountWithAddress, HashSet<SubstateRequirement>), anyhow::Error> {
     let account = get_account_or_default(account, &sdk.accounts_api())?;
 
     // Add all versioned account child addresses as inputs
     let inputs = sdk
         .substate_api()
-        .load_dependent_substates(&[&account.account.address.into()])?;
+        .load_dependent_substates(&[&account.account.component_address.into()])?;
 
     Ok((account, inputs))
 }
@@ -110,7 +110,7 @@ pub fn get_account_with_inputs(
 pub fn get_account<TStore, TNetworkInterface>(
     account: &ComponentAddressOrName,
     accounts_api: &AccountsApi<'_, TStore, TNetworkInterface>,
-) -> Result<AccountWithPublicKey, AccountsApiError>
+) -> Result<AccountWithAddress, AccountsApiError>
 where
     TStore: WalletStore,
 {
@@ -123,7 +123,7 @@ where
 pub(crate) fn get_account_by_key_index<TStore, TNetworkInterface>(
     sdk: &WalletSdk<TStore, TNetworkInterface>,
     key_index: u64,
-) -> Result<AccountWithPublicKey, AccountsApiError>
+) -> Result<AccountWithAddress, AccountsApiError>
 where
     TStore: WalletStore,
     TNetworkInterface: WalletNetworkInterface,
@@ -138,7 +138,7 @@ where
 pub fn get_account_or_default<TStore, TNetworkInterface>(
     account: Option<&ComponentAddressOrName>,
     accounts_api: &AccountsApi<'_, TStore, TNetworkInterface>,
-) -> Result<AccountWithPublicKey, anyhow::Error>
+) -> Result<AccountWithAddress, anyhow::Error>
 where
     TStore: WalletStore,
 {

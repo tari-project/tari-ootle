@@ -7,12 +7,11 @@ use digest::crypto_common::rand_core::OsRng;
 use log::*;
 use tari_bor::{Deserialize, Serialize};
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
-use tari_engine_types::{FromByteType, ToByteType};
+use tari_engine_types::{ConvertFromByteType, FromByteType, ToByteType};
 use tari_ootle_common_types::{optional::IsNotFoundError, SubstateRequirement};
-use tari_ootle_wallet_crypto::{MaskAndValue, UnblindedOutputStatement};
+use tari_ootle_wallet_crypto::{MaskAndValue, OotleAddress, UnblindedOutputStatement};
 use tari_template_lib::{
     models::{ComponentAddress, ResourceAddress, VaultId},
-    prelude::RistrettoPublicKeyBytes,
     types::Amount,
 };
 use tari_transaction::{args, Transaction};
@@ -205,7 +204,7 @@ where
         let from_account = self.accounts_api.get_account_by_address(&params.from_account)?;
         let to_account = self
             .accounts_api
-            .resolve_account_by_public_key(&params.destination_public_key)
+            .resolve_account_by_public_key(params.destination_address.account_public_key())
             .await?;
 
         // Determine Transaction Inputs
@@ -224,12 +223,12 @@ where
         // Add all versioned account child addresses as inputs
         let child_addresses = self
             .substate_api
-            .load_dependent_substates(&[&account.account.address.into()])?;
+            .load_dependent_substates(&[&account.account.component_address.into()])?;
         inputs.extend(child_addresses.into_iter().map(|a| a.into_unversioned()));
 
         let src_vault = self
             .accounts_api
-            .get_vault_by_resource(account.address(), &params.resource_address)?;
+            .get_vault_by_resource(account.component_address(), &params.resource_address)?;
         let src_vault_substate = self.substate_api.get_substate(&src_vault.id.into())?;
         inputs.push(src_vault_substate.substate_id.into_unversioned_requirement());
 
@@ -268,18 +267,20 @@ where
         // Generate outputs
         let resource_view_key = resource
             .view_key()
-            .map(RistrettoPublicKey::try_from_byte_type)
+            .map(RistrettoPublicKey::convert_from_byte_type)
             .transpose()
             .map_err(|e| ConfidentialTransferApiError::InvalidParameter {
                 param: "resource_view_key",
                 reason: format!("Invalid resource view key: {e}"),
             })?;
-        let destination_pk = RistrettoPublicKey::try_from_byte_type(&params.destination_public_key).map_err(|e| {
-            ConfidentialTransferApiError::InvalidParameter {
+        let destination_pk = params
+            .destination_address
+            .account_public_key()
+            .try_from_byte_type()
+            .map_err(|e| ConfidentialTransferApiError::InvalidParameter {
                 param: "destination_public_key",
                 reason: format!("Invalid destination public key: {e}"),
-            }
-        })?;
+            })?;
 
         let output_statement = if params.confidential_amount().is_zero() {
             None
@@ -313,7 +314,7 @@ where
 
             if change_value.is_positive() {
                 self.outputs_api.add_output(ConfidentialOutputModel {
-                    account_address: *account.address(),
+                    account_address: *account.component_address(),
                     vault_id: src_vault.id,
                     commitment: statement
                         .to_commitment()
@@ -348,24 +349,24 @@ where
             .for_network(network.as_byte())
             .with_dry_run(params.is_dry_run)
             // TODO: we assume that from_account has XTR
-            .fee_transaction_pay_from_component(*from_account.address(), max_fee)
+            .fee_transaction_pay_from_component(*from_account.component_address(), max_fee)
             .then(|builder| {
                 if dest_account_exists {
                     builder
                 } else {
-                    builder.create_account(params.destination_public_key)
+                    builder.create_account(*params.destination_address.account_public_key())
                 }
             })
             .then(|builder| {
                 if let Some(ref badge) = params.proof_from_resource {
                     builder
-                        .call_method(*from_account.address(), "create_proof_for_resource", args![badge])
+                        .call_method(*from_account.component_address(), "create_proof_for_resource", args![badge])
                         .put_last_instruction_output_on_workspace("proof")
                 } else {
                     builder
                 }
             })
-            .call_method(*from_account.address(), "withdraw_confidential", args![
+            .call_method(*from_account.component_address(), "withdraw_confidential", args![
                 params.resource_address,
                 proof
             ])
@@ -404,7 +405,7 @@ where
             });
         }
 
-        let mask = self.key_manager_api.next_key(KeyBranch::ConfidentialMasks)?;
+        let mask = self.key_manager_api.next_key(KeyBranch::ConfidentialMask)?;
 
         let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
         let encrypted_data = self.crypto_api.encrypt_value_and_mask(
@@ -445,8 +446,8 @@ pub struct ConfidentialTransferParams {
     pub input_selection: ConfidentialTransferInputSelection,
     /// Amount to spend to destination
     pub amount: Amount,
-    /// Destination public key used to derive the destination account component
-    pub destination_public_key: RistrettoPublicKeyBytes,
+    /// Destination address used to derive the destination account component
+    pub destination_address: OotleAddress,
     /// Address of the resource to transfer
     pub resource_address: ResourceAddress,
     /// Fee to lock for the transaction

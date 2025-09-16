@@ -139,11 +139,11 @@ where
                 target: LOG_TARGET,
                 "👁️‍🗨️ Refreshing account {}", account
             );
-            let is_updated = self.refresh_account(account.address).await?;
+            let is_updated = self.refresh_account(account.component_address).await?;
 
             if is_updated {
                 self.notify.notify(AccountChangedEvent {
-                    account_address: account.address,
+                    account_address: account.component_address,
                 });
             } else {
                 info!(

@@ -29,9 +29,7 @@ import { useErrorNotification } from "@/contexts/ErrorNotificationContext";
 
 function ClaimCoinsButton() {
   const { mutate: claimTestnetFaucetFunds, isPending } = useAccountsCreateFreeTestCoins();
-  const account = useAccountStore((state) => state.account);
-  const setAccount = useAccountStore((state) => state.setAccount);
-  const setPublicKey = useAccountStore((state) => state.setPublicKey);
+  const { account, setAccount, setOotleAddress } = useAccountStore();
   const { showError, showSuccess } = useErrorNotification();
 
   if (!account) {
@@ -41,16 +39,16 @@ function ClaimCoinsButton() {
   const onClaimFreeCoins = () => {
     claimTestnetFaucetFunds(
       {
-        account: { ComponentAddress: substateIdToString(account.address) },
+        account: { ComponentAddress: substateIdToString(account.component_address) },
         amount: 1_000_000_000,
         fee: 1000,
       },
       {
-        onSuccess: (resp: AccountsCreateFreeTestCoinsResponse) => {
+        onSuccess: async (resp: AccountsCreateFreeTestCoinsResponse) => {
           setAccount(resp.account);
-          setPublicKey(resp.public_key);
+          setOotleAddress(resp.address);
           showSuccess("Successfully claimed testnet coins!");
-          queryClient.invalidateQueries({
+          await queryClient.invalidateQueries({
             predicate: (query) => {
               const key = query.queryKey[0];
               return (

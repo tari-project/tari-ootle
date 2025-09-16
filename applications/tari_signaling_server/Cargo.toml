@@ -27,6 +27,6 @@ tokio = { workspace = true, features = ["default", "rt-multi-thread", "macros", 
 tower-http = { workspace = true, default-features = false, features = ["cors", "trace"] }
 thiserror = { workspace = true }
 jsonwebtoken = { workspace = true }
-chrono = { workspace = true }
+chrono = { version = "0.4.42" }
 webrtc = { workspace = true }
 

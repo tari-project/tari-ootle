@@ -44,7 +44,7 @@ pub async fn handle_list(
 ) -> Result<KeysListResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::KeyList])?;
-    let keys = sdk.key_manager_api().get_all_keys(req.branch.as_str())?;
+    let keys = sdk.key_manager_api().get_all_keys(req.branch)?;
     Ok(KeysListResponse {
         keys: keys
             .into_iter()

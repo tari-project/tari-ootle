@@ -17,6 +17,7 @@ pub struct StealthOutputModel {
     pub commitment: PedersenCommitmentBytes,
     pub value: Amount,
     pub sender_public_nonce: RistrettoPublicKeyBytes,
+    /// Note: this field is more for debugging. We use the account key index for all outputs belonging to an account
     pub encryption_secret_key_index: u64,
     pub encrypted_data: EncryptedData,
     pub tag_byte: UtxoTag,

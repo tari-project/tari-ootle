@@ -58,7 +58,7 @@ pub async fn handle_create_transfer_proof(
     let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
     let vault = sdk
         .accounts_api()
-        .get_vault_by_resource(account.address(), &req.resource_address)?;
+        .get_vault_by_resource(account.component_address(), &req.resource_address)?;
     let lock_id = sdk.confidential_outputs_api().create_lock()?;
 
     let amount_to_transfer = req.amount.checked_add_positive(req.reveal_amount).ok_or_else(|| {
@@ -84,7 +84,7 @@ pub async fn handle_create_transfer_proof(
 
     // TODO: Wrap up key/encrypted data handling in the wallet SDK
     let account_secret = sdk.key_manager_api().derive_account_key(account.key_index())?;
-    let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMasks)?;
+    let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask)?;
     let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
 
     let amount_u64 = req.amount.to_u64_checked().ok_or_else(|| {
@@ -139,7 +139,7 @@ pub async fn handle_create_transfer_proof(
     })?;
 
     let maybe_change_statement = if change_amount_u64 > 0 {
-        let change_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMasks)?;
+        let change_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask)?;
         let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
 
         let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
@@ -150,7 +150,7 @@ pub async fn handle_create_transfer_proof(
         )?;
 
         sdk.confidential_outputs_api().add_output(ConfidentialOutputModel {
-            account_address: *account.address(),
+            account_address: *account.component_address(),
             vault_id: vault.id,
             commitment: get_commitment_factory()
                 .commit_value(&change_mask.key, change_amount_u64)
@@ -235,7 +235,7 @@ pub async fn handle_create_output_proof(
         ));
     };
 
-    let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMasks)?;
+    let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask)?;
     let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
     let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
         amount,

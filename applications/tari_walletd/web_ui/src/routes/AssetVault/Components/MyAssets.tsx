@@ -41,13 +41,13 @@ import queryClient from "@api/queryClient";
 
 function MyAssets() {
   const theme = useTheme();
-  const { account, publicKey } = useAccountStore();
+  const { account } = useAccountStore();
 
   if (!account) {
     return <>Loading...</>;
   }
 
-  const refreshBalances = refreshAccountsBalances(substateIdToString(account.address));
+  const refreshBalances = refreshAccountsBalances(substateIdToString(account.component_address));
   const handleRefreshClicked = () => {
     refreshBalances.mutate();
     queryClient.invalidateQueries({
@@ -138,7 +138,7 @@ function MyAssets() {
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
           <InnerHeading>Transactions</InnerHeading>
-          <Transactions account={account} ownerPublicKey={publicKey} />
+          <Transactions account={account} />
         </StyledPaper>
       </Grid>
     </>

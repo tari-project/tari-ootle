@@ -19,17 +19,22 @@
     "build-dist": "tsc --project tsconfig.prod.json",
     "build-dev": "tsc",
     "build": "sh build.sh && pnpm run fmt &&  tsc --project tsconfig.prod.json && echo '✅ Build complete!'",
-    "fmt": "pnpm npx prettier --write \"./**/*.{ts,tsx,css,json}\" --log-level=warn"
+    "fmt": "pnpm npx prettier --write \"./**/*.{ts,tsx,css,json}\" --log-level=warn",
+    "test": "vitest run"
   },
   "files": [
     "/dist"
   ],
   "author": "",
   "license": "ISC",
+  "dependencies": {
+    "bs58": "^6.0.0"
+  },
   "devDependencies": {
     "shx": "^0.3.4",
     "typescript": "catalog:",
     "@types/node": "catalog:",
-    "prettier": "^3.5.3"
+    "prettier": "^3.5.3",
+    "vitest": "^3.2.4"
   }
 }

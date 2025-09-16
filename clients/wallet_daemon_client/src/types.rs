@@ -37,6 +37,7 @@ use tari_ootle_common_types::{
     SubstateAddress,
     SubstateRequirement,
 };
+use tari_ootle_wallet_crypto::OotleAddress;
 use tari_ootle_wallet_sdk::{
     apis::{confidential_transfer::ConfidentialTransferInputSelection, key_manager::KeyBranch},
     models::{Account, AuthoredTemplateModel, NonFungibleToken, TransactionStatus, WalletLockId, WalletTransaction},
@@ -296,7 +297,6 @@ pub struct KeysCreateRequest {
 pub struct KeysCreateResponse {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub id: u64,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub public_key: RistrettoPublicKeyBytes,
 }
 
@@ -313,8 +313,7 @@ pub struct AccountsCreateRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountsCreateResponse {
     pub account: Account,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: RistrettoPublicKeyBytes,
+    pub address: OotleAddress,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -330,8 +329,7 @@ pub struct AccountsCreateOrGetRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountsCreateOrGetResponse {
     pub account: Account,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: RistrettoPublicKeyBytes,
+    pub address: OotleAddress,
     pub created: bool,
 }
 
@@ -348,8 +346,7 @@ pub struct AccountsListRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountInfo {
     pub account: Account,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: RistrettoPublicKeyBytes,
+    pub address: OotleAddress,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -437,8 +434,7 @@ pub struct AccountGetByKeyIndexRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountGetResponse {
     pub account: Account,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: RistrettoPublicKeyBytes,
+    pub address: OotleAddress,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -536,7 +532,7 @@ pub struct ConfidentialTransferRequest {
     pub amount: Amount,
     pub input_selection: ConfidentialTransferInputSelection,
     pub resource_address: ResourceAddress,
-    pub destination_public_key: RistrettoPublicKeyBytes,
+    pub destination_address: OotleAddress,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub max_fee: Option<u64>,
     pub output_to_revealed: bool,
@@ -629,8 +625,7 @@ pub struct AccountsCreateFreeTestCoinsResponse {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub fee: u64,
     pub result: FinalizeResult,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: RistrettoPublicKeyBytes,
+    pub address: OotleAddress,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1069,7 +1064,7 @@ pub struct StealthTransferRequest {
     pub owner_account: ComponentAddressOrName,
     pub input_selection: ConfidentialTransferInputSelection,
     pub resource_address: ResourceAddress,
-    pub destination_public_key: RistrettoPublicKeyBytes,
+    pub destination_address: OotleAddress,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub max_fee: u64,
     pub blinded_output_amount: Amount,

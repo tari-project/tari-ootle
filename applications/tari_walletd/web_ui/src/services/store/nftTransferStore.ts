@@ -20,15 +20,15 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { create } from 'zustand';
-import type { NonFungibleId, ResourceAddress } from '@tari-project/typescript-bindings';
+import { create } from "zustand";
+import type { NonFungibleId, OotleAddress, ResourceAddress } from "@tari-project/typescript-bindings";
 
-export type DialogStep = 'form' | 'confirmation' | 'result';
+export type DialogStep = "form" | "confirmation" | "result";
 
 interface TransferFormState {
   payerAccount: string;
   nfts: NonFungibleId[];
-  targetAccountPublicKey: string;
+  targetAccountAddress: OotleAddress;
   maxFee: string;
   resourceAddress: ResourceAddress;
 }
@@ -48,21 +48,21 @@ interface NftTransferState {
   // Dialog state
   currentStep: DialogStep;
   disabled: boolean;
-  
+
   // Form state
   transferFormState: TransferFormState;
   validity: Validity;
-  
+
   // Fee estimation state
   estimatedFee: number | null;
   isEstimatingFee: boolean;
-  
+
   // Result state
   transferResult: TransferResult | null;
-  
+
   // Auto-close state
   autoCloseTimeoutId: NodeJS.Timeout | null;
-  
+
   // Actions
   setCurrentStep: (step: DialogStep) => void;
   setDisabled: (disabled: boolean) => void;
@@ -72,22 +72,26 @@ interface NftTransferState {
   setIsEstimatingFee: (estimating: boolean) => void;
   setTransferResult: (result: TransferResult | null) => void;
   setAutoCloseTimeoutId: (timeoutId: NodeJS.Timeout | null) => void;
-  
+
   // Complex actions
   updateFormValue: (name: string, value: string, isValid?: boolean) => void;
-  initializeFormState: (preSelectedNftId?: NonFungibleId, preSelectedResourceAddress?: ResourceAddress, accountAddress?: string) => void;
+  initializeFormState: (
+    preSelectedNftId?: NonFungibleId,
+    preSelectedResourceAddress?: ResourceAddress,
+    accountAddress?: string,
+  ) => void;
   resetState: (preSelectedNftId?: NonFungibleId, preSelectedResourceAddress?: ResourceAddress) => void;
   isFormValid: () => boolean;
 }
 
 const createInitialFormState = (
-  preSelectedNftId?: NonFungibleId, 
+  preSelectedNftId?: NonFungibleId,
   preSelectedResourceAddress?: ResourceAddress,
-  accountAddress?: string
+  accountAddress?: string,
 ): TransferFormState => ({
   payerAccount: accountAddress || "",
   nfts: preSelectedNftId ? [preSelectedNftId] : [],
-  targetAccountPublicKey: "",
+  targetAccountAddress: "",
   maxFee: "",
   resourceAddress: (preSelectedResourceAddress || "") as ResourceAddress,
 });
@@ -100,7 +104,7 @@ const createInitialValidity = (preSelectedNftId?: NonFungibleId): Validity => ({
 
 export const useNftTransferStore = create<NftTransferState>((set, get) => ({
   // Initial state
-  currentStep: 'form',
+  currentStep: "form",
   disabled: false,
   transferFormState: createInitialFormState(),
   validity: createInitialValidity(),
@@ -112,12 +116,14 @@ export const useNftTransferStore = create<NftTransferState>((set, get) => ({
   // Simple setters
   setCurrentStep: (step) => set({ currentStep: step }),
   setDisabled: (disabled) => set({ disabled }),
-  setTransferFormState: (state) => set((prev) => ({ 
-    transferFormState: { ...prev.transferFormState, ...state }
-  })),
-  setValidity: (validity) => set((prev) => ({ 
-    validity: { ...prev.validity, ...validity }
-  })),
+  setTransferFormState: (state) =>
+    set((prev) => ({
+      transferFormState: { ...prev.transferFormState, ...state },
+    })),
+  setValidity: (validity) =>
+    set((prev) => ({
+      validity: { ...prev.validity, ...validity },
+    })),
   setEstimatedFee: (fee) => set({ estimatedFee: fee }),
   setIsEstimatingFee: (estimating) => set({ isEstimatingFee: estimating }),
   setTransferResult: (result) => set({ transferResult: result }),
@@ -126,10 +132,10 @@ export const useNftTransferStore = create<NftTransferState>((set, get) => ({
   // Complex actions
   updateFormValue: (name, value, isValid) => {
     const { transferFormState, validity } = get();
-    
+
     set({
       transferFormState: { ...transferFormState, [name]: value },
-      validity: isValid !== undefined ? { ...validity, [name]: isValid } : validity
+      validity: isValid !== undefined ? { ...validity, [name]: isValid } : validity,
     });
   },
 
@@ -142,14 +148,14 @@ export const useNftTransferStore = create<NftTransferState>((set, get) => ({
 
   resetState: (preSelectedNftId, preSelectedResourceAddress) => {
     const { autoCloseTimeoutId } = get();
-    
+
     // Clear any active timeout
     if (autoCloseTimeoutId) {
       clearTimeout(autoCloseTimeoutId);
     }
-    
+
     set({
-      currentStep: 'form',
+      currentStep: "form",
       disabled: false,
       transferFormState: createInitialFormState(preSelectedNftId, preSelectedResourceAddress),
       validity: createInitialValidity(preSelectedNftId),

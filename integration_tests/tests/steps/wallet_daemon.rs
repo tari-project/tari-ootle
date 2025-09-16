@@ -328,7 +328,7 @@ async fn check_account_confidential_balance_is_via_daemon(
 }
 
 #[when(
-    expr = "I transfer {int} tokens of resource {word} from account {word} to public key {word} via the wallet daemon \
+    expr = "I transfer {int} tokens of resource {word} from account {word} to address {word} via the wallet daemon \
             {word} named {word}"
 )]
 async fn when_transfer_via_wallet_daemon(
@@ -336,11 +336,10 @@ async fn when_transfer_via_wallet_daemon(
     amount: i32,
     resource_address: String,
     account_name: String,
-    destination_public_key: String,
+    dest_address: String,
     wallet_daemon_name: String,
     outputs_name: String,
 ) {
-    let destination_public_key = *world.account_keys.get(&destination_public_key).unwrap();
     let amount = Amount::new(amount.into());
 
     let (resource_input_group, resource_name) = resource_address.split_once('/').unwrap_or_else(|| {
@@ -361,10 +360,14 @@ async fn when_transfer_via_wallet_daemon(
         .as_resource_address()
         .unwrap_or_else(|| panic!("{} is not a resource", resource_name));
 
+    let destination_address = world
+        .account_addresses
+        .get(&dest_address)
+        .unwrap_or_else(|| panic!("No account address found with name {}", dest_address));
     wallet_daemon_cli::transfer(
         world,
         account_name,
-        destination_public_key,
+        *destination_address.account_public_key(),
         resource_address,
         amount,
         wallet_daemon_name,
@@ -381,16 +384,16 @@ async fn when_confidential_transfer_via_wallet_daemon(
     world: &mut TariWorld,
     amount: u64,
     account_name: String,
-    destination_public_key: String,
+    destination_address: String,
     wallet_daemon_name: String,
     outputs_name: String,
 ) {
-    let destination_public_key = *world.account_keys.get(&destination_public_key).unwrap();
+    let dest_address = world.account_addresses.get(&destination_address).unwrap();
 
     wallet_daemon_cli::confidential_transfer(
         world,
         account_name,
-        destination_public_key,
+        dest_address.clone(),
         amount.into(),
         wallet_daemon_name,
         outputs_name,

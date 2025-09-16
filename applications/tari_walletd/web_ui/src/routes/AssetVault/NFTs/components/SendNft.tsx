@@ -76,13 +76,9 @@ export interface TransferNftDialogProps {
 }
 
 function getAccountSelector(account: Account): ComponentAddressOrName {
-  return account.name
-    ? {
-        Name: account.name,
-      }
-    : {
-        ComponentAddress: substateIdToString(account.address),
-      };
+  return {
+    ComponentAddress: account.component_address,
+  };
 }
 
 function nftIdToString(nftId: NonFungibleId): string {
@@ -159,14 +155,14 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       max_fee: 3000,
       nfts: transferFormState.nfts,
       source_account: sourceAccount!,
-      target_account_public_key: transferFormState.targetAccountPublicKey,
+      target_account_public_key: transferFormState.targetAccountAddress,
       fee_payer_account: feePayerAccount!,
       resource_address: transferFormState.resourceAddress,
     }),
     [
       transferFormState.nfts,
       sourceAccount,
-      transferFormState.targetAccountPublicKey,
+      transferFormState.targetAccountAddress,
       feePayerAccount,
       transferFormState.resourceAddress,
     ],
@@ -176,7 +172,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     () => ({
       nfts: transferFormState.nfts,
       source_account: sourceAccount!,
-      target_account_public_key: transferFormState.targetAccountPublicKey,
+      target_account_public_key: transferFormState.targetAccountAddress,
       dry_run: false,
       max_fee: parseInt(transferFormState.maxFee) || 3000,
       fee_payer_account: feePayerAccount!,
@@ -185,7 +181,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     [
       transferFormState.nfts,
       sourceAccount,
-      transferFormState.targetAccountPublicKey,
+      transferFormState.targetAccountAddress,
       transferFormState.maxFee,
       feePayerAccount,
       transferFormState.resourceAddress,
@@ -205,7 +201,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     setLocalIsEstimatingFee(true);
 
     // Ensure the form state is updated for fee estimation
-    setTransferFormState({ targetAccountPublicKey: targetAccount });
+    setTransferFormState({ targetAccountAddress: targetAccount });
 
     try {
       // Use a small delay to ensure state is updated
@@ -231,7 +227,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   };
 
   const estimateFee = async () => {
-    return estimateFeeWithTargetAccount(transferFormState.targetAccountPublicKey);
+    return estimateFeeWithTargetAccount(transferFormState.targetAccountAddress);
   };
 
   const handleFormSubmit = async (e: FormEvent) => {
@@ -239,7 +235,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     if (!account) return;
 
     // Check if target account is filled (minimum requirement)
-    if (!transferFormState.targetAccountPublicKey.trim()) {
+    if (!transferFormState.targetAccountAddress.trim()) {
       setPopup({ title: "Missing information", error: true, message: "Please enter the target account public key" });
       return;
     }
@@ -332,7 +328,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     });
   };
 
-  const handlePayerAccountChange = (event: SelectChangeEvent<string>) => {
+  const handlePayerAccountChange = (event: SelectChangeEvent) => {
     const value = event.target.value;
 
     if (value != "") {
@@ -348,7 +344,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
 
   // Handle target account changes for auto fee estimation
   useEffect(() => {
-    const targetAccount = transferFormState.targetAccountPublicKey;
+    const targetAccount = transferFormState.targetAccountAddress;
     if (targetAccount.trim() && targetAccount.match(/^[0-9a-fA-F]+$/)) {
       // Small delay to let state update, then estimate fee
       const timeoutId = setTimeout(() => {
@@ -359,7 +355,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
 
       return () => clearTimeout(timeoutId);
     }
-  }, [transferFormState.targetAccountPublicKey]);
+  }, [transferFormState.targetAccountAddress]);
 
   useEffect(() => {
     if (loadedNfts !== undefined) {
@@ -370,9 +366,9 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   useEffect(() => {
     if (props.open && account) {
       // When dialog opens, ensure we have fresh state with correct NFT
-      initializeFormState(preSelectedNftId, preSelectedResourceAddress, substateIdToString(account.address));
+      initializeFormState(preSelectedNftId, preSelectedResourceAddress, substateIdToString(account.component_address));
     }
-  }, [props.open, preSelectedNftId, preSelectedResourceAddress, account?.address]);
+  }, [props.open, preSelectedNftId, preSelectedResourceAddress, account?.component_address]);
 
   const steps = ["Enter Details", "Confirm Transfer", "Complete"];
 

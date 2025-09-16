@@ -3,7 +3,7 @@ import type { ComponentAddress } from "./ComponentAddress";
 
 export type Account = {
   name: string | null;
-  address: ComponentAddress;
+  component_address: ComponentAddress;
   key_index: number;
   is_confirmed_on_chain: boolean;
   is_default: boolean;

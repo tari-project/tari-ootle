@@ -63,13 +63,13 @@ function AccountBalanceInner({
     // isFetching: balancesIsFetching,
     isLoading: balancesIsLoading,
     refetch,
-  } = useAccountsGetBalances(substateIdToString(account.address));
+  } = useAccountsGetBalances(substateIdToString(account.component_address));
 
   useEffect(() => {
     refetch();
   }, [account, refetch]);
 
-  let formattedBalance = "";
+  let formattedBalance;
   if (balancesIsLoading && !balancesData) {
     formattedBalance = "...";
   } else {

@@ -386,10 +386,14 @@ impl TransactionBuilder {
         self.unsigned_transaction
     }
 
-    pub fn add_signature(mut self, sealed_signer: &RistrettoPublicKeyBytes, secret_key: &PrivateKey) -> Self {
+    pub fn add_signer(self, sealed_signer: &RistrettoPublicKeyBytes, secret_key: &PrivateKey) -> Self {
         let signature = match &self.unsigned_transaction {
             UnsignedTransaction::V1(tx) => TransactionSignature::sign_v1(secret_key, sealed_signer, tx),
         };
+        self.add_signature(signature)
+    }
+
+    pub fn add_signature(mut self, signature: TransactionSignature) -> Self {
         self.signatures.push(signature);
         self
     }

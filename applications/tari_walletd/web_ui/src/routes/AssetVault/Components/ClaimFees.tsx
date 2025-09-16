@@ -95,7 +95,9 @@ export default function ClaimFees() {
     const selected_account = dataAccountsList?.accounts.find(
       (account: AccountInfo) => account.account.key_index === keyIndex,
     );
-    const account = selected_account?.account.address ? substateIdToString(selected_account!.account.address) : null;
+    const account = selected_account?.account.component_address
+      ? substateIdToString(selected_account!.account.component_address)
+      : null;
     setScannedFees(null);
     setFormState({
       ...formState,

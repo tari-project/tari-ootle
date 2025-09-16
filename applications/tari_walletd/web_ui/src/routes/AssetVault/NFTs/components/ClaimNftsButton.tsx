@@ -39,7 +39,7 @@ function ClaimNftsButton() {
   const onClaimTestnetNfts = () => {
     claimTestnetFaucetNfts(
       {
-        account: { ComponentAddress: substateIdToString(account.address) },
+        account: { ComponentAddress: substateIdToString(account.component_address) },
         numberToMint: 5,
         mutableData: {
           image_url: "https://img.freepik.com/free-vector/gradient-isometric-nft-concept_52683-62009.jpg?w=740",
@@ -69,8 +69,8 @@ function ClaimNftsButton() {
   };
 
   return (
-    <Button 
-      variant="outlined" 
+    <Button
+      variant="outlined"
       onClick={() => onClaimTestnetNfts()}
       disabled={isPending}
     >

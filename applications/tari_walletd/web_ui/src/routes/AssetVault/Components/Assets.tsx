@@ -82,11 +82,11 @@ function Assets({ account }: { account: Account }) {
     isError: nftsListIsError,
     error: nftsListError,
     isFetching: nftsListIsFetching,
-  } = useAccountNFTsList(substateIdToString(account.address), nftPage * nftRowsPerPage, nftRowsPerPage);
+  } = useAccountNFTsList(substateIdToString(account.component_address), nftPage * nftRowsPerPage, nftRowsPerPage);
 
   // Get total count of NFTs for accurate pagination
   const { data: allNfts } = useListNfts({
-    account: { ComponentAddress: substateIdToString(account.address) },
+    account: { ComponentAddress: substateIdToString(account.component_address) },
   });
 
   // Calculate total count - use actual count from allNfts, fallback to estimation

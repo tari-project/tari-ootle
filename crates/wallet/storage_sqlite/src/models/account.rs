@@ -25,7 +25,7 @@ impl Account {
     pub(crate) fn try_convert(self) -> Result<tari_ootle_wallet_sdk::models::Account, WalletStorageError> {
         Ok(tari_ootle_wallet_sdk::models::Account {
             name: self.name,
-            address: self.address.parse().map_err(|e| WalletStorageError::DecodingError {
+            component_address: self.address.parse().map_err(|e| WalletStorageError::DecodingError {
                 operation: "Account::try_convert",
                 item: "address",
                 details: format!("Invalid address: {}: {e}", self.address),

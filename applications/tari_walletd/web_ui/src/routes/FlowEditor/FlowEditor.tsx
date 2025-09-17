@@ -60,7 +60,7 @@ import { GeneratedCodeType, TariNetwork, TransactionProps } from "@tari-project/
 import { substateIdToString } from "@utils/helpers";
 import CloseIcon from "@mui/icons-material/Close";
 import { Highlight } from "prism-react-renderer";
-import useFlowEditorStore, { INITIAL_FLOW_STATE } from "@store/flowEditorStore";
+import useFlowEditorStore from "@store/flowEditorStore";
 import {
   shortenString,
   UnsignedTransactionV1,
@@ -69,7 +69,7 @@ import {
   TESTNET_NFT_FAUCET_ADDRESS,
   TESTNET_XTR_FAUCET_ADDRESS,
 } from "@tari-project/typescript-bindings";
-import { settingsGet, submitTransactionDryRun, transactionsSubmit, transactionsWaitResult } from "../../utils/json_rpc";
+import { settingsGet, submitTransactionDryRun, transactionsSubmit, transactionsWaitResult } from "@utils/json_rpc";
 import { useAccountsList } from "@api/hooks/useAccounts";
 import CopyAddress from "@components/CopyAddress";
 
@@ -176,7 +176,7 @@ function FlowEditor() {
     }
   }, [currentState]);
 
-  const onAccountChange = (e: SelectChangeEvent<string>) => {
+  const onAccountChange = (e: SelectChangeEvent) => {
     const selected = dataAccountsList?.accounts.find(
       (acc: any) => substateIdToString(acc.account.address) === e.target.value,
     );
@@ -188,7 +188,7 @@ function FlowEditor() {
       throw new Error("Account is not available");
     }
     const network = await getTariNetwork();
-    const accountAddress = substateIdToString(account.account.address);
+    const accountAddress = substateIdToString(account.account.component_address);
     return {
       network,
       accountAddress,
@@ -225,7 +225,7 @@ function FlowEditor() {
         setFee(result.final_fee);
       }
     } else {
-      let failureReason = undefined;
+      let failureReason;
       if (!txResult) {
         failureReason = "Execution failed";
       } else if ("Reject" in txResult) {
@@ -319,7 +319,7 @@ function FlowEditor() {
               labelId="account-select-label"
               name="account"
               label="Account"
-              value={account ? substateIdToString(account.account.address) : ""}
+              value={account ? substateIdToString(account.account.component_address) : ""}
               onChange={onAccountChange}
             >
               {dataAccountsList?.accounts?.map((acc: any) => (
@@ -331,7 +331,7 @@ function FlowEditor() {
           </FormControl>
           {account ? (
             <Typography variant="subtitle2" mt={1}>
-              Address: <CopyAddress address={substateIdToString(account.account.address)} />
+              Address: <CopyAddress address={substateIdToString(account.account.component_address)} />
             </Typography>
           ) : (
             <Typography color="error" variant="subtitle2" mt={1}>

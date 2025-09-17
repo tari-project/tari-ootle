@@ -98,7 +98,7 @@ impl TryFrom<u8> for Network {
             x if x == Network::LocalNet as u8 => Ok(Network::LocalNet),
             x if x == Network::Igor as u8 => Ok(Network::Igor),
             x if x == Network::Esmeralda as u8 => Ok(Network::Esmeralda),
-            _ => Err(NetworkParseError(format!("Invalid network string: {}", v))),
+            _ => Err(NetworkParseError(format!("Invalid network byte: {}", v))),
         }
     }
 }

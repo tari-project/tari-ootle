@@ -31,9 +31,9 @@ fn dh(
 /// Generate a decryption key from a private key and nonce
 pub fn encrypted_data_dh_kdf_aead(
     private_key: &RistrettoSecretKey,
-    public_nonce: &RistrettoPublicKey,
+    public_key: &RistrettoPublicKey,
 ) -> RistrettoSecretKey {
-    let shared_secret = dh(public_nonce, private_key);
+    let shared_secret = dh(public_key, private_key);
     let mut aead_key = SafeKey64::from(SafeArray::default());
     // Must match base layer burn
     encrypted_data_hasher()

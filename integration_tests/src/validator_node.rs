@@ -29,7 +29,7 @@ use std::{
 use reqwest::Url;
 use tari_common::configuration::{CommonConfig, StringList};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::FromByteType;
+use tari_engine_types::ConvertFromByteType;
 use tari_ootle_app_utilities::{
     epoch_oracle_config::EpochOracleConfig,
     keypair::create_new_keypair,
@@ -185,7 +185,7 @@ pub async fn spawn_validator_node(
             config.validator_node.p2p.listener_port = port;
 
             config.validator_node.fee_claim_public_key =
-                RistrettoPublicKey::try_from_byte_type(&key.public_key).unwrap();
+                RistrettoPublicKey::convert_from_byte_type(&key.public_key).unwrap();
 
             // Add all other VNs as peer seeds
             config.peer_seeds.peer_seeds = StringList::from(peer_seeds);

@@ -7,10 +7,8 @@
 macro_rules! newtype_struct_serde_impl {
     ($ty:ident, $inner_ty:ty) => {
         mod __serde_impl {
-            use serde::{
-                __private::{fmt, PhantomData},
-                de::Error,
-            };
+            use serde::de::Error;
+            use tari_template_abi::rust::{fmt, marker::PhantomData};
 
             use super::*;
 

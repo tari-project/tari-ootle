@@ -13,7 +13,7 @@ use tari_crypto::{
 use tari_engine_types::{
     hashing::{engine_hasher64, EngineHashDomainLabel},
     instruction::Instruction,
-    FromByteType,
+    ConvertFromByteType,
     ToByteType,
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
@@ -47,10 +47,10 @@ impl TransactionSealSignature {
 
     pub fn verify(&self, transaction: &UnsealedTransactionV1) -> bool {
         let message = Self::create_message(transaction);
-        let Ok(public_key) = RistrettoPublicKey::try_from_byte_type(&self.public_key) else {
+        let Ok(public_key) = RistrettoPublicKey::convert_from_byte_type(&self.public_key) else {
             return false;
         };
-        let Ok(signature) = RistrettoSchnorr::try_from_byte_type(&self.signature) else {
+        let Ok(signature) = RistrettoSchnorr::convert_from_byte_type(&self.signature) else {
             return false;
         };
         signature.verify(&public_key, message)
@@ -106,10 +106,10 @@ impl TransactionSignature {
 
     pub fn verify(&self, seal_signer: &RistrettoPublicKeyBytes, transaction: &UnsignedTransactionV1) -> bool {
         let message = Self::create_message(seal_signer, transaction);
-        let Ok(public_key) = RistrettoPublicKey::try_from_byte_type(&self.public_key) else {
+        let Ok(public_key) = RistrettoPublicKey::convert_from_byte_type(&self.public_key) else {
             return false;
         };
-        let Ok(signature) = RistrettoSchnorr::try_from_byte_type(&self.signature) else {
+        let Ok(signature) = RistrettoSchnorr::convert_from_byte_type(&self.signature) else {
             return false;
         };
         signature.verify(&public_key, message)

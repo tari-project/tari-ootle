@@ -4,7 +4,7 @@
 use log::*;
 use tari_consensus_types::{SignedMessage, ToSignatureMessage, ValidatorSchnorrSignature};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::FromByteType;
+use tari_engine_types::ConvertFromByteType;
 
 const LOG_TARGET: &str = "tari::consensus::signer_service";
 
@@ -16,7 +16,7 @@ pub trait ValidatorSignerService {
 
 pub trait ValidatorSignatureVerifierService {
     fn verify<M: SignedMessage>(&self, message: &M) -> bool {
-        let Ok(public_key) = RistrettoPublicKey::try_from_byte_type(message.public_key()) else {
+        let Ok(public_key) = RistrettoPublicKey::convert_from_byte_type(message.public_key()) else {
             warn!(
                 target: LOG_TARGET,
                 "Malformed signature public key. Raw: {}",
@@ -24,7 +24,7 @@ pub trait ValidatorSignatureVerifierService {
             );
             return false;
         };
-        let Ok(signature) = ValidatorSchnorrSignature::try_from_byte_type(message.signature()) else {
+        let Ok(signature) = ValidatorSchnorrSignature::convert_from_byte_type(message.signature()) else {
             warn!(
                 target: LOG_TARGET,
                 "Malformed signature. Raw: {}",

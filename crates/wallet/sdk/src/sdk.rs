@@ -145,7 +145,9 @@ where
     /// This function will panic if the cipher seed has not been initialized i.e. `initialize_cipher_seed` has not been
     /// called once before calling this.
     pub fn key_manager_api(&self) -> KeyManagerApi<'_, TStore> {
+        let network = self.config.network;
         KeyManagerApi::new(
+            network,
             &self.store,
             self.loaded_cipher_seed
                 .as_ref()

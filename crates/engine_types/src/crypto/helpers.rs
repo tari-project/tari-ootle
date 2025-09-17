@@ -15,7 +15,7 @@ use tari_crypto::{
 };
 use tari_template_lib::{prelude::SchnorrSignatureBytes, types::Amount};
 
-use crate::{hashing::EngineSchnorrSignature, FromByteType};
+use crate::{hashing::EngineSchnorrSignature, ConvertFromByteType};
 
 // TODO RistrettoSecretKey should provide a constant ZERO
 pub const ZERO_SECRET_KEY: RistrettoSecretKey = unsafe { std::mem::transmute([0u8; 32]) };
@@ -90,7 +90,7 @@ pub fn convert_amount_to_secret(amount: &Amount) -> Option<RistrettoSecretKey> {
 }
 
 pub fn try_decode_to_signature(signature: &SchnorrSignatureBytes) -> Option<EngineSchnorrSignature> {
-    let public_nonce = RistrettoPublicKey::try_from_byte_type(signature.public_nonce()).ok()?;
+    let public_nonce = RistrettoPublicKey::convert_from_byte_type(signature.public_nonce()).ok()?;
     let signature = PrivateKey::from_canonical_bytes(signature.signature().as_bytes()).ok()?;
     Some(EngineSchnorrSignature::new(public_nonce, signature))
 }

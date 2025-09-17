@@ -28,14 +28,14 @@ import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import CheckBox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
-import { Divider, InputLabel, Stack, InputAdornment, Typography, Box } from "@mui/material";
+import { Divider, InputLabel, Stack, InputAdornment, Typography } from "@mui/material";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
-import { ResourceType, ResourceAddress } from "@tari-project/typescript-bindings";
-import { validateAddress, formatDisplayCurrency } from "@utils/helpers";
+import { ResourceType, ResourceAddress, validateOotleAddress } from "@tari-project/typescript-bindings";
+import { formatDisplayCurrency } from "@utils/helpers";
 import { CURRENCY } from "@utils/constants";
 
 export interface SendMoneyFormState {
-  publicKey: string;
+  address: string;
   outputToConfidential: boolean;
   inputSelection: string;
   amount: string;
@@ -89,7 +89,8 @@ export default function FormStep({
   const enteredAmount = parseFloat(transferFormState.amount) || 0;
   const hasInsufficientFunds = availableBalance !== undefined && enteredAmount > availableBalance;
 
-  const isFormValid = validateAddress(transferFormState.publicKey) && transferFormState.amount && !hasInsufficientFunds;
+  const isFormValid =
+    validateOotleAddress(transferFormState.address) && transferFormState.amount && !hasInsufficientFunds;
 
   // Format amount for display
   const formatAmountValue = (amount: string) => {
@@ -151,10 +152,9 @@ export default function FormStep({
         )}
         <Stack direction="column" spacing={0.5}>
           <TextField
-            name="publicKey"
-            label="To Public Key"
-            value={transferFormState.publicKey}
-            inputProps={{ pattern: "^[0-9a-fA-F]*$" }}
+            name="address"
+            label="To Address"
+            value={transferFormState.address}
             required
             onChange={onFormValueChange}
             style={{ flexGrow: 1 }}
@@ -231,7 +231,8 @@ export default function FormStep({
           disabled={true}
           style={{ flexGrow: 1 }}
           InputProps={{
-            endAdornment: !isEstimatingFee && token_symbol ? <InputAdornment position="end">{token_symbol}</InputAdornment> : null,
+            endAdornment:
+              !isEstimatingFee && token_symbol ? <InputAdornment position="end">{token_symbol}</InputAdornment> : null,
           }}
         />
 

@@ -36,7 +36,6 @@ import CheckMark from "@components/WalletConnectLink/CheckMark";
 import ConnectorLogo from "@components/WalletConnectLink/ConnectorLogo";
 import ConfirmTransaction from "@components/WalletConnectLink/ConfirmTransaction";
 import { useTheme } from "@mui/material/styles";
-import { TariPermission } from "@tari-project/tari-permissions";
 import { Core } from "@walletconnect/core";
 import { WalletKit } from "@reown/walletkit";
 import {
@@ -61,11 +60,6 @@ import { Error as ErrorIcon } from "@mui/icons-material";
 import CircularProgress from "@mui/material/CircularProgress";
 
 const projectId: string = import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID || "78f3485d08b9640a087cbcea000e1f8b";
-
-interface RequestedPermissions {
-  requiredPermissions: TariPermission[];
-  optionalPermissions?: TariPermission[];
-}
 
 const ConnectorDialog = () => {
   const [page, setPage] = useState(1);
@@ -243,7 +237,7 @@ const ConnectorDialog = () => {
       return;
     }
 
-    const accounts = accountStore.account ? [`tari:devnet:${accountStore.account.address}`] : [];
+    const accounts = accountStore.account ? [`tari:devnet:${accountStore.account.component_address}`] : [];
 
     try {
       const approvedNamespaces = buildApprovedNamespaces({

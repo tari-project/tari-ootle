@@ -80,11 +80,11 @@ where
                 return Ok(());
             }
 
-            for (resource_addr, tag_and_nonce_to_account_key_map) in &batch {
-                if tag_and_nonce_to_account_key_map.is_empty() {
+            for (resource_addr, tag_and_nonce_to_view_key_map) in &batch {
+                if tag_and_nonce_to_view_key_map.is_empty() {
                     error!(target: LOG_TARGET, "❓️ NEVER HAPPEN: Asked indexer for zero UTXOs for resource {}.", resource_addr);
                 }
-                let tag_and_nonce_pairs = tag_and_nonce_to_account_key_map.keys().copied().collect();
+                let tag_and_nonce_pairs = tag_and_nonce_to_view_key_map.keys().copied().collect();
 
                 // max 3.3kB per request (excl underlying protocol overhead *cough* json + hex)
                 let utxos = self
@@ -98,21 +98,21 @@ where
                     // We asked for some UTXOs but got none back. This should never happen because UTXO recovery is
                     // 'fed' by UTXO scanning, which should only give recovery tasks if the network
                     // has UTXOs. This could indicate a bug in the indexer (assuming that NetworkInterface impl is
-                    // used). To prevent this case causing fast spinning, return an error the will
+                    // used). To prevent this case causing fast spinning, return an error that will
                     // sleep and retry.
                     return Err(StealthScannerApiError::UnexpectedResponse {
                         details: format!(
                             "{} UTXOs requested but network returned an empty set for resource {}.",
-                            tag_and_nonce_to_account_key_map.len(),
+                            tag_and_nonce_to_view_key_map.len(),
                             resource_addr
                         ),
                     });
                 }
 
-                if utxos.len() != tag_and_nonce_to_account_key_map.len() {
+                if utxos.len() != tag_and_nonce_to_view_key_map.len() {
                     // We could error as above, but let's process what we got
                     warn!(target: LOG_TARGET, "⚠️ Mismatch in number of UTXOs queried ({}) vs returned by indexer ({}).",
-                        tag_and_nonce_to_account_key_map.len(),
+                        tag_and_nonce_to_view_key_map.len(),
                         utxos.len(),
                     );
                 }
@@ -130,13 +130,13 @@ where
                     })
                     .filter_map(|(id, output, is_frozen)| {
                         let tag_and_nonce_pair = (output.tag, output.output.public_nonce);
-                        let Some(account_key_index) = tag_and_nonce_to_account_key_map.get(&tag_and_nonce_pair).copied() else {
+                        let Some(view_key_index) = tag_and_nonce_to_view_key_map.get(&tag_and_nonce_pair).copied() else {
                             warn!(target: LOG_TARGET, "❓️ NEVER HAPPEN: Indexer returned UTXO with tag {}, nonce {} that we didn't request. Ignoring", output.tag, output.output.public_nonce);
                             return None;
                         };
 
                         Some(FoundUtxo {
-                            account_key_index,
+                            view_key_index,
                             id,
                             output,
                             is_frozen,
@@ -179,16 +179,16 @@ where
         resource_address: ResourceAddress,
         found: FoundUtxo,
     ) -> Result<bool, StealthScannerApiError> {
-        let account_key = self
+        let view_only_key = self
             .sdk
             .key_manager_api()
-            .derive_account_key_pair(found.account_key_index)?;
+            .derive_view_only_keypair(found.view_key_index)?;
         let outputs_api = self.sdk.stealth_outputs_api();
 
         let address = UtxoAddress::new(resource_address, found.id);
         let commitment = found.id.into_commitment_bytes();
         let Some(output) = outputs_api.validate_utxo(
-            array::from_ref(&account_key),
+            array::from_ref(&view_only_key),
             network,
             resource_address,
             commitment,
@@ -201,6 +201,9 @@ where
             outputs_api
                 .update_utxo_status(&address, None, None, Some(found.is_frozen))
                 .optional()?;
+            self.sdk.store().with_write_tx(|tx| {
+                tx.utxo_process_queue_remove_item(resource_address, found.output.tag, found.output.output.public_nonce)
+            })?;
 
             return Ok(false);
         };
@@ -209,13 +212,13 @@ where
         self.sdk.store().with_write_tx(|tx| {
             tx.utxo_process_queue_remove_item(resource_address, found.output.tag, found.output.output.public_nonce)
         })?;
-        info!(target: LOG_TARGET, "💰️ Recovered stealth output {} for account {}", address, account_key.public_key);
+        info!(target: LOG_TARGET, "💰️ Recovered stealth output {} for account {}", address, view_only_key.public_key);
         Ok(true)
     }
 }
 
 struct FoundUtxo {
-    account_key_index: u64,
+    view_key_index: u64,
     output: UtxoOutput,
     id: UtxoId,
     is_frozen: bool,

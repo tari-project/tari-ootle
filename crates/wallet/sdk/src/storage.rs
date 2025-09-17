@@ -309,7 +309,7 @@ pub trait WalletStoreWriter {
     fn jwt_revoke(&mut self, token_id: i32) -> Result<(), WalletStorageError>;
 
     // Key manager
-    fn key_manager_insert(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
+    fn key_manager_insert_or_ignore(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
     fn key_manager_set_active_index(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
     fn key_manager_reset_index(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
 

@@ -4,6 +4,7 @@ export type KeyBranch =
   | "account"
   | "transaction"
   | "elgamal_encryption_view_key"
-  | "stealth_masks"
-  | "confidential_masks"
-  | "nonce";
+  | "stealth_mask"
+  | "confidential_mask"
+  | "nonce"
+  | "view_only_key";

@@ -117,9 +117,8 @@ async fn handle_create(args: CreateArgs, client: &mut WalletDaemonClient) -> Res
 
     println!();
     println!("✅ Account created (Locally, not on-chain)");
-    println!("   address: {}", resp.account.address);
-    println!("   public key (hex): {}", resp.public_key);
-    println!("   public key (base64): {}", base64::encode(resp.public_key.as_bytes()));
+    println!("   component address: {}", resp.account.component_address);
+    println!("   address: {}", resp.address);
     Ok(())
 }
 
@@ -189,7 +188,7 @@ async fn handle_create_free_test_coins(
 
     let resp = client
         .create_free_test_coins(AccountsCreateFreeTestCoinsRequest {
-            account: account.address.into(),
+            account: account.component_address.into(),
             // Default 1 tXTR
             amount: args.amount.unwrap_or(1_000_000).into(),
             max_fee: args.fee,
@@ -212,13 +211,13 @@ async fn handle_list(client: &mut WalletDaemonClient) -> Result<(), anyhow::Erro
 
     let mut table = Table::new();
     table.enable_row_count();
-    table.set_titles(vec!["Name", "Address", "Public Key", "Default"]);
+    table.set_titles(vec!["Name", "Component", "Address", "Default"]);
     println!("Accounts:");
-    for AccountInfo { account, public_key } in resp.accounts {
+    for AccountInfo { account, address } in resp.accounts {
         table.add_row(table_row!(
             account.name.as_deref().unwrap_or("<None>"),
-            account.address,
-            public_key,
+            account.component_address,
+            address,
             if account.is_default { "✅" } else { "" }
         ));
     }
@@ -233,7 +232,7 @@ async fn handle_get(args: GetArgs, client: &mut WalletDaemonClient) -> Result<()
     println!(
         "Account {} substate_address: {}",
         resp.account.name.as_deref().unwrap_or("<None>"),
-        resp.account.address
+        resp.account.component_address
     );
     println!();
 

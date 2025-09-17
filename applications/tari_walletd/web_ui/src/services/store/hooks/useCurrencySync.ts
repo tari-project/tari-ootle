@@ -28,7 +28,7 @@ import useCurrencyStore from "@store/currencyStore";
 export const useCurrencySync = () => {
   const { data: defaultAccount } = useAccountsGetDefault();
   const { data: balancesData, isLoading } = useAccountsGetBalances(
-    defaultAccount ? substateIdToString(defaultAccount.account.address) : ""
+    defaultAccount ? substateIdToString(defaultAccount.account.component_address) : "",
   );
   const { setCurrencySymbol } = useCurrencyStore();
 

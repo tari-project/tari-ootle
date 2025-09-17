@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use log::{debug, info, trace, warn};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::FromByteType;
+use tari_engine_types::ConvertFromByteType;
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
     shard::Shard,
@@ -14,7 +14,7 @@ use tari_ootle_common_types::{
     StateVersion,
 };
 use tari_ootle_wallet_sdk::{
-    models::{AccountWithPublicKey, UtxoSpent, UtxoUnspent, WalletUtxoUpdate},
+    models::{AccountWithAddress, UtxoSpent, UtxoUnspent, WalletUtxoUpdate},
     network::{StatusResponseError, WalletNetworkInterface},
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
     WalletSdk,
@@ -31,8 +31,8 @@ const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
 
 pub(crate) struct UtxoScannerRound<'a, TStore, TNetworkInterface> {
     network: Network,
-    account: &'a AccountWithPublicKey,
-    account_key: &'a DerivedKey,
+    account: &'a AccountWithAddress,
+    view_key: &'a DerivedKey,
     resource_address: &'a ResourceAddress,
 
     sdk: &'a WalletSdk<TStore, TNetworkInterface>,
@@ -53,8 +53,8 @@ where
         network: Network,
         sdk: &'a WalletSdk<TStore, TNetworkInterface>,
         notify_tx: &'a watch::Sender<()>,
-        account: &'a AccountWithPublicKey,
-        account_key: &'a DerivedKey,
+        account: &'a AccountWithAddress,
+        view_key: &'a DerivedKey,
         resource_address: &'a ResourceAddress,
     ) -> Self {
         Self {
@@ -62,7 +62,7 @@ where
             sdk,
             notify_tx,
             account,
-            account_key,
+            view_key,
             resource_address,
             shard_state_versions_to_set: HashMap::new(),
             utxos_to_recover: Vec::new(),
@@ -92,7 +92,7 @@ where
         let mut shard_state_versions = self
             .sdk
             .store()
-            .with_read_tx(|tx| tx.shard_state_version_get(self.account.address(), self.resource_address))?;
+            .with_read_tx(|tx| tx.shard_state_version_get(self.account.component_address(), self.resource_address))?;
 
         // Populate any missing shards with zero
         for shard in NUM_PRESHARDS.all_shards_iter() {
@@ -102,7 +102,7 @@ where
         info!(
             target: LOG_TARGET,
             "🔍️ Scanning for stealth outputs (account {}, resource {}, num shards {})",
-            self.account.address(),
+            self.account.component_address(),
             self.resource_address,
             shard_state_versions.len(),
         );
@@ -119,12 +119,12 @@ where
             info!(
                 target: LOG_TARGET,
                 "🔍️ Scan complete for account {}: No more stealth outputs found",
-                self.account.address()
+                self.account.component_address()
             );
             // Update state versions to avoid rescanning from previous versions that didnt contain any changes
             self.sdk.store().with_write_tx(|tx| {
                 tx.shard_state_version_set_many(
-                    self.account.address(),
+                    self.account.component_address(),
                     self.resource_address,
                     response.per_shard_high_watermark,
                 )
@@ -148,7 +148,7 @@ where
             for update in update_set.updates {
                 match update {
                     WalletUtxoUpdate::Unspent(unspent) => {
-                        if self.check_if_tag_matches(self.network, self.account_key, self.resource_address, &unspent)? {
+                        if self.check_if_tag_matches(&unspent)? {
                             debug!(
                                 target: LOG_TARGET,
                                 "🏷️ Stealth output tag {} matches. Queueing for recovery.",
@@ -187,7 +187,7 @@ where
 
             // Update shard state versions
             tx.shard_state_version_set_many(
-                self.account.address(),
+                self.account.component_address(),
                 self.resource_address,
                 self.shard_state_versions_to_set.drain(),
             )
@@ -196,7 +196,7 @@ where
         info!(
             target: LOG_TARGET,
             "Scan round complete for account {}: Validated the tag of {}/{} new stealth outputs, marked {} as spent",
-            self.account.address(),
+            self.account.component_address(),
             num_recovered,
             num_received,
             num_spent
@@ -205,14 +205,8 @@ where
         Ok(true)
     }
 
-    fn check_if_tag_matches(
-        &self,
-        network: Network,
-        account_key: &DerivedKey,
-        resource_address: &ResourceAddress,
-        unspent: &UtxoUnspent,
-    ) -> Result<bool, StealthScannerApiError> {
-        let Ok(public_nonce) = RistrettoPublicKey::try_from_byte_type(&unspent.public_nonce).inspect_err(|e| {
+    fn check_if_tag_matches(&self, unspent: &UtxoUnspent) -> Result<bool, StealthScannerApiError> {
+        let Ok(public_nonce) = RistrettoPublicKey::convert_from_byte_type(&unspent.public_nonce).inspect_err(|e| {
             warn!(
                 target: LOG_TARGET,
                 "⚠️ Received a malformed public nonce while syncing output: {}. Ignoring output.",
@@ -222,11 +216,11 @@ where
             return Ok(false);
         };
 
-        let tag = self.sdk.stealth_crypto_api().derive_stealth_output_tag_from_sender(
-            network,
-            &account_key.key,
+        let tag = self.sdk.stealth_crypto_api().derive_stealth_output_tag(
+            self.network,
+            &self.view_key.key,
             &public_nonce,
-            resource_address,
+            self.resource_address,
         );
 
         if tag != unspent.tag {

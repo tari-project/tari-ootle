@@ -39,7 +39,11 @@ impl UnsealedTransactionV1 {
 
     pub fn seal(self, secret: &RistrettoSecretKey) -> Transaction {
         let sig = TransactionSealSignature::sign(secret, &self);
-        TransactionV1::new(self, sig).into()
+        self.set_seal_signature(sig)
+    }
+
+    pub fn set_seal_signature(self, signature: TransactionSealSignature) -> Transaction {
+        TransactionV1::new(self, signature).into()
     }
 
     pub fn add_signature(mut self, seal_signer: &RistrettoPublicKeyBytes, secret: &RistrettoSecretKey) -> Self {

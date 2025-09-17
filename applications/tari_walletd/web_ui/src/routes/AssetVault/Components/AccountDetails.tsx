@@ -34,7 +34,7 @@ import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 
 function AccountDetails() {
-  const { account, publicKey } = useAccountStore();
+  const { account, address } = useAccountStore();
   if (!account) {
     return <>Loading...</>;
   }
@@ -45,18 +45,18 @@ function AccountDetails() {
         <TableHead>
           <TableRow>
             <TableCell>Name</TableCell>
+            <TableCell>Component</TableCell>
             <TableCell>Address</TableCell>
-            <TableCell>Public Key</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
           <TableRow>
             <DataTableCell>{account.name}</DataTableCell>
             <DataTableCell>
-              <CopyAddress address={substateIdToString(account.address)} />
+              <CopyAddress address={substateIdToString(account.component_address)} />
             </DataTableCell>
             <DataTableCell>
-              <CopyAddress address={publicKey} />
+              <CopyAddress address={address} />
             </DataTableCell>
           </TableRow>
         </TableBody>

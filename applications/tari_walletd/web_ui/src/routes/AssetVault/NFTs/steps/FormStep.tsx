@@ -31,8 +31,9 @@ import ListItemText from "@mui/material/ListItemText";
 import { Divider, InputLabel, Stack } from "@mui/material";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
 import type { NonFungibleId, NonFungibleToken, Account } from "@tari-project/typescript-bindings";
-import { substateIdToString, formatCurrency, validateAddress, displayNftId } from "@utils/helpers";
+import { substateIdToString, formatCurrency, displayNftId } from "@utils/helpers";
 import { useNftTransferStore } from "@store/nftTransferStore";
+import { validateOotleAddress } from "@tari-project/typescript-bindings/dist/helpers/ootleAddress";
 
 interface FormStepProps {
   account: Account;
@@ -43,7 +44,7 @@ interface FormStepProps {
   onSubmit: (e: FormEvent) => void;
   onCancel: () => void;
   onNftsChange: (event: SelectChangeEvent<string[]>) => void;
-  onPayerAccountChange: (event: SelectChangeEvent<string>) => void;
+  onPayerAccountChange: (event: SelectChangeEvent) => void;
 }
 
 function nftIdToString(nftId: NonFungibleId): string {
@@ -100,14 +101,14 @@ export default function FormStep({
               displayEmpty
               value={
                 transferFormState.payerAccount ||
-                substateIdToString(accounts.find((a) => a.account.is_default)?.account.address) ||
+                substateIdToString(accounts.find((a) => a.account.is_default)?.account.component_address) ||
                 ""
               }
               onChange={onPayerAccountChange}
               variant="outlined"
             >
               {accounts.map((account) => (
-                <MenuItem key={account.account.name} value={substateIdToString(account.account.address)}>
+                <MenuItem key={account.account.name} value={substateIdToString(account.account.component_address)}>
                   {account.account.name} {account.account.is_default ? "(default)" : ""}
                 </MenuItem>
               ))}
@@ -118,7 +119,7 @@ export default function FormStep({
         <TextField
           name="targetAccountPublicKey"
           label="Target Account Public Key"
-          value={transferFormState.targetAccountPublicKey}
+          value={transferFormState.targetAccountAddress}
           inputProps={{ pattern: "^[0-9a-fA-F]*$" }}
           required
           onChange={setFormValue}
@@ -182,7 +183,7 @@ export default function FormStep({
           <Button
             variant="contained"
             type="submit"
-            disabled={disabled || !validateAddress(transferFormState.targetAccountPublicKey)}
+            disabled={disabled || !validateOotleAddress(transferFormState.targetAccountAddress)}
           >
             Continue
           </Button>

@@ -135,7 +135,7 @@ function PublishTemplateDialog(props: DialogProps) {
     setDisabled(true);
     const isDryRun = !formState.maxFee;
     publishTemplate({
-      fee_account: { ComponentAddress: formState.account || substateIdToString(account.address) },
+      fee_account: { ComponentAddress: formState.account || substateIdToString(account.component_address) },
       binary: base64FromArrayBuffer(formState.binary!),
       max_fee: isDryRun ? 1_000_000 : Number(formState.maxFee) || 0,
       detect_inputs: true,
@@ -167,7 +167,7 @@ function PublishTemplateDialog(props: DialogProps) {
     if (account) {
       setFormState({
         ...formState,
-        account: substateIdToString(account?.address),
+        account: substateIdToString(account?.component_address),
       });
     }
   }, [validity]);
@@ -229,7 +229,7 @@ function PublishTemplateDialog(props: DialogProps) {
                 variant="outlined"
               >
                 {accounts.map((account: AccountInfo, i: number) => (
-                  <MenuItem key={i} value={substateIdToString(account.account.address)}>
+                  <MenuItem key={i} value={substateIdToString(account.account.component_address)}>
                     {account.account.name} {account.account.is_default ? "(default)" : ""}
                   </MenuItem>
                 ))}

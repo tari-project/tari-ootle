@@ -34,7 +34,7 @@ use serde_json::{self as json, json, Value};
 use tari_consensus_types::Decision;
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::hex::to_hex};
 use tari_engine::{template::TemplateModuleLoader, wasm::WasmModule};
-use tari_engine_types::{FromByteType, ToByteType};
+use tari_engine_types::{ConvertFromByteType, ToByteType};
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_epoch_oracles::store::StoreKey;
 use tari_indexer_client::types::{
@@ -193,7 +193,7 @@ impl JsonRpcHandlers {
         }
 
         let mut networking = self.networking.clone();
-        let public_key = RistrettoPublicKey::try_from_byte_type(&public_key).map_err(|_| {
+        let public_key = RistrettoPublicKey::convert_from_byte_type(&public_key).map_err(|_| {
             JsonRpcResponse::error(
                 answer_id,
                 JsonRpcError::new(

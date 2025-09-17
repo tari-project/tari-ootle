@@ -20,8 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { FormEvent, useState, useEffect } from "react";
-import Button from "@mui/material/Button";
+import { FormEvent, useState } from "react";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
 import { useAccountsGetBalances, useAccountsTransfer } from "@api/hooks/useAccounts";
@@ -41,30 +40,6 @@ import ConfirmationStep from "../steps/ConfirmationStep";
 import ResultStep, { TransferResult } from "../steps/ResultStep";
 import PopupTitle from "@/components/PopupTitle";
 
-export default function SendMoney() {
-  const [open, setOpen] = useState(false);
-  const { account } = useAccountStore();
-
-  const { data } = useAccountsGetBalances(account ? substateIdToString(account.address) : "");
-  const xtrBalanceEntry = data?.balances?.find((b: BalanceEntry) => b.resource_address === XTR);
-
-  return (
-    <>
-      <Button variant="outlined" onClick={() => setOpen(true)}>
-        Send Tari
-      </Button>
-      <SendMoneyDialog
-        open={open}
-        handleClose={() => setOpen(false)}
-        onSendComplete={() => setOpen(false)}
-        resource_type="Confidential"
-        resource_address={XTR}
-        token_symbol={xtrBalanceEntry?.token_symbol || ""}
-      />
-    </>
-  );
-}
-
 export interface SendMoneyDialogProps {
   open: boolean;
   resource_address?: ResourceAddress;
@@ -76,7 +51,7 @@ export interface SendMoneyDialogProps {
 
 export function SendMoneyDialog(props: SendMoneyDialogProps) {
   const INITIAL_VALUES: SendMoneyFormState = {
-    publicKey: "",
+    address: "",
     outputToConfidential: false,
     inputSelection: "PreferRevealed",
     amount: "",
@@ -92,13 +67,14 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   const [transferResult, setTransferResult] = useState<TransferResult | undefined>();
   const { mutateAsync: sendIt } = useAccountsTransfer();
 
-  const { account, setPopup } = useAccountStore();
+  const { account } = useAccountStore();
+
+  const { data } = useAccountsGetBalances(account?.component_address);
 
   if (!account) {
     return null;
   }
 
-  const { data } = useAccountsGetBalances(substateIdToString(account.address));
   const badges = data?.balances
     ?.filter((b: BalanceEntry) => b.resource_type === "NonFungible" && BigInt(b.balance) > 0n)
     .map((b: BalanceEntry) => b.resource_address) as string[];
@@ -140,10 +116,10 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   const availableBalance = calculateAvailableBalance();
 
   const transfer = {
-    account: substateIdToString(account.address),
+    account: substateIdToString(account.component_address),
     amount: Math.floor((parseFloat(transferFormState.amount) || 0) * Math.pow(10, balanceEntry?.divisibility || 6)),
     resource_address: props.resource_address!,
-    destination_public_key: transferFormState.publicKey,
+    destination_address: transferFormState.address,
     resourceType: props.resource_type,
     output_to_revealed: !transferFormState.outputToConfidential,
     input_selection: transferFormState.inputSelection as ConfidentialTransferInputSelection,
@@ -166,7 +142,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     }
 
     // Clear fee when amount or publicKey changes to trigger re-estimation
-    const shouldClearFee = (name === "amount" || name === "publicKey") && transferFormState.fee;
+    const shouldClearFee = (name === "amount" || name === "address") && transferFormState.fee;
 
     setTransferFormState({
       ...transferFormState,
@@ -200,7 +176,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   };
 
   const estimateFee = async () => {
-    if (!account || isEstimatingFee || !transferFormState.publicKey.trim() || !transferFormState.amount) {
+    if (!account || isEstimatingFee || !transferFormState.address.trim() || !transferFormState.amount) {
       return;
     }
 
@@ -209,10 +185,10 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     try {
       // Create transfer object with current form state
       const currentTransfer = {
-        account: substateIdToString(account.address),
+        account: substateIdToString(account.component_address),
         amount: Math.floor((parseFloat(transferFormState.amount) || 0) * Math.pow(10, balanceEntry?.divisibility || 6)),
         resource_address: props.resource_address || XTR,
-        destination_public_key: transferFormState.publicKey,
+        destination_address: transferFormState.address,
         resourceType: props.resource_type,
         output_to_revealed: !transferFormState.outputToConfidential,
         input_selection: transferFormState.inputSelection as ConfidentialTransferInputSelection,
@@ -244,7 +220,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     }
 
     // Check if required fields are filled
-    if (!transferFormState.publicKey.trim() || !transferFormState.amount) {
+    if (!transferFormState.address.trim() || !transferFormState.amount) {
       return;
     }
 
@@ -294,13 +270,13 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   const handleClose = () => {
     const wasSuccessful = transferResult?.success;
     setActiveStep(0);
-    setTransferFormState(INITIAL_VALUES);
     setTransferResult(undefined);
     setUseBadge(false);
     setDisabled(false);
     props.handleClose?.();
     // Call onSendComplete only after successful transfer when dialog closes
     if (wasSuccessful) {
+      setTransferFormState(INITIAL_VALUES);
       props.onSendComplete?.();
     }
   };

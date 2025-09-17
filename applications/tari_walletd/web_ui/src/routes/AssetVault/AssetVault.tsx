@@ -32,7 +32,7 @@ import { useWalletInfo } from "@api/hooks/useWalletInfo";
 function AssetVault() {
   const account = useAccountStore((state) => state.account);
   const setAccount = useAccountStore((state) => state.setAccount);
-  const setPublicKey = useAccountStore((state) => state.setPublicKey);
+  const setOotleAddress = useAccountStore((state) => state.setOotleAddress);
   const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
   const authStore = useAuthStore();
   const { data: walletInfo } = useWalletInfo();
@@ -40,7 +40,7 @@ function AssetVault() {
   useEffect(() => {
     if (!isError && defaultAccount) {
       setAccount(defaultAccount.account);
-      setPublicKey(defaultAccount.public_key);
+      setOotleAddress(defaultAccount.address);
     }
 
     if (error) {

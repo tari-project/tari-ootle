@@ -296,7 +296,7 @@ mod tests {
 
         let secret2 = PrivateKey::random(&mut OsRng);
         let subject = create_transaction()
-            .add_signature(&public_key.to_byte_type(), &secret2)
+            .add_signer(&public_key.to_byte_type(), &secret2)
             .build_and_seal(&secret);
         assert!(subject.verify_all_signatures());
     }

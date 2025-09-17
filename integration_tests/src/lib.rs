@@ -41,9 +41,9 @@ use tari_common_types::{
 };
 use tari_crypto::keys::SecretKey;
 use tari_engine_types::substate::SubstateId;
+use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::SubstateRequirement;
 use tari_sidechain::EvictionProof;
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_transaction_components::{
     consensus::ConsensusManager,
     key_manager::{TariKeyId, TransactionKeyManagerInterface},
@@ -88,7 +88,7 @@ pub struct TariWorld {
     pub claim_proofs: HashMap<String, ExtClaimBurnProof>,
     pub substate_ids: IndexMap<String, SubstateId>,
     pub num_databases_saved: usize,
-    pub account_keys: IndexMap<String, RistrettoPublicKeyBytes>,
+    pub account_addresses: IndexMap<String, OotleAddress>,
     pub key_manager: MemoryDbKeyManager,
     /// Key name -> key index
     pub wallet_keys: IndexMap<String, u64>,
@@ -125,7 +125,7 @@ impl TariWorld {
             claim_proofs: HashMap::new(),
             substate_ids: IndexMap::new(),
             num_databases_saved: 0,
-            account_keys: IndexMap::new(),
+            account_addresses: IndexMap::new(),
             key_manager: create_memory_db_key_manager().await.unwrap(),
             wallet_keys: IndexMap::new(),
             wallet_daemons: IndexMap::new(),
@@ -328,7 +328,7 @@ impl Debug for TariWorld {
             .field("claim_proofs", &self.claim_proofs.keys())
             .field("addresses", &self.substate_ids.keys())
             .field("num_databases_saved", &self.num_databases_saved)
-            .field("account_keys", &self.account_keys.keys())
+            .field("account_keys", &self.account_addresses.keys())
             .field("wallet_keys", &self.wallet_keys.keys())
             .field("wallet_daemons", &self.wallet_daemons.keys())
             .finish()

@@ -6,10 +6,12 @@ use std::cmp;
 use digest::crypto_common::rand_core::OsRng;
 use log::*;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
-use tari_engine_types::{substate::SubstateId, FromByteType, ToByteType, UtxoAddress};
+use tari_engine_types::{substate::SubstateId, ConvertFromByteType, FromByteType, ToByteType, UtxoAddress};
+use tari_ootle_address::{OotleAddress, RistrettoOotleAddress};
 use tari_ootle_common_types::{
     displayable::Displayable,
     optional::{IsNotFoundError, Optional},
+    Network,
     SubstateRequirement,
 };
 use tari_ootle_wallet_crypto::{
@@ -19,8 +21,8 @@ use tari_ootle_wallet_crypto::{
     UnblindedStealthOutputStatement,
 };
 use tari_template_lib::{
+    constants::XTR,
     models::{Account as BuiltinAccount, ComponentAddress, ResourceAddress, StealthTransferStatement, VaultId},
-    prelude::{RistrettoPublicKeyBytes, XTR},
     types::Amount,
 };
 use tari_transaction::{args, Transaction};
@@ -35,7 +37,7 @@ use crate::{
         stealth_outputs::{StealthOutputsApi, StealthOutputsApiError},
         substate::{SubstateApiError, SubstatesApi, ValidatorScanResult},
     },
-    models::{Account, AccountWithPublicKey, OutputStatus, StealthOutputModel, WalletLockId},
+    models::{Account, AccountWithAddress, OutputStatus, StealthOutputModel, WalletLockId},
     network::WalletNetworkInterface,
     storage::{WalletStorageError, WalletStore},
 };
@@ -78,11 +80,12 @@ where
     fn resolve_fee_inputs(
         &self,
         lock_id: WalletLockId,
+        owner_account: &AccountWithAddress,
         params: &StealthTransferParams,
     ) -> Result<InputsToSpend, StealthTransferApiError> {
         self.resolved_inputs_for_transfer(
             lock_id,
-            params.owner_account.account(),
+            owner_account.account(),
             XTR,
             params.max_fee.into(),
             params.input_selection,
@@ -317,14 +320,27 @@ where
     }
 
     #[allow(clippy::too_many_lines)]
-    pub async fn transfer(&self, params: StealthTransferParams) -> Result<TransferOutput, StealthTransferApiError> {
-        params.validate()?;
+    pub async fn transfer(
+        &self,
+        owner_account: AccountWithAddress,
+        params: StealthTransferParams,
+    ) -> Result<TransferOutput, StealthTransferApiError> {
+        let network = self.config_api.get_network()?;
+        params.validate(network)?;
 
-        let destination_account = derive_account_address_from_public_key(&params.destination_public_key);
+        let destination_account =
+            derive_account_address_from_public_key(params.destination_address.account_public_key());
 
         // Determine Transaction Inputs
         let mut substate_inputs = Vec::new();
-        let owner_account = params.owner_account.clone();
+        let owner_address =
+            owner_account
+                .address()
+                .try_from_byte_type()
+                .map_err(|e| StealthTransferApiError::InvalidParameter {
+                    param: "owner_account",
+                    reason: format!("Invalid owner account address: {e}"),
+                })?;
 
         // add the input for the resource address to be transferred
         substate_inputs.push(SubstateRequirement::unversioned(params.resource_address));
@@ -340,7 +356,7 @@ where
                         substate_inputs.push(SubstateRequirement::unversioned(destination_account));
                         if let Some(vault) = self
                             .accounts_api
-                            .get_vault_by_resource(local_account.address(), &params.resource_address)
+                            .get_vault_by_resource(local_account.component_address(), &params.resource_address)
                             .optional()?
                         {
                             substate_inputs.push(SubstateRequirement::unversioned(vault.id));
@@ -413,25 +429,23 @@ where
         // Generate outputs
         let resource_view_key = resource
             .view_key()
-            .map(RistrettoPublicKey::try_from_byte_type)
+            .map(RistrettoPublicKey::convert_from_byte_type)
             .transpose()
             .map_err(|e| StealthTransferApiError::InvalidParameter {
                 param: "resource_view_key",
                 reason: format!("Invalid resource view key: {e}"),
             })?;
-        let destination_pk = RistrettoPublicKey::try_from_byte_type(&params.destination_public_key).map_err(|e| {
-            StealthTransferApiError::InvalidParameter {
-                param: "destination_public_key",
-                reason: format!("Invalid destination public key: {e}"),
-            }
-        })?;
+        let destination_address = params
+            .destination_address
+            .try_from_byte_type()
+            .expect("already validated");
 
         let output_statement = params
             .blinded_output_amount
             .is_positive()
             .then(|| {
                 self.create_output_statement(
-                    &destination_pk,
+                    &destination_address,
                     params.blinded_output_amount,
                     &params.resource_address,
                     resource_view_key.clone(),
@@ -441,7 +455,7 @@ where
 
         // Resolve fee inputs
         let lock_id = self.outputs_api.create_lock()?;
-        let fee_inputs_to_spend = self.resolve_fee_inputs(lock_id, &params)?;
+        let fee_inputs_to_spend = self.resolve_fee_inputs(lock_id, &owner_account, &params)?;
 
         // TODO: use single db transaction across calls
         // --- Any error from here can result in funds staying locked ---
@@ -453,14 +467,7 @@ where
         // Generate fee change outputs if required
         let fee_change_output_statement = fee_change
             .is_positive()
-            .then(|| {
-                self.create_output_statement(
-                    &owner_account.to_ristretto_public_key(),
-                    fee_change,
-                    &params.resource_address,
-                    None,
-                )
-            })
+            .then(|| self.create_output_statement(&owner_address, fee_change, &params.resource_address, None))
             .transpose()
             .inspect_err(|e| {
                 warn!(target: LOG_TARGET, "Unlocking fee fund locks after error: {}", e);
@@ -485,12 +492,7 @@ where
         )?;
 
         if let Some(ref fee_change) = fee_change_output_statement {
-            self.add_unconfirmed_output_from_statement(
-                lock_id,
-                &params.owner_account,
-                params.resource_address,
-                fee_change,
-            )?;
+            self.add_unconfirmed_output_from_statement(lock_id, &owner_account, params.resource_address, fee_change)?;
         }
 
         substate_inputs.extend(
@@ -505,7 +507,7 @@ where
         // Reserve and lock input funds
         let inputs_to_spend = match self.resolved_inputs_for_transfer(
             lock_id,
-            params.owner_account.account(),
+            owner_account.account(),
             params.resource_address,
             params.total_output_amount(),
             params.input_selection,
@@ -531,12 +533,12 @@ where
 
         // If we're spending from the owner account, add the inputs
         if inputs_to_spend.revealed.is_positive() {
-            substate_inputs.push(SubstateRequirement::unversioned(*owner_account.address()));
+            substate_inputs.push(SubstateRequirement::unversioned(*owner_account.component_address()));
 
             // Add the vaults for XTR (fees) and the spending resource if different
             if let Some(vault) = self
                 .accounts_api
-                .get_vault_by_resource(owner_account.address(), &XTR)
+                .get_vault_by_resource(owner_account.component_address(), &XTR)
                 .optional()?
             {
                 substate_inputs.push(SubstateRequirement::unversioned(vault.id));
@@ -545,7 +547,7 @@ where
             if params.resource_address != XTR {
                 if let Some(vault) = self
                     .accounts_api
-                    .get_vault_by_resource(owner_account.address(), &params.resource_address)
+                    .get_vault_by_resource(owner_account.component_address(), &params.resource_address)
                     .optional()?
                 {
                     substate_inputs.push(SubstateRequirement::unversioned(vault.id));
@@ -567,7 +569,7 @@ where
         // Any change outputs?
         let maybe_change_statement = self.generate_change_statement(
             lock_id,
-            &params.owner_account,
+            &owner_account,
             params.resource_address,
             resource_view_key,
             &inputs_to_spend,
@@ -588,6 +590,7 @@ where
         )?;
 
         let result = self.generate_transfer_transaction(
+            &owner_account,
             params,
             substate_inputs,
             fee_transfer_statement,
@@ -616,31 +619,30 @@ where
 
     fn generate_transfer_transaction(
         &self,
+        owner_account: &AccountWithAddress,
         params: StealthTransferParams,
         inputs: Vec<SubstateRequirement>,
         fee_transfer_statement: StealthTransferStatement,
         transfer_statement: StealthTransferStatement,
         need_to_create_account: bool,
     ) -> Result<Transaction, StealthTransferApiError> {
-        let network = self.config_api.get_network()?;
         let revealed_input_amount = transfer_statement.inputs_statement.revealed_amount;
         let revealed_output_amount = transfer_statement.outputs_statement.revealed_output_amount;
 
         let signer_secret = if revealed_input_amount.is_positive() {
-            self.key_manager_api
-                .derive_account_key(params.owner_account.key_index())?
+            self.key_manager_api.derive_account_key(owner_account.key_index())?
         } else {
             // Since we don't require account auth, use a throwaway nonce to sign the transaction
             self.key_manager_api.next_key(KeyBranch::Nonce)?
         };
 
         let transaction = Transaction::builder()
-            .for_network(network.as_byte())
+            .for_network(params.destination_address.network().as_byte())
             .with_dry_run(params.is_dry_run)
             .with_fee_instructions_builder(|builder| {
                 if revealed_input_amount.is_positive() {
                     builder
-                        .call_method(*params.owner_account.address(), "withdraw", args![
+                        .call_method(*owner_account.component_address(), "withdraw", args![
                             XTR,
                             fee_transfer_statement.inputs_statement.revealed_amount
                         ])
@@ -653,7 +655,7 @@ where
             .then(|builder| {
                 if revealed_input_amount.is_positive() {
                     builder
-                        .call_method(params.owner_account.account.address, "withdraw", args![
+                        .call_method(owner_account.account.component_address, "withdraw", args![
                             params.resource_address,
                             revealed_input_amount
                         ])
@@ -674,7 +676,10 @@ where
                     .put_last_instruction_output_on_workspace("output_bucket")
                     .then(|builder| {
                         if need_to_create_account {
-                            builder.create_account_with_bucket(params.destination_public_key, "output_bucket")
+                            builder.create_account_with_bucket(
+                                *params.destination_address.account_public_key(),
+                                "output_bucket",
+                            )
                         } else {
                             builder.call_method(params.derived_destination_account(), "deposit", args![Workspace(
                                 "output_bucket"
@@ -691,7 +696,7 @@ where
     fn generate_change_statement(
         &self,
         lock_id: WalletLockId,
-        account: &AccountWithPublicKey,
+        account: &AccountWithAddress,
         resource_address: ResourceAddress,
         resource_view_key: Option<RistrettoPublicKey>,
         inputs_to_spend: &InputsToSpend,
@@ -714,15 +719,17 @@ where
             return Ok(None);
         }
 
-        let change_public_key = RistrettoPublicKey::try_from_byte_type(&account.owner_public_key).map_err(|e| {
-            StealthTransferApiError::InvalidParameter {
-                param: "owner_public_key",
-                reason: format!("Invalid owner public key: {e}"),
-            }
-        })?;
+        let change_address =
+            account
+                .address
+                .try_from_byte_type()
+                .map_err(|e| StealthTransferApiError::InvalidParameter {
+                    param: "owner_account",
+                    reason: format!("Invalid owner account address: {e}"),
+                })?;
 
         let change =
-            self.create_output_statement(&change_public_key, change_amount, &resource_address, resource_view_key)?;
+            self.create_output_statement(&change_address, change_amount, &resource_address, resource_view_key)?;
 
         self.add_unconfirmed_output_from_statement(lock_id, account, resource_address, &change)?;
 
@@ -732,7 +739,7 @@ where
     fn add_unconfirmed_output_from_statement(
         &self,
         lock_id: WalletLockId,
-        account: &AccountWithPublicKey,
+        account: &AccountWithAddress,
         resource_address: ResourceAddress,
         output: &UnblindedStealthOutputStatement,
     ) -> Result<(), StealthTransferApiError> {
@@ -742,7 +749,7 @@ where
         }
 
         self.outputs_api.add_output(&StealthOutputModel {
-            owner_account: *account.address(),
+            owner_account: *account.component_address(),
             resource_address,
             commitment: output
                 .statement
@@ -765,7 +772,7 @@ where
 
     fn create_output_statement(
         &self,
-        dest_public_key: &RistrettoPublicKey,
+        destination: &RistrettoOotleAddress,
         amount: Amount,
         resource_address: &ResourceAddress,
         resource_view_key: Option<RistrettoPublicKey>,
@@ -777,8 +784,7 @@ where
             });
         }
 
-        let network = self.config_api.get_network()?;
-        let mask = self.key_manager_api.next_key(KeyBranch::StealthMasks)?;
+        let mask = self.key_manager_api.next_key(KeyBranch::StealthMask)?;
 
         let (nonce_secret, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
         let encrypted_data = self.crypto_api.encrypt_value_and_mask(
@@ -791,14 +797,16 @@ where
                         .to_string(),
                 })?,
             &mask.key,
-            dest_public_key,
+            destination.view_only_key(),
             &nonce_secret,
         )?;
 
         // Create stealth address - used during spend time
-        let output_owner_public_key =
-            self.crypto_api
-                .derive_stealth_owner_public_key(network, dest_public_key, &nonce_secret);
+        let output_owner_public_key = self.crypto_api.derive_stealth_owner_public_key(
+            destination.network(),
+            destination.account_key(),
+            &nonce_secret,
+        );
 
         let statement = UnblindedOutputStatement {
             amount,
@@ -809,10 +817,10 @@ where
             resource_view_key,
         };
 
-        let derived_tag = self.crypto_api.derive_stealth_output_tag_for_recipient(
-            network,
+        let derived_tag = self.crypto_api.derive_stealth_output_tag(
+            destination.network(),
             &nonce_secret,
-            dest_public_key,
+            destination.view_only_key(),
             resource_address,
         );
 
@@ -831,16 +839,15 @@ pub struct TransferOutput {
 
 #[derive(Debug)]
 pub struct StealthTransferParams {
-    /// Address of the owner account. This determines used to derive
-    pub owner_account: AccountWithPublicKey,
     /// Strategy for input selection
     pub input_selection: ConfidentialTransferInputSelection,
     /// Amount of the inputs to spend to a blinded output
     pub blinded_output_amount: Amount,
     /// Amount of the inputs to spend to a revealed output
     pub revealed_output_amount: Amount,
-    /// Destination public key used to derive the destination account component
-    pub destination_public_key: RistrettoPublicKeyBytes,
+    /// Destination address used to derive the UTXO encryption keys, owner signature and the account in which to
+    /// deposit revealed funds
+    pub destination_address: OotleAddress,
     /// Address of the resource to transfer
     pub resource_address: ResourceAddress,
     /// Fee to lock for the transaction
@@ -850,7 +857,7 @@ pub struct StealthTransferParams {
 }
 
 impl StealthTransferParams {
-    pub fn validate(&self) -> Result<(), StealthTransferApiError> {
+    pub fn validate(&self, network: Network) -> Result<(), StealthTransferApiError> {
         if self.blinded_output_amount.is_negative() {
             return Err(StealthTransferApiError::InvalidParameter {
                 param: "blinded_output_amount",
@@ -872,6 +879,24 @@ impl StealthTransferParams {
             });
         }
 
+        if self.destination_address.network() != network {
+            return Err(StealthTransferApiError::InvalidParameter {
+                param: "destination_address",
+                reason: format!(
+                    "Destination address network ({}) does not match wallet network ({})",
+                    self.destination_address.network(),
+                    network
+                ),
+            });
+        }
+
+        self.destination_address
+            .validate()
+            .map_err(|e| StealthTransferApiError::InvalidParameter {
+                param: "destination_address",
+                reason: format!("Invalid destination address: {}", e),
+            })?;
+
         Ok(())
     }
 
@@ -880,7 +905,7 @@ impl StealthTransferParams {
     }
 
     pub fn derived_destination_account(&self) -> ComponentAddress {
-        derive_account_address_from_public_key(&self.destination_public_key)
+        derive_account_address_from_public_key(self.destination_address.account_public_key())
     }
 }
 

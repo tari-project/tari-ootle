@@ -127,7 +127,7 @@ function Tokens({ account }: { account: Account }) {
     isError: balancesIsError,
     error: balancesError,
     isFetching: balancesIsFetching,
-  } = useAccountsGetBalances(substateIdToString(account.address));
+  } = useAccountsGetBalances(substateIdToString(account.component_address));
 
   const handleSendResourceClicked = (address: ResourceAddress, resource_type: ResourceType) => {
     setResourceToSend({ address, resource_type });

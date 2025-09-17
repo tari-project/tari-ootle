@@ -3,7 +3,7 @@
 
 use log::*;
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
-use tari_engine_types::{crypto::PrivateOutput, FromByteType, ToByteType};
+use tari_engine_types::{crypto::PrivateOutput, ConvertFromByteType, ToByteType};
 use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 use tari_ootle_wallet_crypto::{kdfs, MaskAndValue};
 use tari_template_lib::{models::VaultId, prelude::PedersenCommitmentBytes, types::Amount};
@@ -161,7 +161,7 @@ where TStore: WalletStore
             // Either derive the mask from the sender's public nonce or from the local key manager
             let shared_decrypt_key = match output.sender_public_nonce {
                 Some(nonce) => {
-                    let nonce = RistrettoPublicKey::try_from_byte_type(&nonce).map_err(|_| {
+                    let nonce = RistrettoPublicKey::convert_from_byte_type(&nonce).map_err(|_| {
                         // We stored these outputs in the db, but they are malformed?
                         ConfidentialOutputsApiError::InvariantError {
                             details: format!(
@@ -271,7 +271,7 @@ where TStore: WalletStore
         output: &PrivateOutput,
     ) -> Result<ConfidentialOutputModel, ConfidentialOutputsApiError> {
         // Validate the commitment is well-formed.
-        let _output_commitment = PedersenCommitment::try_from_byte_type(&commitment).map_err(|e| {
+        let _output_commitment = PedersenCommitment::convert_from_byte_type(&commitment).map_err(|e| {
             ConfidentialOutputsApiError::InvalidParameter {
                 param: "commitment",
                 reason: format!("Invalid output commitment bytes: {}", e),
@@ -279,7 +279,7 @@ where TStore: WalletStore
         })?;
 
         let output_stealth_public_nonce =
-            RistrettoPublicKey::try_from_byte_type(&output.public_nonce).map_err(|e| {
+            RistrettoPublicKey::convert_from_byte_type(&output.public_nonce).map_err(|e| {
                 ConfidentialOutputsApiError::InvalidParameter {
                     param: "stealth_public_nonce",
                     reason: format!("Failed to parse stealth public nonce: {}", e),
@@ -306,7 +306,7 @@ where TStore: WalletStore
         };
 
         Ok(ConfidentialOutputModel {
-            account_address: account.address,
+            account_address: account.component_address,
             vault_id,
             commitment,
             value,

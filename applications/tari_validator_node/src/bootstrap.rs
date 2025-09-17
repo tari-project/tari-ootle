@@ -36,7 +36,7 @@ use tari_consensus::consensus_constants::ConsensusConstants;
 #[cfg(not(feature = "metrics"))]
 use tari_consensus::traits::hooks::NoopHooks;
 use tari_crypto::tari_utilities::ByteArray;
-use tari_engine::{fees::FeeTable, transaction::TransactionProcessorConfig};
+use tari_engine::transaction::TransactionProcessorConfig;
 use tari_engine_types::ToByteType;
 use tari_epoch_manager::{
     service::{EpochManagerConfig, EpochManagerHandle},
@@ -54,6 +54,7 @@ use tari_ootle_app_utilities::{
     common::verify_correct_network,
     configuration::convert_network_to_l1_network,
     epoch_oracle_config::{BaseLayerOracleConfig, EpochOracleType},
+    fee_tables::get_fee_table_by_network,
     keypair::RistrettoKeypair,
     seed_peer::SeedPeer,
     template_download_queue::TemplateDownloadQueue,
@@ -269,13 +270,6 @@ pub async fn spawn_services(
 
     info!(target: LOG_TARGET, "Payload processor initializing");
     // Payload processor
-    let fee_table = FeeTable {
-        per_transaction_weight_cost: 1,
-        per_module_call_cost: 1,
-        per_byte_storage_cost: 1,
-        per_event_cost: 1,
-        per_log_cost: 1,
-    };
 
     let (tx_hotstuff_events, _) = broadcast::channel(100);
     // Consensus gossip
@@ -305,12 +299,13 @@ pub async fn spawn_services(
         message_logger.clone(),
     );
 
-    // Consensus
+    // Transaction executor
+    let fee_table = get_fee_table_by_network(config.network);
     let payload_processor = TariTransactionProcessor::new(
         TransactionProcessorConfig::new(config.network)
             .with_template_binary_max_size_bytes(consensus_constants.template_binary_max_size_bytes),
         template_manager.clone(),
-        fee_table,
+        fee_table.clone(),
     );
     let transaction_executor = TarBlockTransactionExecutor::new(
         payload_processor.clone(),
@@ -330,6 +325,7 @@ pub async fn spawn_services(
         .as_ref()
         .map(|pk| pk.to_byte_type());
 
+    // Consensus
     let signing_service = consensus::TariSignatureService::new(keypair.clone());
     let (consensus_join_handle, consensus_handle) = consensus::spawn(
         config.network,

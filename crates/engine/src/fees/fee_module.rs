@@ -5,7 +5,7 @@ use tari_bor::{encode_into_writer, ByteCounter};
 use tari_engine_types::fees::FeeSource;
 
 use super::FeeTable;
-use crate::runtime::{RuntimeModule, RuntimeModuleError, StateTracker};
+use crate::runtime::{RuntimeEvent, RuntimeModule, RuntimeModuleError, StateTracker};
 
 pub struct FeeModule {
     initial_cost: u64,
@@ -64,6 +64,19 @@ impl RuntimeModule for FeeModule {
             FeeSource::Events,
             track.num_events() as u64 * self.fee_table.per_event_cost(),
         );
+
+        Ok(())
+    }
+
+    fn on_runtime_event(&self, track: &StateTracker, call: &RuntimeEvent) -> Result<(), RuntimeModuleError> {
+        match call {
+            RuntimeEvent::SignatureVerified => {
+                track.add_fee_charge(
+                    FeeSource::SignatureVerification,
+                    self.fee_table.per_signature_verification_cost(),
+                );
+            },
+        }
 
         Ok(())
     }

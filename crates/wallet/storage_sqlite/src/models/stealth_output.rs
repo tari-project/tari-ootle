@@ -5,8 +5,10 @@ use diesel::dsl;
 use tari_ootle_wallet_sdk::{models::StealthOutputModel, storage::WalletStorageError};
 use tari_template_lib::{
     models::{ComponentAddress, EncryptedData},
-    prelude::crypto::UtxoTag,
-    types::{amount, crypto::RistrettoPublicKeyBytes},
+    types::{
+        amount,
+        crypto::{RistrettoPublicKeyBytes, UtxoTag},
+    },
 };
 use time::PrimitiveDateTime;
 

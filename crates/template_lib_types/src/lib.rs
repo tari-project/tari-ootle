@@ -3,7 +3,9 @@
 
 #[macro_use]
 mod amount;
+#[macro_use]
 pub mod crypto;
+pub mod engine_args;
 mod entity_id;
 mod error;
 mod hash;

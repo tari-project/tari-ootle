@@ -33,7 +33,7 @@ import type {
   NonFungibleId,
   NonFungibleToken,
 } from "@tari-project/typescript-bindings";
-import { useListNfts, useNftsTransfer } from "@api/hooks/useNfts";
+import { useNftsTransfer, useNFTsList } from "@api/hooks/useNfts";
 import { substateIdToString } from "@utils/helpers";
 import { useAccountsList } from "@api/hooks/useAccounts";
 import { useNftTransferStore } from "@store/nftTransferStore";
@@ -134,19 +134,19 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   }, [transferFormState.payerAccount, sourceAccount]);
 
   // List NFTs - only enabled when account is present
-  const { data: loadedNfts, refetch: refetchNfts } = useListNfts({
-    account: sourceAccount,
-    enabled: !!account,
-  });
+  const { data: nftsResponse, refetch: refetchNfts } = useNFTsList(account?.component_address!, 0, 1000);
+  const loadedNfts = nftsResponse?.nfts;
 
   // List all accounts for payer account selection - only enabled when account is present
   const { data: accountsResp } = useAccountsList(0, 1000, !!account);
   const accounts = accountsResp?.accounts;
 
   // Only refetch NFTs when account is available
-  if (account) {
-    refetchNfts().catch(console.error);
-  }
+  useEffect(() => {
+    if (account) {
+      refetchNfts().catch(console.error);
+    }
+  }, [account, refetchNfts]);
 
   // Memoize hook parameters to prevent re-renders
   const feeEstimateParams = useMemo(
@@ -369,21 +369,6 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       initializeFormState(preSelectedNftId, preSelectedResourceAddress, substateIdToString(account.component_address));
     }
   }, [props.open, preSelectedNftId, preSelectedResourceAddress, account?.component_address]);
-
-  const steps = ["Enter Details", "Confirm Transfer", "Complete"];
-
-  const getStepIndex = () => {
-    switch (currentStep) {
-      case "form":
-        return 0;
-      case "confirmation":
-        return 1;
-      case "result":
-        return 2;
-      default:
-        return 0;
-    }
-  };
 
   return (
     <Dialog open={props.open} onClose={handleClose} maxWidth="sm" fullWidth>

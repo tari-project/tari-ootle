@@ -47,7 +47,7 @@ export interface NftListProps {
   nftsListIsFetching: boolean;
   nftsListError: ApiError | null;
   nftsListData?: ListNftsResponse;
-  totalCount?: number;
+  totalCount: number;
   page: number;
   rowsPerPage: number;
   onPageChange: (event: unknown, newPage: number) => void;
@@ -69,7 +69,6 @@ export default function NFTList(props: NftListProps) {
 
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const displayedNfts = nftsListData?.nfts || [];
-  const totalItems = totalCount || displayedNfts.length;
 
   return (
     <FetchStatusCheck
@@ -107,7 +106,7 @@ export default function NFTList(props: NftListProps) {
           </Stack>
         </Stack>
 
-        {displayedNfts.length === 0 && !nftsListIsFetching ? (
+        {displayedNfts.length === 0 ? (
           <Box
             sx={{
               display: "flex",
@@ -151,10 +150,10 @@ export default function NFTList(props: NftListProps) {
           </TableContainer>
         )}
 
-        {totalItems > 0 && (
+        {totalCount > 0 && (
           <TablePagination
             component="div"
-            count={totalItems}
+            count={totalCount}
             page={page}
             onPageChange={onPageChange}
             rowsPerPage={rowsPerPage}

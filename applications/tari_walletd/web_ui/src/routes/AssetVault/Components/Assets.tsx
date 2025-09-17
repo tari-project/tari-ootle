@@ -25,9 +25,8 @@ import Tab from "@mui/material/Tab";
 import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
 import React, { useState } from "react";
-import { useAccountNFTsList } from "@api/hooks/useAccounts";
 import { ApiError } from "@api/helpers/types";
-import { useListNfts } from "@api/hooks/useNfts";
+import { useNFTsList } from "@api/hooks/useNfts";
 import { substateIdToString, handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
 import NFTList from "@routes/AssetVault/NFTs/NFTList";
 import { Account } from "@tari-project/typescript-bindings";
@@ -78,23 +77,19 @@ function Assets({ account }: { account: Account }) {
   }, [account]);
 
   const {
-    data: nftsListData,
+    data: allNfts,
     isError: nftsListIsError,
     error: nftsListError,
-    isFetching: nftsListIsFetching,
-  } = useAccountNFTsList(substateIdToString(account.component_address), nftPage * nftRowsPerPage, nftRowsPerPage);
+    isLoading: nftsListIsFetching,
+  } = useNFTsList(substateIdToString(account.component_address), 0, 1000);
 
-  // Get total count of NFTs for accurate pagination
-  const { data: allNfts } = useListNfts({
-    account: { ComponentAddress: substateIdToString(account.component_address) },
-  });
-
-  // Calculate total count - use actual count from allNfts, fallback to estimation
-  const currentNfts = nftsListData?.nfts || [];
-  const actualTotal = allNfts ? allNfts.length : null;
-
-  // Use actual total if available, otherwise fall back to simple estimation
-  const totalCount = actualTotal !== null ? actualTotal : currentNfts.length;
+  const totalCount = allNfts?.nfts?.length || 0;
+  const startIndex = nftPage * nftRowsPerPage;
+  const endIndex = startIndex + nftRowsPerPage;
+  const nftsListData = {
+    ...allNfts,
+    nfts: allNfts?.nfts?.slice(startIndex, endIndex) || [],
+  };
 
   const handleChange = (_event: React.SyntheticEvent, newValue: number) => {
     setAssetTab(newValue);

@@ -211,7 +211,12 @@ export const useMintTestnetFaucetNfts = () => {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: ["accounts_balances"] });
-      queryClient.invalidateQueries({ queryKey: ["nfts_list"] });
+      queryClient.invalidateQueries({
+        predicate: (query) => {
+          const key = query.queryKey[0];
+          return typeof key === "string" && (key === "nfts" || key === "list_nfts" || key === "nfts_list");
+        },
+      });
     },
   });
 };
@@ -269,12 +274,12 @@ export const useAccountsGet = (account: ComponentAddress) => {
   });
 };
 
-export const useAccountNFTsList = (account: ComponentAddress, offset: number, limit: number) => {
-  return useQuery({
-    queryKey: ["nfts_list", account, offset, limit],
-    queryFn: () => nftList({ account: { ComponentAddress: account }, offset, limit }),
-  });
-};
+// export const useAccountNFTsList = (account: ComponentAddress, offset: number, limit: number) => {
+//   return useQuery({
+//     queryKey: ["nfts_list", account, offset, limit],
+//     queryFn: () => nftList({ account: { ComponentAddress: account }, offset, limit }),
+//   });
+// };
 
 export const useValidatorFees = (accountOrKeyIndex: AccountOrKeyIndex, shardGroup = null) => {
   return useQuery({

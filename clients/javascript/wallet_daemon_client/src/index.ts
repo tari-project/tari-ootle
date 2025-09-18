@@ -50,7 +50,8 @@ import type {
   rejectReasonToString,
   SettingsGetResponse,
   SettingsSetRequest,
-  SettingsSetResponse, StealthTransferRequest, StealthTransferResponse,
+  SettingsSetResponse, StealthTransferRequest, StealthTransferResponse, StealthUtxosListRequest,
+  StealthUtxosListResponse,
   stringToSubstateId,
   substateIdToString,
   SubstatesGetRequest,
@@ -331,6 +332,11 @@ export class WalletDaemonClient {
   public webauthnAuthStart(params: WebauthnStartAuthRequest): Promise<WebauthnStartAuthResponse> {
     return this.__invokeRpc("webauthn.auth_start", params);
   }
+
+  public stealthUtxosList(params: StealthUtxosListRequest): Promise<StealthUtxosListResponse> {
+    return this.__invokeRpc("stealth_utxos.list", params);
+  }
+
 
   async __invokeRpc(method: string, params: object = null) {
     const id = this.id++;

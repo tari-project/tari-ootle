@@ -26,7 +26,6 @@ use anyhow::Context;
 use log::*;
 use serde_json::json;
 use tari_common::initialize_logging;
-use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine_types::ToByteType;
 use tari_ootle_app_utilities::configuration::load_configuration;
 use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
@@ -75,27 +74,28 @@ async fn main() -> Result<(), anyhow::Error> {
             let mut sdk = initialize_wallet_sdk(&config, wallet_store)?;
             sdk.initialize_cipher_seed(cli.wallet_restore.seed_words.as_ref())?;
             let km = sdk.key_manager_api();
-            let secret = if let Some(index) = key_index {
-                km.derive_account_key(*index)?
+            let account_address = if let Some(index) = key_index {
+                km.derive_account_address(*index)?
             } else {
-                km.next_account_key()?
+                km.next_account_address()?
             };
-            let public_key = RistrettoPublicKey::from_secret_key(&secret.key);
 
-            let account_addr = sdk
-                .accounts_api()
-                .derive_account_address_from_public_key(&public_key.to_byte_type());
+            let public_key = account_address.address.account_key().to_byte_type();
+            let view_only_public_key = account_address.address.view_only_key().to_byte_type();
+            let account_addr = sdk.accounts_api().derive_account_address_from_public_key(&public_key);
             sdk.accounts_api()
-                .add_account(name.as_deref(), &account_addr, secret.key_index, false, true)?;
+                .add_account(name.as_deref(), &account_addr, account_address.key_index, false, true)?;
 
             if *set_active {
-                km.set_active_key(KeyBranch::Account, secret.key_index)?;
+                km.set_active_key(KeyBranch::Account, account_address.key_index)?;
             }
 
             let json = json!({
-                "address": account_addr,
+                "component_address": account_addr,
+                "address": account_address.address.to_byte_type(),
                 "public_key": public_key,
-                "key_index": secret.key_index,
+                "view_only_key": view_only_public_key,
+                "key_index": account_address.key_index,
             });
             match output_path {
                 Some(path) => {

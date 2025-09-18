@@ -2,44 +2,43 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     sync::{Arc, Mutex},
 };
 
 use reqwest::{IntoUrl, Url};
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::{substate::SubstateId, Utxo, UtxoId};
 use tari_indexer_client::{
     error::IndexerClientError,
     json_rpc_client::IndexerJsonRpcClient,
     types::{
         GetSubstateRequest,
         GetTransactionResultRequest,
+        GetUnspentUtxosRequest,
         GetUtxoUpdatesRequest,
         IndexerTransactionFinalizedResult,
         ListSubstatesRequest,
         SubmitTransactionRequest,
     },
 };
-use tari_ootle_common_types::{
-    optional::IsNotFoundError,
-    shard::Shard,
-    substate_type::SubstateType,
-    StateVersion,
-    UtxoQueryResponse,
-};
-use tari_ootle_wallet_sdk::network::{
-    StatusResponseError,
-    SubstateListItem,
-    SubstateListResult,
-    SubstateQueryResult,
-    TransactionFinalizedResult,
-    TransactionQueryResult,
-    WalletNetworkInterface,
-    WalletQueryErrorStatus,
+use tari_ootle_common_types::{optional::IsNotFoundError, shard::Shard, substate_type::SubstateType, StateVersion};
+use tari_ootle_wallet_sdk::{
+    models::UtxoUpdateSet,
+    network::{
+        StatusResponseError,
+        SubstateListItem,
+        SubstateListResult,
+        SubstateQueryResult,
+        TransactionFinalizedResult,
+        TransactionQueryResult,
+        WalletNetworkInterface,
+        WalletQueryErrorStatus,
+    },
 };
 use tari_template_lib::{
     models::ResourceAddress,
-    types::{crypto::UtxoTagByte, TemplateAddress},
+    prelude::RistrettoPublicKeyBytes,
+    types::{crypto::UtxoTag, TemplateAddress},
 };
 use tari_transaction::{Transaction, TransactionId};
 use url::ParseError;
@@ -67,7 +66,7 @@ impl IndexerJsonRpcNetworkInterface {
         Ok(client)
     }
 
-    pub fn set_endpoint(&mut self, endpoint: &str) -> Result<(), IndexerJrpcError> {
+    pub fn set_endpoint(&self, endpoint: &str) -> Result<(), IndexerJrpcError> {
         *self.indexer_jrpc_address.lock().unwrap() = Url::parse(endpoint)?;
         Ok(())
     }
@@ -191,21 +190,31 @@ impl WalletNetworkInterface for IndexerJsonRpcNetworkInterface {
         &self,
         resource_address: ResourceAddress,
         shard_state_versions: HashMap<Shard, StateVersion>,
-        filter_tag_bytes: HashSet<UtxoTagByte>,
-    ) -> Result<UtxoQueryResponse, Self::Error> {
+    ) -> Result<UtxoUpdateSet, Self::Error> {
         let mut client = self.get_client()?;
         let resp = client
             .get_utxo_updates(GetUtxoUpdatesRequest {
                 shard_state_versions,
-                filter_tag_bytes,
                 resource_address,
                 per_shard_limit: 100,
             })
             .await?;
-        Ok(UtxoQueryResponse {
-            updates: resp.utxo_updates,
-            per_shard_high_watermark: resp.per_shard_high_watermark,
-        })
+        Ok(resp.updates)
+    }
+
+    async fn get_unspent_utxos(
+        &self,
+        resource_address: ResourceAddress,
+        tag_and_nonce_pairs: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
+    ) -> Result<Vec<(UtxoId, Utxo)>, Self::Error> {
+        let mut client = self.get_client()?;
+        let resp = client
+            .get_unspent_utxos(GetUnspentUtxosRequest {
+                resource_address,
+                tag_and_nonce_pairs,
+            })
+            .await?;
+        Ok(resp.utxos)
     }
 
     async fn wait_until_ready(&self) -> Result<(), Self::Error> {

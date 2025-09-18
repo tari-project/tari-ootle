@@ -31,7 +31,7 @@ use tari_engine_types::{
     transaction_receipt::TransactionReceipt,
     vault::Vault,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
-    FromByteType,
+    ConvertFromByteType,
     ToByteType,
     Utxo,
     UtxoAddress,
@@ -1529,7 +1529,7 @@ impl WorkingState {
         let resource = self.get_resource(&resource_lock)?;
         let view_key = resource
             .view_key()
-            .map(RistrettoPublicKey::try_from_byte_type)
+            .map(RistrettoPublicKey::convert_from_byte_type)
             .transpose()
             .map_err(|e| {
                 warn!(target: LOG_TARGET, "Stealth transfer failed - malformed view key: {}", e);

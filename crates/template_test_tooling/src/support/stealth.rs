@@ -15,7 +15,7 @@ use tari_ootle_wallet_crypto::{
 };
 use tari_template_lib::{
     models::{EncryptedData, StealthOutputsStatement, StealthTransferStatement},
-    types::{crypto::UtxoTagByte, Amount},
+    types::{crypto::UtxoTag, Amount},
 };
 
 pub fn generate_stealth_output_statement<I: IntoIterator<Item = A>, A: Into<Amount>>(
@@ -87,7 +87,7 @@ fn generate_stealth_statement_internal(
                 resource_view_key: view_key.clone(),
             },
             output_owner_public_key: RistrettoPublicKey::from_secret_key(mask),
-            tag: UtxoTagByte::new(0),
+            tag: UtxoTag::new(0),
         })
         .collect::<Vec<_>>();
 
@@ -178,7 +178,7 @@ fn generate_transfer_data_internal<I: IntoIterator<Item = A>, A: Into<Amount>>(
             UnblindedStealthOutputStatement {
                 statement,
                 output_owner_public_key,
-                tag: UtxoTagByte::new(0),
+                tag: UtxoTag::new(0),
             }
         })
         .collect::<Vec<_>>();

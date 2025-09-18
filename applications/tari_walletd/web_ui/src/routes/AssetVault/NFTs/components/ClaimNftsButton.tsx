@@ -25,10 +25,12 @@ import { useMintTestnetFaucetNfts } from "@api/hooks/useAccounts";
 import useAccountStore from "@store/accountStore";
 import { substateIdToString } from "@tari-project/typescript-bindings";
 import queryClient from "@api/queryClient";
+import { useErrorNotification } from "../../../../contexts/ErrorNotificationContext";
 
 function ClaimNftsButton() {
-  const { mutate: claimTestnetFaucetNfts } = useMintTestnetFaucetNfts();
+  const { mutate: claimTestnetFaucetNfts, isPending } = useMintTestnetFaucetNfts();
   const account = useAccountStore((state) => state.account);
+  const { showError, showSuccess } = useErrorNotification();
 
   if (!account) {
     return <></>;
@@ -37,7 +39,7 @@ function ClaimNftsButton() {
   const onClaimTestnetNfts = () => {
     claimTestnetFaucetNfts(
       {
-        account: { ComponentAddress: substateIdToString(account.address) },
+        account: { ComponentAddress: substateIdToString(account.component_address) },
         numberToMint: 5,
         mutableData: {
           image_url: "https://img.freepik.com/free-vector/gradient-isometric-nft-concept_52683-62009.jpg?w=740",
@@ -45,27 +47,34 @@ function ClaimNftsButton() {
         maxFee: 2000,
       },
       {
-        onSuccess: (resp) => {
+        onSuccess: (resp: any) => {
           console.log(resp);
+          showSuccess("Successfully claimed NFTs!");
           // Invalidate NFT queries to refresh the list
-          queryClient.invalidateQueries({ 
+          queryClient.invalidateQueries({
             predicate: (query) => {
               const key = query.queryKey[0];
-              return typeof key === "string" && (
-                key === "nfts" || 
-                key === "list_nfts" || 
-                key.startsWith("nfts_list_")
-              );
-            }
+              return typeof key === "string" && (key === "nfts" || key === "list_nfts" || key === "nfts_list");
+            },
           });
+        },
+        onError: (error: any) => {
+          console.error("Error claiming NFTs:", error);
+          // Show user-friendly error message
+          const errorMessage = error?.message || "Failed to claim NFTs. Please ensure you have sufficient funds to pay for transaction fees.";
+          showError(errorMessage);
         },
       },
     );
   };
 
   return (
-    <Button variant="outlined" onClick={() => onClaimTestnetNfts()}>
-      Claim Testnet NFTs
+    <Button
+      variant="outlined"
+      onClick={() => onClaimTestnetNfts()}
+      disabled={isPending}
+    >
+      {isPending ? "Claiming..." : "Claim Testnet NFTs"}
     </Button>
   );
 }

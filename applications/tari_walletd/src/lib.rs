@@ -30,7 +30,7 @@ mod notify;
 mod services;
 mod webrtc;
 
-use std::{fs, panic, process};
+use std::{fs, panic, pin, process};
 
 use log::*;
 use tari_common_types::seeds::seed_words::SeedWords;
@@ -89,15 +89,18 @@ pub async fn run_tari_ootle_walletd(
     let notify = Notify::new(100);
     let services = spawn_services(shutdown_signal.clone(), notify.clone(), wallet_sdk.clone());
 
-    // trigger resource scanning if needed
+    // trigger account scanning if needed
     if needs_seed_recovery {
-        let scanner = recovery_service::Service::new(
+        let scanner = recovery_service::AccountRecoveryService::new(
             wallet_sdk.clone(),
             services.account_monitor_handle.clone(),
             config.ootle_wallet_daemon.recovery_abandon_count,
-            shutdown_signal.clone(),
         );
-        tokio::spawn(scanner.scan());
+        let shutdown_signal = shutdown_signal.clone();
+        tokio::spawn(async move {
+            let scan_pinned = pin::pin!(scanner.scan());
+            shutdown_signal.select(scan_pinned).await;
+        });
     }
 
     let jrpc_address = config.ootle_wallet_daemon.json_rpc_address.unwrap();
@@ -156,7 +159,15 @@ pub async fn run_tari_ootle_walletd(
             res??;
         },
         res = services.services_fut => {
-            res?;
+            match res {
+                Ok(_) => {
+                    info!(target: LOG_TARGET, "All services have shut down");
+                },
+                Err(err) => {
+                    error!(target: LOG_TARGET, "🚨 A service has crashed: {}. Shutting down", err);
+                    return Err(err);
+                },
+            }
         },
     }
     Ok(())

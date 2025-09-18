@@ -1,27 +1,27 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    collections::{HashMap, HashSet},
-    convert::Infallible,
-    future::Future,
-    time::Duration,
-};
+use std::{collections::HashMap, convert::Infallible, future::Future, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::Decision;
 use tari_engine_types::{
     commit_result::ExecuteResult,
     substate::{SubstateId, SubstateValue},
+    Utxo,
+    UtxoId,
 };
-use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, StateVersion, UtxoQueryResponse};
+use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, StateVersion};
 use tari_template_abi::TemplateDef;
 use tari_template_lib::{
     models::ResourceAddress,
-    prelude::{crypto::UtxoTagByte, TemplateAddress},
+    prelude::{RistrettoPublicKeyBytes, TemplateAddress},
+    types::crypto::UtxoTag,
 };
 use tari_transaction::{Transaction, TransactionId};
 use time::PrimitiveDateTime;
+
+use crate::models::UtxoUpdateSet;
 
 pub trait WalletNetworkInterface {
     type Error: std::error::Error + Send + Sync + 'static;
@@ -65,8 +65,13 @@ pub trait WalletNetworkInterface {
         &self,
         resource_address: ResourceAddress,
         shard_state_versions: HashMap<Shard, StateVersion>,
-        filter_tag_bytes: HashSet<UtxoTagByte>,
-    ) -> impl Future<Output = Result<UtxoQueryResponse, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<UtxoUpdateSet, Self::Error>> + Send;
+
+    fn get_unspent_utxos(
+        &self,
+        resource_address: ResourceAddress,
+        tag_and_nonce_pairs: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
+    ) -> impl Future<Output = Result<Vec<(UtxoId, Utxo)>, Self::Error>> + Send;
 
     fn wait_until_ready(&self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }

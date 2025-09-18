@@ -23,6 +23,7 @@
 import { ChangeEvent } from "react";
 import type { Amount, SubstateId, NonFungibleId } from "@tari-project/typescript-bindings";
 import { CURRENCY } from "@utils/constants";
+import useCurrencyStore from "@store/currencyStore";
 
 export const renderJson = (json: any) => {
   if (Array.isArray(json)) {
@@ -250,45 +251,47 @@ export function bigintToDecimalString(int: bigint | Amount, decimalPlaces: numbe
   return `${wholeValues}.${padding}${fractionalValues}`;
 }
 
-export const formatXTM = (amount: number | bigint): string => {
+export const formatCurrency = (amount: number | bigint): string => {
+  const { currencySymbol } = useCurrencyStore.getState();
+
   if (typeof amount === "bigint") {
-    // Handle bigint: divide by divisor to get integer and remainder for fractional part
     const divisor = BigInt(CURRENCY.DIVISOR);
     const integerPart = amount / divisor;
     const remainder = amount % divisor;
 
-    // Convert remainder to fractional string padded to CURRENCY.DECIMALS
     const fractionalPart = remainder.toString().padStart(CURRENCY.DECIMALS, "0");
 
-    return `${integerPart.toString()}.${fractionalPart} ${CURRENCY.SYMBOL}`;
+    return `${Number(integerPart).toLocaleString("en-US")}.${fractionalPart} ${currencySymbol}`;
   } else if (typeof amount === "number") {
-    // Handle number: guard against NaN and use existing toFixed logic
     if (isNaN(amount)) {
-      return `0 ${CURRENCY.SYMBOL}`;
+      return `0 ${currencySymbol}`;
     }
-    return `${(amount / CURRENCY.DIVISOR).toFixed(CURRENCY.DECIMALS)} ${CURRENCY.SYMBOL}`;
+    const convertedAmount = amount / CURRENCY.DIVISOR;
+    return `${convertedAmount.toLocaleString("en-US", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: CURRENCY.DECIMALS,
+    })} ${currencySymbol}`;
   } else {
-    // Handle invalid types
-    return `0 ${CURRENCY.SYMBOL}`;
+    return `0 ${currencySymbol}`;
   }
+};
+
+// Helper function for formatting amounts that are already in display units (XTR)
+export const formatDisplayCurrency = (amount: number): string => {
+  const currencySymbol = useCurrencyStore.getState().currencySymbol;
+
+  if (isNaN(amount)) {
+    return `0 ${currencySymbol}`;
+  }
+  return `${amount.toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: CURRENCY.DECIMALS,
+  })} ${currencySymbol}`;
 };
 
 export function validateHash(hash: string): boolean {
   const regex = /^[a-fA-F0-9]{64}$/;
   return regex.test(hash);
-}
-
-export function validateAddress(address: string): boolean {
-  if (!address || typeof address !== "string") {
-    return false;
-  }
-
-  // Trim whitespace and convert to lowercase for consistent validation
-  const cleanAddress = address.trim().toLowerCase();
-
-  // Check if it's a valid 64-character hexadecimal string (32 bytes)
-  const regex = /^[a-f0-9]{64}$/;
-  return regex.test(cleanAddress);
 }
 
 const normalizeTimestamp = (rawTimestamp: string | null | undefined): Date | null => {
@@ -314,7 +317,7 @@ const normalizeTimestamp = (rawTimestamp: string | null | undefined): Date | nul
 
 export const formatTimestamp = (rawTimestamp: string | null | undefined): string => {
   const date = normalizeTimestamp(rawTimestamp);
-  
+
   if (!date) return "";
 
   return date.toLocaleString(undefined, {

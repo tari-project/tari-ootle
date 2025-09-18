@@ -33,7 +33,7 @@ use tari_base_node_client::types::BaseLayerValidatorNode;
 use tari_common_types::types::CompressedPublicKey;
 use tari_consensus_types::{Decision, LeafBlock};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
-use tari_engine_types::{FromByteType, ToByteType};
+use tari_engine_types::{ConvertFromByteType, ToByteType};
 use tari_epoch_manager::{service::EpochManagerHandle, traits::LayerOneTransactionSubmitter, EpochManagerReader};
 use tari_epoch_oracles::store::StoreKey;
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
@@ -653,7 +653,7 @@ impl JsonRpcHandlers {
             wait_for_dial,
         } = value.parse_params()?;
 
-        let Ok(public_key) = RistrettoPublicKey::try_from_byte_type(&public_key) else {
+        let Ok(public_key) = RistrettoPublicKey::convert_from_byte_type(&public_key) else {
             return Err(JsonRpcResponse::error(
                 answer_id,
                 JsonRpcError::new(

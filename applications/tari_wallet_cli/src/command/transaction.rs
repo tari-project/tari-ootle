@@ -39,6 +39,7 @@ use tari_engine_types::{
     parse_template_address,
     substate::{SubstateDiff, SubstateId, SubstateValue},
 };
+use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{Epoch, SubstateAddress, SubstateRequirement};
 use tari_ootle_wallet_sdk::apis::confidential_transfer::ConfidentialTransferInputSelection;
 use tari_template_lib::{
@@ -144,7 +145,7 @@ pub struct SendArgs {
 #[derive(Debug, Args, Clone)]
 pub struct ConfidentialTransferArgs {
     amount: u64,
-    destination_public_key: FromHex<Vec<u8>>,
+    destination_address: OotleAddress,
     #[clap(flatten)]
     common: CommonSubmitArgs,
     #[clap(long, short = 'a', alias = "account")]
@@ -246,7 +247,7 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
 
     let mut builder = Transaction::builder()
         .for_network(network.byte)
-        .fee_transaction_pay_from_component(fee_account.address, common.max_fee.unwrap_or(1000))
+        .fee_transaction_pay_from_component(fee_account.component_address, common.max_fee.unwrap_or(1000))
         .add_instruction(instruction)
         .with_inputs(common.inputs)
         .with_min_epoch(common.min_epoch.map(Epoch))
@@ -255,10 +256,11 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
     if let Some(dump_account) = common.dump_outputs_into {
         let AccountGetResponse { account, .. } = client.accounts_get(dump_account).await?;
 
-        builder =
-            builder
-                .put_last_instruction_output_on_workspace("bucket")
-                .call_method(account.address, "deposit", args![Workspace("bucket")]);
+        builder = builder.put_last_instruction_output_on_workspace("bucket").call_method(
+            account.component_address,
+            "deposit",
+            args![Workspace("bucket")],
+        );
     }
 
     let transaction = builder.build_unsigned_transaction();
@@ -312,9 +314,11 @@ async fn handle_submit_manifest(
     let builder = Transaction::builder()
         .for_network(network.byte)
         .with_fee_instructions_builder(|builder| {
-            builder
-                .with_instructions(instructions.fee_instructions)
-                .call_method(fee_account.address, "pay_fee", args![common.max_fee.unwrap_or(1000)])
+            builder.with_instructions(instructions.fee_instructions).call_method(
+                fee_account.component_address,
+                "pay_fee",
+                args![common.max_fee.unwrap_or(1000)],
+            )
         })
         .with_instructions(instructions.instructions)
         .with_inputs(common.inputs)
@@ -395,20 +399,18 @@ pub async fn handle_confidential_transfer(
         source_account,
         resource_address,
         amount,
-        destination_public_key,
+        destination_address,
         common,
     } = args;
 
     // let AccountByNameResponse { account, .. } = client.accounts_get_by_name(&source_account_name).await?;
-    let destination_public_key =
-        RistrettoPublicKeyBytes::from_bytes(&destination_public_key.into_inner()).map_err(anyhow::Error::msg)?;
     let resp = client
         .accounts_confidential_transfer(ConfidentialTransferRequest {
             account: source_account,
             input_selection: ConfidentialTransferInputSelection::PreferConfidential,
             amount: amount.into(),
             resource_address: resource_address.unwrap_or(STEALTH_TARI_RESOURCE_ADDRESS),
-            destination_public_key,
+            destination_address,
             max_fee: common.max_fee,
             output_to_revealed: false,
             proof_from_badge_resource: None,

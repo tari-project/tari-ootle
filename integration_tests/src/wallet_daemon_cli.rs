@@ -25,10 +25,11 @@ use std::{collections::HashMap, str::FromStr, time::Duration};
 use anyhow::{anyhow, bail};
 use serde_json::json;
 use tari_engine_types::substate::SubstateId;
+use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_ootle_wallet_sdk::{
     apis::confidential_transfer::ConfidentialTransferInputSelection,
-    models::{Account, AccountWithPublicKey, NonFungibleToken},
+    models::{Account, AccountWithAddress, NonFungibleToken},
 };
 use tari_template_lib::{
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
@@ -52,7 +53,6 @@ use tari_wallet_daemon_client::{
         ConfidentialTransferRequest,
         ListNftsRequest,
         MintFaucetNftRequest,
-        RevealFundsRequest,
         StealthTransferRequest,
         TransactionSubmitRequest,
         TransactionWaitResultRequest,
@@ -99,29 +99,6 @@ pub async fn claim_fees(
     client.claim_validator_fees(request).await
 }
 
-pub async fn reveal_burned_funds(world: &mut TariWorld, account_name: String, amount: u64, wallet_daemon_name: String) {
-    let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
-
-    let request = RevealFundsRequest {
-        account: Some(ComponentAddressOrName::Name(account_name)),
-        amount_to_reveal: amount.into(),
-        max_fee: Some(5000),
-        pay_fee_from_reveal: true,
-    };
-
-    let resp = client
-        .accounts_reveal_funds(request)
-        .await
-        .expect("Failed to request reveal funds");
-
-    let wait_req = TransactionWaitResultRequest {
-        transaction_id: resp.transaction_id,
-        timeout_secs: Some(120),
-    };
-    let wait_resp = client.wait_transaction_result(wait_req).await.unwrap();
-    assert!(wait_resp.result.unwrap().result.is_accept());
-}
-
 pub async fn transfer_confidential(
     world: &mut TariWorld,
     source_account_name: String,
@@ -145,7 +122,7 @@ pub async fn transfer_confidential(
             owner_account: source_account_name,
             input_selection: ConfidentialTransferInputSelection::ConfidentialOnly,
             resource_address: XTR,
-            destination_public_key: dest_account.public_key,
+            destination_address: dest_account.address,
             max_fee: 5000,
             blinded_output_amount: amount.into(),
             revealed_output_amount: Default::default(),
@@ -223,7 +200,7 @@ pub async fn create_account(
     world: &mut TariWorld,
     account_name: String,
     wallet_daemon_name: String,
-) -> AccountWithPublicKey {
+) -> AccountWithAddress {
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
     let request = AccountsCreateRequest {
@@ -237,11 +214,13 @@ pub async fn create_account(
         .unwrap()
         .unwrap();
 
-    world.account_keys.insert(account_name.clone(), resp.public_key);
+    world
+        .account_addresses
+        .insert(account_name.clone(), resp.address.clone());
 
-    AccountWithPublicKey {
+    AccountWithAddress {
         account: resp.account,
-        owner_public_key: resp.public_key,
+        address: resp.address,
     }
 }
 
@@ -270,13 +249,13 @@ pub async fn create_account_with_free_coins(
         .unwrap();
 
     let request = AccountsCreateFreeTestCoinsRequest {
-        account: account.account.address.into(),
+        account: account.account.component_address.into(),
         amount,
         max_fee: None,
     };
 
     let resp = client.create_free_test_coins(request).await.unwrap();
-    world.account_keys.insert(account_name.clone(), resp.public_key);
+    world.account_addresses.insert(account_name.clone(), resp.address);
     let wait_req = TransactionWaitResultRequest {
         transaction_id: resp.result.transaction_hash.into_array().into(),
         timeout_secs: Some(120),
@@ -436,7 +415,7 @@ pub async fn submit_manifest_with_signing_keys(
     let instructions = parse_manifest(&manifest_content, globals, HashMap::new()).unwrap();
 
     let transaction = transaction_builder()
-        .fee_transaction_pay_from_component(account.address, 5000)
+        .fee_transaction_pay_from_component(account.component_address, 5000)
         .with_instructions(instructions.instructions)
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
@@ -521,7 +500,7 @@ pub async fn submit_manifest(
     let AccountGetResponse { account, .. } = client.accounts_get_default().await.unwrap();
 
     let transaction = transaction_builder()
-        .fee_transaction_pay_from_component(account.address, 5000)
+        .fee_transaction_pay_from_component(account.component_address, 5000)
         .with_instructions(instructions.instructions)
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
@@ -637,7 +616,7 @@ pub async fn create_component(
         .unwrap();
 
     let transaction = transaction_builder()
-        .fee_transaction_pay_from_component(account.address, 5000)
+        .fee_transaction_pay_from_component(account.component_address, 5000)
         .call_function(template_address, &function_call, args)
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
@@ -716,7 +695,7 @@ pub async fn call_component(
         .to_string();
 
     let account = get_account_from_name(&mut client, account_name).await;
-    let account_component_address = account.address;
+    let account_component_address = account.component_address;
 
     let inputs = if use_unversioned_inputs {
         [
@@ -784,7 +763,7 @@ pub async fn concurrent_call_component(
         .expect("Failed to get component address from output");
 
     let account = get_account_from_name(&mut client, account_name).await;
-    let account_component_address = account.address;
+    let account_component_address = account.component_address;
 
     let mut join_set = JoinSet::new();
     for _ in 0..times {
@@ -852,7 +831,7 @@ pub async fn transfer(
 pub async fn confidential_transfer(
     world: &mut TariWorld,
     account_name: String,
-    destination_public_key: RistrettoPublicKeyBytes,
+    destination_address: OotleAddress,
     amount: Amount,
     wallet_daemon_name: String,
     outputs_name: String,
@@ -865,7 +844,7 @@ pub async fn confidential_transfer(
     let request = ConfidentialTransferRequest {
         account,
         amount,
-        destination_public_key,
+        destination_address,
         max_fee,
         resource_address: STEALTH_TARI_RESOURCE_ADDRESS,
         proof_from_badge_resource: None,

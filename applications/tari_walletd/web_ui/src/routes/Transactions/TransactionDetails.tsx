@@ -24,7 +24,18 @@ import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTransactionDetails } from "@api/hooks/useTransactions";
 import { Accordion, AccordionDetails, AccordionSummary } from "@components/Accordion";
-import { Grid, Table, TableContainer, TableBody, TableRow, TableCell, Button, Fade, Stack } from "@mui/material";
+import {
+  Grid,
+  Table,
+  TableContainer,
+  TableBody,
+  TableRow,
+  TableCell,
+  Button,
+  Fade,
+  Stack,
+  Tooltip,
+} from "@mui/material";
 import Typography from "@mui/material/Typography";
 import { saveAs } from "file-saver";
 import { DataTableCell, StyledPaper } from "@components/StyledComponents";
@@ -42,9 +53,10 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import Loading from "@components/Loading";
 import Error from "@components/Error";
-import { FinalizeResult, TransactionResult, TransactionSignature } from "@tari-project/typescript-bindings";
+import { FinalizeResult, TransactionResult } from "@tari-project/typescript-bindings";
 import { getRejectReasonFromTransactionResult, rejectReasonToString } from "@tari-project/typescript-bindings";
 import { BsQuestionCircle } from "react-icons/bs";
+import { formatCurrency } from "@/utils/helpers";
 
 export default function TransactionDetails() {
   const [expandedPanels, setExpandedPanels] = useState<string[]>([]);
@@ -120,11 +132,7 @@ export default function TransactionDetails() {
       } else {
         reason = txResult.Reject;
       }
-      if (typeof reason === "string") {
-        return reason;
-      } else {
-        return JSON.stringify(reason);
-      }
+      return rejectReasonToString(reason);
     };
 
     const seal_signature = data.transaction.V1?.seal_signature;
@@ -150,15 +158,14 @@ export default function TransactionDetails() {
                   <TableRow>
                     <TableCell>Total Fees</TableCell>
                     <DataTableCell>
-                      {feeReceipt?.total_fees_paid.toString() || 0}
+                      {feeReceipt ? formatCurrency(feeReceipt.total_fees_paid) : "0"}
                       {feeReceipt?.total_fee_overcharge ? (
                         <>
                           {" "}
-                          ({feeReceipt.total_fee_overcharge} overcharge{" "}
-                          <BsQuestionCircle
-                            style={{ display: "inline" }}
-                            title="An overcharge occurs when paying more fees than required using stealth transfers. To preserve privacy, there is no vault to refund excess fees, therefore the fees are given to validators in their entirety."
-                          />
+                          ({formatCurrency(feeReceipt.total_fee_overcharge)} overcharge{" "}
+                          <Tooltip title="An overcharge occurs when paying more fees than required using stealth transfers. To preserve privacy, there is no vault to refund excess fees, therefore the fees are given to validators in their entirety.">
+                            <BsQuestionCircle style={{ display: "inline" }} />
+                          </Tooltip>
                           )
                         </>
                       ) : (

@@ -2,6 +2,7 @@
 import type { Account } from "../Account";
 import type { Amount } from "../Amount";
 import type { FinalizeResult } from "../FinalizeResult";
+import type { OotleAddress } from "../OotleAddress";
 import type { TransactionId } from "../TransactionId";
 
 export type AccountsCreateFreeTestCoinsResponse = {
@@ -10,5 +11,5 @@ export type AccountsCreateFreeTestCoinsResponse = {
   amount: Amount;
   fee: number;
   result: FinalizeResult;
-  public_key: string;
+  address: OotleAddress;
 };

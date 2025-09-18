@@ -77,6 +77,7 @@ function build() {
   pushd $base_path/$1 > /dev/null
   pnpm install > /dev/null
   if [ -z ${check_typescript+x} ]; then
+    pnpm run clean-dist
     pnpm run build
   else
     npx tsc

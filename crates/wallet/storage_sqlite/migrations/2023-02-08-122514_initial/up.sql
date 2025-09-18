@@ -125,8 +125,8 @@ CREATE TABLE resources
 
 CREATE UNIQUE INDEX resources_uniq_address ON resources (address);
 
--- Outputs
-CREATE TABLE outputs
+-- Confidential Outputs
+CREATE TABLE confidential_outputs
 (
     id                          INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
     account_id                  INTEGER  NOT NULL REFERENCES accounts (id),
@@ -145,8 +145,8 @@ CREATE TABLE outputs
     updated_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE UNIQUE INDEX outputs_uniq_commitment ON outputs (commitment);
-CREATE INDEX outputs_idx_account_status ON outputs (account_id, status);
+CREATE UNIQUE INDEX confidential_outputs_uniq_commitment ON confidential_outputs (commitment);
+CREATE INDEX confidential_outputs_idx_account_status ON confidential_outputs (account_id, status);
 
 -- Locks
 CREATE TABLE locks
@@ -252,3 +252,17 @@ CREATE TABLE shard_state_versions
 
 CREATE UNIQUE INDEX shard_state_versions_account_resource_shard_uniq ON shard_state_versions (account_id, resource_id, shard);
 CREATE INDEX shard_state_versions_account_resource_shard_state_version_idx ON shard_state_versions (account_id, resource_id, shard, state_version);
+
+-- UTXO process queue
+CREATE TABLE utxo_process_queue
+(
+    id                INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    account_key_index BIGINT   NOT NULL,
+    resource_address  TEXT     NOT NULL,
+    utxo_tag          INT      NOT NULL,
+    public_nonce      TEXT     NOT NULL,
+    created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX utxo_process_queue_account_resource_tag_nonce_uniq
+    ON utxo_process_queue (account_key_index, resource_address, utxo_tag, public_nonce);

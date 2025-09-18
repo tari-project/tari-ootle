@@ -26,41 +26,44 @@ import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
-import DialogTitle from "@mui/material/DialogTitle";
-import Box from "@mui/material/Box";
-import Snackbar from "@mui/material/Snackbar";
+import { CircularProgress } from "@mui/material";
 import { useAccountsCreate } from "@api/hooks/useAccounts";
+import useAccountStore from "@store/accountStore";
+import type { AccountsCreateResponse } from "@tari-project/typescript-bindings";
 import { useTheme } from "@mui/material/styles";
 import queryClient from "@api/queryClient";
+import { Stack, Fade, Typography } from "@mui/material";
+import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
+import PopupTitle from "@/components/PopupTitle";
 
 function AddAccount({ open, setOpen }: { open: boolean; setOpen: React.Dispatch<React.SetStateAction<boolean>> }) {
   const [accountFormState, setAccountFormState] = useState({
     accountName: "",
   });
-  const { mutateAsync: mutateAddAccount } = useAccountsCreate();
+  const { mutateAsync: mutateAddAccount, isPending, error, isSuccess, reset } = useAccountsCreate();
   const theme = useTheme();
-  const [isBusy, setIsBusy] = useState(false);
+  const setAccount = useAccountStore((state) => state.setAccount);
+  const setOotleAddress = useAccountStore((state) => state.setOotleAddress);
 
   const handleClose = () => {
+    setAccountFormState({ accountName: "" });
+    reset();
     setOpen(false);
   };
 
   const onSubmitAddAccount = async (e: FormEvent) => {
     e.preventDefault();
-    setIsBusy(true);
-    await mutateAddAccount(
-      { accountName: accountFormState.accountName },
-      {
-        onSettled: () => {
-          setAccountFormState({
-            accountName: "",
-          });
-          setOpen(false);
-          queryClient.invalidateQueries({ queryKey: ["accounts"] });
-        },
-      },
-    );
-    setIsBusy(false);
+    try {
+      const newAccount: AccountsCreateResponse = await mutateAddAccount({ accountName: accountFormState.accountName });
+      setAccount(newAccount.account);
+      setOotleAddress(newAccount.address);
+      await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      setTimeout(() => {
+        handleClose();
+      }, 3000);
+    } catch (error) {
+      console.error("Failed to create account:", error);
+    }
   };
 
   const onAccountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -70,37 +73,77 @@ function AddAccount({ open, setOpen }: { open: boolean; setOpen: React.Dispatch<
     });
   };
 
+  const getErrorMessage = (error: any): string => {
+    if (!error) return "";
+    const message = error.message || "";
+    const invalidRequestMatch = message.match(/Invalid request:\s*(.+)/);
+    if (invalidRequestMatch) {
+      return invalidRequestMatch[1];
+    }
+    return message || "Failed to create account. Please try again.";
+  };
+
   return (
     <Dialog open={open} onClose={handleClose}>
-      <DialogTitle>Add Account</DialogTitle>
-      <DialogContent className="dialog-content">
-        <Form
-          onSubmit={onSubmitAddAccount}
-          className="flex-container-vertical"
-          style={{ paddingTop: theme.spacing(1) }}
-        >
-          <TextField
-            name="accountName"
-            label="Account Name"
-            value={accountFormState.accountName}
-            onChange={onAccountChange}
-            style={{ flexGrow: 1 }}
-          />
-          <Box
-            className="flex-container"
-            style={{
-              justifyContent: "flex-end",
+      <PopupTitle title="Add Account" onClose={handleClose} />
+      {!isSuccess ? (
+        <DialogContent className="dialog-content">
+          <Form
+            onSubmit={onSubmitAddAccount}
+            className="flex-container-vertical"
+            style={{ paddingTop: theme.spacing(1) }}
+          >
+            <TextField
+              name="accountName"
+              label="Account Name"
+              value={accountFormState.accountName}
+              onChange={onAccountChange}
+              style={{ flexGrow: 1 }}
+              disabled={isPending}
+              autoFocus
+              error={!!error}
+              helperText={error ? getErrorMessage(error) : ""}
+            />
+
+            <Stack
+              direction="row"
+              justifyContent="flex-end"
+              alignItems="center"
+              spacing={2}
+              sx={{ marginTop: theme.spacing(2), width: "100%" }}
+            >
+              <Button variant="outlined" onClick={handleClose} disabled={isPending}>
+                Cancel
+              </Button>
+              <Button
+                variant="contained"
+                type="submit"
+                disabled={isPending || !accountFormState.accountName.trim()}
+                startIcon={isPending ? <CircularProgress size={16} /> : null}
+              >
+                {isPending ? "Creating..." : "Add Account"}
+              </Button>
+            </Stack>
+          </Form>
+        </DialogContent>
+      ) : (
+        <DialogContent className="dialog-content">
+          <Stack
+            direction="column"
+            alignItems="center"
+            justifyContent="center"
+            spacing={1}
+            sx={{
+              minHeight: "250px",
             }}
           >
-            <Button variant="outlined" onClick={handleClose}>
-              Cancel
-            </Button>
-            <Button variant="contained" type="submit" disabled={isBusy}>
-              Add Account
-            </Button>
-          </Box>
-        </Form>
-      </DialogContent>
+            <Fade in>
+              <CheckCircleRoundedIcon sx={{ fontSize: 60, color: "success.main" }} />
+            </Fade>
+            <Typography variant="h5">Account created successfully!</Typography>
+          </Stack>
+        </DialogContent>
+      )}
     </Dialog>
   );
 }

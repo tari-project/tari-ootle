@@ -31,7 +31,7 @@ import { useAccountsGetBalances } from "@api/hooks/useAccounts";
 import useAccountStore from "@store/accountStore";
 import { useEffect } from "react";
 import { substateIdToString, bigintToDecimalString } from "@utils/helpers";
-import { CURRENCY } from "@utils/constants";
+// import { CURRENCY } from "@utils/constants";
 import { Account } from "@tari-project/typescript-bindings";
 
 const XTR_RESOURCE = "resource_0101010101010101010101010101010101010101010101010101010101010101";
@@ -42,26 +42,20 @@ export default function AccountBalance() {
 
   if (!account) return <></>;
 
-  return (
-    <AccountBalanceInner 
-      account={account} 
-      showBalance={showBalance} 
-      setShowBalance={setShowBalance} 
-    />
-  );
+  return <AccountBalanceInner account={account} showBalance={showBalance} setShowBalance={setShowBalance} />;
 }
 
-function AccountBalanceInner({ 
-  account, 
-  showBalance, 
-  setShowBalance 
-}: { 
-  account: Account; 
-  showBalance: boolean; 
+function AccountBalanceInner({
+  account,
+  showBalance,
+  setShowBalance,
+}: {
+  account: Account;
+  showBalance: boolean;
   setShowBalance: (show: boolean) => void;
 }) {
   const theme = useTheme();
-  
+
   const {
     data: balancesData,
     isError: balancesIsError,
@@ -69,13 +63,13 @@ function AccountBalanceInner({
     // isFetching: balancesIsFetching,
     isLoading: balancesIsLoading,
     refetch,
-  } = useAccountsGetBalances(substateIdToString(account.address));
+  } = useAccountsGetBalances(substateIdToString(account.component_address));
 
   useEffect(() => {
     refetch();
   }, [account, refetch]);
 
-  let formattedBalance = "";
+  let formattedBalance;
   if (balancesIsLoading && !balancesData) {
     formattedBalance = "...";
   } else {
@@ -88,6 +82,8 @@ function AccountBalanceInner({
       formattedBalance = "************";
     }
   }
+
+  const symbol = balancesData?.balances.find((b) => b.resource_address === XTR_RESOURCE)?.token_symbol || "";
 
   return (
     <FetchStatusCheck
@@ -112,7 +108,7 @@ function AccountBalanceInner({
             }}
           >
             <Typography variant="h2">
-              {formattedBalance} <span style={{ fontSize: "18px" }}>{CURRENCY.SYMBOL}</span>
+              {formattedBalance} <span style={{ fontSize: "18px" }}>{symbol}</span>
             </Typography>
             <IconButton onClick={() => setShowBalance(!showBalance)}>
               {showBalance ? (

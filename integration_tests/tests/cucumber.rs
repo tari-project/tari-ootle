@@ -550,26 +550,6 @@ async fn call_component_method_on_all_vns_and_check_result(
     // tokio::time::sleep(Duration::from_secs(4)).await;
 }
 
-#[when(expr = "I use an account key named {word}")]
-async fn create_transaction_signing_key(world: &mut TariWorld, name: String) {
-    validator_node_cli::create_or_use_key(world, name);
-}
-
-#[then(expr = "I create an account {word} on {word}")]
-#[when(expr = "I create an account {word} on {word}")]
-async fn create_account(world: &mut TariWorld, account_name: String, vn_name: String) {
-    validator_node_cli::create_account(world, account_name, vn_name).await;
-}
-
-#[when(expr = "I create {int} accounts on {word}")]
-async fn create_multiple_accounts(world: &mut TariWorld, num_accounts: u64, vn_name: String) {
-    for i in 1..=num_accounts {
-        let account_name = format!("ACC_{i}");
-        validator_node_cli::create_account(world, account_name, vn_name.clone()).await;
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-}
-
 #[when(expr = r#"I submit a transaction manifest on {word} named "{word}" signed with key {word}"#)]
 async fn submit_manifest(world: &mut TariWorld, step: &Step, vn_name: String, output_name: String, key_name: String) {
     let manifest = wrap_manifest_in_main(world, step.docstring.as_ref().expect("manifest code not provided"));
@@ -589,11 +569,6 @@ async fn submit_manifest_with_inputs(
 ) {
     let manifest = wrap_manifest_in_main(world, step.docstring.as_ref().expect("manifest code not provided"));
     validator_node_cli::submit_manifest(world, vn_name, outputs_name, manifest, inputs, key_name).await;
-}
-
-#[when(expr = "account {word} reveals {int} burned tokens via wallet daemon {word}")]
-async fn reveal_burned_funds(world: &mut TariWorld, account_name: String, amount: u64, wallet_daemon_name: String) {
-    wallet_daemon_cli::reveal_burned_funds(world, account_name, amount, wallet_daemon_name).await;
 }
 
 #[when(regex = r#"^I submit a transaction manifest via wallet daemon (\w+) with inputs "([^"]+)" named "(\w+)"$"#)]

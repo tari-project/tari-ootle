@@ -82,6 +82,12 @@ impl FromStr for Metadata {
     }
 }
 
+impl From<()> for Metadata {
+    fn from(_: ()) -> Self {
+        Self::new()
+    }
+}
+
 impl From<BTreeMap<String, String>> for Metadata {
     fn from(value: BTreeMap<String, String>) -> Self {
         Self(BorTag::new(value))

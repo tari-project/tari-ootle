@@ -36,7 +36,7 @@ mod actions;
 pub use actions::*;
 
 mod module;
-pub use module::{RuntimeModule, RuntimeModuleError};
+pub use module::{RuntimeEvent, RuntimeModule, RuntimeModuleError};
 
 mod fee_state;
 mod tracker;
@@ -89,7 +89,7 @@ use tari_template_lib::{
     },
     invoke_args,
     models::{BucketId, ComponentAddress, Metadata, NonFungibleAddress, StealthTransferStatement, VaultRef},
-    types::EntityId,
+    types::{engine_args::SignatureAction, EntityId},
 };
 use tari_transaction::{
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
@@ -191,6 +191,8 @@ pub trait RuntimeInterface: Send + Sync {
     fn push_call_frame(&self, frame: PushCallFrame) -> Result<(), RuntimeError>;
     fn pop_call_frame(&self) -> Result<(), RuntimeError>;
     fn publish_template(&self, template: Vec<u8>) -> Result<(), RuntimeError>;
+
+    fn signature_invoke(&self, action: SignatureAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError>;
 
     fn allocate_address(
         &self,

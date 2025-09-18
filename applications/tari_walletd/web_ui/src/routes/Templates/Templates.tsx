@@ -1,17 +1,17 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-import { useListTemplatesAuthored } from "../../api/hooks/useTemplatesAuthored";
+import { useListTemplatesAuthored } from "@api/hooks/useTemplatesAuthored";
 import { useEffect, useState } from "react";
-import { useAccountsList } from "../../api/hooks/useAccounts";
+import { useAccountsList } from "@api/hooks/useAccounts";
 import InputLabel from "@mui/material/InputLabel";
 import Select, { SelectChangeEvent } from "@mui/material/Select/Select";
 import {
-  Account,
   AccountInfo,
   ArgDef,
   AuthoredTemplate,
   type FunctionDef,
+  decodeOotleAddress,
   substateIdToString,
   Type as FuncType,
 } from "@tari-project/typescript-bindings";
@@ -23,16 +23,16 @@ import TableRow from "@mui/material/TableRow";
 import TableCell from "@mui/material/TableCell";
 import TableBody from "@mui/material/TableBody";
 import TableContainer from "@mui/material/TableContainer";
-import CopyAddress from "../../Components/CopyAddress";
-import { AccordionIconButton, DataTableCell } from "../../Components/StyledComponents";
+import CopyAddress from "@components/CopyAddress";
+import { AccordionIconButton, DataTableCell } from "@components/StyledComponents";
 import Grid from "@mui/material/Grid";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import { Collapse, TablePagination } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import { SlCheck, SlClose } from "react-icons/sl";
-import { handleChangePage, handleChangeRowsPerPage } from "../../utils/helpers";
-import useAccountStore from "../../store/accountStore";
+import { handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
+import useAccountStore from "@store/accountStore";
 
 function getTypeAsString(funcType: FuncType): string {
   if (typeof funcType === "string") {
@@ -66,8 +66,9 @@ function Templates() {
   const [open, setOpen] = useState<boolean[]>([]);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const theme = useTheme();
+  const address = decodeOotleAddress(account?.address || accountStore.address);
   const { data: templatesResponse } = useListTemplatesAuthored({
-    author_public_key: account?.public_key || accountStore.publicKey,
+    author_public_key: address.accountPublicKey,
     page: page,
     page_size: rowsPerPage,
   });
@@ -79,9 +80,9 @@ function Templates() {
     setAccount(defaultAcc);
   }, [dataAccountsList]);
 
-  const onAccountChange = (e: SelectChangeEvent<string>) => {
+  const onAccountChange = (e: SelectChangeEvent) => {
     const selected = dataAccountsList?.accounts.find(
-      (account: AccountInfo) => substateIdToString(account.account.address) === e.target.value,
+      (account: AccountInfo) => substateIdToString(account.account.component_address) === e.target.value,
     );
     setAccount(selected);
   };
@@ -111,16 +112,13 @@ function Templates() {
             name="account"
             label="Account"
             style={{ flexGrow: 1, minWidth: "200px" }}
-            value={substateIdToString(account.account.address)}
+            value={substateIdToString(account.account.component_address)}
             onChange={onAccountChange}
           >
-            {dataAccountsList?.accounts.map((account: AccountInfo, index: number) => {
+            {dataAccountsList?.accounts.map((account: AccountInfo, i: number) => {
               return (
-                <MenuItem
-                  key={substateIdToString(account.account.address)}
-                  value={substateIdToString(account.account.address)}
-                >
-                  {account.account.name || substateIdToString(account.account.address)}
+                <MenuItem key={i} value={substateIdToString(account.account.component_address)}>
+                  {account.account.name || substateIdToString(account.account.component_address)}
                 </MenuItem>
               );
             })}

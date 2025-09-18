@@ -18,9 +18,6 @@ use tari_ootle_common_types::{
     PeerAddress,
     ShardGroup,
     StateVersion,
-    UtxoSpent,
-    UtxoUnspent,
-    UtxoUpdate,
     VotePower,
 };
 use tari_ootle_p2p::{proto::rpc, TariMessagingSpec};
@@ -43,14 +40,12 @@ use crate::{
         sync_progress::SyncProgress,
     },
     storage_sqlite::{
-        models::Key,
-        store_factory::{
-            IndexerStore,
-            IndexerStoreReadTransaction,
-            IndexerStoreWriteTransaction,
-            SqliteIndexerStore,
-            SqliteStoreWriteTransaction,
-        },
+        models::{Key, UtxoSpent, UtxoUnspent, UtxoUpdateRecord},
+        IndexerStore,
+        IndexerStoreReadTransaction,
+        IndexerStoreWriteTransaction,
+        SqliteIndexerStore,
+        SqliteStoreWriteTransaction,
     },
 };
 
@@ -331,7 +326,7 @@ impl NetworkWideStateSync {
         shard: Shard,
         sync_plan_mut: &mut SyncPlan,
         update_buf: &mut Vec<(Epoch, SubstateUpdateProof)>,
-        utxos_buf: &mut Vec<UtxoUpdate>,
+        utxos_buf: &mut Vec<UtxoUpdateRecord>,
         transactions_buf: &mut Vec<TransactionReceipt>,
         shard_group: ShardGroup,
         session: &mut ValidatorRpcSession,
@@ -456,20 +451,24 @@ fn extend_bufs_from_substate_update(
     msg_epoch: Epoch,
     update_buf: &mut Vec<(Epoch, SubstateUpdateProof)>,
     templates_buf: &mut Vec<TemplateChange>,
-    utxos_buf: &mut Vec<UtxoUpdate>,
+    utxos_buf: &mut Vec<UtxoUpdateRecord>,
     transactions_buf: &mut Vec<TransactionReceipt>,
 ) -> Result<(), NetworkStateSyncError> {
     match &update {
         SubstateUpdateProof::Create(create) => match create.substate.value().value() {
             Some(SubstateValue::Utxo(utxo)) => {
                 if let Some(address) = create.substate.substate_id().as_utxo_address() {
-                    utxos_buf.push(UtxoUpdate::Unspent(UtxoUnspent {
-                        address,
-                        version: update.version(),
-                        shard,
-                        state_version,
-                        utxo: utxo.clone(),
-                    }));
+                    let is_frozen = utxo.is_frozen();
+                    if let Some(ref output) = utxo.output {
+                        utxos_buf.push(UtxoUpdateRecord::Unspent(UtxoUnspent {
+                            address,
+                            version: update.version(),
+                            shard,
+                            state_version,
+                            utxo_output: output.clone(),
+                            is_frozen,
+                        }));
+                    }
                 } else {
                     warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received UTXO substate with invalid address: {}", create.substate.substate_id());
                 };
@@ -509,7 +508,7 @@ fn extend_bufs_from_substate_update(
                 });
             },
             SubstateId::Utxo(address) => {
-                utxos_buf.push(UtxoUpdate::Spent(UtxoSpent {
+                utxos_buf.push(UtxoUpdateRecord::Spent(UtxoSpent {
                     address: address.clone(),
                     shard,
                     version: update.version(),

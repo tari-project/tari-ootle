@@ -34,7 +34,7 @@ import AssetVault from "@routes/AssetVault/AssetVault";
 import SettingsPage from "@routes/Settings/Settings";
 import Auth, { AUTH_TOKEN_FOR_NONE_AUTH } from "@routes/Auth/Auth";
 import Webauthn from "@routes/WebauthnRegistration/Webauthn";
-import useAuthStore from "@store/authStore";
+import useAuthStore from "./services/store/authStore";
 import { useEffect } from "react";
 import { useAuthMethod } from "@api/hooks/useAuth";
 import AccessToken from "@routes/AccessToken/AccessToken";
@@ -42,6 +42,8 @@ import { jwtDecode } from "jwt-decode";
 import Templates from "@routes/Templates/Templates";
 import Manifest from "@routes/Manifest/Manifest";
 import FlowEditor from "@routes/FlowEditor/FlowEditor";
+import { useCurrencySync } from "@store/hooks/useCurrencySync";
+import { ErrorNotificationProvider } from "./contexts/ErrorNotificationContext";
 
 export const breadcrumbRoutes = [
   {
@@ -160,6 +162,8 @@ function App() {
   const { authToken } = authStore;
   let isAuthenticated = !!authToken;
 
+  useCurrencySync();
+
   useEffect(() => {
     if (isTokenExpired(authToken) && authToken !== AUTH_TOKEN_FOR_NONE_AUTH) {
       authStore.clearToken();
@@ -193,10 +197,11 @@ function App() {
   }, [authMethod, authMethodsIsError]);
 
   return (
-    <div>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<GuardedRoute component={AssetVault} isAuthenticated={isAuthenticated} />} />
+    <ErrorNotificationProvider>
+      <div>
+        <Routes>
+          <Route path="/" element={<Layout />}>
+            <Route index element={<GuardedRoute component={AssetVault} isAuthenticated={isAuthenticated} />} />
           <Route path="auth" element={<Auth />} />
           <Route path="auth/webauthn" element={<Webauthn />} />
           <Route
@@ -263,6 +268,7 @@ function App() {
         </Route>
       </Routes>
     </div>
+    </ErrorNotificationProvider>
   );
 }
 

@@ -139,11 +139,11 @@ where
                 target: LOG_TARGET,
                 "👁️‍🗨️ Refreshing account {}", account
             );
-            let is_updated = self.refresh_account(account.address).await?;
+            let is_updated = self.refresh_account(account.component_address).await?;
 
             if is_updated {
                 self.notify.notify(AccountChangedEvent {
-                    account_address: account.address,
+                    account_address: account.component_address,
                 });
             } else {
                 info!(
@@ -642,7 +642,8 @@ where
             };
 
             let Some(account_addr) = vault_substate.parent_address else {
-                warn!(target: LOG_TARGET, "👁️‍🗨️ Vault {} has no parent component.", vault_addr);
+                // Happens if this is someone else's vault
+                debug!(target: LOG_TARGET, "👁️‍🗨️ Vault {} has no parent component.", vault_addr);
                 continue;
             };
             let account_addr = account_addr.as_component_address().unwrap_or_else(|| {

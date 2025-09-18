@@ -29,8 +29,8 @@ pub async fn handle_create(
     let key_manager = sdk.key_manager_api();
     let key = req
         .specific_index
-        .map(|idx| key_manager.derive_key(req.branch.as_str(), idx))
-        .unwrap_or_else(|| key_manager.next_key(req.branch.as_str()))?;
+        .map(|idx| key_manager.derive_key(req.branch, idx))
+        .unwrap_or_else(|| key_manager.next_key(req.branch))?;
     Ok(KeysCreateResponse {
         id: key.key_index,
         public_key: RistrettoPublicKey::from_secret_key(&key.key).to_byte_type(),
@@ -44,7 +44,7 @@ pub async fn handle_list(
 ) -> Result<KeysListResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::KeyList])?;
-    let keys = sdk.key_manager_api().get_all_keys(req.branch.as_str())?;
+    let keys = sdk.key_manager_api().get_all_keys(req.branch)?;
     Ok(KeysListResponse {
         keys: keys
             .into_iter()

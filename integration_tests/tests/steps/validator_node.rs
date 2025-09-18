@@ -14,7 +14,6 @@ use integration_tests::{
     template::{send_template_registration, RegisteredTemplate},
     util::cucumber_log,
     validator_node::spawn_validator_node,
-    validator_node_cli::create_key,
     TariWorld,
 };
 use libp2p::Multiaddr;
@@ -475,11 +474,6 @@ async fn all_vns_have_scanned_to_height(world: &mut TariWorld, block_height: u64
     for vn in all_names {
         vn_has_scanned_to_height(world, vn, block_height).await;
     }
-}
-
-#[when(expr = "I create a new key pair {word}")]
-async fn when_i_create_new_key_pair(world: &mut TariWorld, key_name: String) {
-    create_key(world, key_name);
 }
 
 #[when(expr = "I wait for validator {word} has leaf block height of at least {int} at epoch {int}")]

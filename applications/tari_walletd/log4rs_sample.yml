@@ -35,7 +35,7 @@ appenders:
         count: 5
         pattern: "{{log_dir}}/log/wallet-daemon/ootle.{}.log"
     encoder:
-      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [{X(node-public-key)},{X(node-id)}] {l:5} {m} // {f}:{L}{n}"
+      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m} // {f}:{L}{n}"
 
   json_rpc:
     kind: rolling_file
@@ -51,7 +51,7 @@ appenders:
         count: 5
         pattern: "{{log_dir}}/log/wallet-daemon/json_rpc.{}.log"
     encoder:
-      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [{X(node-public-key)},{X(node-id)}] {l:5} {m} // {f}:{L}{n}"
+      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m} // {f}:{L}{n}"
 
 root:
   level: warn

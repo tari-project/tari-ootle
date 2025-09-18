@@ -5,7 +5,7 @@ use tari_engine_types::UtxoAddress;
 use tari_template_lib::{
     models::{ComponentAddress, EncryptedData},
     prelude::{PedersenCommitmentBytes, ResourceAddress, RistrettoPublicKeyBytes},
-    types::{crypto::UtxoTagByte, Amount},
+    types::{crypto::UtxoTag, Amount},
 };
 
 use crate::models::{OutputStatus, WalletLockId};
@@ -17,9 +17,10 @@ pub struct StealthOutputModel {
     pub commitment: PedersenCommitmentBytes,
     pub value: Amount,
     pub sender_public_nonce: RistrettoPublicKeyBytes,
+    /// Note: this field is more for debugging. We use the account key index for all outputs belonging to an account
     pub encryption_secret_key_index: u64,
     pub encrypted_data: EncryptedData,
-    pub tag_byte: UtxoTagByte,
+    pub tag_byte: UtxoTag,
     pub status: OutputStatus,
     pub is_burnt: bool,
     pub is_frozen: bool,

@@ -7,7 +7,7 @@ use tari_common_types::types::PrivateKey;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::{
     crypto::{ElgamalVerifiableBalance, PrivateOutput, ValueLookupTable},
-    FromByteType,
+    ConvertFromByteType,
 };
 use tari_ootle_wallet_crypto::{
     confidential,
@@ -75,7 +75,8 @@ impl ConfidentialCryptoApi {
         public_nonce: &RistrettoPublicKey,
         secret: &PrivateKey,
     ) -> Result<EncryptedData, ConfidentialCryptoApiError> {
-        let data = encrypt_value_and_mask(amount, mask, public_nonce, secret)?;
+        let key = kdfs::encrypted_data_dh_kdf_aead(secret, public_nonce);
+        let data = encrypt_value_and_mask(amount, mask, &key)?;
         Ok(data)
     }
 
@@ -132,7 +133,7 @@ impl ConfidentialCryptoApi {
     {
         let outputs_viewable_balance_decompressed = outputs
             .filter_map(|output| output.viewable_balance.as_ref())
-            .map(ElgamalVerifiableBalance::try_from_byte_type)
+            .map(ElgamalVerifiableBalance::convert_from_byte_type)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| WalletCryptoError::InvalidArgument {
                 name: "outputs",

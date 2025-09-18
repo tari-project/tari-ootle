@@ -169,6 +169,7 @@ impl TemplateTest {
                 per_byte_storage_cost: 1,
                 per_event_cost: 1,
                 per_log_cost: 1,
+                per_signature_verification_cost: 1,
             },
             key_seed: 1,
         }

@@ -1,12 +1,13 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, time::Duration};
+use std::time::Duration;
 
-use log::{error, info, warn};
+use log::*;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine_types::{component::derive_component_address_from_public_key, ToByteType};
 use tari_ootle_common_types::{
+    displayable::Displayable,
     optional::{IsNotFoundError, Optional},
     substate_type::SubstateType,
 };
@@ -20,24 +21,22 @@ use tari_ootle_wallet_sdk::{
     storage::{WalletStorageError, WalletStore},
     WalletSdk,
 };
-use tari_shutdown::ShutdownSignal;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_transaction_components::key_manager::tari_key_manager::DerivedKey;
+use tokio::time;
 
 use crate::services::{account_monitor::AccountMonitorError, AccountMonitorHandle};
 
 const LOG_TARGET: &str = "tari::ootle_wallet_daemon::resource_scanner";
 
 /// Scans through all the substates to find related resources to current wallet.
-pub struct Service<TStore, TNetworkInterface> {
+pub struct AccountRecoveryService<TStore, TNetworkInterface> {
     wallet_sdk: WalletSdk<TStore, TNetworkInterface>,
     account_monitor_handle: AccountMonitorHandle,
     abandon_after_not_found: usize,
-    shutdown_signal: ShutdownSignal,
 }
 
-impl<TStore, TNetworkInterface> Service<TStore, TNetworkInterface>
+impl<TStore, TNetworkInterface> AccountRecoveryService<TStore, TNetworkInterface>
 where
     TStore: WalletStore,
     TNetworkInterface: WalletNetworkInterface,
@@ -47,13 +46,11 @@ where
         wallet_sdk: WalletSdk<TStore, TNetworkInterface>,
         account_monitor_handle: AccountMonitorHandle,
         abandon_after_not_found: usize,
-        shutdown_signal: ShutdownSignal,
     ) -> Self {
         Self {
             wallet_sdk,
             account_monitor_handle,
             abandon_after_not_found,
-            shutdown_signal,
         }
     }
 
@@ -70,16 +67,7 @@ where
                     warn!(target: LOG_TARGET, "Indexer is not ready yet: {error:?}");
                 },
             }
-            if self.shutdown_signal.is_triggered() {
-                info!(target: LOG_TARGET, "Shutdown signal received. Stopping scan.");
-                break;
-            }
-            tokio::time::sleep(Duration::from_secs(5)).await;
-        }
-
-        if self.shutdown_signal.is_triggered() {
-            info!(target: LOG_TARGET, "Shutdown signal received. Stopping scan.");
-            return;
+            time::sleep(Duration::from_secs(5)).await;
         }
 
         info!(target: LOG_TARGET, "🔑 Attempting to recover accounts...");
@@ -88,7 +76,6 @@ where
         let key_manager_api = self.wallet_sdk.key_manager_api();
         let mut not_found_accounts_count = 0;
         let mut found_accounts_count = 0;
-        let mut owner_key_cache = HashMap::new();
         let initial_key_index = match key_manager_api.get_active_key(KeyBranch::Account) {
             Ok((key_index, _)) => key_index,
             Err(err) => {
@@ -106,14 +93,14 @@ where
                 },
             };
             info!(target: LOG_TARGET, "🔍️ Attempting to recover account with key index {}", key.key_index);
-            match self.try_recover_account(&key, &mut owner_key_cache).await.optional() {
-                Ok(Some(())) => {
+            match self.try_recover_account(&key).await {
+                Ok(true) => {
                     last_found_key = Some(key.key_index);
                     info!(target: LOG_TARGET, "✅ Account with key index {} found!", key.key_index);
                     not_found_accounts_count = 0;
                     found_accounts_count += 1;
                 },
-                Ok(None) => {
+                Ok(false) => {
                     not_found_accounts_count += 1;
                 },
                 Err(err) => {
@@ -160,14 +147,10 @@ where
         info!(target: LOG_TARGET, "✅ Scanning accounts finished! {found_accounts_count} owned account(s) found!");
     }
 
-    /// Attempt to recover an account by the provided public key.
-    async fn try_recover_account(
-        &self,
-        key: &DerivedKey,
-        owner_key_cache: &mut HashMap<RistrettoPublicKeyBytes, u64>,
-    ) -> Result<(), AccountScannerError> {
+    /// Attempt to recover an account by the provided public key. Returning true if the account was found on-chain,
+    /// false if not.
+    async fn try_recover_account(&self, key: &DerivedKey) -> Result<bool, AccountScannerError> {
         let network_interface = self.wallet_sdk.get_network_interface();
-        let accounts_api = self.wallet_sdk.accounts_api();
 
         let public_key = RistrettoPublicKey::from_secret_key(&key.key).to_byte_type();
         // Derive the account address from the public key
@@ -179,64 +162,76 @@ where
             .query_substate(&account_addr.into(), None, false)
             .await
             .optional()
-            .map_err(|e| AccountScannerError::NetworkInterfaceError { details: e.to_string() })?
-            .ok_or(AccountScannerError::AccountNotFound)?;
+            .map_err(|e| AccountScannerError::NetworkInterfaceError { details: e.to_string() })?;
 
-        let component = result
-            .substate
-            .as_component()
-            .ok_or_else(|| AccountScannerError::InvariantError {
-                details: format!(
-                    "Expected component substate for address {account_addr}, got {}",
-                    SubstateType::from(&result.substate)
-                ),
-            })?;
+        match result {
+            None => {
+                info!(target: LOG_TARGET, "🔑 Account {} not found on chain. It may have stealth UTXOs owned by its key", account_addr);
 
-        let Some(owner_public_key) = component.owner_key else {
-            info!(target: LOG_TARGET, "Account {} has no owner key", account_addr);
-            return Ok(());
-        };
+                // We cannot find this account on chain, however there could be UTXOs owned by this key which we'll need
+                // to scan for.
+                self.wallet_sdk.accounts_api().add_account(
+                    Some(format!("recovered-account-{}", key.key_index).as_str()),
+                    &account_addr,
+                    key.key_index,
+                    false,
+                    // if this is the first account, set it as the default
+                    key.key_index == 0,
+                )?;
 
-        let key_index = component
-            .owner_key
-            .and_then(|owner_public_key| {
-                if public_key == owner_public_key {
-                    // Cache this in case we have another account that uses this key
-                    owner_key_cache.insert(owner_public_key, key.key_index);
-                    Some(key.key_index)
-                } else {
-                    Some(*owner_key_cache.get(&owner_public_key)?)
-                }
-            })
-            .unwrap_or_else(|| {
-                warn!(
+                // Update UTXOs
+                self.account_monitor_handle.refresh_account(account_addr).await?;
+                // Count this as not found for the purposes of stopping the scan after N not founds
+                Ok(false)
+            },
+            Some(result) => {
+                let component = result
+                    .substate
+                    .as_component()
+                    .ok_or_else(|| AccountScannerError::InvalidResponse {
+                        details: format!(
+                            "Expected component substate for address {account_addr}, got {}",
+                            SubstateType::from(&result.substate)
+                        ),
+                    })?;
+
+                if component.owner_key.is_none() {
+                    warn!(target: LOG_TARGET, "⚠️ Account {} has no owner key. This wallet may not be able tio sign for this account", account_addr);
+                };
+
+                if component.owner_key.is_some_and(|pk| pk != public_key) {
+                    warn!(
+                        target: LOG_TARGET,
+                        "⚠️ Account {} has a different owner key {} than the one derived from the seed key {}. This wallet may not be able to sign for this account",
+                        account_addr,
+                        component.owner_key.unwrap_or_default(),
+                        public_key
+                    );
+                };
+
+                // add account
+                info!(
                     target: LOG_TARGET,
-                    "⚠️ Account {} has a different owner key {} than the one derived from the seed key {}. Signing a transaction with this key index may not work.",
+                    "🔑 Adding account {} with owner key {} and key index {}",
                     account_addr,
-                    owner_public_key,
-                    public_key
+                    component.owner_key.display(),
+                    key.key_index
                 );
+                self.wallet_sdk.accounts_api().add_account(
+                    Some(format!("recovered-account-{}", key.key_index).as_str()),
+                    &account_addr,
+                    key.key_index,
+                    true,
+                    // if this is the first account, set it as the default
+                    key.key_index == 0,
+                )?;
 
-                // TODO: this key index may not actually be the correct owner key - there is no guaranteed way to
-                // find the key index from the public key. We'll need to find another way to do
-                // this.
-                key.key_index
-            });
+                // Update vaults, UTXOs, nfts etc
+                self.account_monitor_handle.refresh_account(account_addr).await?;
 
-        // add account
-        let any_exist = accounts_api.any_accounts_exist()?;
-        self.wallet_sdk.accounts_api().add_account(
-            Some(format!("account-{}", key.key_index).as_str()),
-            &account_addr,
-            key_index,
-            true,
-            !any_exist,
-        )?;
-
-        // Update vaults, confidential outputs, nfts etc
-        self.account_monitor_handle.refresh_account(account_addr).await?;
-
-        Ok(())
+                Ok(true)
+            },
+        }
     }
 }
 
@@ -250,16 +245,8 @@ pub enum AccountScannerError {
     AccountsApiError(#[from] AccountsApiError),
     #[error("Network interface error: {details}")]
     NetworkInterfaceError { details: String },
-    #[error("Account not found")]
-    AccountNotFound,
     #[error("Account monitor error: {0}")]
     AccountMonitorError(#[from] AccountMonitorError),
-    #[error("Invariant error: {details}")]
-    InvariantError { details: String },
-}
-
-impl IsNotFoundError for AccountScannerError {
-    fn is_not_found_error(&self) -> bool {
-        matches!(self, AccountScannerError::AccountNotFound)
-    }
+    #[error("Invalid response: {details}")]
+    InvalidResponse { details: String },
 }

@@ -15,6 +15,15 @@ pub trait RuntimeModule: Send + Sync {
     fn on_before_finalize(&self, _track: &StateTracker) -> Result<(), RuntimeModuleError> {
         Ok(())
     }
+
+    fn on_runtime_event(&self, _track: &StateTracker, _call: &RuntimeEvent) -> Result<(), RuntimeModuleError> {
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum RuntimeEvent {
+    SignatureVerified,
 }
 
 #[derive(Debug, thiserror::Error)]

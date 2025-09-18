@@ -10,12 +10,12 @@ use tari_crypto::{
 };
 use tari_engine_types::{
     crypto::{get_commitment_factory, ElgamalVerifiableBalance, PrivateOutput, ValueLookupTable},
-    FromByteType,
+    ConvertFromByteType,
 };
 use tari_ootle_common_types::{base_layer_hashing::ownership_proof_hasher64, Network};
 use tari_ootle_wallet_crypto::{
     confidential,
-    encrypted_data::{encrypt_value_and_mask, extract_value_and_mask, unblind_output},
+    encrypted_data::{encrypt_value_and_mask, unblind_output},
     kdfs,
     stealth,
     ConfidentialProofError,
@@ -26,13 +26,17 @@ use tari_ootle_wallet_crypto::{
     WalletCryptoError,
 };
 use tari_template_lib::{
-    models::{ConfidentialOutputStatement, EncryptedData, StealthTransferStatement},
+    models::{ConfidentialOutputStatement, EncryptedData, ResourceAddress, StealthTransferStatement},
     prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes},
-    types::{crypto::UtxoTagByte, Amount},
+    types::{
+        crypto::{CommitmentSignatureBytes, UtxoTag},
+        Amount,
+    },
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet::sdk::stealth_crypto";
 
+#[derive(Debug, Clone, Copy)]
 pub struct StealthCryptoApi;
 
 impl StealthCryptoApi {
@@ -40,7 +44,7 @@ impl StealthCryptoApi {
         Self
     }
 
-    pub fn derive_encrypted_data_key_for_receiver(
+    pub fn derive_encrypted_data_key(
         &self,
         public_nonce: &RistrettoPublicKey,
         private_key: &RistrettoSecretKey,
@@ -78,9 +82,11 @@ impl StealthCryptoApi {
     pub fn derive_stealth_output_tag(
         &self,
         network: Network,
-        dest_public_key: &RistrettoPublicKeyBytes,
-    ) -> UtxoTagByte {
-        kdfs::derive_stealth_output_tag(network, dest_public_key)
+        secret: &RistrettoSecretKey,
+        public_key: &RistrettoPublicKey,
+        resource_address: &ResourceAddress,
+    ) -> UtxoTag {
+        kdfs::utxo_tag_stealth_dh(network, public_key, secret, resource_address)
     }
 
     pub fn derive_stealth_owner_public_key(
@@ -105,21 +111,12 @@ impl StealthCryptoApi {
         &self,
         amount: u64,
         mask: &RistrettoSecretKey,
-        public_nonce: &RistrettoPublicKey,
+        public_key: &RistrettoPublicKey,
         secret: &RistrettoSecretKey,
     ) -> Result<EncryptedData, StealthCryptoApiError> {
-        let data = encrypt_value_and_mask(amount, mask, public_nonce, secret)?;
+        let encryption_key = kdfs::encrypted_data_dh_kdf_aead(secret, public_key);
+        let data = encrypt_value_and_mask(amount, mask, &encryption_key)?;
         Ok(data)
-    }
-
-    pub fn extract_value_and_mask(
-        &self,
-        encryption_key: &RistrettoSecretKey,
-        commitment: &PedersenCommitmentBytes,
-        encrypted_data: &EncryptedData,
-    ) -> Result<(u64, RistrettoSecretKey), StealthCryptoApiError> {
-        let value_and_mask = extract_value_and_mask(encryption_key, commitment, encrypted_data)?;
-        Ok(value_and_mask)
     }
 
     pub fn generate_output_proof<A: Into<Amount>>(
@@ -136,10 +133,10 @@ impl StealthCryptoApi {
         Ok(proof)
     }
 
-    pub fn unblind_output(
+    pub fn decrypt_value_and_mask(
         &self,
-        output_commitment: &PedersenCommitmentBytes,
         output_encrypted_value: &EncryptedData,
+        output_commitment: &PedersenCommitmentBytes,
         claim_secret: &RistrettoSecretKey,
         reciprocal_public_key: &RistrettoPublicKey,
     ) -> Result<MaskAndValue, StealthCryptoApiError> {
@@ -165,7 +162,7 @@ impl StealthCryptoApi {
     {
         let outputs_viewable_balance_decompressed = outputs
             .filter_map(|output| output.viewable_balance.as_ref())
-            .map(ElgamalVerifiableBalance::try_from_byte_type)
+            .map(ElgamalVerifiableBalance::convert_from_byte_type)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| WalletCryptoError::InvalidArgument {
                 name: "outputs",
@@ -200,12 +197,12 @@ impl StealthCryptoApi {
             .chain(&account_owner_pk.as_bytes())
             .finalize();
 
-        let Ok(commitment) = PedersenCommitment::try_from_byte_type(commitment) else {
+        let Ok(commitment) = PedersenCommitment::convert_from_byte_type(commitment) else {
             warn!(target: LOG_TARGET, "Claim burn failed - malformed commitment");
             return false;
         };
 
-        let Ok(proof_of_knowledge) = RistrettoSchnorr::try_from_byte_type(ownership_proof) else {
+        let Ok(proof_of_knowledge) = RistrettoSchnorr::convert_from_byte_type(ownership_proof) else {
             warn!(target: LOG_TARGET, "Claim burn failed - malformed proof of knowledge");
             return false;
         };

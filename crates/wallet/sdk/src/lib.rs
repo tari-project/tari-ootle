@@ -13,3 +13,5 @@ pub use tari_common_types::seeds::cipher_seed::CipherSeed;
 pub mod network;
 
 pub type WalletSecretKey = tari_transaction_components::key_manager::tari_key_manager::DerivedKey;
+
+pub use tari_ootle_wallet_crypto as crypto;

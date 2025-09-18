@@ -47,9 +47,9 @@ Feature: Account transfers
     When I wait 5 seconds
     When I check the balance of ACCOUNT on wallet daemon WALLET_D the amount is at least 10000
     # Do the transfer from ACCOUNT to the second account (which does not exist yet in the network)
-    When I create a new key pair KEY_ACC_2
+    When I create an account ACC_2 via the wallet daemon WALLET_D
     When I print the cucumber world
-    When I transfer 50 tokens of resource FAUCET/resources/0 from account ACCOUNT to public key KEY_ACC_2 via the wallet daemon WALLET_D named TRANSFER
+    When I transfer 50 tokens of resource FAUCET/resources/0 from account ACCOUNT to address ACC_2 via the wallet daemon WALLET_D named TRANSFER
 
     When I print the cucumber world
     # Check that ACC_2 component was created and has funds

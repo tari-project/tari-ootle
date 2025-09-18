@@ -1,10 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    collections::{HashMap, HashSet},
-    time::Duration,
-};
+use std::{collections::HashMap, time::Duration};
 
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
@@ -15,12 +12,15 @@ use tari_engine_types::{
     commit_result::ExecuteResult,
     substate::{SubstateId, SubstateValue},
     template_lib_models::{NonFungibleAddress, ResourceAddress},
+    Utxo,
+    UtxoId,
 };
-use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, StateVersion, UtxoUpdate};
+use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, StateVersion};
 use tari_ootle_storage::time::PrimitiveDateTime;
+use tari_ootle_wallet_sdk::models::UtxoUpdateSet;
 use tari_template_abi::TemplateDef;
 use tari_template_lib_types::{
-    crypto::{RistrettoPublicKeyBytes, UtxoTagByte},
+    crypto::{RistrettoPublicKeyBytes, UtxoTag},
     TemplateAddress,
 };
 use tari_transaction::{Transaction, TransactionId};
@@ -360,7 +360,6 @@ pub struct GetUtxoUpdatesRequest {
     #[cfg_attr(feature = "ts", ts(as = "Vec<(Shard, StateVersion)>"))]
     #[serde_as(as = "Seq<(_, _)>")]
     pub shard_state_versions: HashMap<Shard, StateVersion>,
-    pub filter_tag_bytes: HashSet<UtxoTagByte>,
     pub resource_address: ResourceAddress,
     pub per_shard_limit: u32,
 }
@@ -368,7 +367,18 @@ pub struct GetUtxoUpdatesRequest {
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 pub struct GetUtxoUpdatesResponse {
-    pub utxo_updates: Vec<UtxoUpdate>,
-    /// Highest observed state_version per shard (may equal the request’s)
-    pub per_shard_high_watermark: Vec<(Shard, StateVersion)>,
+    pub updates: UtxoUpdateSet,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+pub struct GetUnspentUtxosRequest {
+    pub tag_and_nonce_pairs: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
+    pub resource_address: ResourceAddress,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+pub struct GetUnspentUtxosResponse {
+    pub utxos: Vec<(UtxoId, Utxo)>,
 }

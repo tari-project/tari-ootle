@@ -126,7 +126,6 @@ async fn handler(
             _ => Ok(value.method_not_found(&value.method)),
         },
         Some(("accounts", method)) => match method {
-            "reveal_funds" => call_handler(context, value, token, accounts::handle_reveal_funds).await,
             "claim_burn" => call_handler(context, value, token, accounts::handle_claim_burn).await,
             "create" => call_handler(context, value, token, accounts::handle_create).await,
             "create_or_get" => call_handler(context, value, token, accounts::handle_create_or_get).await,

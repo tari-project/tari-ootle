@@ -26,7 +26,6 @@ import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
-import DialogTitle from "@mui/material/DialogTitle";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import Select, { SelectChangeEvent } from "@mui/material/Select/Select";
@@ -36,8 +35,8 @@ import { useAccountsList } from "@api/hooks/useAccounts";
 import { useTheme } from "@mui/material/styles";
 import { accountsClaimBurn, transactionsWaitResult } from "@utils/json_rpc";
 import useAccountStore from "@store/accountStore";
-import { useKeysList } from "@api/hooks/useKeys";
-import type { AccountInfo, ComponentAddress } from "@tari-project/typescript-bindings";
+import type { ComponentAddress, AccountInfo } from "@tari-project/typescript-bindings";
+import PopupTitle from "@/components/PopupTitle";
 
 type FormState = {
   account: ComponentAddress;
@@ -139,7 +138,7 @@ export default function ClaimBurn() {
         Claim Burn
       </Button>
       <Dialog open={open} onClose={handleClose}>
-        <DialogTitle>Claim Burn</DialogTitle>
+        <PopupTitle onClose={handleClose} title="Claim Burn" />
         <DialogContent className="dialog-content">
           <Form onSubmit={onClaimBurn} className="flex-container-vertical" style={{ paddingTop: theme.spacing(1) }}>
             <FormControl>
@@ -153,12 +152,10 @@ export default function ClaimBurn() {
                 style={{ flexGrow: 1, minWidth: "200px" }}
                 disabled={claimBurnFormState.disabled}
               >
-                {accountsList?.accounts?.map((account, i) => (
-                  <MenuItem key={i} value={account.account.address}>
+                {accountsList?.accounts?.map((account: AccountInfo, i: number) => (
+                  <MenuItem key={i} value={account.account.component_address}>
                     <div>
-                      <i>
-                        {account.account.name} ({account.public_key})
-                      </i>
+                      <i>{account.account.name}</i>
                     </div>
                   </MenuItem>
                 ))}

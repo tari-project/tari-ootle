@@ -24,7 +24,7 @@ import { Box, Button, Stack, Typography, Avatar, Divider } from "@mui/material";
 import type { Account, NonFungibleId, NonFungibleToken } from "@tari-project/typescript-bindings";
 import CopyAddress from "@components/CopyAddress";
 import { useNftTransferStore } from "@store/nftTransferStore";
-import { formatXTM, substateIdToString, displayNftId } from "@utils/helpers";
+import { formatCurrency, substateIdToString, displayNftId } from "@utils/helpers";
 import { convertCborValue } from "@utils/cbor";
 
 interface ConfirmationStepProps {
@@ -118,7 +118,7 @@ export default function ConfirmationStep({
                 To Account:
               </Typography>
               <Typography variant="subtitle1">
-                <CopyAddress address={transferFormState.targetAccountPublicKey} />
+                <CopyAddress address={transferFormState.targetAccountAddress} />
               </Typography>
             </Box>
 
@@ -126,7 +126,7 @@ export default function ConfirmationStep({
               <Typography variant="subtitle2" color="text.secondary">
                 Transaction Fee:
               </Typography>
-              <Typography>{formatXTM(parseInt(transferFormState.maxFee))}</Typography>
+              <Typography>{formatCurrency(parseInt(transferFormState.maxFee))}</Typography>
             </Box>
 
             <Box>
@@ -134,8 +134,9 @@ export default function ConfirmationStep({
                 Fee paid by:
               </Typography>
               <Typography>
-                {accounts?.find((acc) => substateIdToString(acc.account.address) === transferFormState.payerAccount)
-                  ?.account.name || transferFormState.payerAccount}
+                {accounts?.find(
+                  (acc) => substateIdToString(acc.account.component_address) === transferFormState.payerAccount,
+                )?.account.name || transferFormState.payerAccount}
               </Typography>
             </Box>
           </Stack>

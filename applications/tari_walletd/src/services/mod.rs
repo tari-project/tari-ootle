@@ -27,6 +27,7 @@ use tari_ootle_wallet_sdk::{
     storage::WalletStore,
     WalletSdk,
 };
+use tari_ootle_wallet_sdk_services::utxo_scanner::UtxoRecovery;
 use tari_shutdown::ShutdownSignal;
 use tokio::{sync::oneshot, task::JoinHandle};
 use transaction_service::TransactionService;
@@ -63,6 +64,12 @@ where
     let utxo_scanner = StealthUtxoScannerWorker::new(wallet_sdk.clone());
     let (utxo_scanner_join_handle, utxo_scanner_handle) = utxo_scanner.spawn();
 
+    let utxo_recovery_join_handle = {
+        let sdk = wallet_sdk.clone();
+        let notify_sub = utxo_scanner_handle.subscribe_notifications();
+        tokio::spawn(UtxoRecovery::new(sdk).run(notify_sub))
+    };
+
     let (account_monitor, account_monitor_handle) =
         AccountMonitor::new(notify, wallet_sdk, utxo_scanner_handle, shutdown_signal);
     let account_monitor_join_handle = tokio::spawn(account_monitor.run());
@@ -75,6 +82,7 @@ where
             account_monitor_join_handle,
             template_monitor_join_handle,
             utxo_scanner_join_handle,
+            utxo_recovery_join_handle,
         ])
         .boxed(),
     }

@@ -66,7 +66,10 @@ use crate::{
     network_state_sync::NetworkWideStateSyncConfig,
     storage_sqlite::{
         models::Key,
-        store_factory::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreWriteTransaction, SqliteIndexerStore},
+        IndexerStore,
+        IndexerStoreReadTransaction,
+        IndexerStoreWriteTransaction,
+        SqliteIndexerStore,
     },
     ApplicationConfig,
     IndexerEpochManagerSpec,

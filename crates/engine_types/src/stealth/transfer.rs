@@ -14,7 +14,7 @@ use crate::{
     resource_container::ResourceError,
     stealth,
     stealth::ValidatedStealthOutput,
-    FromByteType,
+    ConvertFromByteType,
 };
 
 const LOG_TARGET: &str = "tari::engine_types::stealth::transfer";
@@ -72,7 +72,7 @@ pub fn validate_transfer(
         .inputs
         .iter()
         .try_fold(RistrettoPublicKey::default(), |sum, input| {
-            let commit = PedersenCommitment::try_from_byte_type(&input.commitment)?;
+            let commit = PedersenCommitment::convert_from_byte_type(&input.commitment)?;
             Ok::<_, ByteArrayError>(sum + commit.as_public_key())
         })
         .map_err(|e| ResourceError::InvalidConfidentialProof {

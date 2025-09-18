@@ -33,7 +33,7 @@ use crate::storage_sqlite::schema::*;
 
 #[derive(Debug, Identifiable, Queryable)]
 #[diesel(table_name = events)]
-pub struct EventDb {
+pub struct EventRecord {
     pub id: i32,
     pub template_address: String,
     pub tx_hash: String,

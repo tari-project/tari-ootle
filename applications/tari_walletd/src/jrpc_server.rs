@@ -184,7 +184,7 @@ async fn handler(
         },
         Some(("stealth_utxos", method)) =>
         {
-            #[allow(clippy::match_single_binding)]
+            #[allow(clippy::collapsible_match)]
             match method {
                 "list" => call_handler(context, value, token, stealth_utxos::handle_list).await,
                 _ => Ok(value.method_not_found(&value.method)),

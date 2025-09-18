@@ -7,27 +7,29 @@ use std::{
 };
 
 use reqwest::{IntoUrl, Url};
-use tari_engine_types::{substate::SubstateId, Utxo, UtxoId};
+use tari_engine_types::{
+    substate::{Substate, SubstateId},
+    Utxo,
+    UtxoId,
+};
 use tari_indexer_client::{
     error::IndexerClientError,
     json_rpc_client::IndexerJsonRpcClient,
     types::{
         GetSubstateRequest,
+        GetSubstatesRequest,
         GetTransactionResultRequest,
         GetUnspentUtxosRequest,
         GetUtxoUpdatesRequest,
         IndexerTransactionFinalizedResult,
-        ListSubstatesRequest,
         SubmitTransactionRequest,
     },
 };
-use tari_ootle_common_types::{optional::IsNotFoundError, shard::Shard, substate_type::SubstateType, StateVersion};
+use tari_ootle_common_types::{optional::IsNotFoundError, shard::Shard, StateVersion};
 use tari_ootle_wallet_sdk::{
     models::UtxoUpdateSet,
     network::{
         StatusResponseError,
-        SubstateListItem,
-        SubstateListResult,
         SubstateQueryResult,
         TransactionFinalizedResult,
         TransactionQueryResult,
@@ -100,34 +102,20 @@ impl WalletNetworkInterface for IndexerJsonRpcNetworkInterface {
         })
     }
 
-    async fn list_substates(
-        &self,
-        filter_by_template: Option<TemplateAddress>,
-        filter_by_type: Option<SubstateType>,
-        limit: Option<u64>,
-        offset: Option<u64>,
-    ) -> Result<SubstateListResult, Self::Error> {
+    async fn get_substates(&self, substate_ids: Vec<SubstateId>) -> Result<HashMap<SubstateId, Substate>, Self::Error> {
         let mut client = self.get_client()?;
-        let result = client
-            .list_substates(ListSubstatesRequest {
-                filter_by_template,
-                filter_by_type,
-                limit,
-                offset,
+        let resp = client
+            .get_substates(GetSubstatesRequest {
+                requests: substate_ids.try_into().map_err(|_| {
+                    IndexerJrpcError::IndexerClientError(IndexerClientError::RequestFailedWithStatus {
+                        code: INVALID_REQUEST_CODE,
+                        message: "Too many substate IDs requested".to_string(),
+                    })
+                })?,
             })
             .await?;
-        let substates = result
-            .substates
-            .into_iter()
-            .map(|s| SubstateListItem {
-                substate_id: s.substate_id,
-                module_name: s.module_name,
-                version: s.version,
-                template_address: s.template_address,
-                timestamp: s.timestamp,
-            })
-            .collect();
-        Ok(SubstateListResult { substates })
+
+        Ok(resp.substates)
     }
 
     async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, Self::Error> {

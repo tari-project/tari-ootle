@@ -1,10 +1,16 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, convert::Infallible, str::FromStr};
+use std::{collections::HashMap, convert::Infallible, future::Future, str::FromStr};
 
 use tari_crypto::tari_utilities::SafePassword;
-use tari_engine_types::{crypto::commit_amount_checked, substate::SubstateId, ToByteType, Utxo, UtxoId};
+use tari_engine_types::{
+    crypto::commit_amount_checked,
+    substate::{Substate, SubstateId},
+    ToByteType,
+    Utxo,
+    UtxoId,
+};
 use tari_ootle_common_types::{optional::Optional, shard::Shard, Network, StateVersion};
 use tari_ootle_wallet_sdk::{
     models::{ConfidentialOutputModel, OutputStatus, UtxoUpdateSet, WalletLockId},
@@ -137,13 +143,7 @@ impl WalletNetworkInterface for PanicNetworkInterface {
         panic!("PanicNetworkInterface called")
     }
 
-    async fn list_substates(
-        &self,
-        _filter_by_template: Option<TemplateAddress>,
-        _filter_by_type: Option<tari_ootle_common_types::substate_type::SubstateType>,
-        _limit: Option<u64>,
-        _offset: Option<u64>,
-    ) -> Result<tari_ootle_wallet_sdk::network::SubstateListResult, Self::Error> {
+    async fn get_substates(&self, _: Vec<SubstateId>) -> Result<HashMap<SubstateId, Substate>, Self::Error> {
         panic!("PanicNetworkInterface called")
     }
 

@@ -155,7 +155,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       max_fee: 3000,
       nfts: transferFormState.nfts,
       source_account: sourceAccount!,
-      target_account_public_key: transferFormState.targetAccountAddress,
+      target_account_address: transferFormState.targetAccountAddress,
       fee_payer_account: feePayerAccount!,
       resource_address: transferFormState.resourceAddress,
     }),
@@ -172,7 +172,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     () => ({
       nfts: transferFormState.nfts,
       source_account: sourceAccount!,
-      target_account_public_key: transferFormState.targetAccountAddress,
+      target_account_address: transferFormState.targetAccountAddress,
       dry_run: false,
       max_fee: parseInt(transferFormState.maxFee) || 3000,
       fee_payer_account: feePayerAccount!,

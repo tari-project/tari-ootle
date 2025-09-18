@@ -234,23 +234,19 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     e.preventDefault();
     if (!account) return;
 
-    // Check if target account is filled (minimum requirement)
+    // Check if target account is filled
     if (!transferFormState.targetAccountAddress.trim()) {
       setPopup({ title: "Missing information", error: true, message: "Please enter the target account public key" });
       return;
     }
 
-    // Only estimate fee if we don't already have one
-    if (!transferFormState.maxFee) {
-      try {
-        await estimateFee();
-      } catch (error) {
-        console.error("Fee estimation failed:", error);
-        // Don't proceed if fee estimation failed
-        return;
-      }
+    // Check if NFTs are selected (if not pre-selected)
+    if (!preSelectedNftId && transferFormState.nfts.length === 0) {
+      setPopup({ title: "Missing NFTs", error: true, message: "Please select at least one NFT to transfer" });
+      return;
     }
 
+    // Proceed to confirmation step (fee estimation will happen there)
     setCurrentStep("confirmation");
   };
 

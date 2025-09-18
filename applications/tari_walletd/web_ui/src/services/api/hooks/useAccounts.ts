@@ -211,12 +211,16 @@ export const useMintTestnetFaucetNfts = () => {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: ["accounts_balances"] });
-      queryClient.invalidateQueries({
-        predicate: (query) => {
-          const key = query.queryKey[0];
-          return typeof key === "string" && (key === "nfts" || key === "list_nfts" || key === "nfts_list");
-        },
-      });
+      
+      // Delayed invalidation for NFTs to handle wallet processing time
+      setTimeout(() => {
+        queryClient.invalidateQueries({
+          predicate: (query) => {
+            const key = query.queryKey[0];
+            return typeof key === "string" && (key === "nfts" || key === "list_nfts" || key === "nfts_list");
+          },
+        });
+      }, 1500);
     },
   });
 };

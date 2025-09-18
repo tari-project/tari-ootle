@@ -20,7 +20,6 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import React from "react";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
 import type { ApiError } from "@api/helpers/types";
@@ -93,7 +92,9 @@ export default function NFTList(props: NftListProps) {
             errorMessage={nftsListError?.message || "Error fetching data"}
             isLoading={nftsListIsFetching && !nftsListData?.nfts.length}
           >
-            {nftsListData?.nfts.map((nft: NonFungibleToken, index: number) => <NftListItem key={index} nft={nft} />)}
+            {nftsListData?.nfts.map((nft: NonFungibleToken, index: number) => (
+              <NftListItem key={index} nft={nft} />
+            ))}
           </FetchStatusCheck>
         </TableBody>
       </Table>

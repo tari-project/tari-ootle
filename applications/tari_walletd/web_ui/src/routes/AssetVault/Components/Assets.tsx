@@ -81,6 +81,7 @@ function Assets({ account }: { account: Account }) {
     isError: nftsListIsError,
     error: nftsListError,
     isLoading: nftsListIsFetching,
+    refetch: refetchNfts,
   } = useNFTsList(substateIdToString(account.component_address), 0, 1000);
 
   const totalCount = allNfts?.nfts?.length || 0;
@@ -117,6 +118,7 @@ function Assets({ account }: { account: Account }) {
           rowsPerPage={nftRowsPerPage}
           onPageChange={(event, newPage) => handleChangePage(event, newPage, setNftPage)}
           onRowsPerPageChange={(event) => handleChangeRowsPerPage(event, setNftRowsPerPage, setNftPage)}
+          onManualRefresh={() => refetchNfts()}
         />
       </TabPanel>
     </Box>

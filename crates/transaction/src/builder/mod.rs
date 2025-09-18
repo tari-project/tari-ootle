@@ -11,7 +11,7 @@ mod workspace_ids;
 pub use named_component_call::*;
 use tari_common_types::types::PrivateKey;
 use tari_engine_types::{
-    confidential::ConfidentialClaim,
+    confidential::TariStealthClaim,
     instruction::Instruction,
     substate::SubstateId,
     ComponentCall,
@@ -23,7 +23,7 @@ use tari_template_lib::{
     args::{AllocatableAddressType, InstructionArg, WorkspaceOffsetId},
     auth::OwnerRule,
     call_args,
-    models::{ConfidentialWithdrawProof, ResourceAddress, StealthTransferStatement},
+    models::{ResourceAddress, StealthTransferStatement},
     prelude::AccessRules,
     types::{crypto::RistrettoPublicKeyBytes, Amount, TemplateAddress},
 };
@@ -84,6 +84,12 @@ impl TransactionBuilder {
         self
     }
 
+    /// Pays fees using a stealth transfer statement. The statement must reveal sufficient funds to cover the fee.
+    /// NOTE: fees paid are not refunded, so any overpayment is kept by validators.
+    pub fn fee_transaction_pay_fees_stealth(self, statement: StealthTransferStatement) -> Self {
+        self.with_fee_instructions_builder(|builder| builder.pay_fee_stealth(statement))
+    }
+
     /// Adds a fee instruction that calls the "take_fee" method on a component.
     /// This method must exist and return a Bucket with containing revealed confidential XTR resource.
     /// This allows the fee to originate from sources other than the transaction sender's account.
@@ -100,18 +106,18 @@ impl TransactionBuilder {
         })
     }
 
-    /// Adds a fee instruction that calls the "take_fee_confidential" method on a component.
-    /// This method must exist and return a Bucket with containing revealed confidential XTR resource.
-    /// This allows the fee to originate from sources other than the transaction sender's account.
-    pub fn fee_transaction_pay_from_component_confidential<A: Into<ComponentCall>>(
+    /// Adds a fee instruction that calls the "pay_fee_stealth" method on a component.
+    /// This method should call either `Vault::pay_fee_stealth` or `ResourceManager::pay_fee_stealth` and result in a
+    /// sufficient amount of revealed funds used to pay fees.
+    pub fn fee_transaction_pay_fees_stealth_from_component<A: Into<ComponentCall>>(
         self,
         call: A,
-        proof: ConfidentialWithdrawProof,
+        statement: StealthTransferStatement,
     ) -> Self {
         self.add_fee_instruction(Instruction::CallMethod {
             call: call.into(),
-            method: "pay_fee_confidential".to_string(),
-            args: call_args![proof],
+            method: "pay_fee_stealth".to_string(),
+            args: call_args![statement],
         })
     }
 
@@ -211,6 +217,30 @@ impl TransactionBuilder {
         })
     }
 
+    pub fn pay_fee_stealth(self, statement: StealthTransferStatement) -> Self {
+        self.pay_fee_stealth_with_opt_input_bucket(statement, None::<String>)
+    }
+
+    pub fn pay_fee_stealth_with_input_bucket<B: Into<String>>(
+        self,
+        statement: StealthTransferStatement,
+        input_bucket: B,
+    ) -> Self {
+        self.pay_fee_stealth_with_opt_input_bucket(statement, Some(input_bucket))
+    }
+
+    pub fn pay_fee_stealth_with_opt_input_bucket<B: Into<String>>(
+        self,
+        statement: StealthTransferStatement,
+        input_bucket: Option<B>,
+    ) -> Self {
+        let revealed_input_bucket = input_bucket.map(|bucket| self.get_workspace_offset_id_from_named_arg(bucket));
+        self.add_instruction(Instruction::PayFee {
+            statement,
+            revealed_input_bucket,
+        })
+    }
+
     pub fn drop_all_proofs_in_workspace(self) -> Self {
         self.add_instruction(Instruction::DropAllProofsInWorkspace)
     }
@@ -239,7 +269,7 @@ impl TransactionBuilder {
         self.add_instruction(Instruction::PublishTemplate { binary })
     }
 
-    pub fn claim_burn(self, claim: ConfidentialClaim) -> Self {
+    pub fn claim_burn(self, claim: TariStealthClaim) -> Self {
         self.add_instruction(Instruction::ClaimBurn { claim: Box::new(claim) })
     }
 
@@ -264,6 +294,7 @@ impl TransactionBuilder {
     }
 
     pub fn with_fee_instructions_builder<F: FnOnce(TransactionBuilder) -> TransactionBuilder>(mut self, f: F) -> Self {
+        // TODO: pass in a fee builder type (probably TransactionBuilder<FeeBuilder> which has applicable methods)
         let builder = f(TransactionBuilder::new());
         self.unsigned_transaction
             .fee_instructions_mut()
@@ -355,10 +386,14 @@ impl TransactionBuilder {
         self.unsigned_transaction
     }
 
-    pub fn add_signature(mut self, sealed_signer: &RistrettoPublicKeyBytes, secret_key: &PrivateKey) -> Self {
+    pub fn add_signer(self, sealed_signer: &RistrettoPublicKeyBytes, secret_key: &PrivateKey) -> Self {
         let signature = match &self.unsigned_transaction {
             UnsignedTransaction::V1(tx) => TransactionSignature::sign_v1(secret_key, sealed_signer, tx),
         };
+        self.add_signature(signature)
+    }
+
+    pub fn add_signature(mut self, signature: TransactionSignature) -> Self {
         self.signatures.push(signature);
         self
     }
@@ -372,11 +407,7 @@ impl TransactionBuilder {
     }
 
     pub fn build(self) -> UnsealedTransactionV1 {
-        self.unsigned_transaction.build(self.signatures)
-    }
-
-    pub fn build_and_seal(self, secret_key: &PrivateKey) -> Transaction {
-        self.then(|builder| {
+        let builder = self.then(|builder| {
             // This is so that we dont have to add this in a lot of places - TODO: this is an assumption that may not
             // apply to all transactions
             if builder.signatures.is_empty() {
@@ -384,9 +415,13 @@ impl TransactionBuilder {
             } else {
                 builder
             }
-        })
-        .build()
-        .seal(secret_key)
+        });
+
+        builder.unsigned_transaction.build(builder.signatures)
+    }
+
+    pub fn build_and_seal(self, secret_key: &PrivateKey) -> Transaction {
+        self.build().seal(secret_key)
     }
 
     fn resolve_call(&self, call: NamedComponentCall) -> ComponentCall {

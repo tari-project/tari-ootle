@@ -20,81 +20,24 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import { useTheme } from "@mui/material/styles";
-import { useMintTestnetFaucetNfts, useAccountsCreateFreeTestCoins } from "../../../api/hooks/useAccounts";
+import Stack from "@mui/material/Stack";
 import ClaimBurn from "./ClaimBurn";
-import useAccountStore from "../../../store/accountStore";
-import SendMoney from "./SendMoney";
+import useAccountStore from "@store/accountStore";
 import ClaimFees from "./ClaimFees";
 import PublishTemplate from "./PublishTemplate";
-import { substateIdToString } from "@tari-project/typescript-bindings";
-import TransferNft from "./TransferNft";
-import AddIcon from "@mui/icons-material/Add";
 
 function ActionMenu() {
-  const { mutate: claimTestnetFaucetFunds } = useAccountsCreateFreeTestCoins();
-  const { mutate: claimTestnetFaucetNfts } = useMintTestnetFaucetNfts();
-  const { account, setAccount, setPublicKey } = useAccountStore();
-  const theme = useTheme();
+  const account = useAccountStore((state) => state.account);
   if (!account) {
     return null;
   }
 
-  const onClaimFreeCoins = () => {
-    claimTestnetFaucetFunds(
-      {
-        account: { ComponentAddress: substateIdToString(account.address) },
-        amount: 1_000_000_000,
-        fee: 1000,
-      },
-      {
-        onSuccess: (resp) => {
-          setAccount(resp.account);
-          setPublicKey(resp.public_key);
-        },
-      },
-    );
-  };
-  const onClaimTestnetNfts = () => {
-    claimTestnetFaucetNfts(
-      {
-        account: { ComponentAddress: substateIdToString(account.address) },
-        numberToMint: 5,
-        mutableData: {
-          image_url: "https://img.freepik.com/free-vector/gradient-isometric-nft-concept_52683-62009.jpg?w=740",
-        },
-        maxFee: 2000,
-      },
-      {
-        onSuccess: (resp) => {
-          console.log(resp);
-        },
-      },
-    );
-  };
-
   return (
-    <Box
-      style={{
-        display: "flex",
-        gap: theme.spacing(1),
-        marginBottom: theme.spacing(2),
-      }}
-    >
-      <SendMoney />
-      <TransferNft />
+    <Stack direction="row" spacing={1} marginBottom={2}>
       <ClaimFees />
-      <Button variant="outlined" onClick={onClaimFreeCoins}>
-        Claim Testnet Coins
-      </Button>
       <ClaimBurn />
       <PublishTemplate />
-      <Button variant="outlined" onClick={() => onClaimTestnetNfts()}>
-        Claim Testnet NFTs
-      </Button>
-    </Box>
+    </Stack>
   );
 }
 

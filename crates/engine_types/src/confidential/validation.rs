@@ -10,6 +10,7 @@ use tari_template_lib::{models::ConfidentialOutputStatement, types::Amount};
 use crate::{
     crypto::{range_proof::validate_bullet_proof, validate_elgamal_verifiable_balance_proof, ValidatedPrivateOutput},
     resource_container::ResourceError,
+    ConvertFromByteType,
     FromByteType,
 };
 
@@ -35,18 +36,18 @@ pub fn validate_confidential_statement(
         .output
         .as_ref()
         .map(|statement| {
-            let output_commitment = PedersenCommitment::try_from_byte_type(&statement.commitment).map_err(|_| {
-                ResourceError::InvalidConfidentialProof {
-                    details: "Invalid commitment".to_string(),
-                }
-            })?;
-
-            let output_public_nonce =
-                RistrettoPublicKey::try_from_byte_type(&statement.sender_public_nonce).map_err(|_| {
+            let output_commitment =
+                PedersenCommitment::convert_from_byte_type(&statement.commitment).map_err(|_| {
                     ResourceError::InvalidConfidentialProof {
-                        details: "Invalid sender public nonce".to_string(),
+                        details: "Invalid commitment".to_string(),
                     }
                 })?;
+
+            let output_public_nonce = statement.sender_public_nonce.try_from_byte_type().map_err(|_| {
+                ResourceError::InvalidConfidentialProof {
+                    details: "Invalid sender public nonce".to_string(),
+                }
+            })?;
 
             let viewable_balance = validate_elgamal_verifiable_balance_proof(
                 &output_commitment,

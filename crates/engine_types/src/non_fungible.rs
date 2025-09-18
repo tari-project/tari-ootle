@@ -7,11 +7,7 @@ use tari_bor::BorError;
 use crate::serde_with;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct NonFungibleContainer(Option<NonFungible>);
 
 impl NonFungibleContainer {
@@ -41,11 +37,7 @@ impl NonFungibleContainer {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct NonFungible {
     #[cfg_attr(feature = "ts", ts(type = "any"))]
     #[serde(with = "serde_with::cbor_value")]

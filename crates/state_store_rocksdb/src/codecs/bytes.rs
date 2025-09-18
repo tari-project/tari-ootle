@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::any::type_name;
+use std::{any::type_name, io::Read};
 
 use anyhow::anyhow;
 
@@ -11,7 +11,8 @@ use crate::{
     utils::read_to_fixed,
 };
 
-/// NOTE: you cannot use this codec with prefixes unless T::try_from(bytes) does not error with excess bytes.
+/// NOTE: you cannot use this codec with prefixes since it uses the entire reader to decode the bytes.
+/// Use FixedBytesCodec for this case.
 #[derive(Default)]
 pub struct BytesCodec;
 
@@ -25,8 +26,15 @@ where
         Ok(EncodeVec::from_slice(value.as_ref()))
     }
 
-    fn decode(&self, bytes: &[u8]) -> Result<T, RocksDbStorageError> {
-        let ret = T::try_from(bytes).map_err(|e| RocksDbStorageError::DecodeError {
+    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<T, RocksDbStorageError> {
+        let mut bytes = Vec::new();
+        reader
+            .read_to_end(&mut bytes)
+            .map_err(|e| RocksDbStorageError::MalformedData {
+                operation: "decode bytes",
+                details: format!("Failed to read bytes for BytesCodec: {e}"),
+            })?;
+        let ret = T::try_from(bytes.as_slice()).map_err(|e| RocksDbStorageError::DecodeError {
             source: anyhow!("{}: {}", type_name::<T>(), e),
         })?;
         Ok(ret)
@@ -48,9 +56,9 @@ where
         Ok(EncodeVec::from_slice(value.as_ref()))
     }
 
-    fn decode(&self, mut bytes: &[u8]) -> Result<T, RocksDbStorageError> {
-        let fixed = read_to_fixed(&mut bytes).ok_or_else(|| RocksDbStorageError::DecodeError {
-            source: anyhow!("FixedBytesCodec: Expected {} bytes, got {}", LEN, bytes.len()),
+    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<T, RocksDbStorageError> {
+        let fixed = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
+            source: anyhow!("FixedBytesCodec: Expected {} bytes", LEN),
         })?;
         let ret = T::from(fixed);
         Ok(ret)

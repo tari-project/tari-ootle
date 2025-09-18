@@ -39,22 +39,17 @@ use tari_common_types::{
     tari_address::{TariAddress, TariAddressFeatures},
     types::{CompressedPublicKey, PrivateKey},
 };
-use tari_core::{
-    consensus::ConsensusManager,
-    transactions::transaction_key_manager::{
-        create_memory_db_key_manager,
-        MemoryDbKeyManager,
-        TariKeyId,
-        TransactionKeyManagerInterface,
-    },
-};
-use tari_crypto::{
-    keys::SecretKey,
-    ristretto::{RistrettoComSig, RistrettoPublicKey},
-};
+use tari_crypto::keys::SecretKey;
+use tari_engine_types::substate::SubstateId;
+use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::SubstateRequirement;
 use tari_sidechain::EvictionProof;
-use tari_template_lib::prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes};
+use tari_transaction_components::{
+    consensus::ConsensusManager,
+    key_manager::{TariKeyId, TransactionKeyManagerInterface},
+};
+use tari_transaction_key_manager::{create_memory_db_key_manager, MemoryDbKeyManager};
+use tari_wallet_daemon_client::types::ExtClaimBurnProof;
 use template::RegisteredTemplate;
 use validator_node::ValidatorNodeProcess;
 use wallet::WalletProcess;
@@ -77,6 +72,7 @@ pub mod wallet_daemon;
 pub mod wallet_daemon_cli;
 
 #[derive(cucumber::World)]
+#[world(init = Self::init)]
 pub struct TariWorld {
     pub base_nodes: IndexMap<String, BaseNodeProcess>,
     pub wallets: IndexMap<String, WalletProcess>,
@@ -89,16 +85,13 @@ pub struct TariWorld {
     pub http_server: Option<MockHttpServer>,
     pub template_mock_server_port: Option<u16>,
     pub current_scenario_name: Option<String>,
-    pub commitments: IndexMap<String, PedersenCommitmentBytes>,
-    pub commitment_ownership_proofs: IndexMap<String, RistrettoComSig>,
-    pub rangeproofs: IndexMap<String, Vec<u8>>,
-    pub addresses: IndexMap<String, String>,
+    pub claim_proofs: HashMap<String, ExtClaimBurnProof>,
+    pub substate_ids: IndexMap<String, SubstateId>,
     pub num_databases_saved: usize,
-    pub account_keys: IndexMap<String, RistrettoPublicKeyBytes>,
+    pub account_addresses: IndexMap<String, OotleAddress>,
     pub key_manager: MemoryDbKeyManager,
     /// Key name -> key index
     pub wallet_keys: IndexMap<String, u64>,
-    pub claim_public_keys: IndexMap<String, RistrettoPublicKey>,
     pub wallet_daemons: IndexMap<String, TariWalletDaemonProcess>,
     /// Used for all one-sided coinbase payments
     pub wallet_private_key: PrivateKey,
@@ -109,6 +102,40 @@ pub struct TariWorld {
 }
 
 impl TariWorld {
+    async fn init() -> Self {
+        let wallet_private_key = PrivateKey::random(&mut OsRng);
+        let default_payment_address = TariAddress::new_single_address(
+            CompressedPublicKey::from_secret_key(&wallet_private_key),
+            L1Network::LocalNet,
+            TariAddressFeatures::create_interactive_and_one_sided(),
+        )
+        .unwrap();
+        Self {
+            base_nodes: IndexMap::new(),
+            wallets: IndexMap::new(),
+            validator_nodes: IndexMap::new(),
+            indexers: IndexMap::new(),
+            vn_seeds: IndexMap::new(),
+            miners: IndexMap::new(),
+            templates: IndexMap::new(),
+            outputs: IndexMap::new(),
+            http_server: None,
+            template_mock_server_port: None,
+            current_scenario_name: None,
+            claim_proofs: HashMap::new(),
+            substate_ids: IndexMap::new(),
+            num_databases_saved: 0,
+            account_addresses: IndexMap::new(),
+            key_manager: create_memory_db_key_manager().await.unwrap(),
+            wallet_keys: IndexMap::new(),
+            wallet_daemons: IndexMap::new(),
+            wallet_private_key,
+            default_payment_address,
+            consensus_manager: ConsensusManager::builder(L1Network::LocalNet).build(),
+            eviction_proofs: HashMap::new(),
+        }
+    }
+
     pub fn mark_point_in_logs(&self, point_name: &str) {
         fn write_point(file_name: &str, point_name: &str) {
             let base_dir = get_base_dir();
@@ -134,6 +161,10 @@ impl TariWorld {
         write_point("wallet.log", point_name);
         write_point("network.log", point_name);
         write_point("wallet_daemon.log", point_name);
+    }
+
+    pub fn get_current_scenario_name(&self) -> &str {
+        self.current_scenario_name.as_deref().expect("No current scenario")
     }
 
     pub fn get_mock_server(&self) -> &MockHttpServer {
@@ -237,8 +268,7 @@ impl TariWorld {
             p.shutdown.trigger();
         }
         self.outputs.clear();
-        self.commitments.clear();
-        self.commitment_ownership_proofs.clear();
+        self.claim_proofs.clear();
         self.miners.clear();
     }
 
@@ -281,45 +311,6 @@ impl TariWorld {
     }
 }
 
-impl Default for TariWorld {
-    fn default() -> Self {
-        let wallet_private_key = PrivateKey::random(&mut OsRng);
-        let default_payment_address = TariAddress::new_single_address(
-            CompressedPublicKey::from_secret_key(&wallet_private_key),
-            L1Network::LocalNet,
-            TariAddressFeatures::create_interactive_and_one_sided(),
-        )
-        .unwrap();
-        Self {
-            base_nodes: IndexMap::new(),
-            wallets: IndexMap::new(),
-            validator_nodes: IndexMap::new(),
-            indexers: IndexMap::new(),
-            vn_seeds: IndexMap::new(),
-            miners: IndexMap::new(),
-            templates: IndexMap::new(),
-            outputs: IndexMap::new(),
-            http_server: None,
-            template_mock_server_port: None,
-            current_scenario_name: None,
-            commitments: IndexMap::new(),
-            commitment_ownership_proofs: IndexMap::new(),
-            rangeproofs: IndexMap::new(),
-            addresses: IndexMap::new(),
-            num_databases_saved: 0,
-            account_keys: IndexMap::new(),
-            key_manager: create_memory_db_key_manager().unwrap(),
-            wallet_keys: IndexMap::new(),
-            claim_public_keys: IndexMap::new(),
-            wallet_daemons: IndexMap::new(),
-            wallet_private_key,
-            default_payment_address,
-            consensus_manager: ConsensusManager::builder(L1Network::LocalNet).build().unwrap(),
-            eviction_proofs: HashMap::new(),
-        }
-    }
-}
-
 impl Debug for TariWorld {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TariWorld")
@@ -334,14 +325,11 @@ impl Debug for TariWorld {
             .field("http_server", &self.http_server)
             .field("template_mock_server_port", &self.template_mock_server_port)
             .field("current_scenario_name", &self.current_scenario_name)
-            .field("commitments", &self.commitments.keys())
-            .field("commitment_ownership_proofs", &self.commitment_ownership_proofs.keys())
-            .field("rangeproofs", &self.rangeproofs.keys())
-            .field("addresses", &self.addresses.keys())
+            .field("claim_proofs", &self.claim_proofs.keys())
+            .field("addresses", &self.substate_ids.keys())
             .field("num_databases_saved", &self.num_databases_saved)
-            .field("account_keys", &self.account_keys.keys())
+            .field("account_keys", &self.account_addresses.keys())
             .field("wallet_keys", &self.wallet_keys.keys())
-            .field("claim_public_keys", &self.claim_public_keys.keys())
             .field("wallet_daemons", &self.wallet_daemons.keys())
             .finish()
     }

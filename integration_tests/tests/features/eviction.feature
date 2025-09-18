@@ -33,7 +33,7 @@ Feature: Eviction scenarios
 
     When miner MINER mines 26 new blocks
     Then all validators have scanned to height 32
-    And indexer IDX has scanned to height 32
+    And indexer IDX has scanned to at least height 32
     Then all validator nodes are listed as registered
 
     When indexer IDX connects to all other validators

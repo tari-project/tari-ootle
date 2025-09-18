@@ -8,24 +8,16 @@ use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
-use crate::{Epoch, NumPreshards, ShardGroup, SubstateAddress, VotePower};
+use crate::{Epoch, NumPreshards, ShardGroup, SubstateAddress, VersionedSubstateIdRef, VotePower};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default, Hash)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Committee<TAddr> {
     members: Vec<CommitteeMember<TAddr>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, Hash)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct CommitteeMember<TAddr> {
     pub address: TAddr,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
@@ -222,11 +214,7 @@ impl<TAddr: PartialEq> FromIterator<Committee<TAddr>> for Committee<TAddr> {
 
 /// Represents a "slice" of the 256-bit shard space
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct CommitteeInfo {
     num_shards: NumPreshards,
     num_shard_group_members: u32,
@@ -315,7 +303,7 @@ impl CommitteeInfo {
             return true;
         }
         // version doesnt affect shard
-        let addr = SubstateAddress::from_substate_id(substate_id, 0);
+        let addr = VersionedSubstateIdRef::new(substate_id, 0);
         let shard = addr.to_shard(self.num_shards);
         self.shard_group.contains(&shard)
     }

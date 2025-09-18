@@ -23,14 +23,17 @@
 use std::collections::HashMap;
 
 use log::{debug, info};
-use tari_engine::{fees::FeeTable, state_store::new_memory_store, transaction::TransactionProcessorConfig};
+use tari_engine::{state_store::new_memory_store, transaction::TransactionProcessorConfig};
 use tari_engine_types::{
     commit_result::ExecuteResult,
     substate::{Substate, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
-use tari_ootle_app_utilities::transaction_executor::{TariTransactionProcessor, TransactionExecutor as _};
+use tari_ootle_app_utilities::{
+    fee_tables::get_fee_table_by_network,
+    transaction_executor::{TariTransactionProcessor, TransactionExecutor as _},
+};
 use tari_ootle_common_types::{Epoch, PeerAddress, SubstateRequirement};
 use tari_template_manager::implementation::TemplateManager;
 use tari_transaction::Transaction;
@@ -81,7 +84,9 @@ impl DryRunTransactionProcessor {
         let epoch = self.epoch_manager.current_epoch().await?;
         let found_substates = self.fetch_input_substates(&transaction, epoch).await?;
 
-        let payload_processor = self.build_payload_processor(&transaction);
+        let fee_table = get_fee_table_by_network(self.config.network);
+        let payload_processor =
+            TariTransactionProcessor::new(self.config.clone(), self.template_manager.clone(), fee_table.clone());
 
         let virtual_substates = self.get_virtual_substates(&transaction, epoch).await?;
 
@@ -94,31 +99,6 @@ impl DryRunTransactionProcessor {
         })?;
 
         Ok(exec_output.result)
-    }
-
-    fn build_payload_processor(
-        &self,
-        transaction: &Transaction,
-    ) -> TariTransactionProcessor<TemplateManager<PeerAddress>> {
-        // simulate fees if the transaction requires it
-        let fee_table = if Self::transaction_includes_fees(transaction) {
-            // TODO: should match the VN fee table, should the fee table values be a consensus constant?
-            FeeTable {
-                per_transaction_weight_cost: 1,
-                per_module_call_cost: 1,
-                per_byte_storage_cost: 1,
-                per_event_cost: 1,
-                per_log_cost: 1,
-            }
-        } else {
-            FeeTable::zero_rated()
-        };
-
-        TariTransactionProcessor::new(self.config.clone(), self.template_manager.clone(), fee_table)
-    }
-
-    fn transaction_includes_fees(transaction: &Transaction) -> bool {
-        !transaction.fee_instructions().is_empty()
     }
 
     async fn fetch_input_substates(

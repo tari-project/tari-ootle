@@ -38,7 +38,7 @@ use tari_ootle_common_types::{
     Network,
     SubstateRequirement,
 };
-use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
+use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, XTR_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     args::InstructionArg,
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS},
@@ -57,7 +57,7 @@ use crate::{
     Package,
 };
 
-pub fn test_faucet_component() -> ComponentAddress {
+pub const fn test_faucet_component() -> ComponentAddress {
     XTR_FAUCET_COMPONENT_ADDRESS
 }
 
@@ -110,6 +110,7 @@ impl TemplateTest {
         // Add builtin templates
         builder.add_builtin_template(&ACCOUNT_TEMPLATE_ADDRESS);
         builder.add_builtin_template(&NFT_FAUCET_TEMPLATE_ADDRESS);
+        builder.add_builtin_template(&XTR_FAUCET_TEMPLATE_ADDRESS);
 
         // Add the faucet template for fungible tokens
         builder.add_template(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/faucet"));
@@ -163,6 +164,7 @@ impl TemplateTest {
                 per_byte_storage_cost: 1,
                 per_event_cost: 1,
                 per_log_cost: 1,
+                per_signature_verification_cost: 1,
             },
             key_seed: 1,
         }
@@ -559,7 +561,7 @@ impl TemplateTest {
         proofs: Vec<NonFungibleAddress>,
     ) -> ExecuteResult {
         let result = self.try_execute(transaction, proofs).unwrap();
-        if let Some(diff) = result.finalize.result.accept() {
+        if let Some(diff) = result.finalize.result.any_accept() {
             self.commit_diff(diff);
         }
 
@@ -568,6 +570,7 @@ impl TemplateTest {
 
     /// Executes a transaction. Panics if the transaction is not finalized (fee transaction fails). Does not panic if
     /// the main instructions fails (use execute_expect_success for that).
+    #[track_caller]
     pub fn execute_expect_commit(
         &mut self,
         transaction: Transaction,
@@ -587,6 +590,7 @@ impl TemplateTest {
     }
 
     /// Executes a transaction. Panics if the transaction fails.
+    #[track_caller]
     pub fn execute_expect_success(
         &mut self,
         transaction: Transaction,
@@ -598,6 +602,7 @@ impl TemplateTest {
     }
 
     /// Executes a transaction. Panics if the transaction succeeds.
+    #[track_caller]
     pub fn execute_expect_failure(
         &mut self,
         transaction: Transaction,
@@ -622,7 +627,7 @@ impl TemplateTest {
         proofs: Vec<NonFungibleAddress>,
     ) -> anyhow::Result<ExecuteResult> {
         let result = self.try_execute_instructions(fee_instructions, instructions, proofs)?;
-        let diff = result.finalize.result.accept().ok_or_else(|| {
+        let diff = result.finalize.result.any_accept().ok_or_else(|| {
             anyhow!(
                 "Transaction was rejected: {}",
                 result.finalize.result.fee_reject().unwrap()

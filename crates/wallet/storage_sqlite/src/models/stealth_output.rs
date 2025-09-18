@@ -1,11 +1,14 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use diesel::dsl;
 use tari_ootle_wallet_sdk::{models::StealthOutputModel, storage::WalletStorageError};
 use tari_template_lib::{
     models::{ComponentAddress, EncryptedData},
-    prelude::crypto::UtxoTagByte,
-    types::{amount, crypto::RistrettoPublicKeyBytes},
+    types::{
+        amount,
+        crypto::{RistrettoPublicKeyBytes, UtxoTag},
+    },
 };
 use time::PrimitiveDateTime;
 
@@ -26,6 +29,9 @@ pub struct StealthOutput {
     pub encryption_secret_key_index: i64,
     pub encrypted_data: Vec<u8>,
     pub tag_byte: i32,
+    pub is_burnt: bool,
+    pub is_frozen: bool,
+    pub is_on_chain: bool,
     pub created_at: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
 }
@@ -66,21 +72,25 @@ impl StealthOutput {
                     details: format!("Corrupt db: invalid encrypted data length {len}"),
                 }
             })?,
-            tag_byte: UtxoTagByte::new(
-                self.tag_byte
-                    .try_into()
-                    .map_err(|_| WalletStorageError::DecodingError {
-                        operation: "try_into_output",
-                        item: "output",
-                        details: format!("Corrupt db: invalid tag byte '{}'", self.tag_byte),
-                    })?,
-            ),
+            tag_byte: UtxoTag::new(self.tag_byte as u32),
             status: self.status.parse().map_err(|_| WalletStorageError::DecodingError {
                 operation: "try_into_output",
                 item: "output",
                 details: format!("Corrupt db: invalid output status '{}'", self.status),
             })?,
-            lock_id: self.locked_by_proof.map(|proof| proof as u64),
+            is_burnt: self.is_burnt,
+            is_frozen: self.is_frozen,
+            is_on_chain: self.is_on_chain,
+            lock_id: self.locked_by_proof,
         })
     }
+}
+
+#[derive(AsChangeset)]
+#[diesel(table_name = stealth_outputs)]
+pub(crate) struct StealthOutputUpdate<'a> {
+    pub status: Option<&'a str>,
+    pub is_burnt: Option<bool>,
+    pub is_frozen: Option<bool>,
+    pub updated_at: dsl::now,
 }

@@ -50,7 +50,7 @@ where
     async fn fetch_template_definition(&self, template_address: TemplateAddress) -> anyhow::Result<TemplateDef> {
         let min_wait_time = Duration::from_millis(100);
         let max_wait_time = Duration::from_secs(5);
-        let wait_step = Duration::from_millis(100);
+        let wait_step = Duration::from_millis(500);
         let mut current_wait_time = min_wait_time;
         let network_interface = self.wallet_sdk.get_network_interface();
         loop {
@@ -60,6 +60,7 @@ where
                 .optional()?
             {
                 Some(template_def) => {
+                    info!(target: LOG_TARGET, "Fetched template definition for {template_address}");
                     return Ok(template_def);
                 },
                 None => {
@@ -78,7 +79,7 @@ where
 
     async fn handle_wallet_event(&self, event: WalletEvent) -> anyhow::Result<()> {
         if let WalletEvent::TransactionFinalized(event) = event {
-            let Some(diff) = event.finalize.result.accept() else {
+            let Some(diff) = event.finalize.result.any_accept() else {
                 return Ok(());
             };
 

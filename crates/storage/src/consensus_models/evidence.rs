@@ -27,11 +27,7 @@ use crate::consensus_models::{RequireLockIntentRef, SubstatePledge};
 const LOG_TARGET: &str = "tari::ootle::consensus_models::evidence";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, BorshSerialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Evidence {
     // Serialize JSON as an array of objects since ShardGroup is a non-string key
     #[serde(with = "serde_with::vec")]
@@ -408,11 +404,7 @@ impl Display for Evidence {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, BorshSerialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ShardGroupEvidence {
     #[borsh(serialize_with = "indexmap_borsh::serialize")]
     #[cfg_attr(feature = "ts", ts(type = "Record<string, any>"))]
@@ -604,11 +596,7 @@ impl Display for ShardGroupEvidence {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct EvidenceInputLockData {
     pub is_write: bool,
     pub version: u32,

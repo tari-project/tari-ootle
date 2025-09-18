@@ -1,20 +1,51 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_key_manager::key_manager::DerivedKey;
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
+use tari_ootle_address::RistrettoOotleAddress;
+use tari_transaction_components::key_manager::tari_key_manager::DerivedKey;
 
-#[derive(Debug, Clone)]
+use crate::apis::key_manager::KeyBranch;
+
+#[derive(Clone)]
 pub struct WalletKey {
-    pub branch: String,
-    pub public_key: RistrettoPublicKeyBytes,
-    pub secret_key: DerivedKey<RistrettoPublicKey>,
+    pub branch: KeyBranch,
+    pub key_pair: KeyPair,
     pub is_active: bool,
 }
 
 impl WalletKey {
     pub fn key_index(&self) -> u64 {
+        self.key_pair.secret_key.key_index
+    }
+
+    pub fn public_key(&self) -> &RistrettoPublicKey {
+        &self.key_pair.public_key
+    }
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct DerivedAddress {
+    pub address: RistrettoOotleAddress,
+    pub key_index: u64,
+}
+
+#[derive(Clone)]
+pub struct KeyPair {
+    pub public_key: RistrettoPublicKey,
+    pub secret_key: DerivedKey,
+}
+
+impl KeyPair {
+    pub fn key_index(&self) -> u64 {
         self.secret_key.key_index
+    }
+
+    pub fn public_key(&self) -> &RistrettoPublicKey {
+        &self.public_key
+    }
+
+    pub fn secret_key(&self) -> &RistrettoSecretKey {
+        &self.secret_key.key
     }
 }

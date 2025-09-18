@@ -8,10 +8,10 @@ use tari_template_lib::{
 };
 use time::PrimitiveDateTime;
 
-use crate::schema::outputs;
+use crate::schema::confidential_outputs;
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[diesel(table_name = outputs)]
+#[diesel(table_name = confidential_outputs)]
 pub struct ConfidentialOutput {
     pub id: i32,
     pub account_id: i32,
@@ -76,7 +76,7 @@ impl ConfidentialOutput {
                 item: "output",
                 details: format!("Corrupt db: invalid output status '{}'", self.status),
             })?,
-            lock_id: self.locked_by_proof.map(|proof| proof as u64),
+            lock_id: self.locked_by_proof,
         })
     }
 }

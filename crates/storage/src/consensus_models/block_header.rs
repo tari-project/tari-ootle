@@ -31,13 +31,9 @@ use super::BlockError;
 use crate::consensus_models::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct BlockHeader {
-    /// "Cached" block ID/hash. This can be computed from the contents of the block header,
+    /// "Cached" block ID/hash. This is computed from the contents of the block header.
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     id: BlockId,
     /// Network this block belongs to.
@@ -56,7 +52,6 @@ pub struct BlockHeader {
     /// Shard group that created this block.
     shard_group: ShardGroup,
     /// The public key of the proposer.
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     proposed_by: RistrettoPublicKeyBytes,
     /// The total leader fee for this block. This should match the sum of the leader fees in the block's body.
     #[cfg_attr(feature = "ts", ts(type = "number"))]
@@ -71,8 +66,8 @@ pub struct BlockHeader {
     command_merkle_root: FixedHash,
     /// Proposer signature that signs the Block ID
     signature: Option<SchnorrSignatureBytes>,
-    /// The time indicating the creation time of the block. Currently, this can be chosen arbitrarily and is only
-    /// informational/used for metrics.
+    /// The Unix Epoch timestamp indicating the creation time of the block. Currently, this can be chosen arbitrarily
+    /// and is only informational/used for metrics.
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     timestamp: u64,
     /// The epoch hash is a hash given by the epoch oracle. E.g. the base layer epoch oracle gives the first block hash
@@ -191,45 +186,10 @@ impl BlockHeader {
         .expect("Infallible with empty commands")
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn load(
-        id: BlockId,
-        network: Network,
-        parent: BlockId,
-        justify_id: QcId,
-        height: NodeHeight,
-        epoch: Epoch,
-        shard_group: ShardGroup,
-        proposed_by: RistrettoPublicKeyBytes,
-        state_merkle_root: FixedHash,
-        total_leader_fee: u64,
-        signature: Option<SchnorrSignatureBytes>,
-        timestamp: u64,
-        epoch_hash: FixedHash,
-        extra_data: ExtraData,
-        command_merkle_root: FixedHash,
-    ) -> Self {
-        Self {
-            id,
-            network,
-            parent,
-            justify_id,
-            height,
-            epoch,
-            shard_group,
-            proposed_by,
-            state_merkle_root,
-            command_merkle_root,
-            total_leader_fee,
-            signature,
-            timestamp,
-            epoch_hash,
-            extra_data,
-        }
-    }
-
     /// This is the parent block for all genesis blocks. Its block ID is always zero.
+    // TODO: do we need a zero block anymore?
     pub fn zero_block(network: Network, num_preshards: NumPreshards) -> Self {
+        let shard_group = ShardGroup::all_shards(num_preshards);
         Self {
             network,
             id: BlockId::zero(),
@@ -238,7 +198,7 @@ impl BlockHeader {
                 .calculate_id(),
             height: NodeHeight::zero(),
             epoch: Epoch::zero(),
-            shard_group: ShardGroup::all_shards(num_preshards),
+            shard_group,
             proposed_by: RistrettoPublicKeyBytes::default(),
             state_merkle_root: FixedHash::zero(),
             command_merkle_root: FixedHash::zero(),

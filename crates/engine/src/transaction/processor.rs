@@ -217,7 +217,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 finalize.result = TransactionResult::AcceptFeeRejectRest(
                     finalize
                         .result
-                        .accept()
+                        .any_accept()
                         .cloned()
                         .expect("The fee transaction should be there"),
                     RejectReason::ExecutionFailure(err.to_string()),
@@ -322,10 +322,33 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 statement,
                 revealed_input_bucket,
             } => Self::stealth_transfer(runtime, resource_address, statement, revealed_input_bucket),
+            Instruction::PayFee {
+                statement,
+                revealed_input_bucket,
+            } => Self::pay_fee(runtime, statement, revealed_input_bucket),
         }
     }
 
-    pub fn stealth_transfer(
+    fn pay_fee(
+        runtime: &Runtime,
+        statement: StealthTransferStatement,
+        revealed_funds_bucket: Option<WorkspaceOffsetId>,
+    ) -> Result<InstructionResult, TransactionError> {
+        let revealed_funds_bucket = revealed_funds_bucket
+            .map(|id| {
+                runtime.resolve_workspace_id(&id).and_then(|r| {
+                    r.decode().map_err(|e| RuntimeError::InvalidArgument {
+                        argument: "revealed_funds_bucket",
+                        reason: format!("Expected workspace id {id} to be a BucketId: {e}"),
+                    })
+                })
+            })
+            .transpose()?;
+        runtime.interface().pay_fee(statement, revealed_funds_bucket)?;
+        Ok(InstructionResult::empty())
+    }
+
+    fn stealth_transfer(
         runtime: &Runtime,
         resource_address: ResourceAddressRef,
         statement: StealthTransferStatement,
@@ -350,14 +373,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         Ok(InstructionResult::empty())
     }
 
-    pub fn put_output_on_workspace_with_name(runtime: &Runtime, key: WorkspaceId) -> Result<(), TransactionError> {
+    fn put_output_on_workspace_with_name(runtime: &Runtime, key: WorkspaceId) -> Result<(), TransactionError> {
         runtime
             .interface()
             .workspace_invoke(WorkspaceAction::PutLastInstructionOutput, invoke_args![key].into())?;
         Ok(())
     }
 
-    pub fn drop_all_proofs_in_workspace(runtime: &Runtime) -> Result<(), TransactionError> {
+    fn drop_all_proofs_in_workspace(runtime: &Runtime) -> Result<(), TransactionError> {
         runtime
             .interface()
             .workspace_invoke(WorkspaceAction::DropAllProofs, invoke_args![].into())?;
@@ -365,7 +388,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
     }
 
     /// Allocating a new address for the given [`AllocatableAddressType`].
-    pub fn allocate_address(
+    fn allocate_address(
         runtime: &Runtime,
         substate_type: AllocatableAddressType,
         workspace_id: WorkspaceId,
@@ -392,7 +415,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
     }
 
     /// Load, validate template binary and adds it to TemplateProvider.
-    pub fn publish_template(
+    fn publish_template(
         config: &TransactionProcessorConfig,
         runtime: &Runtime,
         binary: Vec<u8>,
@@ -412,7 +435,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         Ok(InstructionResult::empty())
     }
 
-    pub fn create_account(
+    fn create_account(
         template_provider: &TTemplateProvider,
         runtime: &Runtime,
         public_key_address: &RistrettoPublicKeyBytes,
@@ -477,7 +500,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         Ok(result)
     }
 
-    pub fn call_function(
+    pub(crate) fn call_function(
         template_provider: &TTemplateProvider,
         runtime: &Runtime,
         template_address: &TemplateAddress,
@@ -522,7 +545,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         Ok(result)
     }
 
-    pub fn call_method(
+    pub(crate) fn call_method(
         template_provider: &TTemplateProvider,
         runtime: &Runtime,
         call: ComponentCall,

@@ -8,8 +8,8 @@ use tari_crypto::tari_utilities::SafePassword;
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_common_types::Network;
 use tari_ootle_wallet_sdk::{WalletSdk as Sdk, WalletSdkConfig};
+use tari_ootle_wallet_sdk_services::indexer_jrpc_impl::IndexerJsonRpcNetworkInterface;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
-use tari_ootle_walletd::indexer_jrpc_impl::IndexerJsonRpcNetworkInterface;
 use tari_transaction::{Transaction, TransactionBuilder, TransactionId};
 use tari_validator_node_client::types::TemplateMetadata;
 use tokio::time::sleep;
@@ -87,7 +87,7 @@ impl Runner {
             }
 
             self.stats
-                .add_substate_created(finalize.result.accept().unwrap().up_len());
+                .add_substate_created(finalize.result.any_accept().unwrap().up_len());
 
             return Ok(finalize.clone());
         }

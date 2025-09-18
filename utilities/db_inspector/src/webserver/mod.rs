@@ -2,7 +2,6 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 mod context;
-mod either_cf;
 mod error;
 mod handlers;
 mod server;

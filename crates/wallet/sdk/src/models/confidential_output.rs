@@ -9,7 +9,7 @@ use tari_template_lib::{
     types::Amount,
 };
 
-use crate::models::OutputLockId;
+use crate::models::WalletLockId;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConfidentialOutputModel {
@@ -22,10 +22,11 @@ pub struct ConfidentialOutputModel {
     pub encrypted_data: EncryptedData,
     pub public_asset_tag: Option<RistrettoPublicKeyBytes>,
     pub status: OutputStatus,
-    pub lock_id: Option<OutputLockId>,
+    pub lock_id: Option<WalletLockId>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum OutputStatus {
     /// The output is available for spending
     Unspent,
@@ -40,8 +41,6 @@ pub enum OutputStatus {
     /// mask were not constructed correctly by the sender. This output will not "be counted" in the confidential
     /// balance.
     Invalid,
-    /// The output was burnt, meaning it was intentionally destroyed and should not be counted in the balance.
-    Burnt,
 }
 
 impl OutputStatus {
@@ -52,7 +51,6 @@ impl OutputStatus {
             Self::LockedForSpend => "LockedForSpend",
             Self::LockedUnconfirmed => "LockedUnconfirmed",
             Self::Invalid => "Invalid",
-            Self::Burnt => "Burnt",
         }
     }
 }
@@ -67,7 +65,6 @@ impl FromStr for OutputStatus {
             "LockedForSpend" => Ok(Self::LockedForSpend),
             "LockedUnconfirmed" => Ok(Self::LockedUnconfirmed),
             "Invalid" => Ok(Self::Invalid),
-            "Burnt" => Ok(Self::Burnt),
             _ => Err(()),
         }
     }

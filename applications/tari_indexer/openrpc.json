@@ -1,628 +1,414 @@
 {
-    "openrpc": "1.0.0-rc1",
-    "info": {
-        "version": "1.0.0",
-        "title": "Tari Indexer",
-        "license": {
-            "name": "MIT"
-        }
-    },
-    "servers": [
-        {
-            "url": "http://localhost:18300"
-        }
-    ],
-    "methods": [
-        {
-            "name": "get_connections",
-            "summary": "List active P2P connections.",
-            "tags": [],
-            "params": [],
-            "result": {
-                "name": "get_connections_response",
-                "description": "",
-                "schema": {
-                    "$ref": "#/components/schemas/GetConnectionsResponse"
-                }
-            },
-            "errors": [],
-            "examples": [
-                {
-                    "name": "default",
-                    "description": "",
-                    "params": [],
-                    "result": {
-                        "name": "example1",
-                        "value": {
-                            "connections": [
-                                {
-                                    "address": "/onion3/zqydnqgtapphitwdxr4sfg5kuvv7kbs5ye54yjy2mybi7f7qxd5jeiyd:18141",
-                                    "age": 9946,
-                                    "direction": false,
-                                    "peer_id": "12D3KooWJn8z...tVx",
-                                    "public_key": "b4a0b93ccd3a50ab8f7fb766cc9fea59e574283d69a53fe60d6aa842f42ecd38"
-                                }
-                            ]
-                        }
-                    }
-                }
-            ]
-        },
-        {
-    "GetIdentityResponse": {
+  "openrpc": "1.3.2",
+  "info": {
+    "version": "0.3.0",
+    "title": "Tari Indexer",
+    "license": {
+      "name": "MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:18300"
+    }
+  ],
+  "components": {
+  "schemas": {
+    "GetConnectionsResponse": {
       "type": "object",
       "properties": {
-        "peer_id": {
-          "type": "string",
-          "description": "Libp2p PeerId string"
-        },
-        "public_addresses": {
+        "connections": {
           "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "public_key": {
-          "type": "string"
+          "items": { "$ref": "#/components/schemas/Connection" }
         }
       },
-      "required": ["peer_id", "public_addresses", "public_key"]
-    }
-            "examples": [
-                {
-                    "name": "default",
-                    "description": "",
-                    "params": [],
-                    "result": {
-                        "name": "example1",
-                        "value": {
-                            "node_id": "9c8d9ee038b16a424a30b4fad8",
-                            "public_address": "/onion3/5m3262svmddswg5q7apa5eciwxwgip5jghzv4xc2jknrh26bysfzwsyd:18141",
-                            "public_key": "7a149364bb8beb7f0cc6a100350391b4debd7dbaf7880bab421f024feca02b1f"
-                        }
-                    }
-                }
-            ]
+      "required": ["connections"]
+    },
+    "Connection": {
+      "type": "object",
+      "properties": {
+        "connection_id": { "type": "string" },
+        "peer_id": { "type": "string" },
+        "address": { "$ref": "#/components/schemas/Multiaddr" },
+        "direction": { "$ref": "#/components/schemas/ConnectionDirection" },
+        "age": { "$ref": "#/components/schemas/Duration" },
+        "ping_latency": {
+          "anyOf": [
+            { "$ref": "#/components/schemas/Duration" },
+            { "type": "null" }
+          ]
         },
-        {
-            "name": "get_addresses",
-            "summary": "",
-            "tags": [],
-            "params": [],
-            "result": {
-                "name": "get_addresses_response",
-                "description": "",
-                "schema": {
-                    "$ref": "#/components/schemas/GetAddressesResponse"
-                }
-            },
-            "errors": [],
-            "examples": [
-                {
-                    "name": "default",
-                    "description": "",
-                    "params": [],
-                    "result": {
-                        "name": "example1",
-                        "value": [
-                            [
-                                "component_e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd",
-                                0
-                            ],
-                            [
-                                "component_7c45d28ffa167b10d2fa700ce29343de692b97422a65485d0a00e8e7578d692e",
-                                0
-                            ],
-                            [
-                                "component_3bca9b603e196b60f261aad0db85e7b55d52c46d687cdbb54194b706423fb1aa",
-                                0
-                            ]
-                        ]
-                    }
-                }
-            ]
-        },
-        {
-            "name": "get_substate",
-            "summary": "",
-            "tags": [],
-            "params": [
-                {
-                    "name": "address",
-                    "required": true,
-                    "schema": {
-                        "type": "string",
-                        "pattern": "^[0-9a-fA-F]+$",
-                        "description": "Hex-encoded SubstateId as expected by the JSON API"
-                    }
-                },
-                {
-                    "name": "version",
-                    "required": false,
-                    "schema": {
-                        "type": "integer"
-                    }
-                },
-                {
-                    "name": "local_search_only",
-                    "required": false,
-                    "schema": {
-                        "type": "boolean",
-                        "default": false
-                    }
-                }
-            ],
-            "result": {
-                "name": "get_substate_response",
-                "description": "",
-                "schema": {
-                    "$ref": "#/components/schemas/GetSubstateResponse"
-                }
-            },
-            "errors": [],
-            "examples": [
-                {
-                    "name": "default",
-                    "description": "",
-                    "params": [
-                        {
-                            "name": "address",
-                            "value": "e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd"
-                        },
-                        {
-                            "name": "version",
-                            "value": 0
-                        }
-                    ],
-                    "result": {
-                        "name": "example1",
-                        "value": {
-                            "address": "e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd",
-                            "version": 0,
-                            "substate": {
-                                "Component": {
-                                    "access_rules": {
-                                        "default": {
-                                            "Restricted": {
-                                                "Require": {
-                                                    "id": {
-                                                        "U256": [
-                                                            242,
-                                                            92,
-                                                            64,
-                                                            223,
-                                                            207,
-                                                            57,
-                                                            225,
-                                                            163,
-                                                            175,
-                                                            11,
-                                                            109,
-                                                            189,
-                                                            230,
-                                                            209,
-                                                            24,
-                                                            78,
-                                                            225,
-                                                            250,
-                                                            171,
-                                                            247,
-                                                            14,
-                                                            102,
-                                                            246,
-                                                            15,
-                                                            193,
-                                                            145,
-                                                            233,
-                                                            156,
-                                                            24,
-                                                            197,
-                                                            147,
-                                                            116
-                                                        ]
-                                                    },
-                                                    "resource_address": [
-                                                        1,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0,
-                                                        0
-                                                    ]
-                                                }
-                                            }
-                                        },
-                                        "method_access": {
-                                            "balance": "AllowAll",
-                                            "deposit": "AllowAll",
-                                            "deposit_all": "AllowAll",
-                                            "get_balances": "AllowAll",
-                                            "get_non_fungible_ids": "AllowAll"
-                                        },
-                                        "native_method_access": {}
-                                    },
-                                    "module_name": "Account",
-                                    "state": {
-                                        "state": [
-                                            0,
-                                            0,
-                                            0,
-                                            0
-                                        ]
-                                    },
-                                    "template_address": [
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0
-                                    ]
-                                }
-                            }
-                        }
-                    }
-                }
-            ]
-        },
-        {
-            "name": "get_substates",
-            "summary": "Fetch multiple substates in a single request",
-            "tags": [],
-            "params": [
-                {
-                    "name": "requests",
-                    "required": true,
-                    "schema": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/GetSubstateRequest"
-                        }
-                    }
-                }
-            ],
-            "result": {
-                "name": "get_substates_response",
-                "description": "Batch substate fetch response",
-                "schema": {
-                    "$ref": "#/components/schemas/GetSubstatesResponse"
-                }
-            },
-            "errors": [],
-            "examples": [
-                {
-                    "name": "default",
-                    "description": "",
-                    "params": [
-                        {
-                            "name": "requests",
-                            "value": [
-                                {
-                                    "address": "e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd"
-                                },
-                                {
-                                    "address": "7c45d28ffa167b10d2fa700ce29343de692b97422a65485d0a00e8e7578d692e"
-                                }
-                            ]
-                        }
-                    ],
-                    "result": {
-                        "name": "example1",
-                        "value": {
-                            "responses": [
-                                {
-                                    "address": "e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd",
-                                    "substate": {
-                                        "Component": {
-                                            "module_name": "Account",
-                                            "state": {
-                                                "state": [
-                                                    0,
-                                                    0,
-                                                    0,
-                                                    0
-                                                ]
-                                            }
-                                        }
-                                    },
-                                    "version": 0
-                                }
-                            ]
-                        }
-                    }
-                }
-            ]
-        },
-        {
-            "name": "fetch_substates",
-            "summary": "Fetch multiple substates in a single request (alias for get_substates)",
-            "tags": [],
-            "params": [
-                {
-                    "name": "requests",
-                    "required": true,
-                    "schema": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/GetSubstateRequest"
-                        }
-                    }
-                }
-            ],
-            "result": {
-                "name": "fetch_substates_response",
-                "description": "Batch substate fetch response",
-                "schema": {
-                    "$ref": "#/components/schemas/GetSubstatesResponse"
-                }
-            },
-            "errors": [],
-            "examples": [
-                {
-                    "name": "default",
-                    "description": "",
-                    "params": [
-                        {
-                            "name": "requests",
-                            "value": [
-                                {
-                                    "address": "e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd"
-                                },
-                                {
-                                    "address": "7c45d28ffa167b10d2fa700ce29343de692b97422a65485d0a00e8e7578d692e"
-                                }
-                            ]
-                        }
-                    ],
-                    "result": {
-                        "name": "example1",
-                        "value": {
-                            "responses": [
-                                {
-                                    "address": "e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd",
-                                    "substate": {
-                                        "Component": {
-                                            "module_name": "Account",
-                                            "state": {
-                                                "state": [
-                                                    0,
-                                                    0,
-                                                    0,
-                                                    0
-                                                ]
-                                            }
-                                        }
-                                    },
-                                    "version": 0
-                                }
-                            ]
-                        }
-                    }
-                }
-            ]
+        "user_agent": {
+          "anyOf": [
+            { "type": "string" },
+            { "type": "null" }
+          ]
         }
-    ],
-    "components": {
-        "schemas": {
-            "GetConnectionsResponse": {
-                "type": "object",
-                "properties": {
-                    "connections": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/Connection"
-                        }
-                    }
-                },
-                "required": [
-                    "connections"
-                ]
-            },
-            "Connection": {
-                "type": "object",
-                "properties": {
-                    "address": {
-                        "type": "string",
-                        "description": "Multiaddress (onion3/TCP)"
-                    },
-                    "age": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "description": "Connection age in seconds"
-                    },
-                    "direction": {
-                        "type": "boolean",
-                        "description": "true=inbound, false=outbound"
-                    },
-                    "node_id": {
-                        "type": "string",
-                        "pattern": "^[0-9a-fA-F]+$",
-                        "description": "Hex-encoded peer NodeId"
-                    },
-                    "public_key": {
-                        "type": "string",
-                        "pattern": "^[0-9a-fA-F]+$",
-                        "description": "Hex-encoded public key"
-                    }
-                },
-                "required": [
-                    "address",
-                    "age",
-                    "direction",
-                    "node_id",
-                    "public_key"
-                ]
-            },
-            "GetIdentityResponse": {
-                "type": "object",
-                "properties": {
-                    "node_id": {
-                        "type": "string",
-                        "pattern": "^[0-9a-fA-F]+$",
-                        "description": "Hex-encoded NodeId"
-                    },
-                    "public_address": {
-                        "type": "string"
-                    },
-                    "public_key": {
-                        "type": "string",
-                        "pattern": "^[0-9a-fA-F]+$"
-                    }
-                },
-                "required": [
-                    "node_id",
-                    "public_address",
-                    "public_key"
-                ]
-            },
-            "GetAddressesResponse": {
-                "type": "array",
-                "items": {
-                    "type": "array",
-                    "items": [
-                        {
-                            "type": "string",
-                            "description": "Prefixed address string (e.g., \"component_<hex>\")"
-                        },
-                        {
-                            "type": "integer",
-                            "description": "Latest version number"
-                        }
-                    ],
-                    "minItems": 2,
-                    "maxItems": 2,
-                    "additionalItems": false
-                }
-            },
-            "GetSubstateRequest": {
-                "type": "object",
-                "properties": {
-                    "address": {
-                        "type": "string",
-                        "pattern": "^[0-9a-fA-F]+$",
-                        "description": "Hex-encoded SubstateId as expected by the JSON API"
-                    },
-                    "version": {
-                        "type": "integer",
-                        "description": "Optional version number for the substate request"
-                    },
-                    "local_search_only": {
-                        "type": "boolean",
-                        "description": "Optional flag to restrict the search to local storage only"
-                    }
-                },
-                "required": [
-                    "address"
-                ]
-            },
-            "GetSubstateResponse": {
-                "type": "object",
-                "properties": {
-                    "address": {
-                        "type": "string",
-                        "pattern": "^[0-9a-fA-F]+$",
-                        "description": "Hex-encoded SubstateId as returned by the JSON API"
-                    },
-                    "substate": {
-                        "type": "object"
-                    },
-                    "version": {
-                        "type": "integer"
-                    }
-                },
-                "required": [
-                    "address",
-                    "substate",
-                    "version"
-                ]
-            },
-            "GetSubstatesRequest": {
-                "type": "object",
-                "properties": {
-                    "requests": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/GetSubstateRequest"
-                        }
-                    }
-                },
-                "required": [
-                    "requests"
-                ]
-            },
-            "GetSubstatesResponse": {
-                "type": "object",
-                "properties": {
-                    "responses": {
-                        "type": "array",
-                        "items": {
-                            "anyOf": [
-                                {
-                                    "$ref": "#/components/schemas/GetSubstateResponse"
-                                },
-                                {
-                                    "type": "null"
-                                }
-                            ]
-                        }
-                    }
-                },
-                "required": [
-                    "responses"
-                ]
+      },
+      "required": ["connection_id", "peer_id", "address", "direction", "age"]
+    },
+    "Multiaddr": {
+      "type": "string",
+      "description": "A multiaddress encoded as a string, e.g., \"/ip4/127.0.0.1/tcp/4001\""
+    },
+    "ConnectionDirection": {
+      "type": "string",
+      "description": "The direction of the peer connection: inbound or outbound.",
+      "enum": ["Inbound", "Outbound"]
+    },
+    "Duration": {
+      "type": "object",
+      "description": "A duration with seconds and nanoseconds.",
+      "properties": {
+        "secs": { "type": "integer" },
+        "nanos": { "type": "integer" }
+      },
+      "required": ["secs", "nanos"]
+    }
+  }
+},
+  "methods": [
+    {
+      "name": "get_connections",
+      "summary": "Returns a list of active peer connections from the node.",
+      "description": "Retrieves a list of active peer-to-peer connections.\n\nEach connection includes metadata such as the peer ID, address, direction (inbound or outbound), age, and latency.\n\nUseful for debugging or monitoring network health.\n\n**Note:** Error messages returned by this method may be generic ('Something went wrong') in production environments to avoid leaking internal details. For detailed error messages, run in debug mode or CI environment.",
+      "tags": [
+        {"name": "Network",
+         "description": "Methods related to network operations and peer management."}
+      ],
+      "params": [],
+      "result": {
+        "name": "Active Peer Connections",
+        "description": "A list of active peer connections with their metadata.",
+        "schema": {
+          "$ref": "#/components/schemas/GetConnectionsResponse"
+        }
+      },
+      "errors": [
+          {
+            "code": -32001,
+            "message": "Networking service has shut down and cannot handle requests",
+            "data": "NetworkingHandleError::ServiceHasShutdown"
+          },
+          {
+            "code": -32002,
+            "message": "Networking service dropped the request without responding",
+            "data": "NetworkingHandleError::ServiceAbandonedRequest"
+          },
+          {
+            "code": -32003,
+            "message": "Codec IO error",
+            "data": "NetworkingError::CodecError"
+          },
+          {
+            "code": -32004,
+            "message": "Gossipsub publish error",
+            "data": "NetworkingError::GossipPublishError"
+          },
+          {
+            "code": -32005,
+            "message": "Failed to send message to peer",
+            "data": "NetworkingError::SwarmError"
+          },
+          {
+            "code": -32006,
+            "message": "Subscription error",
+            "data": "NetworkingError::SubscriptionError"
+          },
+          {
+            "code": -32007,
+            "message": "Dial error",
+            "data": "NetworkingError::DialError"
+          },
+          {
+            "code": -32008,
+            "message": "Outgoing connection error",
+            "data": "NetworkingError::OutgoingConnectionError"
+          },
+          {
+            "code": -32009,
+            "message": "Messaging error",
+            "data": "NetworkingError::MessagingError"
+          },
+          {
+            "code": -32010,
+            "message": "Failed to open substream",
+            "data": "NetworkingError::FailedToOpenSubstream"
+          },
+          {
+            "code": -32011,
+            "message": "RPC error",
+            "data": "NetworkingError::RpcError"
+          },
+          {
+            "code": -32012,
+            "message": "Transport error",
+            "data": "NetworkingError::TransportError"
+          },
+          {
+            "code": -32013,
+            "message": "Rendezvous client register error",
+            "data": "NetworkingError::RendezvousRegisterError"
+          },
+          {
+            "code": -32014,
+            "message": "Messaging is disabled",
+            "data": "NetworkingError::MessagingDisabled"
+          }
+        ],
+"examples": [
+  {
+    "name": "ExampleGetConnections",
+    "summary": "Demonstrates the result of calling get_connections",
+    "params": [],
+    "result": {
+      "name": "connectionsResult",
+      "value": {
+      "connections": [
+        {
+          "connection_id": "3455",
+          "peer_id": "12D3KooWQkGZ9QdHfX3bUg8K2d2i6RZyrA8QyV9dT7YiZtKxF8k7X",
+          "address": "/ip4/192.168.1.15/tcp/8080",
+          "direction": "Outbound",
+          "age": { "secs": 1200, "nanos": 0 },
+          "ping_latency": { "secs": 0, "nanos": 50000000 },
+          "user_agent": "TariNode/1.0.0"
+        },
+        {
+          "connection_id": "3456",
+          "peer_id": "12D3KooWJ4j7TfVgJw8t6E7aNQwL9p3YvXh5HWTKJj7H6jBf8cBUp",
+          "address": "/onion3/abcdefg1234567.onion:18141",
+          "direction": "Inbound",
+          "age": { "secs": 3600, "nanos": 250000000 },
+          "ping_latency": null,
+          "user_agent": null
+        }
+       ]
+    }
+  }
+}
+]
+
+    },
+    {
+      "name": "get_identity",
+      "summary": "",
+      "tags": [],
+      "params": [],
+      "result": {
+        "name": "epoch_stats",
+        "description": "",
+        "schema": {}
+      },
+      "errors": [],
+      "examples": [
+        {
+          "name": "default",
+          "description": "",
+          "params": [],
+          "result": {
+            "name": "example1",
+            "value": {
+              "node_id": "9c8d9ee038b16a424a30b4fad8",
+              "public_address": "/onion3/5m3262svmddswg5q7apa5eciwxwgip5jghzv4xc2jknrh26bysfzwsyd:18141",
+              "public_key": "7a149364bb8beb7f0cc6a100350391b4debd7dbaf7880bab421f024feca02b1f"
             }
+          }
         }
+      ]
+    },
+    {
+      "name": "get_addresses",
+      "summary": "",
+      "tags": [],
+      "params": [],
+      "result": {
+        "name": "epoch_stats",
+        "description": "",
+        "schema": {}
+      },
+      "errors": [],
+      "examples": [
+        {
+          "name": "default",
+          "description": "",
+          "params": [],
+          "result": {
+            "name": "example1",
+            "value": [
+              [
+                "component_e4773b971b876238475c904927435d625d892132e7d7b80c3cc81698fcc4a2dd",
+                0
+              ],
+              [
+                "component_7c45d28ffa167b10d2fa700ce29343de692b97422a65485d0a00e8e7578d692e",
+                0
+              ],
+              [
+                "component_3bca9b603e196b60f261aad0db85e7b55d52c46d687cdbb54194b706423fb1aa",
+                0
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "get_substate",
+      "summary": "",
+      "tags": [],
+      "params": [],
+      "result": {
+        "name": "epoch_stats",
+        "description": "",
+        "schema": {}
+      },
+      "errors": [],
+      "examples": [
+        {
+          "name": "default",
+          "description": "",
+          "params": [],
+          "result": {
+            "name": "example1",
+            "value": {
+              "substate": {
+                "Component": {
+                  "access_rules": {
+                    "default": {
+                      "Restricted": {
+                        "Require": {
+                          "id": {
+                            "U256": [
+                              242,
+                              92,
+                              64,
+                              223,
+                              207,
+                              57,
+                              225,
+                              163,
+                              175,
+                              11,
+                              109,
+                              189,
+                              230,
+                              209,
+                              24,
+                              78,
+                              225,
+                              250,
+                              171,
+                              247,
+                              14,
+                              102,
+                              246,
+                              15,
+                              193,
+                              145,
+                              233,
+                              156,
+                              24,
+                              197,
+                              147,
+                              116
+                            ]
+                          },
+                          "resource_address": [
+                            1,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0
+                          ]
+                        }
+                      }
+                    },
+                    "method_access": {
+                      "balance": "AllowAll",
+                      "deposit": "AllowAll",
+                      "deposit_all": "AllowAll",
+                      "get_balances": "AllowAll",
+                      "get_non_fungible_ids": "AllowAll"
+                    },
+                    "native_method_access": {}
+                  },
+                  "module_name": "Account",
+                  "state": {
+                    "state": [
+                      0,
+                      0,
+                      0,
+                      0
+                    ]
+                  },
+                  "template_address": [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
     }
+  ]
 }

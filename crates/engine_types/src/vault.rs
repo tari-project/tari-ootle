@@ -39,11 +39,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Vault {
     resource_container: ResourceContainer,
     #[serde(default)]
@@ -83,7 +79,7 @@ impl Vault {
     }
 
     pub fn recall_all(&mut self) -> Result<ResourceContainer, ResourceError> {
-        self.resource_container.recall_all()
+        self.resource_container.withdraw_all()
     }
 
     pub fn recall_confidential<T: Into<Amount>>(

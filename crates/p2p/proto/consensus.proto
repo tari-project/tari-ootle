@@ -91,8 +91,8 @@ message BlockHeader {
   uint64 total_leader_fee = 8;
   tari.ootle.common.Signature signature = 10;
   uint64 timestamp = 11;
-  bytes epoch_hash = 13;
-  ExtraData extra_data = 14;
+  bytes epoch_hash = 12;
+  ExtraData extra_data = 13;
 }
 
 message Block {
@@ -100,6 +100,10 @@ message Block {
   QuorumCertificate justify = 2;
   repeated Command commands = 3;
   TimeoutCertificate timeout_certificate = 4; // optional
+}
+
+message ShardStateVersions {
+  repeated uint64 versions = 1;
 }
 
 message ExtraData {
@@ -237,19 +241,21 @@ message Substate {
   uint32 version = 2;
   bytes substate = 3;
 
-  uint64 created_epoch = 4;
-  uint32 created_by_shard = 5;
-  bytes created_block = 6;
-  bytes created_justify = 7;
-
-  SubstateDestroyed destroyed = 8;
+  // Required
+  SubstateCreatedMetadata created = 4;
+  // Optional
+  SubstateDestroyedMetadata destroyed = 5;
 }
 
-message SubstateDestroyed {
-  tari.ootle.common.Epoch epoch = 1;
-  uint32 shard = 2;
-  uint64 block_height = 3;
-  bytes justify = 4;
+message SubstateCreatedMetadata {
+  tari.ootle.common.Epoch at_epoch = 1;
+  uint32 in_shard = 2;
+  uint64 at_state_version = 3;
+}
+
+message SubstateDestroyedMetadata {
+  tari.ootle.common.Epoch at_epoch = 1;
+  uint64 at_state_version = 2;
 }
 
 message SyncRequest {

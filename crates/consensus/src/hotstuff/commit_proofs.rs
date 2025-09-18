@@ -291,12 +291,13 @@ mod tests {
     #[test]
     fn it_hashes_the_header_identically_to_sidechain_header() {
         let parent_id = seed_hash(1).into_array().into();
+        let shard_group = ShardGroup::all_shards(NumPreshards::P256);
         let qc1 = ProposalCertificate::new(
             seed_hash(2),
             parent_id,
             NodeHeight(1),
             Epoch(1),
-            ShardGroup::all_shards(NumPreshards::P256),
+            shard_group,
             vec![],
             QuorumDecision::Accept,
         );
@@ -309,7 +310,7 @@ mod tests {
             qc1_id,
             NodeHeight(2),
             Epoch(1),
-            ShardGroup::all_shards(NumPreshards::P256),
+            shard_group,
             Default::default(),
             Default::default(),
             &Default::default(),

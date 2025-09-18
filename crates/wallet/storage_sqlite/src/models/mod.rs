@@ -15,21 +15,20 @@ mod vault;
 
 mod authored_template;
 mod non_fungible_tokens;
-mod proof;
 mod resource;
 mod stealth_output;
+mod utxo_process_queue;
 mod webauthn_registrations;
 
-pub use account::Account;
-pub use authored_template::AuthoredTemplate;
-pub use config::Config;
-pub use non_fungible_tokens::NonFungibleToken;
-pub use output::ConfidentialOutput;
-// Currently only used internally
-pub(crate) use proof::OutputLock;
+pub use account::*;
+pub use authored_template::*;
+pub use config::*;
+pub use non_fungible_tokens::*;
+pub use output::*;
 pub use resource::*;
 pub use stealth_output::*;
 pub use substate::Substate;
-pub use transaction::Transaction;
+pub use transaction::*;
+pub use utxo_process_queue::*;
 pub use vault::Vault;
 pub use webauthn_registrations::*;

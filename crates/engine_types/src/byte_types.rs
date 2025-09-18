@@ -24,11 +24,25 @@ pub trait ToByteType {
     fn to_byte_type(&self) -> Self::ByteType;
 }
 
-pub trait FromByteType<T> {
+pub trait ConvertFromByteType<T> {
     type Error;
 
-    fn try_from_byte_type(bytes: &T) -> Result<Self, Self::Error>
+    fn convert_from_byte_type(bytes: &T) -> Result<Self, Self::Error>
     where Self: Sized;
+}
+
+pub trait FromByteType<T>: Sized {
+    type Error;
+
+    fn try_from_byte_type(&self) -> Result<T, Self::Error>;
+}
+
+impl<T: ConvertFromByteType<B>, B> FromByteType<T> for B {
+    type Error = T::Error;
+
+    fn try_from_byte_type(&self) -> Result<T, Self::Error> {
+        T::convert_from_byte_type(self)
+    }
 }
 
 impl ToByteType for RistrettoPublicKey {
@@ -42,10 +56,10 @@ impl ToByteType for RistrettoPublicKey {
     }
 }
 
-impl FromByteType<RistrettoPublicKeyBytes> for RistrettoPublicKey {
+impl ConvertFromByteType<RistrettoPublicKeyBytes> for RistrettoPublicKey {
     type Error = tari_utilities::ByteArrayError;
 
-    fn try_from_byte_type(bytes: &RistrettoPublicKeyBytes) -> Result<Self, Self::Error> {
+    fn convert_from_byte_type(bytes: &RistrettoPublicKeyBytes) -> Result<Self, Self::Error> {
         RistrettoPublicKey::from_canonical_bytes(bytes.as_bytes())
     }
 }
@@ -59,10 +73,10 @@ impl ToByteType for PedersenCommitment {
     }
 }
 
-impl FromByteType<PedersenCommitmentBytes> for PedersenCommitment {
+impl ConvertFromByteType<PedersenCommitmentBytes> for PedersenCommitment {
     type Error = tari_utilities::ByteArrayError;
 
-    fn try_from_byte_type(bytes: &PedersenCommitmentBytes) -> Result<Self, Self::Error> {
+    fn convert_from_byte_type(bytes: &PedersenCommitmentBytes) -> Result<Self, Self::Error> {
         PedersenCommitment::from_canonical_bytes(bytes.as_bytes())
     }
 }
@@ -79,13 +93,13 @@ impl<H: DomainSeparation> ToByteType for SchnorrSignature<RistrettoPublicKey, Ri
     }
 }
 
-impl<H: DomainSeparation> FromByteType<SchnorrSignatureBytes>
+impl<H: DomainSeparation> ConvertFromByteType<SchnorrSignatureBytes>
     for SchnorrSignature<RistrettoPublicKey, RistrettoSecretKey, H>
 {
     type Error = tari_utilities::ByteArrayError;
 
-    fn try_from_byte_type(schnorr_bytes: &SchnorrSignatureBytes) -> Result<Self, Self::Error> {
-        let public_nonce = RistrettoPublicKey::try_from_byte_type(schnorr_bytes.public_nonce())?;
+    fn convert_from_byte_type(schnorr_bytes: &SchnorrSignatureBytes) -> Result<Self, Self::Error> {
+        let public_nonce = RistrettoPublicKey::convert_from_byte_type(schnorr_bytes.public_nonce())?;
         let signature = RistrettoSecretKey::from_canonical_bytes(schnorr_bytes.signature().as_bytes())?;
         Ok(SchnorrSignature::new(public_nonce, signature))
     }
@@ -104,11 +118,11 @@ impl ToByteType for CommitmentSignature<RistrettoPublicKey, RistrettoSecretKey> 
     }
 }
 
-impl FromByteType<CommitmentSignatureBytes> for CommitmentSignature<RistrettoPublicKey, RistrettoSecretKey> {
+impl ConvertFromByteType<CommitmentSignatureBytes> for CommitmentSignature<RistrettoPublicKey, RistrettoSecretKey> {
     type Error = tari_utilities::ByteArrayError;
 
-    fn try_from_byte_type(bytes: &CommitmentSignatureBytes) -> Result<Self, Self::Error> {
-        let public_nonce = PedersenCommitment::try_from_byte_type(bytes.public_nonce())?;
+    fn convert_from_byte_type(bytes: &CommitmentSignatureBytes) -> Result<Self, Self::Error> {
+        let public_nonce = PedersenCommitment::convert_from_byte_type(bytes.public_nonce())?;
         let signature = RistrettoSecretKey::from_canonical_bytes(bytes.u().as_bytes())?;
         let v = RistrettoSecretKey::from_canonical_bytes(bytes.v().as_bytes())?;
         Ok(CommitmentSignature::new(public_nonce, signature, v))

@@ -10,7 +10,7 @@ use crate::tracing::TraceTimer;
 
 const LOG_TARGET: &str = "tari::ootle::consensus::tasks";
 
-pub trait PeriodicTask {
+pub(crate) trait PeriodicTask {
     fn name() -> &'static str;
 
     fn do_work_periodically(self, interval: Duration) -> AbortOnDropGuard
@@ -35,7 +35,7 @@ pub trait PeriodicTask {
     fn do_work(&self) -> impl Future<Output = ()> + Send;
 }
 
-pub struct AbortOnDropGuard {
+pub(crate) struct AbortOnDropGuard {
     handle: AbortHandle,
 }
 

@@ -45,8 +45,6 @@ import type {
   GetStateResponse,
   VNGetSubstateRequest,
   VNGetSubstateResponse,
-  GetSubstatesByTransactionRequest,
-  GetSubstatesByTransactionResponse,
   GetTemplateRequest,
   GetTemplateResponse,
   GetTemplatesRequest,
@@ -60,8 +58,6 @@ import type {
   ListBlocksResponse,
   VNSubmitTransactionRequest,
   VNSubmitTransactionResponse,
-  VNGetValidatorFeesRequest,
-  VNGetValidatorFeesResponse,
 } from "@tari-project/typescript-bindings";
 
 
@@ -143,8 +139,8 @@ export const getCommittee = (request: GetCommitteeRequest): Promise<GetCommittee
   jsonRpc("get_committee", request);
 export const getAllVns = (request: VNGetAllVnsRequest): Promise<VNGetAllVnsResponse> => jsonRpc("get_all_vns", request);
 export const getNetworkCommittees = (): Promise<GetNetworkCommitteeResponse> => jsonRpc("get_network_committees", {});
-export const getFees = (request: VNGetValidatorFeesRequest): Promise<VNGetValidatorFeesResponse> =>
-  jsonRpc("get_fees", request);
+// export const getFees = (request: VNGetValidatorFeesRequest): Promise<VNGetValidatorFeesResponse> =>
+//   jsonRpc("get_fees", request);
 
 // Comms
 export const addPeer = (request: VNAddPeerRequest) => jsonRpc("add_peer", request);

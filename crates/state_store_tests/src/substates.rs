@@ -3,14 +3,18 @@
 
 use std::collections::HashSet;
 
-use tari_consensus_types::QcId;
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::{shard::Shard, Epoch, Network, NodeHeight, VersionedSubstateId, VersionedSubstateIdRef};
-use tari_ootle_storage::{consensus_models::Block, StateStore, StateStoreReadTransaction, StateStoreWriteTransaction};
+use tari_ootle_common_types::{Epoch, Network, VersionedSubstateId, VersionedSubstateIdRef};
+use tari_ootle_storage::{
+    consensus_models::{Block, SubstateUpdateBatch},
+    StateStore,
+    StateStoreReadTransaction,
+    StateStoreWriteTransaction,
+};
 use tari_template_lib::{models::ComponentAddress, types::ObjectKey};
 
 use crate::{
-    helpers::{assert_eq_debug, build_substate_record, create_rocksdb},
+    helpers::{assert_eq_debug, build_substate_record, create_rocksdb, create_substate_update_batch},
     TEST_NUM_PRESHARDS,
 };
 
@@ -33,30 +37,18 @@ fn operations(db: impl StateStore) {
 
     // substate 1
     let substate1_id = substate_id(1);
-    let mut substate1 = build_substate_record(&substate1_id, 0);
-    substate1.created_block = *zero_block.id();
+    let substate1 = build_substate_record(&substate1_id, 0, 1);
     let substate1_address = substate1.to_substate_address();
-    tx.substates_create(&substate1).unwrap();
-    tx.substates_down(
-        VersionedSubstateId::new(substate1_id.clone(), 0),
-        Shard::first(),
-        Epoch(123),
-        NodeHeight(123),
-        &QcId::zero(),
-    )
-    .unwrap();
     // substate 1 (version 1)
-    let mut substate1b = build_substate_record(&substate1_id, 1);
-    substate1b.created_block = *zero_block.id();
+    let substate1b = build_substate_record(&substate1_id, 1, 1);
     let substate1b_address = substate1b.to_substate_address();
-    tx.substates_create(&substate1b).unwrap();
-
     // substate 2
     let substate2_id = substate_id(2);
-    let mut substate2 = build_substate_record(&substate2_id, 0);
-    substate2.created_block = *zero_block.id();
+    let substate2 = build_substate_record(&substate2_id, 0, 1);
     let substate2_address = substate2.to_substate_address();
-    tx.substates_create(&substate2).unwrap();
+
+    let batch = create_substate_update_batch(Epoch::zero(), [&substate1, &substate1b, &substate2]);
+    tx.substates_commit_batch(batch).unwrap();
 
     // check that we can get all the newly inserted substates
     let res = tx.substates_get(&substate1_address).unwrap();
@@ -137,19 +129,16 @@ fn operations(db: impl StateStore) {
     assert!(res.destroyed.is_none());
 
     let versioned_substate_id = VersionedSubstateId::new(substate2.substate_id, substate2.version);
-    let shard = Shard::first();
+    let shard = versioned_substate_id.to_shard(TEST_NUM_PRESHARDS);
     let epoch = Epoch::zero();
-    let destroyed_block_height = NodeHeight::zero();
-    let destroyed_qc_id = QcId::zero();
 
-    tx.substates_down(
-        versioned_substate_id,
-        shard,
-        epoch,
-        destroyed_block_height,
-        &destroyed_qc_id,
-    )
-    .unwrap();
+    let mut batch = SubstateUpdateBatch::new(epoch);
+    batch
+        .with_transition(shard, 2)
+        .push(tari_ootle_storage::consensus_models::SubstateTransition::Down {
+            id: versioned_substate_id.clone(),
+        });
+    tx.substates_commit_batch(batch).unwrap();
     let res = tx.substates_get(&substate2_address).unwrap();
     assert!(res.destroyed.is_some());
 

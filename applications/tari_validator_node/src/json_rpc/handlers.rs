@@ -32,9 +32,8 @@ use serde_json::{self as json, json};
 use tari_base_node_client::types::BaseLayerValidatorNode;
 use tari_common_types::types::CompressedPublicKey;
 use tari_consensus_types::{Decision, LeafBlock};
-use tari_core::transactions::transaction_components::ValidatorNodeSignature;
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
-use tari_engine_types::{FromByteType, ToByteType};
+use tari_engine_types::{ConvertFromByteType, ToByteType};
 use tari_epoch_manager::{service::EpochManagerHandle, traits::LayerOneTransactionSubmitter, EpochManagerReader};
 use tari_epoch_oracles::store::StoreKey;
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
@@ -62,15 +61,15 @@ use tari_ootle_storage::{
     StorageError,
 };
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
-use tari_sidechain::QuorumDecision;
 use tari_template_lib::prelude::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
 use tari_template_manager::interface::TemplateManagerHandle;
+use tari_transaction_components::transaction_components::ValidatorNodeSignature;
 use tari_validator_node_client::types::{
     self,
     AddPeerRequest,
     AddPeerResponse,
     ConnectionDirection,
-    DryRunTransactionFinalizeResult,
+    FunctionDef,
     GetAllVnsRequest,
     GetAllVnsResponse,
     GetBlockRequest,
@@ -108,13 +107,13 @@ use tari_validator_node_client::types::{
     SubmitTransactionRequest,
     SubmitTransactionResponse,
     SubstateStatus,
+    TemplateAbi,
     TemplateMetadata,
 };
 
 use crate::{
     bootstrap::Services,
     consensus::{spec::ValidatorNodeStateStore, ConsensusHandle},
-    dry_run_transaction_processor::DryRunTransactionProcessor,
     file_l1_submitter::FileLayerOneSubmitter,
     json_rpc::jrpc_errors::{general_error, internal_error, invalid_operation, not_found},
     p2p::services::mempool::MempoolHandle,
@@ -134,7 +133,6 @@ pub struct JsonRpcHandlers {
     consensus: ConsensusHandle,
     networking: NetworkingHandle<TariMessagingSpec>,
     state_store: ValidatorNodeStateStore,
-    dry_run_transaction_processor: DryRunTransactionProcessor<ValidatorNodeStateStore>,
 }
 
 impl JsonRpcHandlers {
@@ -150,7 +148,6 @@ impl JsonRpcHandlers {
             layer_one_transaction_submitter: services.layer_one_transaction_submitter.clone(),
             networking: services.networking.clone(),
             state_store: services.state_store.clone(),
-            dry_run_transaction_processor: services.dry_run_transaction_processor.clone(),
         }
     }
 
@@ -181,10 +178,7 @@ impl JsonRpcHandlers {
 
     pub async fn submit_transaction(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
-        let SubmitTransactionRequest {
-            transaction,
-            is_dry_run,
-        } = value.parse_params()?;
+        let SubmitTransactionRequest { transaction } = value.parse_params()?;
         debug!(
             target: LOG_TARGET,
             "Transaction {} has {} involved shards",
@@ -194,31 +188,11 @@ impl JsonRpcHandlers {
 
         let tx_id = transaction.calculate_id();
 
-        if is_dry_run {
-            let result = self
-                .dry_run_transaction_processor
-                .process_transaction(transaction)
-                .await;
-            match result {
-                Ok(exec_result) => {
-                    let response = SubmitTransactionResponse {
-                        transaction_id: tx_id,
-                        dry_run_result: Some(DryRunTransactionFinalizeResult {
-                            decision: QuorumDecision::Accept,
-                            fee_breakdown: Some(exec_result.finalize.fee_receipt.to_cost_breakdown()),
-                            finalize: exec_result.finalize,
-                        }),
-                    };
-
-                    return Ok(JsonRpcResponse::success(answer_id, response));
-                },
-                Err(e) => {
-                    return Err(JsonRpcResponse::error(
-                        answer_id,
-                        JsonRpcError::new(JsonRpcErrorReason::ApplicationError(1), e.to_string(), json!(null)),
-                    ));
-                },
-            }
+        if transaction.is_dry_run() {
+            return Err(invalid_operation(
+                answer_id,
+                "Dry-run transactions cannot be submitted via this endpoint.",
+            ));
         }
 
         // Submit to mempool.
@@ -507,11 +481,26 @@ impl JsonRpcHandlers {
             .await
             .map_err(internal_error(answer_id))?;
 
-        let abi = self
+        let loaded = self
             .template_manager
             .load_template_abi(req.template_address)
             .await
             .map_err(internal_error(answer_id))?;
+        let abi = TemplateAbi {
+            template_name: loaded.template_def().template_name().to_string(),
+            functions: loaded
+                .template_def()
+                .functions()
+                .iter()
+                .map(|f| FunctionDef {
+                    name: f.name.clone(),
+                    arguments: f.arguments.to_vec(),
+                    output: f.output.to_string(),
+                    is_mut: f.is_mut,
+                })
+                .collect(),
+            version: loaded.template_def().tari_version().to_string(),
+        };
 
         Ok(JsonRpcResponse::success(answer_id, GetTemplateResponse {
             registration_metadata: TemplateMetadata {
@@ -664,7 +653,7 @@ impl JsonRpcHandlers {
             wait_for_dial,
         } = value.parse_params()?;
 
-        let Ok(public_key) = RistrettoPublicKey::try_from_byte_type(&public_key) else {
+        let Ok(public_key) = RistrettoPublicKey::convert_from_byte_type(&public_key) else {
             return Err(JsonRpcResponse::error(
                 answer_id,
                 JsonRpcError::new(

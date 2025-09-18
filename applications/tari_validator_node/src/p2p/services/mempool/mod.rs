@@ -32,7 +32,5 @@ pub use gossip::TOPIC_PREFIX;
 #[cfg(feature = "metrics")]
 mod metrics;
 mod service;
-mod traits;
 
 pub use error::*;
-pub use traits::*;

@@ -104,7 +104,7 @@ pub async fn handle_claim_validator_fees(
     }
 
     let (account, inputs) = get_account_with_inputs(req.account.as_ref(), &sdk)?;
-    let account_address = *account.address();
+    let account_address = *account.component_address();
     let (account_secret_key, account_public_key) = sdk.key_manager_api().derive_account_keypair(account.key_index())?;
 
     let (claim_public_key, claim_secret) = match req.claim_key_index {
@@ -154,7 +154,7 @@ pub async fn handle_claim_validator_fees(
                 // If the claim key is different from the account secret, we need to sign with both
                 builder
                     .with_authorized_seal_signer()
-                    .add_signature(&account_public_key.to_byte_type(), &secret.key)
+                    .add_signer(&account_public_key.to_byte_type(), &secret.key)
             } else {
                 builder
             }

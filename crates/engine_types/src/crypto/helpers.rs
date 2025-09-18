@@ -15,13 +15,15 @@ use tari_crypto::{
 };
 use tari_template_lib::{prelude::SchnorrSignatureBytes, types::Amount};
 
-use crate::{hashing::EngineSchnorrSignature, FromByteType, ReadOnly};
+use crate::{hashing::EngineSchnorrSignature, ConvertFromByteType};
 
 // TODO RistrettoSecretKey should provide a constant ZERO
 pub const ZERO_SECRET_KEY: RistrettoSecretKey = unsafe { std::mem::transmute([0u8; 32]) };
 
 // Note that the BP-plus implementation currently does not support bit lengths over 64
 const BP_BIT_LENGTH: usize = u64::BITS as usize;
+
+pub const MAX_LAZY_BP_AGG_FACTORS: usize = 8;
 
 lazy_static! {
     /// Static reference to the default commitment factory. Each instance of CommitmentFactory requires a number of heap allocations.
@@ -38,27 +40,14 @@ lazy_static! {
 }
 
 pub fn get_static_range_proof_service(aggregation_factor: usize) -> &'static BulletproofsPlusService {
-    match aggregation_factor {
+    match aggregation_factor.next_power_of_two() {
         1 => &RANGE_PROOF_AGG_1_SERVICE,
         2 => &RANGE_PROOF_AGG_2_SERVICE,
         4 => &RANGE_PROOF_AGG_4_SERVICE,
         8 => &RANGE_PROOF_AGG_8_SERVICE,
         _ => panic!(
-            "Unsupported BP aggregation factor {}. Expected 1/2/4",
+            "Unsupported BP aggregation factor {}. Expected 1/2/4 or 8",
             aggregation_factor
-        ),
-    }
-}
-
-pub fn bullet_proof_service_factory(aggregation_factor: usize) -> ReadOnly<'static, BulletproofsPlusService> {
-    match aggregation_factor.next_power_of_two() {
-        1 => ReadOnly::Borrowed(&RANGE_PROOF_AGG_1_SERVICE),
-        2 => ReadOnly::Borrowed(&RANGE_PROOF_AGG_2_SERVICE),
-        4 => ReadOnly::Borrowed(&RANGE_PROOF_AGG_4_SERVICE),
-        8 => ReadOnly::Borrowed(&RANGE_PROOF_AGG_8_SERVICE),
-        n => ReadOnly::Owned(
-            BulletproofsPlusService::init(BP_BIT_LENGTH, n, CommitmentFactory::default())
-                .expect("Failed to initialize BulletproofsPlusService"),
         ),
     }
 }
@@ -101,7 +90,7 @@ pub fn convert_amount_to_secret(amount: &Amount) -> Option<RistrettoSecretKey> {
 }
 
 pub fn try_decode_to_signature(signature: &SchnorrSignatureBytes) -> Option<EngineSchnorrSignature> {
-    let public_nonce = RistrettoPublicKey::try_from_byte_type(signature.public_nonce()).ok()?;
+    let public_nonce = RistrettoPublicKey::convert_from_byte_type(signature.public_nonce()).ok()?;
     let signature = PrivateKey::from_canonical_bytes(signature.signature().as_bytes()).ok()?;
     Some(EngineSchnorrSignature::new(public_nonce, signature))
 }

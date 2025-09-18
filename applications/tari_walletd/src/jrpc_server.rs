@@ -24,7 +24,7 @@ use serde_json::json;
 use tokio::task;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
-use super::handlers::{substates, templates, wallet, webauthn, HandlerContext};
+use super::handlers::{stealth_utxos, substates, templates, wallet, webauthn, HandlerContext};
 use crate::handlers::{
     accounts,
     auth::jwt::JwtApiError,
@@ -126,7 +126,6 @@ async fn handler(
             _ => Ok(value.method_not_found(&value.method)),
         },
         Some(("accounts", method)) => match method {
-            "reveal_funds" => call_handler(context, value, token, accounts::handle_reveal_funds).await,
             "claim_burn" => call_handler(context, value, token, accounts::handle_claim_burn).await,
             "create" => call_handler(context, value, token, accounts::handle_create).await,
             "create_or_get" => call_handler(context, value, token, accounts::handle_create_or_get).await,
@@ -138,6 +137,9 @@ async fn handler(
             "transfer" => call_handler(context, value, token, accounts::handle_transfer).await,
             "confidential_transfer" => {
                 call_handler(context, value, token, accounts::handle_confidential_transfer).await
+            },
+            "associate_stealth_resource" => {
+                call_handler(context, value, token, accounts::handle_associate_stealth_resource).await
             },
             "stealth_transfer" => call_handler(context, value, token, accounts::handle_stealth_transfer).await,
             "set_default" => call_handler(context, value, token, accounts::handle_set_default).await,
@@ -179,6 +181,14 @@ async fn handler(
             "get_fees" => call_handler(context, value, token, validator::handle_get_validator_fees).await,
             "claim_fees" => call_handler(context, value, token, validator::handle_claim_validator_fees).await,
             _ => Ok(value.method_not_found(&value.method)),
+        },
+        Some(("stealth_utxos", method)) =>
+        {
+            #[allow(clippy::match_single_binding)]
+            match method {
+                "list" => call_handler(context, value, token, stealth_utxos::handle_list).await,
+                _ => Ok(value.method_not_found(&value.method)),
+            }
         },
         Some(("wallet", "get_info")) => call_handler(context, value, token, wallet::handle_get_info).await,
         _ => Ok(value.method_not_found(&value.method)),

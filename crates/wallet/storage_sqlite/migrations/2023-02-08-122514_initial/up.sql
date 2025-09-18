@@ -30,31 +30,25 @@ CREATE UNIQUE INDEX config_uniq_key on config (key);
 -- Transaction
 CREATE TABLE transactions
 (
-    id                        INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    hash                      TEXT     NOT NULL,
-    network                   INTEGER  NOT NULL,
-    instructions              TEXT     NOT NULL,
-    fee_instructions          TEXT     NOT NULL,
-    inputs                    TEXT     NOT NULL,
-    signatures                TEXT     NOT NULL,
-    seal_signature            TEXT     NOT NULL,
-    is_seal_signer_authorized BOOLEAN  NOT NULL,
-    result                    TEXT     NULL,
-    qcs                       TEXT     NULL,
-    final_fee                 BIGINT   NULL,
-    status                    TEXT     NOT NULL,
-    dry_run                   BOOLEAN  NOT NULL,
-    min_epoch                 BIGINT   NULL,
-    max_epoch                 BIGINT   NULL,
-    executed_time_ms          BIGINT   NULL,
-    finalized_time            DATETIME NULL,
-    new_account_info          TEXT     NULL,
-    invalid_reason            TEXT     NULL,
-    created_at                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id                    INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    transaction_id        TEXT     NOT NULL,
+    transaction_json      TEXT     NOT NULL,
+    referenced_components TEXT     NOT NULL,
+    signers               TEXT     NOT NULL,
+    result                TEXT     NULL,
+    qcs                   TEXT     NULL,
+    final_fee             BIGINT   NULL,
+    status                TEXT     NOT NULL,
+    dry_run               BOOLEAN  NOT NULL,
+    executed_time_ms      BIGINT   NULL,
+    finalized_time        DATETIME NULL,
+    new_account_info      TEXT     NULL,
+    invalid_reason        TEXT     NULL,
+    created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE UNIQUE INDEX transactions_uniq_hash ON transactions (hash);
+CREATE UNIQUE INDEX transactions_transaction_id_uniq ON transactions (transaction_id);
 CREATE INDEX transactions_idx_status ON transactions (status);
 
 -- Substates
@@ -81,6 +75,7 @@ CREATE TABLE accounts
     owner_key_index       BIGINT   NOT NULL,
     is_default            BOOLEAN  NOT NULL DEFAULT 0,
     is_confirmed_on_chain BOOLEAN  NOT NULL,
+    stealth_resources     TEXT     NOT NULL DEFAULT '[]',
     created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -101,6 +96,7 @@ CREATE TABLE vaults
     locked_revealed_balance BIGINT   NOT NULL DEFAULT 0,
     token_symbol            TEXT     NULL,
     divisibility            INTEGER  NOT NULL DEFAULT 0,
+    locked_by               INTEGER  NULL REFERENCES locks (id) ON DELETE SET NULL,
     created_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -129,8 +125,8 @@ CREATE TABLE resources
 
 CREATE UNIQUE INDEX resources_uniq_address ON resources (address);
 
--- Outputs
-CREATE TABLE outputs
+-- Confidential Outputs
+CREATE TABLE confidential_outputs
 (
     id                          INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
     account_id                  INTEGER  NOT NULL REFERENCES accounts (id),
@@ -149,18 +145,15 @@ CREATE TABLE outputs
     updated_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE UNIQUE INDEX outputs_uniq_commitment ON outputs (commitment);
-CREATE INDEX outputs_idx_account_status ON outputs (account_id, status);
+CREATE UNIQUE INDEX confidential_outputs_uniq_commitment ON confidential_outputs (commitment);
+CREATE INDEX confidential_outputs_idx_account_status ON confidential_outputs (account_id, status);
 
--- Output Locks
-CREATE TABLE output_locks
+-- Locks
+CREATE TABLE locks
 (
-    id                     INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    resource_address       TEXT     NOT NULL,
-    vault_id               INTEGER  NULL REFERENCES vaults (id),
-    transaction_hash       TEXT     NULL,
-    locked_revealed_amount BIGINT   NOT NULL DEFAULT 0,
-    created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id             INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    transaction_id TEXT     NULL,
+    created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Auth token, we don't store the auth token, the token in this table is the jwt token that is granted when user accepts the auth login request.
@@ -182,7 +175,7 @@ CREATE TABLE non_fungible_tokens
     resource_id  text     NOT NULL,
     data         TEXT     NOT NULL,
     mutable_data TEXT     NOT NULL,
-    is_burned    BOOLEAN  NOT NULL,
+    is_burnt     BOOLEAN  NOT NULL,
     created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -233,8 +226,11 @@ CREATE TABLE stealth_outputs
     locked_at                   DATETIME NULL,
     lock_id                     INTEGER  NULL,
     encryption_secret_key_index BIGINT   NOT NULL,
-    encrypted_data              blob     NOT NULL DEFAULT '',
+    encrypted_data              BLOB     NOT NULL DEFAULT '',
     tag_byte                    INTEGER  NOT NULL,
+    is_burnt                    BOOLEAN  NOT NULL DEFAULT 0,
+    is_frozen                   BOOLEAN  NOT NULL DEFAULT 0,
+    is_on_chain                 BOOLEAN  NOT NULL,
     created_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -242,3 +238,31 @@ CREATE TABLE stealth_outputs
 CREATE UNIQUE INDEX stealth_outputs_uniq_resource_addr_commitment ON stealth_outputs (resource_address, commitment);
 CREATE INDEX stealth_outputs_idx_resource_status ON stealth_outputs (resource_address, status);
 
+-- Shard State Versions
+CREATE TABLE shard_state_versions
+(
+    id            INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    account_id    INTEGER  NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+    resource_id   INTEGER  NOT NULL REFERENCES resources (id) ON DELETE CASCADE,
+    shard         INTEGER  NOT NULL,
+    state_version BIGINT   NOT NULL,
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX shard_state_versions_account_resource_shard_uniq ON shard_state_versions (account_id, resource_id, shard);
+CREATE INDEX shard_state_versions_account_resource_shard_state_version_idx ON shard_state_versions (account_id, resource_id, shard, state_version);
+
+-- UTXO process queue
+CREATE TABLE utxo_process_queue
+(
+    id                INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    account_key_index BIGINT   NOT NULL,
+    resource_address  TEXT     NOT NULL,
+    utxo_tag          INT      NOT NULL,
+    public_nonce      TEXT     NOT NULL,
+    created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX utxo_process_queue_account_resource_tag_nonce_uniq
+    ON utxo_process_queue (account_key_index, resource_address, utxo_tag, public_nonce);

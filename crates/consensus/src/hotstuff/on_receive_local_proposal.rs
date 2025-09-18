@@ -28,7 +28,6 @@ use tari_ootle_storage::{
     consensus_models::{
         Block,
         BookkeepingModel,
-        EpochStateRoot,
         ForeignProposalRecord,
         ForeignProposalStatus,
         NoVoteReason,
@@ -480,9 +479,20 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     )));
                 }
                 checkpoint.save(tx)?;
-                EpochStateRoot::new(eoe_block.epoch(), eoe_block.shard_group(), calculated_mr).set(tx)?;
 
                 if let Some(next_shard_group) = next_shard_group {
+                    // If this shard group remains the same, we can just continue. However, if shard groups change and
+                    // we now manage a shard we have not synced, we should to kick into sync.
+                    if next_shard_group != eoe_block.shard_group() {
+                        return Err(HotStuffError::NeedsSync {
+                            reason: format!(
+                                "Shard group changed from {} to {}. We need to sync the new shard group.",
+                                eoe_block.shard_group(),
+                                next_shard_group
+                            ),
+                        });
+                    }
+
                     // Create the next genesis
                     let mut genesis = Block::genesis(
                         network,

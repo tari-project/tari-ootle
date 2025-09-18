@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::io;
+use std::io::Read;
 
 use borsh::BorshDeserialize;
 use tari_engine_types::substate::SubstateId;
@@ -27,12 +27,6 @@ impl SubstateIdCodec {
         let buf = borsh::to_vec(value).map_err(|e| RocksDbStorageError::EncodeError { source: e.into() })?;
         Ok(EncodeVec::new_heap(buf))
     }
-
-    pub fn decode_reader<R: io::Read>(self, reader: &mut R) -> Result<SubstateId, RocksDbStorageError> {
-        // We use the deserialize_reader here so that no error is returned if there are extra bytes in the buffer
-        // in order to use SubstateId as a prefix
-        SubstateId::deserialize_reader(reader).map_err(|e| RocksDbStorageError::DecodeError { source: e.into() })
-    }
 }
 
 impl DbCodec<SubstateId> for SubstateIdCodec {
@@ -40,8 +34,10 @@ impl DbCodec<SubstateId> for SubstateIdCodec {
         self.encode_substate_id(value)
     }
 
-    fn decode(&self, mut bytes: &[u8]) -> Result<SubstateId, RocksDbStorageError> {
-        self.decode_reader(&mut bytes)
+    fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<SubstateId, RocksDbStorageError> {
+        // We use the deserialize_reader here so that no error is returned if there are extra bytes in the buffer
+        // in order to use SubstateId as a prefix
+        SubstateId::deserialize_reader(reader).map_err(|e| RocksDbStorageError::DecodeError { source: e.into() })
     }
 }
 
@@ -50,8 +46,8 @@ impl<'a> DbCodec<&'a SubstateId> for SubstateIdCodec {
         SubstateIdCodec.encode(*value)
     }
 
-    fn decode(&self, _bytes: &[u8]) -> Result<&'a SubstateId, RocksDbStorageError> {
-        panic!("Attempt to decode a reference to a SubstateId which is not possible.")
+    fn decode_reader<R: Read>(&self, _reader: &mut R) -> Result<&'a SubstateId, RocksDbStorageError> {
+        unimplemented!("Decoding a reference to a SubstateId is not supported. Use decode_reader for owned values.");
     }
 }
 
@@ -65,8 +61,8 @@ impl<'a> DbCodec<VersionedSubstateIdRef<'a>> for SubstateIdCodec {
         ]))
     }
 
-    fn decode(&self, _bytes: &[u8]) -> Result<VersionedSubstateIdRef<'a>, RocksDbStorageError> {
-        panic!("Attempt to decode a reference to a VersionedSubstateIdRef which is not possible.")
+    fn decode_reader<R: Read>(&self, _reader: &mut R) -> Result<VersionedSubstateIdRef<'a>, RocksDbStorageError> {
+        unreachable!("Decoding a VersionedSubstateIdRef is not supported. Use decode_reader for owned values.");
     }
 }
 

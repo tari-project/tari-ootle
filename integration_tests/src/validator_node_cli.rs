@@ -5,13 +5,9 @@ use std::{collections::HashMap, path::PathBuf, str::FromStr};
 
 use tari_engine_types::{
     commit_result::RejectReason,
-    instruction::Instruction,
     substate::{SubstateDiff, SubstateId},
-    ToByteType,
 };
 use tari_ootle_common_types::SubstateRequirement;
-use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::call_args;
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 use tari_validator_node_cli::{
     command::transaction::{handle_submit, submit_transaction, CliArg, CliInstruction, CommonSubmitArgs, SubmitArgs},
@@ -27,63 +23,6 @@ fn get_key_manager(world: &mut TariWorld) -> KeyManager {
 
     // initialize the account public/private keys
     KeyManager::init(path).unwrap()
-}
-pub fn create_or_use_key(world: &mut TariWorld, key_name: String) {
-    let km = get_key_manager(world);
-    if let Some(k) = world.account_keys.get(&key_name) {
-        km.set_active_key(&k.to_string()).unwrap();
-    } else {
-        let key = km.create().expect("Could not create a new key pair");
-        km.set_active_key(&key.public_key.to_string()).unwrap();
-        world.account_keys.insert(key_name, key.public_key.to_byte_type());
-    }
-}
-pub fn create_key(world: &mut TariWorld, key_name: String) {
-    let key = get_key_manager(world)
-        .create()
-        .expect("Could not create a new key pair");
-
-    world.account_keys.insert(key_name, key.public_key.to_byte_type());
-}
-
-pub async fn create_account(world: &mut TariWorld, account_name: String, validator_node_name: String) {
-    let data_dir = get_cli_data_dir(world);
-    let key = get_key_manager(world).create().expect("Could not create keypair");
-    let owner_token = key.to_owner_token();
-    world
-        .account_keys
-        .insert(account_name.clone(), key.public_key.to_byte_type());
-    // create an account component
-    let instruction = Instruction::CallFunction {
-        // The "account" template is builtin in the validator nodes with a constant address
-        address: ACCOUNT_TEMPLATE_ADDRESS,
-        function: "create".to_string(),
-        args: call_args!(owner_token),
-    };
-    let common = CommonSubmitArgs {
-        wait_for_result: true,
-        wait_for_result_timeout: Some(120),
-        inputs: vec![],
-        version: None,
-        dump_outputs_into: None,
-        account_template_address: None,
-        dry_run: false,
-    };
-    let mut client = world.get_validator_node(&validator_node_name).get_client();
-    let resp = submit_transaction(vec![instruction], common, data_dir, &mut client)
-        .await
-        .unwrap();
-
-    if let Some(ref failure) = resp.dry_run_result.as_ref().unwrap().finalize.fee_reject() {
-        panic!("Transaction failed: {:?}", failure);
-    }
-
-    // store the account component address and other substate id for later reference
-    add_substate_ids(
-        world,
-        account_name,
-        resp.dry_run_result.unwrap().finalize.result.accept().unwrap(),
-    );
 }
 
 pub async fn create_component(
@@ -117,7 +56,6 @@ pub async fn create_component(
             version: None,
             dump_outputs_into: None,
             account_template_address: None,
-            dry_run: false,
         },
     };
     let mut client = world.get_validator_node(&vn_name).get_client();
@@ -130,7 +68,7 @@ pub async fn create_component(
     add_substate_ids(
         world,
         outputs_name,
-        resp.dry_run_result.unwrap().finalize.result.accept().unwrap(),
+        resp.dry_run_result.unwrap().finalize.result.any_accept().unwrap(),
     );
 }
 
@@ -267,7 +205,13 @@ pub async fn call_method(
     add_substate_ids(
         world,
         outputs_name,
-        resp.dry_run_result.as_ref().unwrap().finalize.result.accept().unwrap(),
+        resp.dry_run_result
+            .as_ref()
+            .unwrap()
+            .finalize
+            .result
+            .any_accept()
+            .unwrap(),
     );
     Ok(resp)
 }
@@ -295,7 +239,6 @@ async fn call_method_inner(
             version: None,
             dump_outputs_into: None,
             account_template_address: None,
-            dry_run: false,
         },
     };
     let resp = handle_submit(args, vn_data_dir, &mut vn_client.clone()).await.unwrap();
@@ -316,7 +259,7 @@ pub async fn submit_manifest(
     signing_key_name: String,
 ) {
     // HACKY: Sets the active key so that submit_transaction will use it.
-    let key = world.account_keys.get(&signing_key_name).unwrap();
+    let key = world.account_addresses.get(&signing_key_name).unwrap();
     let key_str = key.to_string();
     get_key_manager(world).set_active_key(&key_str).unwrap();
 
@@ -366,7 +309,6 @@ pub async fn submit_manifest(
         version: None,
         dump_outputs_into: None,
         account_template_address: None,
-        dry_run: false,
     };
     let resp = submit_transaction(instructions.instructions, args, data_dir, &mut client)
         .await
@@ -379,7 +321,7 @@ pub async fn submit_manifest(
     add_substate_ids(
         world,
         outputs_name,
-        resp.dry_run_result.unwrap().finalize.result.accept().unwrap(),
+        resp.dry_run_result.unwrap().finalize.result.any_accept().unwrap(),
     );
 }
 

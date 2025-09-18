@@ -29,7 +29,7 @@ fn it_create_a_valid_revealed_only_proof() {
 }
 
 mod stealth_tests {
-    use tari_template_lib::types::crypto::UtxoTagByte;
+    use tari_template_lib::types::crypto::UtxoTag;
 
     use super::*;
 
@@ -130,7 +130,7 @@ mod stealth_tests {
                 UnblindedStealthOutputStatement {
                     statement,
                     output_owner_public_key,
-                    tag: UtxoTagByte::new(0),
+                    tag: UtxoTag::new(0),
                 }
             })
             .collect()

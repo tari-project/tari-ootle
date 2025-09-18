@@ -35,7 +35,7 @@ appenders:
         count: 5
         pattern: "log/wallet-daemon/ootle.{}.log"
     encoder:
-      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [{X(node-public-key)},{X(node-id)}] {l:5} {m} // {f}:{L}{n}"
+      pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] {l:5} {m} // {f}:{L}{n}"
 
 root:
   level: warn

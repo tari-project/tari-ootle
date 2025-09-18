@@ -17,11 +17,7 @@ use tari_template_lib::models::ComponentAddress;
 use crate::builder::TransactionBuilder;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UnsignedTransactionV1 {
     pub network: u8,
     pub fee_instructions: Vec<Instruction>,

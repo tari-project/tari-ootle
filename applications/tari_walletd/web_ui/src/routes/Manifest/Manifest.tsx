@@ -20,18 +20,19 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import PageHeading from "../../Components/PageHeading";
+import PageHeading from "@components/PageHeading";
 import Grid from "@mui/material/Grid";
-import { StyledPaper } from "../../Components/StyledComponents";
-import { BsTextarea } from "react-icons/bs";
-import { TextareaAutosize } from "@mui/material";
+import { StyledPaper } from "@components/StyledComponents";
+import { Stack, Table, TableBody, TableHead, TableRow, TableCell, TextareaAutosize } from "@mui/material";
 import { useState } from "react";
-import useManifestCodeStore from "../../store/manifestStore";
+import useManifestCodeStore from "@store/manifestStore";
 import Button from "@mui/material/Button/Button";
 import TextField from "@mui/material/TextField/TextField";
 import Box from "@mui/material/Box";
-import { useSubmitManifest } from "../../api/hooks/useTransactions";
+import { useSubmitManifest } from "@api/hooks/useTransactions";
 import { rejectReasonToString } from "@tari-project/typescript-bindings";
+import { useTheme } from "@mui/material";
+import { DataTableCell } from "@components/StyledComponents";
 
 function Manifest() {
   return (
@@ -52,8 +53,9 @@ function ManifestEditor() {
   const manifest = useManifestCodeStore();
   const [fee, setFee] = useState<bigint>(0n);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
+  const theme = useTheme();
 
-  const { mutateAsync: submitManifest, isLoading: isSubmittingManifest, error } = useSubmitManifest();
+  const { mutateAsync: submitManifest, isPending: isSubmittingManifest, error } = useSubmitManifest();
 
   const isDryRun = !fee;
 
@@ -108,12 +110,18 @@ function ManifestEditor() {
 
         <form onSubmit={handleSubmit}>
           <TextareaAutosize
-            minRows={40}
+            minRows={25}
             aria-label="Manifest code editor"
             name="manifest-code"
             value={manifest.code}
             onChange={(e) => manifest.setCode(e.target.value)}
-            style={{ width: 1000 }}
+            style={{
+              width: "100%",
+              borderRadius: 8,
+              padding: "8px 32px",
+              fontFamily: "monospace",
+              backgroundColor: theme.palette.accent.background,
+            }}
           />
           <Box className="flex-container" style={{ justifyContent: "flex-start" }}>
             <VariableEditor
@@ -152,34 +160,61 @@ function VariableEditor({
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
 
+  console.log("Variables:", variables);
+
   return (
-    <Grid item xs={12} md={12} lg={12}>
-      <TextField name="variable-key" placeholder="Variable key" value={key} onChange={(e) => setKey(e.target.value)} />
-      <TextField
-        name="variable-value"
-        placeholder="Variable value"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-      />
-      <Button
-        variant="contained"
-        color="primary"
-        onClick={() => {
-          onAdd(key, value);
-          setKey("");
-          setValue("");
-        }}
-      >
-        Add Variable
-      </Button>
-      {Object.entries(variables).map(([k, v]) => (
-        <Box key={k} className="flex-container" style={{ justifyContent: "flex-start" }}>
-          <span>{`${k}: ${v}`}</span>
-          <Button variant="outlined" color="secondary" onClick={() => onRemove(k)}>
-            Remove
-          </Button>
-        </Box>
-      ))}
+    <Grid item xs={12} md={12} lg={12} mt={2}>
+      <Stack direction="row" spacing={1} alignItems="center" marginBottom={2}>
+        <TextField
+          name="variable-key"
+          placeholder="Variable key"
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+        />
+        <TextField
+          name="variable-value"
+          placeholder="Variable value"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+        />
+        <Button
+          variant="contained"
+          color="primary"
+          onClick={() => {
+            onAdd(key, value);
+            setKey("");
+            setValue("");
+          }}
+          style={{
+            minHeight: "52px",
+          }}
+        >
+          Add Variable
+        </Button>
+      </Stack>
+
+      <Table>
+        <TableHead>
+          <TableRow>
+            <TableCell>Key</TableCell>
+            <TableCell>Value</TableCell>
+            <TableCell>Actions</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {Object.entries(variables).map(([k, v]) => (
+            <TableRow key={k}>
+              <DataTableCell>{k}</DataTableCell>
+              <DataTableCell>{v}</DataTableCell>
+              <DataTableCell>
+                <Button variant="outlined" color="secondary" onClick={() => onRemove(k)}>
+                  Remove
+                </Button>
+              </DataTableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </Grid>
   );
 }

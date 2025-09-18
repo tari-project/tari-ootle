@@ -21,7 +21,7 @@ fn it_allocates_addresses_in_template_code() {
     let component_addr = result
         .finalize
         .result
-        .accept()
+        .any_accept()
         .unwrap()
         .up_iter()
         .find_map(|(k, _)| k.as_component_address())
@@ -36,7 +36,7 @@ fn it_allocates_addresses_in_template_code() {
     let actual = result
         .finalize
         .result
-        .accept()
+        .any_accept()
         .unwrap()
         .up_iter()
         .find_map(|(k, _)| k.as_resource_address())
@@ -45,7 +45,7 @@ fn it_allocates_addresses_in_template_code() {
     let component_state = result
         .finalize
         .result
-        .accept()
+        .any_accept()
         .unwrap()
         .up_iter()
         .find_map(|(_, substate)| substate.substate_value().component())
@@ -125,7 +125,7 @@ fn it_allocates_an_address_using_instructions() {
     let actual_comp = result
         .finalize
         .result
-        .accept()
+        .any_accept()
         .unwrap()
         .up_iter()
         .find_map(|(k, _)| k.as_component_address())
@@ -137,7 +137,7 @@ fn it_allocates_an_address_using_instructions() {
     let actual_resx = result
         .finalize
         .result
-        .accept()
+        .any_accept()
         .unwrap()
         .up_iter()
         .find_map(|(k, _)| k.as_resource_address())

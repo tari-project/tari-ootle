@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, BorshSerialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(feature = "ts", derive(TS), ts(export))]
 #[serde(transparent)]
 pub struct NodeHeight(#[cfg_attr(feature = "ts", ts(type = "number"))] pub u64);
 

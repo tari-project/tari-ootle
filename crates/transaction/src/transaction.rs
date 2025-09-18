@@ -13,7 +13,7 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::{committee::CommitteeInfo, Epoch, SubstateRequirement, SubstateRequirementRef};
-use tari_template_lib::models::ComponentAddress;
+use tari_template_lib::{models::ComponentAddress, prelude::TemplateAddress};
 
 use crate::{
     builder::TransactionBuilder,
@@ -26,11 +26,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Transaction {
     V1(TransactionV1),
 }
@@ -199,6 +195,19 @@ impl Transaction {
         }
     }
 
+    pub fn referenced_templates_iter(&self) -> impl Iterator<Item = &TemplateAddress> + '_ {
+        self.instructions()
+            .iter()
+            .chain(self.fee_instructions())
+            .filter_map(|instruction| {
+                if let Instruction::CallFunction { address, .. } = instruction {
+                    Some(address)
+                } else {
+                    None
+                }
+            })
+    }
+
     /// Returns all substates addresses referenced by this transaction
     pub fn to_referenced_substates(&self) -> Result<HashSet<SubstateId>, IndexedValueError> {
         match self {
@@ -287,7 +296,7 @@ mod tests {
 
         let secret2 = PrivateKey::random(&mut OsRng);
         let subject = create_transaction()
-            .add_signature(&public_key.to_byte_type(), &secret2)
+            .add_signer(&public_key.to_byte_type(), &secret2)
             .build_and_seal(&secret);
         assert!(subject.verify_all_signatures());
     }

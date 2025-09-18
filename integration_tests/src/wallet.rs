@@ -31,7 +31,7 @@ use std::{
 
 use minotari_app_grpc::{
     authentication::ClientAuthenticationInterceptor,
-    tari_rpc::{wallet_client::WalletClient, ConnectivityStatus, Empty, GetIdentityRequest, SetBaseNodeRequest},
+    tari_rpc::{wallet_client::WalletClient, GetIdentityRequest},
 };
 use minotari_app_utilities::common_cli_args::CommonCliArgs;
 use minotari_console_wallet::{run_wallet_with_cli, ApplicationConfig};
@@ -115,23 +115,16 @@ impl WalletProcess {
 pub async fn spawn_wallet(world: &mut TariWorld, wallet_name: String, base_node_name: String) {
     // each spawned wallet will use different ports
     let (port, grpc_port) = get_os_assigned_ports();
-    // let (port, grpc_port) = match world.base_nodes.values().last() {
-    //     Some(v) => (v.port + 1, v.grpc_port + 1),
-    //     None => (48000, 48500), // default ports if it's the first wallet to be spawned
-    // };
-    let base_node_public_key = world
-        .base_nodes
-        .get(&base_node_name)
-        .unwrap()
-        .identity
-        .public_key()
-        .clone();
-    let base_node_port = world.base_nodes.get(&base_node_name).unwrap().port;
+
+    // let base_node_public_key = world
+    //     .base_nodes
+    //     .get(&base_node_name)
+    //     .unwrap()
+    //     .identity
+    //     .public_key()
+    //     .clone();
+    // let base_node_port = world.base_nodes.get(&base_node_name).unwrap().port;
     let base_node_http_port = world.base_nodes.get(&base_node_name).unwrap().http_port;
-    let set_base_node_request = SetBaseNodeRequest {
-        net_address: format! {"/ip4/127.0.0.1/tcp/{}", base_node_port},
-        public_key_hex: base_node_public_key.to_string(),
-    };
     let temp_dir = get_base_dir_for_scenario(
         "console_wallet",
         world.current_scenario_name.as_ref().unwrap(),
@@ -143,7 +136,7 @@ pub async fn spawn_wallet(world: &mut TariWorld, wallet_name: String, base_node_
     let handle = thread::spawn({
         let mut shutdown = shutdown.clone();
         move || {
-            let mut wallet_config = minotari_console_wallet::ApplicationConfig {
+            let mut wallet_config = ApplicationConfig {
                 common: CommonConfig::default(),
                 auto_update: AutoUpdateConfig::default(),
                 wallet: WalletConfig::default(),
@@ -163,6 +156,11 @@ pub async fn spawn_wallet(world: &mut TariWorld, wallet_name: String, base_node_
             wallet_config.wallet.contacts_auto_ping_interval = Duration::from_secs(2);
             wallet_config
                 .wallet
+                .output_manager_service_config
+                .num_confirmations_required = 1;
+            wallet_config.wallet.output_manager_service_config.prevent_fee_gt_amount = false;
+            wallet_config
+                .wallet
                 .base_node_service_config
                 .base_node_monitor_max_refresh_interval = Duration::from_secs(15);
             wallet_config.wallet.p2p.transport.transport_type = TransportType::Tcp;
@@ -176,12 +174,12 @@ pub async fn spawn_wallet(world: &mut TariWorld, wallet_name: String, base_node_
                 database_url: DbConnectionUrl::File(temp_dir.join("dht.sqlite")),
                 ..DhtConfig::default_local_test()
             };
-            wallet_config.wallet.http_client_url = format!("http://127.0.0.1:{}", base_node_http_port);
+            wallet_config.wallet.http_server_url = format!("http://127.0.0.1:{}", base_node_http_port);
 
-            wallet_config.wallet.custom_base_node = Some(format!(
-                "{}::/ip4/127.0.0.1/tcp/{}",
-                base_node_public_key, base_node_port
-            ));
+            // wallet_config.wallet.base_node_service_peers = Some(format!(
+            //     "{}::/ip4/127.0.0.1/tcp/{}",
+            //     base_node_public_key, base_node_port
+            // ));
 
             let mut builder = runtime::Builder::new_multi_thread();
             let rt = builder.enable_all().build().unwrap();
@@ -219,20 +217,20 @@ pub async fn spawn_wallet(world: &mut TariWorld, wallet_name: String, base_node_
     // eprintln!("Wallet {} comms address: {}", wallet_name, identity.public_address);
 
     // TODO: Clean up
-    let mut status = wallet_client.get_network_status(Empty {}).await.unwrap().into_inner();
-    let mut counter = 0;
-    while status.status != ConnectivityStatus::Online as i32 {
-        eprintln!(
-            "Waiting for wallet to connect to base node {} {} {} (status: {:?})",
-            base_node_name, set_base_node_request.public_key_hex, set_base_node_request.net_address, status
-        );
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        counter += 1;
-        if counter > 20 {
-            panic!("Wallet failed to connect to base node");
-        }
-        status = wallet_client.get_network_status(Empty {}).await.unwrap().into_inner();
-    }
+    // let mut status = wallet_client.get_network_status(Empty {}).await.unwrap().into_inner();
+    // let mut counter = 0;
+    // while status.status != ConnectivityStatus::Online as i32 {
+    //     eprintln!(
+    //         "Waiting for wallet to connect to base node {} on port {} (status: {:?})",
+    //         base_node_name, base_node_port, status
+    //     );
+    //     tokio::time::sleep(Duration::from_secs(1)).await;
+    //     counter += 1;
+    //     if counter > 20 {
+    //         panic!("Wallet failed to connect to base node");
+    //     }
+    //     status = wallet_client.get_network_status(Empty {}).await.unwrap().into_inner();
+    // }
 
     world.wallets.insert(wallet_name.clone(), wallet_process);
 }

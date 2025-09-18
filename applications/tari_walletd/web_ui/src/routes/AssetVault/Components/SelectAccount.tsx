@@ -30,12 +30,14 @@ import MenuItem from "@mui/material/MenuItem";
 import FormControl from "@mui/material/FormControl";
 import Select, { SelectChangeEvent } from "@mui/material/Select";
 import Dialog from "./AddAccount";
-import useAccountStore from "../../../store/accountStore";
-import { useAccountsList } from "../../../api/hooks/useAccounts";
+import useAccountStore from "@store/accountStore";
+import { useAccountsList } from "@api/hooks/useAccounts";
 import { AccountInfo, substateIdToString } from "@tari-project/typescript-bindings";
 
 function SelectAccount() {
-  const { account, setAccount, setPublicKey } = useAccountStore();
+  const account = useAccountStore((state) => state.account);
+  const setAccount = useAccountStore((state) => state.setAccount);
+  const setOotleAddress = useAccountStore((state) => state.setOotleAddress);
   const { data: dataAccountsList } = useAccountsList(0, 10);
   const [dialogOpen, setDialogOpen] = useState(false);
   const theme = useTheme();
@@ -44,11 +46,11 @@ function SelectAccount() {
     const selectedValue = event.target.value as string;
     if (selectedValue !== "addAccount") {
       const account = dataAccountsList?.accounts.find(
-        (info: AccountInfo) => substateIdToString(info.account.address) === selectedValue,
+        (info: AccountInfo) => substateIdToString(info.account.component_address) === selectedValue,
       );
       if (account) {
         setAccount(account.account);
-        setPublicKey(account.public_key);
+        setOotleAddress(account.address);
         // setAccountName(event.target.value as string);
       }
     }
@@ -66,16 +68,18 @@ function SelectAccount() {
           labelId="account-select-label"
           id="account-select"
           value={
-            dataAccountsList?.accounts.some((info: AccountInfo) => info.account.address === account?.address)
-              ? substateIdToString(account!.address)
+            account && dataAccountsList?.accounts.some((info: AccountInfo) => info.account.component_address === account?.component_address)
+              ? substateIdToString(account.component_address)
+              : dataAccountsList?.accounts.length
+              ? substateIdToString(dataAccountsList.accounts[0].account.component_address)
               : "addAccount"
           }
           label="Account"
           onChange={handleChange}
         >
-          {dataAccountsList?.accounts.map((account: AccountInfo) => {
+          {dataAccountsList?.accounts.map((account: AccountInfo, i) => {
             return (
-              <MenuItem key={account.public_key} value={substateIdToString(account.account.address)}>
+              <MenuItem key={i} value={substateIdToString(account.account.component_address)}>
                 {account.account.name || "<No Name>"}
               </MenuItem>
             );

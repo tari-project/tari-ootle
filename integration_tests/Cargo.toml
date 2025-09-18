@@ -14,8 +14,10 @@ minotari_node = { workspace = true }
 tari_validator_node = { workspace = true, default-features = false }
 tari_indexer = { workspace = true, default-features = false }
 tari_ootle_walletd = { workspace = true, default-features = false }
+tari_ootle_address = { workspace = true }
 
-tari_core = { workspace = true, default-features = true }
+tari_transaction_components = { workspace = true }
+tari_transaction_key_manager = { workspace = true }
 minotari_app_grpc = { workspace = true }
 minotari_app_utilities = { workspace = true }
 minotari_node_grpc_client = { workspace = true }
@@ -33,8 +35,7 @@ tari_ootle_app_utilities = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 tari_engine = { workspace = true }
 tari_engine_types = { workspace = true }
-tari_indexer_client = { workspace = true }
-tari_template_builtin = { workspace = true }
+tari_indexer_client = { workspace = true, features = ["client"] }
 tari_template_lib = { workspace = true }
 tari_transaction = { workspace = true }
 tari_validator_node_client = { workspace = true }
@@ -43,14 +44,15 @@ tari_base_node_client = { workspace = true }
 tari_transaction_manifest = { workspace = true }
 tari_ootle_wallet_sdk = { workspace = true }
 
-tari_comms = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
-tari_comms_dht = { git = "https://github.com/tari-project/tari.git", tag = "v4.9.0-pre.1" }
+tari_comms = { git = "https://github.com/tari-project/tari.git", branch = "development" }
+tari_comms_dht = { git = "https://github.com/tari-project/tari.git", branch = "development" }
 
 anyhow = { workspace = true }
 config = { workspace = true }
 cucumber = { version = "0.21.1", features = ["default", "libtest", "output-junit"] }
-httpmock = { workspace = true }
+httpmock = { version = "0.8.0-alpha.1", features = ["remote"] }
 indexmap = { workspace = true }
+multiaddr = { workspace = true }
 libp2p = { workspace = true }
 log = { workspace = true, features = ["std"] }
 log4rs = { workspace = true, features = ["rolling_file_appender", "compound_policy", "size_trigger", "fixed_window_roller"] }

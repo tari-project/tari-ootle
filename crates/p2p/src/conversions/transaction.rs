@@ -27,7 +27,7 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use tari_engine_types::{
-    confidential::ConfidentialClaim,
+    confidential::TariStealthClaim,
     instruction::Instruction,
     substate::SubstateId,
     ComponentCall,
@@ -54,7 +54,7 @@ use tari_template_lib::{
             PedersenCommitmentBytes,
             RangeProofBytes,
             RistrettoPublicKeyBytes,
-            UtxoTagByte,
+            UtxoTag,
         },
         ObjectKey,
     },
@@ -250,8 +250,8 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                 message: request.log_message,
             },
             InstructionType::ClaimBurn => Instruction::ClaimBurn {
-                claim: Box::new(ConfidentialClaim {
-                    public_key: request
+                claim: Box::new(TariStealthClaim {
+                    burn_public_key: request
                         .claim_burn_public_key
                         .as_slice()
                         .try_into()
@@ -268,7 +268,7 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                         .ok_or_else(|| anyhow!("claim_burn_proof_of_knowledge not provided"))?
                         .try_into()
                         .map_err(|e| anyhow!("claim_burn_proof_of_knowledge: {}", e))?,
-                    withdraw_proof: request.claim_burn_withdraw_proof.map(TryInto::try_into).transpose()?,
+                    transfer_statement: request.claim_burn_transfer.map(TryInto::try_into).transpose()?,
                 }),
             },
             InstructionType::ClaimValidatorFees => Instruction::ClaimValidatorFees {
@@ -311,6 +311,17 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                     .context("stealth_transfer_statement conversion failed")?,
                 revealed_input_bucket: request
                     .stealth_transfer_revealed_input_bucket
+                    .map(TryInto::try_into)
+                    .transpose()?,
+            },
+            InstructionType::PayFee => Instruction::PayFee {
+                statement: request
+                    .pay_fee_stealth_transfer_statement
+                    .ok_or_else(|| anyhow!("pay_fee_stealth_transfer_statement not provided"))?
+                    .try_into()
+                    .context("pay_fee_stealth_transfer_statement conversion failed")?,
+                revealed_input_bucket: request
+                    .pay_fee_revealed_input_bucket
                     .map(TryInto::try_into)
                     .transpose()?,
             },
@@ -367,8 +378,8 @@ impl From<Instruction> for proto::transaction::Instruction {
                 result.claim_burn_commitment_address = claim.output_address.as_bytes().to_vec();
                 result.claim_burn_range_proof = claim.range_proof.into_vec();
                 result.claim_burn_proof_of_knowledge = Some(claim.proof_of_knowledge.into());
-                result.claim_burn_public_key = claim.public_key.to_vec();
-                result.claim_burn_withdraw_proof = claim.withdraw_proof.map(Into::into);
+                result.claim_burn_public_key = claim.burn_public_key.to_vec();
+                result.claim_burn_transfer = claim.transfer_statement.map(Into::into);
             },
             Instruction::ClaimValidatorFees { address } => {
                 result.instruction_type = InstructionType::ClaimValidatorFees as i32;
@@ -409,6 +420,14 @@ impl From<Instruction> for proto::transaction::Instruction {
                 result.stealth_transfer_resource_address = Some(resource_address.into());
                 result.stealth_transfer_statement = Some(statement.into());
                 result.stealth_transfer_revealed_input_bucket = revealed_input_bucket.map(Into::into);
+            },
+            Instruction::PayFee {
+                statement,
+                revealed_input_bucket,
+            } => {
+                result.instruction_type = InstructionType::PayFee as i32;
+                result.pay_fee_stealth_transfer_statement = Some(statement.into());
+                result.pay_fee_revealed_input_bucket = revealed_input_bucket.map(Into::into);
             },
         }
         result
@@ -733,15 +752,11 @@ impl TryFrom<proto::transaction::StealthUnspentOutput> for tari_template_lib::mo
             .try_into()?;
         let owner_public_key = RistrettoPublicKeyBytes::from_bytes(&val.owner_public_key)
             .map_err(|e| anyhow!("Invalid owner public key: {}", e.to_error_string()))?;
-        let tag_byte = val
-            .tag_byte
-            .try_into()
-            .map_err(|e| anyhow!("Invalid tag byte: {}", e))?;
 
         Ok(tari_template_lib::models::StealthUnspentOutput {
             output,
             owner_public_key,
-            tag: UtxoTagByte::new(tag_byte),
+            tag: UtxoTag::new(val.tag_byte),
         })
     }
 }
@@ -751,7 +766,7 @@ impl From<tari_template_lib::models::StealthUnspentOutput> for proto::transactio
         Self {
             output: Some(val.output.into()),
             owner_public_key: val.owner_public_key.as_bytes().to_vec(),
-            tag_byte: val.tag.as_byte().into(),
+            tag_byte: val.tag.value(),
         }
     }
 }

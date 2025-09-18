@@ -22,7 +22,7 @@ pub use sync::*;
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::DerivableFromPublicKey;
 use tari_ootle_storage::StateStore;
-pub use tasks::*;
+pub(crate) use tasks::*;
 pub use transaction_executor::*;
 
 use crate::traits::hooks::ConsensusHooks;

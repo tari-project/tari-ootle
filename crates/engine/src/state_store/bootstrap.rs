@@ -7,7 +7,7 @@ use tari_engine_types::{
 };
 use tari_template_lib::{
     auth::ResourceAccessRules,
-    constants::{CONFIDENTIAL_TARI_RESOURCE_ADDRESS, PUBLIC_IDENTITY_RESOURCE_ADDRESS},
+    constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS},
     models::Metadata,
     prelude::{OwnerRule, ResourceType},
     resource::TOKEN_SYMBOL,
@@ -48,7 +48,7 @@ fn add_global_resources<T: StateWriter>(state_db: &mut T) -> Result<(), StateSto
     )?;
 
     // Create the second layer tari resource
-    let id = SubstateId::Resource(CONFIDENTIAL_TARI_RESOURCE_ADDRESS);
+    let id = SubstateId::Resource(STEALTH_TARI_RESOURCE_ADDRESS);
     let mut metadata = Metadata::new();
     metadata.insert(TOKEN_SYMBOL, "XTR".to_string());
     state_db.set_state(
@@ -56,7 +56,7 @@ fn add_global_resources<T: StateWriter>(state_db: &mut T) -> Result<(), StateSto
         Substate::new(
             0,
             Resource::new(
-                ResourceType::Confidential,
+                ResourceType::Stealth,
                 None,
                 OwnerRule::None,
                 ResourceAccessRules::new(),
@@ -64,7 +64,7 @@ fn add_global_resources<T: StateWriter>(state_db: &mut T) -> Result<(), StateSto
                 None,
                 None,
                 6,
-                false,
+                true,
             ),
         ),
     )?;

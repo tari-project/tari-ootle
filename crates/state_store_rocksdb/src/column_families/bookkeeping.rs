@@ -16,7 +16,6 @@ use tari_consensus_types::{
     LockedBlock,
 };
 use tari_ootle_common_types::NodeHeight;
-use tari_ootle_storage::consensus_models::EpochStateRoot;
 
 use crate::{
     codecs::{ByteColumn, ColumnCodec, DefaultCodec, NumberCodec},
@@ -46,9 +45,6 @@ enum BookKeepingKey {
     HighQc,
     /// The last high timeout certificate
     HighTc,
-    /// The state root of the previous epoch. This is set based on either calculated root of the current shard group
-    /// after a successful sync, or based on the last checkpoint
-    PreviousEpochStateRoot,
     /// The highest block seen by the node
     HighestSeenBlock,
     /// The last sent new view message
@@ -68,9 +64,8 @@ impl BookKeepingKey {
             Self::LeafBlock => 7,
             Self::HighQc => 8,
             Self::HighTc => 9,
-            Self::PreviousEpochStateRoot => 10,
-            Self::HighestSeenBlock => 11,
-            Self::LastSentNewView => 12,
+            Self::HighestSeenBlock => 10,
+            Self::LastSentNewView => 11,
         }
     }
 }
@@ -205,19 +200,6 @@ impl Cf for HighTcCf {
     type Key = ByteColumn<{ BookKeepingKey::HighTc.as_byte() }>;
     type KeyCodec = ColumnCodec;
     type Value = HighTc;
-    type ValueCodec = DefaultCodec<Self::Value>;
-
-    fn name() -> &'static str {
-        CF_NAME
-    }
-}
-
-pub struct PreviousEpochStateRootCf;
-
-impl Cf for PreviousEpochStateRootCf {
-    type Key = ByteColumn<{ BookKeepingKey::PreviousEpochStateRoot.as_byte() }>;
-    type KeyCodec = ColumnCodec;
-    type Value = EpochStateRoot;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {

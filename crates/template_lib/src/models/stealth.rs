@@ -11,11 +11,7 @@ use crate::models::StealthUnspentOutput;
 
 /// A statement for stealth outputs. A statement must contain confidential outputs
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct StealthOutputsStatement {
     /// The stealth outputs that are to be created
     pub outputs: Vec<StealthUnspentOutput>,
@@ -31,11 +27,7 @@ pub struct StealthOutputsStatement {
 
 /// A statement for stealth outputs. A statement must contain confidential outputs
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct StealthInput {
     /// The commitment of the unspent output being spent
     pub commitment: PedersenCommitmentBytes,
@@ -45,11 +37,7 @@ pub struct StealthInput {
 }
 /// A statement for stealth outputs. A statement must contain confidential outputs
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct StealthInputsStatement {
     /// The stealth inputs that are to be spent
     pub inputs: Vec<StealthInput>,
@@ -57,12 +45,26 @@ pub struct StealthInputsStatement {
     pub revealed_amount: Amount,
 }
 
+impl StealthInputsStatement {
+    pub fn new(inputs: Vec<StealthInput>, revealed_amount: Amount) -> Self {
+        assert!(!revealed_amount.is_negative(), "Revealed amount must be positive");
+        assert!(
+            !inputs.is_empty() || !revealed_amount.is_zero(),
+            "At least one input or a revealed amount must be provided"
+        );
+        Self {
+            inputs,
+            revealed_amount,
+        }
+    }
+
+    pub fn new_revealed(amount: Amount) -> Self {
+        Self::new(vec![], amount)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct StealthTransferStatement {
     pub inputs_statement: StealthInputsStatement,
     pub outputs_statement: StealthOutputsStatement,
@@ -70,4 +72,14 @@ pub struct StealthTransferStatement {
     /// is valid).
     #[cfg_attr(feature = "ts", ts(type = "{public_nonce: string, signature: string}"))]
     pub balance_proof: BalanceProofSignature,
+}
+
+impl StealthTransferStatement {
+    pub fn revealed_input_amount(&self) -> Amount {
+        self.inputs_statement.revealed_amount
+    }
+
+    pub fn revealed_output_amount(&self) -> Amount {
+        self.outputs_statement.revealed_output_amount
+    }
 }

@@ -32,7 +32,7 @@ use tari_crypto::{
 use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason, TransactionResult},
     component::ComponentHeader,
-    confidential::ConfidentialClaim,
+    confidential::TariStealthClaim,
     crypto::{get_commitment_factory, get_static_range_proof_service, PrivateOutput},
     entity_id_provider::EntityIdProvider,
     events::Event,
@@ -45,20 +45,20 @@ use tari_engine_types::{
     published_template::{PublishedTemplate, PublishedTemplateAddress},
     resource::Resource,
     resource_container::{ResourceContainer, ResourceError},
-    stealth,
     substate::{SubstateId, SubstateValue},
     vault::Vault,
     ComponentCall,
-    FromByteType,
+    ConvertFromByteType,
     ResourceAddressRef,
-    ToByteType,
     Utxo,
     UtxoAddress,
+    UtxoOutput,
     ValidatorFeePoolAddress,
 };
 use tari_ootle_common_types::{
     base_layer_hashing::ownership_proof_hasher64,
     services::template_provider::TemplateProvider,
+    GetVerifier,
     Network,
 };
 use tari_template_abi::{TemplateDef, Type};
@@ -107,7 +107,7 @@ use tari_template_lib::{
     },
     auth::{AuthHook, AuthHookCaller, ComponentAccessRules, OwnerRule, ResourceAccessRules, ResourceAuthAction},
     call_args,
-    constants::{CONFIDENTIAL_TARI_RESOURCE_ADDRESS, XTR},
+    constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR},
     models::{
         BucketId,
         ComponentAddress,
@@ -124,10 +124,16 @@ use tari_template_lib::{
     prelude::{ResourceType, RistrettoPublicKeyBytes},
     resource::{IMAGE_URL, TOKEN_SYMBOL},
     template::BuiltinTemplate,
-    types::{Amount, EntityId, TemplateAddress},
+    types::{
+        crypto::UtxoTag,
+        engine_args::{SignatureAction, SignatureVerifyArg},
+        Amount,
+        EntityId,
+        TemplateAddress,
+    },
 };
 
-use super::{working_state::WorkingState, Runtime};
+use super::{working_state::WorkingState, Runtime, RuntimeEvent};
 use crate::{
     runtime::{
         engine_args::EngineArgs,
@@ -135,7 +141,6 @@ use crate::{
         locking::{LockError, LockedSubstate},
         scope::PushCallFrame,
         tracker::StateTracker,
-        validation::check_stealth_transfer_limits,
         RuntimeError,
         RuntimeInterface,
         RuntimeModule,
@@ -201,6 +206,13 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         Ok(())
     }
 
+    fn invoke_modules_on_runtime_event(&self, event: RuntimeEvent) -> Result<(), RuntimeError> {
+        for module in &self.modules {
+            module.on_runtime_event(&self.tracker, &event)?;
+        }
+        Ok(())
+    }
+
     pub fn get_template_def(&self, template_address: &TemplateAddress) -> Result<TemplateDef, RuntimeError> {
         let loaded = self
             .template_provider
@@ -261,7 +273,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             payload,
         );
         debug!(target: LOG_TARGET, "Emitted event {}", event);
-        state.push_event(event);
+        state.push_event(event)?;
 
         Ok(())
     }
@@ -424,122 +436,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
         Ok(())
     }
-
-    fn execute_stealth_transfer(
-        &self,
-        resource_address: ResourceAddressRef,
-        statement: StealthTransferStatement,
-        revealed_funds_bucket_id: Option<BucketId>,
-    ) -> Result<Option<BucketId>, RuntimeError> {
-        check_stealth_transfer_limits(&limits::STEALTH_LIMITS, &statement)?;
-
-        self.tracker.write_with(|state_mut| {
-            let resource_address = state_mut.resolve_resource_address_ref(resource_address)?;
-
-            let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(resource_address))?;
-            {
-                let resource = state_mut.get_resource(&resource_lock)?;
-                if !resource.resource_type().is_stealth() {
-                    return Err(ResourceError::OperationNotAllowed(format!(
-                        "Stealth transfer is only allowed for stealth resources: {}",
-                        resource_address
-                    ))
-                    .into());
-                }
-
-                // Authorize transfer
-                state_mut.authorization().check_resource_access_rules(
-                    // TODO: specific auth action for stealth transfer? Technically this is a withdraw and deposit, but
-                    // a separate AccessRule may be excessive/not useful.
-                    ResourceAuthAction::Withdraw,
-                    resource.as_ownership(),
-                    resource.access_rules(),
-                )?;
-            }
-
-            let revealed_funds_bucket = revealed_funds_bucket_id
-                .map(|id| state_mut.take_bucket(id))
-                .transpose()?;
-            if let Some(ref bucket) = revealed_funds_bucket {
-                if *bucket.resource_address() != resource_address {
-                    return Err(RuntimeError::InvalidArgument {
-                        argument: "revealed_funds_bucket",
-                        reason: format!(
-                            "Revealed funds bucket resource address ({}) does not match the statement's resource \
-                             address ({})",
-                            bucket.resource_address(),
-                            resource_address
-                        ),
-                    });
-                }
-            }
-
-            match revealed_funds_bucket {
-                Some(ref bucket) => {
-                    if bucket.amount() != statement.inputs_statement.revealed_amount {
-                        return Err(RuntimeError::InvalidArgument {
-                            argument: "revealed_funds_bucket",
-                            reason: format!(
-                                "Revealed funds bucket amount ({}) does not match the statement's revealed input \
-                                 amount ({})",
-                                bucket.amount(),
-                                statement.inputs_statement.revealed_amount
-                            ),
-                        });
-                    }
-                },
-                None => {
-                    if !statement.inputs_statement.revealed_amount.is_zero() {
-                        return Err(RuntimeError::InvalidArgument {
-                            argument: "revealed_funds_bucket",
-                            reason: format!(
-                                "An input bucket is required but not provided for stealth transfers with revealed \
-                                 input amount ({})",
-                                statement.inputs_statement.revealed_amount
-                            ),
-                        });
-                    }
-                },
-            }
-
-            state_mut.spend_stealth_utxos(resource_address, &statement.inputs_statement)?;
-
-            let resource = state_mut.get_resource(&resource_lock)?;
-            let view_key = resource
-                .view_key()
-                .map(RistrettoPublicKey::try_from_byte_type)
-                .transpose()
-                .map_err(|e| {
-                    warn!(target: LOG_TARGET, "Stealth transfer failed - malformed view key: {}", e);
-                    RuntimeError::InvalidArgument {
-                        argument: "view_key",
-                        reason: "Malformed RistrettoPublicKeyBytes".to_string(),
-                    }
-                })?;
-
-            let valid_transfer = stealth::validate_transfer(&statement, view_key.as_ref())?;
-
-            for output in valid_transfer.outputs {
-                let address = UtxoAddress::new(resource_address, output.output.commitment.to_byte_type().into());
-                let value = Utxo::new(output.to_utxo_output());
-                state_mut.new_substate(address, value)?;
-            }
-
-            state_mut.unlock_substate(resource_lock)?;
-
-            if valid_transfer.revealed_output_amount.is_zero() {
-                return Ok(None);
-            }
-
-            let bucket_id = state_mut.new_bucket_id();
-            state_mut.new_bucket(
-                bucket_id,
-                ResourceContainer::stealth(resource_address, valid_transfer.revealed_output_amount),
-            )?;
-
-            Ok(Some(bucket_id))
-        })
-    }
 }
 
 impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInterface
@@ -572,7 +468,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         let topic = format!("{module}.{topic}");
 
         self.tracker
-            .add_event(Event::custom(substate_id, template_address, tx_hash, topic, payload));
+            .add_event(Event::custom(substate_id, template_address, tx_hash, topic, payload))?;
         Ok(())
     }
 
@@ -588,7 +484,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
         // eprintln!("{}: {}", log_level, message);
         log::log!(target: "tari::ootle::engine::runtime", log_level, "{}", message);
-        self.tracker.add_log(LogEntry::new(level, message));
+        self.tracker.add_log(LogEntry::new(level, message))?;
         Ok(())
     }
 
@@ -1319,8 +1215,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                             reason: "StealthTransfer resource action requires a resource address".to_string(),
                         })?;
                 let arg: StealthTransferResourceArg = args.assert_one_arg()?;
-                let maybe_bucket =
-                    self.execute_stealth_transfer(resource_address.into(), arg.transfer, arg.input_bucket)?;
+                let maybe_bucket = self.stealth_transfer(resource_address.into(), arg.transfer, arg.input_bucket)?;
                 Ok(InvokeResult::encode(
                     &maybe_bucket.map(tari_template_lib::models::Bucket::from_id),
                 )?)
@@ -1387,9 +1282,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     state.new_substate(vault_id, vault)?;
                     debug!(
                         target: LOG_TARGET,
-                        "Created vault {} for resource {}",
+                        "Created vault {} for resource {} ({})",
                         vault_id,
-                        resource_address
+                        resource_address,
+                        resource_type
                     );
                     state.unlock_substate(resource_lock)?;
 
@@ -1420,9 +1316,9 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                                 freeze_flag: VaultFreezeFlag::Deposits,
                             });
                         }
-                        let resource_address = vault.resource_address();
+                        let resource_address = *vault.resource_address();
 
-                        let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(*resource_address))?;
+                        let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(resource_address))?;
 
                         let resource = state_mut.get_resource(&resource_lock)?;
 
@@ -1460,6 +1356,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     self.emit_std_event("vault", "deposit", vault_id.into(), payload, state_mut)?;
 
                     let vault_mut = state_mut.get_vault_mut(&vault_lock)?;
+
                     vault_mut.deposit(bucket)?;
 
                     state_mut.unlock_substate(resource_lock)?;
@@ -1671,27 +1568,20 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         resource.as_ownership(),
                         resource.access_rules(),
                     )?;
-                    let view_key = resource
-                        .to_view_key_public_key()
-                        .map_err(|e| RuntimeError::InvariantError {
-                            function: "VaultAction::PayFee",
-                            details: format!(
-                                "Resource {} has a malformed view key: {}",
-                                resource_lock.substate_id(),
-                                e
-                            ),
-                        })?;
 
                     let vault_mut = state_mut.get_vault_mut(&vault_lock)?;
 
-                    let mut container = ResourceContainer::confidential(XTR, None, Amount::zero());
-                    if !arg.amount.is_zero() {
+                    let mut container = ResourceContainer::stealth(XTR, Amount::zero());
+                    if arg.amount.is_positive() {
                         let withdrawn = vault_mut.withdraw(arg.amount)?;
                         container.deposit(withdrawn)?;
                     }
-                    if let Some(proof) = arg.proof {
-                        let revealed = vault_mut.withdraw_confidential(proof, view_key.as_ref())?;
-                        container.deposit(revealed)?;
+                    if let Some(statement) = arg.statement {
+                        if let Some(revealed) =
+                            state_mut.execute_stealth_transfer(STEALTH_TARI_RESOURCE_ADDRESS.into(), statement, None)?
+                        {
+                            container.deposit(revealed)?;
+                        }
                     }
                     if container.amount().is_zero() {
                         return Err(RuntimeError::InvalidArgument {
@@ -1700,7 +1590,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         });
                     }
 
-                    state_mut.pay_fee(container, vault_id)?;
+                    state_mut.pay_fee(container, Some(vault_id))?;
 
                     state_mut.unlock_substate(resource_lock)?;
                     state_mut.unlock_substate(vault_lock)?;
@@ -2419,33 +2309,33 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         Ok(())
     }
 
-    fn claim_burn(&self, claim: ConfidentialClaim) -> Result<(), RuntimeError> {
-        let ConfidentialClaim {
-            public_key: diffie_hellman_public_key,
+    fn claim_burn(&self, claim: TariStealthClaim) -> Result<(), RuntimeError> {
+        let TariStealthClaim {
+            burn_public_key,
             output_address,
             range_proof,
             proof_of_knowledge,
-            withdraw_proof,
+            transfer_statement,
         } = claim;
         // 1. Must exist
         let unclaimed_output = self.tracker.take_unclaimed_confidential_output(output_address)?;
         // 2. owner_sig must be valid
-        // NOTE: .as_bytes() used because the tari_crypto borsh implementations serialize as variable length bytes
-        // (always 32)
+        // NOTE: .as_bytes() used because the tari_crypto borsh implementations serialize fixed length bytes as variable
+        // length bytes of size 32
         let message = ownership_proof_hasher64(self.network)
             .chain(&proof_of_knowledge.public_nonce().as_bytes())
             .chain(&unclaimed_output.commitment.as_bytes())
             .chain(&self.transaction_signer_public_key.as_bytes())
             .finalize();
 
-        let commitment = PedersenCommitment::try_from_byte_type(&unclaimed_output.commitment).map_err(|e| {
+        let commitment = PedersenCommitment::convert_from_byte_type(&unclaimed_output.commitment).map_err(|e| {
             warn!(target: LOG_TARGET, "Claim burn failed - malformed commitment: {}", e);
             RuntimeError::InvalidClaimingSignature {
                 details: "malformed commitment".to_string(),
             }
         })?;
 
-        let proof_of_knowledge = CommitmentSignature::try_from_byte_type(&proof_of_knowledge).map_err(|e| {
+        let proof_of_knowledge = CommitmentSignature::convert_from_byte_type(&proof_of_knowledge).map_err(|e| {
             warn!(target: LOG_TARGET, "Claim burn failed - malformed proof of knowledge: {}", e);
             RuntimeError::InvalidClaimingSignature {
                 details: "malformed proof of knowledge".to_string(),
@@ -2465,29 +2355,34 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             return Err(RuntimeError::InvalidRangeProof);
         }
 
-        // 4. Create the confidential resource
-        let mut resource = ResourceContainer::confidential(
-            CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-            Some((unclaimed_output.commitment, PrivateOutput {
-                public_nonce: diffie_hellman_public_key,
-                encrypted_data: unclaimed_output.encrypted_data,
-                minimum_value_promise: 0,
-                viewable_balance: None,
-            })),
-            Amount::zero(),
-        );
+        self.tracker.write_with(|state_mut| {
+            // 4. Create the stealth UTXO
+            let address = UtxoAddress::new(XTR, unclaimed_output.commitment.into());
+            let utxo = Utxo::new(UtxoOutput {
+                output: PrivateOutput {
+                    public_nonce: burn_public_key,
+                    encrypted_data: unclaimed_output.encrypted_data,
+                    minimum_value_promise: 0,
+                    viewable_balance: None,
+                },
+                owner_public_key: self.transaction_signer_public_key,
+                tag: UtxoTag::new(0),
+            });
 
-        // If a withdraw proof is provided, we execute it and deposit back into the resource
-        // This allows some funds to be revealed and/or reblinded within a single instruction
-        if let Some(proof) = withdraw_proof {
-            let withdraw = resource.withdraw_confidential(proof, None)?;
-            resource.deposit(withdraw)?;
-        }
+            state_mut.new_substate(address, utxo)?;
 
-        self.tracker.write_with(|state| {
-            let bucket_id = state.new_bucket_id();
-            state.new_bucket(bucket_id, resource)?;
-            state.set_last_instruction_output(IndexedValue::from_type(&bucket_id)?);
+            // If a transfer statement is provided, we execute it
+            // This allows claimed funds to be revealed and/or reblinded within a single instruction
+            let maybe_container = transfer_statement
+                .map(|transfer| state_mut.execute_stealth_transfer(XTR.into(), transfer, None))
+                .transpose()?
+                .flatten();
+
+            if let Some(container) = maybe_container {
+                let bucket_id = state_mut.new_bucket_id();
+                state_mut.new_bucket(bucket_id, container)?;
+                state_mut.set_last_instruction_output(IndexedValue::from_type(&bucket_id)?);
+            }
             Ok::<_, RuntimeError>(())
         })?;
 
@@ -2543,7 +2438,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 finalized.fee_receipt.total_fees_charged(),
                 finalized.fee_receipt.total_fees_paid()
             ));
-            finalized.result = if let Some(accept) = finalized.result.accept() {
+            finalized.result = if let Some(accept) = finalized.result.any_accept() {
                 TransactionResult::AcceptFeeRejectRest(accept.clone(), reason)
             } else {
                 TransactionResult::Reject(reason)
@@ -2725,10 +2620,30 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 "template",
                 "publish",
                 metadata,
-            ));
+            ))?;
 
             Ok(())
         })
+    }
+
+    fn signature_invoke(&self, action: SignatureAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("signature_invoke")?;
+
+        match action {
+            SignatureAction::Verify => {
+                self.invoke_modules_on_runtime_event(RuntimeEvent::SignatureVerified)?;
+
+                let SignatureVerifyArg {
+                    public_key,
+                    domain,
+                    message,
+                    payload,
+                } = args.assert_one_arg()?;
+
+                let is_valid = payload.get_verifier().verify(&domain, &message, &public_key, &payload);
+                Ok(InvokeResult::encode(&is_valid)?)
+            },
+        }
     }
 
     /// Create a new address allocation for the provided substate type and entity id
@@ -2770,7 +2685,38 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         statement: StealthTransferStatement,
         revealed_funds_bucket_id: Option<BucketId>,
     ) -> Result<Option<BucketId>, RuntimeError> {
-        self.execute_stealth_transfer(resource_address, statement, revealed_funds_bucket_id)
+        self.tracker.write_with(|state_mut| {
+            let Some(container) =
+                state_mut.execute_stealth_transfer(resource_address, statement, revealed_funds_bucket_id)?
+            else {
+                return Ok(None);
+            };
+            let bucket_id = state_mut.new_bucket_id();
+            state_mut.new_bucket(bucket_id, container)?;
+            Ok(Some(bucket_id))
+        })
+    }
+
+    fn pay_fee(
+        &self,
+        statement: StealthTransferStatement,
+        revealed_funds_bucket: Option<BucketId>,
+    ) -> Result<(), RuntimeError> {
+        self.tracker.write_with(|state_mut| {
+            let Some(container) = state_mut.execute_stealth_transfer(
+                STEALTH_TARI_RESOURCE_ADDRESS.into(),
+                statement,
+                revealed_funds_bucket,
+            )?
+            else {
+                return Err(RuntimeError::NoFeesPaid {
+                    details: "Stealth transfer did not reveal any funds to pay fees".to_string(),
+                });
+            };
+            // No refunds
+            state_mut.pay_fee(container, None)?;
+            Ok(())
+        })
     }
 }
 

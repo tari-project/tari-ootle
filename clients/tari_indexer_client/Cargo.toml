@@ -16,14 +16,18 @@ tari_ootle_storage = { workspace = true }
 tari_template_abi = { workspace = true }
 tari_template_lib_types = { workspace = true }
 tari_consensus_types = { workspace = true }
+tari_ootle_wallet_sdk = { workspace = true }
 
-anyhow = { workspace = true }
-reqwest = { workspace = true, features = ["json"] }
+anyhow = { workspace = true, optional = true }
+reqwest = { workspace = true, features = ["json"], optional = true }
 multiaddr = { workspace = true }
 serde = { workspace = true, default-features = true }
 serde_json = { workspace = true }
-thiserror = { workspace = true }
+serde_with = { workspace = true }
+thiserror = { workspace = true, optional = true }
 ts-rs = { workspace = true, optional = true }
 
 [features]
-ts = ["ts-rs"]
+default = ["client"]
+ts = ["ts-rs", "tari_template_lib_types/ts", "tari_engine_types/ts", "tari_ootle_common_types/ts", "tari_ootle_wallet_sdk/ts"]
+client = ["dep:reqwest", "dep:anyhow", "dep:thiserror"]

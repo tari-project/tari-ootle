@@ -498,7 +498,7 @@ mod resource_access_rules {
         let badge_resource = result
             .finalize
             .result
-            .accept()
+            .any_accept()
             .unwrap()
             .up_iter()
             .filter_map(|(addr, s)| s.substate_value().as_resource().map(|r| (addr, r)))
@@ -578,7 +578,7 @@ mod resource_access_rules {
         let token_resource = result
             .finalize
             .result
-            .accept()
+            .any_accept()
             .unwrap()
             .up_iter()
             .filter_map(|(addr, s)| s.substate_value().as_resource().map(|r| (addr, r)))
@@ -650,7 +650,7 @@ mod resource_access_rules {
         let badge_resource = result
             .finalize
             .result
-            .accept()
+            .any_accept()
             .unwrap()
             .up_iter()
             .filter_map(|(addr, s)| s.substate_value().as_resource().map(|r| (addr, r)))
@@ -736,7 +736,7 @@ mod resource_access_rules {
         let badge_resource = result
             .finalize
             .result
-            .accept()
+            .any_accept()
             .unwrap()
             .up_iter()
             .filter_map(|(addr, s)| s.substate_value().as_resource().map(|r| (addr, r)))
@@ -875,7 +875,7 @@ mod resource_access_rules {
         let token_resource = result
             .finalize
             .result
-            .accept()
+            .any_accept()
             .unwrap()
             .up_iter()
             .filter_map(|(addr, s)| s.substate_value().as_resource().map(|r| (addr, r)))

@@ -1,11 +1,13 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
-    event_payloads (id) {
+    epoch_checkpoints (id) {
         id -> Integer,
-        payload_key -> Text,
-        payload_value -> Text,
-        event_id -> Integer,
+        epoch -> BigInt,
+        shard_group -> Text,
+        json_data -> Text,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
     }
 }
 
@@ -16,9 +18,18 @@ diesel::table! {
         tx_hash -> Text,
         topic -> Text,
         payload -> Text,
-        version -> Integer,
         substate_id -> Nullable<Text>,
-        timestamp -> BigInt,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    key_values (id) {
+        id -> Integer,
+        key -> Text,
+        value -> Text,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
     }
 }
 
@@ -41,15 +52,31 @@ diesel::table! {
 }
 
 diesel::table! {
+    substate_transitions (id) {
+        id -> Integer,
+        shard -> Integer,
+        state_version -> BigInt,
+        epoch -> BigInt,
+        substate_id -> Text,
+        version -> Integer,
+        substate_type -> Text,
+        is_up -> Bool,
+        value_hash -> Nullable<Text>,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     substates (id) {
         id -> Integer,
         address -> Text,
         version -> Integer,
         data -> Text,
-        tx_hash -> Text,
         template_address -> Nullable<Text>,
         module_name -> Nullable<Text>,
-        timestamp -> BigInt,
+        timestamp -> Timestamp,
+        updated_at -> Timestamp,
+        created_at -> Timestamp,
     }
 }
 
@@ -62,13 +89,32 @@ diesel::table! {
     }
 }
 
-diesel::joinable!(event_payloads -> events (event_id));
+diesel::table! {
+    utxos (id) {
+        id -> Integer,
+        commitment -> Text,
+        public_nonce -> Text,
+        version -> Integer,
+        resource_address -> Text,
+        shard -> Integer,
+        state_version -> BigInt,
+        output -> Nullable<Binary>,
+        utxo_tag -> Integer,
+        is_spent -> Bool,
+        is_burnt -> Bool,
+        is_frozen -> Bool,
+        created_at -> Timestamp,
+    }
+}
 
 diesel::allow_tables_to_appear_in_same_query!(
-    event_payloads,
+    epoch_checkpoints,
     events,
+    key_values,
     non_fungible_indexes,
     scanned_block_ids,
+    substate_transitions,
     substates,
     transactions,
+    utxos,
 );

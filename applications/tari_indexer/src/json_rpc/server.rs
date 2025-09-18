@@ -66,22 +66,33 @@ async fn handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: Js
     debug!(target: LOG_TARGET, "🌐 JSON-RPC body: {:?}", value);
     match value.method.as_str() {
         "rpc.discover" => handlers.rpc_discover(value),
+        // Network
         "get_identity" => handlers.get_identity(value).await,
         "add_peer" => handlers.add_peer(value).await,
         "get_comms_stats" => handlers.get_comms_stats(value).await,
+        "get_connections" => handlers.get_connections(value).await,
+
+        // Substates
         "list_substates" => handlers.list_substates(value).await,
         "get_substate" => handlers.get_substate(value).await,
         "get_substates" | "fetch_substates" => handlers.get_substates(value).await,
         "inspect_substate" => handlers.inspect_substate(value).await,
-        "get_connections" => handlers.get_connections(value).await,
         "get_non_fungibles" => handlers.get_non_fungibles(value).await,
+        "get_utxo_updates" => handlers.get_utxo_updates(value).await,
+        "get_unspent_utxos" => handlers.get_unspent_utxos(value).await,
+
+        // Transactions
         "submit_transaction" => handlers.submit_transaction(value).await,
         "get_transaction_result" => handlers.get_transaction_result(value).await,
-        "get_epoch_manager_stats" => handlers.get_epoch_manager_stats(value).await,
+
+        // Templates
         "get_template_definition" => handlers.get_template_definition(value).await,
         "list_templates" => handlers.list_templates(value).await,
         "list_recent_transactions" => handlers.list_recent_transactions(value).await,
+
+        // Misc
         "wait_until_ready" => handlers.wait_until_ready(value).await,
+        "get_epoch_manager_stats" => handlers.get_epoch_manager_stats(value).await,
         method => Ok(value.method_not_found(method)),
     }
 }

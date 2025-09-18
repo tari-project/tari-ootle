@@ -21,16 +21,16 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useState } from "react";
-import { TableContainer, Table, TableRow, TableBody, Collapse } from "@mui/material";
-import { DataTableCell, AccordionIconButton } from "../../Components/StyledComponents";
+import { TableContainer, Table, TableRow, TableBody, Collapse, Box, Typography } from "@mui/material";
+import { DataTableCell, AccordionIconButton } from "@components/StyledComponents";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import CodeBlockExpand from "../../Components/CodeBlock";
+import CodeBlockExpand from "@components/CodeBlock";
 import { useTheme } from "@mui/material/styles";
 import type { Instruction } from "@tari-project/typescript-bindings";
 import { decode } from "cbor2";
-import { toHexString } from "../../utils/helpers";
-import { BinaryTag } from "../../utils/cbor";
+import { toHexString } from "@utils/helpers";
+import { BinaryTag } from "@utils/cbor";
 
 function RowData({ title, data }: { title: string; data: Instruction }, index: number) {
   const [open, setOpen] = useState(false);
@@ -38,7 +38,11 @@ function RowData({ title, data }: { title: string; data: Instruction }, index: n
   return (
     <>
       <TableRow key={`${index}-1`}>
-        <DataTableCell width={90} sx={{ borderBottom: "none", textAlign: "center" }}>
+        <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>{title}</DataTableCell>
+        <DataTableCell
+          width={90}
+          sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none", textAlign: "center" }}
+        >
           <AccordionIconButton
             aria-label="expand row"
             size="small"
@@ -49,7 +53,6 @@ function RowData({ title, data }: { title: string; data: Instruction }, index: n
             {open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
           </AccordionIconButton>
         </DataTableCell>
-        <DataTableCell>{title}</DataTableCell>
       </TableRow>
       <TableRow key={`${index}-2`}>
         <DataTableCell
@@ -109,49 +112,24 @@ function inspectify(instruction: Instruction) {
       args,
     },
   };
-
-  // if ("CallFunction" in instruction) {
-  //   const args = instruction.CallFunction.args.map((arg) => {
-  //     if ("Literal" in arg) {
-  //       return { Literal: decode(arg.Literal as unknown as string, { encoding: "hex" }) };
-  //     }
-  //     return arg;
-  //   });
-  //   return {
-  //     CallFunction: {
-  //       ...instruction.CallFunction,
-  //       args,
-  //     },
-  //   };
-  // }
-  // if ("CallMethod" in instruction) {
-  //   const args = instruction.CallMethod.args.map((arg) => {
-  //     if ("Literal" in arg) {
-  //       return { Literal: decode(arg.Literal as unknown as string, { encoding: "hex" }) };
-  //     }
-  //     return arg;
-  //   });
-  //   return {
-  //     CallMethod: {
-  //       ...instruction.CallMethod,
-  //       args,
-  //     },
-  //   };
-  // }
-  //
-  // return instruction;
 }
 
-export default function Instructions({ data }: { data: Array<Instruction> }, index: number) {
+export default function Instructions({ data }: { data: Array<Instruction> }) {
   return (
     <TableContainer>
       <Table>
         <TableBody>
-          {data?.length
-            ? data.map((item: Instruction, index) => {
-                return <RowData key={index} title={Object.keys(item)[0]} data={item} />;
-              })
-            : "Empty"}
+          {data?.length ? (
+            data.map((item: Instruction, index) => {
+              return <RowData key={index} title={Object.keys(item)[0]} data={item} />;
+            })
+          ) : (
+            <Box sx={{ p: 3, textAlign: "center" }}>
+              <Typography variant="body2" color="text.secondary">
+                No instructions available
+              </Typography>
+            </Box>
+          )}
         </TableBody>
       </Table>
     </TableContainer>

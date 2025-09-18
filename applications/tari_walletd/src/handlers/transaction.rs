@@ -65,7 +65,7 @@ pub async fn handle_submit_instruction(
     if let Some(ref dump_account) = req.dump_outputs_into {
         let dump_account = get_account(dump_account, &sdk.accounts_api())?;
         builder = builder.put_last_instruction_output_on_workspace("bucket").call_method(
-            *dump_account.address(),
+            *dump_account.component_address(),
             "deposit",
             args![Workspace("bucket")],
         );
@@ -73,7 +73,7 @@ pub async fn handle_submit_instruction(
     let fee_account = get_account(&req.fee_account, &sdk.accounts_api())?;
 
     let transaction = builder
-        .fee_transaction_pay_from_component(*fee_account.address(), req.max_fee)
+        .fee_transaction_pay_from_component(*fee_account.component_address(), req.max_fee)
         .with_min_epoch(req.min_epoch.map(Epoch))
         .with_max_epoch(req.max_epoch.map(Epoch))
         .build_unsigned_transaction();
@@ -155,7 +155,7 @@ pub async fn handle_submit(
     for proof_id in req.proof_ids {
         // update the proofs table with the corresponding transaction hash
         sdk.confidential_outputs_api()
-            .locks_set_transaction_hash(proof_id, tx_id)?;
+            .locks_set_transaction_id(proof_id, tx_id)?;
     }
 
     info!(
@@ -241,7 +241,7 @@ pub async fn handle_submit_dry_run(
     for proof_id in req.proof_ids {
         // update the proofs table with the corresponding transaction hash
         sdk.confidential_outputs_api()
-            .locks_set_transaction_hash(proof_id, transaction.calculate_id())?;
+            .locks_set_transaction_id(proof_id, transaction.calculate_id())?;
     }
 
     info!(
@@ -301,7 +301,9 @@ pub async fn handle_submit_manifest(
         .for_network(network.as_byte())
         .with_fee_instructions_builder(|builder| {
             if instructions.fee_instructions.is_empty() {
-                builder.call_method(*default_account.address(), "pay_fee", args![Amount(fee_amount)])
+                builder.call_method(*default_account.component_address(), "pay_fee", args![Amount(
+                    fee_amount
+                )])
             } else {
                 builder.with_instructions(instructions.fee_instructions)
             }
@@ -311,7 +313,7 @@ pub async fn handle_submit_manifest(
             if signing_key_index == default_account.key_index() {
                 builder
             } else {
-                builder.add_signature(&seal_signer_pk.to_byte_type(), &acc_key.key)
+                builder.add_signer(&seal_signer_pk.to_byte_type(), &acc_key.key)
             }
         });
     let signatures = builder.signatures().to_vec();
@@ -377,6 +379,7 @@ pub async fn handle_get(
         transaction: transaction.transaction,
         result: transaction.finalize,
         status: transaction.status,
+        invalid_reason: transaction.invalid_reason,
         last_update_time: transaction.last_update_time,
     })
 }
@@ -387,10 +390,11 @@ pub async fn handle_get_all(
     req: TransactionGetAllRequest,
 ) -> Result<TransactionGetAllResponse, anyhow::Error> {
     context.check_auth(token, &[JrpcPermission::TransactionGet])?;
-    let transactions = context
-        .wallet_sdk()
-        .transaction_api()
-        .fetch_all(req.status, req.component)?;
+    let transactions =
+        context
+            .wallet_sdk()
+            .transaction_api()
+            .fetch_all(req.status, req.component, req.signer_public_key)?;
     Ok(TransactionGetAllResponse { transactions })
 }
 
@@ -512,7 +516,7 @@ pub async fn handle_publish_template(
 
     let transaction = context
         .transaction_builder()
-        .fee_transaction_pay_from_component(*fee_account.address(), req.max_fee)
+        .fee_transaction_pay_from_component(*fee_account.component_address(), req.max_fee)
         .publish_template(wasm_binary)
         .build_unsigned_transaction();
 

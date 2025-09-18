@@ -29,6 +29,7 @@ use tari_ootle_storage::{
         EpochCheckpoint,
         PendingShardStateTreeDiff,
         SubstateChange,
+        TreeRootSummary,
         ValidatorConsensusStats,
     },
     StateStore,
@@ -260,7 +261,7 @@ where
     let shard_group = eoe_block.shard_group();
 
     // Fetch the state roots of the shards in the shard group
-    let mut shard_roots = IndexMap::with_capacity(shard_group.len() + 1);
+    let mut shard_tree_summary = IndexMap::with_capacity(shard_group.len() + 1);
 
     // adding global shard first
     if let Some(version) = tx.state_tree_versions_get_latest(Shard::global())? {
@@ -270,15 +271,24 @@ where
             .get_root_hash(version)
             .map_err(|e| HotStuffError::StateTreeError(e.into()))?;
 
-        shard_roots.insert(Shard::global(), root_hash);
+        shard_tree_summary.insert(Shard::global(), TreeRootSummary {
+            root_hash,
+            state_version: version,
+        });
     } else {
-        shard_roots.insert(Shard::global(), SPARSE_MERKLE_PLACEHOLDER_HASH);
+        shard_tree_summary.insert(Shard::global(), TreeRootSummary {
+            root_hash: SPARSE_MERKLE_PLACEHOLDER_HASH,
+            state_version: 0,
+        });
     }
 
     for shard in shard_group.shard_iter() {
         let Some(version) = tx.state_tree_versions_get_latest(shard)? else {
             // At v0 there have been no state changes
-            shard_roots.insert(shard, SPARSE_MERKLE_PLACEHOLDER_HASH);
+            shard_tree_summary.insert(shard, TreeRootSummary {
+                root_hash: SPARSE_MERKLE_PLACEHOLDER_HASH,
+                state_version: 0,
+            });
             continue;
         };
 
@@ -288,10 +298,13 @@ where
             .get_root_hash(version)
             .map_err(|e| HotStuffError::StateTreeError(e.into()))?;
 
-        shard_roots.insert(shard, root_hash);
+        shard_tree_summary.insert(shard, TreeRootSummary {
+            root_hash,
+            state_version: version,
+        });
     }
 
-    let checkpoint = EpochCheckpoint::new(commit_proof, shard_roots);
+    let checkpoint = EpochCheckpoint::new(commit_proof, shard_tree_summary);
     Ok(checkpoint)
 }
 

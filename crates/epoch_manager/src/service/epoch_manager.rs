@@ -31,7 +31,7 @@ use std::{
 use log::*;
 use tari_common_types::types::FixedHash;
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::FromByteType;
+use tari_engine_types::ConvertFromByteType;
 use tari_ootle_common_types::{
     committee::{Committee, CommitteeInfo, CommitteeMember},
     displayable::Displayable,
@@ -52,7 +52,7 @@ use tokio::sync::{broadcast, oneshot};
 
 use crate::{
     error::EpochManagerError,
-    service::config::EpochManagerConfig,
+    service::{config::EpochManagerConfig, NetworkDescription, ShardGroupInfo},
     traits::{EpochManagerSpec, LayerOneTransactionSubmitter},
     EpochManagerEvent,
 };
@@ -161,7 +161,7 @@ where TSpec: EpochManagerSpec
     ) -> Result<(), EpochManagerError> {
         info!(target: LOG_TARGET, "Registering validator node for epoch {}", activation_epoch);
 
-        let Ok(vn_pk) = RistrettoPublicKey::try_from_byte_type(&validator_public_key) else {
+        let Ok(vn_pk) = RistrettoPublicKey::convert_from_byte_type(&validator_public_key) else {
             return Err(EpochManagerError::InvalidPublicKeyBytes {
                 public_key: validator_public_key,
             });
@@ -325,7 +325,6 @@ where TSpec: EpochManagerSpec
             return self.get_validator_nodes_per_epoch(epoch);
         }
 
-        // A shard a equal slice of the shard space that a validator fits into
         let shard_group = substate_address.to_shard_group(self.config.num_preshards, num_committees);
 
         // TODO(perf): fetch full validator node records for the shard group in single query (current O(n + 1) queries)
@@ -336,7 +335,7 @@ where TSpec: EpochManagerSpec
             let vn = self
                 .get_validator_node_by_public_key(epoch, &member.public_key)?
                 .ok_or_else(|| EpochManagerError::ValidatorNodeNotRegistered {
-                    address: RistrettoPublicKey::try_from_byte_type(&member.public_key)
+                    address: RistrettoPublicKey::convert_from_byte_type(&member.public_key)
                         .ok()
                         .and_then(|pk| TSpec::Addr::try_from_public_key(&pk))
                         .map(|a| a.to_string())
@@ -433,7 +432,7 @@ where TSpec: EpochManagerSpec
         let vn = self
             .get_validator_node_by_public_key(epoch, &self.node_public_key)?
             .ok_or_else(|| EpochManagerError::ValidatorNodeNotRegistered {
-                address: RistrettoPublicKey::try_from_byte_type(&self.node_public_key)
+                address: RistrettoPublicKey::convert_from_byte_type(&self.node_public_key)
                     .ok()
                     .and_then(|pk| TSpec::Addr::try_from_public_key(&pk))
                     .map(|a| a.to_string())
@@ -463,6 +462,15 @@ where TSpec: EpochManagerSpec
     ) -> Result<CommitteeInfo, EpochManagerError> {
         let num_committees = self.get_number_of_committees(epoch)?;
         let shard_group = substate_address.to_shard_group(self.config.num_preshards, num_committees);
+        self.get_committee_info(epoch, shard_group)
+    }
+
+    pub fn get_committee_info(
+        &self,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> Result<CommitteeInfo, EpochManagerError> {
+        let num_committees = self.get_number_of_committees(epoch)?;
         let mut tx = self.global_db.create_transaction()?;
         let mut validator_node_db = self.global_db.validator_nodes(&mut tx);
         let num_validators = validator_node_db.count_in_shard_group(epoch, shard_group)?;
@@ -470,7 +478,7 @@ where TSpec: EpochManagerSpec
         // validators. This may change in the future if e.g. we introduce staking.
         let total_vote_power = VotePower::of(num_validators);
         let num_validators = u32::try_from(num_validators).map_err(|_| EpochManagerError::IntegerOverflow {
-            func: "get_committee_shard",
+            func: "get_committee_info",
         })?;
         Ok(CommitteeInfo::new(
             self.config.num_preshards,
@@ -564,6 +572,31 @@ where TSpec: EpochManagerSpec
             .map_err(|e| EpochManagerError::FailedToSubmitLayerOneTransaction { details: e.to_string() })?;
 
         Ok(())
+    }
+
+    pub fn get_network_description(&self) -> Result<NetworkDescription, EpochManagerError> {
+        let epoch = self.current_epoch();
+        let num_committees = self.get_number_of_committees(epoch)?;
+        let shard_groups = self.config.num_preshards.all_shard_groups_iter(num_committees);
+
+        let mut tx = self.global_db.create_transaction()?;
+        let mut validator_node_db = self.global_db.validator_nodes(&mut tx);
+
+        let shard_groups = shard_groups
+            .map(|shard_group| {
+                let num_members = validator_node_db.count_in_shard_group(epoch, shard_group)?;
+                let num_members = u32::try_from(num_members).map_err(|_| EpochManagerError::IntegerOverflow {
+                    func: "get_network_description",
+                })?;
+                Ok((shard_group, ShardGroupInfo { num_members }))
+            })
+            .collect::<Result<_, EpochManagerError>>()?;
+
+        Ok(NetworkDescription {
+            epoch,
+            shard_groups,
+            num_preshards: self.config.num_preshards,
+        })
     }
 }
 

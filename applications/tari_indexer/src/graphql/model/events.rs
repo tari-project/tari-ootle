@@ -20,14 +20,12 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::BTreeMap, str::FromStr, sync::Arc};
+use std::{collections::BTreeMap, str::FromStr};
 
 use async_graphql::{Context, EmptyMutation, EmptySubscription, Object, Schema, SimpleObject};
 use log::*;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
-use tari_template_lib::types::Hash;
-use tari_transaction::TransactionId;
 
 use crate::event_manager::EventManager;
 
@@ -74,55 +72,12 @@ impl EventQuery {
             "Querying events. topic: {:?}, substate_id: {:?}, offset: {}, limit: {}, ", topic, substate_id, offset, limit,
         );
         let substate_id = substate_id.map(|str| SubstateId::from_str(&str)).transpose()?;
-        let event_manager = ctx.data_unchecked::<Arc<EventManager>>();
-        let events = event_manager
+        let event_manager = ctx.data_unchecked::<EventManager>();
+        event_manager
             .get_events_from_db(topic, substate_id, offset, limit)
             .await?
-            .iter()
-            .map(|e| Event::from_engine_event(e.clone()))
-            .collect::<Result<Vec<Event>, anyhow::Error>>()?;
-
-        Ok(events)
-    }
-
-    pub async fn save_event(
-        &self,
-        ctx: &Context<'_>,
-        substate_id: String,
-        template_address: String,
-        tx_hash: String,
-        topic: String,
-        payload: String,
-        version: u64,
-        timestamp: u64,
-    ) -> Result<Event, anyhow::Error> {
-        info!(
-            target: LOG_TARGET,
-            "Saving event for substate_id = {}, tx_hash = {} and topic = {}", substate_id, tx_hash, topic
-        );
-
-        let substate_id = SubstateId::from_str(&substate_id)?;
-        let template_address = Hash::from_str(&template_address)?;
-        let tx_hash = TransactionId::from_hex(&tx_hash)?;
-
-        let payload = serde_json::from_str(&payload)?;
-        let event_manager = ctx.data_unchecked::<Arc<EventManager>>();
-        event_manager.save_event_to_db(
-            &substate_id,
-            template_address,
-            tx_hash,
-            topic.clone(),
-            &payload,
-            version,
-            timestamp,
-        )?;
-
-        Ok(Event {
-            substate_id: Some(substate_id.to_string()),
-            template_address: template_address.into_array(),
-            tx_hash: tx_hash.into_array(),
-            topic,
-            payload: payload.into_iter().collect(),
-        })
+            .into_iter()
+            .map(Event::from_engine_event)
+            .collect()
     }
 }

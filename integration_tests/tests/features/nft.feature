@@ -6,26 +6,7 @@
 Feature: NFTs
 
   Scenario: Mint, mutate and burn non fungible tokens
-
-    ###### Setup
-    # Initialize a base node, wallet, miner and VN
-    Given a base node BASE
-    Given a wallet WALLET connected to base node BASE
-    Given a miner MINER connected to base node BASE and wallet WALLET
-
-    # Initialize a validator node
-    Given a validator node VN connected to base node BASE and wallet daemon WALLET_D
-
-    # Fund wallet to send VN registration tx
-    When miner MINER mines 10 new blocks
-    When wallet WALLET has at least 2000 T
-    When validator node VN sends a registration transaction to base wallet WALLET
-    When miner MINER mines 26 new blocks
-    Then the validator node VN is listed as registered
-
-    # Initialize indexer and connect wallet daemon
-    Given an indexer IDX connected to base node BASE
-    Given a wallet daemon WALLET_D connected to indexer IDX
+    Given a network with registered validator VN and wallet daemon WALLET_D
 
     # Publish the "basic_nft" template
     When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
@@ -78,26 +59,7 @@ Feature: NFTs
 
 
   Scenario: Create resource and mint in one transaction
-
-    ##### Setup
-    # Initialize a base node, wallet, miner and VN
-    Given a base node BASE
-    Given a wallet WALLET connected to base node BASE
-    Given a miner MINER connected to base node BASE and wallet WALLET
-
-    # Initialize a validator node
-    Given a validator node VN connected to base node BASE and wallet daemon WALLET_D
-
-    # Fund wallet to send VN registration tx
-    When miner MINER mines 10 new blocks
-    When wallet WALLET has at least 2000 T
-    When validator node VN sends a registration transaction to base wallet WALLET
-    When miner MINER mines 26 new blocks
-    Then the validator node VN is listed as registered
-
-    # Initialize indexer and connect wallet daemon
-    Given an indexer IDX connected to base node BASE
-    Given a wallet daemon WALLET_D connected to indexer IDX
+    Given a network with registered validator VN and wallet daemon WALLET_D
 
     # Publish the "basic_nft" template
     When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins

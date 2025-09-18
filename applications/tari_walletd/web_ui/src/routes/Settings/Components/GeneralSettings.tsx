@@ -26,7 +26,7 @@ import { useTheme } from "@mui/material/styles";
 import IndexerSettings from "./IndexerSettings";
 import { Divider } from "@mui/material";
 import React, { useEffect, useState } from "react";
-import { settingsGet } from "../../../utils/json_rpc";
+import { settingsGet } from "@utils/json_rpc";
 
 function GeneralSettings() {
   const theme = useTheme();

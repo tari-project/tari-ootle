@@ -31,14 +31,10 @@ use tari_template_lib::{
     types::{crypto::RistrettoPublicKeyBytes, Amount},
 };
 
-use crate::FromByteType;
+use crate::ConvertFromByteType;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Resource {
     resource_type: ResourceType,
     owner_rule: OwnerRule,
@@ -135,7 +131,7 @@ impl Resource {
     /// or returning an error if the view key is not a canonical compressed representation of a Ristretto public key.
     pub fn to_view_key_public_key(&self) -> Result<Option<RistrettoPublicKey>, ByteArrayError> {
         match self.view_key.as_ref() {
-            Some(view_key) => RistrettoPublicKey::try_from_byte_type(view_key).map(Some),
+            Some(view_key) => RistrettoPublicKey::convert_from_byte_type(view_key).map(Some),
             None => Ok(None),
         }
     }

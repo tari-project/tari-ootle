@@ -6,34 +6,13 @@
 Feature: Substates
 
   Scenario: Transactions with DOWN local substates are rejected
-    # Initialize a base node, wallet, miner and VN
-    Given a base node BASE
-    Given a wallet WALLET connected to base node BASE
-    Given a miner MINER connected to base node BASE and wallet WALLET
-
-    # Initialize a VN
-    Given a validator node VAL_1 connected to base node BASE and wallet daemon WALLET_D
-
-    # The wallet must have some funds before the VN sends transactions
-    When miner MINER mines 6 new blocks
-    When wallet WALLET has at least 20 T
-
-    # VN registration
-    When validator node VAL_1 sends a registration transaction to base wallet WALLET
-
-    # Register the "counter" template
-    When base wallet WALLET registers the template "counter"
-    When miner MINER mines 23 new blocks
-    Then VAL_1 has scanned to height 26
-    Then the validator node VAL_1 is listed as registered
-    Then the template "counter" is listed as registered by the validator node VAL_1
-
-    # Initialize indexer and connect wallet daemon
-    Given an indexer IDX connected to base node BASE
-    Given a wallet daemon WALLET_D connected to indexer IDX
+    Given a network with registered validator VN and wallet daemon WALLET_D
 
     # Create account
-    When I create an account ACC via the wallet daemon WALLET_D with 10000 free coins
+    When I create an account ACC via the wallet daemon WALLET_D with 10000000 free coins
+
+    # Publish the "counter" template
+    When wallet daemon WALLET_D publishes the template "counter" using account ACC
 
     # Create a new Counter component
     When I call function "new" on template "counter" using account ACC to pay fees via wallet daemon WALLET_D named "COUNTER_1"

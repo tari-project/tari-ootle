@@ -49,15 +49,15 @@ where
             return Err(NetworkClientError::NoInputsProvided);
         }
 
+        // Ensure initial scanning has completed to ensure an accurate epoch
+        self.epoch_manager.wait_for_initial_scanning_to_complete().await?;
+
         let tx_id = transaction.calculate_id();
 
         info!(
             target: LOG_TARGET,
-            "Submitting transaction {} to the validator node", tx_id
+            "Submitting transaction {} to the network", tx_id
         );
-
-        // Ensure initial scanning has completed to ensure an accurate epoch
-        self.epoch_manager.wait_for_initial_scanning_to_complete().await?;
 
         let involved = transaction
             .all_inputs_iter()
@@ -101,53 +101,6 @@ where
         }
 
         Ok(tx_id)
-    }
-
-    #[allow(dead_code)]
-    pub async fn try_with_random_members<'a, F, T, E, TFut>(
-        &self,
-        num_to_query: usize,
-        shard_group: Option<ShardGroup>,
-        mut callback: F,
-    ) -> Result<T, NetworkClientError>
-    where
-        F: FnMut(TClientFactory::Client) -> TFut,
-        TFut: Future<Output = Result<T, E>> + 'a,
-        TClientFactory::Client: 'a,
-        T: 'static,
-        E: Display,
-    {
-        let epoch = self.epoch_manager.current_epoch().await?;
-        let mut attempted = vec![];
-
-        let mut last_error = None;
-        while attempted.len() < num_to_query {
-            let vn = self
-                .epoch_manager
-                .get_random_committee_member(epoch, shard_group, attempted.clone())
-                .await?;
-
-            let client = self.client_provider.create_client(&vn.address);
-            match callback(client).await {
-                Ok(ret) => {
-                    return Ok(ret);
-                },
-                Err(err) => {
-                    warn!(
-                        target: LOG_TARGET,
-                        "Request failed for validator '{}': {}", vn, err
-                    );
-                    last_error = Some(err.to_string());
-                },
-            }
-
-            attempted.push(vn.address);
-        }
-
-        Err(NetworkClientError::AllValidatorsFailed {
-            committee_size: attempted.len(),
-            last_error,
-        })
     }
 
     pub async fn try_single_with_committee<'a, F, T, E, TFut>(
@@ -194,6 +147,13 @@ where
     {
         let epoch = self.epoch_manager.current_epoch().await?;
         let num_committees = self.epoch_manager.get_num_committees(epoch).await?;
+
+        info!(
+            target: LOG_TARGET,
+            "Fetching committee members at epoch {} ({} total committees)",
+            epoch,
+            num_committees,
+        );
 
         let mut all_members = HashMap::new();
         for substate_address in substate_addresses {

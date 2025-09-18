@@ -99,7 +99,9 @@ message GetSubstateResponse {
   // Encoded Substate
   bytes substate = 3;
   SubstateStatus status = 4;
-  repeated tari.ootle.consensus.QuorumCertificate quorum_certificates = 5;
+  uint64 created_at_state_version = 5;
+  // Optional (i.e. 0 if not destroyed)
+  uint64 destroyed_at_state_version = 6;
 }
 
 enum SubstateStatus {
@@ -171,7 +173,7 @@ message SyncBlocksRequest {
 // Clippy complains about too many bools and prefers an enum
 enum StreamSubstateSelection {
   No = 0;
-  All = 1;
+  AllSubstates = 1;
   TransactionReceiptsOnly = 2;
 }
 
@@ -192,42 +194,60 @@ message QuorumCertificates {
   repeated tari.ootle.consensus.QuorumCertificate quorum_certificates = 1;
 }
 
-message GetCheckpointRequest {
-  uint64 epoch = 1;
+message GetCheckpointsRequest {
+  tari.ootle.common.Epoch from_epoch = 1;
+  uint32 num_to_return = 2;
 }
 
-message GetCheckpointResponse {
-  EpochCheckpoint checkpoint = 1;
+message GetCheckpointsResponse {
+  repeated EpochCheckpoint checkpoints = 1;
 }
 
 message EpochCheckpoint {
   bytes proof = 1;
-  map<uint32, bytes> shard_roots = 2;
+  map<uint32, TreeRootSummary> shard_tree_summary = 2;
+}
+
+message TreeRootSummary {
+  bytes root_hash = 1;
+  uint64 state_version = 2;
 }
 
 message SyncStateRequest {
-  uint64 start_epoch = 1;
-  uint32 start_shard = 2;
-  uint64 start_seq = 3;
-  // The shard in the current shard-epoch that is requested.
-  // This will limit the state transitions returned to those that fall within this shard-epoch.
-  uint64 current_epoch = 4;
+  uint64 start_state_version = 1;
+  uint32 shard = 2;
+  // Optional - If not provided, state will be streamed until the current epoch
+  tari.ootle.common.Epoch until_epoch = 3;
+  // Bitflags representing which substates to return.
+  // enum StateSyncValueFilterFlags {
+  //  // Includes all substates
+  //  None = 0;
+  //  All = 0x0001;
+  //  // Includes Components
+  //  Component = 0x0002;
+  //  // Includes resources
+  //  Resource = 0x0004;
+  //  // Includes vaults
+  //  Vault = 0x0008;
+  //  // Includes fungible and non-fungible assets
+  //  NonFungible = 0x0010;
+  //  // Includes transaction receipts
+  //  TransactionReceipt = 0x0020;
+  //  // Includes published template metadata
+  //  Template = 0x0040;
+  //  // Includes validator fee pool substates
+  //  ValidatorFeePool = 0x0080;
+  //  // Includes UTXOs
+  //  Utxo = 0x0100;
+  //}
+  uint32 value_filters = 4;
 }
 
 message SyncStateResponse {
-  repeated StateTransition transitions = 1;
-}
-
-message StateTransition {
-  StateTransitionId id = 1;
-  SubstateUpdate update = 2;
-  uint64 state_version = 3;
-}
-
-message StateTransitionId {
-  uint64 epoch = 1;
-  uint32 shard = 2;
-  uint64 seq = 3;
+  uint64 state_version = 1;
+  repeated SubstateUpdate updates = 2;
+  bool has_more = 3;
+  tari.ootle.common.Epoch epoch = 4;
 }
 
 enum TemplateType {
@@ -246,3 +266,5 @@ message SyncTemplatesResponse {
   string template_name = 4;
   bytes binary = 5;
 }
+
+message GetChainSummary {}

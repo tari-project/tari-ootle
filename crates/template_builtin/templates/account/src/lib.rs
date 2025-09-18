@@ -55,7 +55,6 @@ mod account_template {
                     .add_method_rule("get_balances", rule!(allow_all))
                     .add_method_rule("deposit", rule!(allow_all))
                     .add_method_rule("deposit_all", rule!(allow_all))
-                    .add_method_rule("get_non_fungible_ids", rule!(allow_all))
                     // By default, only the owner of the token will be able to withdraw funds from the account
                     .default(rule!(deny_all)),
             );
@@ -73,7 +72,6 @@ mod account_template {
                 .create()
         }
 
-        // #[access_rule(allow_all)]
         pub fn balance(&self, resource: ResourceAddress) -> Amount {
             self.vaults
                 .get(&resource)
@@ -81,11 +79,11 @@ mod account_template {
                 .unwrap_or_else(Amount::zero)
         }
 
+        /// Only applies to confidential resources. Returns the number of commitments in the vault.
         pub fn confidential_commitment_count(&self, resource: ResourceAddress) -> u32 {
             self.get_vault(resource).commitment_count()
         }
 
-        // #[access_rule(requires(owner_badge))]
         pub fn withdraw(&mut self, resource: ResourceAddress, amount: Amount) -> Bucket {
             emit_event("withdraw", [
                 ("amount", amount.to_string()),
@@ -95,7 +93,6 @@ mod account_template {
             v.withdraw(amount)
         }
 
-        // #[access_rules(requires(owner_badge))]
         pub fn withdraw_non_fungible(&mut self, resource: ResourceAddress, nf_id: NonFungibleId) -> Bucket {
             emit_event("withdraw_non_fungible", [
                 ("id", nf_id.to_string()),
@@ -117,7 +114,6 @@ mod account_template {
             v.withdraw_non_fungibles(nf_ids)
         }
 
-        // #[access_rules(requires(owner_badge))]
         pub fn withdraw_confidential(
             &mut self,
             resource: ResourceAddress,
@@ -132,11 +128,11 @@ mod account_template {
             v.withdraw_confidential(withdraw_proof)
         }
 
-        // #[access_rules(allow_all)]
         pub fn deposit(&mut self, bucket: Bucket) {
             emit_event("deposit", [
                 ("amount", bucket.amount().to_string()),
                 ("resource", bucket.resource_address().to_string()),
+                ("resource_type", bucket.resource_type().to_string()),
             ]);
             let resource_address = bucket.resource_address();
             let vault_mut = self
@@ -150,12 +146,6 @@ mod account_template {
             for bucket in buckets {
                 self.deposit(bucket);
             }
-        }
-
-        // #[access_rules(require(owner_badge))]
-        pub fn get_non_fungible_ids(&self, resource: ResourceAddress) -> Vec<NonFungibleId> {
-            let v = self.get_vault(resource);
-            v.get_non_fungible_ids()
         }
 
         fn get_vault(&self, resource: ResourceAddress) -> &Vault {
@@ -189,17 +179,20 @@ mod account_template {
 
         // Fee methods. These are used to pay fees and satisfy a "duck-typed" interface.
 
-        /// Pay fees from previously revealed confidential resource.
+        /// Pay fees from previously revealed stealth resource.
         pub fn pay_fee(&mut self, amount: Amount) {
             emit_event("pay_fee", [("amount", amount.to_string())]);
-            self.get_vault_mut(CONFIDENTIAL_TARI_RESOURCE_ADDRESS).pay_fee(amount);
+            self.get_vault_mut(STEALTH_TARI_RESOURCE_ADDRESS).pay_fee(amount);
         }
 
-        /// Reveal confidential tokens and return the revealed bucket to pay fees.
-        pub fn pay_fee_confidential(&mut self, proof: ConfidentialWithdrawProof) {
-            emit_event("pay_fee_confidential", [("num_inputs", proof.inputs.len().to_string())]);
-            self.get_vault_mut(CONFIDENTIAL_TARI_RESOURCE_ADDRESS)
-                .pay_fee_confidential(proof);
+        /// Reveal stealth tokens and return the revealed bucket to pay fees.
+        pub fn pay_fee_stealth(&mut self, transfer: StealthTransferStatement) {
+            emit_event("pay_fee", [
+                ("stealth", "true".to_string()),
+                ("num_inputs", transfer.inputs_statement.inputs.len().to_string()),
+            ]);
+            self.get_vault_mut(STEALTH_TARI_RESOURCE_ADDRESS)
+                .pay_fee_stealth(transfer);
         }
 
         pub fn create_proof_for_resource(&mut self, resource: ResourceAddress) -> Proof {
@@ -228,12 +221,6 @@ mod account_template {
             ]);
             let v = self.get_vault_mut(resource);
             v.create_proof_by_amount(amount)
-        }
-
-        /// Utility function to allow bucket NFT content to be inspected. An empty vec is returned if the bucket does
-        /// not contain any NFTs or does not contain a NonFungible resource.
-        pub fn get_non_fungible_ids_for_bucket(bucket: Bucket) -> Vec<NonFungibleId> {
-            bucket.get_non_fungible_ids()
         }
     }
 }

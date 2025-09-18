@@ -21,14 +21,75 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useState } from "react";
-import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Collapse } from "@mui/material";
-import { DataTableCell, AccordionIconButton } from "../../Components/StyledComponents";
+import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Collapse, Box, Chip, Typography } from "@mui/material";
+import { DataTableCell, AccordionIconButton } from "@components/StyledComponents";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import CodeBlockExpand from "../../Components/CodeBlock";
+import CodeBlockExpand from "@components/CodeBlock";
 import { useTheme } from "@mui/material/styles";
 import { Event, substateIdToString } from "@tari-project/typescript-bindings";
-import CopyAddress from "../../Components/CopyAddress";
+import CopyAddress from "@components/CopyAddress";
+
+function renderPayloadField(key: string, value: any) {
+  if (key === "amount" && typeof value === "string") {
+    return (
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+        <Typography variant="body2" color="text.secondary">Amount:</Typography>
+        <Chip label={value} size="small" color="primary" variant="outlined" />
+      </Box>
+    );
+  }
+  
+  if (key === "resource_type" && typeof value === "string") {
+    return (
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+        <Typography variant="body2" color="text.secondary">Resource Type:</Typography>
+        <Chip label={value} size="small" color="secondary" variant="outlined" />
+      </Box>
+    );
+  }
+  
+  if (key === "resource" || key === "resource_address") {
+    return (
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+        <Typography variant="body2" color="text.secondary">Resource:</Typography>
+        <CopyAddress address={value} />
+      </Box>
+    );
+  }
+  
+  if (key === "module_name" && typeof value === "string") {
+    return (
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+        <Typography variant="body2" color="text.secondary">Module:</Typography>
+        <Chip label={value} size="small" color="info" variant="outlined" />
+      </Box>
+    );
+  }
+  
+  return (
+    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+      <Typography variant="body2" color="text.secondary">{key}:</Typography>
+      <Typography variant="body2">{String(value)}</Typography>
+    </Box>
+  );
+}
+
+function renderPayload(payload: any) {
+  if (!payload || typeof payload !== "object") {
+    return <Typography variant="body2">{JSON.stringify(payload)}</Typography>;
+  }
+  
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+      {Object.entries(payload).map(([key, value]) => (
+        <Box key={key}>
+          {renderPayloadField(key, value)}
+        </Box>
+      ))}
+    </Box>
+  );
+}
 
 function RowData({ substate_id, template_address, topic, tx_hash, payload }: Event, index: number) {
   const [open, setOpen] = useState(false);
@@ -36,7 +97,11 @@ function RowData({ substate_id, template_address, topic, tx_hash, payload }: Eve
   return (
     <>
       <TableRow key={index}>
-        <DataTableCell sx={{ borderBottom: "none", textAlign: "center" }}>
+        <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>{topic}</DataTableCell>
+        <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>{substate_id ? <CopyAddress address={substateIdToString(substate_id)} /> : "--"}</DataTableCell>
+        <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>{template_address ? <CopyAddress address={template_address} /> : "--"}</DataTableCell>
+        <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>{tx_hash ? <CopyAddress address={tx_hash} /> : "--"}</DataTableCell>
+        <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none", textAlign: "center" }}>
           <AccordionIconButton
             aria-label="expand row"
             size="small"
@@ -47,10 +112,6 @@ function RowData({ substate_id, template_address, topic, tx_hash, payload }: Eve
             {open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
           </AccordionIconButton>
         </DataTableCell>
-        <DataTableCell>{topic}</DataTableCell>
-        <DataTableCell>{substate_id ? <CopyAddress address={substateIdToString(substate_id)} /> : "--"}</DataTableCell>
-        <DataTableCell>{template_address ? <CopyAddress address={template_address} /> : "--"}</DataTableCell>
-        <DataTableCell>{tx_hash ? <CopyAddress address={tx_hash} /> : "--"}</DataTableCell>
       </TableRow>
       <TableRow>
         <DataTableCell
@@ -62,7 +123,13 @@ function RowData({ substate_id, template_address, topic, tx_hash, payload }: Eve
           colSpan={5}
         >
           <Collapse in={open} timeout="auto" unmountOnExit>
-            <CodeBlockExpand title="Payload" content={payload} />
+            <Box sx={{ p: 2, backgroundColor: theme.palette.accent.background, borderRadius: 1 }}>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>Payload Details</Typography>
+              {renderPayload(payload)}
+              <Box sx={{ mt: 2 }}>
+                <CodeBlockExpand title="Raw Payload" content={payload} />
+              </Box>
+            </Box>
           </Collapse>
         </DataTableCell>
       </TableRow>
@@ -76,11 +143,11 @@ export default function Events({ data }: { data: Event[] }) {
       <Table>
         <TableHead>
           <TableRow>
-            <TableCell width={90}>Payload</TableCell>
             <TableCell>Topic</TableCell>
             <TableCell>Substate Id</TableCell>
             <TableCell>Template Address</TableCell>
             <TableCell>Transaction Hash</TableCell>
+            <TableCell width={90}>Details</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>

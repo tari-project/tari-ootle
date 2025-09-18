@@ -76,7 +76,7 @@ pub async fn handle_list(
     let non_fungible_api = sdk.non_fungible_api();
 
     let non_fungibles = non_fungible_api
-        .get_all(account.address, limit, offset)
+        .get_all(account.component_address, limit, offset)
         .map_err(|e| anyhow!("Failed to list all non fungibles, with error: {}", e))?;
     Ok(ListNftsResponse { nfts: non_fungibles })
 }
@@ -105,18 +105,18 @@ pub async fn handle_mint_faucet(
 
     let inputs = sdk
         .substate_api()
-        .locate_dependent_substates(slice::from_ref(&account.address.into()), true)
+        .locate_dependent_substates(slice::from_ref(&account.component_address.into()), true)
         .await?;
     let fee = req.max_fee.unwrap_or(DEFAULT_FEE);
     let transaction = context
         .transaction_builder()
-        .fee_transaction_pay_from_component(account.address, fee)
+        .fee_transaction_pay_from_component(account.component_address, fee)
         .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![
             Amount(req.number_to_mint),
             mutable_data
         ])
         .put_last_instruction_output_on_workspace("tokens")
-        .call_method(account.address, "deposit", args![Workspace("tokens")])
+        .call_method(account.component_address, "deposit", args![Workspace("tokens")])
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .add_input(NFT_FAUCET_COMPONENT_ADDRESS)
         .add_input(NFT_FAUCET_RESOURCE_ADDRESS)
@@ -153,7 +153,7 @@ async fn try_find_target_account(
         .await
         .optional()?;
 
-    let Some(ValidatorScanResult { address, substate }) = existing_account else {
+    let Some(ValidatorScanResult { id: address, substate }) = existing_account else {
         return Ok(false);
     };
     inputs.insert(address.into());
@@ -226,10 +226,10 @@ pub async fn handle_transfer(
     // fetch accounts and its inputs
     let (fee_payer_account, fee_payer_account_inputs) = get_account_with_inputs(Some(&req.fee_payer_account), sdk)?;
     let fee_payer_account = fee_payer_account.account;
-    let fee_payer_account_address = fee_payer_account.address;
+    let fee_payer_account_address = fee_payer_account.component_address;
     let (source_account, mut inputs) = get_account_with_inputs(Some(&req.source_account), sdk)?;
     inputs.extend(fee_payer_account_inputs);
-    let source_account_address = *source_account.address();
+    let source_account_address = *source_account.component_address();
 
     let target_account_address =
         derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.target_account_public_key);
@@ -246,7 +246,7 @@ pub async fn handle_transfer(
     // add the input for the source account vault substate
     let src_vault = sdk
         .accounts_api()
-        .get_vault_by_resource(source_account.address(), &req.resource_address)?;
+        .get_vault_by_resource(source_account.component_address(), &req.resource_address)?;
     let src_vault_substate = sdk.substate_api().get_substate(&src_vault.id.into())?;
     inputs.insert(src_vault_substate.substate_id.into());
     inputs.insert(SubstateRequirement::unversioned(src_vault.resource_address));
@@ -288,7 +288,7 @@ pub async fn handle_transfer(
         .with_inputs(inputs)
         // Seal signer is the fee payer account
         .with_authorized_seal_signer()
-        .add_signature(
+        .add_signer(
             &fee_payer_account_public_key.to_byte_type(),
             &source_account_secret_key.key,
         )

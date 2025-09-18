@@ -45,7 +45,7 @@ impl ExecutionOutput {
         &self,
         inputs: I,
     ) -> Vec<VersionedSubstateIdLockIntent> {
-        if let Some(diff) = self.result.finalize.accept() {
+        if let Some(diff) = self.result.finalize.any_accept() {
             inputs
                 .into_iter()
                 .map(|(substate_req, substate)| {

@@ -10,6 +10,7 @@ license.workspace = true
 [dependencies]
 tari_common_types = { workspace = true }
 tari_crypto = { workspace = true }
+minotari_app_grpc = { workspace = true, optional = true }
 tari_ootle_common_types = { workspace = true }
 tari_ootle_storage = { workspace = true }
 tari_ootle_storage_sqlite = { workspace = true, optional = true }
@@ -29,4 +30,5 @@ url = { workspace = true }
 service = [
     "log",
     "tari_ootle_storage_sqlite",
+    "minotari_app_grpc"
 ]

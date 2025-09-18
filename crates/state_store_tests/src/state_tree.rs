@@ -3,7 +3,7 @@
 
 use tari_ootle_common_types::{optional::Optional, shard::Shard, ShardGroup};
 use tari_ootle_storage::{StateStore, StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
-use tari_state_tree::{NibblePath, Node, NodeKey, StaleTreeNode, Version};
+use tari_state_tree::{NibblePath, Node, NodeKey, StaleTreeNode, StateTreePayload};
 
 use crate::{
     helpers::{assert_eq_debug, create_rocksdb},
@@ -78,7 +78,7 @@ fn state_tree_operations(db: impl StateStore, num_nodes: usize) {
     .unwrap();
 }
 
-fn gen_nodes(version: u64, num: usize) -> impl Iterator<Item = (NodeKey, Node<Version>)> {
+fn gen_nodes(version: u64, num: usize) -> impl Iterator<Item = (NodeKey, Node<StateTreePayload>)> {
     (0..num as u64).map(move |i| {
         let node = Node::Null;
         // No possibility of key collisions

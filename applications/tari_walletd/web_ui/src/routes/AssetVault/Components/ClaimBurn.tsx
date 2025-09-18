@@ -20,27 +20,26 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
+import { FormEvent, useState } from "react";
 import { Form } from "react-router-dom";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
-import DialogTitle from "@mui/material/DialogTitle";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import Select, { SelectChangeEvent } from "@mui/material/Select/Select";
 import MenuItem from "@mui/material/MenuItem";
 import Box from "@mui/material/Box";
-import { useAccountsList } from "../../../api/hooks/useAccounts";
+import { useAccountsList } from "@api/hooks/useAccounts";
 import { useTheme } from "@mui/material/styles";
-import { accountsClaimBurn } from "../../../utils/json_rpc";
-import useAccountStore from "../../../store/accountStore";
-import { useKeysList } from "../../../api/hooks/useKeys";
-import type { AccountInfo } from "@tari-project/typescript-bindings";
+import { accountsClaimBurn, transactionsWaitResult } from "@utils/json_rpc";
+import useAccountStore from "@store/accountStore";
+import type { ComponentAddress, AccountInfo } from "@tari-project/typescript-bindings";
+import PopupTitle from "@/components/PopupTitle";
 
 type FormState = {
-  account: string;
+  account: ComponentAddress;
   claimProof: string;
   fee: string;
   is_valid_json: boolean;
@@ -102,14 +101,19 @@ export default function ClaimBurn() {
     });
   };
 
-  const onClaimBurn = async () => {
+  const onClaimBurn = async (e: FormEvent) => {
+    e.preventDefault();
     try {
       setClaimBurnFormState({ ...claimBurnFormState, disabled: true });
-      await accountsClaimBurn({
-        account: { Name: claimBurnFormState.account },
+      const resp = await accountsClaimBurn({
+        account: { ComponentAddress: claimBurnFormState.account },
         claim_proof: JSON.parse(claimBurnFormState.claimProof),
         max_fee: +claimBurnFormState.fee,
       });
+      const waitResp = await transactionsWaitResult({ transaction_id: resp.transaction_id, timeout_secs: 30 });
+      if (waitResp.status != "Accepted") {
+        throw new Error(`Transaction not accepted: ${waitResp.status}`);
+      }
       setOpen(false);
       setPopup({ title: "Claimed", error: false });
       setClaimBurnFormState(INITIAL_FORM_STATE);
@@ -134,7 +138,7 @@ export default function ClaimBurn() {
         Claim Burn
       </Button>
       <Dialog open={open} onClose={handleClose}>
-        <DialogTitle>Claim Burn</DialogTitle>
+        <PopupTitle onClose={handleClose} title="Claim Burn" />
         <DialogContent className="dialog-content">
           <Form onSubmit={onClaimBurn} className="flex-container-vertical" style={{ paddingTop: theme.spacing(1) }}>
             <FormControl>
@@ -148,12 +152,10 @@ export default function ClaimBurn() {
                 style={{ flexGrow: 1, minWidth: "200px" }}
                 disabled={claimBurnFormState.disabled}
               >
-                {accountsList?.accounts?.map((account, i) => (
-                  <MenuItem key={i} value={account.account.address}>
+                {accountsList?.accounts?.map((account: AccountInfo, i: number) => (
+                  <MenuItem key={i} value={account.account.component_address}>
                     <div>
-                      <i>
-                        {account.account.name} ({account.public_key})
-                      </i>
+                      <i>{account.account.name}</i>
                     </div>
                   </MenuItem>
                 ))}

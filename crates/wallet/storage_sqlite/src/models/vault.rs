@@ -27,6 +27,7 @@ pub struct Vault {
     pub locked_revealed_balance: i64,
     pub token_symbol: Option<String>,
     pub divisibility: i32,
+    pub _locked_by: Option<i32>,
     pub created_at: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
 }

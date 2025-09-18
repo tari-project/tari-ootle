@@ -41,6 +41,7 @@ message Instruction {
     PUBLISH_TEMPLATE = 9;
     ALLOCATE_ADDRESS = 10;
     STEALTH_TRANSFER = 11;
+    PAY_FEE = 12;
   }
   InstructionType instruction_type = 1;
 
@@ -67,7 +68,7 @@ message Instruction {
   bytes claim_burn_range_proof = 11;
   CommitmentSignature claim_burn_proof_of_knowledge = 12;
   bytes claim_burn_public_key = 13;
-  ConfidentialWithdrawProof claim_burn_withdraw_proof = 14;
+  StealthTransferStatement claim_burn_transfer = 14;
 
   // ClaimValidatorFees
   bytes claim_validator_fees_address = 15;
@@ -94,6 +95,9 @@ message Instruction {
   ResourceAddressRef stealth_transfer_resource_address = 26;
   StealthTransferStatement stealth_transfer_statement = 27;
   WorkspaceOffsetId stealth_transfer_revealed_input_bucket = 28;
+
+  StealthTransferStatement pay_fee_stealth_transfer_statement = 29;
+  WorkspaceOffsetId pay_fee_revealed_input_bucket = 30;
 }
 
 message ComponentCall {

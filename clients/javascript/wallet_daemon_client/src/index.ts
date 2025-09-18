@@ -6,7 +6,7 @@
 import type {
   AccountGetDefaultRequest,
   AccountGetRequest,
-  AccountGetResponse,
+  AccountGetResponse, AccountsAssociateStealthResourceRequest, AccountsAssociateStealthResourceResponse,
   AccountsCreateFreeTestCoinsRequest,
   AccountsCreateFreeTestCoinsResponse,
   AccountsCreateRequest,
@@ -48,11 +48,10 @@ import type {
   PublishTemplateRequest,
   PublishTemplateResponse,
   rejectReasonToString,
-  RevealFundsRequest,
-  RevealFundsResponse,
   SettingsGetResponse,
   SettingsSetRequest,
-  SettingsSetResponse, StealthTransferRequest, StealthTransferResponse,
+  SettingsSetResponse, StealthTransferRequest, StealthTransferResponse, StealthUtxosListRequest,
+  StealthUtxosListResponse,
   stringToSubstateId,
   substateIdToString,
   SubstatesGetRequest,
@@ -174,8 +173,8 @@ export class WalletDaemonClient {
     return this.__invokeRpc("accounts.claim_burn", params);
   }
 
-  public accountsRevealFunds(params: RevealFundsRequest): Promise<RevealFundsResponse> {
-    return this.__invokeRpc("accounts.reveal_funds", params);
+  public accountsAssociateStealthResource(params: AccountsAssociateStealthResourceRequest): Promise<AccountsAssociateStealthResourceResponse> {
+    return this.__invokeRpc("accounts.associate_stealth_resource", params);
   }
 
   public accountsGetBalances(params: AccountsGetBalancesRequest): Promise<AccountsGetBalancesResponse> {
@@ -333,6 +332,11 @@ export class WalletDaemonClient {
   public webauthnAuthStart(params: WebauthnStartAuthRequest): Promise<WebauthnStartAuthResponse> {
     return this.__invokeRpc("webauthn.auth_start", params);
   }
+
+  public stealthUtxosList(params: StealthUtxosListRequest): Promise<StealthUtxosListResponse> {
+    return this.__invokeRpc("stealth_utxos.list", params);
+  }
+
 
   async __invokeRpc(method: string, params: object = null) {
     const id = this.id++;

@@ -30,11 +30,7 @@ const TAG: u64 = BinaryTag::Metadata as u64;
 
 /// A collection of user-defined data used to describe other types, for example, non-fungible tokens or events
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Metadata(BorTag<BTreeMap<String, String>, TAG>);
 
 impl Metadata {
@@ -82,6 +78,12 @@ impl FromStr for Metadata {
             map.insert(key, value);
         }
         Ok(Self(BorTag::new(map)))
+    }
+}
+
+impl From<()> for Metadata {
+    fn from(_: ()) -> Self {
+        Self::new()
     }
 }
 

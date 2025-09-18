@@ -29,7 +29,7 @@ use std::{
 use reqwest::Url;
 use tari_common::configuration::{CommonConfig, StringList};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::FromByteType;
+use tari_engine_types::ConvertFromByteType;
 use tari_ootle_app_utilities::{
     epoch_oracle_config::EpochOracleConfig,
     keypair::create_new_keypair,
@@ -51,9 +51,7 @@ use tokio::task;
 
 use crate::{
     helpers::{check_join_handle, get_os_assigned_port, get_os_assigned_ports, wait_listener_on_local_port},
-    indexer::spawn_indexer,
     logging::get_base_dir_for_scenario,
-    wallet_daemon::spawn_wallet_daemon,
     TariWorld,
 };
 
@@ -61,7 +59,7 @@ use crate::{
 pub struct ValidatorNodeProcess {
     pub name: String,
     pub public_key: RistrettoPublicKeyBytes,
-    pub port: u16,
+    pub p2p_port: u16,
     pub json_rpc_port: u16,
     pub web_ui_port: u16,
     pub base_node_grpc_port: u16,
@@ -96,6 +94,25 @@ impl ValidatorNodeProcess {
         let file = File::open(resp.path).expect("Could not open file");
         serde_json::from_reader(file).expect("Could not parse file")
     }
+
+    pub async fn wait_for_consensus_to_start(&self) {
+        let mut client = self.create_client();
+        let mut attempts = 60;
+        loop {
+            let resp = client.get_consensus_status().await.unwrap();
+            if resp.state == "Running" {
+                return;
+            }
+            attempts -= 1;
+            if attempts == 0 {
+                panic!(
+                    "Validator node did not start consensus in time: status: {}, epoch: {}",
+                    resp.state, resp.epoch
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    }
 }
 
 pub async fn spawn_validator_node(
@@ -112,12 +129,7 @@ pub async fn spawn_validator_node(
     let walletd = match world.wallet_daemons.get(&wallet_daemon_name) {
         Some(walletd) => walletd,
         None => {
-            let indexer_name = format!("{}_indexer", wallet_daemon_name);
-            if world.indexers.get(&indexer_name).is_none() {
-                spawn_indexer(world, indexer_name.clone(), base_node_name).await;
-            }
-            spawn_wallet_daemon(world, wallet_daemon_name.clone(), indexer_name).await;
-            world.wallet_daemons.get(&wallet_daemon_name).unwrap()
+            panic!("No wallet daemon named {} found", wallet_daemon_name);
         },
     };
     let mut wallet_client = walletd.get_authed_client().await;
@@ -132,7 +144,7 @@ pub async fn spawn_validator_node(
     let peer_seeds: Vec<String> = world
         .vn_seeds
         .values()
-        .map(|vn| format!("{}::/ip4/127.0.0.1/tcp/{}", vn.public_key, vn.port))
+        .map(|vn| format!("{}::/ip4/127.0.0.1/tcp/{}", vn.public_key, vn.p2p_port))
         .collect();
 
     let temp_dir = get_base_dir_for_scenario(
@@ -173,7 +185,7 @@ pub async fn spawn_validator_node(
             config.validator_node.p2p.listener_port = port;
 
             config.validator_node.fee_claim_public_key =
-                RistrettoPublicKey::try_from_byte_type(&key.public_key).unwrap();
+                RistrettoPublicKey::convert_from_byte_type(&key.public_key).unwrap();
 
             // Add all other VNs as peer seeds
             config.peer_seeds.peer_seeds = StringList::from(peer_seeds);
@@ -195,7 +207,7 @@ pub async fn spawn_validator_node(
     ValidatorNodeProcess {
         name: name.clone(),
         public_key,
-        port,
+        p2p_port: port,
         base_node_grpc_port,
         web_ui_port,
         handle,

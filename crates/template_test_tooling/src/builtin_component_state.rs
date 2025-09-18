@@ -15,7 +15,7 @@ use tari_engine_types::{
 use tari_template_builtin::NFT_FAUCET_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     auth::{ComponentAccessRules, OwnerRule, ResourceAccessRules},
-    constants::{CONFIDENTIAL_TARI_RESOURCE_ADDRESS, NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS},
+    constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS},
     prelude::{ResourceType, RistrettoPublicKeyBytes, TemplateAddress},
     rule,
     types::{Amount, EntityId, Hash},
@@ -33,9 +33,8 @@ pub fn initialize_builtin_faucet_state<TStore: StateWriter>(
     let object_ids = ObjectIds::new(10);
     let id_provider = IdProvider::new(entity_id, Hash::default(), &object_ids);
     let vault_id = id_provider.new_vault_id().unwrap();
-    let vault = Vault::new(ResourceContainer::confidential(
-        CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-        vec![],
+    let vault = Vault::new(ResourceContainer::stealth(
+        STEALTH_TARI_RESOURCE_ADDRESS,
         initial_supply,
     ));
     store

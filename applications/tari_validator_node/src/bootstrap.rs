@@ -36,7 +36,7 @@ use tari_consensus::consensus_constants::ConsensusConstants;
 #[cfg(not(feature = "metrics"))]
 use tari_consensus::traits::hooks::NoopHooks;
 use tari_crypto::tari_utilities::ByteArray;
-use tari_engine::{fees::FeeTable, transaction::TransactionProcessorConfig};
+use tari_engine::transaction::TransactionProcessorConfig;
 use tari_engine_types::ToByteType;
 use tari_epoch_manager::{
     service::{EpochManagerConfig, EpochManagerHandle},
@@ -49,15 +49,14 @@ use tari_epoch_oracles::{
     store::EpochOracleStore,
     EpochOracle,
 };
-use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_ootle_app_utilities::{
     common::verify_correct_network,
     configuration::convert_network_to_l1_network,
     epoch_oracle_config::{BaseLayerOracleConfig, EpochOracleType},
+    fee_tables::get_fee_table_by_network,
     keypair::RistrettoKeypair,
     seed_peer::SeedPeer,
-    substate_file_cache::SubstateFileCache,
     template_download_queue::TemplateDownloadQueue,
     transaction_executor::TariTransactionProcessor,
     utxo_store::StateUtxoStore,
@@ -81,7 +80,6 @@ use tokio::{
 use crate::consensus::metrics::PrometheusConsensusMetrics;
 use crate::{
     consensus::{self, ConsensusHandle, TarBlockTransactionExecutor, ValidationContext},
-    dry_run_transaction_processor::DryRunTransactionProcessor,
     file_l1_submitter::FileLayerOneSubmitter,
     p2p::{
         create_tari_validator_node_rpc_service,
@@ -93,7 +91,6 @@ use crate::{
         NopLogger,
     },
     state_bootstrap::bootstrap_state,
-    substate_resolver::TariSubstateResolver,
     transaction_validators::{
         EpochRangeValidator,
         FeeTransactionValidator,
@@ -219,16 +216,9 @@ pub async fn spawn_services(
 
     info!(target: LOG_TARGET, "State store initializing");
 
-    let sidechain_id = config
-        .validator_node
-        .validator_node_sidechain_id
-        .as_ref()
-        .map(|pk| pk.to_byte_type());
-
     let state_store = ValidatorNodeStateStore::open(&config.validator_node.state_db_path, DatabaseOptions::default())?;
 
-    state_store
-        .with_write_tx(|tx| bootstrap_state(tx, config.network, consensus_constants.num_preshards, sidechain_id))?;
+    state_store.with_write_tx(|tx| bootstrap_state(tx, config.network, consensus_constants.num_preshards))?;
 
     info!(target: LOG_TARGET, "Epoch manager initializing");
     let epoch_manager_config = EpochManagerConfig {
@@ -280,13 +270,6 @@ pub async fn spawn_services(
 
     info!(target: LOG_TARGET, "Payload processor initializing");
     // Payload processor
-    let fee_table = FeeTable {
-        per_transaction_weight_cost: 1,
-        per_module_call_cost: 1,
-        per_byte_storage_cost: 1,
-        per_event_cost: 1,
-        per_log_cost: 1,
-    };
 
     let (tx_hotstuff_events, _) = broadcast::channel(100);
     // Consensus gossip
@@ -316,12 +299,13 @@ pub async fn spawn_services(
         message_logger.clone(),
     );
 
-    // Consensus
+    // Transaction executor
+    let fee_table = get_fee_table_by_network(config.network);
     let payload_processor = TariTransactionProcessor::new(
         TransactionProcessorConfig::new(config.network)
             .with_template_binary_max_size_bytes(consensus_constants.template_binary_max_size_bytes),
         template_manager.clone(),
-        fee_table,
+        fee_table.clone(),
     );
     let transaction_executor = TarBlockTransactionExecutor::new(
         payload_processor.clone(),
@@ -335,6 +319,13 @@ pub async fn spawn_services(
     #[cfg(not(feature = "metrics"))]
     let metrics = NoopHooks;
 
+    let sidechain_id = config
+        .validator_node
+        .validator_node_sidechain_id
+        .as_ref()
+        .map(|pk| pk.to_byte_type());
+
+    // Consensus
     let signing_service = consensus::TariSignatureService::new(keypair.clone());
     let (consensus_join_handle, consensus_handle) = consensus::spawn(
         config.network,
@@ -368,19 +359,6 @@ pub async fn spawn_services(
     );
     handles.push(join_handle);
 
-    // substate cache
-    let substate_cache_dir = config.common.base_path.join("substate_cache");
-    let substate_cache = SubstateFileCache::new(substate_cache_dir)
-        .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Substate cache error: {}", e)))?;
-
-    // Dry-run services (TODO: should we implement dry-run on validator nodes, or just keep it in the indexer?)
-    let scanner = SubstateScanner::new(
-        epoch_manager.clone(),
-        validator_node_client_factory.clone(),
-        substate_cache,
-    );
-    let substate_resolver = TariSubstateResolver::new(state_store.clone(), scanner);
-
     spawn_p2p_rpc(
         &config,
         &mut networking,
@@ -394,9 +372,6 @@ pub async fn spawn_services(
     // changed by comms during initialization when using tor.
     save_identities(&config, &keypair)?;
 
-    let dry_run_transaction_processor =
-        DryRunTransactionProcessor::new(epoch_manager.clone(), payload_processor, substate_resolver);
-
     Ok(Services {
         config,
         keypair,
@@ -407,7 +382,6 @@ pub async fn spawn_services(
         template_manager: template_manager_service,
         consensus_handle,
         state_store,
-        dry_run_transaction_processor,
         handles,
         layer_one_transaction_submitter,
     })
@@ -432,7 +406,6 @@ pub struct Services<TStore> {
     pub epoch_manager: EpochManagerHandle<PeerAddress>,
     pub template_manager: TemplateManagerHandle,
     pub consensus_handle: ConsensusHandle,
-    pub dry_run_transaction_processor: DryRunTransactionProcessor<TStore>,
     pub state_store: TStore,
     pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     pub layer_one_transaction_submitter: FileLayerOneSubmitter,

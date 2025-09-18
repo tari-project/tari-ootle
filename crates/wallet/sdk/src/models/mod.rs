@@ -10,6 +10,7 @@ mod non_fungible_tokens;
 mod resource;
 mod stealth_output;
 mod substate;
+mod utxo_update;
 mod vault;
 mod wallet_transaction;
 mod webauthn_registration;
@@ -23,8 +24,9 @@ pub use non_fungible_tokens::*;
 pub use resource::*;
 pub use stealth_output::*;
 pub use substate::*;
+pub use utxo_update::*;
 pub use vault::*;
 pub use wallet_transaction::*;
 pub use webauthn_registration::*;
 
-pub type OutputLockId = u64;
+pub type WalletLockId = i32;

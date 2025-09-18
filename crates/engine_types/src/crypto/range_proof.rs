@@ -10,7 +10,10 @@ use tari_crypto::{
 };
 use tari_template_lib::{models::UnspentOutput, types::crypto::RangeProofBytes};
 
-use crate::{crypto::bullet_proof_service_factory, resource_container::ResourceError};
+use crate::{
+    crypto::{get_static_range_proof_service, MAX_LAZY_BP_AGG_FACTORS},
+    resource_container::ResourceError,
+};
 
 pub fn validate_bullet_proof<'a, I: IntoIterator<Item = &'a UnspentOutput>>(
     range_proof: &RangeProofBytes,
@@ -41,6 +44,15 @@ pub fn validate_bullet_proof<'a, I: IntoIterator<Item = &'a UnspentOutput>>(
             details: "Range proof is invalid because it was provided but the proof contained no outputs".to_string(),
         });
     }
+    if agg_factor > MAX_LAZY_BP_AGG_FACTORS {
+        return Err(ResourceError::InvalidConfidentialProof {
+            details: format!(
+                "Range proof aggregation factor {} exceeds the maximum supported {}",
+                agg_factor, MAX_LAZY_BP_AGG_FACTORS
+            ),
+        });
+    }
+
     if !agg_factor.is_power_of_two() {
         let num_to_add = agg_factor.next_power_of_two() - agg_factor;
         // If the number of statements is not a power of two, we pad with zero statements
@@ -57,7 +69,7 @@ pub fn validate_bullet_proof<'a, I: IntoIterator<Item = &'a UnspentOutput>>(
     let public_statement = RistrettoAggregatedPublicStatement::init(statements).unwrap();
 
     let proofs = vec![range_proof.as_ref()];
-    bullet_proof_service_factory(agg_factor)
+    get_static_range_proof_service(agg_factor)
         .verify_batch(proofs, vec![&public_statement])
         .map_err(|e| ResourceError::InvalidRangeProof { details: e.to_string() })?;
 

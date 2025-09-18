@@ -60,7 +60,7 @@ export function stringToSubstateId(substateId: string): SubstateId {
       return { Resource: rest };
     case "vault":
       return { Vault: rest };
-    case "commitment":
+    case "tombstone":
       return { UnclaimedConfidentialOutput: rest };
     case "txreceipt":
       return { TransactionReceipt: rest };
@@ -123,38 +123,38 @@ export function rejectReasonToString(reason: RejectReason | null): string {
     return reason;
   }
   if ("ShardsNotPledged" in reason) {
-    return `ShardsNotPledged(${reason.ShardsNotPledged})`;
+    return `ShardsNotPledged: ${reason.ShardsNotPledged}`;
   }
   if ("ExecutionFailure" in reason) {
-    return `ExecutionFailure(${reason.ExecutionFailure})`;
+    return `ExecutionFailure: ${reason.ExecutionFailure}`;
   }
   if ("ShardPledgedToAnotherPayload" in reason) {
-    return `ShardPledgedToAnotherPayload(${reason.ShardPledgedToAnotherPayload})`;
+    return `ShardPledgedToAnotherPayload: ${reason.ShardPledgedToAnotherPayload}`;
   }
   if ("ShardRejected" in reason) {
-    return `ShardRejected(${reason.ShardRejected})`;
+    return `ShardRejected: ${reason.ShardRejected}`;
   }
   if ("InsufficientFeesPaid" in reason) {
-    return `InsufficientFeesPaid(${reason.InsufficientFeesPaid})`;
+    return `InsufficientFeesPaid: ${reason.InsufficientFeesPaid}`;
   }
   if ("ForeignShardGroupDecidedToAbort" in reason) {
     const r = reason.ForeignShardGroupDecidedToAbort;
-    return `ForeignShardGroupDecidedToAbort(${r.start_shard}-${r.end_shard}, ${r.abort_reason})`;
+    return `ForeignShardGroupDecidedToAbort: ${r.start_shard}-${r.end_shard}, ${r.abort_reason}`;
   }
   if ("InvalidTransaction" in reason) {
-    return `InvalidTransaction(${reason.InvalidTransaction})`;
+    return `InvalidTransaction: ${reason.InvalidTransaction}`;
   }
   if ("ExecutionFailure" in reason) {
-    return `ExecutionFailure(${reason.ExecutionFailure})`;
+    return `ExecutionFailure: ${reason.ExecutionFailure}`;
   }
   if ("OneOrMoreInputsNotFound" in reason) {
-    return `OneOrMoreInputsNotFound(${reason.OneOrMoreInputsNotFound})`;
+    return `OneOrMoreInputsNotFound: ${reason.OneOrMoreInputsNotFound}`;
   }
   if ("FailedToLockInputs" in reason) {
-    return `FailedToLockInputs(${reason.FailedToLockInputs})`;
+    return `FailedToLockInputs: ${reason.FailedToLockInputs}`;
   }
   if ("FailedToLockOutputs" in reason) {
-    return `FailedToLockOutputs(${reason.FailedToLockOutputs})`;
+    return `FailedToLockOutputs: ${reason.FailedToLockOutputs}`;
   }
   console.error("Unknown reason", reason);
   return JSON.stringify(reason);

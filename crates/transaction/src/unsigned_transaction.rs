@@ -12,11 +12,7 @@ use tari_template_lib::models::ComponentAddress;
 use crate::{TransactionSignature, UnsealedTransactionV1, UnsignedTransactionV1};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum UnsignedTransaction {
     V1(UnsignedTransactionV1),
 }

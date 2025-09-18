@@ -116,6 +116,12 @@ pub trait EpochManagerReader: Send + Sync {
         epoch: Epoch,
     ) -> impl Future<Output = Result<CommitteeInfo, EpochManagerError>> + Send;
 
+    fn get_committee_info(
+        &self,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> impl Future<Output = Result<CommitteeInfo, EpochManagerError>> + Send;
+
     fn get_committee_info_for_substate(
         &self,
         epoch: Epoch,

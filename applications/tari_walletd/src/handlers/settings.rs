@@ -39,9 +39,9 @@ pub async fn handle_set(
     token: Option<&Bearer>,
     req: SettingsSetRequest,
 ) -> Result<SettingsSetResponse, anyhow::Error> {
-    let mut sdk = context.wallet_sdk().clone();
+    let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
-    sdk.get_network_interface_mut().set_endpoint(&req.indexer_url)?;
+    sdk.get_network_interface().set_endpoint(&req.indexer_url)?;
     sdk.config_api().set(ConfigKey::IndexerUrl, &req.indexer_url, false)?;
     Ok(SettingsSetResponse {})
 }

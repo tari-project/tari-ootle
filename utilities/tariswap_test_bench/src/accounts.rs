@@ -44,7 +44,7 @@ impl Runner {
             .build_and_seal(&key.key);
 
         let finalize = self.submit_transaction_and_wait(transaction).await?;
-        let diff = finalize.result.accept().unwrap();
+        let diff = finalize.result.any_accept().unwrap();
         let account = diff
             .up_iter()
             .find_map(|(addr, _)| addr.as_component_address())
@@ -56,14 +56,9 @@ impl Runner {
             .unwrap();
 
         self.sdk.accounts_api().add_account(None, &account, 0, true, true)?;
-        self.sdk.accounts_api().add_vault(
-            account,
-            vault,
-            XTR,
-            ResourceType::Confidential,
-            Some("XTR".to_string()),
-            6,
-        )?;
+        self.sdk
+            .accounts_api()
+            .add_vault(account, vault, XTR, ResourceType::Stealth, Some("XTR".to_string()), 6)?;
         let account = self.sdk.accounts_api().get_account_by_address(&account)?;
 
         Ok(account.account)
@@ -86,7 +81,7 @@ impl Runner {
 
         let mut builder = self
             .new_transaction_builder()
-            .fee_transaction_pay_from_component(pay_fee_account.address, 1000 * owners.len());
+            .fee_transaction_pay_from_component(pay_fee_account.component_address, 1000 * owners.len());
         for owner in &owners {
             builder = builder.create_account(RistrettoPublicKey::from_secret_key(&owner.key).to_byte_type());
         }
@@ -94,18 +89,18 @@ impl Runner {
         let pay_fee_vault = self
             .sdk
             .accounts_api()
-            .get_vault_by_resource(&pay_fee_account.address, &XTR)?;
+            .get_vault_by_resource(&pay_fee_account.component_address, &XTR)?;
 
         let transaction = builder
             .with_inputs([
-                SubstateRequirement::unversioned(pay_fee_account.address),
+                SubstateRequirement::unversioned(pay_fee_account.component_address),
                 SubstateRequirement::unversioned(pay_fee_vault.id),
                 SubstateRequirement::unversioned(pay_fee_vault.resource_address),
             ])
             .build_and_seal(&key.key);
 
         let finalize = self.submit_transaction_and_wait(transaction).await?;
-        let diff = finalize.result.accept().unwrap();
+        let diff = finalize.result.any_accept().unwrap();
         let mut accounts = Vec::with_capacity(num_accounts);
 
         for owner in owners {
@@ -113,7 +108,7 @@ impl Runner {
                 .up_iter()
                 .map(|(addr, _)| addr)
                 .filter_map(|addr| addr.as_component_address())
-                .filter(|addr| *addr != pay_fee_account.address)
+                .filter(|addr| *addr != pay_fee_account.component_address)
                 .find(|addr| {
                     derive_component_address_from_public_key(
                         &ACCOUNT_TEMPLATE_ADDRESS,
@@ -142,22 +137,22 @@ impl Runner {
         let fee_vault = self
             .sdk
             .accounts_api()
-            .get_vault_by_resource(&fee_account.address, &XTR)?;
+            .get_vault_by_resource(&fee_account.component_address, &XTR)?;
 
         for accounts in all_accounts.chunks(100) {
             let transaction = self
                 .new_transaction_builder()
-                .fee_transaction_pay_from_component(fee_account.address, 1000 * accounts.len())
+                .fee_transaction_pay_from_component(fee_account.component_address, 1000 * accounts.len())
                 .then(|builder| {
                     accounts.iter().fold(builder, |builder, account| {
                         builder
                             .call_method(faucet.component_address, "take_free_coins", args![])
                             .put_last_instruction_output_on_workspace("faucet")
-                            .call_method(account.address, "deposit", args![Workspace("faucet")])
+                            .call_method(account.component_address, "deposit", args![Workspace("faucet")])
                             .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Amount(1_000_000)])
                             .put_last_instruction_output_on_workspace("xtr")
-                            .call_method(account.address, "deposit", args![Workspace("xtr")])
-                            .add_input(SubstateRequirement::unversioned(account.address))
+                            .call_method(account.component_address, "deposit", args![Workspace("xtr")])
+                            .add_input(SubstateRequirement::unversioned(account.component_address))
                     })
                 })
                 .with_inputs([
@@ -180,13 +175,13 @@ impl Runner {
             let result = self.submit_transaction_and_wait(transaction).await?;
             let accounts_and_state = result
                 .result
-                .accept()
+                .any_accept()
                 .unwrap()
                 .up_iter()
                 .filter(|(addr, _)| {
                     *addr != XTR_FAUCET_COMPONENT_ADDRESS &&
                         *addr != faucet.component_address &&
-                        *addr != fee_account.address
+                        *addr != fee_account.component_address
                 })
                 .filter_map(|(addr, substate)| {
                     Some((addr.as_component_address()?, substate.substate_value().component()?))
@@ -198,7 +193,7 @@ impl Runner {
                 for vault_id in indexed.vault_ids() {
                     let vault = result
                         .result
-                        .accept()
+                        .any_accept()
                         .unwrap()
                         .up_iter()
                         .find(|(addr, _)| addr == vault_id)

@@ -15,11 +15,7 @@ use tari_template_lib::types::{from_hex, hex::write_hex_fmt, Hash};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, Default, BorshSerialize)]
 #[serde(transparent)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionId(
     #[serde(with = "serde_with::hex")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]

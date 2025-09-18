@@ -7,5 +7,6 @@ export type TransactionGetResponse = {
   transaction: Transaction;
   result: FinalizeResult | null;
   status: TransactionStatus;
+  invalid_reason: string | null;
   last_update_time: string;
 };

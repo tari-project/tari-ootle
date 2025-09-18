@@ -13,7 +13,7 @@ use tari_crypto::{
 use tari_engine_types::{
     hashing::{engine_hasher64, EngineHashDomainLabel},
     instruction::Instruction,
-    FromByteType,
+    ConvertFromByteType,
     ToByteType,
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
@@ -22,11 +22,7 @@ use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, SchnorrSignature
 use crate::{UnsealedTransactionV1, UnsignedTransactionV1};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionSealSignature {
     public_key: RistrettoPublicKeyBytes,
     signature: SchnorrSignatureBytes,
@@ -51,10 +47,10 @@ impl TransactionSealSignature {
 
     pub fn verify(&self, transaction: &UnsealedTransactionV1) -> bool {
         let message = Self::create_message(transaction);
-        let Ok(public_key) = RistrettoPublicKey::try_from_byte_type(&self.public_key) else {
+        let Ok(public_key) = RistrettoPublicKey::convert_from_byte_type(&self.public_key) else {
             return false;
         };
-        let Ok(signature) = RistrettoSchnorr::try_from_byte_type(&self.signature) else {
+        let Ok(signature) = RistrettoSchnorr::convert_from_byte_type(&self.signature) else {
             return false;
         };
         signature.verify(&public_key, message)
@@ -81,11 +77,7 @@ impl TransactionSealSignature {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionSignature {
     public_key: RistrettoPublicKeyBytes,
     signature: SchnorrSignatureBytes,
@@ -114,10 +106,10 @@ impl TransactionSignature {
 
     pub fn verify(&self, seal_signer: &RistrettoPublicKeyBytes, transaction: &UnsignedTransactionV1) -> bool {
         let message = Self::create_message(seal_signer, transaction);
-        let Ok(public_key) = RistrettoPublicKey::try_from_byte_type(&self.public_key) else {
+        let Ok(public_key) = RistrettoPublicKey::convert_from_byte_type(&self.public_key) else {
             return false;
         };
-        let Ok(signature) = RistrettoSchnorr::try_from_byte_type(&self.signature) else {
+        let Ok(signature) = RistrettoSchnorr::convert_from_byte_type(&self.signature) else {
             return false;
         };
         signature.verify(&public_key, message)
@@ -149,6 +141,7 @@ struct TransactionSignatureFields<'a> {
     min_epoch: Option<Epoch>,
     max_epoch: Option<Epoch>,
     is_seal_signer_authorized: bool,
+    dry_run: bool,
 }
 
 impl<'a> From<&'a UnsignedTransactionV1> for TransactionSignatureFields<'a> {
@@ -161,6 +154,7 @@ impl<'a> From<&'a UnsignedTransactionV1> for TransactionSignatureFields<'a> {
             min_epoch: transaction.min_epoch,
             max_epoch: transaction.max_epoch,
             is_seal_signer_authorized: transaction.is_seal_signer_authorized,
+            dry_run: transaction.dry_run,
         }
     }
 }

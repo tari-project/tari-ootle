@@ -33,7 +33,7 @@ import { DataTableCell, BoxHeading, BoxHeading2 } from "../../../Components/Styl
 import PageHeading from "../../../Components/PageHeading";
 import Grid from "@mui/material/Grid";
 import { StyledPaper } from "../../../Components/StyledComponents";
-import type { VNArgDef, GetTemplateResponse } from "@tari-project/typescript-bindings";
+import type { GetTemplateResponse } from "@tari-project/typescript-bindings";
 
 function TemplateFunctions() {
   const { address } = useParams();
@@ -69,7 +69,7 @@ function TemplateFunctions() {
                 <DataTableCell style={{ textAlign: "left" }}>{fn.name}</DataTableCell>
                 <DataTableCell>
                   {fn.arguments
-                    .map((a: VNArgDef) => {
+                    .map((a) => {
                       return a.name + ":" + a.arg_type;
                     })
                     .join(", ")}

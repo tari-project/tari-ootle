@@ -36,7 +36,7 @@ mod actions;
 pub use actions::*;
 
 mod module;
-pub use module::{RuntimeModule, RuntimeModuleError};
+pub use module::{RuntimeEvent, RuntimeModule, RuntimeModuleError};
 
 mod fee_state;
 mod tracker;
@@ -57,7 +57,7 @@ use tari_bor::decode_exact;
 use tari_engine_types::{
     commit_result::FinalizeResult,
     component::ComponentHeader,
-    confidential::ConfidentialClaim,
+    confidential::TariStealthClaim,
     indexed_value::IndexedValue,
     limits,
     lock::LockFlag,
@@ -95,7 +95,7 @@ use tari_template_lib::{
     },
     invoke_args,
     models::{BucketId, ComponentAddress, Metadata, NonFungibleAddress, StealthTransferStatement, VaultRef},
-    types::EntityId,
+    types::{engine_args::SignatureAction, EntityId},
 };
 pub use tracker::StateTracker;
 
@@ -163,7 +163,7 @@ pub trait RuntimeInterface: Send + Sync {
 
     fn set_last_instruction_output(&self, value: IndexedValue) -> Result<(), RuntimeError>;
 
-    fn claim_burn(&self, claim: ConfidentialClaim) -> Result<(), RuntimeError>;
+    fn claim_burn(&self, claim: TariStealthClaim) -> Result<(), RuntimeError>;
 
     fn claim_validator_fees(&self, address: ValidatorFeePoolAddress) -> Result<(), RuntimeError>;
 
@@ -192,6 +192,8 @@ pub trait RuntimeInterface: Send + Sync {
     fn pop_call_frame(&self) -> Result<(), RuntimeError>;
     fn publish_template(&self, template: Vec<u8>) -> Result<(), RuntimeError>;
 
+    fn signature_invoke(&self, action: SignatureAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError>;
+
     fn allocate_address(
         &self,
         substate_type: AllocatableAddressType,
@@ -205,6 +207,12 @@ pub trait RuntimeInterface: Send + Sync {
         statement: StealthTransferStatement,
         revealed_funds_bucket: Option<BucketId>,
     ) -> Result<Option<BucketId>, RuntimeError>;
+
+    fn pay_fee(
+        &self,
+        statement: StealthTransferStatement,
+        revealed_funds_bucket: Option<BucketId>,
+    ) -> Result<(), RuntimeError>;
 }
 
 #[derive(Clone)]

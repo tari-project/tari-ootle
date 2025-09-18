@@ -6,7 +6,12 @@ use tari_consensus_types::{BlockId, LeafBlock, QcId};
 use tari_epoch_manager::EpochManagerError;
 use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup, VersionedSubstateIdError, VotePower};
 use tari_ootle_storage::{
-    consensus_models::{BlockError, ForeignProposalCommitProofError, TransactionPoolError},
+    consensus_models::{
+        BlockError,
+        EpochCheckpointValidationError,
+        ForeignProposalCommitProofError,
+        TransactionPoolError,
+    },
     StorageError,
 };
 use tari_state_tree::StateTreeError;
@@ -87,6 +92,8 @@ pub enum HotStuffError {
     InvariantError(String),
     #[error("Sync error: {0}")]
     SyncError(anyhow::Error),
+    #[error("This node needs to sync with the network: {reason}")]
+    NeedsSync { reason: String },
     #[error("Fallen behind: local={local_epoch}/{local_height}, qc={qc_epoch}/{qc_height}")]
     FallenBehind {
         local_epoch: Epoch,
@@ -113,6 +120,8 @@ pub enum HotStuffError {
     },
     #[error("Block building error: {0}")]
     BlockBuildingError(#[from] BlockError),
+    #[error("Epoch checkpoint validation error: {0}")]
+    EpochCheckpointValidationError(#[from] EpochCheckpointValidationError),
 }
 
 impl HotStuffError {

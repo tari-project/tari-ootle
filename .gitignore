@@ -1,5 +1,6 @@
 target
 .env
+cucumber-output-junit.xml
 # Non-root Cargo.locks
 **/Cargo.lock
 !/Cargo.lock

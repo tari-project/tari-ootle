@@ -132,7 +132,7 @@ impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBloc
         let resulting_outputs = result
             .finalize
             .result
-            .accept()
+            .any_accept()
             .map(|diff| {
                 diff.up_iter()
                     .map(|(addr, substate)| {

@@ -26,35 +26,50 @@ import IconButton from "@mui/material/IconButton";
 import Typography from "@mui/material/Typography";
 import { useTheme } from "@mui/material/styles";
 import { IoEyeOffOutline, IoEyeOutline } from "react-icons/io5";
-import FetchStatusCheck from "../../../Components/FetchStatusCheck";
-import { useAccountsGetBalances } from "../../../api/hooks/useAccounts";
-import TariGem from "../../../assets/TariGem";
-import useAccountStore from "../../../store/accountStore";
-import { substateIdToString } from "@tari-project/typescript-bindings";
+import FetchStatusCheck from "@components/FetchStatusCheck";
+import { useAccountsGetBalances } from "@api/hooks/useAccounts";
+import useAccountStore from "@store/accountStore";
 import { useEffect } from "react";
-import { bigintToDecimalString } from "../../../utils/helpers";
+import { substateIdToString, bigintToDecimalString } from "@utils/helpers";
+import { Account } from "@tari-project/typescript-bindings";
 
 const XTR_RESOURCE = "resource_0101010101010101010101010101010101010101010101010101010101010101";
 export default function AccountBalance() {
-  const theme = useTheme();
-  const { showBalance, setShowBalance, account } = useAccountStore();
+  const showBalance = useAccountStore((state) => state.showBalance);
+  const setShowBalance = useAccountStore((state) => state.setShowBalance);
+  const account = useAccountStore((state) => state.account);
+
   if (!account) return <></>;
+
+  return <AccountBalanceInner account={account} showBalance={showBalance} setShowBalance={setShowBalance} />;
+}
+
+function AccountBalanceInner({
+  account,
+  showBalance,
+  setShowBalance,
+}: {
+  account: Account;
+  showBalance: boolean;
+  setShowBalance: (show: boolean) => void;
+}) {
+  const theme = useTheme();
 
   const {
     data: balancesData,
     isError: balancesIsError,
     error: balancesError,
-    isFetching: balancesIsFetching,
+    // isFetching: balancesIsFetching,
     isLoading: balancesIsLoading,
     refetch,
-  } = useAccountsGetBalances(substateIdToString(account.address));
+  } = useAccountsGetBalances(substateIdToString(account.component_address));
 
   useEffect(() => {
     refetch();
-  }, [account]);
+  }, [account, refetch]);
 
-  let formattedBalance = "";
-  if (balancesIsLoading) {
+  let formattedBalance;
+  if (balancesIsLoading && !balancesData) {
     formattedBalance = "...";
   } else {
     if (showBalance) {
@@ -67,13 +82,15 @@ export default function AccountBalance() {
     }
   }
 
+  const symbol = balancesData?.balances.find((b) => b.resource_address === XTR_RESOURCE)?.token_symbol || "";
+
   return (
     <FetchStatusCheck
       isError={balancesIsError}
       errorMessage={balancesError?.message || "Error fetching data"}
       isLoading={false}
     >
-      <Fade in={!balancesIsFetching && !balancesIsError} timeout={100}>
+      <Fade in={!balancesIsError} timeout={100}>
         <Box>
           <Box>
             <Typography variant="body2" gutterBottom={false}>
@@ -90,7 +107,7 @@ export default function AccountBalance() {
             }}
           >
             <Typography variant="h2">
-              <TariGem fill={theme.palette.text.primary} style={{ float: "left" }} /> {formattedBalance}
+              {formattedBalance} <span style={{ fontSize: "18px" }}>{symbol}</span>
             </Typography>
             <IconButton onClick={() => setShowBalance(!showBalance)}>
               {showBalance ? (

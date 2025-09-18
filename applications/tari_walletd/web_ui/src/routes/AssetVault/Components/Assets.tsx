@@ -24,7 +24,7 @@ import Box from "@mui/material/Box";
 import Tab from "@mui/material/Tab";
 import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { ApiError } from "@api/helpers/types";
 import { useNFTsList } from "@api/hooks/useNfts";
 import { substateIdToString, handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
@@ -85,6 +85,17 @@ function Assets({ account }: { account: Account }) {
   } = useNFTsList(substateIdToString(account.component_address), 0, 1000);
 
   const totalCount = allNfts?.nfts?.length || 0;
+  
+  // Auto-adjust page if current page is empty due to NFT transfers
+  useEffect(() => {
+    if (totalCount > 0 && nftPage > 0) {
+      const maxPage = Math.ceil(totalCount / nftRowsPerPage) - 1;
+      if (nftPage > maxPage) {
+        setNftPage(maxPage);
+      }
+    }
+  }, [totalCount, nftPage, nftRowsPerPage, setNftPage]);
+
   const startIndex = nftPage * nftRowsPerPage;
   const endIndex = startIndex + nftRowsPerPage;
   const nftsListData = {

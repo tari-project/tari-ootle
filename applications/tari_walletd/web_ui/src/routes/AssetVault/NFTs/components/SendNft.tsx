@@ -36,6 +36,7 @@ import type {
 import { useNftsTransfer, useNFTsList } from "@api/hooks/useNfts";
 import { substateIdToString } from "@utils/helpers";
 import { useAccountsList } from "@api/hooks/useAccounts";
+import { decodeOotleAddress } from "@tari-project/typescript-bindings";
 import { useNftTransferStore } from "@store/nftTransferStore";
 import FormStep from "../steps/FormStep";
 import ConfirmationStep from "../steps/ConfirmationStep";
@@ -149,44 +150,66 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   }, [account, refetchNfts]);
 
   // Memoize hook parameters to prevent re-renders
-  const feeEstimateParams = useMemo(
-    () => ({
+  const feeEstimateParams = useMemo(() => {
+    // Decode the address to get the public key if we have a valid address
+    let targetPublicKey = transferFormState.targetAccountAddress;
+    if (transferFormState.targetAccountAddress && transferFormState.targetAccountAddress.startsWith("xtr_")) {
+      try {
+        const decodedAddress = decodeOotleAddress(transferFormState.targetAccountAddress);
+        targetPublicKey = decodedAddress.accountPublicKey;
+      } catch (e) {
+        // If decoding fails, keep the original (might be already a public key)
+        console.warn("Failed to decode address, using as-is:", e);
+      }
+    }
+
+    return {
       dry_run: true,
       max_fee: 3000,
       nfts: transferFormState.nfts,
       source_account: sourceAccount!,
-      target_account_public_key: transferFormState.targetAccountAddress,
+      target_account_public_key: targetPublicKey,
       fee_payer_account: feePayerAccount!,
       resource_address: transferFormState.resourceAddress,
-    }),
-    [
-      transferFormState.nfts,
-      sourceAccount,
-      transferFormState.targetAccountAddress,
-      feePayerAccount,
-      transferFormState.resourceAddress,
-    ],
-  );
+    };
+  }, [
+    transferFormState.nfts,
+    sourceAccount,
+    transferFormState.targetAccountAddress,
+    feePayerAccount,
+    transferFormState.resourceAddress,
+  ]);
 
-  const transferParams = useMemo(
-    () => ({
+  const transferParams = useMemo(() => {
+    // Decode the address to get the public key if we have a valid address
+    let targetPublicKey = transferFormState.targetAccountAddress;
+    if (transferFormState.targetAccountAddress && transferFormState.targetAccountAddress.startsWith("xtr_")) {
+      try {
+        const decodedAddress = decodeOotleAddress(transferFormState.targetAccountAddress);
+        targetPublicKey = decodedAddress.accountPublicKey;
+      } catch (e) {
+        // If decoding fails, keep the original (might be already a public key)
+        console.warn("Failed to decode address for transfer, using as-is:", e);
+      }
+    }
+
+    return {
       nfts: transferFormState.nfts,
       source_account: sourceAccount!,
-      target_account_public_key: transferFormState.targetAccountAddress,
+      target_account_public_key: targetPublicKey,
       dry_run: false,
       max_fee: parseInt(transferFormState.maxFee) || 3000,
       fee_payer_account: feePayerAccount!,
       resource_address: transferFormState.resourceAddress,
-    }),
-    [
-      transferFormState.nfts,
-      sourceAccount,
-      transferFormState.targetAccountAddress,
-      transferFormState.maxFee,
-      feePayerAccount,
-      transferFormState.resourceAddress,
-    ],
-  );
+    };
+  }, [
+    transferFormState.nfts,
+    sourceAccount,
+    transferFormState.targetAccountAddress,
+    transferFormState.maxFee,
+    feePayerAccount,
+    transferFormState.resourceAddress,
+  ]);
 
   // Fee estimation and transfer hooks
   const { mutateAsync: calculateFeeEstimate } = useNftsTransfer(feeEstimateParams);
@@ -197,7 +220,6 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       return;
     }
 
-    setIsEstimatingFee(true);
     setLocalIsEstimatingFee(true);
 
     // Ensure the form state is updated for fee estimation
@@ -221,13 +243,34 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       console.error("Fee estimation error:", e);
       throw e;
     } finally {
-      setIsEstimatingFee(false);
       setLocalIsEstimatingFee(false);
     }
   };
 
   const estimateFee = async () => {
-    return estimateFeeWithTargetAccount(transferFormState.targetAccountAddress);
+    if (!account || isEstimatingFee || !transferFormState.targetAccountAddress.trim()) {
+      return;
+    }
+
+    setLocalIsEstimatingFee(true);
+
+    try {
+      const result = await calculateFeeEstimate?.();
+
+      if (result && "Accept" in result.result.result) {
+        const fee = result.fee + 100; // Add buffer
+        setTransferFormState({ maxFee: fee.toString() });
+        return fee;
+      } else {
+        console.error("Fee estimation rejected:", result);
+        throw new Error("Could not estimate transfer fee");
+      }
+    } catch (e: any) {
+      console.error("Fee estimation error:", e);
+      throw e;
+    } finally {
+      setLocalIsEstimatingFee(false);
+    }
   };
 
   const handleFormSubmit = async (e: FormEvent) => {
@@ -246,7 +289,21 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       return;
     }
 
-    // Proceed to confirmation step (fee estimation will happen there)
+    // If no fee is calculated yet, estimate it before proceeding
+    if (!transferFormState.maxFee) {
+      try {
+        await estimateFee();
+      } catch (error) {
+        console.error("Fee estimation failed:", error);
+        setPopup({
+          title: "Fee estimation failed",
+          error: true,
+          message: "Unable to estimate transaction fee. Please try again or check if you have sufficient funds.",
+        });
+        return;
+      }
+    }
+
     setCurrentStep("confirmation");
   };
 

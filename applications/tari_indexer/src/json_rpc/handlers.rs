@@ -50,6 +50,8 @@ use tari_indexer_client::types::{
     GetNonFungiblesResponse,
     GetSubstateRequest,
     GetSubstateResponse,
+    GetSubstatesRequest,
+    GetSubstatesResponse,
     GetTemplateDefinitionRequest,
     GetTemplateDefinitionResponse,
     GetTransactionResultRequest,
@@ -219,7 +221,7 @@ impl JsonRpcHandlers {
             dial_wait.await.map_err(internal_error(answer_id))?;
         }
 
-        Ok(JsonRpcResponse::success(answer_id, AddPeerResponse { success: true }))
+        Ok(JsonRpcResponse::success(answer_id, AddPeerResponse {}))
     }
 
     pub async fn get_comms_stats(&self, value: JsonRpcExtractor) -> JrpcResult {
@@ -379,57 +381,25 @@ impl JsonRpcHandlers {
 
     pub async fn get_substates(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
--        let requests: Vec<GetSubstateRequest> = value.parse_params()?;
--
-        let GetSubstatesRequest { requests } = value.parse_params::<GetSubstatesRequest>()?;
-        let mut responses = Vec::with_capacity(requests.len());
-        for request in requests {
-            // …
-            let maybe_substate = self
-                .substate_manager
-                .get_substate(&request.address, request.version)
-                .await
-                .map_err(|e| {
-                    warn!(target: LOG_TARGET, "Error getting substate: {}", e);
-                    Self::internal_error(answer_id, format!("Error getting substate: {}", e))
-                })?;
+        let req: GetSubstatesRequest = value.parse_params()?;
 
-            match maybe_substate {
-                Some(substate_resp) => responses.push(Some(GetSubstateResponse {
-                    address: substate_resp.address,
-                    version: substate_resp.version,
-                    substate: substate_resp.substate,
-                })),
-                None => {
-                    if request.local_search_only {
-                        responses.push(None);
-                    } else {
-                        // Ask network; on error, push None (don’t fail the entire batch)
-                        match self
-                            .transaction_manager
-                            .get_substate(&SubstateRequirement::new(request.address.clone(), request.version))
-                            .await
-                        {
-                            Err(e) => {
-                                warn!(target: LOG_TARGET, "Error asking network for substate: {}", e);
-                                responses.push(None);
-                            },
-                            Ok(SubstateResult::DoesNotExist) => responses.push(None),
-                            Ok(SubstateResult::Up { id, substate }) => {
-                                responses.push(Some(GetSubstateResponse {
-                                    address: id,
-                                    version: substate.version(),
-                                    substate: substate.into_substate_value(),
-                                }))
-                            },
-                            Ok(SubstateResult::Down { .. }) => responses.push(None),
-                        }
-                    }
-                }
-            }
+        const MAX_REQUESTS: usize = 20;
+
+        let GetSubstatesRequest { requests } = req;
+
+        if requests.len() > MAX_REQUESTS {
+            return Err(Self::invalid_params(
+                answer_id,
+                format!("Cannot request more than {MAX_REQUESTS} substates at once"),
+            ));
         }
 
-        Ok(JsonRpcResponse::success(answer_id, GetSubstatesResponse { responses }))
+        let substates = self.substate_manager.get_substates(requests.as_slice()).map_err(|e| {
+            warn!(target: LOG_TARGET, "Error getting substate: {}", e);
+            Self::internal_error(answer_id, format!("Error getting substate: {}", e))
+        })?;
+
+        Ok(JsonRpcResponse::success(answer_id, GetSubstatesResponse { substates }))
     }
 
     pub async fn inspect_substate(&self, value: JsonRpcExtractor) -> JrpcResult {
@@ -812,10 +782,10 @@ impl JsonRpcHandlers {
 
         let resp = match result {
             TransactionResultStatus::Pending => GetTransactionResultResponse {
-                status: IndexerTransactionFinalizedResult::Pending,
+                result: IndexerTransactionFinalizedResult::Pending,
             },
             TransactionResultStatus::Finalized(finalized) => GetTransactionResultResponse {
-                status: IndexerTransactionFinalizedResult::Finalized {
+                result: IndexerTransactionFinalizedResult::Finalized {
                     final_decision: finalized.final_decision,
                     execution_result: finalized.execute_result.map(Box::new),
                     execution_time: finalized.execution_time,
@@ -873,6 +843,10 @@ impl JsonRpcHandlers {
 
     fn not_found<T: Display>(answer_id: i64, details: T) -> JsonRpcResponse {
         Self::error_response(answer_id, JsonRpcErrorReason::ApplicationError(404), details)
+    }
+
+    fn invalid_params<T: Display>(answer_id: i64, details: T) -> JsonRpcResponse {
+        Self::error_response(answer_id, JsonRpcErrorReason::InvalidParams, details)
     }
 
     fn internal_error<T: Display>(answer_id: i64, error: T) -> JsonRpcResponse {

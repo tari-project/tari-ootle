@@ -1,7 +1,6 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-export * from "./types/wallet-daemon-client/WalletSubstateRecord";
 export * from "./types/wallet-daemon-client/ProofsFinalizeResponse";
 export * from "./types/wallet-daemon-client/WalletGetInfoResponse";
 export * from "./types/wallet-daemon-client/CallInstructionRequest";
@@ -16,6 +15,7 @@ export * from "./types/wallet-daemon-client/AuthGetAllJwtRequest";
 export * from "./types/wallet-daemon-client/KeyBranch";
 export * from "./types/wallet-daemon-client/PublishTemplateResponse";
 export * from "./types/wallet-daemon-client/AccountsAssociateStealthResourceResponse";
+export * from "./types/wallet-daemon-client/WalletSubstateInfo";
 export * from "./types/wallet-daemon-client/WebauthnAlreadyRegisteredResponse";
 export * from "./types/wallet-daemon-client/AccountGetResponse";
 export * from "./types/wallet-daemon-client/SettingsSetRequest";

@@ -112,7 +112,7 @@ pub fn hash_substate(substate: &SubstateValue, version: u32) -> FixedHash {
 // BorshDeserialize is implemented for this struct because we de/encode keys in the database using this format
 /// Base object address, version tuples
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, BorshSerialize, BorshDeserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, type = "string"))]
 pub enum SubstateId {
     Component(ComponentAddress),
     Resource(ResourceAddress),

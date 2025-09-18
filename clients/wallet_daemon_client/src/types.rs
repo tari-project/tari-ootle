@@ -860,7 +860,7 @@ pub struct SubstatesListRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct SubstatesListResponse {
-    pub substates: Vec<WalletSubstateRecord>,
+    pub substates: Vec<WalletSubstateInfo>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -873,13 +873,14 @@ pub struct SubstatesGetRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct SubstatesGetResponse {
-    pub record: Option<WalletSubstateRecord>,
-    pub substate: Option<Substate>,
+    // NOTE either of these can be None, but never both (instead, NotFound error)
+    pub local_record: Option<WalletSubstateInfo>,
+    pub substate_from_remote: Option<Substate>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
-pub struct WalletSubstateRecord {
+pub struct WalletSubstateInfo {
     pub substate_id: SubstateId,
     pub parent_id: Option<SubstateId>,
     pub module_name: Option<String>,

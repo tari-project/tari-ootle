@@ -8,6 +8,7 @@ import { SubstateId } from "../types/SubstateId";
 import { TransactionResult } from "../types/TransactionResult";
 import { NonFungibleId } from "../types/NonFungibleId";
 
+// TODO: this function should be deprecated
 export function substateIdToString(substateId: SubstateId | string | null | undefined): string {
   if (substateId === null || substateId === undefined) {
     return "";
@@ -18,81 +19,83 @@ export function substateIdToString(substateId: SubstateId | string | null | unde
   if (typeof substateId !== "object") {
     throw new Error(`Cannot convert: ${JSON.stringify(substateId)} to string`);
   }
-  if ("Component" in substateId) {
-    return substateId.Component;
-  }
-  if ("Resource" in substateId) {
-    return substateId.Resource;
-  }
-  if ("Vault" in substateId) {
-    return substateId.Vault;
-  }
-  if ("UnclaimedConfidentialOutput" in substateId) {
-    return substateId.UnclaimedConfidentialOutput;
-  }
-  if ("NonFungible" in substateId) {
-    const nft = substateId.NonFungible;
-    const key = Object.keys(nft.id)[0];
-    const type = key.toLowerCase();
-    return `nft_${nft.resource_address}_${type}_${nft.id[key]}`;
-  }
-  if ("TransactionReceipt" in substateId) {
-    return substateId.TransactionReceipt;
-  }
-  if ("ValidatorFeePool" in substateId) {
-    return substateId.ValidatorFeePool;
-  }
+  // if ("Component" in substateId) {
+  //   return substateId.Component;
+  // }
+  // if ("Resource" in substateId) {
+  //   return substateId.Resource;
+  // }
+  // if ("Vault" in substateId) {
+  //   return substateId.Vault;
+  // }
+  // if ("UnclaimedConfidentialOutput" in substateId) {
+  //   return substateId.UnclaimedConfidentialOutput;
+  // }
+  // if ("NonFungible" in substateId) {
+  //   const nft = substateId.NonFungible;
+  //   const key = Object.keys(nft.id)[0];
+  //   const type = key.toLowerCase();
+  //   return `nft_${nft.resource_address}_${type}_${nft.id[key]}`;
+  // }
+  // if ("TransactionReceipt" in substateId) {
+  //   return substateId.TransactionReceipt;
+  // }
+  // if ("ValidatorFeePool" in substateId) {
+  //   return substateId.ValidatorFeePool;
+  // }
   console.error("Unknown substate id", substateId);
-  return "Unknown";
+  return substateId;
 }
 
+// TODO: this function should be deprecated
 export function stringToSubstateId(substateId: string): SubstateId {
   const parts = splitOnce(substateId, "_");
   if (!parts) {
     throw new Error(`Invalid substate id: ${substateId}`);
   }
-  const [prefix, rest] = parts;
-
-  switch (prefix) {
-    case "component":
-      return { Component: rest };
-    case "resource":
-      return { Resource: rest };
-    case "vault":
-      return { Vault: rest };
-    case "tombstone":
-      return { UnclaimedConfidentialOutput: rest };
-    case "txreceipt":
-      return { TransactionReceipt: rest };
-    case "vnfp":
-      return { ValidatorFeePool: rest };
-    case "nft":
-      const nftParts = rest.split("_", 3);
-      if (nftParts.length != 3) {
-        throw new Error(`Invalid NFT substate id: ${substateId}`);
-      }
-
-      const [resourceAddress, type, id] = nftParts;
-
-      return {
-        NonFungible: {
-          resource_address: resourceAddress,
-          id: { [type]: id } as NonFungibleId,
-        },
-      };
-    case "template":
-      return { Template: rest };
-    case "utxo":
-      const utxoParts = rest.split("_", 2);
-      if (utxoParts.length != 2) {
-        throw new Error(`Invalid UTXO substate id: ${substateId}`);
-      }
-
-      return { Utxo: { resource_address: utxoParts[0], id: utxoParts[1] } };
-
-    default:
-      throw new Error(`Unknown substate id: ${substateId}`);
-  }
+  return substateId;
+  // const [prefix, rest] = parts;
+  //
+  // switch (prefix) {
+  //   case "component":
+  //     return { Component: rest };
+  //   case "resource":
+  //     return { Resource: rest };
+  //   case "vault":
+  //     return { Vault: rest };
+  //   case "tombstone":
+  //     return { UnclaimedConfidentialOutput: rest };
+  //   case "txreceipt":
+  //     return { TransactionReceipt: rest };
+  //   case "vnfp":
+  //     return { ValidatorFeePool: rest };
+  //   case "nft":
+  //     const nftParts = rest.split("_", 3);
+  //     if (nftParts.length != 3) {
+  //       throw new Error(`Invalid NFT substate id: ${substateId}`);
+  //     }
+  //
+  //     const [resourceAddress, type, id] = nftParts;
+  //
+  //     return {
+  //       NonFungible: {
+  //         resource_address: resourceAddress,
+  //         id: { [type]: id } as NonFungibleId,
+  //       },
+  //     };
+  //   case "template":
+  //     return { Template: rest };
+  //   case "utxo":
+  //     const utxoParts = rest.split("_", 2);
+  //     if (utxoParts.length != 2) {
+  //       throw new Error(`Invalid UTXO substate id: ${substateId}`);
+  //     }
+  //
+  //     return { Utxo: { resource_address: utxoParts[0], id: utxoParts[1] } };
+  //
+  //   default:
+  //     throw new Error(`Unknown substate id: ${substateId}`);
+  // }
 }
 
 export function shortenSubstateId(

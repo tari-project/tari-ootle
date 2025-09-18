@@ -75,7 +75,7 @@ async fn handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: Js
         // Substates
         "list_substates" => handlers.list_substates(value).await,
         "get_substate" => handlers.get_substate(value).await,
-        "get_substates" | "fetch_substates" => handlers.get_substates(value).await,
+        "get_substates" => handlers.get_substates(value).await,
         "inspect_substate" => handlers.inspect_substate(value).await,
         "get_non_fungibles" => handlers.get_non_fungibles(value).await,
         "get_utxo_updates" => handlers.get_utxo_updates(value).await,

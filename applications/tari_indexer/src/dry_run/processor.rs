@@ -23,12 +23,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use log::{debug, info};
-use tari_engine::{
-
-    state_store::new_memory_store,
-    traits::ClaimProofVerifier,
-    transaction::TransactionProcessorConfig,
-};
+use tari_engine::{state_store::new_memory_store, traits::ClaimProofVerifier, transaction::TransactionProcessorConfig};
 use tari_engine_types::{
     commit_result::ExecuteResult,
     substate::{Substate, SubstateId},
@@ -94,10 +89,12 @@ impl DryRunTransactionProcessor {
 
         let fee_table = get_fee_table_by_network(self.config.network);
 
-        let payload_processor =
-            TariTransactionProcessor::new(self.config.clone(), self.template_manager.clone(), fee_table.clone()
-                                          self.claim_burn_proof_verifier.clone(),
-            );
+        let payload_processor = TariTransactionProcessor::new(
+            self.config.clone(),
+            self.template_manager.clone(),
+            fee_table.clone(),
+            self.claim_burn_proof_verifier.clone(),
+        );
 
         let virtual_substates = self.get_virtual_substates(&transaction, epoch).await?;
 

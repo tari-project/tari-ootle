@@ -47,13 +47,7 @@ use tari_engine_types::{
     UtxoOutput,
     ValidatorFeePoolAddress,
 };
-use tari_ootle_common_types::services::template_provider::TemplateProvider;
-use tari_ootle_common_types::{
-    base_layer_hashing::ownership_proof_hasher64,
-    services::template_provider::TemplateProvider,
-    GetVerifier,
-    Network,
-};
+use tari_ootle_common_types::{services::template_provider::TemplateProvider, GetVerifier};
 use tari_template_abi::{TemplateDef, Type};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{

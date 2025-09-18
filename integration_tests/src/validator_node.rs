@@ -28,8 +28,7 @@ use std::{
 
 use reqwest::Url;
 use tari_common::configuration::{CommonConfig, StringList};
-use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::ConvertFromByteType;
+use tari_engine_types::FromByteType;
 use tari_ootle_app_utilities::{
     epoch_oracle_config::EpochOracleConfig,
     keypair::create_new_keypair,
@@ -40,7 +39,7 @@ use tari_ootle_common_types::{
     optional::Optional,
     Network,
 };
-use tari_ootle_wallet_sdk::models::AccountWithPublicKey;
+use tari_ootle_wallet_sdk::models::AccountWithAddress;
 use tari_shutdown::Shutdown;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_validator_node::{run_validator_node, ApplicationConfig, ValidatorNodeConfig};
@@ -138,9 +137,9 @@ pub async fn spawn_validator_node(
 
     // get the default wallet account public key
     let account = match wallet_client.accounts_get_default().await.optional().unwrap() {
-        Some(account) => AccountWithPublicKey {
+        Some(account) => AccountWithAddress {
             account: account.account,
-            owner_public_key: account.public_key,
+            address: account.address,
         },
         None => {
             let resp = wallet_client
@@ -152,9 +151,9 @@ pub async fn spawn_validator_node(
                 .await
                 .unwrap();
 
-            AccountWithPublicKey {
+            AccountWithAddress {
                 account: resp.account,
-                owner_public_key: resp.public_key,
+                address: resp.address,
             }
         },
     };
@@ -207,7 +206,7 @@ pub async fn spawn_validator_node(
             config.validator_node.p2p.listener_port = port;
 
             config.validator_node.fee_claim_public_key =
-                account.owner_public_key.try_from_byte_type().unwrap();
+                account.address.account_public_key().try_from_byte_type().unwrap();
 
             // Add all other VNs as peer seeds
             config.peer_seeds.peer_seeds = StringList::from(peer_seeds);

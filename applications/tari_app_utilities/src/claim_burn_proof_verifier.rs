@@ -12,7 +12,7 @@ use tari_crypto::{
     tari_utilities::ByteArray,
 };
 use tari_engine::traits::ClaimProofVerifier;
-use tari_engine_types::{confidential::MinotariBurnClaimProof, crypto::get_commitment_factory, FromByteType};
+use tari_engine_types::{confidential::MinotariBurnClaimProof, crypto::get_commitment_factory, ConvertFromByteType};
 use tari_hashing::{hashers::KernelMmrHasherBlake256, TransactionHashDomain};
 use tari_mmr::common::LeafIndex;
 use tari_ootle_common_types::{
@@ -213,12 +213,12 @@ impl ClaimProofVerifier for KnowledgeProofVerifier {
             .chain(&claimant.as_bytes())
             .finalize();
 
-        let commitment = PedersenCommitment::try_from_byte_type(commitment).map_err(|e| {
+        let commitment = PedersenCommitment::convert_from_byte_type(commitment).map_err(|e| {
             warn!(target: LOG_TARGET, "Claim burn failed - malformed commitment: {}", e);
             format!("malformed commitment: {}", e)
         })?;
 
-        let proof_of_knowledge = RistrettoSchnorr::try_from_byte_type(proof_of_knowledge).map_err(|e| {
+        let proof_of_knowledge = RistrettoSchnorr::convert_from_byte_type(proof_of_knowledge).map_err(|e| {
             warn!(target: LOG_TARGET, "Claim burn failed - malformed proof of knowledge: {}", e);
             format!("malformed proof of knowledge: {}", e)
         })?;

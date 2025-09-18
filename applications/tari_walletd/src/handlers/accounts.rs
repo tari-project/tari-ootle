@@ -12,7 +12,7 @@ use tari_engine_types::{
     component::derive_component_address_from_public_key,
     confidential::ClaimBurnOutputData,
     substate::SubstateId,
-    ConvertFromByteType,
+    FromByteType,
     ToByteType,
 };
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
@@ -419,11 +419,13 @@ pub async fn handle_claim_burn(
         claim_nonce_keypair.public_key
     );
 
-    let reciprocal_claim_public_key_expanded = claim_proof.burn_public_key.try_from_byte_type()
+    let reciprocal_claim_public_key_expanded = claim_proof
+        .burn_public_key
+        .try_from_byte_type()
         .map_err(|e| invalid_params("claim_proof.reciprocal_claim_public_key", Some(e)))?;
     let mask_and_value = sdk.stealth_crypto_api().decrypt_value_and_mask(
-        &output.encrypted_data,
-        &output.commitment,
+        &claimed_encrypted_data,
+        &claim_proof.commitment,
         claim_nonce_keypair.secret_key(),
         &reciprocal_claim_public_key_expanded,
     )?;

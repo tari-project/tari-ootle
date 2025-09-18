@@ -28,10 +28,7 @@ use tari_ootle_wallet_crypto::{
 use tari_template_lib::{
     models::{ConfidentialOutputStatement, EncryptedData, ResourceAddress, StealthTransferStatement},
     prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes},
-    types::{
-        crypto::{CommitmentSignatureBytes, UtxoTag},
-        Amount,
-    },
+    types::{crypto::UtxoTag, Amount},
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet::sdk::stealth_crypto";

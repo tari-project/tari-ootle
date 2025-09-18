@@ -31,7 +31,12 @@ use tari_engine_types::{
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
     ToByteType,
 };
-use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::SubstateType, SubstateRequirement};
+use tari_ootle_common_types::{
+    crypto::create_key_pair_from_seed,
+    substate_type::SubstateType,
+    Network,
+    SubstateRequirement,
+};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, XTR_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS},
@@ -522,7 +527,7 @@ impl TemplateTest {
         };
 
         let processor = TransactionProcessor::new(
-            TransactionProcessorConfig::new(),
+            TransactionProcessorConfig::new(Network::LocalNet),
             Arc::new(self.package.clone()),
             self.state_store.clone().into_read_only(),
             auth_params,

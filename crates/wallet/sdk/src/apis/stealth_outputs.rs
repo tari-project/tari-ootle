@@ -325,6 +325,18 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         Ok(exists)
     }
 
+    pub fn utxos_get_many(
+        &self,
+        resource_address: &ResourceAddress,
+        account: Option<&ComponentAddress>,
+        by_status: Option<OutputStatus>,
+    ) -> Result<Vec<StealthOutputModel>, StealthOutputsApiError> {
+        let outputs = self
+            .store
+            .with_read_tx(|tx| tx.stealth_outputs_get_many(resource_address, account, by_status))?;
+        Ok(outputs)
+    }
+
     pub fn verify_and_update_outputs<'i, I: IntoIterator<Item = (UtxoAddress, &'i Utxo)>>(
         &self,
         outputs: I,

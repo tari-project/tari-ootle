@@ -28,6 +28,7 @@ use tari_engine_types::{
     instruction::Instruction,
     serde_with,
     substate::{Substate, SubstateId},
+    UtxoAddress,
     ValidatorFeePoolAddress,
 };
 use tari_ootle_address::OotleAddress;
@@ -40,7 +41,15 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_wallet_sdk::{
     apis::{confidential_transfer::ConfidentialTransferInputSelection, key_manager::KeyBranch},
-    models::{Account, AuthoredTemplateModel, NonFungibleToken, TransactionStatus, WalletLockId, WalletTransaction},
+    models::{
+        Account,
+        AuthoredTemplateModel,
+        NonFungibleToken,
+        OutputStatus,
+        TransactionStatus,
+        WalletLockId,
+        WalletTransaction,
+    },
 };
 use tari_template_abi::{FunctionDef, TemplateDef};
 use tari_template_lib::{
@@ -1088,3 +1097,28 @@ pub struct AccountsAssociateStealthResourceRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountsAssociateStealthResourceResponse {}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub struct StealthUtxosListRequest {
+    pub resource_address: ResourceAddress,
+    pub account_address: Option<ComponentAddress>,
+    pub filter_by_status: Option<OutputStatus>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub struct StealthUtxosListResponse {
+    pub utxos: Vec<UtxoInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub struct UtxoInfo {
+    pub address: UtxoAddress,
+    pub value: Amount,
+    pub status: OutputStatus,
+    pub is_burnt: bool,
+    pub is_frozen: bool,
+    pub is_on_chain: bool,
+}

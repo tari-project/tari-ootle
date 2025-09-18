@@ -11514,6 +11514,7 @@ name = "tari_ootle_wallet_storage_sqlite"
 version = "0.11.2"
 dependencies = [
  "bigdecimal",
+ "chrono",
  "diesel",
  "diesel_migrations",
  "hex",

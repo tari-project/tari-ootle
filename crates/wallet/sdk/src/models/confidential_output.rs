@@ -26,6 +26,7 @@ pub struct ConfidentialOutputModel {
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum OutputStatus {
     /// The output is available for spending
     Unspent,

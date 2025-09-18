@@ -46,6 +46,7 @@ pub mod auth;
 
 #[macro_use]
 pub mod args;
+#[macro_use]
 pub mod models;
 
 pub mod component;

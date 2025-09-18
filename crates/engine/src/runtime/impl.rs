@@ -58,6 +58,7 @@ use tari_engine_types::{
 use tari_ootle_common_types::{
     base_layer_hashing::ownership_proof_hasher64,
     services::template_provider::TemplateProvider,
+    GetVerifier,
     Network,
 };
 use tari_template_abi::{TemplateDef, Type};
@@ -123,10 +124,16 @@ use tari_template_lib::{
     prelude::{ResourceType, RistrettoPublicKeyBytes},
     resource::{IMAGE_URL, TOKEN_SYMBOL},
     template::BuiltinTemplate,
-    types::{crypto::UtxoTag, Amount, EntityId, TemplateAddress},
+    types::{
+        crypto::UtxoTag,
+        engine_args::{SignatureAction, SignatureVerifyArg},
+        Amount,
+        EntityId,
+        TemplateAddress,
+    },
 };
 
-use super::{working_state::WorkingState, Runtime};
+use super::{working_state::WorkingState, Runtime, RuntimeEvent};
 use crate::{
     runtime::{
         engine_args::EngineArgs,
@@ -195,6 +202,13 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     fn invoke_modules_on_before_finalize(&self) -> Result<(), RuntimeError> {
         for module in &self.modules {
             module.on_before_finalize(&self.tracker)?;
+        }
+        Ok(())
+    }
+
+    fn invoke_modules_on_runtime_event(&self, event: RuntimeEvent) -> Result<(), RuntimeError> {
+        for module in &self.modules {
+            module.on_runtime_event(&self.tracker, &event)?;
         }
         Ok(())
     }
@@ -2610,6 +2624,26 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
             Ok(())
         })
+    }
+
+    fn signature_invoke(&self, action: SignatureAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("signature_invoke")?;
+
+        match action {
+            SignatureAction::Verify => {
+                self.invoke_modules_on_runtime_event(RuntimeEvent::SignatureVerified)?;
+
+                let SignatureVerifyArg {
+                    public_key,
+                    domain,
+                    message,
+                    payload,
+                } = args.assert_one_arg()?;
+
+                let is_valid = payload.get_verifier().verify(&domain, &message, &public_key, &payload);
+                Ok(InvokeResult::encode(&is_valid)?)
+            },
+        }
     }
 
     /// Create a new address allocation for the provided substate type and entity id

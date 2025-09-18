@@ -8,6 +8,7 @@ pub mod committee;
 mod consensus_constants;
 pub mod crypto;
 pub mod displayable;
+mod engine_signature;
 mod epoch;
 mod era;
 mod extra_data;
@@ -35,6 +36,7 @@ mod vote_power;
 
 pub use bytes::*;
 pub use consensus_constants::*;
+pub use engine_signature::*;
 pub use epoch::Epoch;
 pub use era::*;
 pub use extra_data::*;

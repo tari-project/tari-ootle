@@ -24,8 +24,10 @@ use tari_ootle_storage_sqlite::{error::SqliteStorageError, SqliteTransaction};
 use tari_ootle_wallet_sdk::models::WalletUtxoUpdate;
 use tari_template_lib::{
     models::ResourceAddress,
-    prelude::{crypto::UtxoTag, RistrettoPublicKeyBytes},
-    types::TemplateAddress,
+    types::{
+        crypto::{RistrettoPublicKeyBytes, UtxoTag},
+        TemplateAddress,
+    },
 };
 use tari_transaction::{Transaction, TransactionId};
 

@@ -42,9 +42,12 @@ use tari_ootle_wallet_sdk::{
     storage::{WalletStorageError, WalletStoreReader, WalletStoreWriter},
 };
 use tari_template_lib::{
-    models::{EncryptedData, NonFungibleId, ResourceAddress, VaultId},
-    prelude::{crypto::UtxoTag, ComponentAddress, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
-    types::{Amount, TemplateAddress},
+    models::{ComponentAddress, EncryptedData, NonFungibleId, ResourceAddress, VaultId},
+    types::{
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
+        Amount,
+        TemplateAddress,
+    },
 };
 use tari_transaction::{Transaction, TransactionId};
 use tari_utilities::hex::Hex;

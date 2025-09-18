@@ -69,6 +69,7 @@ pub enum FeeSource {
     Events,
     Logs,
     TransactionWeight,
+    SignatureVerification,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

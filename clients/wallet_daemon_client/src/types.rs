@@ -1050,8 +1050,7 @@ pub struct TransferNftRequest {
     pub fee_payer_account: ComponentAddressOrName,
     #[serde(deserialize_with = "string_or_struct")]
     pub source_account: ComponentAddressOrName,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub target_account_public_key: RistrettoPublicKeyBytes,
+    pub target_account_address: OotleAddress,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub max_fee: u64,
     pub dry_run: bool,

@@ -20,12 +20,12 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::convert::TryInto;
+use std::{collections::HashMap, convert::TryInto};
 
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_engine_types::{
-    substate::{SubstateId, SubstateValue},
+    substate::{Substate, SubstateId, SubstateValue},
     Utxo,
     UtxoId,
 };
@@ -42,8 +42,10 @@ use tari_ootle_common_types::{
 use tari_ootle_wallet_sdk::models::WalletUtxoUpdate;
 use tari_template_lib::{
     models::ResourceAddress,
-    prelude::{crypto::UtxoTag, RistrettoPublicKeyBytes},
-    types::TemplateAddress,
+    types::{
+        crypto::{RistrettoPublicKeyBytes, UtxoTag},
+        TemplateAddress,
+    },
 };
 use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClientFactory};
 
@@ -156,6 +158,15 @@ impl SubstateManager {
             })),
             _ => Ok(None),
         }
+    }
+
+    pub fn get_substates(&self, substates: &[SubstateId]) -> Result<HashMap<SubstateId, Substate>, anyhow::Error> {
+        let mut tx = self.substate_store.create_read_tx()?;
+        let substates = tx.get_substates(substates)?;
+        Ok(substates
+            .into_iter()
+            .map(|rec| (rec.address, Substate::new(rec.version, rec.substate)))
+            .collect())
     }
 
     async fn get_substate_from_db(

@@ -28,6 +28,7 @@ use tari_engine_types::{
     instruction::Instruction,
     serde_with,
     substate::{Substate, SubstateId},
+    UtxoAddress,
     ValidatorFeePoolAddress,
 };
 use tari_ootle_address::OotleAddress;
@@ -40,7 +41,15 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_wallet_sdk::{
     apis::{confidential_transfer::ConfidentialTransferInputSelection, key_manager::KeyBranch},
-    models::{Account, AuthoredTemplateModel, NonFungibleToken, TransactionStatus, WalletLockId, WalletTransaction},
+    models::{
+        Account,
+        AuthoredTemplateModel,
+        NonFungibleToken,
+        OutputStatus,
+        TransactionStatus,
+        WalletLockId,
+        WalletTransaction,
+    },
 };
 use tari_template_abi::{FunctionDef, TemplateDef};
 use tari_template_lib::{
@@ -851,7 +860,7 @@ pub struct SubstatesListRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct SubstatesListResponse {
-    pub substates: Vec<WalletSubstateRecord>,
+    pub substates: Vec<WalletSubstateInfo>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -864,13 +873,14 @@ pub struct SubstatesGetRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct SubstatesGetResponse {
-    pub record: Option<WalletSubstateRecord>,
-    pub substate: Option<Substate>,
+    // NOTE either of these can be None, but never both (instead, NotFound error)
+    pub local_record: Option<WalletSubstateInfo>,
+    pub substate_from_remote: Option<Substate>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
-pub struct WalletSubstateRecord {
+pub struct WalletSubstateInfo {
     pub substate_id: SubstateId,
     pub parent_id: Option<SubstateId>,
     pub module_name: Option<String>,
@@ -1040,8 +1050,7 @@ pub struct TransferNftRequest {
     pub fee_payer_account: ComponentAddressOrName,
     #[serde(deserialize_with = "string_or_struct")]
     pub source_account: ComponentAddressOrName,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub target_account_public_key: RistrettoPublicKeyBytes,
+    pub target_account_address: OotleAddress,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub max_fee: u64,
     pub dry_run: bool,
@@ -1088,3 +1097,28 @@ pub struct AccountsAssociateStealthResourceRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountsAssociateStealthResourceResponse {}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub struct StealthUtxosListRequest {
+    pub resource_address: ResourceAddress,
+    pub account_address: Option<ComponentAddress>,
+    pub filter_by_status: Option<OutputStatus>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub struct StealthUtxosListResponse {
+    pub utxos: Vec<UtxoInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub struct UtxoInfo {
+    pub address: UtxoAddress,
+    pub value: Amount,
+    pub status: OutputStatus,
+    pub is_burnt: bool,
+    pub is_frozen: bool,
+    pub is_on_chain: bool,
+}

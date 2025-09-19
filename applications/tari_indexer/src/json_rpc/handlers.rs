@@ -50,6 +50,8 @@ use tari_indexer_client::types::{
     GetNonFungiblesResponse,
     GetSubstateRequest,
     GetSubstateResponse,
+    GetSubstatesRequest,
+    GetSubstatesResponse,
     GetTemplateDefinitionRequest,
     GetTemplateDefinitionResponse,
     GetTransactionResultRequest,
@@ -375,6 +377,29 @@ impl JsonRpcHandlers {
                 }
             },
         }
+    }
+
+    pub async fn get_substates(&self, value: JsonRpcExtractor) -> JrpcResult {
+        let answer_id = value.get_answer_id();
+        let req: GetSubstatesRequest = value.parse_params()?;
+
+        const MAX_REQUESTS: usize = 20;
+
+        let GetSubstatesRequest { requests } = req;
+
+        if requests.len() > MAX_REQUESTS {
+            return Err(Self::invalid_params(
+                answer_id,
+                format!("Cannot request more than {MAX_REQUESTS} substates at once"),
+            ));
+        }
+
+        let substates = self.substate_manager.get_substates(requests.as_slice()).map_err(|e| {
+            warn!(target: LOG_TARGET, "Error getting substate: {}", e);
+            Self::internal_error(answer_id, format!("Error getting substate: {}", e))
+        })?;
+
+        Ok(JsonRpcResponse::success(answer_id, GetSubstatesResponse { substates }))
     }
 
     pub async fn inspect_substate(&self, value: JsonRpcExtractor) -> JrpcResult {
@@ -791,7 +816,7 @@ impl JsonRpcHandlers {
 
         let transactions = self
             .transaction_manager
-            .list_recent_transactions(req.last_id, limit as usize)
+            .list_recent_transactions(None, limit as usize)
             .map_err(|e| Self::internal_error(answer_id, e))?;
 
         let resp = ListRecentTransactionsResponse { transactions };
@@ -818,6 +843,10 @@ impl JsonRpcHandlers {
 
     fn not_found<T: Display>(answer_id: i64, details: T) -> JsonRpcResponse {
         Self::error_response(answer_id, JsonRpcErrorReason::ApplicationError(404), details)
+    }
+
+    fn invalid_params<T: Display>(answer_id: i64, details: T) -> JsonRpcResponse {
+        Self::error_response(answer_id, JsonRpcErrorReason::InvalidParams, details)
     }
 
     fn internal_error<T: Display>(answer_id: i64, error: T) -> JsonRpcResponse {

@@ -7,11 +7,11 @@ use serde::{Deserialize, Serialize};
 use tari_consensus_types::Decision;
 use tari_engine_types::{
     commit_result::ExecuteResult,
-    substate::{SubstateId, SubstateValue},
+    substate::{Substate, SubstateId, SubstateValue},
     Utxo,
     UtxoId,
 };
-use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, StateVersion};
+use tari_ootle_common_types::{shard::Shard, StateVersion};
 use tari_template_abi::TemplateDef;
 use tari_template_lib::{
     models::ResourceAddress,
@@ -33,13 +33,10 @@ pub trait WalletNetworkInterface {
         local_search_only: bool,
     ) -> impl Future<Output = Result<SubstateQueryResult, Self::Error>> + Send;
 
-    fn list_substates(
+    fn get_substates(
         &self,
-        filter_by_template: Option<TemplateAddress>,
-        filter_by_type: Option<SubstateType>,
-        limit: Option<u64>,
-        offset: Option<u64>,
-    ) -> impl Future<Output = Result<SubstateListResult, Self::Error>> + Send;
+        substate_ids: Vec<SubstateId>,
+    ) -> impl Future<Output = Result<HashMap<SubstateId, Substate>, Self::Error>> + Send;
 
     fn submit_transaction(
         &self,
@@ -108,20 +105,6 @@ pub struct SubstateQueryResult {
     pub address: SubstateId,
     pub version: u32,
     pub substate: SubstateValue,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct SubstateListResult {
-    pub substates: Vec<SubstateListItem>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct SubstateListItem {
-    pub substate_id: SubstateId,
-    pub module_name: Option<String>,
-    pub version: u32,
-    pub template_address: Option<TemplateAddress>,
-    pub timestamp: PrimitiveDateTime,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

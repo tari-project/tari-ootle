@@ -11120,6 +11120,7 @@ dependencies = [
  "tari_transaction",
  "tari_validator_node_rpc",
  "thiserror 1.0.69",
+ "time",
  "tokio",
  "tower-http 0.4.4",
  "url",
@@ -11130,6 +11131,7 @@ name = "tari_indexer_client"
 version = "0.11.2"
 dependencies = [
  "anyhow",
+ "bounded-vec",
  "multiaddr 0.18.1",
  "reqwest 0.11.27",
  "serde",

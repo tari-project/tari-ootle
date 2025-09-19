@@ -920,6 +920,53 @@ impl WalletStoreReader for ReadTransaction<'_> {
         row.try_convert(account_address)
     }
 
+    fn stealth_outputs_get_many(
+        &mut self,
+        resource_address: &ResourceAddress,
+        by_account: Option<&ComponentAddress>,
+        by_status: Option<OutputStatus>,
+    ) -> Result<Vec<StealthOutputModel>, WalletStorageError> {
+        const OPERATION: &str = "stealth_outputs_get_many";
+        use crate::schema::{accounts, stealth_outputs};
+
+        let mut query = stealth_outputs::table
+            .inner_join(accounts::table.on(accounts::id.eq(stealth_outputs::owner_account_id)))
+            .select((stealth_outputs::all_columns, accounts::address))
+            .filter(stealth_outputs::resource_address.eq(resource_address.to_string()))
+            .into_boxed();
+
+        if let Some(account_addr) = by_account {
+            // NOTE: because we also join on accounts table, we cannot use it in the filter directly due to a diesel
+            // limitation. Also tried aliases, but didn't immediately work and decided this is fine.
+            let account_id = accounts::table
+                .select(accounts::id)
+                .filter(accounts::address.eq(account_addr.to_string()))
+                .limit(1)
+                .get_result::<i32>(self.connection())
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+            query = query.filter(stealth_outputs::owner_account_id.eq(account_id));
+        }
+
+        if let Some(status) = by_status {
+            query = query.filter(stealth_outputs::status.eq(status.as_key_str()));
+        }
+
+        let rows = query
+            .get_results::<(models::StealthOutput, String)>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        rows.into_iter()
+            .map(|(row, address)| {
+                let address = address.parse().map_err(|e| WalletStorageError::DecodingError {
+                    operation: OPERATION,
+                    item: "account",
+                    details: format!("Corrupt db: invalid owner account address '{address}': {e}"),
+                })?;
+                row.try_convert(address)
+            })
+            .collect()
+    }
+
     fn locks_get_by_transaction_id(
         &mut self,
         transaction_id: TransactionId,

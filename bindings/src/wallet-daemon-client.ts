@@ -1,7 +1,6 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-export * from "./types/wallet-daemon-client/WalletSubstateRecord";
 export * from "./types/wallet-daemon-client/ProofsFinalizeResponse";
 export * from "./types/wallet-daemon-client/WalletGetInfoResponse";
 export * from "./types/wallet-daemon-client/CallInstructionRequest";
@@ -10,11 +9,13 @@ export * from "./types/wallet-daemon-client/AccountsListRequest";
 export * from "./types/wallet-daemon-client/AuthGetAllJwtResponse";
 export * from "./types/wallet-daemon-client/AuthLoginResponse";
 export * from "./types/wallet-daemon-client/GetValidatorFeesRequest";
+export * from "./types/wallet-daemon-client/StealthUtxosListResponse";
 export * from "./types/wallet-daemon-client/AccountGetDefaultRequest";
 export * from "./types/wallet-daemon-client/AuthGetAllJwtRequest";
 export * from "./types/wallet-daemon-client/KeyBranch";
 export * from "./types/wallet-daemon-client/PublishTemplateResponse";
 export * from "./types/wallet-daemon-client/AccountsAssociateStealthResourceResponse";
+export * from "./types/wallet-daemon-client/WalletSubstateInfo";
 export * from "./types/wallet-daemon-client/WebauthnAlreadyRegisteredResponse";
 export * from "./types/wallet-daemon-client/AccountGetResponse";
 export * from "./types/wallet-daemon-client/SettingsSetRequest";
@@ -82,6 +83,7 @@ export * from "./types/wallet-daemon-client/SettingsGetResponse";
 export * from "./types/wallet-daemon-client/WebauthnFinishRegisterResponse";
 export * from "./types/wallet-daemon-client/TransactionSubmitDryRunResponse";
 export * from "./types/wallet-daemon-client/WalletGetInfoRequest";
+export * from "./types/wallet-daemon-client/StealthUtxosListRequest";
 export * from "./types/wallet-daemon-client/ClaimBurnResponse";
 export * from "./types/wallet-daemon-client/WebRtcStartRequest";
 export * from "./types/wallet-daemon-client/ConfidentialViewVaultBalanceResponse";
@@ -115,6 +117,7 @@ export * from "./types/wallet-daemon-client/AuthLoginAcceptRequest";
 export * from "./types/wallet-daemon-client/TransactionSubmitDryRunRequest";
 export * from "./types/wallet-daemon-client/KeysSetActiveRequest";
 export * from "./types/wallet-daemon-client/ConfidentialViewVaultBalanceRequest";
+export * from "./types/wallet-daemon-client/UtxoInfo";
 export * from "./types/wallet-daemon-client/TemplatesListAuthoredResponse";
 export * from "./types/wallet-daemon-client/ConfidentialTransferRequest";
 export * from "./types/wallet-daemon-client/AuthoredTemplate";

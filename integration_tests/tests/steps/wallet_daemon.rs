@@ -8,7 +8,10 @@ use cucumber::{then, when};
 use integration_tests::{util::cucumber_log, wallet_daemon_cli, TariWorld};
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
-use tari_template_lib::prelude::{crypto::CommitmentSignatureBytes, Amount, PedersenCommitmentBytes, Scalar32Bytes};
+use tari_template_lib::types::{
+    crypto::{CommitmentSignatureBytes, PedersenCommitmentBytes, Scalar32Bytes},
+    Amount,
+};
 use tari_transaction_components::transaction_components::{memo_field::TxType, MemoField};
 use tari_wallet_daemon_client::{
     types::{ClaimBurnProof, ExtClaimBurnProof},

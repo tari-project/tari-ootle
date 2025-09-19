@@ -51,6 +51,7 @@ use tari_template_lib::{
         VaultInvokeArg,
         WorkspaceInvokeArg,
     },
+    types::engine_args::SignatureInvokeArg,
     AbiContext,
 };
 use wasmer::{imports, AsStoreMut, Function, FunctionEnv, FunctionEnvMut, Instance, Store, StoreMut, WasmPtr};
@@ -209,6 +210,9 @@ impl WasmProcess {
                     env.interface().builtin_template_invoke(arg.action)
                 })
             },
+            EngineOp::SignatureInvoke => Self::handle(store, env_mut, arg, |env, arg: SignatureInvokeArg| {
+                env.interface().signature_invoke(arg.action, arg.args.into())
+            }),
         };
 
         result.unwrap_or_else(|err| {

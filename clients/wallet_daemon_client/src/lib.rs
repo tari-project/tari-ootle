@@ -112,6 +112,8 @@ use crate::{
         SettingsGetResponse,
         StealthTransferRequest,
         StealthTransferResponse,
+        StealthUtxosListRequest,
+        StealthUtxosListResponse,
         TransactionGetAllRequest,
         TransactionGetAllResponse,
         TransactionGetRequest,
@@ -457,6 +459,13 @@ impl WalletDaemonClient {
     ) -> Result<PublishTemplateResponse, WalletDaemonClientError> {
         self.send_request("transactions.publish_template", request.borrow())
             .await
+    }
+
+    pub async fn stealth_utxos_list<T: Borrow<StealthUtxosListRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<StealthUtxosListResponse, WalletDaemonClientError> {
+        self.send_request("stealth_utxos.list", request.borrow()).await
     }
 
     pub async fn get_settings(&mut self) -> Result<SettingsGetResponse, WalletDaemonClientError> {

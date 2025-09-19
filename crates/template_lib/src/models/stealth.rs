@@ -73,3 +73,13 @@ pub struct StealthTransferStatement {
     #[cfg_attr(feature = "ts", ts(type = "{public_nonce: string, signature: string}"))]
     pub balance_proof: BalanceProofSignature,
 }
+
+impl StealthTransferStatement {
+    pub fn revealed_input_amount(&self) -> Amount {
+        self.inputs_statement.revealed_amount
+    }
+
+    pub fn revealed_output_amount(&self) -> Amount {
+        self.outputs_statement.revealed_output_amount
+    }
+}

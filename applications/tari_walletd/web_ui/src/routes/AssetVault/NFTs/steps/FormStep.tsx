@@ -88,9 +88,9 @@ export default function FormStep({
     updateFormValue(name, value, e.target.validity.valid);
   };
 
-  const isAddressValid = transferFormState.targetAccountAddress ? 
-    validateOotleAddress(transferFormState.targetAccountAddress) : 
-    true; // Don't show error for empty field
+  const isAddressValid = transferFormState.targetAccountAddress
+    ? validateOotleAddress(transferFormState.targetAccountAddress)
+    : true; // Don't show error for empty field
 
   const getFormErrors = () => {
     const errors = [];
@@ -145,7 +145,7 @@ export default function FormStep({
 
         <TextField
           name="targetAccountAddress"
-          label="Target Account Public Key"
+          label="To Account address"
           value={transferFormState.targetAccountAddress}
           required
           onChange={setFormValue}

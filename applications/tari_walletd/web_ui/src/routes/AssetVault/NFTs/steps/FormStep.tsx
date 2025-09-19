@@ -31,7 +31,7 @@ import ListItemText from "@mui/material/ListItemText";
 import { Divider, InputLabel, Stack, Alert } from "@mui/material";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
 import type { NonFungibleId, NonFungibleToken, Account } from "@tari-project/typescript-bindings";
-import { substateIdToString, formatCurrency, displayNftId } from "@utils/helpers";
+import { substateIdToString, displayNftId } from "@utils/helpers";
 import { useNftTransferStore } from "@store/nftTransferStore";
 import { validateOotleAddress } from "@tari-project/typescript-bindings/dist/helpers/ootleAddress";
 
@@ -75,7 +75,6 @@ export default function FormStep({
   accounts,
   availableNfts,
   preSelectedNftId,
-  isEstimatingFee,
   onSubmit,
   onCancel,
   onNftsChange,
@@ -158,21 +157,6 @@ export default function FormStep({
               : "Enter the recipient's address (e.g., xtr_loc_1enpsfkx...)"
           }
         />
-
-        {/* <TextField
-          name="maxFee"
-          label="Transaction Fee"
-          value={
-            isEstimatingFee
-              ? "Estimating..."
-              : transferFormState.maxFee
-                ? formatCurrency(parseInt(transferFormState.maxFee))
-                : "Will be calculated automatically"
-          }
-          placeholder="Fee will be estimated automatically"
-          disabled={true}
-          style={{ flexGrow: 1 }}
-        /> */}
 
         {!preSelectedNftId ? (
           <>

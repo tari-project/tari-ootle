@@ -85,7 +85,7 @@ function Assets({ account }: { account: Account }) {
   } = useNFTsList(substateIdToString(account.component_address), 0, 1000);
 
   const totalCount = allNfts?.nfts?.length || 0;
-  
+
   // Auto-adjust page if current page is empty due to NFT transfers
   useEffect(() => {
     if (totalCount > 0 && nftPage > 0) {

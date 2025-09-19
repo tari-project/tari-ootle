@@ -36,7 +36,6 @@ import type {
 import { useNftsTransfer, useNFTsList } from "@api/hooks/useNfts";
 import { substateIdToString } from "@utils/helpers";
 import { useAccountsList } from "@api/hooks/useAccounts";
-import { decodeOotleAddress } from "@tari-project/typescript-bindings";
 import { useNftTransferStore } from "@store/nftTransferStore";
 import FormStep from "../steps/FormStep";
 import ConfirmationStep from "../steps/ConfirmationStep";
@@ -117,7 +116,6 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     setDisabled,
     setTransferFormState,
     setValidity,
-    setIsEstimatingFee,
     setTransferResult,
     setAutoCloseTimeoutId,
     initializeFormState,
@@ -125,7 +123,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   } = useNftTransferStore();
 
   const [availableNfts, setAvailableNfts] = useState<NonFungibleToken[]>([]);
-  const [isEstimatingFee, setLocalIsEstimatingFee] = useState(false);
+  const [isEstimatingFee, setIsEstimatingFee] = useState(false);
 
   // Memoize account selectors to prevent infinite re-renders - now nullable
   const sourceAccount = useMemo(() => (account ? getAccountSelector(account) : null), [account]);
@@ -151,24 +149,12 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
 
   // Memoize hook parameters to prevent re-renders
   const feeEstimateParams = useMemo(() => {
-    // Decode the address to get the public key if we have a valid address
-    let targetPublicKey = transferFormState.targetAccountAddress;
-    if (transferFormState.targetAccountAddress && transferFormState.targetAccountAddress.startsWith("xtr_")) {
-      try {
-        const decodedAddress = decodeOotleAddress(transferFormState.targetAccountAddress);
-        targetPublicKey = decodedAddress.accountPublicKey;
-      } catch (e) {
-        // If decoding fails, keep the original (might be already a public key)
-        console.warn("Failed to decode address, using as-is:", e);
-      }
-    }
-
     return {
       dry_run: true,
       max_fee: 3000,
       nfts: transferFormState.nfts,
       source_account: sourceAccount!,
-      target_account_address: targetPublicKey,
+      target_account_address: transferFormState.targetAccountAddress,
       fee_payer_account: feePayerAccount!,
       resource_address: transferFormState.resourceAddress,
     };
@@ -181,22 +167,10 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   ]);
 
   const transferParams = useMemo(() => {
-    // Decode the address to get the public key if we have a valid address
-    let targetPublicKey = transferFormState.targetAccountAddress;
-    if (transferFormState.targetAccountAddress && transferFormState.targetAccountAddress.startsWith("xtr_")) {
-      try {
-        const decodedAddress = decodeOotleAddress(transferFormState.targetAccountAddress);
-        targetPublicKey = decodedAddress.accountPublicKey;
-      } catch (e) {
-        // If decoding fails, keep the original (might be already a public key)
-        console.warn("Failed to decode address for transfer, using as-is:", e);
-      }
-    }
-
     return {
       nfts: transferFormState.nfts,
       source_account: sourceAccount!,
-      target_account_address: targetPublicKey,
+      target_account_address: transferFormState.targetAccountAddress,
       dry_run: false,
       max_fee: parseInt(transferFormState.maxFee) || 3000,
       fee_payer_account: feePayerAccount!,
@@ -220,7 +194,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       return;
     }
 
-    setLocalIsEstimatingFee(true);
+    setIsEstimatingFee(true);
 
     // Ensure the form state is updated for fee estimation
     setTransferFormState({ targetAccountAddress: targetAccount });
@@ -243,7 +217,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       console.error("Fee estimation error:", e);
       throw e;
     } finally {
-      setLocalIsEstimatingFee(false);
+      setIsEstimatingFee(false);
     }
   };
 
@@ -252,7 +226,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       return;
     }
 
-    setLocalIsEstimatingFee(true);
+    setIsEstimatingFee(true);
 
     try {
       const result = await calculateFeeEstimate?.();
@@ -269,7 +243,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       console.error("Fee estimation error:", e);
       throw e;
     } finally {
-      setLocalIsEstimatingFee(false);
+      setIsEstimatingFee(false);
     }
   };
 
@@ -346,6 +320,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
 
   const handleClose = () => {
     resetState(preSelectedNftId, preSelectedResourceAddress);
+    setCurrentStep("form");
     props.handleClose?.();
   };
 
@@ -398,7 +373,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   // Handle target account changes for auto fee estimation
   useEffect(() => {
     const targetAccount = transferFormState.targetAccountAddress;
-    if (targetAccount.trim() && targetAccount.match(/^[0-9a-fA-F]+$/)) {
+    if (targetAccount.trim() && targetAccount.startsWith("xtr_")) {
       // Small delay to let state update, then estimate fee
       const timeoutId = setTimeout(() => {
         estimateFeeWithTargetAccount(targetAccount).catch(() => {
@@ -418,7 +393,8 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
 
   useEffect(() => {
     if (props.open && account) {
-      // When dialog opens, ensure we have fresh state with correct NFT
+      // When dialog opens, always reset to ensure clean state
+      resetState(preSelectedNftId, preSelectedResourceAddress);
       initializeFormState(preSelectedNftId, preSelectedResourceAddress, substateIdToString(account.component_address));
     }
   }, [props.open, preSelectedNftId, preSelectedResourceAddress, account?.component_address]);

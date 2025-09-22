@@ -20,7 +20,6 @@ use tari_consensus_types::BlockId;
 use tari_engine_types::{
     substate::{SubstateId, SubstateValue},
     Utxo,
-    UtxoId,
 };
 use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate, TransactionEntry};
 use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, ShardGroup, StateVersion};
@@ -28,7 +27,7 @@ use tari_ootle_storage::{time::PrimitiveDateTime, StorageError};
 use tari_ootle_storage_sqlite::SqliteTransaction;
 use tari_ootle_wallet_sdk::models::WalletUtxoUpdate;
 use tari_template_lib::{
-    models::ResourceAddress,
+    models::{ResourceAddress, UtxoId},
     prelude::{RistrettoPublicKeyBytes, TemplateAddress},
     types::crypto::UtxoTag,
 };

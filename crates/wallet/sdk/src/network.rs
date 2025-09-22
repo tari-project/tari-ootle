@@ -9,12 +9,11 @@ use tari_engine_types::{
     commit_result::ExecuteResult,
     substate::{Substate, SubstateId, SubstateValue},
     Utxo,
-    UtxoId,
 };
 use tari_ootle_common_types::{shard::Shard, StateVersion};
 use tari_template_abi::TemplateDef;
 use tari_template_lib::{
-    models::ResourceAddress,
+    models::{ResourceAddress, UtxoId},
     prelude::{RistrettoPublicKeyBytes, TemplateAddress},
     types::crypto::UtxoTag,
 };

@@ -12,9 +12,8 @@ use tari_consensus_types::Decision;
 use tari_engine_types::{
     commit_result::ExecuteResult,
     substate::{Substate, SubstateId, SubstateValue},
-    template_lib_models::{NonFungibleAddress, ResourceAddress},
+    template_lib_models::{NonFungibleAddress, ResourceAddress, UtxoId},
     Utxo,
-    UtxoId,
 };
 use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, StateVersion};
 use tari_ootle_storage::time::PrimitiveDateTime;

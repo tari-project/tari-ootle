@@ -4,7 +4,7 @@
 use std::{array, time::Duration};
 
 use log::*;
-use tari_engine_types::{UtxoAddress, UtxoId, UtxoOutput};
+use tari_engine_types::UtxoOutput;
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
     Network,
@@ -14,7 +14,7 @@ use tari_ootle_wallet_sdk::{
     storage::{WalletStore, WalletStoreReader, WalletStoreWriter},
     WalletSdk,
 };
-use tari_template_lib::models::ResourceAddress;
+use tari_template_lib::models::{ResourceAddress, UtxoAddress, UtxoId};
 use tokio::sync::watch;
 
 use crate::utxo_scanner::StealthScannerApiError;

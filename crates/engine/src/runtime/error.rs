@@ -86,11 +86,11 @@ pub enum RuntimeError {
         // To reduce the size of this variant, we box one of the fields
         requested_owner: Box<SubstateId>,
     },
-    #[error("Expected lock {lock_id} to lock {expected_type} but it locks {address}")]
+    #[error("Expected lock {lock_id} to lock {expected_type} but it locks {id}")]
     LockSubstateMismatch {
         lock_id: LockId,
         expected_type: &'static str,
-        address: SubstateId,
+        id: SubstateId,
     },
     #[error("Component {component} referenced an unknown substate {id}")]
     ComponentReferencedUnknownSubstate {

@@ -10,10 +10,9 @@ use tari_engine_types::{
     substate::{Substate, SubstateId, SubstateValue},
     vault::Vault,
     Utxo,
-    UtxoAddress,
 };
 use tari_ootle_common_types::optional::Optional;
-use tari_template_lib::models::{ComponentAddress, VaultId};
+use tari_template_lib::models::{ComponentAddress, UtxoAddress, VaultId};
 
 use crate::{
     runtime::{

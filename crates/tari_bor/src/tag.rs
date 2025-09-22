@@ -7,7 +7,6 @@ use ciborium::tag::Required;
 use serde::{de, ser, Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-
 pub struct BorTag<T, const TAG: u64>(Required<T, TAG>);
 
 impl<T, const TAG: u64> BorTag<T, TAG> {

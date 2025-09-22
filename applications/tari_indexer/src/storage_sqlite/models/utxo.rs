@@ -3,11 +3,14 @@
 
 use std::str::FromStr;
 
-use tari_engine_types::{Utxo, UtxoAddress, UtxoId, UtxoOutput};
+use tari_engine_types::{Utxo, UtxoOutput};
 use tari_ootle_common_types::StateVersion;
 use tari_ootle_storage::{time::PrimitiveDateTime, StorageError};
 use tari_ootle_wallet_sdk::models::{UtxoBurnt, UtxoSpent, UtxoUnspent, WalletUtxoUpdate};
-use tari_template_lib::prelude::{PedersenCommitmentBytes, ResourceAddress};
+use tari_template_lib::{
+    models::{UtxoAddress, UtxoId},
+    prelude::{PedersenCommitmentBytes, ResourceAddress},
+};
 
 use crate::storage_sqlite::{schema::utxos, serialization::deserialize_bincode};
 

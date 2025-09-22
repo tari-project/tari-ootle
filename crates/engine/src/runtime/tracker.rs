@@ -35,12 +35,11 @@ use tari_engine_types::{
     logs::LogEntry,
     substate::{SubstateId, SubstateValue},
     virtual_substate::VirtualSubstates,
-    UtxoAddress,
 };
 use tari_ootle_common_types::Epoch;
 use tari_template_lib::{
     auth::{ComponentAccessRules, OwnerRule},
-    models::{ComponentAddress, ComponentAddressAllocation, Metadata, UnclaimedConfidentialOutputAddress},
+    models::{ComponentAddress, ComponentAddressAllocation, Metadata, UnclaimedConfidentialOutputAddress, UtxoAddress},
     prelude::{RistrettoPublicKeyBytes, TemplateAddress},
     types::Hash,
 };

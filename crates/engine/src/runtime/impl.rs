@@ -51,7 +51,6 @@ use tari_engine_types::{
     ConvertFromByteType,
     ResourceAddressRef,
     Utxo,
-    UtxoAddress,
     UtxoOutput,
     ValidatorFeePoolAddress,
 };
@@ -95,6 +94,7 @@ use tari_template_lib::{
         ResourceGetNonFungibleArg,
         ResourceRef,
         ResourceUpdateNonFungibleDataArg,
+        SetFreezeStealthUtxosArg,
         StealthTransferResourceArg,
         VaultAction,
         VaultCreateProofByFungibleAmountArg,
@@ -119,6 +119,7 @@ use tari_template_lib::{
         ResourceAddress,
         ResourceAddressAllocation,
         StealthTransferStatement,
+        UtxoAddress,
         VaultRef,
     },
     prelude::{ResourceType, RistrettoPublicKeyBytes},
@@ -1154,7 +1155,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     Ok(InvokeResult::unit())
                 })
             },
-            ResourceAction::SetFreeze => {
+            ResourceAction::SetVaultFreeze => {
                 let resource_address =
                     resource_ref
                         .as_resource_address()
@@ -1219,6 +1220,68 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 Ok(InvokeResult::encode(
                     &maybe_bucket.map(tari_template_lib::models::Bucket::from_id),
                 )?)
+            },
+            ResourceAction::SetStealthUtxosFreeze => {
+                let resource_address =
+                    resource_ref
+                        .as_resource_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "FreezeStealthUtxo resource action requires a resource address".to_string(),
+                        })?;
+                let arg: SetFreezeStealthUtxosArg = args.assert_one_arg()?;
+
+                self.tracker.write_with(|state_mut| {
+                    let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(resource_address))?;
+
+                    let resource = state_mut.get_resource(&resource_lock)?;
+
+                    if !resource.resource_type().is_stealth() {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "FreezeStealthUtxo can only be called on stealth resources".to_string(),
+                        });
+                    }
+
+                    if arg.utxos.is_empty() {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "SetFreezeStealthUtxosArg",
+                            reason: "Utxos list cannot be empty".to_string(),
+                        });
+                    }
+
+                    state_mut.authorization().check_resource_access_rules(
+                        ResourceAuthAction::Freeze,
+                        resource.as_ownership(),
+                        resource.access_rules(),
+                    )?;
+
+                    for utxo in arg.utxos {
+                        let id = SubstateId::Utxo(UtxoAddress::new(resource_address, utxo));
+                        let locked = state_mut.write_lock_substate(&id)?;
+
+                        let utxo = state_mut
+                            .get_locked_substate_mut(&locked)?
+                            .as_utxo_mut()
+                            .ok_or_else(|| RuntimeError::LockSubstateMismatch {
+                                lock_id: locked.lock_id(),
+                                expected_type: "Utxo",
+                                id,
+                            })?;
+
+                        // Freeze is idempotent.
+                        if arg.freeze {
+                            utxo.freeze();
+                        } else {
+                            utxo.unfreeze();
+                        }
+                        state_mut.unlock_substate(locked)?;
+                    }
+
+                    state_mut.unlock_substate(resource_lock)?;
+
+                    Ok(InvokeResult::unit())
+                })
             },
         }
     }

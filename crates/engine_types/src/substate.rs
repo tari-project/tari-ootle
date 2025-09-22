@@ -31,7 +31,14 @@ use serde::{Deserialize, Serialize};
 use tari_bor::{decode, decode_exact, encode, BorError};
 use tari_common_types::types::FixedHash;
 use tari_template_lib::{
-    models::{ComponentAddress, NonFungibleAddress, ResourceAddress, UnclaimedConfidentialOutputAddress, VaultId},
+    models::{
+        ComponentAddress,
+        NonFungibleAddress,
+        ResourceAddress,
+        UnclaimedConfidentialOutputAddress,
+        UtxoAddress,
+        VaultId,
+    },
     prelude::PUBLIC_IDENTITY_RESOURCE_ADDRESS,
     types::{Hash, ObjectKey},
 };
@@ -46,7 +53,6 @@ use crate::{
     transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
     utxo::Utxo,
     vault::Vault,
-    UtxoAddress,
     ValidatorFeePool,
     ValidatorFeePoolAddress,
     ValidatorFeeWithdrawal,
@@ -752,6 +758,13 @@ impl SubstateValue {
     }
 
     pub fn as_utxo(&self) -> Option<&Utxo> {
+        match self {
+            SubstateValue::Utxo(utxo) => Some(utxo),
+            _ => None,
+        }
+    }
+
+    pub fn as_utxo_mut(&mut self) -> Option<&mut Utxo> {
         match self {
             SubstateValue::Utxo(utxo) => Some(utxo),
             _ => None,

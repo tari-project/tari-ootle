@@ -58,6 +58,7 @@ use crate::{
         ResourceInvokeArg,
         ResourceRef,
         ResourceUpdateNonFungibleDataArg,
+        SetFreezeStealthUtxosArg,
         StealthTransferResourceArg,
         VaultFreezeFlags,
     },
@@ -72,6 +73,7 @@ use crate::{
         ResourceAddress,
         ResourceAddressAllocation,
         StealthTransferStatement,
+        UtxoId,
         VaultId,
     },
     prelude::{AuthHook, ResourceType},
@@ -888,15 +890,15 @@ impl ResourceManager {
     }
 
     /// Freezes all withdrawals, deposits and burns for the specified vault.
-    pub fn freeze(&self, vault_id: VaultId) {
-        self.set_freeze(vault_id, VaultFreezeFlags::all());
+    pub fn freeze_vault(&self, vault_id: VaultId) {
+        self.set_freeze_vault_flags(vault_id, VaultFreezeFlags::all());
     }
 
     /// Sets the freeze flags for the specified vault.
-    pub fn set_freeze(&self, vault_id: VaultId, flags: VaultFreezeFlags) {
+    pub fn set_freeze_vault_flags(&self, vault_id: VaultId, flags: VaultFreezeFlags) {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
             resource_ref: self.resource_address.into(),
-            action: ResourceAction::SetFreeze,
+            action: ResourceAction::SetVaultFreeze,
             args: invoke_args![FreezeResourceArg { vault_id, flags }],
         });
 
@@ -905,8 +907,28 @@ impl ResourceManager {
 
     /// Unfreezes all withdrawals, deposits and burns for the specified vault.
     /// Equivalent to `manager.set_freeze(FreezeFlags::empty())`.
-    pub fn unfreeze(&self, vault_id: VaultId) {
-        self.set_freeze(vault_id, VaultFreezeFlags::empty());
+    pub fn unfreeze_vault(&self, vault_id: VaultId) {
+        self.set_freeze_vault_flags(vault_id, VaultFreezeFlags::empty());
+    }
+
+    /// Freezes the specified stealth UTXOs, preventing them from being spent/transferred.
+    pub fn freeze_utxos(&self, utxos: Vec<UtxoId>) {
+        self.set_freeze_utxos(utxos, true);
+    }
+
+    /// Unfreezes the specified stealth UTXOs, allowing them to be spent/transferred again.
+    pub fn unfreeze_utxos(&self, utxos: Vec<UtxoId>) {
+        self.set_freeze_utxos(utxos, false);
+    }
+
+    fn set_freeze_utxos(&self, utxos: Vec<UtxoId>, freeze: bool) {
+        let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
+            resource_ref: self.resource_address.into(),
+            action: ResourceAction::SetStealthUtxosFreeze,
+            args: invoke_args![SetFreezeStealthUtxosArg { utxos, freeze }],
+        });
+
+        resp.decode().expect("SetFreeze failed")
     }
 
     fn recall_internal(&self, arg: RecallResourceArg) -> Bucket {

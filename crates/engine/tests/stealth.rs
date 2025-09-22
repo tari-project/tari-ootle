@@ -5,9 +5,9 @@ use std::collections::BTreeMap;
 
 use rand::rngs::OsRng;
 use tari_common_types::types::PrivateKey;
-use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
+use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
-    crypto::{ElgamalVerifiableBalance, ValueLookupTable},
+    crypto::{get_commitment_factory, ElgamalVerifiableBalance, ValueLookupTable},
     resource_container::ResourceError,
     ToByteType,
     UtxoOutput,
@@ -15,7 +15,7 @@ use tari_engine_types::{
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_template_lib::{
     call_args,
-    models::{ComponentAddress, ResourceAddress},
+    models::{ComponentAddress, ResourceAddress, UtxoId},
     prelude::{PedersenCommitmentBytes, SchnorrSignatureBytes},
 };
 use tari_template_test_tooling::{
@@ -457,4 +457,77 @@ fn mint_with_view_key() {
     let total_balance =
         try_brute_force_stealth_balance(&utxos, &view_key_secret, 0..=200, &mut AlwaysMissLookupTable).unwrap();
     assert_eq!(total_balance, Some(1000));
+}
+
+#[test]
+fn freeze_then_attempt_spend() {
+    let outputs = vec![100u64, 1000, 10000];
+    let mint = stealth::generate_mint_statement(outputs.clone(), 0, None);
+    let (mut test, faucet, faucet_resx) = setup(&mint, None);
+
+    let transfer = stealth::generate_transfer_data(
+        &[
+            MaskAndValue {
+                mask: mint.output_masks[0].clone(),
+                value: 100.into(),
+            },
+            MaskAndValue {
+                mask: mint.output_masks[1].clone(),
+                value: 1000.into(),
+            },
+        ],
+        0,
+        Some(1100),
+        0,
+    );
+    let owner = test.owner_proof();
+    let utxos = mint.output_masks
+        .iter()
+        .zip(outputs)
+        .take(2) // Freeze the first two outputs
+        .map(|(mask, amount)| {
+            let commitment = get_commitment_factory().commit_value(mask, amount);
+            UtxoId::from(commitment.to_byte_type())
+        })
+        .collect::<Vec<_>>();
+
+    test.execute_expect_success(
+        Transaction::builder()
+            .call_method(faucet, "freeze_utxos", args![utxos])
+            .build_and_seal(test.secret_key()),
+        vec![owner.clone()],
+    );
+
+    // Try and spend a frozen output
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .stealth_transfer(faucet_resx, transfer.statement.clone())
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    assert_reject_reason(reason, ResourceError::InvalidSpend { details: String::new() });
+
+    test.execute_expect_success(
+        Transaction::builder()
+            .call_method(faucet, "unfreeze_utxos", args![utxos])
+            .build_and_seal(test.secret_key()),
+        vec![owner],
+    );
+
+    // Should be able to spend now
+    let result = test.execute_expect_success(
+        Transaction::builder()
+            .stealth_transfer(faucet_resx, transfer.statement)
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    let diff = result.finalize.any_accept().unwrap();
+    let utxos = diff
+        .up_iter()
+        .filter_map(|(_, substate)| substate.substate_value().as_utxo())
+        .collect::<Vec<_>>();
+    assert_eq!(utxos.len(), 1);
+    assert!(utxos[0].output().is_some());
 }

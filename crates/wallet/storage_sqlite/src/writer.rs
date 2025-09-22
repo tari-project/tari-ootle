@@ -21,7 +21,7 @@ use diesel::{
 use log::*;
 use serde::Serialize;
 use tari_bor::json_encoding::CborValueJsonSerializeWrapper;
-use tari_engine_types::{resource::Resource, substate::SubstateId, UtxoAddress, UtxoId};
+use tari_engine_types::{resource::Resource, substate::SubstateId};
 use tari_ootle_common_types::{shard::Shard, StateVersion, VersionedSubstateIdRef};
 use tari_ootle_wallet_sdk::{
     models::{
@@ -42,7 +42,7 @@ use tari_ootle_wallet_sdk::{
     storage::{WalletStorageError, WalletStoreReader, WalletStoreWriter},
 };
 use tari_template_lib::{
-    models::{ComponentAddress, EncryptedData, NonFungibleId, ResourceAddress, VaultId},
+    models::{ComponentAddress, EncryptedData, NonFungibleId, ResourceAddress, UtxoAddress, UtxoId, VaultId},
     types::{
         crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
         Amount,

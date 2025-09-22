@@ -27,7 +27,6 @@ use tari_common_types::types::FixedHash;
 use tari_engine_types::{
     substate::{Substate, SubstateId, SubstateValue},
     Utxo,
-    UtxoId,
 };
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate};
@@ -41,7 +40,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_wallet_sdk::models::WalletUtxoUpdate;
 use tari_template_lib::{
-    models::ResourceAddress,
+    models::{ResourceAddress, UtxoId},
     types::{
         crypto::{RistrettoPublicKeyBytes, UtxoTag},
         TemplateAddress,

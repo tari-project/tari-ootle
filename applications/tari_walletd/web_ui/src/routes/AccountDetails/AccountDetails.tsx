@@ -30,7 +30,8 @@ import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TableCell from "@mui/material/TableCell";
 import TableBody from "@mui/material/TableBody";
-import { useAccountsGetBalances, useAccountNFTsList, useAccountsGet } from "@api/hooks/useAccounts";
+import { useAccountsGetBalances, useAccountsGet } from "@api/hooks/useAccounts";
+import { useNFTsList } from "@api/hooks/useNfts";
 import { ApiError } from "@api/helpers/types";
 import { DataTableCell } from "@components/StyledComponents";
 import FetchStatusCheck from "@components/FetchStatusCheck";
@@ -89,7 +90,7 @@ function AccountDetailsLayout() {
     isLoading: nftsListIsFetching,
     isError: nftsListIsError,
     error: nftsListError,
-  } = useAccountNFTsList(substateIdToString(accountAddr!), offset, nftRowsPerPage);
+  } = useNFTsList(substateIdToString(accountAddr!), offset, nftRowsPerPage);
 
   const currentNfts = nftsListData?.nfts || [];
   const hasMore = currentNfts.length === nftRowsPerPage;

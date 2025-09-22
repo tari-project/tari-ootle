@@ -33,6 +33,7 @@ import {
   TableRow,
   Typography,
   Box,
+  Button,
 } from "@mui/material";
 import type { ListNftsResponse, NonFungibleToken } from "@tari-project/typescript-bindings";
 import React, { useState } from "react";
@@ -47,11 +48,12 @@ export interface NftListProps {
   nftsListIsFetching: boolean;
   nftsListError: ApiError | null;
   nftsListData?: ListNftsResponse;
-  totalCount?: number;
+  totalCount: number;
   page: number;
   rowsPerPage: number;
   onPageChange: (event: unknown, newPage: number) => void;
   onRowsPerPageChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  onManualRefresh?: () => void;
 }
 
 export default function NFTList(props: NftListProps) {
@@ -65,11 +67,66 @@ export default function NFTList(props: NftListProps) {
     rowsPerPage,
     onPageChange,
     onRowsPerPageChange,
+    onManualRefresh,
   } = props;
 
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const displayedNfts = nftsListData?.nfts || [];
-  const totalItems = totalCount || displayedNfts.length;
+
+  const EmptyPlaceHolder = () => (
+    <Stack alignItems="center" justifyContent="center" sx={{ py: 8 }}>
+      <Typography variant="h6" color="text.secondary" gutterBottom>
+        No NFTs found
+      </Typography>
+      <Typography variant="body2" color="text.secondary">
+        You don't have any NFTs in this account yet. Try claiming some testnet NFTs to get started.
+      </Typography>
+    </Stack>
+  );
+
+  const FetchingPlaceHolder = () => (
+    <Stack alignItems="center" justifyContent="center" sx={{ py: 8 }}>
+      <Typography variant="h6" color="text.secondary" gutterBottom>
+        NFTs loading...
+      </Typography>
+      <Typography variant="body2" color="text.secondary">
+        Please wait while we fetch your NFTs from the wallet.
+      </Typography>
+      {onManualRefresh && (
+        <Button variant="outlined" onClick={onManualRefresh} size="small" sx={{ mt: 2 }}>
+          Click here to manually refresh
+        </Button>
+      )}
+    </Stack>
+  );
+
+  const DisplayNFTs = () => {
+    return viewMode === "grid" ? (
+      <Grid container spacing={3}>
+        {displayedNfts.map((nft: NonFungibleToken, index: number) => (
+          <NftCard key={`${nft.nft_id}-${index}`} nft={nft} />
+        ))}
+      </Grid>
+    ) : (
+      <TableContainer>
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableCell>NFT</TableCell>
+              <TableCell>Original Owner</TableCell>
+              <TableCell>Status</TableCell>
+              <TableCell>Actions</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {displayedNfts.map((nft: NonFungibleToken, index: number) => (
+              <NftRow key={`${nft.nft_id}-${index}`} nft={nft} />
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    );
+  };
 
   return (
     <FetchStatusCheck
@@ -107,54 +164,18 @@ export default function NFTList(props: NftListProps) {
           </Stack>
         </Stack>
 
-        {displayedNfts.length === 0 && !nftsListIsFetching ? (
-          <Box
-            sx={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              py: 8,
-              textAlign: "center",
-            }}
-          >
-            <Typography variant="h6" color="text.secondary" gutterBottom>
-              No NFTs found
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              You don't have any NFTs in this account yet. Try claiming some testnet NFTs to get started.
-            </Typography>
-          </Box>
-        ) : viewMode === "grid" ? (
-          <Grid container spacing={3}>
-            {displayedNfts.map((nft: NonFungibleToken, index: number) => (
-              <NftCard key={`${nft.nft_id}-${index}`} nft={nft} />
-            ))}
-          </Grid>
+        {totalCount === 0 ? (
+          <EmptyPlaceHolder />
+        ) : displayedNfts.length === 0 ? (
+          <FetchingPlaceHolder />
         ) : (
-          <TableContainer>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>NFT</TableCell>
-                  <TableCell>Original Owner</TableCell>
-                  <TableCell>Status</TableCell>
-                  <TableCell>Actions</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {displayedNfts.map((nft: NonFungibleToken, index: number) => (
-                  <NftRow key={`${nft.nft_id}-${index}`} nft={nft} />
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
+          <DisplayNFTs />
         )}
 
-        {totalItems > 0 && (
+        {totalCount > 0 && (
           <TablePagination
             component="div"
-            count={totalItems}
+            count={totalCount}
             page={page}
             onPageChange={onPageChange}
             rowsPerPage={rowsPerPage}

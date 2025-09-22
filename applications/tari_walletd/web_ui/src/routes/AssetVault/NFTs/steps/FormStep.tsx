@@ -28,10 +28,10 @@ import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import Checkbox from "@mui/material/Checkbox";
 import ListItemText from "@mui/material/ListItemText";
-import { Divider, InputLabel, Stack } from "@mui/material";
+import { Divider, InputLabel, Stack, Alert } from "@mui/material";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
 import type { NonFungibleId, NonFungibleToken, Account } from "@tari-project/typescript-bindings";
-import { substateIdToString, formatCurrency, displayNftId } from "@utils/helpers";
+import { substateIdToString, displayNftId } from "@utils/helpers";
 import { useNftTransferStore } from "@store/nftTransferStore";
 import { validateOotleAddress } from "@tari-project/typescript-bindings/dist/helpers/ootleAddress";
 
@@ -75,7 +75,6 @@ export default function FormStep({
   accounts,
   availableNfts,
   preSelectedNftId,
-  isEstimatingFee,
   onSubmit,
   onCancel,
   onNftsChange,
@@ -88,9 +87,36 @@ export default function FormStep({
     updateFormValue(name, value, e.target.validity.valid);
   };
 
+  const isAddressValid = transferFormState.targetAccountAddress
+    ? validateOotleAddress(transferFormState.targetAccountAddress)
+    : true; // Don't show error for empty field
+
+  const getFormErrors = () => {
+    const errors = [];
+    if (transferFormState.targetAccountAddress && !isAddressValid) {
+      errors.push("Invalid address format");
+    }
+    if (!preSelectedNftId && transferFormState.nfts.length === 0) {
+      errors.push("Please select at least one NFT");
+    }
+    return errors;
+  };
+
+  const formErrors = getFormErrors();
+
   return (
     <Form onSubmit={onSubmit}>
       <Stack direction="column" spacing={2} sx={{ py: 2 }}>
+        {formErrors.length > 0 && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            <strong>Please fix the following errors:</strong>
+            <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
+              {formErrors.map((error, index) => (
+                <li key={index}>{error}</li>
+              ))}
+            </ul>
+          </Alert>
+        )}
         {accounts && (
           <>
             <InputLabel id="select-payer-account">Account (to pay fees)</InputLabel>
@@ -124,21 +150,12 @@ export default function FormStep({
           onChange={setFormValue}
           style={{ flexGrow: 1 }}
           disabled={disabled}
-        />
-
-        <TextField
-          name="maxFee"
-          label="Transaction Fee"
-          value={
-            isEstimatingFee
-              ? "Estimating..."
-              : transferFormState.maxFee
-                ? formatCurrency(parseInt(transferFormState.maxFee))
-                : "Will be calculated automatically"
+          error={transferFormState.targetAccountAddress !== "" && !isAddressValid}
+          helperText={
+            transferFormState.targetAccountAddress !== "" && !isAddressValid
+              ? "Invalid address format. Expected format: xtr_loc_..."
+              : "Enter the recipient's address (e.g., xtr_loc_1enpsfkx...)"
           }
-          placeholder="Fee will be estimated automatically"
-          disabled={true}
-          style={{ flexGrow: 1 }}
         />
 
         {!preSelectedNftId ? (
@@ -182,7 +199,7 @@ export default function FormStep({
           <Button
             variant="contained"
             type="submit"
-            disabled={disabled || !validateOotleAddress(transferFormState.targetAccountAddress)}
+            disabled={disabled || formErrors.length > 0 || !transferFormState.targetAccountAddress}
           >
             Continue
           </Button>

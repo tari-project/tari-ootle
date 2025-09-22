@@ -86,13 +86,14 @@ function Resources() {
         }
         if (nftData) {
           console.log(nftData);
-          let { image_url, name } = nftData;
-          const nftSubstateId = { NonFungible: nft.address };
-          let address = substateIdToString(nftSubstateId).split("_", 4);
+          const { image_url, name } = nftData;
+          const nftId = nft.address.id;
+          const key = Object.keys(nftId)[0];
+          const address = `${key}_${nftId[key as keyof typeof nftId]}`;
           nfts.push({
             img: image_url,
             title: name,
-            address: `${address[2]}_${address[3]}`,
+            address,
             version: nft.version,
           });
         }
@@ -125,9 +126,9 @@ function Resources() {
 
       {nfts.length > 0 && (
         <ImageList cols={4} gap={8}>
-          {nfts.map((item) =>
+          {nfts.map((item, i) =>
             item.img ? (
-              <ImageListItem key={item.address}>
+              <ImageListItem key={i}>
                 <img
                   src={`${item.img}?size=248&fit=fill&auto=format`}
                   srcSet={`${item.img}?size=248&fit=fill&auto=format&dpr=2 4x`}
@@ -145,7 +146,7 @@ function Resources() {
                 />
               </ImageListItem>
             ) : (
-              <ImageListItem key={item.address}>
+              <ImageListItem key={i}>
                 <ImageListItemBar
                   title={item.title}
                   subtitle={
@@ -156,7 +157,7 @@ function Resources() {
                   position="below"
                 />
               </ImageListItem>
-            )
+            ),
           )}
         </ImageList>
       )}

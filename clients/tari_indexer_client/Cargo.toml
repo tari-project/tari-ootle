@@ -19,6 +19,7 @@ tari_consensus_types = { workspace = true }
 tari_ootle_wallet_sdk = { workspace = true }
 
 anyhow = { workspace = true, optional = true }
+bounded-vec = { workspace = true }
 reqwest = { workspace = true, features = ["json"], optional = true }
 multiaddr = { workspace = true }
 serde = { workspace = true, default-features = true }

@@ -34,11 +34,14 @@ use tari_template_lib::{
 };
 use tari_transaction::{Transaction, TransactionId};
 
-use crate::storage_sqlite::{
-    models,
-    models::{EventRecord, KeyValue, ScannedBlockId, SubstateRecord},
-    serialization::{deserialize_hex_try_from, deserialize_json, serialize_hex},
-    IndexerStoreReadTransaction,
+use crate::{
+    storage_sqlite::{
+        models,
+        models::{EventRecord, KeyValue, ScannedBlockId, SubstateRecord},
+        serialization::{deserialize_hex_try_from, deserialize_json, serialize_hex},
+        IndexerStoreReadTransaction,
+    },
+    substate_manager::SubstateResponse,
 };
 
 const LOG_TARGET: &str = "tari::indexer::storage_sqlite::reader";
@@ -138,6 +141,22 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             .map_err(|e| StorageError::QueryError {
                 reason: format!("get_substate: {}", e),
             })
+    }
+
+    fn get_substates(&mut self, ids: &[SubstateId]) -> Result<Vec<SubstateResponse>, StorageError> {
+        use crate::storage_sqlite::schema::substates;
+
+        let str_ids = ids.iter().map(|id| id.to_string());
+
+        let rows = substates::table
+            .select(substates::all_columns)
+            .filter(substates::address.eq_any(str_ids))
+            .get_results::<SubstateRecord>(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("get_substate: {}", e),
+            })?;
+
+        rows.into_iter().map(TryInto::try_into).collect()
     }
 
     fn get_non_fungible_count(&mut self, resource_address: String) -> Result<i64, StorageError> {

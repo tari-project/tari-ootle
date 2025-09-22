@@ -231,8 +231,10 @@ pub async fn handle_transfer(
     inputs.extend(fee_payer_account_inputs);
     let source_account_address = *source_account.component_address();
 
-    let target_account_address =
-        derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.target_account_public_key);
+    let target_account_address = derive_component_address_from_public_key(
+        &ACCOUNT_TEMPLATE_ADDRESS,
+        req.target_account_address.account_public_key(),
+    );
 
     // TODO: this can be simplified
     let mut builder = context.transaction_builder();
@@ -241,7 +243,7 @@ pub async fn handle_transfer(
 
     if !try_find_target_account(context, &mut inputs, target_account_address, req.resource_address).await? {
         // We need to create the target account
-        builder = builder.create_account(req.target_account_public_key)
+        builder = builder.create_account(*req.target_account_address.account_public_key())
     }
     // add the input for the source account vault substate
     let src_vault = sdk

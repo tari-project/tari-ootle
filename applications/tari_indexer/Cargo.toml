@@ -66,6 +66,7 @@ serde = { workspace = true, features = ["default", "derive"] }
 serde_json = { workspace = true }
 serde_with = { workspace = true, features = ["indexmap"] }
 thiserror = { workspace = true }
+time = { workspace = true, features = ["serde"] }
 tokio = { workspace = true, features = [
     "default",
     "macros",

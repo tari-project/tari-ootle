@@ -70,6 +70,8 @@ import type {
   SettingsSetResponse,
   StealthTransferRequest,
   StealthTransferResponse,
+  StealthUtxosListRequest,
+  StealthUtxosListResponse,
   SubstatesGetRequest,
   SubstatesGetResponse,
   SubstatesListRequest,
@@ -333,3 +335,7 @@ export const templatesListAuthored = (request: TemplatesListAuthoredRequest): Pr
 
 // info
 export const walletGetInfo = (): Promise<WalletGetInfoResponse> => client().then((c) => c.walletGetInfo());
+
+// utxos
+export const stealthUtxosList = (request: StealthUtxosListRequest): Promise<StealthUtxosListResponse> =>
+  client().then((c) => c.stealthUtxosList(request));

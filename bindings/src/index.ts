@@ -77,6 +77,7 @@ export * from "./types/NonFungible";
 export * from "./types/NumPreshards";
 export * from "./types/OotleAddress";
 export * from "./types/Ordering";
+export * from "./types/OutputStatus";
 export * from "./types/OwnerRule";
 export * from "./types/PedersenCommitmentBytes";
 export * from "./types/PeerAddress";

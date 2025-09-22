@@ -117,10 +117,9 @@ export default function FormStep({
         )}
 
         <TextField
-          name="targetAccountPublicKey"
-          label="Target Account Public Key"
+          name="targetAccountAddress"
+          label="To Account address"
           value={transferFormState.targetAccountAddress}
-          inputProps={{ pattern: "^[0-9a-fA-F]*$" }}
           required
           onChange={setFormValue}
           style={{ flexGrow: 1 }}

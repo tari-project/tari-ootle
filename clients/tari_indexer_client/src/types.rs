@@ -3,6 +3,7 @@
 
 use std::{collections::HashMap, time::Duration};
 
+use bounded_vec::BoundedVec;
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, Seq};
@@ -10,7 +11,7 @@ use tari_common_types::types::FixedHash;
 use tari_consensus_types::Decision;
 use tari_engine_types::{
     commit_result::ExecuteResult,
-    substate::{SubstateId, SubstateValue},
+    substate::{Substate, SubstateId, SubstateValue},
     template_lib_models::{NonFungibleAddress, ResourceAddress},
     Utxo,
     UtxoId,
@@ -79,8 +80,21 @@ pub struct GetSubstateResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+pub struct GetSubstatesRequest {
+    // Note that we may permit less than 50 in the handler, but this is the max we'll deserialize for DoS mitigation
+    #[cfg_attr(feature = "ts", ts(as = "Vec<SubstateId>"))]
+    pub requests: BoundedVec<SubstateId, 1, 50>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+pub struct GetSubstatesResponse {
+    pub substates: HashMap<SubstateId, Substate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 pub struct InspectSubstateRequest {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub address: SubstateId,
     pub version: Option<u32>,
 }

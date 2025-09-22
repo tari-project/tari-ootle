@@ -239,6 +239,13 @@ pub trait WalletStoreReader {
         commitment: &PedersenCommitmentBytes,
     ) -> Result<StealthOutputModel, WalletStorageError>;
 
+    fn stealth_outputs_get_many(
+        &mut self,
+        resource_address: &ResourceAddress,
+        by_account: Option<&ComponentAddress>,
+        by_status: Option<OutputStatus>,
+    ) -> Result<Vec<StealthOutputModel>, WalletStorageError>;
+
     // Output Locks
     fn locks_get_by_transaction_id(
         &mut self,

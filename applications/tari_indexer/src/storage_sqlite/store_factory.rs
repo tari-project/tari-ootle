@@ -31,10 +31,13 @@ use tari_template_lib::{
 };
 use tari_transaction::{Transaction, TransactionId};
 
-use crate::storage_sqlite::{
-    models::{EventRecord, KeyValue, NewScannedBlockId, NewSubstate, SubstateRecord, UtxoUpdateRecord},
-    reader::SqliteStoreReadTransaction,
-    writer::SqliteStoreWriteTransaction,
+use crate::{
+    storage_sqlite::{
+        models::{EventRecord, KeyValue, NewScannedBlockId, NewSubstate, SubstateRecord, UtxoUpdateRecord},
+        reader::SqliteStoreReadTransaction,
+        writer::SqliteStoreWriteTransaction,
+    },
+    substate_manager::SubstateResponse,
 };
 
 const LOG_TARGET: &str = "tari::indexer::storage_sqlite";
@@ -134,6 +137,8 @@ pub trait IndexerStoreReadTransaction {
         address: &SubstateId,
         version: Option<u32>,
     ) -> Result<Option<SubstateRecord>, StorageError>;
+
+    fn get_substates(&mut self, ids: &[SubstateId]) -> Result<Vec<SubstateResponse>, StorageError>;
     fn get_non_fungible_count(&mut self, resource_address: String) -> Result<i64, StorageError>;
     fn get_non_fungibles_by_resource_address(
         &mut self,

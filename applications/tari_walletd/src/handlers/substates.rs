@@ -12,7 +12,7 @@ use tari_wallet_daemon_client::{
         SubstatesGetResponse,
         SubstatesListRequest,
         SubstatesListResponse,
-        WalletSubstateRecord,
+        WalletSubstateInfo,
     },
 };
 
@@ -43,14 +43,14 @@ pub async fn handle_get(
     }
 
     Ok(SubstatesGetResponse {
-        record: record.map(|record| WalletSubstateRecord {
+        local_record: record.map(|record| WalletSubstateInfo {
             version: record.substate_id.version(),
             substate_id: record.substate_id.into_substate_id(),
             parent_id: record.parent_address,
             module_name: record.module_name,
             template_address: record.template_address,
         }),
-        substate: substate.map(|s| Substate::new(s.version, s.substate)),
+        substate_from_remote: substate.map(|s| Substate::new(s.version, s.substate)),
     })
 }
 
@@ -61,21 +61,19 @@ pub async fn handle_list(
 ) -> Result<SubstatesListResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
     context.check_auth(token, &[JrpcPermission::SubstatesRead])?;
+    let substates = sdk.substate_api().list_substates(
+        req.filter_by_type,
+        req.filter_by_template.as_ref(),
+        req.limit,
+        req.offset,
+    )?;
 
-    let result = sdk
-        .get_network_interface()
-        .list_substates(req.filter_by_template, req.filter_by_type, req.limit, req.offset)
-        .await?;
-
-    let substates = result
-        .substates
+    let substates = substates
         .into_iter()
-        // TODO: should also add the "timestamp" and "type" fields from the indexer list items?
-        .map(|s| WalletSubstateRecord {
-            substate_id: s.substate_id,
-            // TODO: should we remove the "parent_id" field from the wallet API? is it really needed somewhere?
-            parent_id: None,
-            version: s.version,
+        .map(|s| WalletSubstateInfo {
+            version: s.substate_id.version(),
+            substate_id: s.substate_id.into_substate_id(),
+            parent_id: s.parent_address,
             template_address: s.template_address,
             module_name: s.module_name,
         })

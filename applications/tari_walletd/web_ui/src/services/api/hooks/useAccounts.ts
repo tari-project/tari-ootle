@@ -33,8 +33,8 @@ import {
   accountsStealthTransfer,
   accountsTransfer,
   mintFaucetNfts,
-  nftList,
   validatorsGetFees,
+  stealthUtxosList,
 } from "@utils/json_rpc";
 import { ApiError } from "@api/helpers/types";
 import queryClient from "@api/queryClient";
@@ -45,6 +45,8 @@ import {
   ComponentAddressOrName,
   ConfidentialTransferInputSelection,
   decodeOotleAddress,
+  OutputStatus,
+  ResourceAddress,
   ResourceType,
 } from "@tari-project/typescript-bindings";
 
@@ -211,7 +213,7 @@ export const useMintTestnetFaucetNfts = () => {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: ["accounts_balances"] });
-      
+
       // Delayed invalidation for NFTs to handle wallet processing time
       setTimeout(() => {
         queryClient.invalidateQueries({
@@ -289,5 +291,36 @@ export const useValidatorFees = (accountOrKeyIndex: AccountOrKeyIndex, shardGrou
   return useQuery({
     queryKey: ["validator_fees"],
     queryFn: () => validatorsGetFees({ account_or_key: accountOrKeyIndex, shard_group: shardGroup }),
+  });
+};
+
+// (alias) type StealthUtxosListRequest = {
+//     resource_address: ResourceAddress;
+//     account_address: ComponentAddress | null;
+//     filter_by_status: OutputStatus | null;
+// }
+
+export const useStealthUtxosList = (
+  account_address: ComponentAddress,
+  resource_address: ResourceAddress,
+  filter_by_status: OutputStatus | null,
+) => {
+  return useQuery({
+    queryKey: ["stealth_utxos_list", account_address, resource_address, filter_by_status],
+    queryFn: () =>
+      stealthUtxosList({
+        account_address,
+        resource_address,
+        filter_by_status,
+      }),
+    enabled: !!account_address && !!resource_address,
+    refetchInterval: 5000,
+    structuralSharing: (oldData, newData) => {
+      if (!oldData || !newData) return newData;
+      if (JSON.stringify(oldData) === JSON.stringify(newData)) {
+        return oldData;
+      }
+      return newData;
+    },
   });
 };

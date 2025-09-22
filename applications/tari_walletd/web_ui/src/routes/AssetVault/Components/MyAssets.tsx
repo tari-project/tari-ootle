@@ -37,6 +37,7 @@ import Assets from "./Assets";
 import SelectAccount from "./SelectAccount";
 import { substateIdToString } from "@tari-project/typescript-bindings";
 import { Refresh } from "@mui/icons-material";
+import StealthUtxoList from "@routes/StealthUtxoList/StealthUtxoList";
 import queryClient from "@api/queryClient";
 
 function MyAssets() {
@@ -133,6 +134,12 @@ function MyAssets() {
             </IconButton>
           </InnerHeading>
           <Assets account={account} />
+        </StyledPaper>
+      </Grid>
+      <Grid item xs={12} md={12} lg={12}>
+        <StyledPaper>
+          <InnerHeading>Stealth UTXO List</InnerHeading>
+          <StealthUtxoList account={account} />
         </StyledPaper>
       </Grid>
       <Grid item xs={12} md={12} lg={12}>

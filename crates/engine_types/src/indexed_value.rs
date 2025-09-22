@@ -15,6 +15,8 @@ use tari_template_lib::{
         ProofId,
         ResourceAddress,
         ResourceAddressAllocation,
+        UtxoAddress,
+        UtxoAddressContents,
         VaultId,
     },
     prelude::{ComponentAddress, Metadata, NonFungibleAddress},
@@ -26,8 +28,6 @@ use crate::{
     serde_with,
     substate::SubstateId,
     transaction_receipt::TransactionReceiptAddress,
-    UtxoAddress,
-    UtxoAddressContents,
     ValidatorFeePoolAddress,
 };
 
@@ -208,38 +208,38 @@ impl IndexedWellKnownTypes {
     }
 
     /// Checks if a value contains a substate with the given address. This function does not allocate.
-    pub fn value_contains_substate(value: &tari_bor::Value, address: &SubstateId) -> Result<bool, IndexedValueError> {
+    pub fn value_contains_substate(value: &tari_bor::Value, id: &SubstateId) -> Result<bool, IndexedValueError> {
         let mut found = false;
         tari_bor::walk_all(
             value,
             &mut |value: WellKnownTariValue| {
                 match value {
                     WellKnownTariValue::ComponentAddress(addr) => {
-                        found = *address == addr;
+                        found = *id == addr;
                     },
                     WellKnownTariValue::ResourceAddress(addr) => {
-                        found = *address == addr;
+                        found = *id == addr;
                     },
                     WellKnownTariValue::TransactionReceiptAddress(addr) => {
-                        found = *address == addr;
+                        found = *id == addr;
                     },
                     WellKnownTariValue::NonFungibleAddress(addr) => {
-                        found = *address == addr;
+                        found = *id == addr;
                     },
                     WellKnownTariValue::VaultId(addr) => {
-                        found = *address == addr;
+                        found = *id == addr;
                     },
                     WellKnownTariValue::ClaimedOutputTombstoneAddress(addr) => {
-                        found = *address == addr;
+                        found = *id == addr;
                     },
                     WellKnownTariValue::PublishedTemplateAddress(addr) => {
-                        found = *address == addr;
+                        found = *id == addr;
                     },
                     WellKnownTariValue::ValidatorNodeFeePool(addr) => {
-                        found = *address == addr;
+                        found = *id == addr;
                     },
                     WellKnownTariValue::Utxo(addr) => {
-                        found = *address == addr;
+                        found = *id == addr;
                     },
                     WellKnownTariValue::BucketId(_) |
                     WellKnownTariValue::Metadata(_) |

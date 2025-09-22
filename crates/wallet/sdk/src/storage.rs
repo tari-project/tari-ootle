@@ -6,7 +6,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use tari_engine_types::{resource::Resource, substate::SubstateId, UtxoAddress, UtxoId};
+use tari_engine_types::{resource::Resource, substate::SubstateId};
 use tari_ootle_common_types::{
     optional::IsNotFoundError,
     shard::Shard,
@@ -15,7 +15,7 @@ use tari_ootle_common_types::{
     VersionedSubstateIdRef,
 };
 use tari_template_lib::{
-    models::VaultId,
+    models::{UtxoAddress, UtxoId, VaultId},
     prelude::{
         ComponentAddress,
         NonFungibleId,

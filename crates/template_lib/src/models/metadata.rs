@@ -132,3 +132,53 @@ impl Display for Metadata {
         Ok(())
     }
 }
+
+/// Creates a metadata object
+///
+/// # Example
+///
+/// ```rust
+/// # use tari_template_lib::metadata;
+/// metadata!(
+///   "name" => "My NFT",
+///   "description" => "This is my first NFT",
+///   "image" => "https://example.com/my-nft.png"
+/// );
+/// ```
+#[macro_export]
+macro_rules! metadata {
+    ($($key:expr => $value:expr),* $(,)?) => {
+        {
+            let mut metadata = $crate::models::Metadata::new();
+            $(
+                metadata.insert($key, $value);
+            )*
+            metadata
+        }
+    };
+    () => {
+        $crate::models::Metadata::new()
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn metadata_macro() {
+        let i = 123;
+        let metadata = metadata!(
+            "name" => "My NFT",
+            "description" => "This is my first NFT",
+            "image" => "https://example.com/my-nft.png",
+            "index" => i.to_string()
+        );
+
+        assert_eq!(metadata.get("name"), Some(&"My NFT".to_string()));
+        assert_eq!(metadata.get("description"), Some(&"This is my first NFT".to_string()));
+        assert_eq!(
+            metadata.get("image"),
+            Some(&"https://example.com/my-nft.png".to_string())
+        );
+        assert_eq!(metadata.get("index"), Some(&"123".to_string()));
+    }
+}

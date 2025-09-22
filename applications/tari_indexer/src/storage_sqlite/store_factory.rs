@@ -13,7 +13,7 @@ use diesel::{sql_query, Connection, RunQueryDsl, SqliteConnection};
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
 use serde::{de::DeserializeOwned, Serialize};
 use tari_consensus_types::BlockId;
-use tari_engine_types::{events::Event, substate::SubstateId, Utxo, UtxoId};
+use tari_engine_types::{events::Event, substate::SubstateId, Utxo};
 use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate, TransactionEntry};
 use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, ShardGroup, StateVersion};
 use tari_ootle_storage::{
@@ -23,7 +23,7 @@ use tari_ootle_storage::{
 use tari_ootle_storage_sqlite::{error::SqliteStorageError, SqliteTransaction};
 use tari_ootle_wallet_sdk::models::WalletUtxoUpdate;
 use tari_template_lib::{
-    models::ResourceAddress,
+    models::{ResourceAddress, UtxoId},
     types::{
         crypto::{RistrettoPublicKeyBytes, UtxoTag},
         TemplateAddress,

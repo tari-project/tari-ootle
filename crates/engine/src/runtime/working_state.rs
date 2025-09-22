@@ -34,7 +34,6 @@ use tari_engine_types::{
     ConvertFromByteType,
     ToByteType,
     Utxo,
-    UtxoAddress,
     ValidatorFeePoolAddress,
     ValidatorFeeWithdrawal,
 };
@@ -52,6 +51,7 @@ use tari_template_lib::{
         ResourceAddress,
         StealthInputsStatement,
         StealthTransferStatement,
+        UtxoAddress,
         VaultId,
     },
     prelude::{AuthHookCaller, ResourceAddressAllocation, PUBLIC_IDENTITY_RESOURCE_ADDRESS},
@@ -201,7 +201,7 @@ impl WorkingState {
         let (address, substate) = self.store.get_locked_substate(locked.lock_id())?;
         let component = substate.component().ok_or_else(|| RuntimeError::LockSubstateMismatch {
             lock_id: locked.lock_id(),
-            address,
+            id: address,
             expected_type: "Component",
         })?;
         Ok(component)
@@ -219,7 +219,7 @@ impl WorkingState {
                     .component_mut()
                     .ok_or_else(|| RuntimeError::LockSubstateMismatch {
                         lock_id: locked.lock_id(),
-                        address: locked.substate_id().clone(),
+                        id: locked.substate_id().clone(),
                         expected_type: "Component",
                     })?;
 
@@ -260,7 +260,7 @@ impl WorkingState {
             .as_resource()
             .ok_or_else(|| RuntimeError::LockSubstateMismatch {
                 lock_id: locked.lock_id(),
-                address: addr,
+                id: addr,
                 expected_type: "Resource",
             })?;
 
@@ -297,8 +297,8 @@ impl WorkingState {
         let non_fungible = value
             .as_non_fungible()
             .ok_or_else(|| RuntimeError::LockSubstateMismatch {
-                lock_id: 0,
-                address: address.clone(),
+                lock_id: locked.lock_id(),
+                id: address.clone(),
                 expected_type: "NonFungible",
             })?;
         Ok(non_fungible)
@@ -309,8 +309,8 @@ impl WorkingState {
         let non_fungible = value
             .as_non_fungible_mut()
             .ok_or_else(|| RuntimeError::LockSubstateMismatch {
-                lock_id: 0,
-                address: address.clone(),
+                lock_id: locked.lock_id(),
+                id: address.clone(),
                 expected_type: "NonFungible",
             })?;
         Ok(non_fungible)
@@ -331,7 +331,7 @@ impl WorkingState {
 
         let vault = substate.as_vault().ok_or_else(|| RuntimeError::LockSubstateMismatch {
             lock_id: locked.lock_id(),
-            address: addr,
+            id: addr,
             expected_type: "Vault",
         })?;
 
@@ -345,7 +345,7 @@ impl WorkingState {
             .as_vault_mut()
             .ok_or_else(|| RuntimeError::LockSubstateMismatch {
                 lock_id: locked.lock_id(),
-                address: addr,
+                id: addr,
                 expected_type: "Vault",
             })?;
 
@@ -359,7 +359,7 @@ impl WorkingState {
             .as_resource_mut()
             .ok_or_else(|| RuntimeError::LockSubstateMismatch {
                 lock_id: locked.lock_id(),
-                address: addr,
+                id: addr,
                 expected_type: "Resource",
             })?;
 
@@ -1057,7 +1057,7 @@ impl WorkingState {
                 total_fees_paid: fee_resource
                     .amount()
                     .to_u64_checked()
-                    .expect("FeeState guarantees that the total fee payments fit in a u64"),
+                    .expect("FeeState guarantees that the total fee payments fit in an u64"),
                 total_fee_overcharge,
                 cost_breakdown: self.fee_state.take_fee_charges(),
             },
@@ -1438,7 +1438,7 @@ impl WorkingState {
         if !component.contains_substate(address)? {
             warn!(
                 target: LOG_TARGET,
-                "Component {} attempted access to {} that is does not own",
+                "Component {} attempted access to {} that it does not own",
                 component_lock.substate_id(),
                 address
             );

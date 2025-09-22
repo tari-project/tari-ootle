@@ -57,6 +57,7 @@ pub use crate::{
     info,
     invoke_args as args,
     log,
+    metadata,
     models::{
         Account,
         Bucket,
@@ -77,6 +78,8 @@ pub use crate::{
         StealthInputsStatement,
         StealthOutputsStatement,
         StealthTransferStatement,
+        UtxoAddress,
+        UtxoId,
         Vault,
         VaultId,
         Verifiable,

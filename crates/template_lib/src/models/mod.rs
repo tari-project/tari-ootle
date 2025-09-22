@@ -32,6 +32,7 @@ mod claimed_output_tombstone;
 mod component;
 mod confidential_proof;
 mod encrypted_data;
+#[macro_use]
 mod metadata;
 mod non_fungible;
 mod proof;
@@ -40,6 +41,7 @@ mod signature_verifier;
 mod stealth;
 mod system;
 mod unspent_output;
+mod utxo;
 mod vault;
 mod viewable_balance;
 
@@ -59,5 +61,6 @@ pub use signature_verifier::*;
 pub use stealth::*;
 pub use system::*;
 pub use unspent_output::*;
+pub use utxo::*;
 pub use vault::*;
 pub use viewable_balance::*;

@@ -43,6 +43,7 @@ use crate::{
         ResourceAddress,
         ResourceAddressAllocation,
         StealthTransferStatement,
+        UtxoId,
         VaultId,
         VaultRef,
     },
@@ -235,9 +236,11 @@ pub enum ResourceAction {
     /// Update the access rules of a resource
     UpdateAccessRules,
     /// Sets the freeze flags on a vault of a resource.
-    SetFreeze,
+    SetVaultFreeze,
     /// Executes a stealth transfer for the resource
     StealthTransfer,
+    /// Un/freezes one or more stealth UTXOs of a resource
+    SetStealthUtxosFreeze,
 }
 
 /// All the possible minting operation types
@@ -702,4 +705,12 @@ pub struct BuiltinTemplateInvokeArg {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum BuiltinTemplateAction {
     GetTemplateAddress { bultin: BuiltinTemplate },
+}
+
+// -------------------------------- UTXOs -------------------------------- //
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SetFreezeStealthUtxosArg {
+    pub utxos: Vec<UtxoId>,
+    pub freeze: bool,
 }

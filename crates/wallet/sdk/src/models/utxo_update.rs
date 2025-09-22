@@ -4,9 +4,11 @@
 use std::collections::HashMap;
 
 use tari_bor::{Deserialize, Serialize};
-use tari_engine_types::UtxoId;
 use tari_ootle_common_types::{shard::Shard, StateVersion};
-use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, UtxoTag};
+use tari_template_lib::{
+    models::UtxoId,
+    types::crypto::{RistrettoPublicKeyBytes, UtxoTag},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]

@@ -237,12 +237,11 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
 #[cfg(test)]
 mod tests {
     use tari_template_lib::{
-        models::NonFungibleId,
+        models::{NonFungibleId, UtxoAddress, UtxoId},
         types::{Hash, ObjectKey},
     };
 
     use super::*;
-    use crate::{UtxoAddress, UtxoId};
 
     #[test]
     fn encoding_and_decoding() {

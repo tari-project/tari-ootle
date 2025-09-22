@@ -38,6 +38,7 @@ use tari_template_lib::{
         ComponentAddress,
         NonFungibleAddress,
         ResourceAddress,
+        UtxoAddress,
         VaultId,
     },
     prelude::PUBLIC_IDENTITY_RESOURCE_ADDRESS,
@@ -54,7 +55,6 @@ use crate::{
     transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
     utxo::Utxo,
     vault::Vault,
-    UtxoAddress,
     ValidatorFeePool,
     ValidatorFeePoolAddress,
     ValidatorFeeWithdrawal,
@@ -763,6 +763,13 @@ impl SubstateValue {
     }
 
     pub fn as_utxo(&self) -> Option<&Utxo> {
+        match self {
+            SubstateValue::Utxo(utxo) => Some(utxo),
+            _ => None,
+        }
+    }
+
+    pub fn as_utxo_mut(&mut self) -> Option<&mut Utxo> {
         match self {
             SubstateValue::Utxo(utxo) => Some(utxo),
             _ => None,

@@ -28,7 +28,6 @@ use tari_engine_types::{
     confidential::MinotariBurnClaimProof,
     serde_with,
     substate::{Substate, SubstateId},
-    UtxoAddress,
     ValidatorFeePoolAddress,
 };
 use tari_ootle_address::OotleAddress;
@@ -53,7 +52,7 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_template_abi::{FunctionDef, TemplateDef};
 use tari_template_lib::{
-    models::{ConfidentialOutputStatement, EncryptedData, NonFungibleId, ResourceAddress, VaultId},
+    models::{ConfidentialOutputStatement, EncryptedData, NonFungibleId, ResourceAddress, UtxoAddress, VaultId},
     prelude::{ComponentAddress, ConfidentialWithdrawProof, ResourceType, RistrettoPublicKeyBytes},
     types::{crypto::PedersenCommitmentBytes, Amount, TemplateAddress},
 };

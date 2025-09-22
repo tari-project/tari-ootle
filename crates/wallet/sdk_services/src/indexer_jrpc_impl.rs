@@ -10,7 +10,6 @@ use reqwest::{IntoUrl, Url};
 use tari_engine_types::{
     substate::{Substate, SubstateId},
     Utxo,
-    UtxoId,
 };
 use tari_indexer_client::{
     error::IndexerClientError,
@@ -38,7 +37,7 @@ use tari_ootle_wallet_sdk::{
     },
 };
 use tari_template_lib::{
-    models::ResourceAddress,
+    models::{ResourceAddress, UtxoId},
     prelude::RistrettoPublicKeyBytes,
     types::{crypto::UtxoTag, TemplateAddress},
 };

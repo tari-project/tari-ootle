@@ -11,7 +11,6 @@ use tari_engine_types::{
     FromByteType,
     ToByteType,
     Utxo,
-    UtxoAddress,
     UtxoOutput,
 };
 use tari_ootle_common_types::{
@@ -21,7 +20,7 @@ use tari_ootle_common_types::{
 use tari_ootle_wallet_crypto::UnblindedStealthInputStatement;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    models::{ComponentAddress, ResourceAddress, VaultId},
+    models::{ComponentAddress, ResourceAddress, UtxoAddress, VaultId},
     prelude::PedersenCommitmentBytes,
     types::Amount,
 };

@@ -102,6 +102,7 @@ const createInitialValidity = (preSelectedNftId?: NonFungibleId): Validity => ({
   targetAccountPublicKey: false,
 });
 
+
 export const useNftTransferStore = create<NftTransferState>((set, get) => ({
   // Initial state
   currentStep: "form",

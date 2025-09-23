@@ -44,13 +44,7 @@ use tari_template_lib::{
     },
     prelude::AccessRules,
     types::{
-        crypto::{
-            BalanceProofSignature,
-            PedersenCommitmentBytes,
-            RangeProofBytes,
-            RistrettoPublicKeyBytes,
-            UtxoTag,
-        },
+        crypto::{BalanceProofSignature, PedersenCommitmentBytes, RangeProofBytes, RistrettoPublicKeyBytes, UtxoTag},
         ObjectKey,
     },
 };

@@ -9,10 +9,10 @@
 use std::{borrow::Cow, fmt, fmt::Formatter, marker::PhantomData, str::FromStr};
 
 use tari_template_lib::models::{
+    ClaimedOutputTombstoneAddress,
     ComponentAddress,
     NonFungibleAddress,
     ResourceAddress,
-    UnclaimedConfidentialOutputAddress,
     VaultId,
 };
 
@@ -40,11 +40,11 @@ impl serde::Serialize for SubstateId {
             SubstateId::Vault(ref __field0) => {
                 serde::Serializer::serialize_newtype_variant(serializer, "SubstateId", 2u32, "Vault", __field0)
             },
-            SubstateId::UnclaimedConfidentialOutput(ref __field0) => serde::Serializer::serialize_newtype_variant(
+            SubstateId::ClaimedOutputTombstone(ref __field0) => serde::Serializer::serialize_newtype_variant(
                 serializer,
                 "SubstateId",
                 3u32,
-                "UnclaimedConfidentialOutput",
+                "ClaimedOutputTombstone",
                 __field0,
             ),
             SubstateId::NonFungible(ref __field0) => {
@@ -121,7 +121,7 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
                     "Component" => Ok(Field::__field0),
                     "Resource" => Ok(Field::__field1),
                     "Vault" => Ok(Field::__field2),
-                    "UnclaimedConfidentialOutput" => Ok(Field::__field3),
+                    "ClaimedOutputTombstone" => Ok(Field::__field3),
                     "NonFungible" => Ok(Field::__field4),
                     "TransactionReceipt" => Ok(Field::__field5),
                     "Template" => Ok(Field::__field6),
@@ -137,7 +137,7 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
                     b"Component" => Ok(Field::__field0),
                     b"Resource" => Ok(Field::__field1),
                     b"Vault" => Ok(Field::__field2),
-                    b"UnclaimedConfidentialOutput" => Ok(Field::__field3),
+                    b"ClaimedOutputTombstone" => Ok(Field::__field3),
                     b"NonFungible" => Ok(Field::__field4),
                     b"TransactionReceipt" => Ok(Field::__field5),
                     b"Template" => Ok(Field::__field6),
@@ -185,8 +185,8 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
                         SubstateId::Vault,
                     ),
                     (Field::__field3, variant) => Result::map(
-                        serde::de::VariantAccess::newtype_variant::<UnclaimedConfidentialOutputAddress>(variant),
-                        SubstateId::UnclaimedConfidentialOutput,
+                        serde::de::VariantAccess::newtype_variant::<ClaimedOutputTombstoneAddress>(variant),
+                        SubstateId::ClaimedOutputTombstone,
                     ),
                     (Field::__field4, variant) => Result::map(
                         serde::de::VariantAccess::newtype_variant::<NonFungibleAddress>(variant),
@@ -215,7 +215,7 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
             "Component",
             "Resource",
             "Vault",
-            "UnclaimedConfidentialOutput",
+            "ClaimedOutputTombstone",
             "NonFungible",
             "TransactionReceipt",
             "Template",
@@ -251,7 +251,7 @@ mod tests {
         check(&resource_id);
         let vault_id = SubstateId::Vault(VaultId::new(ObjectKey::from([2; ObjectKey::LENGTH])));
         check(&vault_id);
-        let unclaimed_output_id = SubstateId::UnclaimedConfidentialOutput(UnclaimedConfidentialOutputAddress::new(
+        let unclaimed_output_id = SubstateId::ClaimedOutputTombstone(ClaimedOutputTombstoneAddress::new(
             ObjectKey::from([3; ObjectKey::LENGTH]),
         ));
         check(&unclaimed_output_id);

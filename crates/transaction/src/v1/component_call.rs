@@ -4,9 +4,11 @@
 use std::fmt::{Display, Formatter};
 
 use tari_bor::{Deserialize, Serialize};
-use tari_template_lib::{args::WorkspaceId, models::ComponentAddress};
+use tari_template_lib::models::ComponentAddress;
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+use crate::args::WorkspaceId;
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum ComponentCall {
     Address(ComponentAddress),

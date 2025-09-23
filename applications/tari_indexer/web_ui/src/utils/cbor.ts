@@ -66,7 +66,7 @@ export function convertCborValue(value: any): any {
 }
 
 function bytesToAddressString(type: String, tag: ArrayLike<number>): string {
-  const hex = Array.from(tag, function (byte) {
+  const hex = Array.from(tag, function(byte) {
     return ("0" + (byte & 0xff).toString(16)).slice(-2);
   }).join("");
 
@@ -83,8 +83,8 @@ export function convertTaggedValue(tag: number, value: any): string | any {
       return bytesToAddressString("resource", value.Bytes!);
     case TariTypeTag.NonFungibleAddress:
       return bytesToAddressString("non_fungible", value.Bytes!);
-    case TariTypeTag.UnclaimedConfidentialOutputAddress:
-      return bytesToAddressString("commitment", value.Bytes!);
+    case TariTypeTag.ClaimedOutputTombstoneAddress:
+      return bytesToAddressString("tombstone", value.Bytes!);
     case TariTypeTag.TemplateAddress:
       return bytesToAddressString("template", value.Bytes!);
     case TariTypeTag.Utxo:

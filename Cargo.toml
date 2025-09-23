@@ -100,7 +100,7 @@ tari_indexer_lib = { path = "crates/indexer_lib" }
 tari_rpc_state_sync = { path = "crates/rpc_state_sync" }
 tari_state_store_rocksdb = { path = "crates/state_store_rocksdb" }
 tari_state_tree = { path = "crates/state_tree" }
-tari_template_abi = { version = "0.12.0", path = "crates/template_abi", default-features = false }
+tari_template_abi = { version = "0.13.0", path = "crates/template_abi", default-features = false }
 tari_template_builtin = { path = "crates/template_builtin" }
 tari_template_lib = { path = "crates/template_lib" }
 tari_template_lib_types = { version = "0.12.3", path = "crates/template_lib_types", default-features = false }
@@ -122,26 +122,26 @@ tari_wallet_daemon_client = { path = "clients/wallet_daemon_client" }
 transaction_generator = { path = "utilities/transaction_generator" }
 
 # external minotari/tari dependencies
-minotari_app_grpc = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-minotari_app_utilities = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-minotari_console_wallet = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-minotari_node = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-minotari_wallet = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-minotari_wallet_grpc_client = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-tari_common = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-tari_common_sqlite = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-tari_common_types = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-tari_hashing = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-tari_jellyfish = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-tari_metrics = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-tari_mmr = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-tari_node_components = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-tari_p2p = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-tari_shutdown = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-tari_sidechain = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-tari_transaction_components = { git = "https://github.com/tari-project/tari.git", branch = "development" }
-tari_transaction_key_manager = { git = "https://github.com/tari-project/tari.git", branch = "development" }
+minotari_app_grpc = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
+minotari_app_utilities = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
+minotari_console_wallet = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
+minotari_node = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
+minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
+minotari_wallet = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
+minotari_wallet_grpc_client = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
+tari_common = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
+tari_common_sqlite = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
+tari_common_types = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
+tari_hashing = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
+tari_jellyfish = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
+tari_metrics = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
+tari_mmr = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
+tari_node_components = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
+tari_p2p = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
+tari_shutdown = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
+tari_sidechain = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
+tari_transaction_components = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
+tari_transaction_key_manager = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
 
 tari_crypto = "0.22.0"
 tari_utilities = "0.8.0"
@@ -162,7 +162,7 @@ axum = "0.6"
 axum-jrpc = "0.3.2"
 base64 = "0.20.0"
 bigdecimal = "0.4.1"
-bincode = "2.0.0-rc.3"
+bincode = "2.0.1"
 bitflags = "2.9.2"
 blake2 = "0.10.6"
 borsh = { version = "1.5", default-features = false }
@@ -308,6 +308,7 @@ overflow-checks = true
 #tari_p2p = { path = "../tari/base_layer/p2p" }
 #tari_shutdown = { path = "../tari/infrastructure/shutdown" }
 #tari_script = { path = "../tari/infrastructure/tari_script" }
+#tari_hashing = { path = "../tari/hashing" }
 #minotari_wallet = { path = "../tari/base_layer/wallet" }
 #minotari_console_wallet = { path = "../tari/applications/minotari_console_wallet" }
 #minotari_app_utilities = { path = "../tari/applications/minotari_app_utilities" }
@@ -315,7 +316,6 @@ overflow-checks = true
 #tari_service_framework = { path = "../tari/base_layer/service_framework" }
 #tari_comms_dht = { path = "../tari/comms/dht" }
 #tari_metrics = { path = "../tari/infrastructure/metrics" }
-#tari_hashing = { path = "../tari/hashing" }
 #tari_libtor = { path = "../tari/infrastructure/libtor" }
 #tari_sidechain = { path = "../tari/base_layer/sidechain" }
 #tari_jellyfish = { path = "../tari/infrastructure/jellyfish" }

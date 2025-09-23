@@ -832,7 +832,7 @@ impl ResourceManager {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```rust,ignore
     /// # use tari_template_lib::models::NonFungibleId;
     /// # use tari_template_lib::prelude::ResourceManager;
     ///

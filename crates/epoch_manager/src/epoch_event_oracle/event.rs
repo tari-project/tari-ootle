@@ -4,11 +4,12 @@
 use std::fmt::Display;
 
 use tari_common_types::types::FixedHash;
-use tari_engine_types::confidential::UnclaimedConfidentialOutput;
 use tari_ootle_common_types::{displayable::Displayable, Epoch, SubstateAddress};
 use tari_sidechain::EvictionProof;
 use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 use url::Url;
+
+use crate::epoch_event_oracle::block_header_data::BlockHeaderData;
 
 #[derive(Debug)]
 pub enum EpochEvent {
@@ -34,9 +35,9 @@ pub enum EpochEvent {
         url: Url,
         binary_hash: FixedHash,
     },
-    NewConfidentialOutput {
+    NewBlockHeader {
         epoch: Epoch,
-        substate: UnclaimedConfidentialOutput,
+        header: BlockHeaderData,
     },
     NewEvictionProof {
         epoch: Epoch,
@@ -106,12 +107,8 @@ impl Display for EpochEvent {
                     epoch, name, address, author_public_key, url, binary_hash
                 )
             },
-            EpochEvent::NewConfidentialOutput { epoch, substate } => {
-                write!(
-                    f,
-                    "NewConfidentialOutput {{ epoch: {}, commitment: {} }}",
-                    epoch, substate.commitment
-                )
+            EpochEvent::NewBlockHeader { epoch, header } => {
+                write!(f, "NewBlockHeader {{ epoch: {}, commitment: {} }}", epoch, header)
             },
             EpochEvent::NewEvictionProof { epoch, eviction_proof } => {
                 write!(

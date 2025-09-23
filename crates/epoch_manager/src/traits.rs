@@ -23,7 +23,6 @@
 use std::{collections::HashMap, future::Future};
 
 use tari_common_types::types::FixedHash;
-use tari_engine_types::confidential::UnclaimedConfidentialOutput;
 use tari_ootle_common_types::{
     committee::{Committee, CommitteeInfo},
     layer_one_transaction::LayerOneTransactionDef,
@@ -45,7 +44,6 @@ use crate::{epoch_event_oracle::EpochEventOracle, EpochManagerError, EpochManage
 pub trait EpochManagerSpec: Send + 'static {
     type Addr: NodeAddressable + DerivableFromPublicKey + 'static;
     type EpochEventOracle: EpochEventOracle + Send + 'static;
-    type UtxoStore: EpochUtxoStore + Send + 'static;
     type LayerOneSubmitter: LayerOneTransactionSubmitter + Send + Sync + 'static;
     type TemplateDownloader: TemplateDownloader + Send + 'static;
 }
@@ -64,12 +62,6 @@ pub trait EpochManagerWriter: Send + Sync {
         &mut self,
         public_key: RistrettoPublicKeyBytes,
         deactivation_epoch: Epoch,
-    ) -> impl Future<Output = Result<(), EpochManagerError>> + Send;
-
-    fn activate_epoch(
-        &mut self,
-        epoch: Epoch,
-        epoch_hash: FixedHash,
     ) -> impl Future<Output = Result<(), EpochManagerError>> + Send;
 }
 
@@ -234,11 +226,6 @@ pub trait EpochManagerReader: Send + Sync {
         shard_group: Option<ShardGroup>,
         excluding: Vec<Self::Addr>,
     ) -> impl Future<Output = Result<ValidatorNode<Self::Addr>, EpochManagerError>> + Send;
-}
-
-pub trait EpochUtxoStore: Send + Sync {
-    type Error: std::error::Error + Send + Sync + 'static;
-    fn add_unclaimed_utxo(&mut self, epoch: Epoch, substate: UnclaimedConfidentialOutput) -> Result<(), Self::Error>;
 }
 
 pub trait LayerOneTransactionSubmitter {

@@ -3,20 +3,16 @@
 
 use std::time::Duration;
 
-use anyhow::Context;
 use cucumber::{then, when};
-use integration_tests::{util::cucumber_log, wallet_daemon_cli, TariWorld};
+use integration_tests::{claim_proof::CucumberClaimProof, util::cucumber_log, wallet_daemon_cli, TariWorld};
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
-use tari_template_lib::types::{
-    crypto::{CommitmentSignatureBytes, PedersenCommitmentBytes, Scalar32Bytes},
-    Amount,
+use tari_template_lib::types::{crypto::PedersenCommitmentBytes, Amount};
+use tari_transaction_components::{
+    tari_amount::T,
+    transaction_components::{memo_field::TxType, MemoField},
 };
-use tari_transaction_components::transaction_components::{memo_field::TxType, MemoField};
-use tari_wallet_daemon_client::{
-    types::{ClaimBurnProof, ExtClaimBurnProof},
-    ComponentAddressOrName,
-};
+use tari_wallet_daemon_client::ComponentAddressOrName;
 
 async fn claim_burn(
     world: &mut TariWorld,
@@ -28,6 +24,9 @@ async fn claim_burn(
         .claim_proofs
         .get(&proof_name)
         .unwrap_or_else(|| panic!("Burn proof {} not found", proof_name));
+    let claim_proof = claim_proof
+        .confirmed()
+        .unwrap_or_else(|| panic!("Burn proof {} is not confirmed, cannot claim burn", proof_name));
     let walletd = world.get_wallet_daemon(&wallet_daemon_name);
     // Then burn into the new account
     let claim_burn_resp = walletd.claim_burn(&account_name, claim_proof.clone()).await?;
@@ -61,15 +60,15 @@ async fn when_i_claim_burn_via_wallet_daemon_it_fails(
     account_name: String,
     wallet_daemon_name: String,
 ) {
-    let _result = claim_burn(world, proof_name, account_name, wallet_daemon_name)
+    let result = claim_burn(world, proof_name, account_name, wallet_daemon_name)
         .await
-        .unwrap_err();
+        .unwrap();
 
-    // TODO: the wallet/indexer cannot find the substate before we submit the transaction, so this doesnt test the VN
-    // behaviour. assert!(
-    //     result.any_reject().is_some(),
-    //     "Expected transaction to fail, but it succeeded"
-    // );
+    assert!(
+        result.any_reject().is_some(),
+        "Expected transaction to fail, but it succeeded: {:?}",
+        result
+    );
 }
 
 #[when(expr = "I claim fees for validator {word} into account {word} using the wallet daemon {word}")]
@@ -195,10 +194,11 @@ async fn when_i_burn_funds_with_wallet_daemon(
         .get(&wallet_name)
         .unwrap_or_else(|| panic!("Wallet {} not found", wallet_name));
 
+    let amount = (amount * T).as_u64();
     let mut client = wallet.create_client().await;
     let resp = client
         .create_burn_transaction(minotari_app_grpc::tari_rpc::CreateBurnTransactionRequest {
-            amount: amount * 1_000_000,
+            amount,
             fee_per_gram: 1,
             payment_id: MemoField::open_from_string("Burn", TxType::Burn).to_bytes(),
             claim_public_key: public_key.to_vec(),
@@ -210,27 +210,11 @@ async fn when_i_burn_funds_with_wallet_daemon(
 
     assert!(resp.is_success, "Burn transaction failed: {}", resp.failure_message);
 
-    let ownership_proof = resp.ownership_proof.as_ref().unwrap();
-    let ownership_proof = CommitmentSignatureBytes::new(
-        PedersenCommitmentBytes::from_bytes(&ownership_proof.public_nonce)
-            .context("comsig public_nonce parse error")
-            .unwrap(),
-        Scalar32Bytes::from_bytes(&ownership_proof.u)
-            .context("comsig u parse error")
-            .unwrap(),
-        Scalar32Bytes::from_bytes(&ownership_proof.v)
-            .context("comsig v parse error")
-            .unwrap(),
-    );
+    let commitment = PedersenCommitmentBytes::from_bytes(&resp.commitment).expect("commitment parse error");
 
-    world.claim_proofs.insert(proof_name, ExtClaimBurnProof {
-        claim_proof: ClaimBurnProof {
-            reciprocal_claim_public_key: resp.reciprocal_claim_public_key.as_slice().try_into().unwrap(),
-            commitment: resp.commitment.as_slice().try_into().unwrap(),
-            ownership_proof,
-            range_proof: resp.range_proof.try_into().unwrap(),
-        },
-        owner_nonce_key_index: nonce.id,
+    world.claim_proofs.insert(proof_name, CucumberClaimProof::Pending {
+        commitment,
+        nonce_id: nonce.id,
     });
 }
 

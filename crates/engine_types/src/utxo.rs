@@ -6,14 +6,14 @@ use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, UtxoTag};
 
 use crate::crypto::PrivateOutput;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Utxo {
     pub output: Option<UtxoOutput>,
     pub is_frozen: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UtxoOutput {
     pub output: PrivateOutput,

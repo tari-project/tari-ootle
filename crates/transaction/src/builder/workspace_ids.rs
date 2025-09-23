@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use tari_template_lib::args::WorkspaceId;
+use crate::args::WorkspaceId;
 
 #[derive(Debug, Clone, Default)]
 pub struct WorkspaceIds {

@@ -20,14 +20,13 @@ use tari_engine::{
     executables::Executable,
     fees::{FeeModule, FeeTable},
     runtime::{AuthParams, RuntimeModule},
-    state_store::{memory::MemoryStateStore, new_memory_store, StateWriter},
+    state_store::{memory::MemoryStateStore, StateWriter},
     template::LoadedTemplate,
     transaction::{TransactionError, TransactionProcessor, TransactionProcessorConfig},
     wasm::LoadedWasmTemplate,
 };
 use tari_engine_types::{
     commit_result::{ExecuteResult, RejectReason},
-    instruction::Instruction,
     substate::{SubstateDiff, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
     ToByteType,
@@ -40,17 +39,28 @@ use tari_ootle_common_types::{
 };
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, XTR_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
-    args::InstructionArg,
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS},
     models::{ComponentAddress, NonFungibleAddress},
     prelude::RistrettoPublicKeyBytes,
     types::{Amount, TemplateAddress},
 };
-use tari_transaction::{args, builder::named_args::BuilderWorkspaceKey, Transaction, TransactionBuilder};
+use tari_transaction::{
+    args,
+    args::InstructionArg,
+    builder::named_args::BuilderWorkspaceKey,
+    Instruction,
+    Transaction,
+    TransactionBuilder,
+};
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 
 use crate::{
-    builtin_component_state::{initialize_builtin_faucet_state, initialize_builtin_nft_faucet_state},
+    builtin_component_state::{
+        add_tari_resources,
+        initialize_builtin_faucet_state,
+        initialize_builtin_nft_faucet_state,
+    },
+    mocks::AlwaysPassesProofVerifier,
     read_only_state_store::ReadOnlyStateStore,
     track_calls::TrackCallsModule,
     wrapped_transaction::WrappedTransaction,
@@ -155,7 +165,7 @@ impl TemplateTest {
             secret_key,
             name_to_template,
             last_outputs: HashSet::new(),
-            state_store: new_memory_store(),
+            state_store: MemoryStateStore::new(),
             virtual_substates,
             enable_fees: false,
             fee_table: FeeTable {
@@ -172,6 +182,7 @@ impl TemplateTest {
 
     pub fn bootstrap_state(&mut self) {
         let template_addr = self.get_template_address("TestFaucet");
+        add_tari_resources(&mut self.state_store).unwrap();
         initialize_builtin_faucet_state(&mut self.state_store, &self.public_key, template_addr);
         initialize_builtin_nft_faucet_state(&mut self.state_store)
     }
@@ -514,6 +525,7 @@ impl TemplateTest {
         let auth_params = AuthParams {
             initial_ownership_proofs: proofs,
         };
+
         let processor = TransactionProcessor::new(
             TransactionProcessorConfig::new(Network::LocalNet),
             Arc::new(self.package.clone()),
@@ -521,6 +533,7 @@ impl TemplateTest {
             auth_params,
             self.virtual_substates.clone(),
             modules,
+            Arc::new(AlwaysPassesProofVerifier),
         );
 
         let mut wrapped_transaction = WrappedTransaction::new(transaction);

@@ -8,10 +8,8 @@ use std::{
 
 use tari_bor::Value;
 use tari_engine_types::indexed_value::{IndexedValue, IndexedValueError};
-use tari_template_lib::{
-    args::{WorkspaceId, WorkspaceOffsetId},
-    models::ProofId,
-};
+use tari_template_lib::models::ProofId;
+use tari_transaction::args::{WorkspaceId, WorkspaceOffsetId};
 
 use crate::runtime::RuntimeError;
 
@@ -67,9 +65,8 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use tari_engine_types::indexed_value::IndexedValue;
-    use tari_template_lib::args::WorkspaceOffsetId;
 
-    use super::Workspace;
+    use super::*;
 
     #[test]
     fn tuples() {

@@ -5,11 +5,11 @@ use std::collections::HashSet;
 
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
-use tari_engine_types::{indexed_value::IndexedValueError, instruction::Instruction, substate::SubstateId};
+use tari_engine_types::{indexed_value::IndexedValueError, substate::SubstateId};
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib::models::ComponentAddress;
 
-use crate::{TransactionSignature, UnsealedTransactionV1, UnsignedTransactionV1};
+use crate::{Instruction, TransactionSignature, UnsealedTransactionV1, UnsignedTransactionV1};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]

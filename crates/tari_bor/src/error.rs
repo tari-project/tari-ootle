@@ -4,7 +4,6 @@
 #[cfg(not(feature = "std"))]
 use alloc::{
     fmt,
-    format,
     string::{String, ToString},
 };
 #[cfg(feature = "std")]

@@ -1,16 +1,14 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::instruction::Instruction;
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_template_lib::{
-    call_args,
     models::ComponentAddress,
     prelude::{NonFungibleAddress, ResourceAddress},
     types::Amount,
 };
 use tari_template_test_tooling::TemplateTest;
-use tari_transaction::{args, Transaction};
+use tari_transaction::{args, call_args, Instruction, Transaction};
 
 struct TariSwapTest {
     template_test: TemplateTest,

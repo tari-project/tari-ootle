@@ -28,19 +28,17 @@ use tari_engine::{
 };
 use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason},
-    instruction::Instruction,
     substate::SubstateId,
     virtual_substate::{VirtualSubstate, VirtualSubstateId},
 };
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
-    call_args,
     models::{ComponentAddress, NonFungible, NonFungibleAddress, ResourceAddress},
     types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
-use tari_transaction::{args, Transaction};
+use tari_transaction::{args, call_args, Transaction};
 use tari_transaction_manifest::ManifestValue;
 use tari_utilities::hex::to_hex;
 use wasmer::ExportError;
@@ -335,6 +333,8 @@ fn test_errors_on_infinite_loop() {
 }
 
 mod errors {
+    use tari_transaction::Instruction;
+
     use super::*;
 
     #[test]
@@ -417,6 +417,7 @@ mod consensus {
 
 mod fungible {
     use tari_template_lib::types::Amount;
+    use tari_transaction::Instruction;
 
     use super::*;
 
@@ -450,7 +451,7 @@ mod fungible {
         let owner_proof = template_test.owner_proof();
         let result = template_test.build_and_execute(
             Transaction::builder()
-                .call_method(faucet_component, "burn_coins", args![Amount(500)])
+                .call_method(faucet_component, "burn_coins", args![500])
                 .call_method(faucet_component, "total_supply", args![]),
             vec![owner_proof.clone()],
         );
@@ -478,7 +479,7 @@ mod fungible {
 
         template_test
             .build_and_execute(
-                Transaction::builder().call_method(faucet_component, "burn_coins", args![Amount(1)]),
+                Transaction::builder().call_method(faucet_component, "burn_coins", args![1]),
                 vec![],
             )
             .expect_failure();
@@ -873,7 +874,7 @@ mod basic_nft {
 }
 
 mod emoji_id {
-    use tari_template_lib::{call_args, constants::XTR, types::Amount};
+    use tari_template_lib::{constants::XTR, types::Amount};
 
     use super::*;
 
@@ -897,7 +898,7 @@ mod emoji_id {
         emoji_id: &EmojiId,
         price: Amount,
         owner_proof: NonFungibleAddress,
-    ) -> Result<FinalizeResult, anyhow::Error> {
+    ) -> Result<FinalizeResult, String> {
         let transaction = Transaction::builder()
             .call_method(account_address, "withdraw", args![faucet_resource, price])
             .put_last_instruction_output_on_workspace("payment")
@@ -908,7 +909,7 @@ mod emoji_id {
 
         let result = test.execute_and_commit_on_success(transaction, vec![owner_proof]);
         if let Some(reason) = result.finalize.result.any_reject() {
-            return Err(anyhow::anyhow!("Minting emoji id failed: {reason}"));
+            return Err(format!("Minting emoji id failed: {reason}"));
         }
         Ok(result.finalize)
     }

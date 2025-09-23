@@ -35,6 +35,7 @@ use tari_template_abi::{
 use tari_template_lib_types::{EntityId, KeyParseError, ObjectKey};
 
 use super::{
+    address_prefixes,
     BinaryTag,
     Bucket,
     ConfidentialWithdrawProof,
@@ -66,6 +67,7 @@ const TAG: u64 = BinaryTag::VaultId as u64;
 /// A vault's unique identification in the Tari network
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct VaultId(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl VaultId {
@@ -95,7 +97,7 @@ impl From<ObjectKey> for VaultId {
 
 impl Display for VaultId {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "vault_{}", *self.0)
+        write!(f, "{}_{}", address_prefixes::VAULT, *self.0)
     }
 }
 
@@ -124,25 +126,6 @@ impl TryFrom<&[u8]> for VaultId {
 }
 
 newtype_struct_serde_impl!(VaultId, BorTag<ObjectKey, TAG>);
-
-#[cfg(feature = "borsh")]
-mod borsh_impl {
-    use std::io::Read;
-
-    use super::*;
-    impl ::borsh::BorshSerialize for VaultId {
-        fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-            borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
-        }
-    }
-
-    impl borsh::BorshDeserialize for VaultId {
-        fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
-            let key = borsh::BorshDeserialize::deserialize_reader(reader)?;
-            Ok(Self::new(ObjectKey::from_array(key)))
-        }
-    }
-}
 
 /// Encapsulates all the ways that a vault can be referenced
 #[derive(Clone, Debug, Serialize, Deserialize)]

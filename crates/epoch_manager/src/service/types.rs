@@ -46,11 +46,6 @@ pub enum EpochManagerRequest<TAddr> {
         deactivation_epoch: Epoch,
         reply: Reply<()>,
     },
-    ActivateEpoch {
-        epoch: Epoch,
-        epoch_hash: FixedHash,
-        reply: Reply<()>,
-    },
     GetCommittees {
         epoch: Epoch,
         reply: Reply<HashMap<ShardGroup, Committee<TAddr>>>,

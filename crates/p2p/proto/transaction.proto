@@ -11,12 +11,6 @@ message NewTransactionMessage {
   Transaction transaction = 1;
 }
 
-message CommitmentSignature {
-  bytes public_nonce_commitment = 1;
-  bytes signature_u = 2;
-  bytes signature_v = 3;
-}
-
 message Transaction {
   bytes bor_encoded = 1;
 }
@@ -28,76 +22,93 @@ enum AllocatableAddressType {
 }
 
 message Instruction {
-  enum InstructionType {
-    FUNCTION = 0;
-    METHOD = 1;
-    PUT_OUTPUT_IN_WORKSPACE = 2;
-    EMIT_LOG = 3;
-    CLAIM_BURN = 4;
-    CLAIM_VALIDATOR_FEES = 5;
-    DROP_ALL_PROOFS_IN_WORKSPACE = 6;
-    CREATE_ACCOUNT = 7;
-    ASSERT_BUCKET_CONTAINS = 8;
-    PUBLISH_TEMPLATE = 9;
-    ALLOCATE_ADDRESS = 10;
-    STEALTH_TRANSFER = 11;
-    PAY_FEE = 12;
+  oneof instruction {
+    CallFunction call_function = 1;
+    CallMethod call_method = 2;
+    uint32 put_last_instruction_output_on_workspace = 3;
+    EmitLog emit_log = 4;
+    ClaimBurn claim_burn = 5;
+    ClaimValidatorFees claim_validator_fees = 6;
+    bool drop_all_proofs_in_workspace = 7;
+    CreateAccount create_account = 8;
+    AssertBucketContains assert_bucket_contains = 9;
+    PublishTemplate publish_template = 10;
+    AllocateAddress allocate_address = 11;
+    StealthTransfer stealth_transfer = 12;
+    PayFee pay_fee = 13;
   }
-  InstructionType instruction_type = 1;
+}
 
-  // common fields
-  bytes template_address = 2;
+message CallFunction {
+  bytes template_address = 1;
+  string function = 2;
   repeated Arg args = 3;
+}
 
-  // function only
-  string function = 4;
+message CallMethod {
+  ComponentCall component_call = 1;
+  string method = 2;
+  repeated Arg args = 3;
+}
 
-  // method only
-  ComponentCall component_call = 5;
-  string method = 6;
+message ClaimBurn {
+  bytes commitment = 1;
+  uint64 value = 2;
+  tari.ootle.common.Signature proof_of_knowledge = 3;
+  bytes public_key = 4;
+  EncodedMerkleProof encoded_merkle_proof = 5;
+  bytes encrypted_data = 6;
+  AbridgedKernel kernel = 7;
+}
 
-  // PutLastInstructionOutputOnWorkspace
-  uint32 workspace_put_key = 7;
+message AbridgedKernel {
+  uint32 version = 1;
+  uint64 fee = 2;
+  uint64 lock_height = 3;
+  bytes excess = 4;
+  tari.ootle.common.Signature excess_sig = 5;
+}
 
-  // EmitLog
-  string log_level = 8;
-  string log_message = 9;
+message EmitLog {
+  string log_level = 1;
+  string log_message = 2;
+}
 
-  // ClaimBurn
-  bytes claim_burn_commitment_address = 10;
-  bytes claim_burn_range_proof = 11;
-  CommitmentSignature claim_burn_proof_of_knowledge = 12;
-  bytes claim_burn_public_key = 13;
-  StealthTransferStatement claim_burn_transfer = 14;
+message ClaimValidatorFees {
+  bytes fee_pool_address = 1;
+}
 
-  // ClaimValidatorFees
-  bytes claim_validator_fees_address = 15;
+message CreateAccount {
+  bytes public_key = 1;
+  OwnerRule owner_rule = 2;
+  AccessRules access_rules = 3;
+  WorkspaceOffsetId workspace_id = 4;
+}
 
-  // CreateAccount
-  bytes create_account_public_key = 16;
-  OwnerRule create_account_owner_rule = 17;
-  AccessRules create_account_access_rules = 18;
-  WorkspaceOffsetId create_account_workspace_id = 19;
+message AssertBucketContains {
+  WorkspaceOffsetId bucket = 1;
+  bytes resource_address = 2;
+  tari.ootle.common.Amount min_amount = 3;
+}
 
-  // AssertBucketContains
-  WorkspaceOffsetId assert_bucket_workspace_id = 20;
-  bytes resource_address = 21;
-  tari.ootle.common.Amount min_amount = 22;
+message PublishTemplate {
+  bytes binary = 1;
+}
 
-  // PublishTemplate
-  bytes template_binary = 23;
+message AllocateAddress {
+  AllocatableAddressType address_type = 1;
+  uint32 workspace_id = 2;
+}
 
-  // AllocateAddress
-  AllocatableAddressType allocatable_address_type = 24;
-  uint32 allocate_address_workspace_id = 25;
+message StealthTransfer {
+  ResourceAddressRef resource_address = 1;
+  StealthTransferStatement statement = 2;
+  WorkspaceOffsetId revealed_input_bucket = 3;
+}
 
-  // StealthTransfer
-  ResourceAddressRef stealth_transfer_resource_address = 26;
-  StealthTransferStatement stealth_transfer_statement = 27;
-  WorkspaceOffsetId stealth_transfer_revealed_input_bucket = 28;
-
-  StealthTransferStatement pay_fee_stealth_transfer_statement = 29;
-  WorkspaceOffsetId pay_fee_revealed_input_bucket = 30;
+message PayFee {
+  StealthTransferStatement statement = 1;
+  WorkspaceOffsetId revealed_input_bucket = 2;
 }
 
 message ComponentCall {
@@ -166,7 +177,7 @@ message ConfidentialOutputStatement {
 message UnspentOutput {
   bytes commitment = 1;
   bytes sender_public_nonce = 2;
-  bytes encrypted_value = 3;
+  bytes encrypted_data = 3;
   uint64 minimum_value_promise = 4;
   ViewableBalanceProof viewable_balance_proof = 5;
 }
@@ -223,3 +234,9 @@ message StealthInputsStatement {
   tari.ootle.common.Amount revealed_amount = 2;
 }
 
+
+message EncodedMerkleProof {
+  bytes block_hash = 1;
+  bytes encoded_proof = 2;
+  uint64 leaf_index = 3;
+}

@@ -181,9 +181,9 @@ impl JsonRpcHandlers {
         let SubmitTransactionRequest { transaction } = value.parse_params()?;
         debug!(
             target: LOG_TARGET,
-            "Transaction {} has {} involved shards",
+            "Transaction {} has {} involved substate addresses",
             transaction.calculate_id(),
-            transaction.num_unique_inputs()
+            transaction.involved_substate_addresses_iter().count()
         );
 
         let tx_id = transaction.calculate_id();

@@ -12,6 +12,7 @@ use crate::models::StealthUnspentOutput;
 /// A statement for stealth outputs. A statement must contain confidential outputs
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct StealthOutputsStatement {
     /// The stealth outputs that are to be created
     pub outputs: Vec<StealthUnspentOutput>,
@@ -28,6 +29,7 @@ pub struct StealthOutputsStatement {
 /// A statement for stealth outputs. A statement must contain confidential outputs
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct StealthInput {
     /// The commitment of the unspent output being spent
     pub commitment: PedersenCommitmentBytes,
@@ -38,6 +40,7 @@ pub struct StealthInput {
 /// A statement for stealth outputs. A statement must contain confidential outputs
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct StealthInputsStatement {
     /// The stealth inputs that are to be spent
     pub inputs: Vec<StealthInput>,
@@ -65,6 +68,7 @@ impl StealthInputsStatement {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct StealthTransferStatement {
     pub inputs_statement: StealthInputsStatement,
     pub outputs_statement: StealthOutputsStatement,

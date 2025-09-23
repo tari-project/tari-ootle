@@ -2,7 +2,6 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 mod base_node;
-mod common;
 mod indexer;
 mod miner;
 mod network;

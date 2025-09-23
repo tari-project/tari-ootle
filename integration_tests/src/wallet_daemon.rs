@@ -40,9 +40,9 @@ use tari_wallet_daemon_client::{
         AuthLoginAcceptRequest,
         AuthLoginRequest,
         AuthLoginResponse,
+        ClaimBurnProof,
         ClaimBurnRequest,
         ClaimBurnResponse,
-        ExtClaimBurnProof,
         TransactionWaitResultRequest,
         TransactionWaitResultResponse,
     },
@@ -145,7 +145,7 @@ impl TariWalletDaemonProcess {
     pub async fn claim_burn(
         &self,
         account_name: &str,
-        claim_proof: ExtClaimBurnProof,
+        claim_proof: ClaimBurnProof,
     ) -> Result<ClaimBurnResponse, WalletDaemonClientError> {
         let mut client = self.get_authed_client().await;
 

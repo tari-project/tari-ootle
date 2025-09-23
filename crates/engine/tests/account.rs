@@ -3,9 +3,8 @@
 
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine::runtime::{ActionIdent, RuntimeError};
-use tari_engine_types::{instruction::Instruction, ToByteType};
+use tari_engine_types::ToByteType;
 use tari_template_lib::{
-    call_args,
     constants::XTR,
     models::{ComponentAddress, ResourceAddress},
     prelude::AccessRules,
@@ -17,7 +16,7 @@ use tari_template_test_tooling::{
     test_faucet_component,
     TemplateTest,
 };
-use tari_transaction::{args, Transaction};
+use tari_transaction::{args, call_args, Instruction, Transaction};
 
 #[test]
 fn basic_faucet_transfer() {

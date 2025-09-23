@@ -15,7 +15,6 @@ use tari_ootle_common_types::{
     optional::Optional,
     NumPreshards,
     ToSubstateAddress,
-    VersionedSubstateId,
 };
 use tari_transaction::{Transaction, TransactionId};
 use time::PrimitiveDateTime;
@@ -65,13 +64,7 @@ impl TransactionRecord {
     pub fn is_involved_in_inputs(&self, local_committee_info: &CommitteeInfo) -> bool {
         self.transaction
             .all_inputs_iter()
-            .any(|i| local_committee_info.includes_substate_id(i.substate_id()))
-    }
-
-    pub fn is_all_local_inputs(&self, local_committee_info: &CommitteeInfo) -> bool {
-        self.transaction
-            .all_inputs_iter()
-            .all(|i| local_committee_info.includes_substate_id(i.substate_id()))
+            .any(|id| local_committee_info.includes_substate_id(id.substate_id()))
     }
 
     pub fn to_receipt_id(&self) -> TransactionReceiptAddress {
@@ -80,10 +73,12 @@ impl TransactionRecord {
 
     pub fn to_initial_evidence(&self, num_preshards: NumPreshards, num_committees: u32) -> Evidence {
         let inputs = self.transaction.all_inputs_iter();
-        let receipt = self.transaction.calculate_id().into_receipt_address();
-        Evidence::from_inputs_and_outputs(num_preshards, num_committees, inputs, [VersionedSubstateId::new(
-            receipt, 0,
-        )])
+        Evidence::from_inputs_and_outputs(
+            num_preshards,
+            num_committees,
+            inputs,
+            self.transaction.known_outputs_iter(),
+        )
     }
 }
 

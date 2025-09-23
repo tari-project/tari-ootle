@@ -12,6 +12,7 @@ use crate::serde_helpers;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct EntityId(
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "serde_helpers::fixed_hex")]
@@ -139,6 +140,7 @@ impl From<[u8; Self::LENGTH]> for ComponentKey {
 /// Representation of a 32-byte object key
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct ObjectKey(#[serde(with = "serde_helpers::fixed_hex")] [u8; Self::LENGTH]);
 
 impl ObjectKey {

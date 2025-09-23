@@ -2,17 +2,13 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine::{runtime::ActionIdent, transaction::MAX_CALL_DEPTH};
-use tari_engine_types::{
-    commit_result::{ExecuteResult, RejectReason},
-    instruction::Instruction,
-};
+use tari_engine_types::commit_result::{ExecuteResult, RejectReason};
 use tari_template_lib::{
-    call_args,
     models::{ComponentAddress, ResourceAddress},
     types::{Amount, TemplateAddress},
 };
 use tari_template_test_tooling::{support::assert_error::assert_access_denied_for_action, TemplateTest};
-use tari_transaction::{args, Transaction};
+use tari_transaction::{args, call_args, Instruction, Transaction};
 
 struct ComposabilityTest {
     template_test: TemplateTest,

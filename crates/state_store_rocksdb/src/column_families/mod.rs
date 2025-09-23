@@ -24,7 +24,6 @@ pub mod block;
 pub mod block_diff;
 pub mod block_transaction_execution;
 pub mod bookkeeping;
-pub mod burnt_utxo;
 pub mod chain;
 pub mod epoch_checkpoint;
 pub mod evicted_node;

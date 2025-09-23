@@ -104,8 +104,6 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         column_families::state_tree::StateTreeStaleNodesModel,
         column_families::state_tree_shard_versions::StateTreeShardVersionCf,
         column_families::epoch_checkpoint::EpochCheckpointCf,
-        column_families::burnt_utxo::BurntUtxoCf,
-        column_families::burnt_utxo::ProposedInBlockIndex,
         column_families::lock_conflict::LockConflictCf,
         column_families::lock_conflict::LockConflictBlockIdIndex,
         column_families::evicted_node::EvictedNodeCf,

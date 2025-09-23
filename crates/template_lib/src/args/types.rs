@@ -28,7 +28,7 @@ use tari_template_abi::rust::{
 };
 
 use crate::{
-    args::{freeze_flags::VaultFreezeFlags, InstructionArg},
+    args::freeze_flags::VaultFreezeFlags,
     auth::{AuthHook, OwnerRule, ResourceAccessRules},
     models::{
         AddressAllocationId,
@@ -67,6 +67,7 @@ pub struct EmitLogArg {
 /// All the possible log levels
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub enum LogLevel {
     Error,
     Warn,
@@ -567,14 +568,6 @@ pub struct CallerContextInvokeArg {
     pub args: Vec<Vec<u8>>,
 }
 
-/// Possible allocatable address types
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub enum AllocatableAddressType {
-    Component,
-    Resource,
-}
-
 // -------------------------------- AddressAllocation -------------------------------- //
 
 /// The possible actions that can be performed related to the caller context
@@ -617,7 +610,7 @@ pub enum CallAction {
 pub struct CallFunctionArg {
     pub template_address: TemplateAddress,
     pub function: String,
-    pub args: Vec<InstructionArg>,
+    pub args: Vec<Vec<u8>>,
 }
 
 /// A component's method call operation argument
@@ -625,7 +618,7 @@ pub struct CallFunctionArg {
 pub struct CallMethodArg {
     pub component_address: ComponentAddress,
     pub method: String,
-    pub args: Vec<InstructionArg>,
+    pub args: Vec<Vec<u8>>,
 }
 
 // -------------------------------- ProofInvoke -------------------------------- //

@@ -1,13 +1,17 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::{instruction::Instruction, ComponentCall};
-use tari_template_lib::{
-    args::{AllocatableAddressType, InstructionArg, WorkspaceOffsetId},
-    types::TemplateAddress,
-};
+use tari_template_lib::types::TemplateAddress;
 
-use crate::{args, builder::named_component_call::CallFromWorkspace, Transaction};
+use crate::{
+    args,
+    args::{InstructionArg, WorkspaceOffsetId},
+    builder::named_component_call::CallFromWorkspace,
+    AllocatableAddressType,
+    ComponentCall,
+    Instruction,
+    Transaction,
+};
 
 #[test]
 fn it_converts_workspace_names_to_ids() {

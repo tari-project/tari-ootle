@@ -5,12 +5,12 @@ use std::collections::HashMap;
 
 use proc_macro2::Ident;
 use syn::Lit;
-use tari_engine_types::{instruction::Instruction, substate::SubstateId};
-use tari_template_lib::{
+use tari_engine_types::substate::SubstateId;
+use tari_template_lib::{models::NonFungibleId, types::TemplateAddress};
+use tari_transaction::{
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
     call_arg,
-    models::NonFungibleId,
-    types::TemplateAddress,
+    Instruction,
 };
 
 use crate::{
@@ -169,7 +169,7 @@ impl ManifestInstructionGenerator {
                                 SubstateId::TransactionReceipt(addr) => Ok(call_arg!(*addr)),
                                 SubstateId::Vault(addr) => Ok(call_arg!(*addr)),
                                 SubstateId::NonFungible(addr) => Ok(call_arg!(addr)),
-                                SubstateId::UnclaimedConfidentialOutput(addr) => Ok(call_arg!(*addr)),
+                                SubstateId::ClaimedOutputTombstone(addr) => Ok(call_arg!(*addr)),
                                 SubstateId::Template(addr) => Ok(call_arg!(*addr)),
                                 SubstateId::ValidatorFeePool(addr) => Ok(call_arg!(*addr)),
                                 SubstateId::Utxo(addr) => Ok(call_arg!(*addr)),

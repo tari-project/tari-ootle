@@ -12,13 +12,15 @@ ciborium = { workspace = true }
 ciborium-io = { workspace = true }
 serde = { workspace = true, default-features = false }
 ts-rs = { workspace = true, optional = true }
+borsh = { workspace = true, optional = true, default-features = false }
 
 [dev-dependencies]
 serde_json = { workspace = true }
 
 [features]
 default = ["std"]
-std = ["serde/std", "ciborium/std", "ciborium-io/std"]
+borsh = ["dep:borsh"]
+std = ["serde/std", "ciborium/std", "ciborium-io/std", "borsh?/std"]
 alloc = ["serde/alloc", "ciborium-io/alloc"]
 json_encoding = []
 ts = ["dep:ts-rs"]

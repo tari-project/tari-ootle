@@ -9,6 +9,7 @@ use crate::models::{ComponentAddress, NonFungibleAddress, ResourceAddress};
 
 /// Represents the types of possible access control rules over a component method or resource
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum AccessRule {
     /// AccessRule always passes
@@ -43,6 +44,7 @@ impl AccessRule {
 
 /// An enum that represents the possible ways to restrict access to components or resources
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum RestrictedAccessRule {
     /// Requires a specific condition to be met
@@ -65,6 +67,7 @@ impl RestrictedAccessRule {
 
 /// Specifies a requirement for a [RequireRule].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum RuleRequirement {
     /// Requires ownership of a specific resource
@@ -103,6 +106,7 @@ impl From<TemplateAddress> for RuleRequirement {
 
 /// A rule requiring specific condition(s) to be met
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum RequireRule {
     /// Requires a specific condition to be met
@@ -116,6 +120,7 @@ pub enum RequireRule {
 /// Information needed to specify access rules to methods of a component
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct ComponentAccessRules {
     #[cfg_attr(feature = "ts", ts(type = "Record<string, AccessRule>"))]
     method_access: BTreeMap<String, AccessRule>,
@@ -196,6 +201,7 @@ impl ResourceAuthAction {
 
 /// Information needed to specify access rules to a resource
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ResourceAccessRules {
     mintable: AccessRule,

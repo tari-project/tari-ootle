@@ -123,19 +123,6 @@ impl<TAddr: NodeAddressable> EpochManagerWriter for EpochManagerHandle<TAddr> {
             .map_err(|_| EpochManagerError::SendError)?;
         rx.await.map_err(|_| EpochManagerError::ReceiveError)?
     }
-
-    async fn activate_epoch(&mut self, epoch: Epoch, epoch_hash: FixedHash) -> Result<(), EpochManagerError> {
-        let (tx, rx) = oneshot::channel();
-        self.tx_request
-            .send(EpochManagerRequest::ActivateEpoch {
-                epoch,
-                epoch_hash,
-                reply: tx,
-            })
-            .await
-            .map_err(|_| EpochManagerError::SendError)?;
-        rx.await.map_err(|_| EpochManagerError::ReceiveError)?
-    }
 }
 
 impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {

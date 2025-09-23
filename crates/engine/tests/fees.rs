@@ -4,9 +4,9 @@
 use std::iter;
 
 use tari_engine_types::commit_result::RejectReason;
-use tari_template_lib::{call_args, constants::STEALTH_TARI_RESOURCE_ADDRESS, models::ComponentAddress, types::Amount};
+use tari_template_lib::{constants::STEALTH_TARI_RESOURCE_ADDRESS, models::ComponentAddress, types::Amount};
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, test_faucet_component, TemplateTest};
-use tari_transaction::{args, Transaction};
+use tari_transaction::{args, call_args, Transaction};
 
 #[test]
 fn deducts_fees_from_payments_and_refunds_the_rest() {
@@ -79,7 +79,7 @@ fn deposit_from_faucet_then_pay() {
                     .call_method(test_faucet_component(), "take_free_coins", args![])
                     .put_last_instruction_output_on_workspace("bucket")
                     .call_method(account, "deposit", args![Workspace("bucket")])
-                    .call_method(account, "pay_fee", args![Amount(1000)])
+                    .call_method(account, "pay_fee", args![1000])
             })
             .call_function(test.get_template_address("State"), "new", args![])
             .build_and_seal(&private_key),
@@ -245,7 +245,7 @@ fn fail_pay_less_fees_than_fee_transaction() {
                         .call_method(
                             account,
                             "pay_fee".to_string(),
-                            args![Amount(100)],
+                            args![100],
                         )
 
                 })

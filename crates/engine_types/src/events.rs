@@ -37,7 +37,7 @@ fn std_event(object_name: &str, action_name: &str) -> String {
     format!("{}{}.{}", STANDARD_TOPIC_PREFIX, object_name, action_name)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Event {
     substate_id: Option<SubstateId>,

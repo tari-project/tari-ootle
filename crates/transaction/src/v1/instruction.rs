@@ -1,11 +1,15 @@
-//  Copyright 2022 The Tari Project
-//  SPDX-License-Identifier: BSD-3-Clause
+//   Copyright 2025 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
 
 use std::fmt::{Display, Formatter};
 
 use serde::{Deserialize, Serialize};
+use tari_engine_types::{
+    confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
+    ValidatorFeePoolAddress,
+};
 use tari_template_lib::{
-    args::{AllocatableAddressType, InstructionArg, LogLevel, WorkspaceId, WorkspaceOffsetId},
+    args::LogLevel,
     auth::OwnerRule,
     models::{ResourceAddress, StealthTransferStatement},
     prelude::{AccessRules, Amount},
@@ -13,18 +17,18 @@ use tari_template_lib::{
 };
 
 use crate::{
-    component_call::ComponentCall,
-    confidential::TariStealthClaim,
-    resource_address_ref::ResourceAddressRef,
-    ValidatorFeePoolAddress,
+    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
+    AllocatableAddressType,
+    ComponentCall,
+    ResourceAddressRef,
 };
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Instruction {
     CreateAccount {
         #[cfg_attr(feature = "ts", ts(type = "string"))]
-        public_key_address: RistrettoPublicKeyBytes,
+        owner_public_key: RistrettoPublicKeyBytes,
         owner_rule: Option<OwnerRule>,
         access_rules: Option<AccessRules>,
         workspace_id: Option<WorkspaceOffsetId>,
@@ -33,7 +37,7 @@ pub enum Instruction {
         #[cfg_attr(feature = "ts", ts(type = "string"))]
         address: TemplateAddress,
         function: String,
-        #[serde(deserialize_with = "crate::argument_parser::json_deserialize")]
+        #[serde(deserialize_with = "crate::special_json_arg_syntax::json_deserialize")]
         #[cfg_attr(feature = "ts", ts(type = "Array<any>"))]
         args: Vec<InstructionArg>,
     },
@@ -42,7 +46,7 @@ pub enum Instruction {
         method: String,
         // TODO: remove this as it causes tricky issues that are hard to track down (typically Signature errors).
         // Rather have clients provide raw arguments using CBOR.
-        #[serde(deserialize_with = "crate::argument_parser::json_deserialize")]
+        #[serde(deserialize_with = "crate::special_json_arg_syntax::json_deserialize")]
         // Argument parser takes an array of strings as input
         #[cfg_attr(feature = "ts", ts(type = "Array<any>"))]
         args: Vec<InstructionArg>,
@@ -55,7 +59,8 @@ pub enum Instruction {
         message: String,
     },
     ClaimBurn {
-        claim: Box<TariStealthClaim>,
+        claim: Box<MinotariBurnClaimProof>,
+        output_data: ClaimBurnOutputData,
     },
     ClaimValidatorFees {
         #[cfg_attr(feature = "ts", ts(type = "string"))]
@@ -94,14 +99,17 @@ impl Instruction {
     }
 
     pub fn referenced_template(&self) -> Option<&TemplateAddress> {
-        if let Self::CallFunction {
-            address: template_address,
-            ..
-        } = self
-        {
-            return Some(template_address);
+        match self {
+            Self::CallFunction { address, .. } => Some(address),
+            _ => None,
         }
-        None
+    }
+
+    pub fn claim_burn(&self) -> Option<&MinotariBurnClaimProof> {
+        match self {
+            Self::ClaimBurn { claim, .. } => Some(claim),
+            _ => None,
+        }
     }
 }
 
@@ -110,7 +118,7 @@ impl Display for Instruction {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::CreateAccount {
-                public_key_address,
+                owner_public_key: public_key_address,
                 owner_rule,
                 access_rules,
                 workspace_id,
@@ -152,15 +160,8 @@ impl Display for Instruction {
             Self::EmitLog { level, message } => {
                 write!(f, "EmitLog {{ level: {level}, message: {message} }}")
             },
-            Self::ClaimBurn { claim } => {
-                write!(
-                    f,
-                    "ClaimBurn {{ commitment_address: {}, proof_of_knowledge: nonce({}), u({}) v({}) }}",
-                    claim.output_address,
-                    claim.proof_of_knowledge.public_nonce(),
-                    claim.proof_of_knowledge.u(),
-                    claim.proof_of_knowledge.v(),
-                )
+            Self::ClaimBurn { claim, .. } => {
+                write!(f, "ClaimBurn {{ {claim} }}",)
             },
             Self::ClaimValidatorFees { address } => {
                 write!(f, "ClaimValidatorFees {{ address: {} }}", address)
@@ -231,9 +232,8 @@ impl Display for Instruction {
 
 #[cfg(test)]
 mod tests {
-    use tari_template_lib::call_args;
-
     use super::*;
+    use crate::call_args;
 
     #[test]
     fn decode_encode() {

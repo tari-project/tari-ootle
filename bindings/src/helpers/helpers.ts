@@ -28,8 +28,8 @@ export function substateIdToString(substateId: SubstateId | string | null | unde
   // if ("Vault" in substateId) {
   //   return substateId.Vault;
   // }
-  // if ("UnclaimedConfidentialOutput" in substateId) {
-  //   return substateId.UnclaimedConfidentialOutput;
+  // if ("ClaimedOutputTombstone" in substateId) {
+  //   return substateId.ClaimedOutputTombstone;
   // }
   // if ("NonFungible" in substateId) {
   //   const nft = substateId.NonFungible;
@@ -64,7 +64,7 @@ export function stringToSubstateId(substateId: string): SubstateId {
   //   case "vault":
   //     return { Vault: rest };
   //   case "tombstone":
-  //     return { UnclaimedConfidentialOutput: rest };
+  //     return { ClaimedOutputTombstone: rest };
   //   case "txreceipt":
   //     return { TransactionReceipt: rest };
   //   case "vnfp":

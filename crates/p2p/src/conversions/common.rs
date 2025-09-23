@@ -27,7 +27,13 @@ use tari_consensus_types::ValidatorSignatureBytes;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_ootle_common_types::{Epoch, SubstateAddress};
 use tari_template_lib::{
-    prelude::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
+    prelude::{
+        crypto::CommitmentSignatureBytes,
+        PedersenCommitmentBytes,
+        RistrettoPublicKeyBytes,
+        Scalar32Bytes,
+        SchnorrSignatureBytes,
+    },
     types::Amount,
 };
 use tari_transaction::TransactionSignature;
@@ -43,6 +49,12 @@ impl TryFrom<proto::common::Signature> for SchnorrSignatureBytes {
         let signature = Scalar32Bytes::from_bytes(&sig.signature).map_err(anyhow::Error::msg)?;
 
         Ok(Self::new(public_nonce, signature))
+    }
+}
+
+impl From<SchnorrSignatureBytes> for proto::common::Signature {
+    fn from(sig: SchnorrSignatureBytes) -> Self {
+        (&sig).into()
     }
 }
 
@@ -165,6 +177,30 @@ impl From<Amount> for proto::common::Amount {
             digit1: digits[0],
             digit2: digits[1],
             digit3: digits[2],
+        }
+    }
+}
+// -------------------------------- CommitmentSignature -------------------------------- //
+
+impl TryFrom<proto::common::CommitmentSignature> for CommitmentSignatureBytes {
+    type Error = anyhow::Error;
+
+    fn try_from(val: proto::common::CommitmentSignature) -> Result<Self, Self::Error> {
+        let u = Scalar32Bytes::from_bytes(&val.signature_u).context("Invalid u signature")?;
+        let v = Scalar32Bytes::from_bytes(&val.signature_v).context("Invalid v signature")?;
+        let public_nonce =
+            PedersenCommitmentBytes::from_bytes(&val.public_nonce_commitment).context("Invalid public nonce")?;
+
+        Ok(Self::new(public_nonce, u, v))
+    }
+}
+
+impl From<CommitmentSignatureBytes> for proto::common::CommitmentSignature {
+    fn from(val: CommitmentSignatureBytes) -> Self {
+        Self {
+            public_nonce_commitment: val.public_nonce().to_vec(),
+            signature_u: val.u().to_vec(),
+            signature_v: val.v().to_vec(),
         }
     }
 }

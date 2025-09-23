@@ -9,7 +9,7 @@ use std::{
 
 use tari_bor::{BorTag, Deserialize, Serialize};
 use tari_template_lib::{
-    models::BinaryTag,
+    models::{address_prefixes, BinaryTag},
     types::{crypto::RistrettoPublicKeyBytes, Hash, KeyParseError, ObjectKey},
 };
 
@@ -17,15 +17,24 @@ use crate::hashing::{hasher32, EngineHashDomainLabel};
 
 const TAG: u64 = BinaryTag::TemplateAddress.as_u64();
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    borsh::BorshSerialize,
+    borsh::BorshDeserialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PublishedTemplateAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl PublishedTemplateAddress {
-    const fn new(key: ObjectKey) -> Self {
-        Self(BorTag::new(key))
-    }
-
     pub const fn from_hash(hash: Hash) -> Self {
         let key = ObjectKey::from_array(hash.into_array());
         Self(BorTag::new(key))
@@ -60,7 +69,7 @@ impl<T: Into<Hash>> From<T> for PublishedTemplateAddress {
 
 impl Display for PublishedTemplateAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "template_{}", self.as_object_key())
+        write!(f, "{}_{}", address_prefixes::TEMPLATE, self.as_object_key())
     }
 }
 
@@ -73,20 +82,7 @@ impl FromStr for PublishedTemplateAddress {
     }
 }
 
-impl borsh::BorshSerialize for PublishedTemplateAddress {
-    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
-    }
-}
-
-impl borsh::BorshDeserialize for PublishedTemplateAddress {
-    fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
-        let key = borsh::BorshDeserialize::deserialize_reader(reader)?;
-        Ok(Self::new(ObjectKey::from_array(key)))
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PublishedTemplate {
     #[cfg_attr(feature = "ts", ts(type = "string"))]

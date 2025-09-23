@@ -6,19 +6,20 @@ use std::collections::HashSet;
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_engine_types::{indexed_value::IndexedValueError, instruction::Instruction, substate::SubstateId};
+use tari_engine_types::{indexed_value::IndexedValueError, substate::SubstateId};
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib::{models::ComponentAddress, types::crypto::RistrettoPublicKeyBytes};
 
 use crate::{
     v1::{signature::TransactionSignature, transaction::TransactionV1, unsigned::UnsignedTransactionV1},
+    Instruction,
     Transaction,
     TransactionSealSignature,
 };
 
 const LOG_TARGET: &str = "tari::ootle::transaction::transaction";
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UnsealedTransactionV1 {
     transaction: UnsignedTransactionV1,

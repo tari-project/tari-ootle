@@ -27,7 +27,7 @@ use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_networking::NetworkingHandle;
-use tari_ootle_common_types::{optional::Optional, PeerAddress, ShardGroup, ToSubstateAddress};
+use tari_ootle_common_types::{optional::Optional, PeerAddress, ShardGroup};
 use tari_ootle_p2p::{NewTransactionMessage, TariMessage, TariMessagingSpec};
 use tari_ootle_storage::{consensus_models::TransactionRecord, StateStore, StateStoreReadTransaction};
 use tari_transaction::{Transaction, TransactionId};
@@ -236,7 +236,7 @@ where
             return Err(e.into());
         }
 
-        if transaction.num_unique_inputs() == 0 {
+        if !transaction.is_shard_applicable() {
             warn!(target: LOG_TARGET, "⚠ No involved shards for transaction {tx_id}");
             return Err(MempoolError::TransactionValidationError(
                 TransactionValidationError::NoInvolvedShards { transaction_id: tx_id },
@@ -244,18 +244,11 @@ where
         }
 
         let current_epoch = self.consensus_handle.current_view().get_epoch();
-        let tx_substate_address = tx_id.to_substate_address();
 
         let local_committee_shard = self.epoch_manager.get_local_committee_info(current_epoch).await?;
-        let is_input_shard = transaction.is_involved_inputs(&local_committee_shard);
-        let is_output_shard = transaction.is_global() ||
-            local_committee_shard.includes_substate_address(
-                // Known output shards
-                // This is to allow for the txreceipt output and indicates shard involvement.
-                &tx_substate_address,
-            );
+        let is_involved = transaction.is_involved(&local_committee_shard);
 
-        if is_input_shard || is_output_shard {
+        if is_involved {
             debug!(target: LOG_TARGET, "🎱 New transaction {tx_id} in mempool");
             self.transactions.insert(tx_id);
             self.consensus_handle
@@ -296,7 +289,7 @@ where
             target: LOG_TARGET,
             "🎱 Propagating transaction {} ({} input(s))",
             tx_id,
-            transaction.num_unique_inputs(),
+            transaction.num_inputs(),
         );
         if let Err(e) = self
             .gossip

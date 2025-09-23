@@ -9,6 +9,7 @@ use tari_engine::{
     runtime::{AuthParams, RuntimeModule},
     state_store::{memory::ReadOnlyMemoryStateStore, StateStoreError},
     template::LoadedTemplate,
+    traits::ClaimProofVerifier,
     transaction::{TransactionError, TransactionProcessor, TransactionProcessorConfig},
 };
 use tari_engine_types::{commit_result::ExecuteResult, substate::Substate, virtual_substate::VirtualSubstates};
@@ -81,19 +82,26 @@ impl ExecutionOutput {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct TariTransactionProcessor<TTemplateProvider> {
     template_provider: Arc<TTemplateProvider>,
     fee_table: FeeTable,
     config: TransactionProcessorConfig,
+    claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
 }
 
 impl<TTemplateProvider> TariTransactionProcessor<TTemplateProvider> {
-    pub fn new(config: TransactionProcessorConfig, template_provider: TTemplateProvider, fee_table: FeeTable) -> Self {
+    pub fn new(
+        config: TransactionProcessorConfig,
+        template_provider: TTemplateProvider,
+        fee_table: FeeTable,
+        claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
+    ) -> Self {
         Self {
             template_provider: Arc::new(template_provider),
             fee_table,
             config,
+            claim_burn_proof_verifier,
         }
     }
 }
@@ -132,6 +140,7 @@ where TTemplateProvider: TemplateProvider<Template = LoadedTemplate>
             auth_params,
             virtual_substates,
             modules,
+            self.claim_burn_proof_verifier.clone(),
         );
         let result = processor.execute(transaction.clone())?;
 

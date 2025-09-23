@@ -32,3 +32,10 @@ message Amount {
   // MSD
   uint64 digit3 = 3;
 }
+
+message CommitmentSignature {
+  bytes public_nonce_commitment = 1;
+  bytes signature_u = 2;
+  bytes signature_v = 3;
+}
+

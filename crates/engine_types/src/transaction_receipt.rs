@@ -4,14 +4,13 @@
 use std::{
     fmt,
     fmt::{Display, Formatter},
-    io::Read,
     str::FromStr,
 };
 
 use serde::{Deserialize, Serialize};
 use tari_bor::BorTag;
 use tari_template_lib::{
-    models::BinaryTag,
+    models::{address_prefixes, BinaryTag},
     types::{Hash, KeyParseError, ObjectKey},
 };
 
@@ -19,15 +18,24 @@ use crate::{events::Event, fees::FeeReceipt, logs::LogEntry};
 
 const TAG: u64 = BinaryTag::TransactionReceipt.as_u64();
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    borsh::BorshSerialize,
+    borsh::BorshDeserialize,
+)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionReceiptAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl TransactionReceiptAddress {
-    const fn new(key: ObjectKey) -> Self {
-        Self(BorTag::new(key))
-    }
-
     pub const fn from_hash(hash: Hash) -> Self {
         Self::from_array(hash.into_array())
     }
@@ -54,7 +62,7 @@ impl<T: Into<Hash>> From<T> for TransactionReceiptAddress {
 
 impl Display for TransactionReceiptAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "txreceipt_{}", self.as_object_key())
+        write!(f, "{}_{}", address_prefixes::TRANSACTION_RECEIPT, self.as_object_key())
     }
 }
 
@@ -67,20 +75,7 @@ impl FromStr for TransactionReceiptAddress {
     }
 }
 
-impl borsh::BorshSerialize for TransactionReceiptAddress {
-    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
-    }
-}
-
-impl borsh::BorshDeserialize for TransactionReceiptAddress {
-    fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
-        let key = borsh::BorshDeserialize::deserialize_reader(reader)?;
-        Ok(Self::new(ObjectKey::from_array(key)))
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionReceipt {
     pub transaction_hash: Hash,

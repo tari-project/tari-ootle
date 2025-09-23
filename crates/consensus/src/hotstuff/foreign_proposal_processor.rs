@@ -12,7 +12,6 @@ use tari_ootle_common_types::{
     NumPreshards,
     ShardGroup,
     SubstateAddress,
-    VersionedSubstateId,
 };
 use tari_ootle_storage::{
     consensus_models::{
@@ -552,8 +551,7 @@ pub fn process_foreign_block<TStore: StateStore>(
             Command::SomeAccept(_) |
             Command::LocalOnly(_) |
             Command::ForeignProposal(_) |
-            Command::EvictNode(_) |
-            Command::MintConfidentialOutput(_) => {
+            Command::EvictNode(_) => {
                 // Disregard
                 continue;
             },
@@ -770,7 +768,7 @@ fn get_or_sequence_transaction<TTx: StateStoreReadTransaction>(
                     num_preshards,
                     num_committees,
                     transaction.transaction.all_inputs_iter(),
-                    [VersionedSubstateId::new(transaction_id.into_receipt_address(), 0)],
+                    transaction.transaction.known_outputs_iter(),
                 );
 
                 let pool_tx =

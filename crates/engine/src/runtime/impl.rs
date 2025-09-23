@@ -23,17 +23,12 @@
 use std::sync::Arc;
 
 use log::{warn, *};
-use tari_crypto::{
-    range_proof::RangeProofService,
-    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey},
-    signatures::CommitmentSignature,
-    tari_utilities::ByteArray,
-};
+use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_engine_types::{
     commit_result::{FinalizeResult, RejectReason, TransactionResult},
     component::ComponentHeader,
-    confidential::TariStealthClaim,
-    crypto::{get_commitment_factory, get_static_range_proof_service, PrivateOutput},
+    confidential::{ClaimBurnOutputData, ClaimedOutputTombstone, MinotariBurnClaimProof},
+    crypto::PrivateOutput,
     entity_id_provider::EntityIdProvider,
     events::Event,
     hashing::hash_template_code,
@@ -47,25 +42,16 @@ use tari_engine_types::{
     resource_container::{ResourceContainer, ResourceError},
     substate::{SubstateId, SubstateValue},
     vault::Vault,
-    ComponentCall,
-    ConvertFromByteType,
-    ResourceAddressRef,
     Utxo,
     UtxoOutput,
     ValidatorFeePoolAddress,
 };
-use tari_ootle_common_types::{
-    base_layer_hashing::ownership_proof_hasher64,
-    services::template_provider::TemplateProvider,
-    GetVerifier,
-    Network,
-};
+use tari_ootle_common_types::{services::template_provider::TemplateProvider, GetVerifier};
 use tari_template_abi::{TemplateDef, Type};
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     args::{
         AddressAllocationInvokeArg,
-        AllocatableAddressType,
         AllocateAddressResult,
         BucketAction,
         BucketRef,
@@ -81,7 +67,6 @@ use tari_template_lib::{
         CreateResourceArg,
         FreezeResourceArg,
         GenerateRandomAction,
-        InstructionArg,
         InvokeResult,
         LogLevel,
         MintResourceArg,
@@ -102,14 +87,13 @@ use tari_template_lib::{
         VaultFreezeFlag,
         VaultWithdrawArg,
         WorkspaceAction,
-        WorkspaceId,
-        WorkspaceOffsetId,
     },
     auth::{AuthHook, AuthHookCaller, ComponentAccessRules, OwnerRule, ResourceAccessRules, ResourceAuthAction},
-    call_args,
     constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR},
+    invoke_args,
     models::{
         BucketId,
+        ClaimedOutputTombstoneAddress,
         ComponentAddress,
         ComponentAddressAllocation,
         Metadata,
@@ -133,6 +117,12 @@ use tari_template_lib::{
         TemplateAddress,
     },
 };
+use tari_transaction::{
+    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
+    AllocatableAddressType,
+    ComponentCall,
+    ResourceAddressRef,
+};
 
 use super::{working_state::WorkingState, Runtime, RuntimeEvent};
 use crate::{
@@ -147,6 +137,7 @@ use crate::{
         RuntimeModule,
     },
     template::LoadedTemplate,
+    traits::ClaimProofVerifier,
     transaction::TransactionProcessor,
 };
 
@@ -157,10 +148,10 @@ pub struct RuntimeInterfaceImpl<TTemplateProvider> {
     tracker: StateTracker,
     template_provider: Arc<TTemplateProvider>,
     entity_id_provider: EntityIdProvider,
-    transaction_signer_public_key: RistrettoPublicKeyBytes,
+    seal_signer_public_key: RistrettoPublicKeyBytes,
     modules: Vec<Arc<dyn RuntimeModule>>,
     max_call_depth: usize,
-    network: Network,
+    claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
 }
 
 impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInterfaceImpl<TTemplateProvider> {
@@ -171,16 +162,16 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         entity_id_provider: EntityIdProvider,
         modules: Vec<Arc<dyn RuntimeModule>>,
         max_call_depth: usize,
-        network: Network,
+        claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
     ) -> Result<Self, RuntimeError> {
         let runtime = Self {
             tracker,
             template_provider,
             entity_id_provider,
-            transaction_signer_public_key: signer_public_key,
+            seal_signer_public_key: signer_public_key,
             modules,
             max_call_depth,
-            network,
+            claim_burn_proof_verifier,
         };
         runtime.invoke_modules_on_initialize()?;
         Ok(runtime)
@@ -316,7 +307,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
         // The signature of a call back is (action: ResourceAuthAction, auth_caller: AuthCaller)
         let ret = self
-            .invoke_component_method(auth_hook.component_address, &auth_hook.method, call_args![
+            .invoke_component_method(auth_hook.component_address, &auth_hook.method, invoke_args![
                 action,
                 auth_caller
             ])
@@ -340,7 +331,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         &self,
         component_address: ComponentAddress,
         method: &str,
-        args: Vec<InstructionArg>,
+        args: Vec<Vec<u8>>,
     ) -> Result<InstructionResult, RuntimeError> {
         let call_runtime = Runtime::new(Arc::new(self.clone()));
         TransactionProcessor::call_method(
@@ -348,7 +339,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             &call_runtime,
             component_address.into(),
             method,
-            args,
+            args.into_iter().map(InstructionArg::Literal).collect(),
         )
         .map_err(|e| RuntimeError::CrossTemplateCallMethodError {
             component_address,
@@ -361,7 +352,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         &self,
         template_address: &TemplateAddress,
         function: &str,
-        args: Vec<InstructionArg>,
+        args: Vec<Vec<u8>>,
     ) -> Result<InstructionResult, RuntimeError> {
         // we are initializing a new runtime for the nested call
         let call_runtime = Runtime::new(Arc::new(self.clone()));
@@ -370,7 +361,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             &call_runtime,
             template_address,
             function,
-            args,
+            args.into_iter().map(InstructionArg::Literal).collect(),
         )
         .map_err(|e| RuntimeError::CrossTemplateCallFunctionError {
             template_address: *template_address,
@@ -578,7 +569,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 validate_component_access_rule_methods(&access_rules, &template_def)?;
 
                 let owner_key = match owner_rule {
-                    OwnerRule::OwnedBySigner => Some(self.transaction_signer_public_key),
+                    OwnerRule::OwnedBySigner => Some(self.seal_signer_public_key),
                     OwnerRule::None => None,
                     OwnerRule::ByAccessRule(_) => None,
                     OwnerRule::ByPublicKey(key) => Some(key),
@@ -806,7 +797,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 }
 
                 let owner_key = match &arg.owner_rule {
-                    OwnerRule::OwnedBySigner => Some(self.transaction_signer_public_key),
+                    OwnerRule::OwnedBySigner => Some(self.seal_signer_public_key),
                     OwnerRule::ByPublicKey(key) => Some(*key),
                     OwnerRule::None | OwnerRule::ByAccessRule(_) => None,
                 };
@@ -2254,7 +2245,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let bucket_id = indexed
                         .bucket_ids()
                         .first()
-                        .ok_or_else(|| RuntimeError::AssertError(AssertError::InvalidBucket))?;
+                        .ok_or(RuntimeError::AssertError(AssertError::InvalidBucket))?;
 
                     let bucket = state.get_bucket(*bucket_id)?;
 
@@ -2372,80 +2363,51 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         Ok(())
     }
 
-    fn claim_burn(&self, claim: TariStealthClaim) -> Result<(), RuntimeError> {
-        let TariStealthClaim {
-            burn_public_key,
-            output_address,
-            range_proof,
-            proof_of_knowledge,
-            transfer_statement,
-        } = claim;
-        // 1. Must exist
-        let unclaimed_output = self.tracker.take_unclaimed_confidential_output(output_address)?;
-        // 2. owner_sig must be valid
-        // NOTE: .as_bytes() used because the tari_crypto borsh implementations serialize fixed length bytes as variable
-        // length bytes of size 32
-        let message = ownership_proof_hasher64(self.network)
-            .chain(&proof_of_knowledge.public_nonce().as_bytes())
-            .chain(&unclaimed_output.commitment.as_bytes())
-            .chain(&self.transaction_signer_public_key.as_bytes())
-            .finalize();
-
-        let commitment = PedersenCommitment::convert_from_byte_type(&unclaimed_output.commitment).map_err(|e| {
-            warn!(target: LOG_TARGET, "Claim burn failed - malformed commitment: {}", e);
-            RuntimeError::InvalidClaimingSignature {
-                details: "malformed commitment".to_string(),
-            }
-        })?;
-
-        let proof_of_knowledge = CommitmentSignature::convert_from_byte_type(&proof_of_knowledge).map_err(|e| {
-            warn!(target: LOG_TARGET, "Claim burn failed - malformed proof of knowledge: {}", e);
-            RuntimeError::InvalidClaimingSignature {
-                details: "malformed proof of knowledge".to_string(),
-            }
-        })?;
-
-        if !proof_of_knowledge.verify_challenge(&commitment, &message, get_commitment_factory()) {
-            warn!(target: LOG_TARGET, "Claim burn failed - signature verification failed");
-            return Err(RuntimeError::InvalidClaimingSignature {
-                details: "signature verification failed".to_string(),
-            });
-        }
-
-        // 3. range_proof must be valid
-        if !get_static_range_proof_service(1).verify(range_proof.as_ref(), &commitment) {
-            warn!(target: LOG_TARGET, "Claim burn failed - Invalid range proof");
-            return Err(RuntimeError::InvalidRangeProof);
-        }
+    fn claim_burn(&self, claim: MinotariBurnClaimProof, output_data: ClaimBurnOutputData) -> Result<(), RuntimeError> {
+        let epoch = self.tracker.get_current_epoch()?;
+        self.claim_burn_proof_verifier
+            .verify_claim_proof(epoch, &self.seal_signer_public_key, &claim)
+            .map_err(|e| {
+                warn!(target: LOG_TARGET, "Claim burn failed - proof verification failed: {}", e);
+                RuntimeError::InvalidClaimProof { details: e }
+            })?;
 
         self.tracker.write_with(|state_mut| {
-            // 4. Create the stealth UTXO
-            let address = UtxoAddress::new(XTR, unclaimed_output.commitment.into());
+            // 2. Create a tombstone
+            let address = ClaimedOutputTombstoneAddress::from_commitment(claim.commitment);
+            state_mut.new_substate(address, ClaimedOutputTombstone { value: claim.value })?;
+
+            // 3. Create the stealth UTXO
+            let address = UtxoAddress::new(XTR, claim.commitment.into());
             let utxo = Utxo::new(UtxoOutput {
                 output: PrivateOutput {
-                    public_nonce: burn_public_key,
-                    encrypted_data: unclaimed_output.encrypted_data,
+                    public_nonce: claim.burn_public_key,
+                    encrypted_data: output_data.encrypted_data,
                     minimum_value_promise: 0,
                     viewable_balance: None,
                 },
-                owner_public_key: self.transaction_signer_public_key,
+                owner_public_key: self.seal_signer_public_key,
                 tag: UtxoTag::new(0),
             });
 
             state_mut.new_substate(address, utxo)?;
 
-            // If a transfer statement is provided, we execute it
-            // This allows claimed funds to be revealed and/or reblinded within a single instruction
-            let maybe_container = transfer_statement
-                .map(|transfer| state_mut.execute_stealth_transfer(XTR.into(), transfer, None))
-                .transpose()?
-                .flatten();
-
-            if let Some(container) = maybe_container {
-                let bucket_id = state_mut.new_bucket_id();
-                state_mut.new_bucket(bucket_id, container)?;
-                state_mut.set_last_instruction_output(IndexedValue::from_type(&bucket_id)?);
+            // 4. Update the total supply
+            {
+                let resource_lock = state_mut.write_lock_substate(&SubstateId::Resource(XTR))?;
+                let resource_mut = state_mut.get_resource_mut(&resource_lock)?;
+                if !resource_mut.increase_total_supply(claim.value.into()) {
+                    return Err(RuntimeError::ResourceSupplyWouldOverflow {
+                        resource_address: XTR,
+                        current_supply: resource_mut
+                            .total_supply()
+                            .expect("Resource supply tracking is enabled"),
+                        amount: claim.value.into(),
+                    });
+                }
+                state_mut.unlock_substate(resource_lock)?;
             }
+
             Ok::<_, RuntimeError>(())
         })?;
 
@@ -2528,7 +2490,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         match action {
             CallerContextAction::GetCallerPublicKey => {
                 args.assert_no_args("CallerContextAction::GetCallerPublicKey")?;
-                Ok(InvokeResult::encode(&self.transaction_signer_public_key)?)
+                Ok(InvokeResult::encode(&self.seal_signer_public_key)?)
             },
             CallerContextAction::GetComponentAddress => self.tracker.read_with(|state| {
                 args.assert_no_args("CallerContextAction::GetComponentAddress")?;
@@ -2658,16 +2620,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         self.tracker.write_with(|state| {
             let template_byte_size = template.len();
             let binary_hash = hash_template_code(&template);
-            let template_address = PublishedTemplateAddress::from_author_and_binary_hash(
-                &self.transaction_signer_public_key,
-                &binary_hash,
-            );
+            let template_address =
+                PublishedTemplateAddress::from_author_and_binary_hash(&self.seal_signer_public_key, &binary_hash);
             state.new_substate(
                 template_address,
                 SubstateValue::Template(PublishedTemplate {
                     // We essentially store the pre-image of the template address in the substate
                     binary_hash,
-                    author: self.transaction_signer_public_key,
+                    author: self.seal_signer_public_key,
                 }),
             )?;
             // Mark template substate as owned by current call stack

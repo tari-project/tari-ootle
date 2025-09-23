@@ -15,7 +15,7 @@ use tari_template_lib_types::{
     KeyParseError,
 };
 
-use crate::models::{BinaryTag, ResourceAddress};
+use crate::models::{address_prefixes, BinaryTag, ResourceAddress};
 
 const TAG: u64 = BinaryTag::Utxo.as_u64();
 
@@ -52,7 +52,13 @@ impl FromStr for UtxoAddress {
 
 impl Display for UtxoAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "utxo_{}_{}", self.resource_address().as_object_key(), self.id())
+        write!(
+            f,
+            "{}_{}_{}",
+            address_prefixes::UTXO,
+            self.resource_address().as_object_key(),
+            self.id()
+        )
     }
 }
 

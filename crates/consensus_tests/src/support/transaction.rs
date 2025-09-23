@@ -18,8 +18,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{LockIntent, SubstateRequirement};
 use tari_ootle_storage::consensus_models::{TransactionRecord, VersionedSubstateIdLockIntent};
-use tari_template_lib::call_args;
-use tari_transaction::Transaction;
+use tari_transaction::{args, Transaction};
 
 use crate::support::{committee_number_to_shard_group, helpers::random_substate_in_shard_group, TEST_NUM_PRESHARDS};
 
@@ -165,7 +164,7 @@ pub fn random_substates_ids_for_committee_generator(
 pub fn build_transaction(inputs: Vec<SubstateRequirement>) -> TransactionRecord {
     let k = PrivateKey::default();
     let tx = Transaction::builder()
-        .call_function(Default::default(), "foo", call_args![])
+        .call_function(Default::default(), "foo", args![])
         .with_inputs(inputs)
         .build_and_seal(&k);
     TransactionRecord::new(tx)

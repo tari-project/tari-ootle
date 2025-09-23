@@ -68,7 +68,7 @@ fn manifest_smoke_test() {
         Instruction::CallMethod {
             call: test_faucet_component.into(),
             method: "take_free_coins".to_string(),
-            args: call_args![1_000],
+            args: call_args![1000],
         },
         Instruction::PutLastInstructionOutputOnWorkspace { key: 1 },
         Instruction::CallMethod {

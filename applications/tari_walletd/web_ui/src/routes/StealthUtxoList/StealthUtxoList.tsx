@@ -9,11 +9,7 @@ import {
   TableHead,
   TablePagination,
   TableRow,
-  MenuItem,
   Stack,
-  IconButton,
-  Menu,
-  Chip,
 } from "@mui/material";
 import { useState } from "react";
 import { useStealthUtxosList } from "@/services/api/hooks/useAccounts";
@@ -31,13 +27,12 @@ import {
 } from "@utils/helpers";
 import CopyToClipboard from "@components/CopyToClipboard";
 import PlaceHolder from "./components/PlaceHolder";
-import { IoEllipsisVerticalOutline, IoCloseOutline } from "react-icons/io5";
+import SortableHeader from "./components/SortableHeader";
 
 function StealthUtxoList({ account }: { account: Account }) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [statusFilter, setStatusFilter] = useState<OutputStatus | "all">("all");
-  const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null);
 
   const getStatusDisplayName = (status: OutputStatus | "all") => {
     switch (status) {
@@ -51,24 +46,20 @@ function StealthUtxoList({ account }: { account: Account }) {
         return status;
     }
   };
-
-  const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
-    setMenuAnchorEl(event.currentTarget);
-  };
-
-  const handleMenuClose = () => {
-    setMenuAnchorEl(null);
-  };
-
-  const handleStatusSelect = (status: OutputStatus | "all") => {
-    setStatusFilter(status);
-    handleMenuClose();
-  };
   const { data, isLoading, isError, error } = useStealthUtxosList(
     account.component_address,
     XTR_RESOURCE,
     statusFilter === "all" ? null : statusFilter,
   );
+
+  const columnWidths = {
+    1: "30%",
+    2: "20%",
+    3: "20%",
+    4: "10%",
+    5: "10%",
+    6: "10%",
+  };
 
   return (
     <Stack minHeight={300}>
@@ -77,39 +68,19 @@ function StealthUtxoList({ account }: { account: Account }) {
           <Table>
             <TableHead>
               <TableRow>
-                <TableCell>Transaction Hash</TableCell>
-                <TableCell>Value</TableCell>
-                <TableCell>
-                  <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1} maxWidth={130}>
-                    <Stack direction="row" alignItems="center" spacing={0.5}>
-                      <span>Status</span>
-                      {statusFilter !== "all" && (
-                        <Chip
-                          label={getStatusDisplayName(statusFilter)}
-                          size="small"
-                          variant="outlined"
-                          onDelete={() => setStatusFilter("all")}
-                          deleteIcon={<IoCloseOutline style={{ fontSize: 12 }} />}
-                          sx={{ fontSize: 11 }}
-                        />
-                      )}
-                    </Stack>
-                    <IconButton size="small" onClick={handleMenuOpen} sx={{ p: 0.25 }}>
-                      <IoEllipsisVerticalOutline style={{ fontSize: 14 }} />
-                    </IconButton>
-                    <Menu anchorEl={menuAnchorEl} open={Boolean(menuAnchorEl)} onClose={handleMenuClose}>
-                      <MenuItem onClick={() => handleStatusSelect("all")}>All</MenuItem>
-                      <MenuItem onClick={() => handleStatusSelect("Unspent")}>Unspent</MenuItem>
-                      <MenuItem onClick={() => handleStatusSelect("Spent")}>Spent</MenuItem>
-                      <MenuItem onClick={() => handleStatusSelect("LockedForSpend")}>Locked for Spend</MenuItem>
-                      <MenuItem onClick={() => handleStatusSelect("LockedUnconfirmed")}>Locked Unconfirmed</MenuItem>
-                      <MenuItem onClick={() => handleStatusSelect("Invalid")}>Invalid</MenuItem>
-                    </Menu>
-                  </Stack>
+                <TableCell width={columnWidths[1]}>ID</TableCell>
+                <TableCell width={columnWidths[2]}>Value</TableCell>
+                <TableCell width={columnWidths[3]}>
+                  <SortableHeader
+                    title="Status"
+                    currentFilter={statusFilter}
+                    onFilterChange={setStatusFilter}
+                    getDisplayName={getStatusDisplayName}
+                  />
                 </TableCell>
-                <TableCell>Burnt</TableCell>
-                <TableCell>Frozen</TableCell>
-                <TableCell>On Chain</TableCell>
+                <TableCell width={columnWidths[4]}>Burnt</TableCell>
+                <TableCell width={columnWidths[5]}>Frozen</TableCell>
+                <TableCell width={columnWidths[6]}>On Chain</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>

@@ -25,12 +25,12 @@ function PlaceHolder({ status, utxoStatus, onManualRefresh }: PlaceHolderProps) 
 
     const getStatusMessage = () => {
       if (utxoStatus) {
-        return `No ${getStatusDisplayName(utxoStatus)} UTXOs found`;
+        return `No UTXOs found`;
       }
       return "No UTXOs found";
     };
 
-    const getStatusDescription = () => {
+    const getStatusDescription = (): string => {
       if (utxoStatus) {
         return `You don't have any stealth UTXOs with "${getStatusDisplayName(utxoStatus)}" status in this account.`;
       }

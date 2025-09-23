@@ -138,7 +138,7 @@ function MyAssets() {
       </Grid>
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
-          <InnerHeading>Stealth UTXO List</InnerHeading>
+          <InnerHeading>Stealth UTXOs</InnerHeading>
           <StealthUtxoList account={account} />
         </StyledPaper>
       </Grid>

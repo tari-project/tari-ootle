@@ -9,32 +9,33 @@ mod tests;
 mod workspace_ids;
 
 pub use named_component_call::*;
-use tari_common_types::types::PrivateKey;
+use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::{
-    confidential::TariStealthClaim,
-    instruction::Instruction,
+    confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
     substate::SubstateId,
-    ComponentCall,
-    ResourceAddressRef,
     ValidatorFeePoolAddress,
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib::{
-    args::{AllocatableAddressType, InstructionArg, WorkspaceOffsetId},
     auth::OwnerRule,
-    call_args,
     models::{ResourceAddress, StealthTransferStatement},
     prelude::AccessRules,
     types::{crypto::RistrettoPublicKeyBytes, Amount, TemplateAddress},
 };
 
 use crate::{
+    args::{InstructionArg, WorkspaceOffsetId},
     builder::{
         named_args::{parse_workspace_key, BuilderWorkspaceKey, NamedArg, ParseWorkspaceKeyError},
         named_resource_ref::NamedResourceRef,
         workspace_ids::WorkspaceIds,
     },
+    call_args,
     unsigned_transaction::UnsignedTransaction,
+    AllocatableAddressType,
+    ComponentCall,
+    Instruction,
+    ResourceAddressRef,
     Transaction,
     TransactionSignature,
     UnsealedTransactionV1,
@@ -123,7 +124,7 @@ impl TransactionBuilder {
 
     pub fn create_account(self, owner_public_key: RistrettoPublicKeyBytes) -> Self {
         self.add_instruction(Instruction::CreateAccount {
-            public_key_address: owner_public_key,
+            owner_public_key,
             owner_rule: None,
             access_rules: None,
             workspace_id: None,
@@ -137,7 +138,7 @@ impl TransactionBuilder {
     ) -> Self {
         let workspace_id = self.get_workspace_offset_id_from_named_arg(workspace_id);
         self.add_instruction(Instruction::CreateAccount {
-            public_key_address: owner_public_key,
+            owner_public_key,
             owner_rule: None,
             access_rules: None,
             workspace_id: Some(workspace_id),
@@ -153,7 +154,7 @@ impl TransactionBuilder {
     ) -> Self {
         let workspace_id = workspace_id.map(|id| self.get_workspace_offset_id_from_named_arg(id));
         self.add_instruction(Instruction::CreateAccount {
-            public_key_address,
+            owner_public_key: public_key_address,
             owner_rule,
             access_rules,
             workspace_id,
@@ -269,8 +270,11 @@ impl TransactionBuilder {
         self.add_instruction(Instruction::PublishTemplate { binary })
     }
 
-    pub fn claim_burn(self, claim: TariStealthClaim) -> Self {
-        self.add_instruction(Instruction::ClaimBurn { claim: Box::new(claim) })
+    pub fn claim_burn(self, claim: MinotariBurnClaimProof, output_data: ClaimBurnOutputData) -> Self {
+        self.add_instruction(Instruction::ClaimBurn {
+            claim: Box::new(claim),
+            output_data,
+        })
     }
 
     pub fn claim_validator_fees(self, address: ValidatorFeePoolAddress) -> Self {
@@ -386,7 +390,7 @@ impl TransactionBuilder {
         self.unsigned_transaction
     }
 
-    pub fn add_signer(self, sealed_signer: &RistrettoPublicKeyBytes, secret_key: &PrivateKey) -> Self {
+    pub fn add_signer(self, sealed_signer: &RistrettoPublicKeyBytes, secret_key: &RistrettoSecretKey) -> Self {
         let signature = match &self.unsigned_transaction {
             UnsignedTransaction::V1(tx) => TransactionSignature::sign_v1(secret_key, sealed_signer, tx),
         };
@@ -420,7 +424,7 @@ impl TransactionBuilder {
         builder.unsigned_transaction.build(builder.signatures)
     }
 
-    pub fn build_and_seal(self, secret_key: &PrivateKey) -> Transaction {
+    pub fn build_and_seal(self, secret_key: &RistrettoSecretKey) -> Transaction {
         self.build().seal(secret_key)
     }
 

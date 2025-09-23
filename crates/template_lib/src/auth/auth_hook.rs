@@ -6,8 +6,9 @@ use tari_template_lib_types::TemplateAddress;
 
 use crate::models::ComponentAddress;
 
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct AuthHook {
     pub component_address: ComponentAddress,
     pub method: String,

@@ -115,7 +115,7 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
                 },
                 SubstateChange::Down { id, .. } => {
                     debug!(target: LOG_TARGET, "Creating substate in place: {}", id);
-                    let value = creator(Some(id.as_ref()))?;
+                    let value = creator(Some(id.as_versioned_ref()))?;
                     let next_id = id.to_next_version();
                     let up = SubstateChange::Up {
                         shard: id.to_shard(num_preshards),
@@ -168,7 +168,7 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
             },
             SubstateChange::Down { id, .. } => {
                 debug!(target: LOG_TARGET, "Re-creating DOWNed substate in place: {}", id);
-                let value = creator(Some(id.as_ref()))?;
+                let value = creator(Some(id.as_versioned_ref()))?;
                 let next_id = id.into_next_version();
                 let up = SubstateChange::Up {
                     shard: next_id.to_shard(self.num_preshards),
@@ -228,7 +228,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingS
                 }
             },
             SubstateChange::Down { id, .. } => {
-                self.assert_is_up(id.as_ref())?;
+                self.assert_is_up(id.as_versioned_ref())?;
             },
         }
 
@@ -335,6 +335,11 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
             })?;
 
         Ok(LatestSubstateVersion { version, is_up })
+    }
+
+    pub fn exists(&self, id: &SubstateId) -> Result<bool, SubstateStoreError> {
+        let latest = self.get_latest_version(id).optional()?;
+        Ok(latest.is_some())
     }
 
     pub fn get_many<I: IntoIterator<Item = (SubstateRequirement, u32)> + ExactSizeIterator>(

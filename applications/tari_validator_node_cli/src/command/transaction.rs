@@ -32,11 +32,9 @@ use clap::{Args, Subcommand};
 use tari_engine::abi::Type;
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
-    instruction::Instruction,
     instruction_result::InstructionResult,
     parse_template_address,
     substate::{SubstateDiff, SubstateId, SubstateValue},
-    ComponentCall,
 };
 use tari_ootle_common_types::{
     displayable::{DisplayContainer, Displayable},
@@ -46,12 +44,19 @@ use tari_ootle_common_types::{
 };
 use tari_sidechain::QuorumDecision;
 use tari_template_lib::{
-    args::InstructionArg,
     models::{BucketId, NonFungibleAddress, NonFungibleId},
     prelude::ResourceAddress,
     types::{Amount, TemplateAddress},
 };
-use tari_transaction::{arg, builder::named_args::NamedArg, Transaction, TransactionId};
+use tari_transaction::{
+    arg,
+    args::InstructionArg,
+    builder::named_args::NamedArg,
+    ComponentCall,
+    Instruction,
+    Transaction,
+    TransactionId,
+};
 use tari_transaction_manifest::parse_manifest;
 use tari_validator_node_client::{
     types::{
@@ -383,7 +388,7 @@ fn print_substate_diff(diff: &SubstateDiff) {
             SubstateValue::NonFungible(_) => {
                 println!("      ▶ NFT: {}", address);
             },
-            SubstateValue::UnclaimedConfidentialOutput(_hash) => {
+            SubstateValue::ClaimedOutputTombstone(_hash) => {
                 println!("     ! layer one commitment: Should never happen");
             },
             SubstateValue::ValidatorFeePool(fee_pool) => {
@@ -728,7 +733,7 @@ impl CliArg {
                 SubstateId::Component(v) => arg!(v),
                 SubstateId::Resource(v) => arg!(v),
                 SubstateId::Vault(v) => arg!(v),
-                SubstateId::UnclaimedConfidentialOutput(v) => arg!(v),
+                SubstateId::ClaimedOutputTombstone(v) => arg!(v),
                 SubstateId::NonFungible(v) => arg!(v),
                 SubstateId::TransactionReceipt(v) => arg!(v),
                 SubstateId::Template(v) => arg!(v),

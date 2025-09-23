@@ -100,3 +100,16 @@ CREATE TABLE layer_one_transactions
     is_observed  BOOLEAN                           NOT NULL DEFAULT '0'
 );
 
+CREATE TABLE block_headers
+(
+    id                         INTEGER PRIMARY KEY autoincrement NOT NULL,
+    epoch                      BIGINT                            NOT NULL,
+    height                     BIGINT                            NOT NULL,
+    block_hash                 BLOB                              NOT NULL,
+    kernel_merkle_root         BLOB                              NOT NULL,
+    validator_node_merkle_root BLOB                              NOT NULL,
+    created_at                 DATETIME                          NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX block_headers_block_hash_epoch_idx ON block_headers (block_hash, epoch);
+

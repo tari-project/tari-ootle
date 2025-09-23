@@ -20,6 +20,7 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+pub mod claim_burn_proof_verifier;
 pub mod common;
 pub mod configuration;
 pub mod epoch_oracle_config;
@@ -29,4 +30,3 @@ pub mod p2p_config;
 pub mod seed_peer;
 pub mod template_download_queue;
 pub mod transaction_executor;
-pub mod utxo_store;

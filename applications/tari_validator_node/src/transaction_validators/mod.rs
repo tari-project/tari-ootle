@@ -3,7 +3,7 @@
 
 mod epoch_range;
 mod fee;
-mod has_inputs;
+mod is_shard_applicable;
 mod network;
 mod signature;
 mod template_exists;
@@ -13,7 +13,7 @@ mod dry_run;
 pub use dry_run::*;
 pub use epoch_range::*;
 pub use fee::*;
-pub use has_inputs::*;
+pub use is_shard_applicable::*;
 pub use network::*;
 pub use signature::*;
 pub use template_exists::*;

@@ -6,17 +6,8 @@ use std::num::NonZeroU64;
 use log::*;
 use tari_consensus_types::{Decision, LastVoted, LeafBlock, QcId};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::{
-    commit_result::{AbortReason, RejectReason},
-    substate::Substate,
-};
-use tari_ootle_common_types::{
-    committee::CommitteeInfo,
-    optional::Optional,
-    Epoch,
-    ShardGroup,
-    VersionedSubstateIdRef,
-};
+use tari_engine_types::commit_result::{AbortReason, RejectReason};
+use tari_ootle_common_types::{committee::CommitteeInfo, optional::Optional, Epoch, ShardGroup};
 use tari_ootle_storage::{
     consensus_models::{
         Block,
@@ -27,10 +18,8 @@ use tari_ootle_storage::{
         ForeignProposalAtom,
         ForeignProposalStatus,
         InvalidEvidenceReason,
-        MintConfidentialOutputAtom,
         NoVoteReason,
         PendingShardStateTreeDiff,
-        SubstateChange,
         SubstateRecord,
         TransactionAtom,
         TransactionExecution,
@@ -371,18 +360,6 @@ where TConsensusSpec: ConsensusSpec
                     }
 
                     continue;
-                },
-                Command::MintConfidentialOutput(atom) => {
-                    if let Some(reason) = self.evaluate_mint_confidential_output_command(
-                        tx,
-                        atom,
-                        local_committee_info,
-                        &mut substate_store,
-                        proposed_block_change_set,
-                    )? {
-                        proposed_block_change_set.set_no_vote(reason);
-                        return Ok(());
-                    }
                 },
                 Command::EvictNode(atom) => {
                     if ValidatorConsensusStats::is_node_evicted(tx, block.id(), &atom.public_key)? {
@@ -1476,47 +1453,6 @@ where TConsensusSpec: ConsensusSpec
         Ok(None)
     }
 
-    fn evaluate_mint_confidential_output_command(
-        &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
-        atom: &MintConfidentialOutputAtom,
-        local_committee_info: &CommitteeInfo,
-        substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
-        proposed_block_change_set: &mut ProposedBlockChangeSet,
-    ) -> Result<Option<NoVoteReason>, HotStuffError> {
-        let Some(output) = atom.get(tx).optional()? else {
-            warn!(
-                target: LOG_TARGET,
-                "❌ NO VOTE: MintConfidentialOutputAtom for {} is not known.",
-                atom.commitment
-            );
-            return Ok(Some(NoVoteReason::MintConfidentialOutputUnknown));
-        };
-        let substate_id = atom.commitment.into();
-        let addr = VersionedSubstateIdRef::new(&substate_id, 0);
-        let shard = addr.to_shard(local_committee_info.num_preshards());
-        let change = SubstateChange::Up {
-            id: substate_id,
-            shard,
-            substate: Box::new(Substate::new(0, output)),
-        };
-
-        if let Err(err) = substate_store.put(change) {
-            let err = err.ok_lock_failed()?;
-            warn!(
-                target: LOG_TARGET,
-                "❌ NO VOTE: Failed to store mint confidential output for {}. Error: {}",
-                atom.commitment,
-                err
-            );
-            return Ok(Some(NoVoteReason::MintConfidentialOutputStoreFailed));
-        }
-
-        proposed_block_change_set.set_utxo_mint_proposed_in(atom.commitment);
-
-        Ok(None)
-    }
-
     fn execute_transaction(
         &self,
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
@@ -1625,10 +1561,6 @@ where TConsensusSpec: ConsensusSpec
         for atom in block.all_foreign_proposals() {
             // TODO: we need to keep these ATM to send them if a node needs to catch up
             atom.set_status(tx, ForeignProposalStatus::Confirmed, None)?;
-        }
-
-        for atom in block.all_confidential_output_mints() {
-            atom.delete(tx, block.id())?;
         }
 
         for atom in block.all_node_evictions() {

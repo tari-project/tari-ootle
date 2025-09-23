@@ -9,14 +9,7 @@ use std::{
 
 use log::{info, warn};
 use tari_epoch_manager::{EpochManagerError, EpochManagerReader};
-use tari_ootle_common_types::{
-    optional::IsNotFoundError,
-    NodeAddressable,
-    NumPreshards,
-    ShardGroup,
-    SubstateAddress,
-    ToSubstateAddress,
-};
+use tari_ootle_common_types::{optional::IsNotFoundError, NodeAddressable, NumPreshards, ShardGroup, SubstateAddress};
 use tari_transaction::{Transaction, TransactionId};
 use tari_validator_node_rpc::client::{ValidatorNodeClientFactory, ValidatorNodeRpcClient};
 
@@ -45,7 +38,7 @@ where
     }
 
     pub async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, NetworkClientError> {
-        if transaction.num_unique_inputs() == 0 {
+        if !transaction.is_shard_applicable() {
             return Err(NetworkClientError::NoInputsProvided);
         }
 
@@ -59,11 +52,7 @@ where
             "Submitting transaction {} to the network", tx_id
         );
 
-        let involved = transaction
-            .all_inputs_iter()
-            // The version does not affect the shard group
-            .map(|i| i.or_zero_version().to_substate_address())
-            .collect::<HashSet<_>>();
+        let involved = transaction.involved_substate_addresses_iter().collect::<HashSet<_>>();
 
         let results = self
             .try_with_committee(involved, |mut client| {

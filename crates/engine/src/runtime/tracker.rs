@@ -27,7 +27,6 @@ use log::*;
 use tari_engine_types::{
     commit_result::{FinalizeResult, TransactionResult},
     component::{ComponentBody, ComponentHeader},
-    confidential::UnclaimedConfidentialOutput,
     events::Event,
     fees::FeeSource,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
@@ -35,12 +34,11 @@ use tari_engine_types::{
     logs::LogEntry,
     substate::{SubstateId, SubstateValue},
     virtual_substate::VirtualSubstates,
-    UtxoAddress,
 };
 use tari_ootle_common_types::Epoch;
 use tari_template_lib::{
     auth::{ComponentAccessRules, OwnerRule},
-    models::{ComponentAddress, ComponentAddressAllocation, Metadata, UnclaimedConfidentialOutputAddress},
+    models::{ComponentAddress, ComponentAddressAllocation, Metadata, UtxoAddress},
     prelude::{RistrettoPublicKeyBytes, TemplateAddress},
     types::Hash,
 };
@@ -129,29 +127,6 @@ impl StateTracker {
 
     pub fn get_template_module_name(&self) -> Result<String, RuntimeError> {
         self.read_with(|state| state.current_template().map(|(_, name)| name.to_string()))
-    }
-
-    pub fn take_unclaimed_confidential_output(
-        &self,
-        address: UnclaimedConfidentialOutputAddress,
-    ) -> Result<UnclaimedConfidentialOutput, RuntimeError> {
-        self.write_with(|state| {
-            let output_lock = state.write_lock_substate(&address.into())?;
-            let output = state
-                .get_locked_substate(&output_lock)?
-                .as_unclaimed_confidential_output()
-                .cloned()
-                .ok_or_else(|| RuntimeError::InvariantError {
-                    function: "StateTracker::take_unclaimed_confidential_output",
-                    details: format!(
-                        "Expected substate at address {} to be an UnclaimedConfidentialOutput",
-                        address
-                    ),
-                })?;
-            state.claim_confidential_output(&address)?;
-            state.unlock_substate(output_lock)?;
-            Ok(output)
-        })
     }
 
     pub fn new_component(

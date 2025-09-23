@@ -32,10 +32,8 @@ use tari_engine_types::{
     vault::Vault,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
     ConvertFromByteType,
-    ResourceAddressRef,
     ToByteType,
     Utxo,
-    UtxoAddress,
     ValidatorFeePoolAddress,
     ValidatorFeeWithdrawal,
 };
@@ -53,12 +51,13 @@ use tari_template_lib::{
         ResourceAddress,
         StealthInputsStatement,
         StealthTransferStatement,
-        UnclaimedConfidentialOutputAddress,
+        UtxoAddress,
         VaultId,
     },
     prelude::{AuthHookCaller, ResourceAddressAllocation, PUBLIC_IDENTITY_RESOURCE_ADDRESS},
     types::{Amount, EntityId, Hash, TemplateAddress},
 };
+use tari_transaction::ResourceAddressRef;
 
 use super::workspace::Workspace;
 use crate::{
@@ -94,7 +93,6 @@ pub(super) struct WorkingState {
 
     store: WorkingStateStore,
 
-    claimed_confidential_outputs: Vec<UnclaimedConfidentialOutputAddress>,
     virtual_substates: VirtualSubstates,
     validator_fee_withdrawals: Vec<ValidatorFeeWithdrawal>,
 
@@ -125,7 +123,6 @@ impl WorkingState {
 
             store: WorkingStateStore::new(state_store),
 
-            claimed_confidential_outputs: Vec::new(),
             last_instruction_output: None,
 
             workspace: Workspace::default(),
@@ -204,7 +201,7 @@ impl WorkingState {
         let (address, substate) = self.store.get_locked_substate(locked.lock_id())?;
         let component = substate.component().ok_or_else(|| RuntimeError::LockSubstateMismatch {
             lock_id: locked.lock_id(),
-            address,
+            id: address,
             expected_type: "Component",
         })?;
         Ok(component)
@@ -222,7 +219,7 @@ impl WorkingState {
                     .component_mut()
                     .ok_or_else(|| RuntimeError::LockSubstateMismatch {
                         lock_id: locked.lock_id(),
-                        address: locked.substate_id().clone(),
+                        id: locked.substate_id().clone(),
                         expected_type: "Component",
                     })?;
 
@@ -263,7 +260,7 @@ impl WorkingState {
             .as_resource()
             .ok_or_else(|| RuntimeError::LockSubstateMismatch {
                 lock_id: locked.lock_id(),
-                address: addr,
+                id: addr,
                 expected_type: "Resource",
             })?;
 
@@ -300,8 +297,8 @@ impl WorkingState {
         let non_fungible = value
             .as_non_fungible()
             .ok_or_else(|| RuntimeError::LockSubstateMismatch {
-                lock_id: 0,
-                address: address.clone(),
+                lock_id: locked.lock_id(),
+                id: address.clone(),
                 expected_type: "NonFungible",
             })?;
         Ok(non_fungible)
@@ -312,19 +309,11 @@ impl WorkingState {
         let non_fungible = value
             .as_non_fungible_mut()
             .ok_or_else(|| RuntimeError::LockSubstateMismatch {
-                lock_id: 0,
-                address: address.clone(),
+                lock_id: locked.lock_id(),
+                id: address.clone(),
                 expected_type: "NonFungible",
             })?;
         Ok(non_fungible)
-    }
-
-    pub fn claim_confidential_output(&mut self, addr: &UnclaimedConfidentialOutputAddress) -> Result<(), RuntimeError> {
-        if self.claimed_confidential_outputs.contains(addr) {
-            return Err(RuntimeError::ConfidentialOutputAlreadyClaimed { address: *addr });
-        }
-        self.claimed_confidential_outputs.push(*addr);
-        Ok(())
     }
 
     pub fn get_locked_substate(&self, lock: &LockedSubstate) -> Result<&SubstateValue, RuntimeError> {
@@ -342,7 +331,7 @@ impl WorkingState {
 
         let vault = substate.as_vault().ok_or_else(|| RuntimeError::LockSubstateMismatch {
             lock_id: locked.lock_id(),
-            address: addr,
+            id: addr,
             expected_type: "Vault",
         })?;
 
@@ -356,7 +345,7 @@ impl WorkingState {
             .as_vault_mut()
             .ok_or_else(|| RuntimeError::LockSubstateMismatch {
                 lock_id: locked.lock_id(),
-                address: addr,
+                id: addr,
                 expected_type: "Vault",
             })?;
 
@@ -370,7 +359,7 @@ impl WorkingState {
             .as_resource_mut()
             .ok_or_else(|| RuntimeError::LockSubstateMismatch {
                 lock_id: locked.lock_id(),
-                address: addr,
+                id: addr,
                 expected_type: "Resource",
             })?;
 
@@ -430,10 +419,9 @@ impl WorkingState {
         // being empty)
         let call_scope = self.base_call_scope();
         if !call_scope.orphans().is_empty() {
-            return Err(TransactionCommitError::OrphanedSubstates {
+            return Err(RuntimeError::OrphanedSubstates {
                 substates: call_scope.orphans().iter().map(ToString::to_string).collect(),
-            }
-            .into());
+            });
         }
 
         Ok(())
@@ -1069,7 +1057,7 @@ impl WorkingState {
                 total_fees_paid: fee_resource
                     .amount()
                     .to_u64_checked()
-                    .expect("FeeState guarantees that the total fee payments fit in a u64"),
+                    .expect("FeeState guarantees that the total fee payments fit in an u64"),
                 total_fee_overcharge,
                 cost_breakdown: self.fee_state.take_fee_charges(),
             },
@@ -1418,11 +1406,6 @@ impl WorkingState {
             substate_diff.down(SubstateId::Utxo(downed_utxo), spent_utxo.version());
         }
 
-        // Special case: unclaimed confidential outputs are downed without being upped if claimed
-        for claimed in &self.claimed_confidential_outputs {
-            substate_diff.down(SubstateId::UnclaimedConfidentialOutput(*claimed), 0);
-        }
-
         substate_diff.up(
             SubstateId::TransactionReceipt(transaction_receipt.transaction_hash.into()),
             Substate::new(0, SubstateValue::TransactionReceipt(transaction_receipt)),
@@ -1455,7 +1438,7 @@ impl WorkingState {
         if !component.contains_substate(address)? {
             warn!(
                 target: LOG_TARGET,
-                "Component {} attempted access to {} that is does not own",
+                "Component {} attempted access to {} that it does not own",
                 component_lock.substate_id(),
                 address
             );

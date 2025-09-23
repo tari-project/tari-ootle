@@ -28,13 +28,17 @@ use std::{
 use tari_bor::BorTag;
 use tari_template_lib_types::{EntityId, KeyParseError, ObjectKey};
 
-use crate::{models::BinaryTag, newtype_struct_serde_impl};
+use crate::{
+    models::{address_prefixes, BinaryTag},
+    newtype_struct_serde_impl,
+};
 
 const TAG: u64 = BinaryTag::ComponentAddress.as_u64();
 
 /// A component's unique global identifier.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct ComponentAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl ComponentAddress {
@@ -87,7 +91,7 @@ impl<T: Into<ObjectKey>> From<T> for ComponentAddress {
 
 impl Display for ComponentAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "component_{}", *self.0)
+        write!(f, "{}_{}", address_prefixes::COMPONENT, *self.0)
     }
 }
 
@@ -98,23 +102,3 @@ impl AsRef<[u8]> for ComponentAddress {
 }
 
 newtype_struct_serde_impl!(ComponentAddress, BorTag<ObjectKey, TAG>);
-
-#[cfg(feature = "borsh")]
-mod borsh {
-    use std::io::Read;
-
-    use super::*;
-
-    impl ::borsh::BorshSerialize for ComponentAddress {
-        fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-            self.as_object_key().array().serialize(writer)
-        }
-    }
-
-    impl ::borsh::BorshDeserialize for ComponentAddress {
-        fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
-            let key = ::borsh::BorshDeserialize::deserialize_reader(reader)?;
-            Ok(Self::new(ObjectKey::from_array(key)))
-        }
-    }
-}

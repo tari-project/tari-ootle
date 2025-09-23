@@ -24,8 +24,7 @@ Feature: Account transfers
     Then VN has scanned to at least height 40
     Then indexer NETWORK_INDEXER has scanned to at least height 40
 
-    When I convert commitment in proof BURN_PROOF into COMM_ADDRESS address
-    Then validator node VN has state at COMM_ADDRESS within 20 seconds
+    When I wait for proof BURN_PROOF to confirm on wallet NETWORK_CONSOLE_WALLET
     When I claim burn BURN_PROOF and spend it into account ACCOUNT using wallet daemon WALLET_D
 
     # Wait for the wallet daemon account monitor to update the sender account information
@@ -82,8 +81,7 @@ Feature: Account transfers
     Then VN has scanned to at least height 40
     Then indexer IDX has scanned to at least height 40
 
-    When I convert commitment in proof BURN_PROOF into COMM_ADDRESS address
-    Then validator node VN has state at COMM_ADDRESS within 20 seconds
+    When I wait for proof BURN_PROOF to confirm on wallet NETWORK_CONSOLE_WALLET
     When I claim burn BURN_PROOF and spend it into account ACCOUNT_1 using wallet daemon WALLET_D
 
     # Wait for the wallet daemon account monitor to update the sender account information

@@ -30,7 +30,7 @@ impl Runner {
         let transaction = self
             .new_transaction_builder()
             .fee_transaction_pay_from_component(in_account.component_address, 1000)
-            .call_function(self.faucet_template.address, "mint", args![Amount(1_000_000_000)])
+            .call_function(self.faucet_template.address, "mint", args![1_000_000_000])
             .with_inputs([
                 SubstateRequirement::unversioned(in_account.component_address),
                 SubstateRequirement::unversioned(fee_vault.id),

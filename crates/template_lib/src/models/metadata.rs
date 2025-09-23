@@ -30,6 +30,7 @@ const TAG: u64 = BinaryTag::Metadata as u64;
 
 /// A collection of user-defined data used to describe other types, for example, non-fungible tokens or events
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Metadata(BorTag<BTreeMap<String, String>, TAG>);
 
@@ -129,5 +130,55 @@ impl Display for Metadata {
             write!(f, "key = {}, value = {} ", key, value)?;
         }
         Ok(())
+    }
+}
+
+/// Creates a metadata object
+///
+/// # Example
+///
+/// ```rust
+/// # use tari_template_lib::metadata;
+/// metadata!(
+///   "name" => "My NFT",
+///   "description" => "This is my first NFT",
+///   "image" => "https://example.com/my-nft.png"
+/// );
+/// ```
+#[macro_export]
+macro_rules! metadata {
+    ($($key:expr => $value:expr),* $(,)?) => {
+        {
+            let mut metadata = $crate::models::Metadata::new();
+            $(
+                metadata.insert($key, $value);
+            )*
+            metadata
+        }
+    };
+    () => {
+        $crate::models::Metadata::new()
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn metadata_macro() {
+        let i = 123;
+        let metadata = metadata!(
+            "name" => "My NFT",
+            "description" => "This is my first NFT",
+            "image" => "https://example.com/my-nft.png",
+            "index" => i.to_string()
+        );
+
+        assert_eq!(metadata.get("name"), Some(&"My NFT".to_string()));
+        assert_eq!(metadata.get("description"), Some(&"This is my first NFT".to_string()));
+        assert_eq!(
+            metadata.get("image"),
+            Some(&"https://example.com/my-nft.png".to_string())
+        );
+        assert_eq!(metadata.get("index"), Some(&"123".to_string()));
     }
 }

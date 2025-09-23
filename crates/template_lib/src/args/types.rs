@@ -28,7 +28,7 @@ use tari_template_abi::rust::{
 };
 
 use crate::{
-    args::{freeze_flags::VaultFreezeFlags, InstructionArg},
+    args::freeze_flags::VaultFreezeFlags,
     auth::{AuthHook, OwnerRule, ResourceAccessRules},
     models::{
         AddressAllocationId,
@@ -43,6 +43,7 @@ use crate::{
         ResourceAddress,
         ResourceAddressAllocation,
         StealthTransferStatement,
+        UtxoId,
         VaultId,
         VaultRef,
     },
@@ -66,6 +67,7 @@ pub struct EmitLogArg {
 /// All the possible log levels
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub enum LogLevel {
     Error,
     Warn,
@@ -234,9 +236,11 @@ pub enum ResourceAction {
     /// Update the access rules of a resource
     UpdateAccessRules,
     /// Sets the freeze flags on a vault of a resource.
-    SetFreeze,
+    SetVaultFreeze,
     /// Executes a stealth transfer for the resource
     StealthTransfer,
+    /// Un/freezes one or more stealth UTXOs of a resource
+    SetStealthUtxosFreeze,
 }
 
 /// All the possible minting operation types
@@ -564,14 +568,6 @@ pub struct CallerContextInvokeArg {
     pub args: Vec<Vec<u8>>,
 }
 
-/// Possible allocatable address types
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub enum AllocatableAddressType {
-    Component,
-    Resource,
-}
-
 // -------------------------------- AddressAllocation -------------------------------- //
 
 /// The possible actions that can be performed related to the caller context
@@ -614,7 +610,7 @@ pub enum CallAction {
 pub struct CallFunctionArg {
     pub template_address: TemplateAddress,
     pub function: String,
-    pub args: Vec<InstructionArg>,
+    pub args: Vec<Vec<u8>>,
 }
 
 /// A component's method call operation argument
@@ -622,7 +618,7 @@ pub struct CallFunctionArg {
 pub struct CallMethodArg {
     pub component_address: ComponentAddress,
     pub method: String,
-    pub args: Vec<InstructionArg>,
+    pub args: Vec<Vec<u8>>,
 }
 
 // -------------------------------- ProofInvoke -------------------------------- //
@@ -709,4 +705,12 @@ pub struct BuiltinTemplateInvokeArg {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum BuiltinTemplateAction {
     GetTemplateAddress { bultin: BuiltinTemplate },
+}
+
+// -------------------------------- UTXOs -------------------------------- //
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SetFreezeStealthUtxosArg {
+    pub utxos: Vec<UtxoId>,
+    pub freeze: bool,
 }

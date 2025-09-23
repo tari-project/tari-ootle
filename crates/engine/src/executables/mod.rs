@@ -3,10 +3,9 @@
 
 mod transaction;
 
-use tari_engine_types::instruction::Instruction;
 use tari_ootle_common_types::SubstateRequirementRef;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
-use tari_transaction::{TransactionId, TransactionWeight};
+use tari_transaction::{Instruction, TransactionId, TransactionWeight};
 
 pub struct Instructions {
     pub fee: Vec<Instruction>,

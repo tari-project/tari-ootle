@@ -25,10 +25,9 @@ use std::{collections::HashMap, time::Duration};
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult},
-    instruction::Instruction,
+    confidential::MinotariBurnClaimProof,
     serde_with,
     substate::{Substate, SubstateId},
-    UtxoAddress,
     ValidatorFeePoolAddress,
 };
 use tari_ootle_address::OotleAddress;
@@ -53,15 +52,11 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_template_abi::{FunctionDef, TemplateDef};
 use tari_template_lib::{
-    models::{ConfidentialOutputStatement, NonFungibleId, ResourceAddress, VaultId},
+    models::{ConfidentialOutputStatement, EncryptedData, NonFungibleId, ResourceAddress, UtxoAddress, VaultId},
     prelude::{ComponentAddress, ConfidentialWithdrawProof, ResourceType, RistrettoPublicKeyBytes},
-    types::{
-        crypto::{CommitmentSignatureBytes, PedersenCommitmentBytes, RangeProofBytes},
-        Amount,
-        TemplateAddress,
-    },
+    types::{crypto::PedersenCommitmentBytes, Amount, TemplateAddress},
 };
-use tari_transaction::{Transaction, TransactionId, UnsignedTransaction};
+use tari_transaction::{Instruction, Transaction, TransactionId, UnsignedTransaction};
 use time::PrimitiveDateTime;
 use webauthn_rs_proto::{
     PublicKeyCredential,
@@ -581,35 +576,24 @@ pub struct ConfidentialViewVaultBalanceResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ClaimBurnRequest {
     pub account: ComponentAddressOrName,
-    pub claim_proof: ExtClaimBurnProof,
+    pub claim_proof: ClaimBurnProof,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub max_fee: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
-pub struct ExtClaimBurnProof {
-    pub claim_proof: ClaimBurnProof,
+pub struct ClaimBurnProof {
+    pub claim_proof: MinotariBurnClaimProof,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub owner_nonce_key_index: u64,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
-pub struct ClaimBurnProof {
-    pub reciprocal_claim_public_key: RistrettoPublicKeyBytes,
-    pub commitment: PedersenCommitmentBytes,
-    pub ownership_proof: CommitmentSignatureBytes,
-    pub range_proof: RangeProofBytes,
+    pub encrypted_data: EncryptedData,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ClaimBurnResponse {
     pub transaction_id: TransactionId,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub fee: u64,
-    pub result: FinalizeResult,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

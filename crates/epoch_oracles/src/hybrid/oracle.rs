@@ -47,7 +47,7 @@ impl<TStore: EpochOracleStore + Send + 'static> HybridEpochOracle<TStore> {
             EpochEvent::NewEvictionProof { .. } |
             EpochEvent::DoneForNow { .. } => true,
             // These events are handled by the base layer oracle
-            EpochEvent::NewConfidentialOutput { .. }  => false
+            EpochEvent::NewBlockHeader { .. }  => false
         }
     }
 
@@ -55,7 +55,7 @@ impl<TStore: EpochOracleStore + Send + 'static> HybridEpochOracle<TStore> {
         match event {
             EpochEvent::Error(_) |
             // Let the base layer oracle handle epoch timing and UTXO events
-            EpochEvent::NewConfidentialOutput { .. } |
+            EpochEvent::NewBlockHeader { .. } |
             EpochEvent::NewCodeTemplateDownload { .. } => true,
             EpochEvent::DoneForNow { .. }  |
             EpochEvent::EpochChanged { .. } |

@@ -2,6 +2,7 @@
 //  SPDX-License-Identifier: BSD-3-Clause
 
 mod builtin_component_state;
+mod mocks;
 mod package_builder;
 mod read_only_state_store;
 pub mod support;

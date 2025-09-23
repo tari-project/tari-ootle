@@ -1,9 +1,8 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::UtxoAddress;
 use tari_template_lib::{
-    models::{ComponentAddress, EncryptedData},
+    models::{ComponentAddress, EncryptedData, UtxoAddress},
     prelude::{PedersenCommitmentBytes, ResourceAddress, RistrettoPublicKeyBytes},
     types::{crypto::UtxoTag, Amount},
 };

@@ -301,9 +301,7 @@ pub async fn handle_submit_manifest(
         .for_network(network.as_byte())
         .with_fee_instructions_builder(|builder| {
             if instructions.fee_instructions.is_empty() {
-                builder.call_method(*default_account.component_address(), "pay_fee", args![Amount(
-                    fee_amount
-                )])
+                builder.call_method(*default_account.component_address(), "pay_fee", args![fee_amount])
             } else {
                 builder.with_instructions(instructions.fee_instructions)
             }

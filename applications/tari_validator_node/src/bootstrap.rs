@@ -20,7 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashMap, fs, io, str::FromStr};
+use std::{collections::HashMap, fs, io, str::FromStr, sync::Arc};
 
 use anyhow::{anyhow, Context};
 use futures::{future, FutureExt};
@@ -51,6 +51,7 @@ use tari_epoch_oracles::{
 };
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_ootle_app_utilities::{
+    claim_burn_proof_verifier::TariClaimBurnProofVerifier,
     common::verify_correct_network,
     configuration::convert_network_to_l1_network,
     epoch_oracle_config::{BaseLayerOracleConfig, EpochOracleType},
@@ -59,7 +60,6 @@ use tari_ootle_app_utilities::{
     seed_peer::SeedPeer,
     template_download_queue::TemplateDownloadQueue,
     transaction_executor::TariTransactionProcessor,
-    utxo_store::StateUtxoStore,
 };
 use tari_ootle_common_types::{Network, PeerAddress};
 use tari_ootle_p2p::TariMessagingSpec;
@@ -94,7 +94,7 @@ use crate::{
     transaction_validators::{
         EpochRangeValidator,
         FeeTransactionValidator,
-        HasInputs,
+        IsShardApplicable,
         TemplateExistsValidator,
         TransactionDryRunValidator,
         TransactionNetworkValidator,
@@ -246,7 +246,6 @@ pub async fn spawn_services(
             global_db.clone(),
             keypair.public_key().to_byte_type(),
             epoch_event_oracle,
-            StateUtxoStore::new(state_store.clone()),
             template_queue_sender,
             layer_one_transaction_submitter.clone(),
             shutdown.clone(),
@@ -306,6 +305,7 @@ pub async fn spawn_services(
             .with_template_binary_max_size_bytes(consensus_constants.template_binary_max_size_bytes),
         template_manager.clone(),
         fee_table.clone(),
+        Arc::new(TariClaimBurnProofVerifier::new(config.network, global_db.clone())),
     );
     let transaction_executor = TarBlockTransactionExecutor::new(
         payload_processor.clone(),
@@ -480,7 +480,7 @@ pub fn create_mempool_transaction_validator(
 ) -> impl Validator<Transaction, Context = (), Error = TransactionValidationError> {
     TransactionNetworkValidator::new(network)
         .and_then(TransactionDryRunValidator)
-        .and_then(HasInputs::new())
+        .and_then(IsShardApplicable::new())
         .and_then(FeeTransactionValidator)
         .and_then(TransactionSignatureValidator)
         .and_then(TemplateExistsValidator::new(template_manager))
@@ -569,6 +569,7 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + 'static>(
             .template_sidechain_id
             .as_ref()
             .map(|p| p.to_byte_type()),
+        config.network,
     ))
 }
 

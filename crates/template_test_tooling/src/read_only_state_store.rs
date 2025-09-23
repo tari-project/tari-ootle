@@ -28,7 +28,7 @@ impl<'a> ReadOnlyStateStore<'a> {
 
     pub fn get_account(&self, account_address: ComponentAddress) -> Result<Account, StateStoreError> {
         let account = self.get_component(account_address)?;
-        Account::from_value(account.state()).map_err(StateStoreError::custom)
+        Account::from_value(account.state()).map_err(|e| StateStoreError::CustomStr(e.to_string()))
     }
 
     pub fn get_vaults_for_account(

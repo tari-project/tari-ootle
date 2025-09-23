@@ -3,7 +3,6 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    fs::File,
     net::SocketAddr,
     path::PathBuf,
     pin::pin,
@@ -23,7 +22,6 @@ use tari_shutdown::ShutdownSignal;
 use tari_template_lib_types::TemplateAddress;
 use tari_transaction_components::consensus::NetworkConsensus;
 use tari_validator_node_client::types::{AddPeerRequest, GetTemplatesRequest};
-use tari_wallet_daemon_client::types::ExtClaimBurnProof;
 use tokio::{sync::mpsc, time, time::sleep};
 use url::Url;
 
@@ -35,6 +33,7 @@ use crate::{
         handle::{ProcessManagerHandle, ProcessManagerRequest},
         instances::InstanceManager,
         InstanceId,
+        MinoTariWalletProcess,
         MinotariNodeDetails,
         TemplateData,
     },
@@ -611,15 +610,19 @@ impl ProcessManager {
             .next()
             .ok_or_else(|| anyhow!("No MinoTariConsoleWallet instances found"))?;
 
-        let proof = wallet.burn_funds(amount, claim_public_key).await?;
+        let burn_resp = wallet.burn_funds(amount, claim_public_key).await?;
 
-        let file_name = PathBuf::from(format!("burn_proof-{}.json", proof.tx_id));
+        let file_name = PathBuf::from(format!("burn_proof-{}.json", burn_resp.tx_id));
+
+        let client = wallet.connect_client().await?;
         let path = out_path.join(&file_name);
-        let mut file = File::create(path)?;
-        serde_json::to_writer_pretty(&mut file, &ExtClaimBurnProof {
-            claim_proof: proof.claim_proof,
-            owner_nonce_key_index: nonce_key_index,
-        })?;
+        tokio::spawn(MinoTariWalletProcess::wait_for_claim_burn_proof_task(
+            client,
+            path,
+            burn_resp.commitment,
+            amount,
+            nonce_key_index,
+        ));
 
         info!("🔥 Burned {amount} Tari to account {account_name}");
         Ok(file_name)

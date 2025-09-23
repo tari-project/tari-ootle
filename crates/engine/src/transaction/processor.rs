@@ -29,31 +29,28 @@ use tari_engine_types::{
     component::derive_component_address_from_public_key,
     entity_id_provider::EntityIdProvider,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
-    instruction::Instruction,
     instruction_result::InstructionResult,
     lock::LockFlag,
     virtual_substate::VirtualSubstates,
-    ComponentCall,
-    ResourceAddressRef,
 };
 use tari_ootle_common_types::services::template_provider::TemplateProvider;
 use tari_template_abi::{FunctionDef, Type};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    args::{
-        AllocatableAddressType,
-        AllocateAddressResult,
-        InstructionArg,
-        WorkspaceAction,
-        WorkspaceId,
-        WorkspaceOffsetId,
-    },
+    args::{AllocateAddressResult, WorkspaceAction},
     auth::{ComponentAccessRules, OwnerRule},
-    call_arg,
-    call_args,
     invoke_args,
     models::{Bucket, NonFungibleAddress, StealthTransferStatement},
     types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
+};
+use tari_transaction::{
+    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
+    call_arg,
+    call_args,
+    AllocatableAddressType,
+    ComponentCall,
+    Instruction,
+    ResourceAddressRef,
 };
 
 use crate::{
@@ -70,7 +67,7 @@ use crate::{
     },
     state_store::memory::ReadOnlyMemoryStateStore,
     template::LoadedTemplate,
-    traits::Invokable,
+    traits::{ClaimProofVerifier, Invokable},
     transaction::{TransactionError, TransactionProcessorConfig},
     wasm::{WasmModule, WasmProcess},
 };
@@ -86,6 +83,7 @@ pub struct TransactionProcessor<TTemplateProvider> {
     auth_params: AuthParams,
     virtual_substates: VirtualSubstates,
     modules: Vec<Arc<dyn RuntimeModule>>,
+    claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
 }
 
 impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> TransactionProcessor<TTemplateProvider> {
@@ -96,6 +94,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         auth_params: AuthParams,
         virtual_substates: VirtualSubstates,
         modules: Vec<Arc<dyn RuntimeModule>>,
+        claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
     ) -> Self {
         Self {
             config,
@@ -104,6 +103,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             auth_params,
             virtual_substates,
             modules,
+            claim_burn_proof_verifier,
         }
     }
 
@@ -119,6 +119,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             auth_params,
             virtual_substates,
             modules,
+            claim_burn_proof_verifier,
         } = self;
 
         let initial_auth_scope = AuthorizationScope::new(auth_params.initial_ownership_proofs);
@@ -156,7 +157,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             entity_id_provider,
             modules,
             MAX_CALL_DEPTH,
-            config.network,
+            claim_burn_proof_verifier,
         )?;
 
         let runtime = Runtime::new(Arc::new(runtime_interface));
@@ -258,7 +259,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         debug!(target: LOG_TARGET, "instruction = {:?}", instruction);
         match instruction {
             Instruction::CreateAccount {
-                public_key_address,
+                owner_public_key: public_key_address,
                 owner_rule,
                 access_rules,
                 workspace_id,
@@ -292,9 +293,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 runtime.interface().emit_log(level, message)?;
                 Ok(InstructionResult::empty())
             },
-            Instruction::ClaimBurn { claim } => {
-                // Need to call it on the runtime so that a bucket is created.
-                runtime.interface().claim_burn(*claim)?;
+            Instruction::ClaimBurn { claim, output_data } => {
+                runtime.interface().claim_burn(*claim, output_data)?;
                 Ok(InstructionResult::empty())
             },
             Instruction::ClaimValidatorFees { address } => {

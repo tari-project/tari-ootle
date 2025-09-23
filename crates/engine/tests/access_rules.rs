@@ -14,7 +14,6 @@ use tari_template_lib::{
         ResourceAuthAction,
         RestrictedAccessRule,
     },
-    call_args,
     models::{ComponentAddress, Metadata, NonFungibleId, ResourceAddress, VaultId},
     rule,
 };
@@ -213,7 +212,7 @@ mod component_access_rules {
 }
 
 mod resource_access_rules {
-    use tari_template_lib::types::Amount;
+    use tari_template_lib::{invoke_args, types::Amount};
 
     use super::*;
 
@@ -250,7 +249,7 @@ mod resource_access_rules {
         // User cannot get tokens
         let reason = test.execute_expect_failure(
             Transaction::builder()
-                .call_method(component_address, "take_tokens", args![Amount(10)])
+                .call_method(component_address, "take_tokens", args![10])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
                 .build_and_seal(&user_key),
@@ -667,7 +666,7 @@ mod resource_access_rules {
                 .call_function(cross_call_template, "call_component_with_args", args![
                     component_address,
                     "take_tokens",
-                    call_args![Amount(10)],
+                    invoke_args![10],
                 ])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
@@ -684,25 +683,14 @@ mod resource_access_rules {
                 .call_method(component_address, "mint_new_badge", args![])
                 .put_last_instruction_output_on_workspace("badge")
                 .call_method(owner_account, "deposit", args![Workspace("badge")])
-                .call_method(
-                    owner_account,
-                    "create_proof_for_resource",
-                    args![badge_resource],
-                )
+                .call_method(owner_account, "create_proof_for_resource", args![badge_resource])
                 .put_last_instruction_output_on_workspace("proof")
-                // This is quite interesting: we have to pass in the proof to call_component_with_args_using_proof to bring it into scope so that the cross template call can use it.
-                // Another way would be for the arguments to resolve recursively at the "base" call site, rather than resolving workspace args in invoke_call. This requires indexing the Args type.
-                .call_function(
-                    cross_call_template,
-                    "call_component_with_args_using_proof",
-                    args![
-                        component_address,
-                        "take_tokens_using_proof",
-                        Workspace("proof"),
-                        // "proof" == 1 - transaction builder does not recursively resolve the args
-                        call_args![Workspace(1), Amount(10)],
-                    ],
-                )
+                .call_function(cross_call_template, "call_component_with_args_using_proof", args![
+                    component_address,
+                    "take_tokens_using_proof",
+                    Workspace("proof"),
+                    10,
+                ])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
                 .drop_all_proofs_in_workspace()

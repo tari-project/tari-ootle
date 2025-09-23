@@ -43,4 +43,6 @@ pub use base_layer_db::*;
 mod bmt_db;
 pub use bmt_db::{BmtDb, DbBmt};
 
+mod block_header;
 pub mod models;
+pub use block_header::*;

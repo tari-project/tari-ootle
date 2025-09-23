@@ -58,7 +58,7 @@ const SUBSTATE_TYPES = [
   "Component",
   "Resource",
   "Vault",
-  "UnclaimedConfidentialOutput",
+  "ClaimedOutputTombstone",
   "NonFungible",
   "TransactionReceipt",
   "ValidatorFeePool",
@@ -214,7 +214,7 @@ function SubstatesLayout() {
                 >
                   <TableCell>
                     {substateIdToString(row.substate_id).startsWith(
-                      "resource_"
+                      "resource_",
                     ) ? (
                       <Link
                         to={`/resources/${substateIdToString(row.substate_id)}`}

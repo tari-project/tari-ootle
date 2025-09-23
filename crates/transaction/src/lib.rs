@@ -20,7 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+pub mod args;
 pub mod builder;
+mod special_json_arg_syntax;
 mod transaction;
 mod transaction_id;
 mod unsigned_transaction;
@@ -28,7 +30,6 @@ mod v1;
 mod weight;
 
 pub use builder::TransactionBuilder;
-pub use tari_engine_types::instruction::Instruction;
 pub use transaction::*;
 pub use transaction_id::*;
 pub use unsigned_transaction::*;

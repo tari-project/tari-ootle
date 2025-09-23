@@ -151,7 +151,8 @@ impl ValidatorBuilder {
         let transaction_pool = TransactionPool::new();
         let (tx_events, _) = broadcast::channel(100);
 
-        let transaction_executor = TestBlockTransactionProcessor::new(self.transaction_executions.clone());
+        let transaction_executor =
+            TestBlockTransactionProcessor::new(self.address.clone(), self.transaction_executions.clone());
 
         let worker = HotstuffWorker::<TestConsensusSpec>::new(
             self.config

@@ -10,23 +10,24 @@ use tari_engine_types::{
     transaction_receipt::TransactionReceiptAddress,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
-use tari_ootle_common_types::{Epoch, LockIntent, SubstateRequirement, VersionedSubstateId};
+use tari_ootle_common_types::{displayable::Displayable, Epoch, LockIntent, SubstateRequirement, VersionedSubstateId};
 use tari_ootle_storage::{
     consensus_models::{TransactionExecution, VersionedSubstateIdLockIntent},
     StateStore,
 };
 use tari_transaction::Transaction;
 
-use crate::support::{create_execution_result_for_transaction, executions_store::TestExecutionSpecStore};
+use crate::support::{create_execution_result_for_transaction, executions_store::TestExecutionSpecStore, TestAddress};
 
 #[derive(Debug, Clone)]
 pub struct TestBlockTransactionProcessor {
+    address: TestAddress,
     store: TestExecutionSpecStore,
 }
 
 impl TestBlockTransactionProcessor {
-    pub fn new(store: TestExecutionSpecStore) -> Self {
-        Self { store }
+    pub fn new(address: TestAddress, store: TestExecutionSpecStore) -> Self {
+        Self { address, store }
     }
 
     fn add_substates_to_memory_db<'a, I: IntoIterator<Item = (&'a SubstateRequirement, &'a Substate)>>(
@@ -61,7 +62,12 @@ impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBloc
     ) -> Result<TransactionExecution, BlockTransactionExecutorError> {
         let id = transaction.calculate_id();
 
-        log::info!("Transaction {} executing. {} input(s)", id, resolved_inputs.len());
+        log::info!(
+            "[{}] Transaction {} executing. {} input(s)",
+            self.address,
+            id,
+            resolved_inputs.len()
+        );
 
         // Create a memory db with all the input substates, needed for the transaction execution
         let mut state_db = new_memory_store();
@@ -73,10 +79,13 @@ impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBloc
             VirtualSubstate::CurrentEpoch(current_epoch.as_u64()),
         );
 
-        let spec = self
-            .store
-            .get(&id)
-            .unwrap_or_else(|| panic!("Missing execution spec for transaction {}", transaction.calculate_id()));
+        let spec = self.store.get(&id).unwrap_or_else(|| {
+            panic!(
+                "[{}] Missing execution spec for transaction {}",
+                self.address,
+                transaction.calculate_id()
+            )
+        });
 
         let resolved_inputs = spec
             .input_locks
@@ -84,8 +93,13 @@ impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBloc
             .map(|(substate_id, lock_type)| {
                 let substate = resolved_inputs.get(&substate_id).unwrap_or_else(|| {
                     panic!(
-                        "Consensus did not provide input substate {} for transaction {}. In spec: {}",
-                        substate_id, id, lock_type
+                        "[{}] Consensus did not provide input substate {} for transaction {}. In spec: {}. Provided: \
+                         {}",
+                        self.address,
+                        substate_id,
+                        id,
+                        lock_type,
+                        resolved_inputs.keys().collect::<Vec<_>>().display()
                     )
                 });
                 VersionedSubstateIdLockIntent::new(
@@ -147,7 +161,8 @@ impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBloc
 
         let executed = TransactionExecution::new(result, resolved_inputs, resulting_outputs);
         log::info!(
-            "Transaction {} executed in {:.2?}. {}",
+            "[{}] Transaction {} executed in {:.2?}. {}",
+            self.address,
             id,
             executed.execution_time(),
             executed.result().finalize.result

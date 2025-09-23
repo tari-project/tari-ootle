@@ -1,7 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use async_trait::async_trait;
+use std::future::Future;
+
 use minotari_app_grpc::tari_rpc::ValidatorNodeChange;
 use tari_common_types::types::FixedHash;
 use tari_node_components::blocks::BlockHeader;
@@ -14,32 +15,40 @@ use crate::{
     types::{BaseLayerConsensusConstants, BaseLayerMetadata, BaseLayerValidatorNode, SideChainUtxos},
 };
 
-#[async_trait]
 pub trait BaseNodeClient: Send + Sync + Clone {
-    async fn test_connection(&mut self) -> Result<(), BaseNodeClientError>;
-    async fn get_network(&mut self) -> Result<u8, BaseNodeClientError>;
-    async fn get_tip_info(&mut self) -> Result<BaseLayerMetadata, BaseNodeClientError>;
-    async fn get_validator_node_changes(
+    fn test_connection(&mut self) -> impl Future<Output = Result<(), BaseNodeClientError>> + Send;
+    fn get_network(&mut self) -> impl Future<Output = Result<u8, BaseNodeClientError>> + Send;
+    fn get_tip_info(&mut self) -> impl Future<Output = Result<BaseLayerMetadata, BaseNodeClientError>> + Send;
+    fn get_validator_node_changes(
         &mut self,
         epoch: Epoch,
         sidechain_id: Option<&RistrettoPublicKeyBytes>,
-    ) -> Result<Vec<ValidatorNodeChange>, BaseNodeClientError>;
-    async fn get_validator_nodes(&mut self, height: u64) -> Result<Vec<BaseLayerValidatorNode>, BaseNodeClientError>;
-    async fn get_shard_key(
+    ) -> impl Future<Output = Result<Vec<ValidatorNodeChange>, BaseNodeClientError>> + Send;
+    fn get_validator_nodes(
+        &mut self,
+        height: u64,
+    ) -> impl Future<Output = Result<Vec<BaseLayerValidatorNode>, BaseNodeClientError>> + Send;
+    fn get_shard_key(
         &mut self,
         epoch: Epoch,
         public_key: &RistrettoPublicKeyBytes,
-    ) -> Result<Option<SubstateAddress>, BaseNodeClientError>;
-    async fn get_template_registrations(
+    ) -> impl Future<Output = Result<Option<SubstateAddress>, BaseNodeClientError>> + Send;
+    fn get_template_registrations(
         &mut self,
         start_hash: Option<FixedHash>,
         count: u64,
-    ) -> Result<Vec<CodeTemplateRegistration>, BaseNodeClientError>;
-    async fn get_header_by_hash(&mut self, block_hash: FixedHash) -> Result<BlockHeader, BaseNodeClientError>;
-    async fn get_consensus_constants(&mut self, tip: u64) -> Result<BaseLayerConsensusConstants, BaseNodeClientError>;
-    async fn get_sidechain_utxos(
+    ) -> impl Future<Output = Result<Vec<CodeTemplateRegistration>, BaseNodeClientError>> + Send;
+    fn get_header_by_hash(
+        &mut self,
+        block_hash: &FixedHash,
+    ) -> impl Future<Output = Result<BlockHeader, BaseNodeClientError>> + Send;
+    fn get_consensus_constants(
+        &mut self,
+        tip: u64,
+    ) -> impl Future<Output = Result<BaseLayerConsensusConstants, BaseNodeClientError>> + Send;
+    fn get_sidechain_utxos(
         &mut self,
         start_hash: Option<FixedHash>,
         count: u64,
-    ) -> Result<Vec<SideChainUtxos>, BaseNodeClientError>;
+    ) -> impl Future<Output = Result<Vec<SideChainUtxos>, BaseNodeClientError>> + Send;
 }

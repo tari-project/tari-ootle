@@ -1,6 +1,8 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
+mod header_hasher;
+
 use std::{
     collections::VecDeque,
     future::{poll_fn, Future},
@@ -17,14 +19,9 @@ use tari_base_node_client::{
     BaseNodeClientError,
 };
 use tari_common_types::types::FixedHash;
-use tari_engine_types::confidential::UnclaimedConfidentialOutput;
-use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle};
-use tari_ootle_common_types::{displayable::Displayable, optional::Optional};
-use tari_template_lib::{
-    models::EncryptedData,
-    prelude::PedersenCommitmentBytes,
-    types::crypto::RistrettoPublicKeyBytes,
-};
+use tari_epoch_manager::epoch_event_oracle::{BlockHeaderData, EpochEvent, EpochEventOracle};
+use tari_ootle_common_types::{displayable::Displayable, optional::Optional, Network};
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction_components::transaction_components::{
     OutputType,
     SideChainFeature,
@@ -35,7 +32,10 @@ use tari_utilities::ByteArray;
 use tokio::time;
 use url::Url;
 
-use crate::store::{EpochOracleStore, StoreKey};
+use crate::{
+    base_layer::header_hasher::hash_header,
+    store::{EpochOracleStore, StoreKey},
+};
 
 const LOG_TARGET: &str = "tari::ootle::base_layer_scanner";
 
@@ -66,6 +66,7 @@ struct BaseLayerOracleInner<TStore> {
     burnt_utxo_sidechain_id: Option<RistrettoPublicKeyBytes>,
     template_sidechain_id: Option<RistrettoPublicKeyBytes>,
     pending_events: VecDeque<EpochEvent>,
+    network: Network,
 }
 
 impl<TStore: EpochOracleStore + 'static> BaseLayerOracle<TStore> {
@@ -77,6 +78,7 @@ impl<TStore: EpochOracleStore + 'static> BaseLayerOracle<TStore> {
         validator_node_sidechain_id: Option<RistrettoPublicKeyBytes>,
         burnt_utxo_sidechain_id: Option<RistrettoPublicKeyBytes>,
         template_sidechain_id: Option<RistrettoPublicKeyBytes>,
+        network: Network,
     ) -> Self {
         Self {
             inner: Some(Box::new(BaseLayerOracleInner {
@@ -94,6 +96,7 @@ impl<TStore: EpochOracleStore + 'static> BaseLayerOracle<TStore> {
                 burnt_utxo_sidechain_id,
                 template_sidechain_id,
                 pending_events: VecDeque::new(),
+                network,
             })),
             scanning_interval,
             is_initialized: false,
@@ -190,8 +193,8 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
         if tip.height_of_longest_chain == 0 {
             return Ok(BlockchainProgression::NoProgress);
         }
-        match self.last_scanned_tip {
-            Some(hash) if hash == tip.tip_hash => Ok(BlockchainProgression::NoProgress),
+        match &self.last_scanned_tip {
+            Some(hash) if *hash == tip.tip_hash => Ok(BlockchainProgression::NoProgress),
             Some(hash) => {
                 let header = self.base_node_client.get_header_by_hash(hash).await.optional()?;
                 if header.is_some() {
@@ -219,12 +222,14 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
             Some(end_height) => end_height,
         };
 
+        let mut cached_header = None;
         // Recover the last scanned validator node MR if it is not set yet, i.e the node has scanned BL blocks
         // previously.
         if self.last_scanned_validator_node_mr.is_none() {
-            if let Some(hash) = self.last_scanned_hash {
+            if let Some(ref hash) = self.last_scanned_hash {
                 let header = self.base_node_client.get_header_by_hash(hash).await?;
                 self.last_scanned_validator_node_mr = Some(header.validator_node_mr);
+                cached_header = Some(header);
             }
         }
 
@@ -248,7 +253,7 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
             let block_info = utxos.block_info;
 
             // TODO: Because we don't know the next hash when we're done scanning to the tip, we need to load the
-            //       previous scanned block again to get it.  This isn't ideal, but won't be an issue when we scan a few
+            //       previous scanned block again to get it. Won't be an issue when we scan a few
             //       blocks back.
             if self.last_scanned_hash.is_some_and(|h| h == block_info.hash) {
                 if let Some(hash) = block_info.next_block_hash {
@@ -262,7 +267,25 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                 "⛓️ Scanning base layer block {} of {}", block_info.height, end_height
             );
 
-            let header = self.base_node_client.get_header_by_hash(block_info.hash).await?;
+            let header = match cached_header {
+                Some(ref h) if h.prev_hash == block_info.hash => h,
+                _ => {
+                    let header = self.base_node_client.get_header_by_hash(&block_info.hash).await?;
+                    let current_epoch = constants.height_to_epoch(current_height);
+                    self.pending_events.push_back(EpochEvent::NewBlockHeader {
+                        epoch: current_epoch,
+                        header: BlockHeaderData {
+                            height: header.height,
+                            // TODO: Cant use header.hash() because it uses CURRENT_NETWORK global
+                            hash: hash_header(self.network, &header),
+                            kernel_merkle_root: header.kernel_mr,
+                            validator_node_merkle_root: header.validator_node_mr,
+                        },
+                    });
+                    cached_header = Some(header);
+                    cached_header.as_ref().unwrap()
+                },
+            };
             let current_validator_node_mr = header.validator_node_mr;
             let current_epoch = constants.height_to_epoch(current_height);
 
@@ -277,10 +300,7 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
             for output in utxos.outputs {
                 let output_hash = output.hash();
                 let TransactionOutput {
-                    features,
-                    commitment,
-                    encrypted_data,
-                    ..
+                    features, commitment, ..
                 } = output;
                 let Some(SideChainFeature {
                     data: sidechain_feature_data,
@@ -388,27 +408,6 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                             output_hash,
                             commitment.to_compressed_key()
                         );
-
-                        let encrypted_data_bytes = encrypted_data.as_bytes().to_vec();
-                        let encrypted_data = EncryptedData::try_from(encrypted_data_bytes).map_err(|len| {
-                            BaseLayerOracleError::InvalidBaseNodeResponse(format!(
-                                "Encrypted data incorrect length of bytes: {len}"
-                            ))
-                        })?;
-
-                        let commitment = PedersenCommitmentBytes::from_bytes(commitment.as_bytes()).expect(
-                            "commitment: Compressed<PedersenCommitment> and PedersenCommitmentBytes must be the same \
-                             length",
-                        );
-                        let unclaimed_utxo = UnclaimedConfidentialOutput {
-                            commitment,
-                            encrypted_data,
-                        };
-
-                        self.pending_events.push_back(EpochEvent::NewConfidentialOutput {
-                            epoch: current_epoch,
-                            substate: unclaimed_utxo,
-                        });
                     },
                     SideChainFeatureData::EvictionProof(eviction_proof) => {
                         if sidechain_id.as_ref().map(|s| s.public_key().as_bytes()) !=

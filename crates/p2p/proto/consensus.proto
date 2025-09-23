@@ -124,7 +124,6 @@ message Command {
     TransactionAtom some_accept = 5;
 
     ForeignProposalAtom foreign_proposal = 6;
-    MintConfidentialOutputAtom mint_confidential_output = 7;
     EvictNodeAtom evict_node = 8;
     bool end_epoch = 9;
   }
@@ -133,10 +132,6 @@ message Command {
 message ForeignProposalAtom {
   bytes block_id = 1;
   uint32 shard_group = 2;
-}
-
-message MintConfidentialOutputAtom {
-  bytes commitment = 1;
 }
 
 message TransactionAtom {

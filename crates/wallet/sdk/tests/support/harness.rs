@@ -9,7 +9,6 @@ use tari_engine_types::{
     substate::{Substate, SubstateId},
     ToByteType,
     Utxo,
-    UtxoId,
 };
 use tari_ootle_common_types::{optional::Optional, shard::Shard, Network, StateVersion};
 use tari_ootle_wallet_sdk::{
@@ -23,7 +22,7 @@ use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_abi::TemplateDef;
 use tari_template_lib::{
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
-    models::{ComponentAddress, EncryptedData, ResourceAddress, VaultId},
+    models::{ComponentAddress, EncryptedData, ResourceAddress, UtxoId, VaultId},
     prelude::{Amount, PedersenCommitmentBytes, ResourceType, TemplateAddress},
 };
 use tari_transaction::{Transaction, TransactionId};

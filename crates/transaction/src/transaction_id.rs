@@ -8,10 +8,9 @@ use std::{
 
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::FixedHashSizeError;
 use tari_engine_types::{serde_with, transaction_receipt::TransactionReceiptAddress};
 use tari_ootle_common_types::{SubstateAddress, ToSubstateAddress};
-use tari_template_lib::types::{from_hex, hex::write_hex_fmt, Hash};
+use tari_template_lib::types::{from_hex, hex::write_hex_fmt, Hash, KeyParseError};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, Default, BorshSerialize)]
 #[serde(transparent)]
@@ -39,8 +38,8 @@ impl TransactionId {
         Hash::from(self.0)
     }
 
-    pub fn from_hex(hex: &str) -> Result<Self, FixedHashSizeError> {
-        let bytes = from_hex(hex).map_err(|_| FixedHashSizeError)?;
+    pub fn from_hex(hex: &str) -> Result<Self, KeyParseError> {
+        let bytes = from_hex(hex)?;
         Ok(Self(bytes))
     }
 
@@ -82,7 +81,7 @@ impl Display for TransactionId {
 }
 
 impl TryFrom<Vec<u8>> for TransactionId {
-    type Error = FixedHashSizeError;
+    type Error = KeyParseError;
 
     fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
         Self::try_from(value.as_slice())
@@ -90,11 +89,11 @@ impl TryFrom<Vec<u8>> for TransactionId {
 }
 
 impl TryFrom<&[u8]> for TransactionId {
-    type Error = FixedHashSizeError;
+    type Error = KeyParseError;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
         if value.len() != TransactionId::byte_size() {
-            return Err(FixedHashSizeError);
+            return Err(KeyParseError);
         }
         let mut id = [0u8; TransactionId::byte_size()];
         id.copy_from_slice(value);

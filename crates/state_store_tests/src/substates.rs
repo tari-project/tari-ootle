@@ -100,7 +100,7 @@ fn operations(db: impl StateStore) {
         VersionedSubstateId::new(substate2_id.clone(), 0),
     ];
     let res = tx
-        .substates_any_exist(substate_ids.iter().map(|id| id.as_ref()))
+        .substates_any_exist(substate_ids.iter().map(|id| id.as_versioned_ref()))
         .unwrap();
     assert!(res);
 
@@ -110,7 +110,7 @@ fn operations(db: impl StateStore) {
         VersionedSubstateId::new(substate2_id.clone(), 0),
     ];
     let res = tx
-        .substates_any_exist(substate_ids.iter().map(|id| id.as_ref()))
+        .substates_any_exist(substate_ids.iter().map(|id| id.as_versioned_ref()))
         .unwrap();
     assert!(res);
 
@@ -120,7 +120,7 @@ fn operations(db: impl StateStore) {
         VersionedSubstateId::new(substate2_id, 100), // version should not exist
     ];
     let res = tx
-        .substates_any_exist(substate_ids.iter().map(|id| id.as_ref()))
+        .substates_any_exist(substate_ids.iter().map(|id| id.as_versioned_ref()))
         .unwrap();
     assert!(!res);
 

@@ -45,11 +45,7 @@ use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_engine_types::crypto::{get_commitment_factory, get_static_range_proof_service, MAX_LAZY_BP_AGG_FACTORS};
 use tari_epoch_manager::traits::EpochManagerSpec;
 use tari_epoch_oracles::EpochOracle;
-use tari_ootle_app_utilities::{
-    keypair::RistrettoKeypair,
-    template_download_queue::TemplateDownloadQueue,
-    utxo_store::StateUtxoStore,
-};
+use tari_ootle_app_utilities::{keypair::RistrettoKeypair, template_download_queue::TemplateDownloadQueue};
 use tari_ootle_common_types::{PeerAddress, SubstateAddress};
 use tari_ootle_storage::global::{DbFactory, GlobalDb};
 use tari_ootle_storage_sqlite::{global::SqliteGlobalDbAdapter, SqliteDbFactory};
@@ -222,7 +218,6 @@ impl EpochManagerSpec for ValidatorNodeEpochManagerSpec {
     type EpochEventOracle = EpochOracle<GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>>;
     type LayerOneSubmitter = FileLayerOneSubmitter;
     type TemplateDownloader = TemplateDownloadQueue;
-    type UtxoStore = StateUtxoStore<ValidatorNodeStateStore>;
 }
 
 #[cfg(test)]

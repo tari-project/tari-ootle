@@ -6,7 +6,7 @@ use std::cmp;
 use digest::crypto_common::rand_core::OsRng;
 use log::*;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
-use tari_engine_types::{substate::SubstateId, ConvertFromByteType, FromByteType, ToByteType, UtxoAddress};
+use tari_engine_types::{substate::SubstateId, ConvertFromByteType, FromByteType, ToByteType};
 use tari_ootle_address::{OotleAddress, RistrettoOotleAddress};
 use tari_ootle_common_types::{
     displayable::Displayable,
@@ -22,7 +22,14 @@ use tari_ootle_wallet_crypto::{
 };
 use tari_template_lib::{
     constants::XTR,
-    models::{Account as BuiltinAccount, ComponentAddress, ResourceAddress, StealthTransferStatement, VaultId},
+    models::{
+        Account as BuiltinAccount,
+        ComponentAddress,
+        ResourceAddress,
+        StealthTransferStatement,
+        UtxoAddress,
+        VaultId,
+    },
     types::Amount,
 };
 use tari_transaction::{args, Transaction};

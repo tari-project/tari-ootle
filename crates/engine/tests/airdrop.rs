@@ -3,9 +3,9 @@
 
 use tari_engine_types::{substate::SubstateId, ToByteType};
 use tari_ootle_common_types::substate_type::SubstateType;
-use tari_template_lib::{call_args, models::ComponentAddress, types::Amount};
+use tari_template_lib::{models::ComponentAddress, types::Amount};
 use tari_template_test_tooling::TemplateTest;
-use tari_transaction::{args, Transaction};
+use tari_transaction::{args, call_args, Transaction};
 
 fn setup() -> (TemplateTest, ComponentAddress, SubstateId) {
     let mut template_test = TemplateTest::new(vec!["tests/templates/nft/airdrop"]);

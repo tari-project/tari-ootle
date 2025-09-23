@@ -11,13 +11,7 @@ use log::*;
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::{Decision, HighPc, HighestSeenBlock, LeafBlock, ProposalCertificate, TimeoutCertificate};
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
-use tari_engine_types::{
-    commit_result::RejectReason,
-    confidential::UnclaimedConfidentialOutput,
-    substate::Substate,
-    template_lib_models::UnclaimedConfidentialOutputAddress,
-    ToByteType,
-};
+use tari_engine_types::{commit_result::RejectReason, ToByteType};
 use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{
     committee::CommitteeInfo,
@@ -26,7 +20,6 @@ use tari_ootle_common_types::{
     Epoch,
     ExtraData,
     NodeHeight,
-    VersionedSubstateIdRef,
 };
 use tari_ootle_storage::{
     consensus_models::{
@@ -35,14 +28,11 @@ use tari_ootle_storage::{
         BlockHeader,
         BlockTransactionExecution,
         BookkeepingModel,
-        BurntUtxo,
         Command,
         EvictNodeAtom,
         ForeignProposal,
         ForeignProposalRecord,
-        MintConfidentialOutputAtom,
         PendingShardStateTreeDiff,
-        SubstateChange,
         TransactionAtom,
         TransactionExecution,
         TransactionPool,
@@ -360,11 +350,6 @@ where TConsensusSpec: ConsensusSpec
                     .foreign_proposals
                     .iter()
                     .map(|fp| Command::ForeignProposal(fp.to_atom()))
-                    .chain(batch.burnt_utxos.keys().map(|commitment| {
-                        Command::MintConfidentialOutput(MintConfidentialOutputAtom {
-                            commitment: *commitment,
-                        })
-                    }))
                     .chain(
                         batch
                             .evict_nodes
@@ -446,20 +431,6 @@ where TConsensusSpec: ConsensusSpec
             }
         }
         timer.done();
-
-        // This relies on the UTXO commands being ordered after transaction commands
-        for (commitment, output) in batch.burnt_utxos {
-            let substate_id = commitment.into();
-            let id = VersionedSubstateIdRef::new(&substate_id, 0);
-            let shard = id.to_shard(local_committee_info.num_preshards());
-            let change = SubstateChange::Up {
-                id: substate_id,
-                shard,
-                substate: Box::new(Substate::new(0, output)),
-            };
-
-            substate_store.put(change)?;
-        }
 
         debug!(
             target: LOG_TARGET,
@@ -553,21 +524,6 @@ where TConsensusSpec: ConsensusSpec
             foreign_proposals.len() * FP_WEIGHT_MULTIPLIER,
         );
 
-        let burnt_utxos = remaining_block_size
-            .map(|size| BurntUtxo::get_all_unproposed(tx, start_of_chain_block.block_id(), size))
-            .transpose()?
-            .unwrap_or_default();
-
-        if !burnt_utxos.is_empty() {
-            debug!(
-                target: LOG_TARGET,
-               "🌿 Found {} burnt utxos for next block",
-                burnt_utxos.len()
-            );
-        }
-
-        remaining_block_size = subtract_block_size_checked(remaining_block_size, burnt_utxos.len());
-
         let evict_nodes = remaining_block_size
             .map(|max| {
                 let num_evicted =
@@ -607,7 +563,6 @@ where TConsensusSpec: ConsensusSpec
 
         Ok(ProposalBatch {
             foreign_proposals: foreign_proposals.into_iter().map(|fp| fp.into_proposal()).collect(),
-            burnt_utxos,
             transactions,
             evict_nodes,
             commands: vec![],
@@ -958,7 +913,6 @@ where TConsensusSpec: ConsensusSpec
 #[derive(Default)]
 struct ProposalBatch {
     pub foreign_proposals: Vec<ForeignProposal>,
-    pub burnt_utxos: HashMap<UnclaimedConfidentialOutputAddress, UnclaimedConfidentialOutput>,
     pub transactions: Vec<TransactionPoolRecord>,
     pub evict_nodes: Vec<RistrettoPublicKeyBytes>,
     pub commands: Vec<Command>,
@@ -968,10 +922,9 @@ impl Display for ProposalBatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{} transaction(s), {} foreign proposal(s), {} UTXOs, {} evict, {} command(s)",
+            "{} transaction(s), {} foreign proposal(s), {} evict, {} command(s)",
             self.transactions.len(),
             self.foreign_proposals.len(),
-            self.burnt_utxos.len(),
             self.evict_nodes.len(),
             self.commands.len()
         )

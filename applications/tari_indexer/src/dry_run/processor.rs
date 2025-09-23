@@ -20,10 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use log::{debug, info};
-use tari_engine::{state_store::new_memory_store, transaction::TransactionProcessorConfig};
+use tari_engine::{state_store::new_memory_store, traits::ClaimProofVerifier, transaction::TransactionProcessorConfig};
 use tari_engine_types::{
     commit_result::ExecuteResult,
     substate::{Substate, SubstateId},
@@ -54,6 +54,7 @@ pub struct DryRunTransactionProcessor {
     epoch_manager: EpochManagerHandle<PeerAddress>,
     client_provider: TariValidatorNodeRpcClientFactory,
     template_manager: TemplateManager<PeerAddress>,
+    claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
 }
 
 impl DryRunTransactionProcessor {
@@ -62,12 +63,14 @@ impl DryRunTransactionProcessor {
         epoch_manager: EpochManagerHandle<PeerAddress>,
         client_provider: TariValidatorNodeRpcClientFactory,
         template_manager: TemplateManager<PeerAddress>,
+        claim_burn_proof_verifier: impl ClaimProofVerifier + Send + Sync + 'static,
     ) -> Self {
         Self {
             config,
             epoch_manager,
             client_provider,
             template_manager,
+            claim_burn_proof_verifier: Arc::new(claim_burn_proof_verifier),
         }
     }
 
@@ -85,8 +88,13 @@ impl DryRunTransactionProcessor {
         let found_substates = self.fetch_input_substates(&transaction, epoch).await?;
 
         let fee_table = get_fee_table_by_network(self.config.network);
-        let payload_processor =
-            TariTransactionProcessor::new(self.config.clone(), self.template_manager.clone(), fee_table.clone());
+
+        let payload_processor = TariTransactionProcessor::new(
+            self.config.clone(),
+            self.template_manager.clone(),
+            fee_table.clone(),
+            self.claim_burn_proof_verifier.clone(),
+        );
 
         let virtual_substates = self.get_virtual_substates(&transaction, epoch).await?;
 

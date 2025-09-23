@@ -63,6 +63,7 @@ pub use manager::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub enum ResourceType {
     /// Fungible tokens do not have individual identity, making them interchangeable.
     /// Examples include monetary units, liquidity pool tokens, or tokenized shares.

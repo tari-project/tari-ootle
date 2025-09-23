@@ -45,11 +45,7 @@ use tari_consensus_types::{
     TcId,
     TimeoutCertificate,
 };
-use tari_engine_types::{
-    confidential::UnclaimedConfidentialOutput,
-    substate::SubstateId,
-    template_lib_models::UnclaimedConfidentialOutputAddress,
-};
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{
     displayable::Displayable,
     optional::Optional,
@@ -122,8 +118,6 @@ use crate::{
             LeafBlockCf,
             LockedBlockCf,
         },
-        burnt_utxo,
-        burnt_utxo::BurntUtxoCf,
         certificates::{proposal::ProposalCertificateCf, timeout::TimeoutCertificateCf},
         chain,
         epoch_checkpoint,
@@ -1806,70 +1800,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         }
 
         Ok(pledges)
-    }
-
-    fn burnt_utxos_get(
-        &self,
-        commitment: &UnclaimedConfidentialOutputAddress,
-    ) -> Result<UnclaimedConfidentialOutput, StorageError> {
-        const OPERATION: &str = "burnt_utxos_get";
-        let cf = self.db().cf(BurntUtxoCf)?;
-        let output = cf.get(commitment, OPERATION)?;
-        Ok(output)
-    }
-
-    fn burnt_utxos_get_all_unproposed(
-        &self,
-        leaf_block: &BlockId,
-        limit: usize,
-    ) -> Result<HashMap<UnclaimedConfidentialOutputAddress, UnclaimedConfidentialOutput>, StorageError> {
-        const OPERATION: &str = "burnt_utxos_get_all_unproposed";
-        if !self.blocks_exists(leaf_block)? {
-            return Err(StorageError::NotFound {
-                item: "Block",
-                key: leaf_block.to_string(),
-            });
-        }
-
-        if limit == 0 {
-            return Ok(HashMap::new());
-        }
-
-        let exclude_block_ids = self.get_pending_chain_with_commands_between(leaf_block)?;
-
-        let cf = self.db().cf(BurntUtxoCf)?;
-        let index_cf = self.db().cf(burnt_utxo::ProposedInBlockIndex)?;
-
-        let iter = cf.iterator(Ordering::default(), OPERATION);
-
-        let mut outputs = HashMap::new();
-        for result in iter {
-            let (commitment, output) = result?;
-            // TODO: consider optimising
-            let mut is_proposed = false;
-            for excluded_block_id in &exclude_block_ids {
-                if index_cf.exists_prefix(&(*excluded_block_id, commitment))? {
-                    is_proposed = true;
-                    break;
-                }
-            }
-            if is_proposed {
-                continue;
-            }
-
-            outputs.insert(commitment, output);
-            if outputs.len() == limit {
-                break;
-            }
-        }
-
-        Ok(outputs)
-    }
-
-    fn burnt_utxos_count(&self) -> Result<u64, StorageError> {
-        const OPERATION: &str = "burnt_utxos_count";
-        let count = self.db().cf(BurntUtxoCf)?.count(OPERATION)?;
-        Ok(count as u64)
     }
 
     fn foreign_parked_blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError> {

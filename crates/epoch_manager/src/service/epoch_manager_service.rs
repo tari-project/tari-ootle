@@ -20,10 +20,19 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::sync::{atomic::AtomicU64, Arc};
+use std::{
+    mem,
+    sync::{atomic::AtomicU64, Arc},
+};
 
 use log::*;
-use tari_ootle_common_types::{optional::IsNotFoundError, VotePower};
+use tari_common_types::types::FixedHash;
+use tari_ootle_common_types::{
+    displayable::Displayable,
+    optional::{IsNotFoundError, Optional},
+    Epoch,
+    VotePower,
+};
 use tari_ootle_storage::global::GlobalDb;
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_shutdown::ShutdownSignal;
@@ -42,7 +51,8 @@ use crate::{
         types::EpochManagerRequest,
         EpochManagerHandle,
     },
-    traits::{EpochManagerSpec, EpochUtxoStore, TemplateDownloader},
+    traits::{EpochManagerSpec, TemplateDownloader},
+    EpochManagerEvent,
 };
 
 const LOG_TARGET: &str = "tari::ootle::epoch_manager";
@@ -52,7 +62,12 @@ pub struct EpochManagerService<TSpec: EpochManagerSpec> {
     inner: EpochManager<TSpec>,
     epoch_events: TSpec::EpochEventOracle,
     template_downloader: TSpec::TemplateDownloader,
-    utxo_store: TSpec::UtxoStore,
+
+    tx_events: broadcast::Sender<EpochManagerEvent>,
+    is_initial_epoch_sync_complete: bool,
+    has_epoch_changed: bool,
+    waiting_for_scanning_complete: Vec<oneshot::Sender<Result<(), EpochManagerError>>>,
+
     shutdown: ShutdownSignal,
 }
 
@@ -61,7 +76,6 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
         config: EpochManagerConfig,
         global_db: GlobalDb<SqliteGlobalDbAdapter<TSpec::Addr>>,
         epoch_events: TSpec::EpochEventOracle,
-        utxo_store: TSpec::UtxoStore,
         template_downloader: TSpec::TemplateDownloader,
         layer_one_transaction_submitter: TSpec::LayerOneSubmitter,
         node_public_key: RistrettoPublicKeyBytes,
@@ -79,13 +93,15 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     config,
                     global_db,
                     layer_one_transaction_submitter,
-                    events,
                     node_public_key,
                     current_epoch,
                 ),
+                tx_events: events,
+                has_epoch_changed: false,
+                is_initial_epoch_sync_complete: false,
+                waiting_for_scanning_complete: Vec::new(),
                 epoch_events,
                 template_downloader,
-                utxo_store,
                 shutdown,
             }
             .run()
@@ -99,7 +115,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
     pub async fn run(&mut self) -> Result<(), EpochManagerError> {
         info!(target: LOG_TARGET, "Starting epoch manager");
         // first, load initial state
-        self.inner.load_initial_state().await?;
+        self.inner.load_initial_state()?;
 
         loop {
             tokio::select! {
@@ -178,7 +194,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                                 public_key,
                             );
 
-                            self.inner.deactivate_validator_node(public_key, epoch).await?;
+                            self.inner.deactivate_validator_node(public_key, epoch)?;
                         },
                     }
                 }
@@ -221,6 +237,10 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     .enqueue_download(epoch, name, address, author_public_key, url, binary_hash)
                     .await?
             },
+            EpochEvent::NewBlockHeader { epoch, header } => {
+                trace!(target: LOG_TARGET, "New block header at {epoch}: {header}");
+                self.inner.insert_block_header(epoch, header)?;
+            },
             EpochEvent::NewEvictionProof { epoch, eviction_proof } => {
                 trace!(target: LOG_TARGET, "New Eviction proof for {epoch}: {eviction_proof:?}");
             },
@@ -229,18 +249,83 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     target: LOG_TARGET,
                     "🌟 new epoch {epoch} with hash {epoch_hash}",
                 );
-                self.inner.activate_epoch(epoch, epoch_hash).await?;
+                self.activate_epoch(epoch, epoch_hash)?;
             },
-            EpochEvent::NewConfidentialOutput { epoch, substate } => {
-                self.utxo_store.add_unclaimed_utxo(epoch, substate)?;
-            },
+
             EpochEvent::DoneForNow { epoch, .. } => {
                 info!(target: LOG_TARGET, "Epoch event scanner done for now at {epoch}. Current epoch: {}", self.inner.current_epoch());
-                self.inner.on_scanning_complete().await?;
+                self.on_scanning_complete()?;
             },
         }
 
         Ok(())
+    }
+
+    fn activate_epoch(&mut self, epoch: Epoch, epoch_hash: FixedHash) -> Result<(), EpochManagerError> {
+        if self.current_epoch() >= epoch {
+            // no need to update the epoch
+            return Ok(());
+        }
+
+        self.has_epoch_changed = true;
+
+        // In the base layer case, the epoch_hash is the first block of the epoch
+        // persist the epoch data including the validator node set
+        self.inner.insert_current_epoch(epoch, epoch_hash)?;
+        self.inner.assign_validators_for_epoch(epoch)?;
+        Ok(())
+    }
+
+    fn current_epoch(&self) -> Epoch {
+        self.inner.current_epoch()
+    }
+
+    fn on_scanning_complete(&mut self) -> Result<(), EpochManagerError> {
+        let current_epoch = self.inner.current_epoch();
+        if !self.is_initial_epoch_sync_complete {
+            info!(
+                target: LOG_TARGET,
+                "🌟 Initial epoch sync complete. Current epoch is {}", current_epoch
+            );
+            self.is_initial_epoch_sync_complete = true;
+            for reply in mem::take(&mut self.waiting_for_scanning_complete) {
+                let _ignore = reply.send(Ok(()));
+            }
+        }
+
+        if self.has_epoch_changed {
+            let num_committees = self.inner.get_number_of_committees(current_epoch)?;
+            let shard_group = self.inner.get_our_validator_node(current_epoch).optional()?.map(|vn| {
+                vn.shard_key
+                    .to_shard_group(self.inner.config().num_preshards, num_committees)
+            });
+            let level = if self.is_initial_epoch_sync_complete {
+                Level::Info
+            } else {
+                Level::Debug
+            };
+            log!(target: LOG_TARGET, level, "🌟 A new epoch {} is upon us. Shard group: {}", current_epoch, shard_group.display());
+
+            self.publish_event(EpochManagerEvent::EpochChanged {
+                epoch: current_epoch,
+                registered_shard_group: shard_group,
+            });
+            self.has_epoch_changed = false;
+        }
+
+        Ok(())
+    }
+
+    fn publish_event(&mut self, event: EpochManagerEvent) {
+        let _ignore = self.tx_events.send(event);
+    }
+
+    fn add_notify_on_scanning_complete(&mut self, reply: oneshot::Sender<Result<(), EpochManagerError>>) {
+        if self.is_initial_epoch_sync_complete {
+            let _ignore = reply.send(Ok(()));
+        } else {
+            self.waiting_for_scanning_complete.push(reply);
+        }
     }
 
     #[allow(clippy::too_many_lines)]
@@ -268,13 +353,6 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     }),
                 context,
             ),
-            EpochManagerRequest::ActivateEpoch {
-                epoch,
-                epoch_hash,
-                reply,
-            } => {
-                handle(reply, self.inner.activate_epoch(epoch, epoch_hash).await, context);
-            },
             EpochManagerRequest::GetCommittees { epoch, reply } => {
                 handle(reply, self.inner.get_committees(epoch), context);
             },
@@ -321,16 +399,14 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                 reply,
             } => handle(
                 reply,
-                self.inner
-                    .deactivate_validator_node(public_key, deactivation_epoch)
-                    .await,
+                self.inner.deactivate_validator_node(public_key, deactivation_epoch),
                 context,
             ),
             EpochManagerRequest::IsInitialScanningComplete { reply } => {
-                handle(reply, Ok(self.inner.is_initial_epoch_sync_complete()), context)
+                handle(reply, Ok(self.is_initial_epoch_sync_complete), context)
             },
             EpochManagerRequest::WaitForInitialScanningToComplete { reply } => {
-                self.inner.add_notify_on_scanning_complete(reply);
+                self.add_notify_on_scanning_complete(reply);
             },
 
             EpochManagerRequest::GetOurValidatorNode { epoch, reply } => {

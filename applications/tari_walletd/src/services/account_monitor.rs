@@ -193,7 +193,10 @@ where
         }
 
         let indexed_value = IndexedWellKnownTypes::from_value(account_value.component().unwrap().state())?;
-        substate_api.save_root(account_substate_id.as_ref(), indexed_value.referenced_substates())?;
+        substate_api.save_root(
+            account_substate_id.as_versioned_ref(),
+            indexed_value.referenced_substates(),
+        )?;
         let known_child_vaults = substate_api
             .load_dependent_substates(&[account_substate_id.substate_id()])?
             .into_iter()
@@ -271,7 +274,7 @@ where
             // Save the vault substate
             substate_api.save_child(
                 account_substate_id.substate_id(),
-                versioned_vault_substate_id.as_ref(),
+                versioned_vault_substate_id.as_versioned_ref(),
                 [SubstateId::from(*latest_vault.resource_address())],
             )?;
 

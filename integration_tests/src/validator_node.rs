@@ -28,8 +28,7 @@ use std::{
 
 use reqwest::Url;
 use tari_common::configuration::{CommonConfig, StringList};
-use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::ConvertFromByteType;
+use tari_engine_types::FromByteType;
 use tari_ootle_app_utilities::{
     epoch_oracle_config::EpochOracleConfig,
     keypair::create_new_keypair,
@@ -37,9 +36,10 @@ use tari_ootle_app_utilities::{
 };
 use tari_ootle_common_types::{
     layer_one_transaction::{LayerOneTransactionDef, ValidatorRegistrationParams},
+    optional::Optional,
     Network,
 };
-use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
+use tari_ootle_wallet_sdk::models::AccountWithAddress;
 use tari_shutdown::Shutdown;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_validator_node::{run_validator_node, ApplicationConfig, ValidatorNodeConfig};
@@ -47,6 +47,7 @@ use tari_validator_node_client::{
     types::{LayerOneTransactionParams, PrepareLayerOneTransactionRequest},
     ValidatorNodeClient,
 };
+use tari_wallet_daemon_client::types::AccountsCreateRequest;
 use tokio::task;
 
 use crate::{
@@ -135,8 +136,28 @@ pub async fn spawn_validator_node(
     let mut wallet_client = walletd.get_authed_client().await;
 
     // get the default wallet account public key
-    let key = wallet_client.create_key(KeyBranch::Account).await.unwrap();
-    world.wallet_keys.insert(claim_fee_key_name, key.id);
+    let account = match wallet_client.accounts_get_default().await.optional().unwrap() {
+        Some(account) => AccountWithAddress {
+            account: account.account,
+            address: account.address,
+        },
+        None => {
+            let resp = wallet_client
+                .create_account(AccountsCreateRequest {
+                    account_name: None,
+                    is_default: None,
+                    key_id: None,
+                })
+                .await
+                .unwrap();
+
+            AccountWithAddress {
+                account: resp.account,
+                address: resp.address,
+            }
+        },
+    };
+    world.wallet_keys.insert(claim_fee_key_name, account.account.key_index);
 
     // let wallet_account_pub = wallet_client.accounts_get_default().await.unwrap().public_key;
     let name = validator_node_name.clone();
@@ -185,7 +206,7 @@ pub async fn spawn_validator_node(
             config.validator_node.p2p.listener_port = port;
 
             config.validator_node.fee_claim_public_key =
-                RistrettoPublicKey::convert_from_byte_type(&key.public_key).unwrap();
+                account.address.account_public_key().try_from_byte_type().unwrap();
 
             // Add all other VNs as peer seeds
             config.peer_seeds.peer_seeds = StringList::from(peer_seeds);

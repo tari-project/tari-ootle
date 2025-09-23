@@ -16,7 +16,7 @@ fn it_prevents_reentrant_withdraw() {
 
     let result = test.execute_expect_success(
         Transaction::builder()
-            .call_function(faucet_addr, "mint", args![Amount(1000)])
+            .call_function(faucet_addr, "mint", args![1000])
             .build_and_seal(test.secret_key()),
         vec![],
     );
@@ -41,7 +41,7 @@ fn it_prevents_reentrant_withdraw() {
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .call_method(reentrancy, "get_balance", args![])
-            .call_method(reentrancy, "reentrant_withdraw", args![Amount(1000)])
+            .call_method(reentrancy, "reentrant_withdraw", args![1000])
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(reentrancy, "get_balance", args![])
             .call_method(account, "deposit", args![Workspace("bucket")])

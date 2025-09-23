@@ -32,10 +32,10 @@ impl Runner {
             .new_transaction_builder()
             .with_fee_instructions_builder(|builder| {
                 builder
-                    .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Amount(1_000_000_000)])
+                    .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![1_000_000_000])
                     .put_last_instruction_output_on_workspace("coins")
                     .create_account_with_bucket(owner_public_key, "coins")
-                    .call_method(account_address, "pay_fee", args![Amount(1000)])
+                    .call_method(account_address, "pay_fee", args![1000])
             })
             .with_inputs([
                 SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
@@ -149,7 +149,7 @@ impl Runner {
                             .call_method(faucet.component_address, "take_free_coins", args![])
                             .put_last_instruction_output_on_workspace("faucet")
                             .call_method(account.component_address, "deposit", args![Workspace("faucet")])
-                            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Amount(1_000_000)])
+                            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![1_000_000])
                             .put_last_instruction_output_on_workspace("xtr")
                             .call_method(account.component_address, "deposit", args![Workspace("xtr")])
                             .add_input(SubstateRequirement::unversioned(account.component_address))

@@ -23,7 +23,8 @@
 use std::path::Path;
 
 use clap::{Args, Subcommand};
-use tari_engine_types::{instruction::Instruction, ToByteType};
+use tari_engine_types::ToByteType;
+use tari_transaction::Instruction;
 use tari_validator_node_client::{types::SubmitTransactionResponse, ValidatorNodeClient};
 
 use crate::{
@@ -66,7 +67,7 @@ pub async fn handle_create(
         .ok_or_else(|| anyhow::anyhow!("No active key"))?;
 
     let instruction = Instruction::CreateAccount {
-        public_key_address: key.public_key.to_byte_type(),
+        owner_public_key: key.public_key.to_byte_type(),
         owner_rule: None,
         access_rules: None,
         workspace_id: None,

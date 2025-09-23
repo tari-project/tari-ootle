@@ -19,7 +19,6 @@ use crate::support::{logging::setup_logger, Test, TestAddress, TEST_NUM_PRESHARD
 async fn check_state_transitions() {
     setup_logger();
     let mut test = Test::builder()
-        .with_rocks_path("/tmp/test{}")
         .modify_consensus_constants(|config| {
             config.pacemaker_block_time = Duration::from_millis(500);
         })

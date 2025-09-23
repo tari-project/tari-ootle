@@ -28,8 +28,6 @@ use crate::{Epoch, Network, NumPreshards};
 pub struct ConsensusConstants {
     pub base_layer_confirmations: u64,
     pub committee_size: u32,
-    pub max_base_layer_blocks_ahead: u64,
-    pub max_base_layer_blocks_behind: u64,
     pub num_preshards: NumPreshards,
     pub pacemaker_block_time: Duration,
     /// The number of missed proposals before a SuspendNode command is sent.
@@ -54,8 +52,6 @@ impl ConsensusConstants {
         Self {
             base_layer_confirmations: 3,
             committee_size: 7,
-            max_base_layer_blocks_ahead: 5,
-            max_base_layer_blocks_behind: 5,
             num_preshards: NumPreshards::current(),
             pacemaker_block_time: Duration::from_secs(10),
             missed_proposal_suspend_threshold: 5,

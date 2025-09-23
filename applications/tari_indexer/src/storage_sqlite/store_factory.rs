@@ -17,7 +17,7 @@ use tari_engine_types::{events::Event, substate::SubstateId, Utxo};
 use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate, TransactionEntry};
 use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, ShardGroup, StateVersion};
 use tari_ootle_storage::{
-    consensus_models::{EpochCheckpoint, SubstateUpdateProof},
+    consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof},
     StorageError,
 };
 use tari_ootle_storage_sqlite::{error::SqliteStorageError, SqliteTransaction};
@@ -33,7 +33,7 @@ use tari_transaction::{Transaction, TransactionId};
 
 use crate::{
     storage_sqlite::{
-        models::{EventRecord, KeyValue, NewScannedBlockId, NewSubstate, SubstateRecord, UtxoUpdateRecord},
+        models::{EventRecord, KeyValue, NewScannedBlockId, SubstateRecord, UtxoUpdateRecord},
         reader::SqliteStoreReadTransaction,
         writer::SqliteStoreWriteTransaction,
     },
@@ -209,7 +209,7 @@ pub trait IndexerStoreWriteTransaction {
         &mut self,
         updates: I,
     ) -> Result<(), StorageError>;
-    fn upsert_substate(&mut self, new_substate: NewSubstate) -> Result<(), StorageError>;
+    fn upsert_substate(&mut self, substate: &SubstateData) -> Result<(), StorageError>;
     fn batch_insert_events<I: IntoIterator<Item = Event>>(&mut self, events: I) -> Result<(), StorageError>;
     fn save_scanned_block_id(&mut self, new_scanned_block_id: NewScannedBlockId) -> Result<(), StorageError>;
     fn delete_scanned_epochs_older_than(&mut self, epoch: Epoch) -> Result<(), StorageError>;

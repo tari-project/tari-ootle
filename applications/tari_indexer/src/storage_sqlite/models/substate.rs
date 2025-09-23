@@ -43,7 +43,6 @@ pub struct SubstateRecord {
     pub data: String,
     pub template_address: Option<String>,
     pub module_name: Option<String>,
-    pub timestamp: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
     pub created_at: PrimitiveDateTime,
 }
@@ -72,5 +71,4 @@ pub struct NewSubstate {
     pub data: String,
     pub template_address: Option<String>,
     pub module_name: Option<String>,
-    pub timestamp: PrimitiveDateTime,
 }

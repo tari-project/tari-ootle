@@ -553,10 +553,6 @@ impl Block {
         Ok(())
     }
 
-    pub fn remove_diff<TTx: StateStoreWriteTransaction>(&self, tx: &mut TTx) -> Result<(), StorageError> {
-        tx.block_diffs_remove(self.id())
-    }
-
     pub fn remove_pending_tree_diff_and_return<TTx: StateStoreWriteTransaction>(
         &self,
         tx: &mut TTx,
@@ -766,6 +762,9 @@ impl Block {
         tx: &TTx,
         num_preshards: NumPreshards,
     ) -> Result<Vec<SubstateUpdateProof>, StorageError> {
+        // The block diff is removed as soon as it is committed, so we need to reconstruct the substate updates from the
+        // committed transactions. TODO: this does not include "implicit" state transitions i.e. validator fee
+        // pools.
         let committed = self
             .commands()
             .iter()

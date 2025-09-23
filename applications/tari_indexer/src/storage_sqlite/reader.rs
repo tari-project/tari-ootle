@@ -100,7 +100,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                 let substate_id = SubstateId::from_str(&s.address)?;
                 let version = s.version as u32;
                 let template_address = s.template_address.map(|h| deserialize_hex_try_from(&h)).transpose()?;
-                let timestamp = s.timestamp;
+                let timestamp = s.updated_at;
                 Ok(ListSubstateItem {
                     substate_id,
                     module_name: s.module_name,

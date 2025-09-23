@@ -12,7 +12,8 @@ pub struct DatabaseOptions {
     pub state_history_length: u64,
     /// The number of epochs back from the current epoch to keep in the database.
     /// This includes blocks, foreign proposals etc.
-    /// The default is 1, which means we keep the previous epoch's data. It is not recommended to set this to 0.
+    /// The default is 1, which means we keep the previous epoch's data until this epoch has passed. It is not
+    /// recommended to set this to 0.
     pub epoch_history_length: Epoch,
 }
 

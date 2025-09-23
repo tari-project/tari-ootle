@@ -6,8 +6,6 @@ create table substates
     data             text      not NULL,
     template_address text      NULL,
     module_name      text      NULL,
-    -- Block timestamp
-    timestamp        timestamp not NULL,
     updated_at       timestamp not null default current_timestamp,
     created_at       timestamp not null default current_timestamp
 );

@@ -8,4 +8,5 @@ export type VNGetIdentityResponse = {
   supported_protocols: Array<string>;
   protocol_version: string;
   user_agent: string;
+  fee_claim_public_key: RistrettoPublicKeyBytes;
 };

@@ -29,12 +29,14 @@ import {
 import CopyToClipboard from "@components/CopyToClipboard";
 import PlaceHolder from "./components/PlaceHolder";
 import SortableHeader from "./components/SortableHeader";
+import useCurrencyStore from "@store/currencyStore";
 
 function StealthUtxoList({ account }: { account: Account }) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [statusFilter, setStatusFilter] = useState<OutputStatus | "all">("all");
   const { data: balancesData } = useAccountsGetBalances(substateIdToString(account.component_address));
+  const { currencySymbol } = useCurrencyStore();
 
   const stealthResources = balancesData?.balances?.filter((balance) => balance.resource_type === "Stealth") || [];
 
@@ -107,7 +109,7 @@ function StealthUtxoList({ account }: { account: Account }) {
                         {shortenString(utxo.address.id)}
                         <CopyToClipboard copy={utxo.address.id} />
                       </DataTableCell>
-                      <DataTableCell>{bigintToDecimalString(utxo.value, 6)} XTR</DataTableCell>
+                      <DataTableCell>{bigintToDecimalString(utxo.value, 6)} {currencySymbol}</DataTableCell>
                       <DataTableCell>
                         <StatusChip status={utxo.status} />
                       </DataTableCell>

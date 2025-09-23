@@ -32,7 +32,8 @@ import useAccountStore from "@store/accountStore";
 import { useEffect } from "react";
 import { substateIdToString, bigintToDecimalString } from "@utils/helpers";
 import { Account } from "@tari-project/typescript-bindings";
-import { XTR_RESOURCE } from "@utils/constants";
+
+const XTR_RESOURCE = "resource_0101010101010101010101010101010101010101010101010101010101010101";
 
 export default function AccountBalance() {
   const showBalance = useAccountStore((state) => state.showBalance);

@@ -13,11 +13,12 @@ import {
 } from "@mui/material";
 import { useState } from "react";
 import { useStealthUtxosList } from "@/services/api/hooks/useAccounts";
-import { Account, OutputStatus } from "@tari-project/typescript-bindings";
-import { XTR_RESOURCE } from "@utils/constants";
+import { Account, OutputStatus, ResourceAddress } from "@tari-project/typescript-bindings";
 import FetchStatusCheck from "@/components/FetchStatusCheck";
 import { DataTableCell } from "@components/StyledComponents";
 import StatusChip from "./components/StatusChip";
+import { useAccountsGetBalances } from "@/services/api/hooks/useAccounts";
+import { substateIdToString } from "@utils/helpers";
 import {
   emptyRows,
   handleChangePage,
@@ -33,6 +34,11 @@ function StealthUtxoList({ account }: { account: Account }) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [statusFilter, setStatusFilter] = useState<OutputStatus | "all">("all");
+  const { data: balancesData } = useAccountsGetBalances(substateIdToString(account.component_address));
+
+  const stealthResources = balancesData?.balances?.filter((balance) => balance.resource_type === "Stealth") || [];
+
+  const resourceToUse = stealthResources[0]?.resource_address;
 
   const getStatusDisplayName = (status: OutputStatus | "all") => {
     switch (status) {
@@ -46,9 +52,10 @@ function StealthUtxoList({ account }: { account: Account }) {
         return status;
     }
   };
+
   const { data, isLoading, isError, error } = useStealthUtxosList(
     account.component_address,
-    XTR_RESOURCE,
+    resourceToUse!,
     statusFilter === "all" ? null : statusFilter,
   );
 
@@ -60,6 +67,14 @@ function StealthUtxoList({ account }: { account: Account }) {
     5: "10%",
     6: "10%",
   };
+
+  if (!resourceToUse) {
+    return (
+      <Stack minHeight={300} alignItems="center" justifyContent="center">
+        <PlaceHolder status="empty" />
+      </Stack>
+    );
+  }
 
   return (
     <Stack minHeight={300}>

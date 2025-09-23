@@ -26,7 +26,8 @@ import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
-import { Typography, Box, Stack } from "@mui/material";
+import IconButton from "@mui/material/IconButton";
+import { Typography, Box, Stack, Icon, Tooltip } from "@mui/material";
 import { useState } from "react";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import { DataTableCell } from "@components/StyledComponents";
@@ -45,6 +46,8 @@ import {
   Amount,
 } from "@tari-project/typescript-bindings";
 import CopyAddress from "@components/CopyAddress";
+import { IoWalletOutline } from "react-icons/io5";
+import { useNavigate } from "react-router-dom";
 
 interface BalanceRowProps {
   token_symbol: string;
@@ -86,6 +89,7 @@ function BalanceRow({
   onSendClicked,
 }: BalanceRowProps) {
   const showBalance = useAccountStore((state) => state.showBalance);
+  const navigate = useNavigate();
   return (
     <TableRow key={token_symbol || resource_address}>
       <DataTableCell>{vault_address ? <CopyAddress address={vault_address} /> : "--"}</DataTableCell>
@@ -99,13 +103,22 @@ function BalanceRow({
         {showBalance ? bigintToDecimalString(balance, divisibility) + " " + token_symbol : "*************"}
       </DataTableCell>
       <DataTableCell>
-        <ConfidentialBalance
-          show={showBalance}
-          resourceType={resource_type}
-          balance={confidential_balance}
-          divisibility={divisibility}
-          token_symbol={token_symbol}
-        />
+        <Stack direction="row" alignItems="center" gap={1}>
+          <ConfidentialBalance
+            show={showBalance}
+            resourceType={resource_type}
+            balance={confidential_balance}
+            divisibility={divisibility}
+            token_symbol={token_symbol}
+          />
+          {resource_type === "Stealth" && (
+            <Tooltip title="View Stealth UTXOs">
+              <IconButton size="small" onClick={() => navigate("/stealth-utxos")} color="primary">
+                <IoWalletOutline />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Stack>
       </DataTableCell>
       <DataTableCell>
         <Button variant="outlined" onClick={() => onSendClicked?.(resource_address, resource_type)}>

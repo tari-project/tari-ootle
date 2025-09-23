@@ -29,19 +29,7 @@ impl ProcessDefinition for WalletDaemonCreateAccount {
             .arg("-b")
             .arg(context.base_path())
             .arg("--network")
-            .arg(context.network().to_string())
-            .args([
-                "create-account",
-                "--name",
-                "Fees",
-                "--key",
-                "0",
-                "--set-active",
-                "--output",
-                output_path
-                    .to_str()
-                    .context("Non-UTF8 output path in WalletDaemonCreateAccount")?,
-            ]);
+            .arg(context.network().to_string());
 
         if let Some(override_keyring_password) =
             context.get_setting(wallet_daemon::OVERRIDE_KEYRING_PASSWORD_SETTINGS_KEY)
@@ -50,6 +38,19 @@ impl ProcessDefinition for WalletDaemonCreateAccount {
                 .arg("--override-keyring-password")
                 .arg(override_keyring_password);
         }
+
+        command.args([
+            "create-account",
+            "--name",
+            "Validator Fees",
+            "--key",
+            "0",
+            "--set-active",
+            "--output",
+            output_path
+                .to_str()
+                .context("Non-UTF8 output path in WalletDaemonCreateAccount")?,
+        ]);
 
         Ok(command)
     }

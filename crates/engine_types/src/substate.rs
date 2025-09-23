@@ -42,7 +42,7 @@ use tari_template_lib::{
         VaultId,
     },
     prelude::PUBLIC_IDENTITY_RESOURCE_ADDRESS,
-    types::{Hash, ObjectKey},
+    types::{Hash, ObjectKey, TemplateAddress},
 };
 
 use crate::{
@@ -774,6 +774,10 @@ impl SubstateValue {
             SubstateValue::Utxo(utxo) => Some(utxo),
             _ => None,
         }
+    }
+
+    pub fn related_template_address(&self) -> Option<TemplateAddress> {
+        self.as_component().map(|c| c.template_address)
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {

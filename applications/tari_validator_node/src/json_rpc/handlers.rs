@@ -164,6 +164,7 @@ impl JsonRpcHandlers {
             .get_local_peer_info()
             .await
             .map_err(internal_error(answer_id))?;
+        let fee_claim_public_key = self.config.validator_node.fee_claim_public_key.to_byte_type();
         let response = GetIdentityResponse {
             peer_id: info.peer_id.to_string(),
             public_key: self.keypair.public_key().to_byte_type(),
@@ -171,6 +172,7 @@ impl JsonRpcHandlers {
             supported_protocols: info.protocols.into_iter().map(|p| p.to_string()).collect(),
             protocol_version: info.protocol_version,
             user_agent: info.agent_version,
+            fee_claim_public_key,
         };
 
         Ok(JsonRpcResponse::success(answer_id, response))

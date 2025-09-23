@@ -182,6 +182,7 @@ impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
                     .then(|| child.get_substate_updates(tx, self.num_preshards))
                     .transpose()?
                     .unwrap_or_default();
+
                 let transaction_receipts = matches!(
                     substates_selection,
                     proto::rpc::StreamSubstateSelection::TransactionReceiptsOnly

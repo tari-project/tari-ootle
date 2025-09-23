@@ -35,58 +35,14 @@ import type {
 } from "@tari-project/typescript-bindings";
 
 function Info({
-  epoch,
-  identity,
-  shardKey,
-}: {
+                epoch,
+                identity,
+                shardKey,
+              }: {
   epoch: GetEpochManagerStatsResponse;
   identity: VNGetIdentityResponse;
   shardKey: string | null;
 }) {
-  const [registering, setRegistering] = useState(false);
-  const [registerMessage, setRegisterMessage] = useState("");
-  const [feeClaimPublicKey, setRegisterFeeClaimPublicKey] = useState("");
-
-  const renderShardKey = () => {
-    if (shardKey === null)
-      return (
-        <>
-          {/* <TableRow>
-            <TableCell>Shard key</TableCell>
-            <DataTableCell>
-              <span
-                className={`${registering ? 'disabled-button' : 'button'}`}
-                id="register"
-                onClick={registering ? () => {} : register}
-              >
-                Register
-              </span>
-              {registerMessage ? <span>{registerMessage}</span> : null}
-            </DataTableCell>
-          </TableRow> */}
-          <TableRow>
-            <TableCell>Shard key</TableCell>
-            <DataTableCell>
-              <TextField
-                disabled={registering}
-                name="feeClaimFublicKey"
-                label="Fee Claim Public Key"
-                style={{ flexGrow: 1 }}
-                value={feeClaimPublicKey}
-                onChange={(e) => setRegisterFeeClaimPublicKey(e.target.value)}
-              />
-              {registerMessage ? <span style={{ marginLeft: "20px" }}>{registerMessage}</span> : null}
-            </DataTableCell>
-          </TableRow>
-        </>
-      );
-    return (
-      <TableRow>
-        <TableCell>Shard key</TableCell>
-        <DataTableCell className="key">{shardKey}</DataTableCell>
-      </TableRow>
-    );
-  };
   return (
     <div>
       <TableContainer>
@@ -106,11 +62,14 @@ function Info({
               <TableCell>Listen addresses</TableCell>
               <DataTableCell>{identity.public_addresses?.join("\n")}</DataTableCell>
             </TableRow>
-            <TableRow>
-              <TableCell>Public key</TableCell>
-              <DataTableCell>{identity.public_key}</DataTableCell>
+            <TableRow><TableCell>Public key</TableCell> <DataTableCell>{identity.public_key}</DataTableCell>
             </TableRow>
-            {renderShardKey()}
+            <TableRow><TableCell>Claim key</TableCell> <DataTableCell>{identity.fee_claim_public_key}</DataTableCell>
+            </TableRow>
+            <TableRow>
+              <TableCell>Shard key</TableCell>
+              <DataTableCell className="key">{shardKey}</DataTableCell>
+            </TableRow>
           </TableBody>
         </Table>
       </TableContainer>

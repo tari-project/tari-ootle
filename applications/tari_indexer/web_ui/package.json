@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "clean-dist": "rm -rf dist && rm -f tsconfig.tsbuildinfo"
+    "clean-dist": "rm -rf dist/* && rm -f tsconfig.tsbuildinfo"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",

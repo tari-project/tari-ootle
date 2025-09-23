@@ -74,7 +74,6 @@ diesel::table! {
         data -> Text,
         template_address -> Nullable<Text>,
         module_name -> Nullable<Text>,
-        timestamp -> Timestamp,
         updated_at -> Timestamp,
         created_at -> Timestamp,
     }

@@ -22,7 +22,7 @@ use tari_template_lib::{
 use crate::{
     apis::{
         confidential_transfer::{ConfidentialTransferApiError, ResolvedAccountDetails},
-        key_manager::{KeyManagerApi, KeyManagerApiError},
+        key_manager::{KeyBranch, KeyManagerApi, KeyManagerApiError},
         substate::{SubstatesApi, ValidatorScanResult},
     },
     models::{Account, AccountUpdate, AccountWithAddress, VaultBalance, VaultModel},
@@ -111,6 +111,7 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
                     return Err(AccountsApiError::AccountNameAlreadyExists { name: name.to_string() });
                 }
             }
+            tx.key_manager_insert_or_ignore(KeyBranch::Account.as_str(), owner_key_index)?;
             tx.accounts_insert(
                 account_name,
                 account_address,

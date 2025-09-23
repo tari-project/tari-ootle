@@ -22,7 +22,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_p2p::{proto::rpc, TariMessagingSpec};
 use tari_ootle_storage::{
-    consensus_models::{EpochCheckpoint, SubstateUpdateProof, SubstateValueFilterFlags},
+    consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof, SubstateValueFilterFlags},
     StorageError,
 };
 use tari_rpc_framework::__macro_reexports::future::Either;
@@ -282,6 +282,7 @@ impl NetworkWideStateSync {
         let mut update_buf = Vec::new();
         let mut utxos_buf = Vec::new();
         let mut transactions_buf = Vec::new();
+        let mut validator_fee_pools_buf = Vec::new();
 
         let mut has_synced_global_shard = false;
 
@@ -297,6 +298,7 @@ impl NetworkWideStateSync {
                     &mut update_buf,
                     &mut utxos_buf,
                     &mut transactions_buf,
+                    &mut validator_fee_pools_buf,
                     shard_group,
                     &mut session,
                 )
@@ -311,6 +313,7 @@ impl NetworkWideStateSync {
                     &mut update_buf,
                     &mut utxos_buf,
                     &mut transactions_buf,
+                    &mut validator_fee_pools_buf,
                     shard_group,
                     &mut session,
                 )
@@ -328,6 +331,7 @@ impl NetworkWideStateSync {
         update_buf: &mut Vec<(Epoch, SubstateUpdateProof)>,
         utxos_buf: &mut Vec<UtxoUpdateRecord>,
         transactions_buf: &mut Vec<TransactionReceipt>,
+        validator_fee_pools_buf: &mut Vec<SubstateData>,
         shard_group: ShardGroup,
         session: &mut ValidatorRpcSession,
     ) -> Result<(), NetworkStateSyncError> {
@@ -348,6 +352,7 @@ impl NetworkWideStateSync {
                 until_epoch: None,
                 value_filters: (SubstateValueFilterFlags::UTXO |
                     SubstateValueFilterFlags::TEMPLATE |
+                    SubstateValueFilterFlags::VALIDATOR_FEE_POOL |
                     SubstateValueFilterFlags::TRANSACTION_RECEIPT)
                     .bits(),
             })
@@ -389,6 +394,7 @@ impl NetworkWideStateSync {
                     &mut templates_buf,
                     utxos_buf,
                     transactions_buf,
+                    validator_fee_pools_buf,
                 )?;
             }
             if msg.has_more {
@@ -405,6 +411,11 @@ impl NetworkWideStateSync {
                 tx.batch_insert_substate_transitions(shard, state_version, update_buf.drain(..))?;
                 debug!(target: LOG_TARGET, "✅ Committing {} UTXOs for shard {shard} (epoch: {msg_epoch})", utxos_buf.len());
                 tx.batch_insert_utxo_updates(utxos_buf.drain(..))?;
+                // TODO: there are many ways to do this. This is probably not the best way. But this allows wallet to query for validator fee pool values since
+                // block sync does not sync validator fee pools (due to block diffs being removed on block commit).
+                for substate_data in validator_fee_pools_buf.drain(..) {
+                    tx.upsert_substate(&substate_data)?;
+                }
                 // TODO: transaction events and templates
                 debug!(target: LOG_TARGET, "✅ Committing {} transactions for shard {shard} (epoch: {msg_epoch})", transactions_buf.len());
                 self.stats.increase_events(transactions_buf.len());
@@ -453,6 +464,7 @@ fn extend_bufs_from_substate_update(
     templates_buf: &mut Vec<TemplateChange>,
     utxos_buf: &mut Vec<UtxoUpdateRecord>,
     transactions_buf: &mut Vec<TransactionReceipt>,
+    validator_fee_pools_buf: &mut Vec<SubstateData>,
 ) -> Result<(), NetworkStateSyncError> {
     match &update {
         SubstateUpdateProof::Create(create) => match create.substate.value().value() {
@@ -488,6 +500,13 @@ fn extend_bufs_from_substate_update(
                     // This is invalid, but possible given a malfunctioning validator
                     warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received template substate with invalid address: {}", create.substate.substate_id());
                 }
+            },
+            Some(SubstateValue::ValidatorFeePool(_)) => {
+                validator_fee_pools_buf.push(SubstateData {
+                    substate_id: create.substate.substate_id().clone(),
+                    version: create.substate.version,
+                    value: create.substate.value().clone(),
+                });
             },
             Some(_) => {},
             None => {

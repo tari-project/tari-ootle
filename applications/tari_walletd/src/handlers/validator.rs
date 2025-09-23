@@ -9,7 +9,7 @@ use either::Either;
 use log::*;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{substate::SubstateId, ToByteType};
-use tari_ootle_common_types::{derive_fee_pool_address, optional::Optional, SubstateRequirement};
+use tari_ootle_common_types::{derive_fee_pool_address, SubstateAddress, SubstateRequirement};
 use tari_transaction::args;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
@@ -49,41 +49,45 @@ pub async fn handle_get_validator_fees(
         },
         AccountOrKeyIndex::KeyIndex(index) => sdk.key_manager_api().derive_account_key(index)?,
     };
-    let claim_public_key = RistrettoPublicKey::from_secret_key(&claim_key.key);
+    let claim_public_key = RistrettoPublicKey::from_secret_key(&claim_key.key).to_byte_type();
 
     let shards = req
         .shard_group
         .map(|sg| Either::Left(sg.shard_iter()))
         .unwrap_or_else(|| Either::Right(NUM_PRESHARDS.all_shards_iter()));
 
-    let addresses = shards.into_iter().map(|shard| {
-        (
-            shard,
-            derive_fee_pool_address(&claim_public_key.to_byte_type(), NUM_PRESHARDS, shard),
-        )
-    });
+    let ids = shards
+        .into_iter()
+        .map(|shard| derive_fee_pool_address(&claim_public_key, NUM_PRESHARDS, shard))
+        .map(SubstateId::from)
+        .collect::<Vec<_>>();
 
-    let mut fees = HashMap::new();
-
-    // TODO(perf); bulk scan
-    for (shard, address) in addresses {
-        let Some(result) = context
+    let mut fees = HashMap::with_capacity(ids.len());
+    const CHUNK_SIZE: usize = 20;
+    for id_chunk in ids.chunks(CHUNK_SIZE) {
+        let substates = context
             .wallet_sdk()
             .substate_api()
-            .fetch_substate_from_network(&SubstateId::from(address), None)
-            .await
-            .optional()?
-        else {
-            continue;
-        };
+            .get_substates_from_network(id_chunk.to_vec())
+            .await?;
 
-        let Some(amount) = result.substate.as_validator_fee_pool().map(|p| p.amount()) else {
-            warn!(target: LOG_TARGET, "Incorrect substate type found at address {}", address);
-            continue;
-        };
+        info!(target: LOG_TARGET, "🔍️ Found {}/{} fee pool substates for claim key {}", substates.len(), CHUNK_SIZE, claim_public_key);
 
-        if amount > 0 {
-            fees.insert(shard, FeePoolDetails { amount, address });
+        for (substate_id, substate) in substates {
+            let Some(address) = substate_id.as_validator_fee_pool_address() else {
+                warn!(target: LOG_TARGET, "Incorrect substate ID found: {}", substate_id);
+                continue;
+            };
+
+            let Some(amount) = substate.substate_value().as_validator_fee_pool().map(|p| p.amount()) else {
+                warn!(target: LOG_TARGET, "Incorrect substate type found at address {}", substate_id);
+                continue;
+            };
+
+            if amount > 0 {
+                let shard = SubstateAddress::from_substate_id(&substate_id, substate.version()).to_shard(NUM_PRESHARDS);
+                fees.insert(shard, FeePoolDetails { amount, address });
+            }
         }
     }
 

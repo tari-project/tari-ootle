@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "clean-dist": "rm -rf dist && rm -f tsconfig.tsbuildinfo"
+    "clean-dist": "rm -rf dist/* && rm -f tsconfig.tsbuildinfo"
   },
   "engines": {
     "node": ">=18.0.0"

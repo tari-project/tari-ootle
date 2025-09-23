@@ -1,13 +1,13 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use log::*;
 use tari_engine_types::{
     indexed_value::{IndexedValueError, IndexedWellKnownTypes},
     resource::Resource,
-    substate::{SubstateId, SubstateValue},
+    substate::{Substate, SubstateId, SubstateValue},
     transaction_receipt::TransactionReceiptAddress,
 };
 use tari_ootle_common_types::{
@@ -61,6 +61,16 @@ where
         let mut tx = self.store.create_read_tx()?;
         let substates = tx.substates_get_all(filter_by_type, filter_by_template, limit, offset)?;
         Ok(substates)
+    }
+
+    pub async fn get_substates_from_network(
+        &self,
+        ids: Vec<SubstateId>,
+    ) -> Result<HashMap<SubstateId, Substate>, SubstateApiError> {
+        self.network_interface
+            .get_substates(ids)
+            .await
+            .map_err(|e| SubstateApiError::NetworkInterfaceError(e.into()))
     }
 
     pub fn load_dependent_substates(

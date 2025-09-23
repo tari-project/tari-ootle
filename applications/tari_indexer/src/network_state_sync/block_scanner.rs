@@ -4,21 +4,16 @@
 use futures::StreamExt;
 use log::*;
 use tari_consensus_types::BlockId;
-use tari_engine_types::substate::SubstateValue;
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_ootle_common_types::{committee::Committee, Epoch, PeerAddress, ShardGroup};
 use tari_ootle_p2p::{proto, proto::rpc::SyncBlocksRequest};
-use tari_ootle_storage::{
-    consensus_models::{Block, SubstateUpdateProof},
-    time::{OffsetDateTime, PrimitiveDateTime},
-};
-use tari_template_lib::types::TemplateAddress;
+use tari_ootle_storage::consensus_models::{Block, SubstateUpdateProof};
 use tari_validator_node_rpc::client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory};
 
 use crate::{
     block_data::BlockData,
     storage_sqlite::{
-        models::{NewScannedBlockId, NewSubstate},
+        models::NewScannedBlockId,
         IndexerStore,
         IndexerStoreReadTransaction,
         IndexerStoreWriteTransaction,
@@ -107,12 +102,19 @@ impl BlockScanner {
 
             count += new_blocks.len();
             for block_data in new_blocks {
-                let timestamp = unix_epoch_to_primitive_date_time(block_data.block.timestamp());
                 // TODO: store blocks
                 // TODO: remove substates (I think). These can be requested lazily and cached (LRU) as needed to allow
                 // TODO: an committed transaction should queue a shard state sync in the affected shards
                 // an upper bound on substates stored in the indexer.
-                self.store_substates_in_db(&block_data.diff, timestamp)?;
+                info!(
+                    target: LOG_TARGET,
+                    "Storing {} substate update(s) for block {} (epoch={}, height={})",
+                    block_data.diff.len(),
+                    block_data.block.id(),
+                    block_data.block.epoch(),
+                    block_data.block.height()
+                );
+                self.store_substates_in_db(&block_data.diff)?;
             }
         }
 
@@ -125,67 +127,30 @@ impl BlockScanner {
             .map_err(|e| e.into())
     }
 
-    fn store_substates_in_db(
-        &self,
-        updates: &[SubstateUpdateProof],
-        timestamp: PrimitiveDateTime,
-    ) -> Result<(), anyhow::Error> {
+    fn store_substates_in_db(&self, updates: &[SubstateUpdateProof]) -> Result<(), anyhow::Error> {
         let mut tx = self.substate_store.create_write_tx()?;
         // store/update up substates if any
         for update in updates {
             match update {
                 SubstateUpdateProof::Create(create) => {
-                    let maybe_substate_value = create.substate.value.value();
-                    if maybe_substate_value.is_none() {
+                    if create.substate.value.value().is_none() {
                         warn!(
                             target: LOG_TARGET,
                             "⚠️ Received UP substate {} without value. This indicates that the substate has been pruned. Some event data is not available.", create.substate.as_versioned_substate_id_ref(),
                         );
                     }
-                    let template_address = maybe_substate_value.and_then(Self::extract_template_address_from_substate);
-                    let module_name = maybe_substate_value.and_then(Self::extract_module_name_from_substate);
-                    let substate_row = NewSubstate {
-                        address: create.substate.substate_id.to_string(),
-                        version: create.substate.version as i32,
-                        data: maybe_substate_value
-                            .map(Self::encode_substate)
-                            .transpose()?
-                            .unwrap_or_default(),
-                        template_address: template_address.map(|s| s.to_string()),
-                        module_name,
-                        timestamp,
-                    };
                     debug!(
                         target: LOG_TARGET,
                         "Saving substate: {:?}",
-                        substate_row
+                        create.substate
                     );
-                    tx.upsert_substate(substate_row)?;
+                    tx.upsert_substate(&create.substate)?;
                 },
                 SubstateUpdateProof::Destroy(_) => {},
             }
         }
         tx.commit()?;
         Ok(())
-    }
-
-    fn extract_template_address_from_substate(substate: &SubstateValue) -> Option<TemplateAddress> {
-        match substate {
-            SubstateValue::Component(c) => Some(c.template_address),
-            _ => None,
-        }
-    }
-
-    fn extract_module_name_from_substate(substate: &SubstateValue) -> Option<String> {
-        match substate {
-            SubstateValue::Component(c) => Some(c.module_name.to_owned()),
-            _ => None,
-        }
-    }
-
-    fn encode_substate(substate: &SubstateValue) -> Result<String, anyhow::Error> {
-        let pretty_json = serde_json::to_string_pretty(&substate)?;
-        Ok(pretty_json)
     }
 
     async fn get_oldest_scanned_epoch(&self) -> Result<Option<Epoch>, anyhow::Error> {
@@ -360,30 +325,4 @@ impl BlockScanner {
 
         Ok(blocks)
     }
-}
-
-fn unix_epoch_to_primitive_date_time(timestamp: u64) -> PrimitiveDateTime {
-    let timestamp = i64::try_from(timestamp).unwrap_or_else(|e| {
-        // TODO: this is very possible because we trust that the timestamp is roughly correct, however
-        // it is purely informational and not enforced in consensus therefore could be any value and
-        // therefore cannot be relied for ordering (use (epoch,height) instead).
-        warn!(
-            target: LOG_TARGET,
-            "Failed to convert block timestamp to PrimitiveDateTime: {}",
-            e
-        );
-        i64::MAX // = August 17, 292278994, 07:12:55.807 UTC
-    });
-    OffsetDateTime::from_unix_timestamp(timestamp)
-        .map(|osdt| PrimitiveDateTime::new(osdt.date(), osdt.time()))
-        .unwrap_or_else(|e| {
-            warn!(
-                target: LOG_TARGET,
-                "Failed to convert block timestamp to OffsetDateTime: {}. Using UNIX_EPOCH",
-                e
-            );
-            // An error cannot be because the timestamp is too small, because we use an u64 and a zero unix
-            // timestamp represents a greater date (1970 AD) than the minimum (9999 BC)
-            PrimitiveDateTime::MAX
-        })
 }

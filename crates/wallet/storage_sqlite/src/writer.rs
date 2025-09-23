@@ -221,6 +221,9 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         let index = i64::try_from(index)
             .map_err(|_| WalletStorageError::general("key_manager_set_active_index", "index too large"))?;
 
+        // Ensure it exists
+        self.key_manager_insert_or_ignore(branch, index as u64)?;
+
         let active_id = key_manager_states::table
             .select(key_manager_states::id)
             .filter(key_manager_states::branch_seed.eq(branch))

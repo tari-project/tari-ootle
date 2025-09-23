@@ -65,6 +65,7 @@ pub struct GetIdentityResponse {
     pub supported_protocols: Vec<String>,
     pub protocol_version: String,
     pub user_agent: String,
+    pub fee_claim_public_key: RistrettoPublicKeyBytes,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

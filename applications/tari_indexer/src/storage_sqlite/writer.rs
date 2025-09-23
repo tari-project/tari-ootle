@@ -9,7 +9,7 @@ use serde::Serialize;
 use tari_engine_types::events::Event;
 use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, StateVersion};
 use tari_ootle_storage::{
-    consensus_models::{EpochCheckpoint, SubstateUpdateProof},
+    consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof},
     StorageError,
 };
 use tari_ootle_storage_sqlite::SqliteTransaction;
@@ -170,8 +170,31 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         Ok(())
     }
 
-    fn upsert_substate(&mut self, new_substate: NewSubstate) -> Result<(), StorageError> {
+    fn upsert_substate(&mut self, substate: &SubstateData) -> Result<(), StorageError> {
         use crate::storage_sqlite::schema::substates;
+
+        let template_address = substate
+            .value
+            .value()
+            .and_then(|s| s.component())
+            .map(|c| c.template_address.to_string());
+        let module_name = substate
+            .value
+            .value()
+            .and_then(|s| s.component())
+            .map(|c| c.module_name.clone());
+        let new_substate = NewSubstate {
+            address: substate.substate_id.to_string(),
+            version: substate.version as i32,
+            data: substate
+                .value
+                .value()
+                .map(serialize_json)
+                .transpose()?
+                .unwrap_or_default(),
+            template_address,
+            module_name,
+        };
 
         let address = &new_substate.address;
         let current_substate = substates::table

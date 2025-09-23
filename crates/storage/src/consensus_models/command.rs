@@ -86,7 +86,6 @@ pub enum Command {
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum CommandOrdering<'a> {
     EvictNode,
-    // EvictNode,
     /// Foreign proposals should come first in the block so that they are processed before commands
     ForeignProposal(ShardGroup, &'a BlockId),
     TransactionId(&'a TransactionId),

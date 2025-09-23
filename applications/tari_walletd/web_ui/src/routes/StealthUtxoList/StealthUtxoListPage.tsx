@@ -25,26 +25,43 @@ import { StyledPaper } from "@components/StyledComponents";
 import useAccountStore from "@store/accountStore";
 import StealthUtxoList from "@routes/StealthUtxoList/StealthUtxoList";
 import PageHeading from "@/components/PageHeading";
+import { useAccountsGetDefault } from "@api/hooks/useAccounts";
+import { useEffect } from "react";
+import FetchStatusCheck from "@components/FetchStatusCheck";
+import PageHeader from "@components/PageHeader";
+import ConfidentialBalanceDisplay from "@routes/AssetVault/Components/ConfidentialBalanceDisplay";
 
 function StealthUtxoListPage() {
-  const { account } = useAccountStore();
+  const account = useAccountStore((state) => state.account);
+  const setAccount = useAccountStore((state) => state.setAccount);
+  const setOotleAddress = useAccountStore((state) => state.setOotleAddress);
+  const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
 
-  if (!account) {
-    return <>No Account...</>;
-  }
+  useEffect(() => {
+    if (!isError && defaultAccount && !account) {
+      setAccount(defaultAccount.account);
+      setOotleAddress(defaultAccount.address);
+    }
+  }, [defaultAccount, isError, account, setAccount, setOotleAddress]);
 
   return (
-    <>
-      <Grid item xs={12} md={12} lg={12}>
-        <PageHeading>Stealth UTXOs</PageHeading>
-      </Grid>
+    <FetchStatusCheck isLoading={isLoading} isError={isError} errorMessage={error?.message || "Error loading account"}>
+      {account ? (
+        <>
+          <PageHeader title="Stealth UTXOs" balanceComponent={<ConfidentialBalanceDisplay />} />
 
-      <Grid item xs={12} md={12} lg={12}>
-        <StyledPaper>
-          <StealthUtxoList account={account} />
-        </StyledPaper>
-      </Grid>
-    </>
+          <Grid item xs={12} md={12} lg={12}>
+            <StyledPaper>
+              <StealthUtxoList account={account} />
+            </StyledPaper>
+          </Grid>
+        </>
+      ) : (
+        <Grid item xs={12} md={12} lg={12}>
+          <PageHeading>No Account Available</PageHeading>
+        </Grid>
+      )}
+    </FetchStatusCheck>
   );
 }
 

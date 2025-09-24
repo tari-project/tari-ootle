@@ -277,16 +277,18 @@ export const formatCurrency = (amount: number | bigint): string => {
   }
 };
 
-// Helper function for formatting amounts that are already in display units (XTR)
-export const formatDisplayCurrency = (amount: number): string => {
-  const currencySymbol = useCurrencyStore.getState().currencySymbol;
-
+// Helper function for formatting currency amounts
+export const formatDisplayCurrency = (
+  amount: number,
+  divisibility: number,
+  currencySymbol: string | undefined,
+): string => {
   if (isNaN(amount)) {
     return `0 ${currencySymbol}`;
   }
   return `${amount.toLocaleString("en-US", {
     minimumFractionDigits: 0,
-    maximumFractionDigits: CURRENCY.DECIMALS,
+    maximumFractionDigits: divisibility,
   })} ${currencySymbol}`;
 };
 

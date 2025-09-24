@@ -104,9 +104,8 @@ export default function FormStep({
     }
 
     // Otherwise, show formatted value
-    const hasDecimals = amount.includes(".") && amount.split(".")[1].length > 0;
     return num.toLocaleString("en-US", {
-      minimumFractionDigits: hasDecimals ? 0 : 2,
+      minimumFractionDigits: 0,
       maximumFractionDigits: divisibility,
     });
   };
@@ -205,13 +204,13 @@ export default function FormStep({
           error={hasInsufficientFunds}
           helperText={
             hasInsufficientFunds
-              ? `Insufficient funds. Available balance: ${formatDisplayCurrency(availableBalance || 0)}`
+              ? `Insufficient funds. Available balance: ${formatDisplayCurrency(availableBalance || 0, divisibility, token_symbol)}`
               : availableBalance !== undefined
-                ? `Available balance: ${formatDisplayCurrency(availableBalance)}`
+                ? `Available balance: ${formatDisplayCurrency(availableBalance, divisibility, token_symbol)}`
                 : undefined
           }
           InputProps={{
-            placeholder: "0.0",
+            placeholder: "0" + (divisibility > 0 ? "." + "0".repeat(divisibility) : ""),
             endAdornment: token_symbol ? <InputAdornment position="end">{token_symbol}</InputAdornment> : undefined,
           }}
         />

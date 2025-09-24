@@ -80,9 +80,12 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     .map((b: BalanceEntry) => b.resource_address) as string[];
 
   // Find the available balance for the resource we're trying to send
-  const balanceEntry = data?.balances?.find(
-    (b: BalanceEntry) => b.resource_address === (props.resource_address || XTR),
-  );
+  const balanceEntry = data?.balances?.find((b: BalanceEntry) => b.resource_address === props.resource_address);
+
+  if (!balanceEntry) {
+    console.warn("No balance entry found for resource", props.resource_address);
+    return null;
+  }
 
   // Function to calculate available balance based on input selection
   const calculateAvailableBalance = () => {
@@ -114,17 +117,6 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   };
 
   const availableBalance = calculateAvailableBalance();
-
-  const transfer = {
-    account: substateIdToString(account.component_address),
-    amount: Math.floor((parseFloat(transferFormState.amount) || 0) * Math.pow(10, balanceEntry?.divisibility || 6)),
-    resource_address: props.resource_address!,
-    destination_address: transferFormState.address,
-    resourceType: props.resource_type,
-    output_to_revealed: !transferFormState.outputToConfidential,
-    input_selection: transferFormState.inputSelection as ConfidentialTransferInputSelection,
-    badge: transferFormState.badge,
-  };
 
   function setFormValue(e: React.ChangeEvent<HTMLInputElement>) {
     const { name, value } = e.target;
@@ -179,14 +171,19 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     if (!account || isEstimatingFee || !transferFormState.address.trim() || !transferFormState.amount) {
       return;
     }
+    if (!balanceEntry) {
+      console.warn("No balance entry found for resource", props.resource_address);
+      return;
+    }
 
     setIsEstimatingFee(true);
 
     try {
+      let amount = Math.floor((parseFloat(transferFormState.amount) || 0) * Math.pow(10, balanceEntry.divisibility));
       // Create transfer object with current form state
       const currentTransfer = {
         account: substateIdToString(account.component_address),
-        amount: Math.floor((parseFloat(transferFormState.amount) || 0) * Math.pow(10, balanceEntry?.divisibility || 6)),
+        amount,
         resource_address: props.resource_address || XTR,
         destination_address: transferFormState.address,
         resourceType: props.resource_type,
@@ -246,6 +243,18 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     setActiveStep(2);
 
     try {
+      let amount = Math.floor((parseFloat(transferFormState.amount) || 0) * Math.pow(10, balanceEntry.divisibility));
+      const transfer = {
+        account: substateIdToString(account.component_address),
+        amount,
+        resource_address: props.resource_address!,
+        destination_address: transferFormState.address,
+        resourceType: props.resource_type,
+        output_to_revealed: !transferFormState.outputToConfidential,
+        input_selection: transferFormState.inputSelection as ConfidentialTransferInputSelection,
+        badge: transferFormState.badge,
+      };
+
       await sendIt?.({
         ...transfer,
         dry_run: false,
@@ -299,7 +308,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
             isEstimatingFee={isEstimatingFee}
             availableBalance={availableBalance}
             token_symbol={props.token_symbol}
-            divisibility={balanceEntry?.divisibility || 6}
+            divisibility={balanceEntry.divisibility}
             onSubmit={handleFormSubmit}
             onCancel={handleClose}
             onFormValueChange={setFormValue}

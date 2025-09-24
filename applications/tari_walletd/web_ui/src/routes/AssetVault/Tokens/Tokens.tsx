@@ -150,17 +150,19 @@ function Tokens({ account }: { account: Account }) {
 
   return (
     <>
-      <SendMoneyDialog
-        open={resourceToSend !== null}
-        handleClose={() => setResourceToSend(null)}
-        onSendComplete={() => setResourceToSend(null)}
-        resource_address={resourceToSend?.address}
-        resource_type={resourceToSend?.resource_type!}
-        token_symbol={
-          balancesData?.balances.find((b: BalanceEntry) => b.resource_address === resourceToSend?.address)
-            ?.token_symbol || ""
-        }
-      />
+      {resourceToSend == null ? null : (
+        <SendMoneyDialog
+          open={true}
+          handleClose={() => setResourceToSend(null)}
+          onSendComplete={() => setResourceToSend(null)}
+          resource_address={resourceToSend?.address}
+          resource_type={resourceToSend?.resource_type!}
+          token_symbol={
+            balancesData?.balances.find((b: BalanceEntry) => b.resource_address === resourceToSend?.address)
+              ?.token_symbol || ""
+          }
+        />
+      )}
       <FetchStatusCheck
         isError={balancesIsError as boolean}
         errorMessage={(balancesError as { message?: string })?.message || "Error fetching data"}
@@ -202,37 +204,34 @@ function Tokens({ account }: { account: Account }) {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {balancesData?.balances.map(
-                    (
-                      {
-                        resource_address,
-                        balance,
-                        resource_type,
-                        confidential_balance,
-                        token_symbol,
-                        vault_address,
-                        divisibility,
-                      }: BalanceEntry,
-                      i: number,
-                    ) => (
-                      <BalanceRow
-                        key={i}
-                        token_symbol={token_symbol || ""}
-                        resource_address={resource_address}
-                        resource_type={resource_type}
-                        balance={balance}
-                        confidential_balance={confidential_balance}
-                        vault_address={vault_address ?? undefined} // convert null to undefined
-                        divisibility={divisibility}
-                        onSendClicked={
-                          handleSendResourceClicked as (
-                            resource_address: ResourceAddress,
-                            resource_type: ResourceType,
-                          ) => void
-                        }
-                      />
-                    ),
-                  )}
+                  {balancesData?.balances
+                    .filter((b) => BigInt(b.balance) > 0n || BigInt(b.confidential_balance) > 0n)
+                    .map(
+                      (
+                        {
+                          resource_address,
+                          balance,
+                          resource_type,
+                          confidential_balance,
+                          token_symbol,
+                          vault_address,
+                          divisibility,
+                        }: BalanceEntry,
+                        i: number,
+                      ) => (
+                        <BalanceRow
+                          key={i}
+                          token_symbol={token_symbol || ""}
+                          resource_address={resource_address}
+                          resource_type={resource_type}
+                          balance={balance}
+                          confidential_balance={confidential_balance}
+                          vault_address={vault_address ?? undefined} // convert null to undefined
+                          divisibility={divisibility}
+                          onSendClicked={handleSendResourceClicked}
+                        />
+                      ),
+                    )}
                 </TableBody>
               </Table>
             </TableContainer>

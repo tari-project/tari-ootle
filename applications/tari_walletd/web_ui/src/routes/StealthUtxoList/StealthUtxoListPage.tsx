@@ -1,4 +1,4 @@
-//  Copyright 2022. The Tari Project
+//  Copyright 2025. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,39 +20,49 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useAccountsGetDefault } from "@api/hooks/useAccounts";
+import Grid from "@mui/material/Grid";
+import { StyledPaper } from "@components/StyledComponents";
 import useAccountStore from "@store/accountStore";
-import Onboarding from "@routes/Onboarding/Onboarding";
-import MyAssets from "./Components/MyAssets";
+import StealthUtxoList from "@routes/StealthUtxoList/StealthUtxoList";
+import PageHeading from "@/components/PageHeading";
+import { useAccountsGetDefault } from "@api/hooks/useAccounts";
 import { useEffect } from "react";
 import FetchStatusCheck from "@components/FetchStatusCheck";
-import useAuthStore from "@store/authStore";
+import PageHeader from "@components/PageHeader";
+import ConfidentialBalanceDisplay from "@routes/AssetVault/Components/ConfidentialBalanceDisplay";
 
-function AssetVault() {
+function StealthUtxoListPage() {
   const account = useAccountStore((state) => state.account);
   const setAccount = useAccountStore((state) => state.setAccount);
   const setOotleAddress = useAccountStore((state) => state.setOotleAddress);
   const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
-  const authStore = useAuthStore();
 
   useEffect(() => {
-    if (!isError && defaultAccount) {
+    if (!isError && defaultAccount && !account) {
       setAccount(defaultAccount.account);
       setOotleAddress(defaultAccount.address);
     }
-
-    if (error) {
-      // This can happen when the token is invalid
-      console.error(error);
-      authStore.clearToken();
-    }
-  }, [defaultAccount, isError]);
+  }, [defaultAccount, isError, account, setAccount, setOotleAddress]);
 
   return (
-    <FetchStatusCheck errorMessage={""} isError={false} isLoading={isLoading}>
-      {account ? <MyAssets /> : <Onboarding />}
+    <FetchStatusCheck isLoading={isLoading} isError={isError} errorMessage={error?.message || "Error loading account"}>
+      {account ? (
+        <>
+          <PageHeader title="Stealth UTXOs" balanceComponent={<ConfidentialBalanceDisplay />} />
+
+          <Grid item xs={12} md={12} lg={12}>
+            <StyledPaper>
+              <StealthUtxoList account={account} />
+            </StyledPaper>
+          </Grid>
+        </>
+      ) : (
+        <Grid item xs={12} md={12} lg={12}>
+          <PageHeading>No Account Available</PageHeading>
+        </Grid>
+      )}
     </FetchStatusCheck>
   );
 }
 
-export default AssetVault;
+export default StealthUtxoListPage;

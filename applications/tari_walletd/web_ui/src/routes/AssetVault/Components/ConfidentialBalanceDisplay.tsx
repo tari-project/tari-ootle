@@ -1,4 +1,4 @@
-//  Copyright 2022. The Tari Project
+//  Copyright 2025. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -35,17 +35,17 @@ import { Account } from "@tari-project/typescript-bindings";
 
 const XTR_RESOURCE = "resource_0101010101010101010101010101010101010101010101010101010101010101";
 
-export default function AccountBalance() {
+export default function ConfidentialBalanceDisplay() {
   const showBalance = useAccountStore((state) => state.showBalance);
   const setShowBalance = useAccountStore((state) => state.setShowBalance);
   const account = useAccountStore((state) => state.account);
 
   if (!account) return <></>;
 
-  return <AccountBalanceInner account={account} showBalance={showBalance} setShowBalance={setShowBalance} />;
+  return <ConfidentialBalanceDisplayInner account={account} showBalance={showBalance} setShowBalance={setShowBalance} />;
 }
 
-function AccountBalanceInner({
+function ConfidentialBalanceDisplayInner({
   account,
   showBalance,
   setShowBalance,
@@ -60,7 +60,6 @@ function AccountBalanceInner({
     data: balancesData,
     isError: balancesIsError,
     error: balancesError,
-    // isFetching: balancesIsFetching,
     isLoading: balancesIsLoading,
     refetch,
   } = useAccountsGetBalances(substateIdToString(account.component_address));
@@ -75,9 +74,9 @@ function AccountBalanceInner({
   } else {
     if (showBalance) {
       const balanceObj = balancesData?.balances.find((b) => b.resource_address === XTR_RESOURCE);
-      const balance = BigInt(balanceObj?.balance || 0) + BigInt(balanceObj?.confidential_balance || 0);
+      const confidentialBalance = BigInt(balanceObj?.confidential_balance || 0);
       const xtr_decimals = balanceObj?.divisibility || 6;
-      formattedBalance = bigintToDecimalString(balance, xtr_decimals);
+      formattedBalance = bigintToDecimalString(confidentialBalance, xtr_decimals);
     } else {
       formattedBalance = "************";
     }
@@ -95,7 +94,7 @@ function AccountBalanceInner({
         <Box>
           <Box>
             <Typography variant="body2" gutterBottom={false}>
-              Balance
+              Confidential Balance
             </Typography>
           </Box>
           <Box

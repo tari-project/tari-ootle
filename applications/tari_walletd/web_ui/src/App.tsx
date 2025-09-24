@@ -42,6 +42,7 @@ import { jwtDecode } from "jwt-decode";
 import Templates from "@routes/Templates/Templates";
 import Manifest from "@routes/Manifest/Manifest";
 import FlowEditor from "@routes/FlowEditor/FlowEditor";
+import StealthUtxoListPage from "@/routes/StealthUtxoList/StealthUtxoListPage";
 import { useCurrencySync } from "@store/hooks/useCurrencySync";
 import { ErrorNotificationProvider } from "./contexts/ErrorNotificationContext";
 
@@ -119,6 +120,11 @@ export const breadcrumbRoutes = [
   {
     label: "Flow Editor",
     path: "/flow-editor",
+    dynamic: false,
+  },
+  {
+    label: "Stealth UTXOs",
+    path: "/stealth-utxos",
     dynamic: false,
   },
 ];
@@ -202,72 +208,90 @@ function App() {
         <Routes>
           <Route path="/" element={<Layout />}>
             <Route index element={<GuardedRoute component={AssetVault} isAuthenticated={isAuthenticated} />} />
-          <Route path="auth" element={<Auth />} />
-          <Route path="auth/webauthn" element={<Webauthn />} />
-          <Route
-            path="access-token"
-            element={
-              <GuardedRoute isAuthenticated={isAuthenticated} redirect="/access-token" component={AccessToken} />
-            }
-          />
-          <Route
-            path="accounts"
-            element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/accounts" component={Accounts} />}
-          />
-          <Route
-            path="accounts/:id"
-            element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/accounts" component={AccountDetails} />}
-          />
-          <Route
-            path="keys"
-            element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/keys" component={Keys} />}
-          />
-          <Route
-            path="access-tokens"
-            element={
-              <GuardedRoute
-                redirect="/access-tokens"
-                isAuthenticated={isAuthenticated}
-                component={AccessTokensLayout}
-              />
-            }
-          />
-          <Route
-            path="transactions"
-            element={
-              <GuardedRoute isAuthenticated={isAuthenticated} redirect="/transactions" component={Transactions} />
-            }
-          />
-          <Route
-            path="wallet"
-            element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/wallet" component={Wallet} />}
-          />
-          <Route
-            path="transactions/:id"
-            element={
-              <GuardedRoute isAuthenticated={isAuthenticated} redirect="/transactions" component={TransactionDetails} />
-            }
-          />
-          <Route
-            path="settings"
-            element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/settings" component={SettingsPage} />}
-          />
-          <Route
-            path="templates"
-            element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/templates" component={Templates} />}
-          />
-          <Route
-            path="manifest"
-            element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/manifest" component={Manifest} />}
-          />
-          <Route
-            path="flow-editor"
-            element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/flow-editor" component={FlowEditor} />}
-          />
-          <Route path="*" element={<ErrorPage />} />
-        </Route>
-      </Routes>
-    </div>
+            <Route path="auth" element={<Auth />} />
+            <Route path="auth/webauthn" element={<Webauthn />} />
+            <Route
+              path="access-token"
+              element={
+                <GuardedRoute isAuthenticated={isAuthenticated} redirect="/access-token" component={AccessToken} />
+              }
+            />
+            <Route
+              path="accounts"
+              element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/accounts" component={Accounts} />}
+            />
+            <Route
+              path="accounts/:id"
+              element={
+                <GuardedRoute isAuthenticated={isAuthenticated} redirect="/accounts" component={AccountDetails} />
+              }
+            />
+            <Route
+              path="keys"
+              element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/keys" component={Keys} />}
+            />
+            <Route
+              path="access-tokens"
+              element={
+                <GuardedRoute
+                  redirect="/access-tokens"
+                  isAuthenticated={isAuthenticated}
+                  component={AccessTokensLayout}
+                />
+              }
+            />
+            <Route
+              path="transactions"
+              element={
+                <GuardedRoute isAuthenticated={isAuthenticated} redirect="/transactions" component={Transactions} />
+              }
+            />
+            <Route
+              path="wallet"
+              element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/wallet" component={Wallet} />}
+            />
+            <Route
+              path="transactions/:id"
+              element={
+                <GuardedRoute
+                  isAuthenticated={isAuthenticated}
+                  redirect="/transactions"
+                  component={TransactionDetails}
+                />
+              }
+            />
+            <Route
+              path="settings"
+              element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/settings" component={SettingsPage} />}
+            />
+            <Route
+              path="templates"
+              element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/templates" component={Templates} />}
+            />
+            <Route
+              path="manifest"
+              element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/manifest" component={Manifest} />}
+            />
+            <Route
+              path="flow-editor"
+              element={
+                <GuardedRoute isAuthenticated={isAuthenticated} redirect="/flow-editor" component={FlowEditor} />
+              }
+            />
+            <Route
+              path="stealth-utxos"
+              element={
+                <GuardedRoute
+                  isAuthenticated={isAuthenticated}
+                  redirect="/stealth-utxos"
+                  component={StealthUtxoListPage}
+                />
+              }
+            />
+            <Route path="*" element={<ErrorPage />} />
+          </Route>
+        </Routes>
+      </div>
     </ErrorNotificationProvider>
   );
 }

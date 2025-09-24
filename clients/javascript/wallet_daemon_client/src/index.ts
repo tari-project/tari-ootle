@@ -16,7 +16,7 @@ import type {
   AccountsGetBalancesRequest,
   AccountsGetBalancesResponse,
   AccountsListRequest,
-  AccountsListResponse,
+  AccountsListResponse, AccountsRenameRequest, AccountsRenameResponse,
   AccountsTransferRequest,
   AccountsTransferResponse,
   AuthGetAllJwtRequest,
@@ -167,6 +167,10 @@ export class WalletDaemonClient {
 
   public accountsCreate(params: AccountsCreateRequest): Promise<AccountsCreateResponse> {
     return this.__invokeRpc("accounts.create", params);
+  }
+
+  public accountsRename(params: AccountsRenameRequest): Promise<AccountsRenameResponse> {
+    return this.__invokeRpc("accounts.rename", params);
   }
 
   public accountsClaimBurn(params: ClaimBurnRequest): Promise<ClaimBurnResponse> {

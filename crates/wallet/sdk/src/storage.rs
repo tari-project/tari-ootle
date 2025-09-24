@@ -367,7 +367,7 @@ pub trait WalletStoreWriter {
     fn accounts_update(
         &mut self,
         account_addr: &ComponentAddress,
-        update: AccountUpdate,
+        update: AccountUpdate<'_>,
     ) -> Result<(), WalletStorageError>;
 
     fn accounts_add_stealth_resource(

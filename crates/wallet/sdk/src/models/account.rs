@@ -99,7 +99,7 @@ pub struct NewAccountData {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct AccountUpdate {
-    pub name: Option<String>,
+pub struct AccountUpdate<'a> {
+    pub name: Option<&'a str>,
     pub is_account_on_chain: Option<bool>,
 }

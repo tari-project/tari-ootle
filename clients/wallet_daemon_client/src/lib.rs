@@ -86,6 +86,8 @@ use crate::{
         AccountsGetBalancesResponse,
         AccountsListRequest,
         AccountsListResponse,
+        AccountsRenameRequest,
+        AccountsRenameResponse,
         AuthGetAllJwtRequest,
         AuthGetAllJwtResponse,
         AuthRevokeTokenRequest,
@@ -315,6 +317,15 @@ impl WalletDaemonClient {
         account: ComponentAddressOrName,
     ) -> Result<AccountSetDefaultResponse, WalletDaemonClientError> {
         self.send_request("accounts.set_default", &AccountSetDefaultRequest { account })
+            .await
+    }
+
+    pub async fn accounts_rename(
+        &mut self,
+        account: ComponentAddressOrName,
+        new_name: String,
+    ) -> Result<AccountsRenameResponse, WalletDaemonClientError> {
+        self.send_request("accounts.rename", &AccountsRenameRequest { account, new_name })
             .await
     }
 

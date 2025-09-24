@@ -126,7 +126,7 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
     pub fn update_account(
         &self,
         account_address: &ComponentAddress,
-        update: AccountUpdate,
+        update: AccountUpdate<'_>,
     ) -> Result<(), AccountsApiError> {
         self.store.with_write_tx(|tx| {
             tx.accounts_update(account_address, update)?;
@@ -280,6 +280,16 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
         let mut tx = self.store.create_read_tx()?;
         let exists = tx.vaults_exists(vault_id)?;
         Ok(exists)
+    }
+
+    pub fn rename_account(&self, account_addr: &ComponentAddress, new_name: &str) -> Result<(), AccountsApiError> {
+        let mut tx = self.store.create_write_tx()?;
+        tx.accounts_update(account_addr, AccountUpdate {
+            name: Some(new_name),
+            ..Default::default()
+        })?;
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn set_default_account(&self, account_addr: &ComponentAddress) -> Result<(), AccountsApiError> {

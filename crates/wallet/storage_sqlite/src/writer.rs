@@ -523,7 +523,11 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
-    fn accounts_update(&mut self, address: &ComponentAddress, update: AccountUpdate) -> Result<(), WalletStorageError> {
+    fn accounts_update(
+        &mut self,
+        address: &ComponentAddress,
+        update: AccountUpdate<'_>,
+    ) -> Result<(), WalletStorageError> {
         use crate::schema::accounts;
         let AccountUpdate {
             name,

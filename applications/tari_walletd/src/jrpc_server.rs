@@ -143,6 +143,7 @@ async fn handler(
             },
             "stealth_transfer" => call_handler(context, value, token, accounts::handle_stealth_transfer).await,
             "set_default" => call_handler(context, value, token, accounts::handle_set_default).await,
+            "rename" => call_handler(context, value, token, accounts::handle_rename).await,
             "create_free_test_coins" => {
                 call_handler(context, value, token, accounts::handle_create_free_test_coins).await
             },

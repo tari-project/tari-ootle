@@ -81,6 +81,7 @@ use crate::consensus::metrics::PrometheusConsensusMetrics;
 use crate::{
     consensus::{self, ConsensusHandle, TarBlockTransactionExecutor, ValidationContext},
     file_l1_submitter::FileLayerOneSubmitter,
+    genesis_state::create_genesis_state,
     p2p::{
         create_tari_validator_node_rpc_service,
         services::{
@@ -90,7 +91,6 @@ use crate::{
         },
         NopLogger,
     },
-    state_bootstrap::bootstrap_state,
     transaction_validators::{
         EpochRangeValidator,
         FeeTransactionValidator,
@@ -218,7 +218,7 @@ pub async fn spawn_services(
 
     let state_store = ValidatorNodeStateStore::open(&config.validator_node.state_db_path, DatabaseOptions::default())?;
 
-    state_store.with_write_tx(|tx| bootstrap_state(tx, config.network, consensus_constants.num_preshards))?;
+    state_store.with_write_tx(|tx| create_genesis_state(tx, config.network, consensus_constants.num_preshards))?;
 
     info!(target: LOG_TARGET, "Epoch manager initializing");
     let epoch_manager_config = EpochManagerConfig {

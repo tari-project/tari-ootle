@@ -223,8 +223,10 @@ impl StealthResourceBuilder {
     /// This builds the resource and mints the initial supply of tokens, returning the address of the resource.
     /// NOTE that stealth resources do not return the bucket of the initial supply since
     /// they are minted as individual UTXO substates and cannot be placed in vault.
-    pub fn initial_supply(self, initial_supply: Amount) -> Bucket {
-        let mint_arg = MintArg::Stealth { amount: initial_supply };
+    pub fn initial_supply<A: Into<Amount>>(self, initial_supply: A) -> Bucket {
+        let mint_arg = MintArg::Stealth {
+            amount: initial_supply.into(),
+        };
 
         let (_, bucket) = self.build_internal(Some(mint_arg));
         bucket.expect("[initial_supply] Bucket not returned from engine")

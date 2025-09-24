@@ -4,7 +4,11 @@
 use rand::rngs::OsRng;
 use tari_crypto::{
     keys::{PublicKey, SecretKey},
-    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
+};
+use tari_engine_types::{
+    crypto::{commit_amount, messages},
+    ToByteType,
 };
 use tari_ootle_wallet_crypto::{
     stealth,
@@ -15,7 +19,11 @@ use tari_ootle_wallet_crypto::{
 };
 use tari_template_lib::{
     models::{EncryptedData, StealthOutputsStatement, StealthTransferStatement},
-    types::{crypto::UtxoTag, Amount},
+    prelude::{crypto::ValueKnowledgeProof, RistrettoPublicKeyBytes},
+    types::{
+        crypto::{StealthValueProof, UtxoTag},
+        Amount,
+    },
 };
 
 pub fn generate_stealth_output_statement<I: IntoIterator<Item = A>, A: Into<Amount>>(
@@ -207,5 +215,28 @@ fn generate_transfer_data_internal<I: IntoIterator<Item = A>, A: Into<Amount>>(
     StealthUnblindedTransferData {
         output_masks: outputs.into_iter().map(|m| m.statement.mask).collect(),
         statement: transfer,
+    }
+}
+
+pub fn generate_value_proof_mask_knowledge(value: Amount, mask: &RistrettoSecretKey) -> StealthValueProof {
+    assert!(value.is_positive(), "Value must be positive");
+    let commitment = commit_amount(mask, value);
+    let commitment_bytes = commitment.to_byte_type();
+    let message = messages::value_proof_message(&commitment_bytes, &value);
+    let sig = RistrettoSchnorr::sign(mask, message, &mut OsRng).expect("Signing cannot fail");
+
+    StealthValueProof {
+        value,
+        knowledge_proof: ValueKnowledgeProof::Commitment {
+            mask_knowledge_proof: sig.to_byte_type(),
+        },
+    }
+}
+
+pub fn generate_value_proof_elgamal(value: Amount, reveal_key: RistrettoPublicKeyBytes) -> StealthValueProof {
+    assert!(value.is_positive(), "Value must be positive");
+    StealthValueProof {
+        value,
+        knowledge_proof: ValueKnowledgeProof::ElgamalEncrypted { reveal_key },
     }
 }

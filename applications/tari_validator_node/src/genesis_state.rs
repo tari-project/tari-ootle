@@ -54,7 +54,11 @@ pub fn has_bootstrapped<TTx: StateStoreReadTransaction>(tx: &TTx) -> Result<bool
     )
 }
 
-pub fn bootstrap_state<TTx>(tx: &mut TTx, network: Network, num_preshards: NumPreshards) -> Result<(), StorageError>
+pub fn create_genesis_state<TTx>(
+    tx: &mut TTx,
+    network: Network,
+    num_preshards: NumPreshards,
+) -> Result<(), StorageError>
 where
     TTx: StateStoreWriteTransaction + Deref,
     TTx::Target: StateStoreReadTransaction,
@@ -94,7 +98,11 @@ where
         None,
         None,
         6,
-        true,
+        // Disable total supply tracking for XTR. This is because it is not feasible to include "the fee exhaust" in
+        // the tracking (as that would require mutating the resource on every transaction). Tracking supply can
+        // be done by summing up the total burn claims (ClaimedOutputTombstone) and subtracting the total exhaust in
+        // fee receipts.
+        false,
     );
 
     if is_testnet {

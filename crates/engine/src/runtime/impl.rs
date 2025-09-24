@@ -40,6 +40,7 @@ use tari_engine_types::{
     published_template::{PublishedTemplate, PublishedTemplateAddress},
     resource::Resource,
     resource_container::{ResourceContainer, ResourceError},
+    stealth,
     substate::{SubstateId, SubstateValue},
     vault::Vault,
     Utxo,
@@ -56,6 +57,7 @@ use tari_template_lib::{
         BucketAction,
         BucketRef,
         BuiltinTemplateAction,
+        BurnStealthUtxoArg,
         CallAction,
         CallFunctionArg,
         CallMethodArg,
@@ -959,14 +961,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(resource_address))?;
 
                     let resource = state_mut.get_resource(&resource_lock)?;
-                    if resource.resource_type().is_stealth() {
-                        return Err(ResourceError::OperationNotAllowed(format!(
-                            "Cannot recall stealth resources: {}",
-                            resource_address
-                        ))
-                        .into());
-                    }
-
                     state_mut.authorization().check_resource_access_rules(
                         ResourceAuthAction::Recall,
                         resource.as_ownership(),
@@ -1222,6 +1216,13 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         })?;
                 let arg: SetFreezeStealthUtxosArg = args.assert_one_arg()?;
 
+                if arg.utxos.is_empty() {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "SetFreezeStealthUtxosArg",
+                        reason: "Utxos list cannot be empty".to_string(),
+                    });
+                }
+
                 self.tracker.write_with(|state_mut| {
                     let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(resource_address))?;
 
@@ -1231,13 +1232,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         return Err(RuntimeError::InvalidArgument {
                             argument: "resource_ref",
                             reason: "FreezeStealthUtxo can only be called on stealth resources".to_string(),
-                        });
-                    }
-
-                    if arg.utxos.is_empty() {
-                        return Err(RuntimeError::InvalidArgument {
-                            argument: "SetFreezeStealthUtxosArg",
-                            reason: "Utxos list cannot be empty".to_string(),
                         });
                     }
 
@@ -1251,7 +1245,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         let id = SubstateId::Utxo(UtxoAddress::new(resource_address, utxo));
                         let locked = state_mut.write_lock_substate(&id)?;
 
-                        let utxo = state_mut
+                        let utxo_mut = state_mut
                             .get_locked_substate_mut(&locked)?
                             .as_utxo_mut()
                             .ok_or_else(|| RuntimeError::LockSubstateMismatch {
@@ -1262,14 +1256,97 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                         // Freeze is idempotent.
                         if arg.freeze {
-                            utxo.freeze();
+                            utxo_mut.freeze();
                         } else {
-                            utxo.unfreeze();
+                            utxo_mut.unfreeze();
                         }
                         state_mut.unlock_substate(locked)?;
                     }
 
                     state_mut.unlock_substate(resource_lock)?;
+
+                    Ok(InvokeResult::unit())
+                })
+            },
+            ResourceAction::StealthUtxoBurn => {
+                let resource_address =
+                    resource_ref
+                        .as_resource_address()
+                        .ok_or_else(|| RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "BurnStealthUtxo resource action requires a resource address".to_string(),
+                        })?;
+                let arg: BurnStealthUtxoArg = args.assert_one_arg()?;
+
+                self.tracker.write_with(|state_mut| {
+                    let resource_lock = state_mut.read_lock_substate(&SubstateId::Resource(resource_address))?;
+
+                    let resource = state_mut.get_resource(&resource_lock)?;
+
+                    if !resource.resource_type().is_stealth() {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "resource_ref",
+                            reason: "FreezeStealthUtxo can only be called on stealth resources".to_string(),
+                        });
+                    }
+
+                    let is_total_supply_tracking_enabled = resource.is_supply_tracking_enabled();
+                    if is_total_supply_tracking_enabled && arg.value_proof.is_none() {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "BurnStealthUtxoArg",
+                            reason: "Burning from a total supply tracking resource requires a value proof".to_string(),
+                        });
+                    }
+
+                    state_mut.authorization().check_resource_access_rules(
+                        ResourceAuthAction::Burn,
+                        resource.as_ownership(),
+                        resource.access_rules(),
+                    )?;
+
+                    state_mut.unlock_substate(resource_lock)?;
+
+                    let id = SubstateId::Utxo(UtxoAddress::new(resource_address, arg.utxo_id));
+                    let utxo_lock = state_mut.write_lock_substate(&id)?;
+
+                    let utxo_mut = state_mut
+                        .get_locked_substate_mut(&utxo_lock)?
+                        .as_utxo_mut()
+                        .ok_or_else(|| RuntimeError::LockSubstateMismatch {
+                            lock_id: utxo_lock.lock_id(),
+                            expected_type: "Utxo",
+                            id,
+                        })?;
+
+                    if utxo_mut.is_burnt() {
+                        return Err(RuntimeError::ResourceError(ResourceError::UtxoBurnFailed {
+                            id: arg.utxo_id,
+                            details: "already burnt".to_string(),
+                        }));
+                    }
+
+                    utxo_mut.burn();
+
+                    if is_total_supply_tracking_enabled {
+                        let value_proof = arg.value_proof.as_ref().expect(
+                            "BUG: is_total_supply_tracking_enabled is true and value proof is some has been checked",
+                        );
+                        let commitment = arg.utxo_id.into_commitment_bytes();
+                        let elgamal_proof = utxo_mut
+                            .output
+                            .as_ref()
+                            .and_then(|o| o.output.viewable_balance.as_ref());
+                        let value = stealth::validate_value_proof(&commitment, elgamal_proof, value_proof)?;
+                        if value.is_positive() {
+                            let resource_lock =
+                                state_mut.write_lock_substate(&SubstateId::Resource(resource_address))?;
+                            let resource_mut = state_mut.get_resource_mut(&resource_lock)?;
+                            resource_mut.decrease_total_supply(value);
+                            state_mut.unlock_substate(resource_lock)?;
+                        }
+                    }
+
+                    state_mut.unlock_substate(utxo_lock)?;
 
                     Ok(InvokeResult::unit())
                 })
@@ -2391,22 +2468,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             });
 
             state_mut.new_substate(address, utxo)?;
-
-            // 4. Update the total supply
-            {
-                let resource_lock = state_mut.write_lock_substate(&SubstateId::Resource(XTR))?;
-                let resource_mut = state_mut.get_resource_mut(&resource_lock)?;
-                if !resource_mut.increase_total_supply(claim.value.into()) {
-                    return Err(RuntimeError::ResourceSupplyWouldOverflow {
-                        resource_address: XTR,
-                        current_supply: resource_mut
-                            .total_supply()
-                            .expect("Resource supply tracking is enabled"),
-                        amount: claim.value.into(),
-                    });
-                }
-                state_mut.unlock_substate(resource_lock)?;
-            }
 
             Ok::<_, RuntimeError>(())
         })?;

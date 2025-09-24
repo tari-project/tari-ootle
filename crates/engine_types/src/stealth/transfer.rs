@@ -31,6 +31,11 @@ pub fn validate_transfer(
 ) -> Result<ValidatedStealthTransfer, ResourceError> {
     basic_validations(transfer)?;
     let validated_outputs = stealth::validate_stealth_outputs_statement(&transfer.outputs_statement, view_key)?;
+    if transfer.balance_proof.public_nonce().is_zero() {
+        return Err(ResourceError::InvalidBalanceProof {
+            details: "Balance proof public nonce cannot be zero".to_string(),
+        });
+    }
 
     let balance_proof =
         try_decode_to_signature(&transfer.balance_proof).ok_or_else(|| ResourceError::InvalidBalanceProof {

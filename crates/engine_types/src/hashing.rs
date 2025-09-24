@@ -128,6 +128,7 @@ pub enum EngineHashDomainLabel {
     UtxoAddress,
     StealthTransfer,
     StealthOwnership,
+    ValueProof,
 }
 
 impl EngineHashDomainLabel {
@@ -154,6 +155,7 @@ impl EngineHashDomainLabel {
             Self::UtxoAddress => "UtxoAddress",
             Self::StealthTransfer => "StealthTransfer",
             Self::StealthOwnership => "StealthOwnership",
+            Self::ValueProof => "ValueProof",
         }
     }
 }

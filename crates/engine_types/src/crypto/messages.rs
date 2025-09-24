@@ -63,3 +63,10 @@ pub fn stealth_ownership64(
         .chain(public_output_nonce)
         .result()
 }
+
+pub fn value_proof_message(commitment: &PedersenCommitmentBytes, value: &Amount) -> [u8; 64] {
+    engine_hasher64(EngineHashDomainLabel::ValueProof)
+        .chain(commitment)
+        .chain(value)
+        .result()
+}

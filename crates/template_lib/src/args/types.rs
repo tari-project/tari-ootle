@@ -26,6 +26,7 @@ use tari_template_abi::rust::{
     fmt::{Display, Formatter},
     str::FromStr,
 };
+use tari_template_lib_types::crypto::StealthValueProof;
 
 use crate::{
     args::freeze_flags::VaultFreezeFlags,
@@ -241,6 +242,8 @@ pub enum ResourceAction {
     StealthTransfer,
     /// Un/freezes one or more stealth UTXOs of a resource
     SetStealthUtxosFreeze,
+    /// Burns a stealth UTXO of a resource
+    StealthUtxoBurn,
 }
 
 /// All the possible minting operation types
@@ -315,13 +318,13 @@ pub struct ResourceUpdateNonFungibleDataArg {
 /// A convenience enum that allows to specify resource types
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ResourceDiscriminator {
+    /// Select all tokens
     Everything,
-    Fungible {
-        amount: Amount,
-    },
-    NonFungible {
-        tokens: BTreeSet<NonFungibleId>,
-    },
+    /// Select a specific amount of fungible (public or stealth) tokens
+    Fungible { amount: Amount },
+    /// Select specific non-fungible tokens
+    NonFungible { tokens: BTreeSet<NonFungibleId> },
+    /// Select specific confidential commitments and a revealed amount
     Confidential {
         commitments: BTreeSet<PedersenCommitmentBytes>,
         revealed_amount: Amount,
@@ -713,4 +716,10 @@ pub enum BuiltinTemplateAction {
 pub struct SetFreezeStealthUtxosArg {
     pub utxos: Vec<UtxoId>,
     pub freeze: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BurnStealthUtxoArg {
+    pub utxo_id: UtxoId,
+    pub value_proof: Option<StealthValueProof>,
 }

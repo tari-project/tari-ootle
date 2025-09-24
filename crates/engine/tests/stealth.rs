@@ -5,7 +5,11 @@ use std::collections::BTreeMap;
 
 use rand::rngs::OsRng;
 use tari_common_types::types::PrivateKey;
-use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey, ristretto::RistrettoPublicKey};
+use tari_crypto::{
+    commitment::HomomorphicCommitmentFactory,
+    keys::{PublicKey, SecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+};
 use tari_engine_types::{
     crypto::{get_commitment_factory, ElgamalVerifiableBalance, ValueLookupTable},
     resource_container::ResourceError,
@@ -14,7 +18,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_template_lib::{
-    models::{ComponentAddress, ResourceAddress, UtxoId},
+    models::{ComponentAddress, ResourceAddress, UtxoAddress, UtxoId},
     prelude::{PedersenCommitmentBytes, SchnorrSignatureBytes},
 };
 use tari_template_test_tooling::{
@@ -289,7 +293,12 @@ fn transfer_invalid_ownership_proof() {
         0,
     );
     // Set an invalid ownership proof
-    transfer_from_faucet.statement.inputs_statement.inputs[0].owner_proof = SchnorrSignatureBytes::zero();
+    let sig = transfer_from_faucet.statement.inputs_statement.inputs[0].owner_proof;
+    let sig = SchnorrSignatureBytes::new(
+        RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::random(&mut OsRng)).to_byte_type(),
+        *sig.signature(),
+    );
+    transfer_from_faucet.statement.inputs_statement.inputs[0].owner_proof = sig;
 
     let reason = test.execute_expect_failure(
         Transaction::builder()
@@ -529,4 +538,63 @@ fn freeze_then_attempt_spend() {
         .collect::<Vec<_>>();
     assert_eq!(utxos.len(), 1);
     assert!(utxos[0].output().is_some());
+}
+
+#[test]
+fn burn_then_attempt_spend() {
+    let outputs = vec![100u64, 1000, 10000];
+    let mint = stealth::generate_mint_statement(outputs.clone(), 0, None);
+    let (mut test, faucet, faucet_resx) = setup(&mint, None);
+
+    let transfer = stealth::generate_transfer_data(
+        &[
+            MaskAndValue {
+                mask: mint.output_masks[0].clone(),
+                value: outputs[0].into(),
+            },
+            MaskAndValue {
+                mask: mint.output_masks[1].clone(),
+                value: outputs[1].into(),
+            },
+        ],
+        0,
+        Some(outputs[0] + outputs[1]),
+        0,
+    );
+    let owner = test.owner_proof();
+    let utxos_and_proofs = mint.output_masks
+        .iter()
+        .zip(outputs)
+        .take(2) // Freeze the first two outputs
+        .map(|(mask, amount)| {
+            let commitment = get_commitment_factory().commit_value(mask, amount);
+            let utxo_id = UtxoId::from(commitment.to_byte_type());
+            let proof = stealth::generate_value_proof_mask_knowledge(amount.into(), mask);
+            (utxo_id, proof)
+        })
+        .collect::<Vec<_>>();
+
+    test.execute_expect_success(
+        Transaction::builder()
+            .call_method(faucet, "burn_utxos", args![utxos_and_proofs.clone()])
+            .build_and_seal(test.secret_key()),
+        vec![owner.clone()],
+    );
+
+    // Try and spend a burnt outputs
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .stealth_transfer(faucet_resx, transfer.statement.clone())
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    assert_reject_reason(reason, ResourceError::InvalidSpend { details: String::new() });
+    for (utxo_id, _) in utxos_and_proofs {
+        let utxo = test
+            .read_only_state_store()
+            .get_utxo(UtxoAddress::new(faucet_resx, utxo_id))
+            .unwrap();
+        assert!(utxo.is_burnt());
+    }
 }

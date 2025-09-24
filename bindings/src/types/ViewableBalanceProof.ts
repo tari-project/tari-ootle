@@ -27,7 +27,8 @@ import type { Scalar32Bytes } from "./Scalar32Bytes";
 export type ViewableBalanceProof = {
   /**
    * The encrypted value that takes the form: E = v.G + r.P
-   * where v is the value, G is the generator, r is the secret_nonce and P is the view key
+   * where v is the value, G is the generator, r is the secret_nonce and P is the view key.
+   * The value is decrypted by brute forcing E - R.p = v.G
    */
   elgamal_encrypted: RistrettoPublicKeyBytes;
   /**

@@ -14,6 +14,7 @@ mod utxo_tag;
 
 #[macro_use]
 mod signature;
+mod value_proof;
 
 pub use balance_proof::*;
 pub use commitment::*;
@@ -24,5 +25,6 @@ pub use scalar::*;
 pub use schnorr::*;
 pub use signature::*;
 pub use utxo_tag::*;
+pub use value_proof::*;
 
 pub use crate::error::*;

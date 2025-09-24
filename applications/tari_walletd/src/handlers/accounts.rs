@@ -59,6 +59,8 @@ use tari_wallet_daemon_client::{
         AccountsGetBalancesResponse,
         AccountsListRequest,
         AccountsListResponse,
+        AccountsRenameRequest,
+        AccountsRenameResponse,
         AccountsTransferRequest,
         AccountsTransferResponse,
         BalanceEntry,
@@ -211,6 +213,19 @@ pub async fn handle_set_default(
     let account = get_account(&req.account, &sdk.accounts_api())?;
     sdk.accounts_api().set_default_account(account.component_address())?;
     Ok(AccountSetDefaultResponse {})
+}
+
+pub async fn handle_rename(
+    context: &HandlerContext,
+    token: Option<&Bearer>,
+    req: AccountsRenameRequest,
+) -> Result<AccountsRenameResponse, anyhow::Error> {
+    context.check_auth(token, &[JrpcPermission::Admin])?;
+    let sdk = context.wallet_sdk();
+    let account = get_account(&req.account, &sdk.accounts_api())?;
+    sdk.accounts_api()
+        .rename_account(account.component_address(), &req.new_name)?;
+    Ok(AccountsRenameResponse {})
 }
 
 pub async fn handle_list(

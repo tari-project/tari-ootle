@@ -20,7 +20,7 @@ fn update_account() {
     let mut tx = db.create_write_tx().unwrap();
     tx.accounts_insert(Some("test"), &address, 0, false, false).unwrap();
     tx.accounts_update(&address, AccountUpdate {
-        name: Some("foo".to_string()),
+        name: Some("foo"),
         ..Default::default()
     })
     .unwrap();

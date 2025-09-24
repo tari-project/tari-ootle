@@ -109,7 +109,9 @@ function StealthUtxoList({ account }: { account: Account }) {
                         {shortenString(utxo.address.id)}
                         <CopyToClipboard copy={utxo.address.id} />
                       </DataTableCell>
-                      <DataTableCell>{bigintToDecimalString(utxo.value, 6)} {currencySymbol}</DataTableCell>
+                      <DataTableCell>
+                        {bigintToDecimalString(utxo.value, 6)} {currencySymbol}
+                      </DataTableCell>
                       <DataTableCell>
                         <StatusChip status={utxo.status} />
                       </DataTableCell>

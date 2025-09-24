@@ -952,6 +952,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
         }
 
         let rows = query
+            .order_by(stealth_outputs::id.desc())
             .get_results::<(models::StealthOutput, String)>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 

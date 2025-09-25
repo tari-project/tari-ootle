@@ -87,7 +87,7 @@ pub async fn handle_decrypt_value(
 
     // NOTE: we iterate in a random order (HashMap) but collect into a deterministic order (IndexMap) so that the
     // results are always in the same order for the same input
-    let outputs = substates
+    let proofs = substates
         .iter()
         .filter_map(|(id, s)| {
             let id = id.as_utxo_address().map(|a| a.into_contents().id)?;
@@ -95,7 +95,7 @@ pub async fn handle_decrypt_value(
                 .substate_value()
                 .as_utxo()
                 .and_then(|u| u.output())
-                .map(|o| &o.output)?;
+                .and_then(|o| o.output.viewable_balance.as_ref())?;
             Some((id, output))
         })
         .collect::<IndexMap<_, _>>();
@@ -110,7 +110,7 @@ pub async fn handle_decrypt_value(
             block_in_place(|| {
                 sdk.viewable_balance_api().try_brute_force_commitment_balances(
                     &view_key.key,
-                    outputs.values().copied(), // Copying the reference, not the PrivateOutput
+                    proofs.values().copied(), // Copying the reference, not the ElgamalVerifiableBalanceBytes
                     value_range,
                     &mut lookup,
                 )
@@ -119,7 +119,7 @@ pub async fn handle_decrypt_value(
         None => block_in_place(|| {
             sdk.viewable_balance_api().try_brute_force_commitment_balances(
                 &view_key.key,
-                outputs.values().copied(),
+                proofs.values().copied(),
                 value_range,
                 &mut AlwaysMissLookupTable,
             )
@@ -129,6 +129,6 @@ pub async fn handle_decrypt_value(
     info!(target: LOG_TARGET, "Brute force balance lookup took {:.2?}", timer.elapsed());
 
     Ok(StealthUtxosDecryptValueResponse {
-        balances: outputs.into_keys().zip(balances).collect(),
+        balances: proofs.into_keys().zip(balances).collect(),
     })
 }

@@ -5,7 +5,7 @@ use std::ops::RangeInclusive;
 
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::{
-    crypto::{ElgamalVerifiableBalance, PrivateOutput, ValueLookupTable},
+    crypto::{ElgamalVerifiableBalance, ElgamalVerifiableBalanceBytes, ValueLookupTable},
     ConvertFromByteType,
 };
 use tari_ootle_wallet_crypto::WalletCryptoError;
@@ -14,23 +14,22 @@ use tari_ootle_wallet_crypto::WalletCryptoError;
 pub struct ViewableBalanceApi;
 
 impl ViewableBalanceApi {
-    pub fn try_brute_force_commitment_balances<'a, TLookup, TOutputsIter>(
+    pub fn try_brute_force_commitment_balances<'a, TLookup, TProofsIter>(
         &self,
         secret_view_key: &RistrettoSecretKey,
-        outputs: TOutputsIter,
+        proofs: TProofsIter,
         value_range: RangeInclusive<u64>,
         lookup: &mut TLookup,
     ) -> Result<Vec<Option<u64>>, ViewableBalanceApiError>
     where
         TLookup: ValueLookupTable,
-        TOutputsIter: Iterator<Item = &'a PrivateOutput>,
+        TProofsIter: Iterator<Item = &'a ElgamalVerifiableBalanceBytes>,
     {
-        let outputs_viewable_balance_decompressed = outputs
-            .filter_map(|output| output.viewable_balance.as_ref())
+        let outputs_viewable_balance_decompressed = proofs
             .map(ElgamalVerifiableBalance::convert_from_byte_type)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| WalletCryptoError::InvalidArgument {
-                name: "outputs",
+                name: "proofs",
                 details: "Malformed viewable balance in output when decompressing ElgamalVerifiableBalance for brute \
                           forcing"
                     .to_string(),

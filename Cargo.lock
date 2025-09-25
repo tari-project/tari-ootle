@@ -10624,7 +10624,7 @@ dependencies = [
 
 [[package]]
 name = "tari_bor"
-version = "0.10.4"
+version = "0.11.1"
 dependencies = [
  "borsh",
  "ciborium",
@@ -11891,7 +11891,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_abi"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "hashbrown 0.13.2",
  "serde",
@@ -11925,7 +11925,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_lib_types"
-version = "0.12.3"
+version = "0.13.0"
 dependencies = [
  "bincode 2.0.1",
  "bnum",
@@ -11941,7 +11941,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_macros"
-version = "0.12.3"
+version = "0.13.0"
 dependencies = [
  "indoc",
  "proc-macro2",

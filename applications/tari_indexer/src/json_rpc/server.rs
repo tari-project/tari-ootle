@@ -20,43 +20,36 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{future::IntoFuture, net::SocketAddr, sync::Arc};
 
 use axum::{
     extract::{DefaultBodyLimit, Extension},
-    middleware,
     routing::post,
     Router,
 };
 use axum_jrpc::{JrpcResult, JsonRpcExtractor};
 use log::*;
+use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
 use tower_http::cors::CorsLayer;
 
 use super::handlers::JsonRpcHandlers;
 
 const LOG_TARGET: &str = "tari::indexer::json_rpc";
 
-pub fn spawn_json_rpc(preferred_address: SocketAddr, handlers: JsonRpcHandlers) -> anyhow::Result<SocketAddr> {
+pub async fn spawn_json_rpc(preferred_address: SocketAddr, handlers: JsonRpcHandlers) -> anyhow::Result<SocketAddr> {
     let router = Router::new()
         .route("/", post(handler))
         .route("/json_rpc", post(handler))
-        .layer(middleware::from_fn(logger::middleware_fn))
         .layer(Extension(Arc::new(handlers)))
         // Limit the body size to 5MB to allow for large transactions (wasm uploads)
         .layer(DefaultBodyLimit::max(5*1024*1024))
         .layer(CorsLayer::permissive());
 
-    let server = axum::Server::try_bind(&preferred_address).or_else(|_| {
-        warn!(
-            target: LOG_TARGET,
-            "🌐 Failed to bind on preferred address {}. Trying OS-assigned", preferred_address
-        );
-        axum::Server::try_bind(&"127.0.0.1:0".parse().unwrap())
-    })?;
-    let server = server.serve(router.into_make_service());
-    let listen_addr = server.local_addr();
+    let listener = try_bind_with_fallback(preferred_address).await?;
+    let server = axum::serve(listener, router);
+    let listen_addr = server.local_addr()?;
     info!(target: LOG_TARGET, "🌐 JSON-RPC listening on {listen_addr}");
-    tokio::spawn(server);
+    tokio::spawn(server.into_future());
 
     Ok(listen_addr)
 }
@@ -94,71 +87,5 @@ async fn handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: Js
         "wait_until_ready" => handlers.wait_until_ready(value).await,
         "get_epoch_manager_stats" => handlers.get_epoch_manager_stats(value).await,
         method => Ok(value.method_not_found(method)),
-    }
-}
-
-// TODO: this is a janky and fairly costly logger found on SO, replace with tracing middleware
-mod logger {
-    use async_graphql::futures_util;
-    use axum::{
-        body::{Body, Bytes, HttpBody},
-        http::{Request, Response, StatusCode},
-        middleware::Next,
-        response::IntoResponse,
-    };
-    use libp2p::bytes::{Buf, BufMut};
-
-    use super::*;
-
-    // use Body as type here
-    pub async fn middleware_fn(
-        req: Request<Body>,
-        next: Next<Body>,
-    ) -> Result<impl IntoResponse, (StatusCode, String)> {
-        let (parts, body) = req.into_parts();
-        let req = Request::from_parts(parts, body);
-
-        let res = next.run(req).await;
-
-        let (parts, body) = res.into_parts();
-        let body_bytes = to_bytes(body).await.unwrap();
-        debug!(target: LOG_TARGET, "🌐 Response: {}", String::from_utf8_lossy(&body_bytes));
-
-        Ok(Response::from_parts(parts, Body::from(body_bytes)))
-    }
-
-    async fn to_bytes<T>(body: T) -> Result<Bytes, T::Error>
-    where T: HttpBody {
-        futures_util::pin_mut!(body);
-
-        // If there's only 1 chunk, we can just return Buf::to_bytes()
-        let mut first = if let Some(buf) = body.data().await {
-            buf?
-        } else {
-            return Ok(Bytes::new());
-        };
-
-        let second = if let Some(buf) = body.data().await {
-            buf?
-        } else {
-            return Ok(first.copy_to_bytes(first.remaining()));
-        };
-
-        // Don't pre-emptively reserve *too* much.
-        let rest = (body.size_hint().lower() as usize).min(1024 * 16);
-        let cap = first
-            .remaining()
-            .saturating_add(second.remaining())
-            .saturating_add(rest);
-        // With more than 1 buf, we gotta flatten into a Vec first.
-        let mut vec = Vec::with_capacity(cap);
-        vec.put(first);
-        vec.put(second);
-
-        while let Some(buf) = body.data().await {
-            vec.put(buf?);
-        }
-
-        Ok(vec.into())
     }
 }

@@ -4,7 +4,7 @@
 use std::fs;
 
 use anyhow::anyhow;
-use axum::headers::authorization::Bearer;
+use axum_extra::headers::authorization::Bearer;
 use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use log::*;
 use rand::rngs::OsRng;

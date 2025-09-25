@@ -22,9 +22,8 @@ use crate::webserver::{
     handlers::types::{decode_hex_prefix, Column, TableRequest, TableResponse},
 };
 
-pub fn list<CF, F, B, S>(cf: F) -> impl Handler<(), S, B>
+pub fn list<CF, F, S>(cf: F) -> impl Handler<(), S>
 where
-    B: axum::body::HttpBody + Send + 'static,
     S: Clone + Send + Sync + 'static,
     F: Fn() -> CF + Send + Sync + Clone + 'static,
     CF: Cf + Send + Sync + 'static,

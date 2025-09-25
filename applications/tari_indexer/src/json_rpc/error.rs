@@ -10,7 +10,7 @@ use axum_jrpc::{
 
 const LOG_TARGET: &str = "tari::indexer::json_rpc";
 
-pub fn internal_error<T: Display>(answer_id: i64) -> impl Fn(T) -> JsonRpcResponse {
+pub fn internal_error<T: Display>(answer_id: axum_jrpc::Id) -> impl Fn(T) -> JsonRpcResponse {
     move |err| {
         let msg = if cfg!(debug_assertions) || option_env!("CI").is_some() {
             err.to_string()
@@ -19,7 +19,7 @@ pub fn internal_error<T: Display>(answer_id: i64) -> impl Fn(T) -> JsonRpcRespon
             "Something went wrong".to_string()
         };
         JsonRpcResponse::error(
-            answer_id,
+            answer_id.clone(),
             JsonRpcError::new(JsonRpcErrorReason::InternalError, msg, serde_json::Value::Null),
         )
     }

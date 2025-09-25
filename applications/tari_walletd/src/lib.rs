@@ -119,7 +119,8 @@ pub async fn run_tari_ootle_walletd(
         authenticator,
         shutdown_signal,
     );
-    let (jrpc_address, listen_fut) = jrpc_server::spawn_listener(jrpc_address, signaling_server_address, handlers)?;
+    let (jrpc_address, listen_fut) =
+        jrpc_server::spawn_listener(jrpc_address, signaling_server_address, handlers).await?;
 
     // Run the web ui
     #[cfg(feature = "web_ui")]

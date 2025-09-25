@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use anyhow::anyhow;
-use axum::headers::authorization::Bearer;
+use axum_extra::headers::authorization::Bearer;
 use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use futures::{future, future::Either};
 use log::*;

@@ -753,7 +753,7 @@ impl FromStr for CliArg {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some(file) = s.strip_prefix('@') {
             let base64_data = fs::read_to_string(file).map_err(|e| anyhow!("Failed to read file {}: {}", file, e))?;
-            return Ok(CliArg::Blob(decode_exact(&base64::decode(base64_data)?)?));
+            return Ok(CliArg::Blob(decode_exact(&base64_decode(base64_data)?)?));
         }
 
         if let Ok(v) = s.parse::<u64>() {
@@ -934,11 +934,11 @@ fn parse_globals(globals: Vec<String>) -> Result<HashMap<String, ManifestValue>,
                     let contents = fs::read_to_string(url.path())
                         .map_err(|err| anyhow!("Failed to read file '{}': {}", &url, err))?;
 
-                    base64::decode(contents.trim())
+                    base64_decode(contents.trim())
                         .map_err(|err| anyhow!("Failed to decode base64 file '{}': {}", url, err))?
                 },
                 "data" => {
-                    base64::decode(url.path()).map_err(|err| anyhow!("Failed to decode base64 '{}': {}", url, err))?
+                    base64_decode(url.path()).map_err(|err| anyhow!("Failed to decode base64 '{}': {}", url, err))?
                 },
                 scheme => anyhow::bail!("Unsupported scheme '{}'", scheme),
             };
@@ -951,4 +951,9 @@ fn parse_globals(globals: Vec<String>) -> Result<HashMap<String, ManifestValue>,
         }
     }
     Ok(result)
+}
+
+fn base64_decode<T: AsRef<[u8]>>(s: T) -> Result<Vec<u8>, base64::DecodeError> {
+    use base64::Engine;
+    base64::prelude::BASE64_STANDARD.decode(s)
 }

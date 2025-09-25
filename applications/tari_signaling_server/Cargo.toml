@@ -15,7 +15,8 @@ tari_engine_types = { workspace = true }
 tari_utilities = { workspace = true }
 
 anyhow = { workspace = true }
-axum = { workspace = true, features = ["headers"] }
+axum = { workspace = true }
+axum-extra = { workspace = true, features = ["typed-header"] }
 axum-jrpc = { workspace = true, features = ["anyhow_error"] }
 # if we set clap version 4 in the workspace it would break other crates
 clap = { version = "4.1.4", features = ["derive", "env"] }

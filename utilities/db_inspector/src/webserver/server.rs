@@ -4,7 +4,7 @@
 use std::{str::FromStr, sync::Arc};
 
 use axum::{
-    http::{HeaderValue, Response, Uri},
+    http::{header, HeaderValue, Response, StatusCode, Uri},
     response::IntoResponse,
     routing::get,
     Extension,
@@ -12,7 +12,6 @@ use axum::{
 };
 use include_dir::{include_dir, Dir};
 use log::*;
-use reqwest::{header, StatusCode};
 use tari_state_store_rocksdb::{column_families, traits::Cf};
 use tower_http::cors::CorsLayer;
 
@@ -118,16 +117,18 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         .layer(CorsLayer::permissive())
         .layer(Extension(Arc::new(context)));
 
-    let server = axum::Server::try_bind(&bind_address).or_else(|_| {
-        warn!(
-            target: LOG_TARGET,
-            "🕸️ Failed to bind on preferred address {}. Trying OS-assigned", bind_address
-        );
-        axum::Server::try_bind(&"127.0.0.1:0".parse().unwrap())
-    })?;
-
-    let server = server.serve(router.into_make_service());
-    info!(target: LOG_TARGET, "🕸️ Webserver listening on http://{}", server.local_addr());
+    let listener = match tokio::net::TcpListener::bind(bind_address).await {
+        Ok(l) => l,
+        Err(e) => {
+            warn!(
+                target: LOG_TARGET,
+                "🕸️ Failed to bind on preferred address {} ({e}). Trying OS-assigned", bind_address
+            );
+            tokio::net::TcpListener::bind(("127.0.0.1", 0u16)).await?
+        },
+    };
+    let server = axum::serve(listener, router);
+    info!(target: LOG_TARGET, "🕸️ Webserver listening on http://{}", server.local_addr()?);
     server.await?;
 
     Ok(())

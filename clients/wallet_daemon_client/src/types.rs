@@ -52,7 +52,15 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_template_abi::{FunctionDef, TemplateDef};
 use tari_template_lib::{
-    models::{ConfidentialOutputStatement, EncryptedData, NonFungibleId, ResourceAddress, UtxoAddress, VaultId},
+    models::{
+        ConfidentialOutputStatement,
+        EncryptedData,
+        NonFungibleId,
+        ResourceAddress,
+        UtxoAddress,
+        UtxoId,
+        VaultId,
+    },
     prelude::{ComponentAddress, ConfidentialWithdrawProof, ResourceType, RistrettoPublicKeyBytes},
     types::{crypto::PedersenCommitmentBytes, Amount, TemplateAddress},
 };
@@ -1117,4 +1125,20 @@ pub struct UtxoInfo {
     pub is_burnt: bool,
     pub is_frozen: bool,
     pub is_on_chain: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub struct StealthUtxosDecryptValueRequest {
+    pub resource_address: ResourceAddress,
+    pub ids: Vec<UtxoId>,
+    pub view_key_id: u64,
+    pub minimum_expected_value: Option<u64>,
+    pub maximum_expected_value: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub struct StealthUtxosDecryptValueResponse {
+    pub balances: HashMap<UtxoId, Option<u64>>,
 }

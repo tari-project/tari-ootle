@@ -6,7 +6,9 @@
 import type {
   AccountGetDefaultRequest,
   AccountGetRequest,
-  AccountGetResponse, AccountsAssociateStealthResourceRequest, AccountsAssociateStealthResourceResponse,
+  AccountGetResponse,
+  AccountsAssociateStealthResourceRequest,
+  AccountsAssociateStealthResourceResponse,
   AccountsCreateFreeTestCoinsRequest,
   AccountsCreateFreeTestCoinsResponse,
   AccountsCreateRequest,
@@ -16,7 +18,9 @@ import type {
   AccountsGetBalancesRequest,
   AccountsGetBalancesResponse,
   AccountsListRequest,
-  AccountsListResponse, AccountsRenameRequest, AccountsRenameResponse,
+  AccountsListResponse,
+  AccountsRenameRequest,
+  AccountsRenameResponse,
   AccountsTransferRequest,
   AccountsTransferResponse,
   AuthGetAllJwtRequest,
@@ -50,7 +54,11 @@ import type {
   rejectReasonToString,
   SettingsGetResponse,
   SettingsSetRequest,
-  SettingsSetResponse, StealthTransferRequest, StealthTransferResponse, StealthUtxosListRequest,
+  SettingsSetResponse,
+  StealthTransferRequest,
+  StealthTransferResponse,
+  StealthUtxosDecryptValueRequest, StealthUtxosDecryptValueResponse,
+  StealthUtxosListRequest,
   StealthUtxosListResponse,
   stringToSubstateId,
   substateIdToString,
@@ -341,6 +349,10 @@ export class WalletDaemonClient {
     return this.__invokeRpc("stealth_utxos.list", params);
   }
 
+
+  public stealthUtxosDecryptValue(params: StealthUtxosDecryptValueRequest): Promise<StealthUtxosDecryptValueResponse> {
+    return this.__invokeRpc("stealth_utxos.decrypt_value", params);
+  }
 
   async __invokeRpc(method: string, params: object = null) {
     const id = this.id++;

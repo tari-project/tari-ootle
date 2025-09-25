@@ -35,6 +35,10 @@ impl UtxoAddress {
     pub fn id(&self) -> &UtxoId {
         &self.0.inner().id
     }
+
+    pub fn into_contents(self) -> UtxoAddressContents {
+        self.0.into_inner()
+    }
 }
 
 impl FromStr for UtxoAddress {
@@ -120,8 +124,8 @@ impl Display for UtxoId {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct UtxoAddressContents {
-    resource_address: ResourceAddress,
-    id: UtxoId,
+    pub resource_address: ResourceAddress,
+    pub id: UtxoId,
 }
 
 #[cfg(feature = "borsh")]

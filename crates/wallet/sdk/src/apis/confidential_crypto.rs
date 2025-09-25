@@ -1,14 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::ops::RangeInclusive;
-
 use tari_common_types::types::PrivateKey;
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::{
-    crypto::{ElgamalVerifiableBalance, PrivateOutput, ValueLookupTable},
-    ConvertFromByteType,
-};
 use tari_ootle_wallet_crypto::{
     confidential,
     encrypted_data::{encrypt_value_and_mask, extract_value_and_mask, unblind_output},
@@ -119,39 +113,6 @@ impl ConfidentialCryptoApi {
         )?;
         Ok(unmasked_output)
     }
-
-    pub fn try_brute_force_commitment_balances<'a, TLookup, TOutputsIter>(
-        &self,
-        secret_view_key: &PrivateKey,
-        outputs: TOutputsIter,
-        value_range: RangeInclusive<u64>,
-        lookup: &mut TLookup,
-    ) -> Result<Vec<Option<u64>>, ConfidentialCryptoApiError>
-    where
-        TLookup: ValueLookupTable,
-        TOutputsIter: Iterator<Item = &'a PrivateOutput>,
-    {
-        let outputs_viewable_balance_decompressed = outputs
-            .filter_map(|output| output.viewable_balance.as_ref())
-            .map(ElgamalVerifiableBalance::convert_from_byte_type)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| WalletCryptoError::InvalidArgument {
-                name: "outputs",
-                details: "Malformed viewable balance in output when decompressing ElgamalVerifiableBalance for brute \
-                          forcing"
-                    .to_string(),
-            })?;
-
-        let results = ElgamalVerifiableBalance::batched_brute_force(
-            secret_view_key,
-            value_range,
-            lookup,
-            &outputs_viewable_balance_decompressed,
-        )
-        .map_err(|e| ConfidentialCryptoApiError::ValueLookupTableError { details: e.to_string() })?;
-
-        Ok(results)
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -160,8 +121,6 @@ pub enum ConfidentialCryptoApiError {
     WalletCryptoError(#[from] WalletCryptoError),
     #[error("Confidential proof error: {0}")]
     ConfidentialProofError(#[from] ConfidentialProofError),
-    #[error("Value lookup table error: {details}")]
-    ValueLookupTableError { details: String },
     #[error("Negative amount")]
     NegativeAmount,
 }

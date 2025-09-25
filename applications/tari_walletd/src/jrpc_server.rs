@@ -182,13 +182,10 @@ async fn handler(
             "claim_fees" => call_handler(context, value, token, validator::handle_claim_validator_fees).await,
             _ => Ok(value.method_not_found(&value.method)),
         },
-        Some(("stealth_utxos", method)) =>
-        {
-            #[allow(clippy::collapsible_match)]
-            match method {
-                "list" => call_handler(context, value, token, stealth_utxos::handle_list).await,
-                _ => Ok(value.method_not_found(&value.method)),
-            }
+        Some(("stealth_utxos", method)) => match method {
+            "list" => call_handler(context, value, token, stealth_utxos::handle_list).await,
+            "decrypt_value" => call_handler(context, value, token, stealth_utxos::handle_decrypt_value).await,
+            _ => Ok(value.method_not_found(&value.method)),
         },
         Some(("wallet", "get_info")) => call_handler(context, value, token, wallet::handle_get_info).await,
         _ => Ok(value.method_not_found(&value.method)),

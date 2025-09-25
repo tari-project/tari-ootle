@@ -1,17 +1,12 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::ops::RangeInclusive;
-
 use log::*;
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
-use tari_engine_types::{
-    crypto::{get_commitment_factory, ElgamalVerifiableBalance, PrivateOutput, ValueLookupTable},
-    ConvertFromByteType,
-};
+use tari_engine_types::{crypto::get_commitment_factory, ConvertFromByteType};
 use tari_ootle_common_types::{base_layer_hashing::ownership_proof_hasher64, Network};
 use tari_ootle_wallet_crypto::{
     confidential,
@@ -144,39 +139,6 @@ impl StealthCryptoApi {
             reciprocal_public_key,
         )?;
         Ok(unmasked_output)
-    }
-
-    pub fn try_brute_force_commitment_balances<'a, TLookup, TOutputsIter>(
-        &self,
-        secret_view_key: &RistrettoSecretKey,
-        outputs: TOutputsIter,
-        value_range: RangeInclusive<u64>,
-        lookup: &mut TLookup,
-    ) -> Result<Vec<Option<u64>>, StealthCryptoApiError>
-    where
-        TLookup: ValueLookupTable,
-        TOutputsIter: Iterator<Item = &'a PrivateOutput>,
-    {
-        let outputs_viewable_balance_decompressed = outputs
-            .filter_map(|output| output.viewable_balance.as_ref())
-            .map(ElgamalVerifiableBalance::convert_from_byte_type)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| WalletCryptoError::InvalidArgument {
-                name: "outputs",
-                details: "Malformed viewable balance in output when decompressing ElgamalVerifiableBalance for brute \
-                          forcing"
-                    .to_string(),
-            })?;
-
-        let results = ElgamalVerifiableBalance::batched_brute_force(
-            secret_view_key,
-            value_range,
-            lookup,
-            &outputs_viewable_balance_decompressed,
-        )
-        .map_err(|e| StealthCryptoApiError::ValueLookupTableError { details: e.to_string() })?;
-
-        Ok(results)
     }
 
     pub fn validate_burn_claim_ownership_proof(

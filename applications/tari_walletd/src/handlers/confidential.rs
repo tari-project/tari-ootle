@@ -295,7 +295,7 @@ pub async fn handle_view_vault_balance(
             let mut lookup = IoReaderValueLookup::load(&mut file)?;
 
             block_in_place(|| {
-                sdk.confidential_crypto_api().try_brute_force_commitment_balances(
+                sdk.viewable_balance_api().try_brute_force_commitment_balances(
                     &view_key.key,
                     commitments.values(),
                     value_range,
@@ -304,7 +304,7 @@ pub async fn handle_view_vault_balance(
             })?
         },
         None => block_in_place(|| {
-            sdk.confidential_crypto_api().try_brute_force_commitment_balances(
+            sdk.viewable_balance_api().try_brute_force_commitment_balances(
                 &view_key.key,
                 commitments.values(),
                 value_range,

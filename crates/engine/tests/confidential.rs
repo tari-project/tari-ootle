@@ -69,11 +69,14 @@ fn setup(
 #[test]
 fn mint_initial_commitment() {
     let (confidential_proof, _mask, _change) = generate_confidential_output_statement(Amount::from(100), None);
-    let (mut template_test, faucet, _faucet_resx) = setup(confidential_proof, None);
+    let (test, _faucet, faucet_resx) = setup(confidential_proof, None);
 
-    let total_supply: Option<Amount> = template_test.call_method(faucet, "total_supply", call_args![], vec![]);
-    // Total supply cannot be tracked for confidential resources
-    assert!(total_supply.is_none());
+    let resource = test
+        .read_only_state_store()
+        .get_resource(&faucet_resx.as_resource_address().unwrap())
+        .unwrap();
+    // TODO: confidential total_supply tracking only tracks revealed funds
+    assert_eq!(resource.total_supply(), Some(Amount::from(0)));
 }
 
 #[test]

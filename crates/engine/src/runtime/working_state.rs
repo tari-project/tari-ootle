@@ -708,7 +708,7 @@ impl WorkingState {
                     });
                 }
 
-                if !vault_mut.resource_type().is_fungible() {
+                if !vault_mut.resource_type().is_fungible() && !vault_mut.resource_type().is_stealth() {
                     return Err(RuntimeError::InvalidArgument {
                         argument: "resource",
                         reason: format!(

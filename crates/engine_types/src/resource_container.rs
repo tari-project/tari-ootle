@@ -16,6 +16,7 @@ use tari_template_lib::{
         NonFungibleAddress,
         NonFungibleId,
         ResourceAddress,
+        UtxoId,
     },
     prelude::ResourceType,
     types::{crypto::PedersenCommitmentBytes, Amount},
@@ -895,4 +896,6 @@ pub enum ResourceError {
     InvalidConfidentialMintWithChange,
     #[error("Invalid spend: {details}")]
     InvalidSpend { details: String },
+    #[error("UTXO {id} failed to burn: {details}")]
+    UtxoBurnFailed { id: UtxoId, details: String },
 }

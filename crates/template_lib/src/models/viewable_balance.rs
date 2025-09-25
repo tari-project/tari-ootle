@@ -28,7 +28,8 @@ use tari_template_lib_types::crypto::{PedersenCommitmentBytes, RistrettoPublicKe
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct ViewableBalanceProof {
     /// The encrypted value that takes the form: E = v.G + r.P
-    /// where v is the value, G is the generator, r is the secret_nonce and P is the view key
+    /// where v is the value, G is the generator, r is the secret_nonce and P is the view key.
+    /// The value is decrypted by brute forcing E - R.p = v.G
     pub elgamal_encrypted: RistrettoPublicKeyBytes,
     /// The public nonce used in the ElGamal encryption R = r.G
     pub elgamal_public_nonce: RistrettoPublicKeyBytes,

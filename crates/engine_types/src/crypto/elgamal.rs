@@ -48,6 +48,12 @@ pub fn validate_elgamal_verifiable_balance_proof(
         }
     })?;
 
+    if proof.elgamal_public_nonce.is_zero() {
+        return Err(ResourceError::InvalidConfidentialProof {
+            details: "Public nonce for ElGamal encryption cannot be the identity point".to_string(),
+        });
+    }
+
     let elgamal_public_nonce =
         RistrettoPublicKey::from_canonical_bytes(&*proof.elgamal_public_nonce).map_err(|_| {
             ResourceError::InvalidConfidentialProof {
@@ -129,15 +135,15 @@ pub fn validate_elgamal_verifiable_balance_proof(
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct CompressedElgamalVerifiableBalance {
+pub struct ElgamalVerifiableBalanceBytes {
     pub encrypted: RistrettoPublicKeyBytes,
     pub public_nonce: RistrettoPublicKeyBytes,
 }
 
-impl ConvertFromByteType<CompressedElgamalVerifiableBalance> for ElgamalVerifiableBalance {
+impl ConvertFromByteType<ElgamalVerifiableBalanceBytes> for ElgamalVerifiableBalance {
     type Error = tari_utilities::ByteArrayError;
 
-    fn convert_from_byte_type(bytes: &CompressedElgamalVerifiableBalance) -> Result<Self, Self::Error> {
+    fn convert_from_byte_type(bytes: &ElgamalVerifiableBalanceBytes) -> Result<Self, Self::Error> {
         let encrypted = RistrettoPublicKey::convert_from_byte_type(&bytes.encrypted)?;
         let public_nonce = RistrettoPublicKey::convert_from_byte_type(&bytes.public_nonce)?;
         Ok(ElgamalVerifiableBalance {
@@ -147,13 +153,13 @@ impl ConvertFromByteType<CompressedElgamalVerifiableBalance> for ElgamalVerifiab
     }
 }
 
-impl From<ElgamalVerifiableBalance> for CompressedElgamalVerifiableBalance {
+impl From<ElgamalVerifiableBalance> for ElgamalVerifiableBalanceBytes {
     fn from(value: ElgamalVerifiableBalance) -> Self {
         (&value).into()
     }
 }
 
-impl From<&ElgamalVerifiableBalance> for CompressedElgamalVerifiableBalance {
+impl From<&ElgamalVerifiableBalance> for ElgamalVerifiableBalanceBytes {
     fn from(value: &ElgamalVerifiableBalance) -> Self {
         Self {
             encrypted: value.encrypted.to_byte_type(),
@@ -226,10 +232,10 @@ impl ElgamalVerifiableBalance {
     }
 }
 
-impl TryFrom<&CompressedElgamalVerifiableBalance> for ElgamalVerifiableBalance {
+impl TryFrom<&ElgamalVerifiableBalanceBytes> for ElgamalVerifiableBalance {
     type Error = tari_utilities::ByteArrayError;
 
-    fn try_from(value: &CompressedElgamalVerifiableBalance) -> Result<Self, Self::Error> {
+    fn try_from(value: &ElgamalVerifiableBalanceBytes) -> Result<Self, Self::Error> {
         let encrypted = RistrettoPublicKey::convert_from_byte_type(&value.encrypted)?;
         let public_nonce = RistrettoPublicKey::convert_from_byte_type(&value.public_nonce)?;
         Ok(ElgamalVerifiableBalance {
@@ -240,10 +246,10 @@ impl TryFrom<&CompressedElgamalVerifiableBalance> for ElgamalVerifiableBalance {
 }
 
 impl ToByteType for ElgamalVerifiableBalance {
-    type ByteType = CompressedElgamalVerifiableBalance;
+    type ByteType = ElgamalVerifiableBalanceBytes;
 
     fn to_byte_type(&self) -> Self::ByteType {
-        CompressedElgamalVerifiableBalance {
+        ElgamalVerifiableBalanceBytes {
             encrypted: self.encrypted.to_byte_type(),
             public_nonce: self.public_nonce.to_byte_type(),
         }

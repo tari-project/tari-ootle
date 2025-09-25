@@ -10,8 +10,9 @@ use tari_engine_types::{
     resource::Resource,
     substate::{Substate, SubstateId},
     vault::Vault,
+    Utxo,
 };
-use tari_template_lib::models::{Account, ComponentAddress, ResourceAddress, VaultId};
+use tari_template_lib::models::{Account, ComponentAddress, ResourceAddress, UtxoAddress, VaultId};
 
 pub struct ReadOnlyStateStore<'a> {
     store: &'a MemoryStateStore,
@@ -53,6 +54,11 @@ impl<'a> ReadOnlyStateStore<'a> {
     pub fn get_vault(&self, vault_id: &VaultId) -> Result<Vault, StateStoreError> {
         let substate = self.get_substate(&SubstateId::Vault(*vault_id))?;
         Ok(substate.into_substate_value().into_vault().unwrap())
+    }
+
+    pub fn get_utxo(&self, utxo_addr: UtxoAddress) -> Result<Utxo, StateStoreError> {
+        let substate = self.get_substate(&SubstateId::Utxo(utxo_addr))?;
+        Ok(substate.into_substate_value().into_utxo().unwrap())
     }
 
     pub fn inspect_component(&self, component_address: ComponentAddress) -> Result<IndexedValue, StateStoreError> {

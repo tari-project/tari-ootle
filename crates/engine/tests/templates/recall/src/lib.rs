@@ -12,12 +12,19 @@ mod template {
         fungible: Vault,
         non_fungible: Vault,
         confidential: Vault,
+        stealth: Vault,
     }
 
     impl Recall {
         pub fn new(
             confidential_supply: ConfidentialOutputStatement,
-        ) -> (Component<Self>, ResourceAddress, ResourceAddress, ResourceAddress) {
+        ) -> (
+            Component<Self>,
+            ResourceAddress,
+            ResourceAddress,
+            ResourceAddress,
+            ResourceAddress,
+        ) {
             let fungible = ResourceBuilder::fungible()
                 .recallable(rule!(allow_all))
                 .initial_supply(1_000_000);
@@ -34,10 +41,16 @@ mod template {
                 .initial_supply(confidential_supply);
             let confidential_resource = confidential.resource_address();
 
+            let stealth = ResourceBuilder::stealth()
+                .recallable(rule!(allow_all))
+                .initial_supply(1_000_000);
+            let stealth_resource = stealth.resource_address();
+
             let component = Component::new(Self {
                 fungible: Vault::from_bucket(fungible),
                 non_fungible: Vault::from_bucket(non_fungible),
                 confidential: Vault::from_bucket(confidential),
+                stealth: Vault::from_bucket(stealth),
             })
             .with_access_rules(AccessRules::allow_all())
             .create();
@@ -47,20 +60,22 @@ mod template {
                 fungible_resource,
                 non_fungible_resource,
                 confidential_resource,
+                stealth_resource,
             )
         }
 
-        pub fn withdraw_some(&mut self, confidential: ConfidentialWithdrawProof) -> (Bucket, Bucket, Bucket) {
+        pub fn withdraw_some(&mut self, confidential: ConfidentialWithdrawProof) -> (Bucket, Bucket, Bucket, Bucket) {
             let fungible = self.fungible.withdraw(10);
             let non_fungible = self
                 .non_fungible
                 .withdraw_non_fungibles([NonFungibleId::from_u32(1), NonFungibleId::from_u32(2)]);
             let confidential = self.confidential.withdraw_confidential(confidential);
-            (fungible, non_fungible, confidential)
+            let stealth = self.stealth.withdraw(10);
+            (fungible, non_fungible, confidential, stealth)
         }
 
-        pub fn recall_fungible_all(&mut self, vault_id: VaultId) {
-            let bucket = ResourceManager::get(self.fungible.resource_address()).recall_fungible_all(vault_id);
+        pub fn recall_all(&mut self, vault_id: VaultId) {
+            let bucket = ResourceManager::get(self.fungible.resource_address()).recall_all(vault_id);
             match bucket.resource_type() {
                 ResourceType::Fungible => {
                     self.fungible.deposit(bucket);
@@ -72,7 +87,7 @@ mod template {
                     self.confidential.deposit(bucket);
                 },
                 ResourceType::Stealth => {
-                    panic!("Stealth resources cannot be recalled");
+                    self.stealth.deposit(bucket);
                 },
             }
         }
@@ -103,12 +118,10 @@ mod template {
             self.confidential.deposit(bucket);
         }
 
-        pub fn get_balances(&self) -> (Amount, Amount, Amount) {
-            (
-                self.fungible.balance(),
-                self.non_fungible.balance(),
-                self.confidential.balance(),
-            )
+        pub fn recall_stealth(&mut self, vault_id: VaultId, revealed_amount: Amount) {
+            let bucket =
+                ResourceManager::get(self.stealth.resource_address()).recall_fungible_amount(vault_id, revealed_amount);
+            self.stealth.deposit(bucket);
         }
     }
 }

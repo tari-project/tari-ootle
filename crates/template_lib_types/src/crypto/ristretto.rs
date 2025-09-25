@@ -50,6 +50,10 @@ impl RistrettoPublicKeyBytes {
         &self.0
     }
 
+    pub fn is_zero(&self) -> bool {
+        self.0.iter().all(|&b| b == 0)
+    }
+
     pub fn into_array(self) -> [u8; Self::length()] {
         self.0
     }

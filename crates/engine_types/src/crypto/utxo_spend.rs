@@ -12,6 +12,12 @@ use crate::{
 };
 
 pub fn verify_utxo_spend_permission(utxo: &UtxoOutput, input: &StealthInput) -> Result<(), ResourceError> {
+    if input.owner_proof.public_nonce().is_zero() {
+        return Err(ResourceError::InvalidSpend {
+            details: "Ownership proof public nonce cannot be zero".to_string(),
+        });
+    }
+
     let balance_proof = try_decode_to_signature(&input.owner_proof).ok_or_else(|| ResourceError::InvalidSpend {
         details: "Malformed ownership proof".to_string(),
     })?;

@@ -43,9 +43,11 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 use tari_bor::to_value;
 use tari_template_abi::{call_engine, rust::collections::BTreeMap, EngineOp};
+use tari_template_lib_types::crypto::StealthValueProof;
 
 use crate::{
     args::{
+        BurnStealthUtxoArg,
         CreateResourceArg,
         FreezeResourceArg,
         InvokeResult,
@@ -503,6 +505,17 @@ impl ResourceManager {
         })
     }
 
+    fn mint_internal(&self, arg: MintResourceArg) -> Bucket {
+        let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
+            resource_ref: self.resource_address.into(),
+            action: ResourceAction::Mint,
+            args: invoke_args![arg],
+        });
+
+        let bucket_id: BucketId = resp.decode().expect("Failed to decode Bucket");
+        Bucket::from_id(bucket_id)
+    }
+
     /// Executes a stealth transfer for the resource managed by this [ResourceManager].
     ///
     /// If the [StealthTransferStatement] is valid, and contains revealed outputs, this method will return a
@@ -542,7 +555,7 @@ impl ResourceManager {
             .expect("[stealth_transfer] Failed to decode Option<Bucket>")
     }
 
-    /// Recalls all tokens of a fungible resource from the specified vault, returning them in a [`Bucket`].
+    /// Recalls all tokens of a resource from the specified vault, returning them in a [`Bucket`].
     ///
     /// This method withdraws the entire balance of the resource held in the vault. The caller must have
     /// the necessary permissions as defined by the resource's access rules to perform a recall.
@@ -564,9 +577,9 @@ impl ResourceManager {
     ///
     /// ```rust,ignore
     /// let vault_id = component.get_user_vault("alice");
-    /// let bucket = resource_manager.recall_fungible_all(vault_id);
+    /// let bucket = resource_manager.recall_all(vault_id);
     /// ```
-    pub fn recall_fungible_all(&self, vault_id: VaultId) -> Bucket {
+    pub fn recall_all(&self, vault_id: VaultId) -> Bucket {
         self.recall_internal(RecallResourceArg {
             resource: ResourceDiscriminator::Everything,
             vault_id,
@@ -714,6 +727,17 @@ impl ResourceManager {
             },
             vault_id,
         })
+    }
+
+    fn recall_internal(&self, arg: RecallResourceArg) -> Bucket {
+        let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
+            resource_ref: self.resource_address.into(),
+            action: ResourceAction::Recall,
+            args: invoke_args![arg],
+        });
+
+        let bucket_id = resp.decode().expect("Failed to decode Bucket");
+        Bucket::from_id(bucket_id)
     }
 
     /// Returns the total supply of tokens for the resource being managed in a [`ResourceManager`] instance.
@@ -931,26 +955,19 @@ impl ResourceManager {
         resp.decode().expect("SetFreeze failed")
     }
 
-    fn recall_internal(&self, arg: RecallResourceArg) -> Bucket {
+    /// Burns the stealth UTXO, permanently removing them from circulation.
+    /// If total supply tracking is enabled for the resource, a valid `StealthValueProof` is required.
+    /// NOTE: that this essentially limits burns to the UTXO owner or the secret view key holder regardless of the
+    /// access rules (i.e. if burns are limited to an "admin" badge, the admin can only burn funds if they have the
+    /// secret view key or burn their own funds). This is a limitation of the current protocol.
+    pub fn burn_utxo(&self, utxo_id: UtxoId, value_proof: Option<StealthValueProof>) {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
             resource_ref: self.resource_address.into(),
-            action: ResourceAction::Recall,
-            args: invoke_args![arg],
+            action: ResourceAction::StealthUtxoBurn,
+            args: invoke_args![BurnStealthUtxoArg { utxo_id, value_proof }],
         });
 
-        let bucket_id = resp.decode().expect("Failed to decode Bucket");
-        Bucket::from_id(bucket_id)
-    }
-
-    fn mint_internal(&self, arg: MintResourceArg) -> Bucket {
-        let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
-            resource_ref: self.resource_address.into(),
-            action: ResourceAction::Mint,
-            args: invoke_args![arg],
-        });
-
-        let bucket_id: BucketId = resp.decode().expect("Failed to decode Bucket");
-        Bucket::from_id(bucket_id)
+        resp.decode().expect("BurnStealthUtxos failed")
     }
 }
 

@@ -59,6 +59,10 @@ impl Verifier for RistrettoSchnorrBlake2bVerifier {
             return false;
         };
 
+        if sig.public_nonce().is_zero() {
+            return false;
+        }
+
         let Ok(sig) = RistrettoSchnorr::convert_from_byte_type(sig) else {
             return false;
         };

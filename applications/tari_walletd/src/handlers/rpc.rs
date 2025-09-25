@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use axum::headers::authorization::Bearer;
+use axum_extra::headers::authorization::Bearer;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{

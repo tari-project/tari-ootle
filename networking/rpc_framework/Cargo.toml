@@ -21,14 +21,13 @@ prost = { workspace = true, features = ["std"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["default", "sync", "time", "rt", "macros"] }
 tokio-util = { workspace = true, features = ["compat", "codec"] }
-tower = { workspace = true, features = ["default", "make", "util"] }
+tower = { workspace = true, features = ["make", "util"] }
 tracing = { workspace = true }
 
 libp2p = { workspace = true }
 libp2p-substream = { workspace = true }
 
 [build-dependencies]
-prost-build = { workspace = true }
 proto_builder = { workspace = true }
 
 [features]

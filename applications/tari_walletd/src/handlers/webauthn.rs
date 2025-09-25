@@ -1,7 +1,7 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use axum::headers::authorization::Bearer;
+use axum_extra::headers::authorization::Bearer;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_wallet_daemon_client::types::{
     WebauthnAlreadyRegisteredRequest,

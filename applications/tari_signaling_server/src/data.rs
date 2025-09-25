@@ -3,6 +3,7 @@
 
 use std::{collections::HashMap, time::Duration};
 
+use axum_extra::headers::authorization::Bearer;
 use chrono::Utc;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, TokenData, Validation};
 use serde::{Deserialize, Serialize};
@@ -68,9 +69,9 @@ impl Data {
         .map_err(anyhow::Error::new)
     }
 
-    pub fn check_jwt(&self, token: String) -> anyhow::Result<u64> {
+    pub fn check_jwt(&self, token: Bearer) -> anyhow::Result<u64> {
         let token: TokenData<Claims> = decode(
-            &token,
+            token.token(),
             &DecodingKey::from_secret(self.secret_key.reveal()),
             &Validation::default(),
         )?;

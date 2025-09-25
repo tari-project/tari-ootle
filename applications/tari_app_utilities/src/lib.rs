@@ -28,5 +28,6 @@ pub mod fee_tables;
 pub mod keypair;
 pub mod p2p_config;
 pub mod seed_peer;
+pub mod tcp;
 pub mod template_download_queue;
 pub mod transaction_executor;

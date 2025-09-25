@@ -3,7 +3,7 @@
 
 use std::{array, collections::HashSet};
 
-use axum::headers::authorization::Bearer;
+use axum_extra::headers::authorization::Bearer;
 use indexmap::IndexMap;
 use log::*;
 use rand::rngs::OsRng;

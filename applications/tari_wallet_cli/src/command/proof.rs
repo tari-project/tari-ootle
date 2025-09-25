@@ -22,6 +22,7 @@
 
 use std::str::FromStr;
 
+use base64::{prelude::BASE64_STANDARD, Engine};
 use clap::{Args, Subcommand};
 use tari_bor::encode;
 use tari_wallet_daemon_client::{types::ConfidentialCreateOutputProofRequest, WalletDaemonClient};
@@ -76,7 +77,7 @@ impl ProofsSubcommand {
                     },
                     OutputType::Base64 => {
                         let encode_proof = encode(&resp.proof)?;
-                        println!("{}", base64::encode(encode_proof));
+                        println!("{}", BASE64_STANDARD.encode(encode_proof));
                     },
                 }
             },

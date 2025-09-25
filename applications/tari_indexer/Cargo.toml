@@ -49,6 +49,7 @@ diesel = { workspace = true, default-features = false, features = [
     "returning_clauses_for_sqlite_3_35",
     "time",
 ] }
+indexmap = { workspace = true }
 diesel_migrations = { workspace = true }
 futures = { workspace = true }
 include_dir = { workspace = true, optional = true }
@@ -64,7 +65,7 @@ log4rs = { workspace = true, features = [
 mime_guess = { workspace = true }
 serde = { workspace = true, features = ["default", "derive"] }
 serde_json = { workspace = true }
-serde_with = { workspace = true, features = ["indexmap"] }
+serde_with = { workspace = true, features = ["indexmap_2"] }
 thiserror = { workspace = true }
 time = { workspace = true, features = ["serde"] }
 tokio = { workspace = true, features = [

@@ -71,7 +71,7 @@ log4rs = { workspace = true, features = [
 mime_guess = { workspace = true }
 prometheus-client = { workspace = true, optional = true }
 rand = { workspace = true }
-reqwest = { workspace = true }
+url = { workspace = true }
 serde = { workspace = true, features = ["default", "derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

@@ -5,12 +5,10 @@ use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
     extract::{DefaultBodyLimit, Extension},
-    headers,
-    headers::authorization::Bearer,
     routing::post,
     Router,
-    TypedHeader,
 };
+use axum_extra::{headers, headers::authorization::Bearer, TypedHeader};
 use axum_jrpc::{
     error::{JsonRpcError, JsonRpcErrorReason},
     JrpcResult,
@@ -21,6 +19,7 @@ use axum_jrpc::{
 use log::*;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::json;
+use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
 use tokio::task;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
@@ -42,7 +41,7 @@ use crate::handlers::{
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::json_rpc";
 
-pub fn spawn_listener(
+pub async fn spawn_listener(
     preferred_address: SocketAddr,
     signaling_server_address: SocketAddr,
     context: HandlerContext,
@@ -59,9 +58,9 @@ pub fn spawn_listener(
         // Limit the body size to 5MB to allow for wasm uploads
         .layer(DefaultBodyLimit::max(5*1024*1024));
 
-    let server = axum::Server::try_bind(&preferred_address)?;
-    let server = server.serve(router.into_make_service());
-    let listen_addr = server.local_addr();
+    let listener = try_bind_with_fallback(preferred_address).await?;
+    let server = axum::serve(listener, router);
+    let listen_addr = server.local_addr()?;
     info!(target: LOG_TARGET, "🌐 JSON-RPC listening on {listen_addr}");
     let server = server.with_graceful_shutdown(shutdown_signal);
     let task = tokio::spawn(async move {
@@ -222,11 +221,11 @@ where
             })?,
         )
         .await
-        .map_err(|e| resolve_handler_error(answer_id, &e))?;
+        .map_err(|e| resolve_handler_error(answer_id.clone(), &e))?;
     Ok(JsonRpcResponse::success(answer_id, resp))
 }
 
-fn resolve_handler_error(answer_id: i64, e: &HandlerError) -> JsonRpcResponse {
+fn resolve_handler_error(answer_id: axum_jrpc::Id, e: &HandlerError) -> JsonRpcResponse {
     match e {
         HandlerError::Anyhow(e) => resolve_any_error(answer_id, e),
         HandlerError::NotFound => JsonRpcResponse::error(
@@ -240,7 +239,7 @@ fn resolve_handler_error(answer_id: i64, e: &HandlerError) -> JsonRpcResponse {
     }
 }
 
-fn resolve_any_error(answer_id: i64, e: &anyhow::Error) -> JsonRpcResponse {
+fn resolve_any_error(answer_id: axum_jrpc::Id, e: &anyhow::Error) -> JsonRpcResponse {
     warn!(target: LOG_TARGET, "🌐 JSON-RPC error: {}", e);
     if let Some(handler_err) = e.downcast_ref::<HandlerError>() {
         return resolve_handler_error(answer_id, handler_err);

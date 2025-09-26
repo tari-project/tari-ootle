@@ -4,7 +4,7 @@
 use std::fs;
 
 use anyhow::anyhow;
-use axum::headers::authorization::Bearer;
+use axum_extra::headers::authorization::Bearer;
 use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use log::*;
 use rand::rngs::OsRng;
@@ -295,18 +295,18 @@ pub async fn handle_view_vault_balance(
             let mut lookup = IoReaderValueLookup::load(&mut file)?;
 
             block_in_place(|| {
-                sdk.confidential_crypto_api().try_brute_force_commitment_balances(
+                sdk.viewable_balance_api().try_brute_force_commitment_balances(
                     &view_key.key,
-                    commitments.values(),
+                    commitments.values().filter_map(|o| o.viewable_balance.as_ref()),
                     value_range,
                     &mut lookup,
                 )
             })?
         },
         None => block_in_place(|| {
-            sdk.confidential_crypto_api().try_brute_force_commitment_balances(
+            sdk.viewable_balance_api().try_brute_force_commitment_balances(
                 &view_key.key,
-                commitments.values(),
+                commitments.values().filter_map(|o| o.viewable_balance.as_ref()),
                 value_range,
                 &mut AlwaysMissLookupTable,
             )
@@ -316,6 +316,10 @@ pub async fn handle_view_vault_balance(
     info!(target: LOG_TARGET, "Brute force balance lookup took {:.2?}", timer.elapsed());
 
     Ok(ConfidentialViewVaultBalanceResponse {
-        balances: commitments.keys().copied().zip(balances).collect(),
+        balances: commitments
+            .iter()
+            .filter_map(|(id, o)| o.viewable_balance.as_ref().map(|_| *id))
+            .zip(balances)
+            .collect(),
     })
 }

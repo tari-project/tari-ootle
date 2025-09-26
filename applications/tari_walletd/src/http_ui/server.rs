@@ -23,14 +23,14 @@
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
 
 use axum::{
-    http::{HeaderValue, Response, Uri},
+    http::{header, HeaderValue, Response, StatusCode, Uri},
     response::IntoResponse,
     routing::get,
     Router,
 };
 use include_dir::{include_dir, Dir};
 use log::*;
-use reqwest::{header, StatusCode};
+use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
 use url::Url;
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::web_ui::server";
@@ -42,16 +42,9 @@ pub async fn run_http_ui_server(address: SocketAddr, json_rpc_address: Url) -> R
         .fallback(handler);
 
     info!(target: LOG_TARGET, "🕸️ Web UI started at http://{}", address);
-    let server = axum::Server::try_bind(&address).or_else(|_| {
-        warn!(
-            target: LOG_TARGET,
-            "🕸️ Failed to bind on preferred address {}. Trying OS-assigned", address
-        );
-        axum::Server::try_bind(&"127.0.0.1:0".parse().unwrap())
-    })?;
-
-    let server = server.serve(router.into_make_service());
-    info!(target: LOG_TARGET, "🕸️ Web UI listening on {}", server.local_addr());
+    let listener = try_bind_with_fallback(address).await?;
+    let server = axum::serve(listener, router);
+    info!(target: LOG_TARGET, "🕸️ Web UI listening on {}", server.local_addr()?);
     server.await?;
 
     info!(target: LOG_TARGET, "Stopping Web UI");

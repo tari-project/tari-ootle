@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use anyhow::anyhow;
-use axum::headers::authorization::Bearer;
+use axum_extra::headers::authorization::Bearer;
 use either::Either;
 use log::*;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};

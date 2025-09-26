@@ -149,7 +149,7 @@ impl JsonRpcHandlers {
 impl JsonRpcHandlers {
     pub fn rpc_discover(&self, value: JsonRpcExtractor) -> JrpcResult {
         Ok(JsonRpcResponse::success(
-            value.id,
+            value.id.clone(),
             serde_json::from_str::<HashMap<String, Value>>(include_str!("../../openrpc.json")).map_err(|e| {
                 JsonRpcResponse::error(
                     value.id,
@@ -165,7 +165,7 @@ impl JsonRpcHandlers {
             .networking
             .get_local_peer_info()
             .await
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
         let response = GetIdentityResponse {
             peer_id: info.peer_id.to_string(),
             public_key: self.keypair.public_key().to_byte_type(),
@@ -185,7 +185,7 @@ impl JsonRpcHandlers {
 
         if let Some(unsupported) = addresses.iter().find(|a| !is_supported_multiaddr(a)) {
             return Err(JsonRpcResponse::error(
-                answer_id,
+                answer_id.clone(),
                 JsonRpcError::new(
                     JsonRpcErrorReason::InvalidParams,
                     format!("Unsupported multiaddr {unsupported}"),
@@ -197,7 +197,7 @@ impl JsonRpcHandlers {
         let mut networking = self.networking.clone();
         let public_key = RistrettoPublicKey::convert_from_byte_type(&public_key).map_err(|_| {
             JsonRpcResponse::error(
-                answer_id,
+                answer_id.clone(),
                 JsonRpcError::new(
                     JsonRpcErrorReason::InvalidParams,
                     "Public key is malformed".to_string(),
@@ -215,10 +215,10 @@ impl JsonRpcHandlers {
                     .build(),
             )
             .await
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
 
         if wait_for_dial {
-            dial_wait.await.map_err(internal_error(answer_id))?;
+            dial_wait.await.map_err(internal_error(answer_id.clone()))?;
         }
 
         Ok(JsonRpcResponse::success(answer_id, AddPeerResponse {}))
@@ -231,7 +231,7 @@ impl JsonRpcHandlers {
             .clone()
             .get_connected_peers()
             .await
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
 
         let status = if peers.is_empty() { "Offline" } else { "Online" };
         Ok(JsonRpcResponse::success(answer_id, GetCommsStatsResponse {
@@ -245,7 +245,7 @@ impl JsonRpcHandlers {
             .networking
             .get_active_connections()
             .await
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
 
         let connections = active_connections
             .into_iter()
@@ -283,7 +283,7 @@ impl JsonRpcHandlers {
             .get_stored_substates_by_filters(filter_by_type, filter_by_template, limit, offset)
             .map_err(|e| {
                 warn!(target: LOG_TARGET, "Error getting substate: {}", e);
-                Self::internal_error(answer_id, format!("Error getting substate: {}", e))
+                Self::internal_error(answer_id.clone(), format!("Error getting substate: {}", e))
             })?;
 
         Ok(JsonRpcResponse::success(answer_id, ListSubstatesResponse { substates }))
@@ -299,7 +299,7 @@ impl JsonRpcHandlers {
             .await
             .map_err(|e| {
                 warn!(target: LOG_TARGET, "Error getting substate: {}", e);
-                Self::internal_error(answer_id, format!("Error getting substate: {}", e))
+                Self::internal_error(answer_id.clone(), format!("Error getting substate: {}", e))
             })?;
 
         match maybe_substate {
@@ -331,7 +331,7 @@ impl JsonRpcHandlers {
                         .map_err(|e| {
                             warn!(target: LOG_TARGET, "Error asking network for substate: {}", e);
                             JsonRpcResponse::error(
-                                answer_id,
+                                answer_id.clone(),
                                 JsonRpcError::new(
                                     JsonRpcErrorReason::ApplicationError(501),
                                     format!("Error asking network for substate:{}", e),
@@ -396,7 +396,7 @@ impl JsonRpcHandlers {
 
         let substates = self.substate_manager.get_substates(requests.as_slice()).map_err(|e| {
             warn!(target: LOG_TARGET, "Error getting substate: {}", e);
-            Self::internal_error(answer_id, format!("Error getting substate: {}", e))
+            Self::internal_error(answer_id.clone(), format!("Error getting substate: {}", e))
         })?;
 
         Ok(JsonRpcResponse::success(answer_id, GetSubstatesResponse { substates }))
@@ -412,11 +412,11 @@ impl JsonRpcHandlers {
             .await
             .map_err(|e| {
                 warn!(target: LOG_TARGET, "Error getting substate: {}", e);
-                Self::internal_error(answer_id, format!("Error getting substate: {}", e))
+                Self::internal_error(answer_id.clone(), format!("Error getting substate: {}", e))
             })?
             .ok_or_else(|| {
                 JsonRpcResponse::error(
-                    answer_id,
+                    answer_id.clone(),
                     JsonRpcError::new(
                         JsonRpcErrorReason::ApplicationError(404),
                         format!(
@@ -441,7 +441,7 @@ impl JsonRpcHandlers {
         let request: GetNonFungiblesRequest = value.parse_params()?;
         let limit = usize::try_from(request.end_index.saturating_sub(request.start_index)).map_err(|e| {
             JsonRpcResponse::error(
-                answer_id,
+                answer_id.clone(),
                 JsonRpcError::new(
                     JsonRpcErrorReason::InvalidParams,
                     format!("Invalid end_index: {}", e),
@@ -451,7 +451,7 @@ impl JsonRpcHandlers {
         })?;
         let offset = usize::try_from(request.start_index).map_err(|e| {
             JsonRpcResponse::error(
-                answer_id,
+                answer_id.clone(),
                 JsonRpcError::new(
                     JsonRpcErrorReason::InvalidParams,
                     format!("Invalid start_index: {}", e),
@@ -463,7 +463,7 @@ impl JsonRpcHandlers {
         let non_fungibles = self
             .substate_manager
             .get_non_fungibles_by_resource_address(request.address, limit, offset)
-            .map_err(|e| Self::internal_error(answer_id, format!("Error getting non fungibles: {}", e)))?;
+            .map_err(|e| Self::internal_error(answer_id.clone(), format!("Error getting non fungibles: {}", e)))?;
         Ok(JsonRpcResponse::success(answer_id, GetNonFungiblesResponse {
             non_fungibles,
         }))
@@ -503,7 +503,7 @@ impl JsonRpcHandlers {
             .any(|shard| shard.is_global() || *shard > NumPreshards::MAX_SHARD)
         {
             return Err(JsonRpcResponse::error(
-                answer_id,
+                answer_id.clone(),
                 JsonRpcError::new(
                     JsonRpcErrorReason::InvalidParams,
                     format!(
@@ -524,7 +524,7 @@ impl JsonRpcHandlers {
                 .get_utxo_updates(req.resource_address, shard, state_version, req.per_shard_limit)
                 .map_err(|e| {
                     Self::internal_error(
-                        answer_id,
+                        answer_id.clone(),
                         format!(
                             "Error getting UTXO updates for resource_address {}, shard {}, state_version {}: {}",
                             req.resource_address, shard, state_version, e
@@ -539,7 +539,7 @@ impl JsonRpcHandlers {
                 .get_max_state_version(&req.resource_address, shard)
                 .map_err(|e| {
                     Self::internal_error(
-                        answer_id,
+                        answer_id.clone(),
                         format!(
                             "Error getting max state version for resource_address {}, shard {}: {}",
                             req.resource_address, shard, e
@@ -584,7 +584,7 @@ impl JsonRpcHandlers {
             .get_unspent_utxos(&req.resource_address, &req.tag_and_nonce_pairs)
             .map_err(|e| {
                 Self::internal_error(
-                    answer_id,
+                    answer_id.clone(),
                     format!(
                         "Error getting UTXOs for resource_address {}, with {} tag/nonce pair(s): {}",
                         req.resource_address,
@@ -607,7 +607,7 @@ impl JsonRpcHandlers {
                 .dry_run_transaction_processor
                 .process_transaction(request.transaction)
                 .await
-                .map_err(|e| Self::internal_error(answer_id, e))?;
+                .map_err(|e| Self::internal_error(answer_id.clone(), e))?;
 
             return Ok(JsonRpcResponse::success(answer_id, SubmitTransactionResponse {
                 result: IndexerTransactionFinalizedResult::Finalized {
@@ -629,7 +629,7 @@ impl JsonRpcHandlers {
             .map_err(|e| match e {
                 TransactionManagerError::NetworkClientError(NetworkClientError::AllValidatorsFailed { .. }) => {
                     JsonRpcResponse::error(
-                        answer_id,
+                        answer_id.clone(),
                         JsonRpcError::new(
                             JsonRpcErrorReason::ApplicationError(400),
                             format!("All validators failed: {}", e),
@@ -641,14 +641,14 @@ impl JsonRpcHandlers {
                     transaction_id,
                     details,
                 } => JsonRpcResponse::error(
-                    answer_id,
+                    answer_id.clone(),
                     JsonRpcError::new(
                         JsonRpcErrorReason::ApplicationError(400),
                         format!("Transaction {} is invalid: {}", transaction_id, details),
                         json::Value::Null,
                     ),
                 ),
-                e => Self::internal_error(answer_id, e),
+                e => Self::internal_error(answer_id.clone(), e),
             })?;
 
         info!(target: LOG_TARGET, "✅ Transaction submitted: {}", transaction_id);
@@ -666,7 +666,7 @@ impl JsonRpcHandlers {
             .epoch_manager
             .get_current_epoch_hash()
             .await
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
 
         let current_block_height = self
             .global_db
@@ -678,7 +678,7 @@ impl JsonRpcHandlers {
             })
             .map_err(|e| {
                 JsonRpcResponse::error(
-                    answer_id,
+                    answer_id.clone(),
                     JsonRpcError::new(
                         JsonRpcErrorReason::InternalError,
                         format!("Could not get current block height: {}", e),
@@ -709,26 +709,26 @@ impl JsonRpcHandlers {
                     status: Some(TemplateStatus::Pending)
                 }) {
                     Self::not_found(
-                        answer_id,
+                        answer_id.clone(),
                         format!(
                             "Template with address {} is still being downloaded. Try again later.",
                             request.template_address
                         ),
                     )
                 } else {
-                    Self::internal_error(answer_id, format!("Error fetching template: {}", err))
+                    Self::internal_error(answer_id.clone(), format!("Error fetching template: {}", err))
                 }
             })?
             .ok_or_else(|| {
                 Self::not_found(
-                    answer_id,
+                    answer_id.clone(),
                     format!("Template with address {} not found", request.template_address),
                 )
             })?;
         let template = match template.executable {
             TemplateExecutable::CompiledWasm(code) => WasmModule::from_code(code)
                 .load_template()
-                .map_err(|e| Self::internal_error(answer_id, format!("Error loading template: {}", e)))?,
+                .map_err(|e| Self::internal_error(answer_id.clone(), format!("Error loading template: {}", e)))?,
             // TemplateExecutable::DownloadableWasm is never returned ad there is no DB type for that
             TemplateExecutable::DownloadableWasm(_, _) | TemplateExecutable::Manifest(_) => {
                 return Err(JsonRpcResponse::error(
@@ -754,7 +754,7 @@ impl JsonRpcHandlers {
         let templates = self
             .template_manager
             .fetch_template_metadata(req.limit as usize)
-            .map_err(|e| Self::internal_error(answer_id, e))?;
+            .map_err(|e| Self::internal_error(answer_id.clone(), e))?;
 
         Ok(JsonRpcResponse::success(answer_id, ListTemplatesResponse {
             templates: templates
@@ -777,8 +777,8 @@ impl JsonRpcHandlers {
             .get_transaction_result(request.transaction_id)
             .await
             .optional()
-            .map_err(|e| Self::internal_error(answer_id, e))?
-            .ok_or_else(|| Self::not_found(answer_id, "Transaction not found"))?;
+            .map_err(|e| Self::internal_error(answer_id.clone(), e))?
+            .ok_or_else(|| Self::not_found(answer_id.clone(), "Transaction not found"))?;
 
         let resp = match result {
             TransactionResultStatus::Pending => GetTransactionResultResponse {
@@ -817,7 +817,7 @@ impl JsonRpcHandlers {
         let transactions = self
             .transaction_manager
             .list_recent_transactions(None, limit as usize)
-            .map_err(|e| Self::internal_error(answer_id, e))?;
+            .map_err(|e| Self::internal_error(answer_id.clone(), e))?;
 
         let resp = ListRecentTransactionsResponse { transactions };
         Ok(JsonRpcResponse::success(answer_id, resp))
@@ -829,27 +829,27 @@ impl JsonRpcHandlers {
         self.epoch_manager
             .wait_for_initial_scanning_to_complete()
             .await
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
 
         Ok(JsonRpcResponse::success(answer_id, IndexerReadyResponse {}))
     }
 
-    fn error_response<T: Display>(answer_id: i64, reason: JsonRpcErrorReason, message: T) -> JsonRpcResponse {
+    fn error_response<T: Display>(answer_id: axum_jrpc::Id, reason: JsonRpcErrorReason, message: T) -> JsonRpcResponse {
         JsonRpcResponse::error(
             answer_id,
             JsonRpcError::new(reason, message.to_string(), json::Value::Null),
         )
     }
 
-    fn not_found<T: Display>(answer_id: i64, details: T) -> JsonRpcResponse {
+    fn not_found<T: Display>(answer_id: axum_jrpc::Id, details: T) -> JsonRpcResponse {
         Self::error_response(answer_id, JsonRpcErrorReason::ApplicationError(404), details)
     }
 
-    fn invalid_params<T: Display>(answer_id: i64, details: T) -> JsonRpcResponse {
+    fn invalid_params<T: Display>(answer_id: axum_jrpc::Id, details: T) -> JsonRpcResponse {
         Self::error_response(answer_id, JsonRpcErrorReason::InvalidParams, details)
     }
 
-    fn internal_error<T: Display>(answer_id: i64, error: T) -> JsonRpcResponse {
+    fn internal_error<T: Display>(answer_id: axum_jrpc::Id, error: T) -> JsonRpcResponse {
         error!(target: LOG_TARGET, "Internal error: {}", error);
         Self::error_response(answer_id, JsonRpcErrorReason::InternalError, error)
     }

@@ -39,6 +39,7 @@ use axum::{
 };
 use log::*;
 use serde::Serialize;
+use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
 use tower_http::cors::CorsLayer;
 
 use crate::{
@@ -64,16 +65,9 @@ pub async fn run_graphql(
         .layer(CorsLayer::permissive())
         .layer(Extension(schema));
 
-    let server = axum::Server::try_bind(&preferred_address)
-        .or_else(|_| {
-            warn!(
-                target: LOG_TARGET,
-                "🌐 Failed to bind on preferred address {}. Trying OS-assigned", preferred_address
-            );
-            axum::Server::try_bind(&"127.0.0.1:0".parse().unwrap())
-        })?
-        .serve(router.into_make_service());
-    let bind_addr = server.local_addr();
+    let listener = try_bind_with_fallback(preferred_address).await?;
+    let server = axum::serve(listener, router);
+    let bind_addr = server.local_addr()?;
     info!(target: LOG_TARGET, "🌐 GraphQL listening on {bind_addr}");
     server.await?;
 

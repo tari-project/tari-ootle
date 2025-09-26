@@ -9,14 +9,8 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
 };
 
-use axum::{
-    extract::Extension,
-    http::{Request, StatusCode},
-    middleware::Next,
-    response::Response,
-    routing::post,
-    Router,
-};
+use axum::{extract::Extension, routing::post, Router};
+use axum_extra::{headers, headers::authorization::Bearer, TypedHeader};
 use axum_jrpc::{
     error::{JsonRpcError, JsonRpcErrorReason},
     JrpcResult,
@@ -34,21 +28,6 @@ use crate::{data::Data, permissions::JrpcPermissions};
 
 const LOG_TARGET: &str = "tari::signaling_server::json_rpc";
 
-// We need to extract the token, because the first call is without any token. So we don't have to have two handlers.
-async fn extract_token<B>(mut request: Request<B>, next: Next<B>) -> Result<Response, StatusCode> {
-    let mut token_ext = None;
-    if let Some(token) = request.headers().get("authorization") {
-        if let Ok(token) = token.to_str() {
-            if let Some(token) = token.strip_prefix("Bearer ") {
-                token_ext = Some(token.to_string());
-            }
-        }
-    }
-    request.extensions_mut().insert::<Option<String>>(token_ext);
-    let response = next.run(request).await;
-    Ok(response)
-}
-
 pub async fn listen(
     base_dir: PathBuf,
     preferred_address: SocketAddr,
@@ -59,12 +38,11 @@ pub async fn listen(
         .route("/", post(handler))
         .route("/json_rpc", post(handler))
         .layer(Extension(Arc::new(Mutex::new(data))))
-        .layer(CorsLayer::permissive())
-        .layer(axum::middleware::from_fn(extract_token));
+        .layer(CorsLayer::permissive());
 
-    let server = axum::Server::try_bind(&preferred_address)?;
-    let server = server.serve(router.into_make_service());
-    info!(target: LOG_TARGET, "🌐 JSON-RPC listening on {}", server.local_addr());
+    let listener = tokio::net::TcpListener::bind(preferred_address).await?;
+    let server = axum::serve(listener, router);
+    info!(target: LOG_TARGET, "🌐 JSON-RPC listening on {}", server.local_addr()?);
     let server = server.with_graceful_shutdown(shutdown_signal);
     fs::write(base_dir.join("pid"), process::id().to_string())?;
     server.await?;
@@ -195,9 +173,10 @@ fn get_answer_ice_candidates(
 
 async fn handler(
     Extension(data): Extension<Arc<Mutex<Data>>>,
-    Extension(token): Extension<Option<String>>,
+    authorization_header: Option<TypedHeader<headers::Authorization<Bearer>>>,
     value: JsonRpcExtractor,
 ) -> JrpcResult {
+    let token = authorization_header.map(|auth| auth.0 .0);
     let answer_id = value.get_answer_id();
     let mut data = data.lock().unwrap();
     let payload;
@@ -206,7 +185,7 @@ async fn handler(
             Ok(id) => id,
             Err(e) => {
                 return Ok(JsonRpcResponse::error(
-                    answer_id,
+                    answer_id.clone(),
                     JsonRpcError::new(JsonRpcErrorReason::ApplicationError(401), format!("{}", e), json!({})),
                 ));
             },
@@ -235,14 +214,14 @@ async fn handler(
                 let permissions: JrpcPermissions = value.parse_params()?;
                 let jwt = data.generate_jwt(permissions).map_err(|e| {
                     JsonRpcResponse::error(
-                        answer_id,
+                        answer_id.clone(),
                         JsonRpcError::new(JsonRpcErrorReason::InternalError, e.to_string(), json!({})),
                     )
                 })?;
 
                 json::to_value(jwt).map_err(|e| {
                     JsonRpcResponse::error(
-                        answer_id,
+                        answer_id.clone(),
                         JsonRpcError::new(JsonRpcErrorReason::InternalError, e.to_string(), json!({})),
                     )
                 })?

@@ -23,7 +23,8 @@ pub mod webrtc;
 
 use std::future::Future;
 
-use axum::{async_trait, headers::authorization::Bearer};
+use async_trait::async_trait;
+use axum_extra::headers::authorization::Bearer;
 pub use context::HandlerContext;
 use error::HandlerError;
 

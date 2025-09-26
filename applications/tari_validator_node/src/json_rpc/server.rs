@@ -20,19 +20,20 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{future::IntoFuture, net::SocketAddr, sync::Arc};
 
 use axum::{extract::Extension, routing::post, Router};
 use axum_jrpc::{error::JsonRpcErrorReason, JrpcResult, JsonRpcAnswer, JsonRpcExtractor};
 use log::*;
+use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
 use tower_http::cors::CorsLayer;
 
 use super::handlers::JsonRpcHandlers;
 
 const LOG_TARGET: &str = "tari::validator_node::json_rpc";
 
-pub fn spawn_json_rpc(
-    mut preferred_address: SocketAddr,
+pub async fn spawn_json_rpc(
+    preferred_address: SocketAddr,
     handlers: JsonRpcHandlers,
     #[cfg(feature = "metrics")] registry: prometheus_client::registry::Registry,
 ) -> Result<SocketAddr, anyhow::Error> {
@@ -48,18 +49,11 @@ pub fn spawn_json_rpc(
         .layer(Extension(Arc::new(handlers)))
         .layer(CorsLayer::permissive());
 
-    let server = axum::Server::try_bind(&preferred_address).or_else(|_| {
-        warn!(
-            target: LOG_TARGET,
-            "🌐 Failed to bind on preferred address {}. Trying OS-assigned", preferred_address
-        );
-        preferred_address.set_port(0);
-        axum::Server::try_bind(&preferred_address)
-    })?;
-    let server = server.serve(router.into_make_service());
-    let addr = server.local_addr();
+    let listener = try_bind_with_fallback(preferred_address).await?;
+    let server = axum::serve(listener, router);
+    let addr = server.local_addr()?;
     info!(target: LOG_TARGET, "🌐 JSON-RPC listening on {}", addr);
-    tokio::spawn(server);
+    tokio::spawn(server.into_future());
 
     Ok(addr)
 }

@@ -3,7 +3,7 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
-use axum::headers::authorization::Bearer;
+use axum_extra::headers::authorization::Bearer;
 use axum_jrpc::{
     error::{JsonRpcError, JsonRpcErrorReason},
     JrpcResult,
@@ -30,7 +30,7 @@ pub fn handle_start(
     let answer_id = value.get_answer_id();
     context.check_auth(token, &[JrpcPermission::StartWebrtc]).map_err(|e| {
         JsonRpcResponse::error(
-            answer_id,
+            answer_id.clone(),
             JsonRpcError::new(
                 JsonRpcErrorReason::ApplicationError(401),
                 format!("Not authorized: {e}"),
@@ -41,7 +41,7 @@ pub fn handle_start(
     let webrtc_start_request = value.parse_params::<WebRtcStartRequest>()?;
     let permissions = serde_json::from_value::<JrpcPermissions>(webrtc_start_request.permissions).map_err(|e| {
         JsonRpcResponse::error(
-            answer_id,
+            answer_id.clone(),
             JsonRpcError::new(
                 JsonRpcErrorReason::InvalidRequest,
                 e.to_string(),
@@ -52,7 +52,7 @@ pub fn handle_start(
     let jwt = context.jwt_api();
     let (auth_token, _expiry) = jwt.generate_auth_token(permissions, None).map_err(|e| {
         JsonRpcResponse::error(
-            answer_id,
+            answer_id.clone(),
             JsonRpcError::new(
                 JsonRpcErrorReason::InternalError,
                 e.to_string(),
@@ -62,7 +62,7 @@ pub fn handle_start(
     })?;
     let permissions_token = jwt.grant(webrtc_start_request.name, &auth_token).map_err(|e| {
         JsonRpcResponse::error(
-            answer_id,
+            answer_id.clone(),
             JsonRpcError::new(
                 JsonRpcErrorReason::InternalError,
                 e.to_string(),

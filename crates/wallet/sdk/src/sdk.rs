@@ -36,6 +36,7 @@ use crate::{
         substate::SubstatesApi,
         template::TemplateApi,
         transaction::TransactionApi,
+        viewable_balance::ViewableBalanceApi,
     },
     network::{StatusResponseError, WalletNetworkInterface},
     storage::{WalletStorageError, WalletStore},
@@ -220,6 +221,10 @@ where
 
     pub fn template_api(&self) -> TemplateApi<'_, TStore> {
         TemplateApi::new(&self.store)
+    }
+
+    pub fn viewable_balance_api(&self) -> ViewableBalanceApi {
+        ViewableBalanceApi
     }
 
     /// Tries to get encrypted cipher seed from DB and decrypts it using OS keyring if possible.

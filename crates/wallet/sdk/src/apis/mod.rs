@@ -15,3 +15,4 @@ pub mod stealth_transfer;
 pub mod substate;
 pub mod template;
 pub mod transaction;
+pub mod viewable_balance;

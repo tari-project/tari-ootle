@@ -140,7 +140,8 @@ pub async fn run_validator_node(
             handlers,
             #[cfg(feature = "metrics")]
             base_registry,
-        )?;
+        )
+        .await?;
         // Run the web ui
         #[cfg(feature = "web_ui")]
         if let Some(address) = config.validator_node.web_ui_listener_address {

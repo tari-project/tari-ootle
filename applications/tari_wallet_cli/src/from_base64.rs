@@ -22,7 +22,7 @@
 
 use std::{convert::TryFrom, str::FromStr};
 
-use base64;
+use base64::{self, Engine};
 
 #[derive(Debug, Clone, Copy)]
 pub struct FromBase64<T>(pub T);
@@ -41,7 +41,7 @@ where
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let a = base64::decode(s)?;
+        let a = base64::prelude::BASE64_STANDARD.decode(s)?;
         let b = T::try_from(a)?;
         Ok(Self(b))
     }

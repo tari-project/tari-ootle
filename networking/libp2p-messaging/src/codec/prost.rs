@@ -22,7 +22,7 @@ impl<TMsg> Default for ProstCodec<TMsg> {
 
 #[async_trait]
 impl<TMsg> Codec for ProstCodec<TMsg>
-where TMsg: prost::Message + Default
+where TMsg: prost::Message + fmt::Debug + Default
 {
     type Message = TMsg;
 

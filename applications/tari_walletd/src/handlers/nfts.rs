@@ -4,7 +4,7 @@
 use std::{collections::HashSet, slice};
 
 use anyhow::anyhow;
-use axum::headers::authorization::Bearer;
+use axum_extra::headers::authorization::Bearer;
 use log::{info, warn};
 use tari_engine_types::{
     component::derive_component_address_from_public_key,

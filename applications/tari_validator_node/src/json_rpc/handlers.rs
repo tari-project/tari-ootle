@@ -163,7 +163,7 @@ impl JsonRpcHandlers {
             .networking
             .get_local_peer_info()
             .await
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
         let fee_claim_public_key = self.config.validator_node.fee_claim_public_key.to_byte_type();
         let response = GetIdentityResponse {
             peer_id: info.peer_id.to_string(),
@@ -192,7 +192,7 @@ impl JsonRpcHandlers {
 
         if transaction.is_dry_run() {
             return Err(invalid_operation(
-                answer_id,
+                answer_id.clone(),
                 "Dry-run transactions cannot be submitted via this endpoint.",
             ));
         }
@@ -202,7 +202,7 @@ impl JsonRpcHandlers {
             if e.is_transaction_validator_error() {
                 warn!(target: LOG_TARGET, "❌ Mempool rejected the transaction: {}", e);
                 JsonRpcResponse::error(
-                    answer_id,
+                    answer_id.clone(),
                     JsonRpcError::new(
                         JsonRpcErrorReason::InvalidRequest,
                         format!("Mempool rejected the transaction: {}", e),
@@ -212,7 +212,7 @@ impl JsonRpcHandlers {
             } else {
                 error!(target: LOG_TARGET, "🚨 Mempool error: {}", e);
                 JsonRpcResponse::error(
-                    answer_id,
+                    answer_id.clone(),
                     JsonRpcError::new(
                         JsonRpcErrorReason::InternalError,
                         format!("Mempool error: {}", e),
@@ -271,7 +271,10 @@ impl JsonRpcHandlers {
 
     pub async fn get_recent_transactions(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
-        let tx = self.state_store.create_read_tx().map_err(internal_error(answer_id))?;
+        let tx = self
+            .state_store
+            .create_read_tx()
+            .map_err(internal_error(answer_id.clone()))?;
         match tx.transactions_get_paginated(1000, 0, Some(Ordering::Descending)) {
             Ok(recent_transactions) => {
                 let res = GetRecentTransactionsResponse {
@@ -298,26 +301,29 @@ impl JsonRpcHandlers {
             .epoch_manager
             .current_epoch()
             .await
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
 
-        let tx = self.state_store.create_read_tx().map_err(internal_error(answer_id))?;
+        let tx = self
+            .state_store
+            .create_read_tx()
+            .map_err(internal_error(answer_id.clone()))?;
 
         let start_block = match req.from_id {
             Some(id) => Block::get(&tx, &id)
                 .optional()
-                .map_err(internal_error(answer_id))?
-                .ok_or_else(|| not_found(answer_id, format!("Block {} not found", id)))?,
+                .map_err(internal_error(answer_id.clone()))?
+                .ok_or_else(|| not_found(answer_id.clone(), format!("Block {} not found", id)))?,
             None => {
                 let leaf = LeafBlock::get(&tx, current_epoch)
                     .optional()
-                    .map_err(internal_error(answer_id))?
-                    .ok_or_else(|| not_found(answer_id, format!("No leaf block for epoch {current_epoch}")))?;
-                Block::get(&tx, leaf.block_id()).map_err(internal_error(answer_id))?
+                    .map_err(internal_error(answer_id.clone()))?
+                    .ok_or_else(|| not_found(answer_id.clone(), format!("No leaf block for epoch {current_epoch}")))?;
+                Block::get(&tx, leaf.block_id()).map_err(internal_error(answer_id.clone()))?
             },
         };
         let blocks = tx
             .blocks_get_parent_chain(start_block.id(), req.limit)
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
 
         let res = ListBlocksResponse { blocks };
         Ok(JsonRpcResponse::success(answer_id, res))
@@ -335,7 +341,7 @@ impl JsonRpcHandlers {
         let tx_pool = self
             .state_store
             .with_read_tx(|tx| tx.transaction_pool_get_all())
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
         let res = json!({ "tx_pool": tx_pool });
         Ok(JsonRpcResponse::success(answer_id, res))
     }
@@ -352,8 +358,13 @@ impl JsonRpcHandlers {
                 Ok::<_, StorageError>((exec, time))
             })
             .optional()
-            .map_err(internal_error(answer_id))?
-            .ok_or_else(|| not_found(answer_id, format!("Transaction {} not found", request.transaction_id)))?;
+            .map_err(internal_error(answer_id.clone()))?
+            .ok_or_else(|| {
+                not_found(
+                    answer_id.clone(),
+                    format!("Transaction {} not found", request.transaction_id),
+                )
+            })?;
 
         let response = GetTransactionResultResponse {
             final_decision: Decision::from(&execution.result.finalize.result),
@@ -370,8 +381,13 @@ impl JsonRpcHandlers {
         let transaction = self
             .state_store
             .with_read_tx(|tx| TransactionRecord::get(tx, &data.transaction_id).optional())
-            .map_err(internal_error(answer_id))?
-            .ok_or_else(|| not_found(answer_id, format!("Transaction {} not found", data.transaction_id)))?;
+            .map_err(internal_error(answer_id.clone()))?
+            .ok_or_else(|| {
+                not_found(
+                    answer_id.clone(),
+                    format!("Transaction {} not found", data.transaction_id),
+                )
+            })?;
 
         Ok(JsonRpcResponse::success(answer_id, GetTransactionResponse {
             transaction: transaction.into_transaction(),
@@ -388,7 +404,7 @@ impl JsonRpcHandlers {
                 let address = SubstateAddress::from_substate_id(&data.address, data.version);
                 SubstateRecord::get(tx, &address).optional()
             })
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
 
         match maybe_substate {
             Some(substate) if substate.is_destroyed() => Ok(JsonRpcResponse::success(answer_id, GetSubstateResponse {
@@ -412,8 +428,8 @@ impl JsonRpcHandlers {
         let block = self
             .state_store
             .with_read_tx(|tx| Block::get(tx, &data.block_id).optional())
-            .map_err(internal_error(answer_id))?
-            .ok_or_else(|| not_found(answer_id, format!("Block {} not found", data.block_id)))?;
+            .map_err(internal_error(answer_id.clone()))?
+            .ok_or_else(|| not_found(answer_id.clone(), format!("Block {} not found", data.block_id)))?;
 
         let res = GetBlockResponse { block };
         Ok(JsonRpcResponse::success(answer_id, res))
@@ -425,7 +441,7 @@ impl JsonRpcHandlers {
         let count = self
             .state_store
             .with_read_tx(|tx| tx.filtered_blocks_get_count(req.filter_index, req.filter))
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
         let res = GetBlocksCountResponse { count };
         Ok(JsonRpcResponse::success(answer_id, res))
     }
@@ -446,7 +462,7 @@ impl JsonRpcHandlers {
                     req.ordering,
                 )
             })
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
         let res = GetBlocksResponse { blocks };
         Ok(JsonRpcResponse::success(answer_id, res))
     }
@@ -459,7 +475,7 @@ impl JsonRpcHandlers {
             .template_manager
             .get_templates(req.limit as usize)
             .await
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
 
         Ok(JsonRpcResponse::success(answer_id, GetTemplatesResponse {
             templates: templates
@@ -481,13 +497,13 @@ impl JsonRpcHandlers {
             .template_manager
             .get_template(req.template_address)
             .await
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
 
         let loaded = self
             .template_manager
             .load_template_abi(req.template_address)
             .await
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
         let abi = TemplateAbi {
             template_name: loaded.template_def().template_name().to_string(),
             functions: loaded
@@ -520,7 +536,7 @@ impl JsonRpcHandlers {
             .networking
             .get_active_connections()
             .await
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
 
         let connections = active_connections
             .into_iter()
@@ -549,7 +565,7 @@ impl JsonRpcHandlers {
         let size = self.mempool.get_mempool_size().await.map_err(|err| {
             error!(target: LOG_TARGET, "Error getting mempool size: {}", err);
             JsonRpcResponse::error(
-                answer_id,
+                answer_id.clone(),
                 JsonRpcError::new(
                     JsonRpcErrorReason::InvalidParams,
                     "Something went wrong".to_string(),
@@ -565,13 +581,13 @@ impl JsonRpcHandlers {
         self.epoch_manager
             .wait_for_initial_scanning_to_complete()
             .await
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
         let current_epoch = self.epoch_manager.get_current_epoch();
         let current_epoch_hash = self
             .epoch_manager
             .get_current_epoch_hash()
             .await
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
 
         let current_block_height = self
             .global_db
@@ -583,7 +599,7 @@ impl JsonRpcHandlers {
             })
             .map_err(|e| {
                 JsonRpcResponse::error(
-                    answer_id,
+                    answer_id.clone(),
                     JsonRpcError::new(
                         JsonRpcErrorReason::InternalError,
                         format!("Could not get current block height: {}", e),
@@ -602,7 +618,7 @@ impl JsonRpcHandlers {
                     Ok(None)
                 } else {
                     Err(JsonRpcResponse::error(
-                        answer_id,
+                        answer_id.clone(),
                         JsonRpcError::new(
                             JsonRpcErrorReason::InternalError,
                             format!("Could not get committee shard:{}", err),
@@ -621,7 +637,7 @@ impl JsonRpcHandlers {
                     Ok(None)
                 } else {
                     Err(JsonRpcResponse::error(
-                        answer_id,
+                        answer_id.clone(),
                         JsonRpcError::new(
                             JsonRpcErrorReason::InternalError,
                             format!("Could not get committee shard:{}", err),
@@ -634,7 +650,7 @@ impl JsonRpcHandlers {
             .epoch_manager
             .is_initial_scanning_complete()
             .await
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
         let response = GetEpochManagerStatsResponse {
             current_epoch,
             current_block_height: current_block_height.unwrap_or(0),
@@ -688,10 +704,10 @@ impl JsonRpcHandlers {
                     .build(),
             )
             .await
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
 
         if wait_for_dial {
-            dial_wait.await.map_err(internal_error(answer_id))?;
+            dial_wait.await.map_err(internal_error(answer_id.clone()))?;
         }
 
         Ok(JsonRpcResponse::success(answer_id, AddPeerResponse {}))
@@ -704,7 +720,7 @@ impl JsonRpcHandlers {
             .clone()
             .get_connected_peers()
             .await
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
 
         let status = if peers.is_empty() { "Offline" } else { "Online" };
         Ok(JsonRpcResponse::success(answer_id, GetCommsStatsResponse {
@@ -720,7 +736,7 @@ impl JsonRpcHandlers {
             .get_our_validator_node(request.epoch)
             .await
             .optional()
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
 
         Ok(JsonRpcResponse::success(answer_id, GetShardKeyResponse {
             shard_key: maybe_vn.map(|vn| vn.shard_key),
@@ -756,7 +772,7 @@ impl JsonRpcHandlers {
             .epoch_manager
             .get_all_validator_nodes(epoch)
             .await
-            .map_err(internal_error(answer_id))?;
+            .map_err(internal_error(answer_id.clone()))?;
 
         let vns = vns
             .into_iter()
@@ -793,12 +809,12 @@ impl JsonRpcHandlers {
                     .epoch_manager
                     .current_epoch()
                     .await
-                    .map_err(internal_error(answer_id))?;
+                    .map_err(internal_error(answer_id.clone()))?;
                 if self
                     .epoch_manager
                     .is_this_validator_registered_for_epoch(current_epoch)
                     .await
-                    .map_err(internal_error(answer_id))?
+                    .map_err(internal_error(answer_id.clone()))?
                 {
                     return Err(invalid_operation(
                         answer_id,
@@ -853,19 +869,19 @@ impl JsonRpcHandlers {
                 self.layer_one_transaction_submitter
                     .submit_transaction(l1_tx)
                     .await
-                    .map_err(internal_error(answer_id))?
+                    .map_err(internal_error(answer_id.clone()))?
             },
             LayerOneTransactionParams::Exit => {
                 let current_epoch = self
                     .epoch_manager
                     .current_epoch()
                     .await
-                    .map_err(internal_error(answer_id))?;
+                    .map_err(internal_error(answer_id.clone()))?;
                 if !self
                     .epoch_manager
                     .is_this_validator_registered_for_epoch(current_epoch)
                     .await
-                    .map_err(internal_error(answer_id))?
+                    .map_err(internal_error(answer_id.clone()))?
                 {
                     return Err(invalid_operation(
                         answer_id,
@@ -899,7 +915,7 @@ impl JsonRpcHandlers {
                 self.layer_one_transaction_submitter
                     .submit_transaction(l1_tx)
                     .await
-                    .map_err(internal_error(answer_id))?
+                    .map_err(internal_error(answer_id.clone()))?
             },
         };
 

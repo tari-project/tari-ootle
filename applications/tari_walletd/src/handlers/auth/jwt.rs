@@ -3,7 +3,7 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use axum::headers::authorization::Bearer;
+use axum_extra::headers::authorization::Bearer;
 use jsonwebtoken::{errors, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use tari_crypto::tari_utilities::SafePassword;

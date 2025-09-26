@@ -112,6 +112,7 @@ use tari_template_lib::{
     resource::{IMAGE_URL, TOKEN_SYMBOL},
     template::BuiltinTemplate,
     types::{
+        bytes::Bytes,
         crypto::UtxoTag,
         engine_args::{SignatureAction, SignatureVerifyArg},
         Amount,
@@ -333,7 +334,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         &self,
         component_address: ComponentAddress,
         method: &str,
-        args: Vec<Vec<u8>>,
+        args: Vec<Bytes>,
     ) -> Result<InstructionResult, RuntimeError> {
         let call_runtime = Runtime::new(Arc::new(self.clone()));
         TransactionProcessor::call_method(
@@ -354,7 +355,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         &self,
         template_address: &TemplateAddress,
         function: &str,
-        args: Vec<Vec<u8>>,
+        args: Vec<Bytes>,
     ) -> Result<InstructionResult, RuntimeError> {
         // we are initializing a new runtime for the nested call
         let call_runtime = Runtime::new(Arc::new(self.clone()));
@@ -532,13 +533,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
     fn lock_component(&self, address: ComponentAddress, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError> {
         self.tracker.lock_substate(&SubstateId::Component(address), lock_flag)
-    }
-
-    fn get_substate(&self, lock: &LockedSubstate) -> Result<SubstateValue, RuntimeError> {
-        self.tracker.read_with(|state| {
-            let (_, substate) = state.store().get_locked_substate(lock.lock_id())?;
-            Ok(substate.clone())
-        })
     }
 
     #[allow(clippy::too_many_lines)]

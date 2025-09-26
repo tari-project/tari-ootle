@@ -230,6 +230,15 @@ where
         let src_vault = self
             .accounts_api
             .get_vault_by_resource(account.component_address(), &params.resource_address)?;
+        if !src_vault.resource_type.is_confidential() {
+            return Err(ConfidentialTransferApiError::InvalidParameter {
+                param: "resource_address",
+                reason: format!(
+                    "Resource {} is {}. Expected confidential,",
+                    params.resource_address, src_vault.resource_type
+                ),
+            });
+        }
         let src_vault_substate = self.substate_api.get_substate(&src_vault.id.into())?;
         inputs.push(src_vault_substate.substate_id.into_unversioned_requirement());
 

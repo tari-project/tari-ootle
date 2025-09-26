@@ -23,11 +23,11 @@ use tari_transaction_components::{
 use tari_wallet_daemon_client::types::ClaimBurnProof;
 use tokio::time::sleep;
 
-use crate::{spawn_wallet, TariWorld};
+use crate::{spawn_minotari_wallet, TariWorld};
 
 #[given(expr = "a wallet {word} connected to base node {word}")]
 async fn start_wallet(world: &mut TariWorld, wallet_name: String, bn_name: String) {
-    spawn_wallet(world, wallet_name, bn_name).await;
+    spawn_minotari_wallet(world, wallet_name, bn_name).await;
 }
 
 #[when(expr = "I burn {int}T on wallet {word} to proof {word} for wallet daemon {word}")]

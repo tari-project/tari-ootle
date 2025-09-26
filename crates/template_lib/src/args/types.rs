@@ -26,7 +26,7 @@ use tari_template_abi::rust::{
     fmt::{Display, Formatter},
     str::FromStr,
 };
-use tari_template_lib_types::crypto::StealthValueProof;
+use tari_template_lib_types::{bytes::Bytes, crypto::StealthValueProof};
 
 use crate::{
     args::freeze_flags::VaultFreezeFlags,
@@ -120,7 +120,7 @@ impl std::error::Error for LogLevelParseError {}
 pub struct ComponentInvokeArg {
     pub component_ref: ComponentRef,
     pub action: ComponentAction,
-    pub args: Vec<Vec<u8>>,
+    pub args: Vec<Bytes>,
 }
 
 /// The possible actions that can be performed on components
@@ -183,7 +183,7 @@ pub struct EmitEventArg {
 pub struct ResourceInvokeArg {
     pub resource_ref: ResourceRef,
     pub action: ResourceAction,
-    pub args: Vec<Vec<u8>>,
+    pub args: Vec<Bytes>,
 }
 
 /// Encapsulates all the ways that a resource can be referenced
@@ -373,7 +373,7 @@ pub struct FreezeResourceArg {
 pub struct VaultInvokeArg {
     pub vault_ref: VaultRef,
     pub action: VaultAction,
-    pub args: Vec<Vec<u8>>,
+    pub args: Vec<Bytes>,
 }
 
 /// The possible actions that can be performed on vaults
@@ -435,7 +435,7 @@ pub struct PayFeeArg {
 pub struct BucketInvokeArg {
     pub bucket_ref: BucketRef,
     pub action: BucketAction,
-    pub args: Vec<Vec<u8>>,
+    pub args: Vec<Bytes>,
 }
 
 /// Encapsulates all the ways that a bucket can be referenced
@@ -507,7 +507,7 @@ pub enum WorkspaceAction {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WorkspaceInvokeArg {
     pub action: WorkspaceAction,
-    pub args: Vec<Vec<u8>>,
+    pub args: Vec<Bytes>,
 }
 
 // -------------------------------- NonFungible -------------------------------- //
@@ -517,7 +517,7 @@ pub struct WorkspaceInvokeArg {
 pub struct NonFungibleInvokeArg {
     pub address: NonFungibleAddress,
     pub action: NonFungibleAction,
-    pub args: Vec<Vec<u8>>,
+    pub args: Vec<Bytes>,
 }
 
 /// The possible actions that can be performed on non-fungible resources
@@ -568,7 +568,7 @@ pub enum CallerContextAction {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CallerContextInvokeArg {
     pub action: CallerContextAction,
-    pub args: Vec<Vec<u8>>,
+    pub args: Vec<Bytes>,
 }
 
 // -------------------------------- AddressAllocation -------------------------------- //
@@ -596,7 +596,7 @@ pub enum AllocateAddressResult {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CallInvokeArg {
     pub action: CallAction,
-    pub args: Vec<Vec<u8>>,
+    pub args: Vec<Bytes>,
 }
 
 /// All the possible call operation types
@@ -613,7 +613,7 @@ pub enum CallAction {
 pub struct CallFunctionArg {
     pub template_address: TemplateAddress,
     pub function: String,
-    pub args: Vec<Vec<u8>>,
+    pub args: Vec<Bytes>,
 }
 
 /// A component's method call operation argument
@@ -621,7 +621,7 @@ pub struct CallFunctionArg {
 pub struct CallMethodArg {
     pub component_address: ComponentAddress,
     pub method: String,
-    pub args: Vec<Vec<u8>>,
+    pub args: Vec<Bytes>,
 }
 
 // -------------------------------- ProofInvoke -------------------------------- //
@@ -631,7 +631,7 @@ pub struct CallMethodArg {
 pub struct ProofInvokeArg {
     pub proof_ref: ProofRef,
     pub action: ProofAction,
-    pub args: Vec<Vec<u8>>,
+    pub args: Vec<Bytes>,
 }
 
 /// All the possible ways to reference a proof

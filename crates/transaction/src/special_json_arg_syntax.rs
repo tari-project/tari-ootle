@@ -200,7 +200,7 @@ impl From<ParsedArg<'_>> for InstructionArg {
             ParsedArg::SignedInteger(v) => call_arg!(v),
             ParsedArg::Bool(v) => call_arg!(v),
             // Ensure bytes are encoded as Cbor Bytes, not Array<u8>
-            ParsedArg::Bytes(v) => InstructionArg::Literal(encode(&tari_bor::Value::Bytes(v)).unwrap()),
+            ParsedArg::Bytes(v) => InstructionArg::Literal(encode(&tari_bor::Value::Bytes(v)).unwrap().into()),
             ParsedArg::Workspace(s) => call_arg!(Workspace(s)),
             ParsedArg::Metadata(m) => call_arg!(m),
             ParsedArg::Cbor(cbor) => InstructionArg::from_type(&cbor).unwrap(),

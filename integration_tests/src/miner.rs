@@ -38,7 +38,7 @@ use tari_transaction_components::{
 };
 use tari_transaction_key_manager::MemoryDbKeyManager;
 
-use crate::TariWorld;
+use crate::{util::cucumber_log, TariWorld};
 
 type BaseNodeClient = BaseNodeGrpcClient<tonic::transport::Channel>;
 
@@ -55,6 +55,8 @@ pub fn register_miner_process(world: &mut TariWorld, miner_name: String, base_no
         base_node_name,
         wallet_name,
     };
+
+    cucumber_log(format!("Miner {} registered", miner_name));
     world.miners.insert(miner_name, miner);
 }
 

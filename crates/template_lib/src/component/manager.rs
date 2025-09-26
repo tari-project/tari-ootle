@@ -23,7 +23,7 @@
 use serde::{de::DeserializeOwned, Serialize};
 use tari_bor::{from_value, to_value};
 use tari_template_abi::{call_engine, EngineOp};
-use tari_template_lib_types::TemplateAddress;
+use tari_template_lib_types::{bytes::Bytes, TemplateAddress};
 
 use crate::{
     args::{CallAction, CallInvokeArg, CallMethodArg, ComponentAction, ComponentInvokeArg, ComponentRef, InvokeResult},
@@ -57,11 +57,11 @@ impl ComponentManager {
     /// Calls a method of another component and returns the result.
     /// This is used to call external component methods and can be used in a component method or template function
     /// context.
-    pub fn call<T: Into<String>, R: DeserializeOwned>(&self, method: T, args: Vec<Vec<u8>>) -> R {
+    pub fn call<T: Into<String>, R: DeserializeOwned, B: Into<Bytes>>(&self, method: T, args: Vec<B>) -> R {
         self.call_internal(CallMethodArg {
             component_address: self.address,
             method: method.into(),
-            args,
+            args: args.into_iter().map(Into::into).collect(),
         })
     }
 
@@ -78,7 +78,7 @@ impl ComponentManager {
 
     /// Calls a method of another component. The called method must return a unit type.
     /// Equivalent to [`call::<_, ()>(method, args)`](ComponentManager::call).
-    pub fn invoke<T: Into<String>>(&self, method: T, args: Vec<Vec<u8>>) {
+    pub fn invoke<T: Into<String>, B: Into<Bytes>>(&self, method: T, args: Vec<B>) {
         self.call(method, args)
     }
 

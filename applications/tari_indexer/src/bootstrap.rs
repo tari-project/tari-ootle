@@ -211,7 +211,7 @@ pub async fn spawn_services(
         template_manager_service.clone(),
         NetworkWideStateSyncConfig {
             event_filters: Arc::from(config.indexer.event_filters.clone()),
-            ..Default::default()
+            work_interval: config.indexer.state_scanning_interval,
         },
     )
     .spawn(shutdown.clone());

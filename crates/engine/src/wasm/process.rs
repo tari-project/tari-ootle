@@ -127,6 +127,7 @@ impl WasmProcess {
         Ok(AllocPtr::new(ptr.offset(), len))
     }
 
+    #[allow(clippy::too_many_lines)]
     fn tari_engine_entrypoint(
         mut env: FunctionEnvMut<WasmEnv<Runtime>>,
         op: i32,
@@ -140,6 +141,16 @@ impl WasmProcess {
                 return WasmPtr::null();
             },
         };
+
+        if arg_len as usize > limits::ENGINE_LIMITS.max_internal_call_size {
+            log::error!(
+                target: LOG_TARGET,
+                "Engine call size limit of {} bytes exceeded: {} bytes",
+                limits::ENGINE_LIMITS.max_internal_call_size,
+                arg_len
+            );
+            return WasmPtr::null();
+        }
 
         let (env_mut, mut store) = env.data_and_store_mut();
         let arg = match env_mut.read_from_memory(&mut store, arg_ptr, arg_len) {
@@ -244,7 +255,10 @@ impl WasmProcess {
         U: Serialize,
         WasmExecutionError: From<E>,
     {
-        let decoded = decode_exact(&args).map_err(WasmExecutionError::EngineArgDecodeFailed)?;
+        let decoded = decode_exact(&args).map_err(|e| {
+            eprintln!("Failed to decode args: {}", e);
+            WasmExecutionError::EngineArgDecodeFailed(e)
+        })?;
         let resp = f(env_mut.state_mut(), decoded)?;
         let len = encoded_len(&resp)?;
         let ptr = env_mut.alloc(&mut store, len as u32)?;

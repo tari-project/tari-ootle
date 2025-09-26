@@ -59,7 +59,7 @@ async fn handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: Js
     debug!(target: LOG_TARGET, "🌐 JSON-RPC body: {:?}", value);
     match value.method.as_str() {
         "rpc.discover" => handlers.rpc_discover(value),
-        // Network
+        // P2p Network
         "get_identity" => handlers.get_identity(value).await,
         "add_peer" => handlers.add_peer(value).await,
         "get_comms_stats" => handlers.get_comms_stats(value).await,
@@ -86,6 +86,7 @@ async fn handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: Js
         // Misc
         "wait_until_ready" => handlers.wait_until_ready(value).await,
         "get_epoch_manager_stats" => handlers.get_epoch_manager_stats(value).await,
+        "get_network_sync_state" => handlers.get_network_sync_state(value).await,
         method => Ok(value.method_not_found(method)),
     }
 }

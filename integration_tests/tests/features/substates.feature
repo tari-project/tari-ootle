@@ -6,10 +6,11 @@
 Feature: Substates
 
   Scenario: Transactions with DOWN local substates are rejected
+    #FIX
     Given a network with registered validator VN and wallet daemon WALLET_D
 
     # Create account
-    When I create an account ACC via the wallet daemon WALLET_D with 10000000 free coins
+    When I create an account ACC via the wallet daemon WALLET_D with 10 XTR
 
     # Publish the "counter" template
     When wallet daemon WALLET_D publishes the template "counter" using account ACC

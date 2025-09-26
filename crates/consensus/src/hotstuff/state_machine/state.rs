@@ -3,7 +3,7 @@
 
 use std::fmt::Display;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::hotstuff::state_machine::{check_sync::CheckSync, idle::Idle, running::Running, syncing::Syncing};
 
@@ -17,7 +17,7 @@ pub(super) enum ConsensusState<TSpec> {
     Shutdown,
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub enum ConsensusCurrentState {
     #[default]
     Idle,
@@ -26,6 +26,21 @@ pub enum ConsensusCurrentState {
     Running,
     Sleeping,
     Shutdown,
+}
+
+impl Display for ConsensusCurrentState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        #[allow(clippy::enum_glob_use)]
+        use ConsensusCurrentState::*;
+        match self {
+            Idle => write!(f, "Idle"),
+            CheckSync => write!(f, "CheckSync"),
+            Syncing => write!(f, "Syncing"),
+            Running => write!(f, "Running"),
+            Sleeping => write!(f, "Sleeping"),
+            Shutdown => write!(f, "Shutdown"),
+        }
+    }
 }
 
 impl ConsensusCurrentState {
@@ -42,16 +57,7 @@ impl<TSpec> ConsensusState<TSpec> {
 
 impl<TSpec> Display for ConsensusState<TSpec> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        #[allow(clippy::enum_glob_use)]
-        use ConsensusState::*;
-        match self {
-            Idle(_) => write!(f, "Idle"),
-            CheckSync(_) => write!(f, "CheckSync"),
-            Syncing(_) => write!(f, "Syncing"),
-            Running(_) => write!(f, "Running"),
-            Sleeping => write!(f, "Sleeping"),
-            Shutdown => write!(f, "Shutdown"),
-        }
+        ConsensusCurrentState::from(self).fmt(f)
     }
 }
 

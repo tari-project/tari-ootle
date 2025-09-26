@@ -170,7 +170,7 @@ where
     };
     create_substate(tx, num_preshards, NFT_FAUCET_COMPONENT_ADDRESS, value)?;
 
-    let metadata = Metadata::from([("name", "NFT Faucet"), (TOKEN_SYMBOL, "TNFT")]);
+    let metadata = Metadata::from([("name", "NFT Faucet"), (TOKEN_SYMBOL, "tNFT")]);
 
     let access_rules = ResourceAccessRules::new().mintable(rule!(component(NFT_FAUCET_COMPONENT_ADDRESS)));
     let value = Resource::new(

@@ -217,7 +217,10 @@ impl NetworkWideStateSync {
                 .await?;
 
             if checkpoints.is_empty() {
-                info!(target: LOG_TARGET, "🌍️ No checkpoints found for shard group {shard_group} from epoch {from_epoch}");
+                info!(target: LOG_TARGET, "🌍️ No checkpoints found for shard group {shard_group} from epoch {from_epoch} (prev_epoch {prev_epoch})");
+                sync_plan_mut.add_checkpoint_sync_progress(shard_group, prev_epoch);
+                self.store
+                    .with_write_tx(|tx| tx.key_value_set(Key::SyncProgress, sync_plan_mut.sync_progress()))?;
                 continue;
             }
 
@@ -286,7 +289,7 @@ impl NetworkWideStateSync {
 
         let mut has_synced_global_shard = false;
 
-        for (shard_group, pool) in committee_pools {
+        for (shard_group, mut pool) in committee_pools {
             // TODO: make this robust against failures, e.g. if one peer fails, continue with others
             // TODO: consider syncing shards in epoch chunks rather than one after another
             // TODO: consider parallelizing shard syncs within a shard group

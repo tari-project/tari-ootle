@@ -38,13 +38,25 @@ impl ValidatorCommitteeRpcPool {
         }
     }
 
-    pub async fn new_session(&self) -> Result<ValidatorRpcSession, ValidatorCommitteeClientError> {
+    pub async fn new_session(&mut self) -> Result<ValidatorRpcSession, ValidatorCommitteeClientError> {
         let epoch = self.epoch_manager.get_current_epoch();
-        let member = self
-            .epoch_manager
-            .get_random_committee_member(epoch, Some(self.shard_group), self.past_failed_nodes.clone())
-            .await?;
-        self.session_for_peer(member.address).await
+        loop {
+            let member = self
+                .epoch_manager
+                .get_random_committee_member(epoch, Some(self.shard_group), self.past_failed_nodes.clone())
+                .await?;
+            let result = self.session_for_peer(member.address).await;
+            match result {
+                Ok(session) => return Ok(session),
+                Err(err) => {
+                    warn!(
+                        target: LOG_TARGET,
+                        "Failed to create session for validator '{}': {}", member, err
+                    );
+                    self.past_failed_nodes.push(member.address);
+                },
+            }
+        }
     }
 
     async fn session_for_peer(

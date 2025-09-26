@@ -10,6 +10,7 @@ use log::*;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{substate::SubstateId, ToByteType};
 use tari_ootle_common_types::{derive_fee_pool_address, SubstateAddress, SubstateRequirement};
+use tari_template_lib::constants::XTR;
 use tari_transaction::args;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
@@ -108,7 +109,7 @@ pub async fn handle_claim_validator_fees(
     }
 
     let (account, inputs) = get_account_with_inputs(req.account.as_ref(), &sdk)?;
-    let account_address = *account.component_address();
+    let account_component_address = *account.component_address();
     let (account_secret_key, account_public_key) = sdk.key_manager_api().derive_account_keypair(account.key_index())?;
 
     let (claim_public_key, claim_secret) = match req.claim_key_index {
@@ -131,28 +132,46 @@ pub async fn handle_claim_validator_fees(
         .transaction_builder()
         .with_dry_run(req.dry_run)
         .with_fee_instructions_builder(|builder| {
-            let mut bucket_names = vec![];
-            fee_pool_addresses
-                .clone()
-                .enumerate()
-                .fold(builder, |builder, (i, address)| {
-                    bucket_names.push(format!("b{}", i));
-                    builder
-                        .claim_validator_fees(address)
-                        .put_last_instruction_output_on_workspace(bucket_names.last().unwrap())
+            builder
+                .then(|b| {
+                    if account.is_confirmed_on_chain() {
+                        b
+                    } else {
+                        // TODO: make create account idempotent so we don't need to check if the account exists
+                        // This is easy enough, but assumes that the account is given as an input (which requires
+                        // checking anyway). So ideally, we'd be adding "auto-inputs" from the instructions i.e.
+                        // create_account instruction would automatically add the account as an
+                        // input if it exists. This could add complications to multi-shard networks but should be
+                        // possible (a good idea tho?).
+                        b.create_account(*account.address.account_public_key())
+                    }
                 })
                 .then(|builder| {
-                    // TODO: improve this - suggest: the workspace implicitly collect all returned resources (buckets)
-                    // and we should create buckets by taking from the workspace. Then we could collect all buckets and
-                    // deposit once. Greatly reducing gas for this (and a lot of other) transactions.
-                    bucket_names.into_iter().fold(builder, |builder, bucket| {
-                        builder.call_method(account_address, "deposit", args![Workspace(bucket)])
-                    })
+                    let mut bucket_names = vec![];
+                    fee_pool_addresses
+                        .clone()
+                        .enumerate()
+                        .fold(builder, |builder, (i, address)| {
+                            bucket_names.push(format!("b{}", i));
+                            builder
+                                .claim_validator_fees(address)
+                                .put_last_instruction_output_on_workspace(bucket_names.last().unwrap())
+                        })
+                        .then(|builder| {
+                            // TODO: improve this - suggest: the workspace implicitly collect all returned resources
+                            // (buckets) and we should create buckets by taking from the
+                            // workspace. Then we could collect all buckets and
+                            // deposit once. Greatly reducing gas for this (and a lot of other) transactions.
+                            bucket_names.into_iter().fold(builder, |builder, bucket| {
+                                builder.call_method(account_component_address, "deposit", args![Workspace(bucket)])
+                            })
+                        })
                 })
-                .call_method(account_address, "pay_fee", args![max_fee])
+                .call_method(account_component_address, "pay_fee", args![max_fee])
         })
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .with_inputs(fee_pool_addresses.map(SubstateRequirement::unversioned))
+        .add_input(XTR)
         .then(|builder| {
             if let Some(secret) = claim_secret {
                 // If the claim key is different from the account secret, we need to sign with both

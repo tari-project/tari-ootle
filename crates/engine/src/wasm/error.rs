@@ -19,7 +19,8 @@ pub enum WasmExecutionError {
     InstantiationError(Box<InstantiationError>),
     #[error(transparent)]
     ExportError(#[from] ExportError),
-    #[error(transparent)]
+    // NOTE this renders as "Wasm RuntimeError: <message>"
+    #[error("Wasm {0}")]
     WasmRuntimeError(#[from] wasmer::RuntimeError),
     #[error("Expected function {function} to return a pointer")]
     ExpectedPointerReturn { function: String },
@@ -31,6 +32,8 @@ pub enum WasmExecutionError {
     MemoryPointerOutOfRange { size: u64, pointer: u64, len: u64 },
     #[error("Memory allocation too large")]
     MemoryAllocationTooLarge,
+    #[error("Memory export too large")]
+    MemoryExportTooLarge,
     #[error("Memory allocation failed")]
     MemoryAllocationFailed,
     #[error("BUG: memory not set in environment")]
@@ -73,13 +76,20 @@ pub enum WasmExecutionError {
 pub enum WasmValidationError {
     #[error("Function name {name} is too long, maximum length is {max_length}")]
     FunctionNameTooLong { name: String, max_length: usize },
-    #[error("Function {name} is not allowed to contain floats")]
-    FunctionContainsFloats { name: String },
     #[error("Function {name} contained too many arguments, maximum is {max_args}, but got {num_args}")]
     FunctionTooManyArguments {
         name: String,
         max_args: usize,
         num_args: usize,
+    },
+    #[error(
+        "Function {name} contained too many return values in a tuple, maximum is {max_tuple_size}, but got \
+         {tuple_size}"
+    )]
+    FunctionTooManyTupleReturn {
+        name: String,
+        max_tuple_size: usize,
+        tuple_size: usize,
     },
     #[error("Too many functions in the module, maximum is {max_functions}")]
     TooManyFunctions { max_functions: usize },

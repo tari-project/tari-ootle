@@ -46,6 +46,7 @@ use tari_indexer_client::types::{
     GetConnectionsResponse,
     GetEpochManagerStatsResponse,
     GetIdentityResponse,
+    GetNetworkSyncStateResponse,
     GetNonFungiblesRequest,
     GetNonFungiblesResponse,
     GetSubstateRequest,
@@ -70,8 +71,10 @@ use tari_indexer_client::types::{
     ListSubstatesResponse,
     ListTemplatesRequest,
     ListTemplatesResponse,
+    NetworkDescription,
     SubmitTransactionRequest,
     SubmitTransactionResponse,
+    SyncProgress,
     TemplateMetadata,
 };
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
@@ -691,6 +694,38 @@ impl JsonRpcHandlers {
             current_epoch,
             current_block_height: current_block_height.unwrap_or(0),
             current_block_hash: current_epoch_hash,
+        };
+        Ok(JsonRpcResponse::success(answer_id, response))
+    }
+
+    pub async fn get_network_sync_state(&self, value: JsonRpcExtractor) -> JrpcResult {
+        let answer_id = value.get_answer_id();
+        let network_desc = self
+            .epoch_manager
+            .get_network_description()
+            .await
+            .map_err(internal_error(answer_id.clone()))?;
+        let sync_progress = self
+            .substate_manager
+            .get_sync_progress()
+            .optional()
+            .map_err(internal_error(answer_id.clone()))?;
+
+        let response = GetNetworkSyncStateResponse {
+            network_desc: NetworkDescription {
+                epoch: network_desc.epoch,
+                shard_groups: network_desc
+                    .shard_groups
+                    .into_iter()
+                    .map(|(shard_group, info)| (shard_group, info.num_members))
+                    .collect(),
+                num_preshards: network_desc.num_preshards,
+            },
+            sync_progress: sync_progress.map(|p| SyncProgress {
+                last_epoch: p.last_epoch,
+                checkpoint_progress: p.checkpoint_progress.into_iter().collect(),
+                last_state_versions: p.last_state_versions.into_iter().collect(),
+            }),
         };
         Ok(JsonRpcResponse::success(answer_id, response))
     }

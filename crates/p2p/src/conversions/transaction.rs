@@ -433,7 +433,7 @@ impl TryFrom<proto::transaction::Arg> for InstructionArg {
     fn try_from(request: proto::transaction::Arg) -> Result<Self, Self::Error> {
         let arg_value = request.arg_value.ok_or_else(|| anyhow!("arg_value not provided"))?;
         match arg_value {
-            proto::transaction::arg::ArgValue::Literal(data) => Ok(InstructionArg::Literal(data)),
+            proto::transaction::arg::ArgValue::Literal(data) => Ok(InstructionArg::raw_literal_bytes(data)),
             proto::transaction::arg::ArgValue::Workspace(offset_id) => {
                 let id = u16::try_from(offset_id.id).context("WorkspaceOffsetId id overflowed")?;
                 Ok(InstructionArg::Workspace(
@@ -448,7 +448,7 @@ impl From<InstructionArg> for proto::transaction::Arg {
     fn from(arg: InstructionArg) -> Self {
         match arg {
             InstructionArg::Literal(data) => proto::transaction::Arg {
-                arg_value: Some(proto::transaction::arg::ArgValue::Literal(data)),
+                arg_value: Some(proto::transaction::arg::ArgValue::Literal(data.into())),
             },
             InstructionArg::Workspace(offset_id) => proto::transaction::Arg {
                 arg_value: Some(proto::transaction::arg::ArgValue::Workspace(

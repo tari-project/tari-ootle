@@ -46,9 +46,10 @@ import CopyToClipboard from "../../Components/CopyToClipboard";
 import saveAs from "file-saver";
 import JsonDialog from "../../Components/JsonDialog";
 import { ListSubstateItem, shortenSubstateId, substateIdToString } from "@tari-project/typescript-bindings";
-import { listSubstates, getSubstate } from "../../utils/json_rpc";
+import { getSubstate } from "../../utils/json_rpc";
 import { Link } from "react-router-dom";
 import FetchStatusCheck from "../../Components/FetchStatusCheck";
+import { useListSubstates } from "../../api/hooks/useSubstates";
 
 const SUBSTATE_TYPES = [
   "Component",
@@ -64,19 +65,24 @@ const SUBSTATE_TYPES = [
 type ExtendedSubstateItem = ListSubstateItem & { id: string; show?: boolean };
 
 function SubstatesLayout() {
-  const [substates, setSubstates] = useState<ListSubstateItem[]>([]);
   const [filteredSubstates, setFilteredSubstates] = useState<ExtendedSubstateItem[]>([]);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [jsonDialogOpen, setJsonDialogOpen] = React.useState(false);
   const [selectedContent, setSelectedContent] = useState({});
-  const [isLoading, setIsLoading] = useState(false);
-  const [isError, setIsError] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
   const [filter, setFilter] = useState({
     filter_by_template: "",
     filter_by_type: "",
   });
+
+  const { data, isLoading, isError, error } = useListSubstates({
+    offset: 0,
+    limit: 50,
+    filter_by_template: filter.filter_by_template || null,
+    filter_by_type: filter.filter_by_type || null,
+  });
+
+  const substates = data?.substates || [];
 
   const extendedSubstates = useMemo(
     () => substates.map((substate) => ({ ...substate, id: substateIdToString(substate.substate_id) })),
@@ -90,40 +96,6 @@ function SubstatesLayout() {
     setFilteredSubstates(extendedSubstates);
   }, [extendedSubstates]);
 
-  useEffect(() => {
-    get_substates(0, 50, { filter_by_template: null, filter_by_type: null });
-  }, []);
-
-  async function get_substates(offset: number, limit: number, filter: any) {
-    setIsLoading(true);
-    setIsError(false);
-    setError(null);
-
-    try {
-      let params = {
-        limit,
-        offset,
-        filter_by_template: null,
-        filter_by_type: null,
-      };
-      if (filter.filter_by_template) {
-        params.filter_by_template = filter.filter_by_template;
-      }
-      if (filter.filter_by_type) {
-        params.filter_by_type = filter.filter_by_type;
-      }
-
-      // Ignoring eslint about BintInt to number conversion, as BigInts break serialization
-      // @ts-ignore
-      let resp = await listSubstates(params);
-      setSubstates(resp.substates);
-    } catch (err) {
-      setIsError(true);
-      setError(err as Error);
-    } finally {
-      setIsLoading(false);
-    }
-  }
 
   const handleChangePage = (_event: React.MouseEvent<HTMLButtonElement> | null, newPage: number) => {
     setPage(newPage);
@@ -161,19 +133,13 @@ function SubstatesLayout() {
     setJsonDialogOpen(false);
   };
 
-  const onFilterChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onFilterChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newFilter = {
       ...filter,
       [e.target.name]: e.target.value,
     };
 
     setFilter(newFilter);
-
-    const offset = 0;
-    await get_substates(offset, 50, {
-      filter_by_template: newFilter.filter_by_template || null,
-      filter_by_type: newFilter.filter_by_type || null,
-    });
     setPage(0);
   };
 
@@ -187,7 +153,7 @@ function SubstatesLayout() {
           <FetchStatusCheck
             isLoading={isLoading}
             isError={isError}
-            errorMessage={error ? error.message : "Error fetching substates."}
+            errorMessage={error ? (error as Error).message : "Error fetching substates."}
           >
             <Stack spacing={1}>
               <Box className="flex-container" sx={{ marginBottom: 2 }}>

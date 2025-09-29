@@ -41,7 +41,7 @@ import {
   InputLabel,
 } from "@mui/material";
 import React, { useEffect, useState, useMemo } from "react";
-import { truncateText } from "../../utils/helpers";
+import { truncateText, formatTimestamp } from "../../utils/helpers";
 import CopyToClipboard from "../../Components/CopyToClipboard";
 import saveAs from "file-saver";
 import JsonDialog from "../../Components/JsonDialog";
@@ -227,7 +227,7 @@ function SubstatesLayout() {
                             </>
                           )}
                         </DataTableCell>
-                        <DataTableCell>{new Date(Number(row.timestamp) * 1000).toDateString()}</DataTableCell>
+                        <DataTableCell>{formatTimestamp(row.timestamp)}</DataTableCell>
                         <DataTableCell>
                           <Stack direction="row" spacing={2} alignItems="left">
                             <Button variant="outlined" onClick={() => handleContentView(row)}>

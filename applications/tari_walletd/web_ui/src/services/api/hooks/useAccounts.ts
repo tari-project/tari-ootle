@@ -30,6 +30,7 @@ import {
   accountsGetBalances,
   accountsGetDefault,
   accountsList,
+  accountsRename,
   accountsStealthTransfer,
   accountsTransfer,
   mintFaucetNfts,
@@ -85,6 +86,30 @@ export const useAccountsCreate = () => {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
+    },
+  });
+};
+
+export type AccountsRenameMutate = {
+  account: ComponentAddress;
+  newName: string;
+};
+
+export const useAccountsRename = () => {
+  return useMutation({
+    mutationFn: async (req: AccountsRenameMutate) => {
+      return await accountsRename({
+        account: { ComponentAddress: req.account },
+        new_name: req.newName,
+      });
+    },
+    onError: (error: ApiError) => {
+      error;
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      queryClient.invalidateQueries({ queryKey: [`accounts_get_${variables.account}`] });
+      queryClient.refetchQueries({ queryKey: ["accounts"] });
     },
   });
 };

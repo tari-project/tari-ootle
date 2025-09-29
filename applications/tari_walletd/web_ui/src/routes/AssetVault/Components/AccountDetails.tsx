@@ -20,9 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import Box from "@mui/material/Box";
-import { GridHeadCell, GridDataCell, DataTableCell } from "@components/StyledComponents";
-import { styled } from "@mui/material/styles";
+import { DataTableCell } from "@components/StyledComponents";
 import useAccountStore from "@store/accountStore";
 import CopyAddress from "@components/CopyAddress";
 import { substateIdToString } from "@tari-project/typescript-bindings";
@@ -32,12 +30,18 @@ import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
+import AccountName from "@/components/AccountName";
 
 function AccountDetails() {
-  const { account, address } = useAccountStore();
+  const { account, address, setAccount } = useAccountStore();
+
   if (!account) {
     return <>Loading...</>;
   }
+
+  const handleRenameSuccess = (newName: string) => {
+    setAccount({ ...account, name: newName });
+  };
 
   return (
     <TableContainer>
@@ -51,7 +55,13 @@ function AccountDetails() {
         </TableHead>
         <TableBody>
           <TableRow>
-            <DataTableCell>{account.name}</DataTableCell>
+            <DataTableCell>
+              <AccountName
+                accountAddress={substateIdToString(account.component_address)}
+                currentName={account?.name}
+                onRenameSuccess={handleRenameSuccess}
+              />
+            </DataTableCell>
             <DataTableCell>
               <CopyAddress address={substateIdToString(account.component_address)} />
             </DataTableCell>

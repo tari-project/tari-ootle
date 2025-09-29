@@ -30,6 +30,8 @@ import type {
   AccountsCreateFreeTestCoinsResponse,
   AccountsCreateRequest,
   AccountsCreateResponse,
+  AccountsRenameRequest,
+  AccountsRenameResponse,
   AccountSetDefaultRequest,
   AccountSetDefaultResponse,
   AccountsGetBalancesRequest,
@@ -271,7 +273,8 @@ export const accountsClaimBurn = (request: ClaimBurnRequest): Promise<ClaimBurnR
   client().then((c) => c.accountsClaimBurn(request));
 export const accountsCreate = (request: AccountsCreateRequest): Promise<AccountsCreateResponse> =>
   client().then((c) => c.accountsCreate(request));
-
+export const accountsRename = (request: AccountsRenameRequest): Promise<AccountsRenameResponse> =>
+  client().then((c) => c.accountsRename(request));
 export const accountsList = (request: AccountsListRequest): Promise<AccountsListResponse> =>
   client().then((c) => c.accountsList(request));
 export const accountsGetBalances = (request: AccountsGetBalancesRequest): Promise<AccountsGetBalancesResponse> =>

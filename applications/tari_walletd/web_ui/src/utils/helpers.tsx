@@ -252,7 +252,7 @@ export function bigintToDecimalString(int: bigint | Amount, decimalPlaces: numbe
   return `${wholeValues}.${padding}${fractionalValues}`;
 }
 
-export const formatCurrency = (amount: number | bigint): string => {
+export const formatCurrency = (amount: number | bigint | Amount): string => {
   const { currencySymbol } = useCurrencyStore.getState();
 
   if (typeof amount === "bigint") {
@@ -272,8 +272,37 @@ export const formatCurrency = (amount: number | bigint): string => {
       minimumFractionDigits: 0,
       maximumFractionDigits: CURRENCY.DECIMALS,
     })} ${currencySymbol}`;
+  } else if (typeof amount === "string") {
+    // Handle Amount type
+    try {
+      const numericAmount = BigInt(amount);
+      const divisor = BigInt(CURRENCY.DIVISOR);
+      const integerPart = numericAmount / divisor;
+      const remainder = numericAmount % divisor;
+
+      const fractionalPart = remainder.toString().padStart(CURRENCY.DECIMALS, "0");
+
+      return `${Number(integerPart).toLocaleString("en-US")}.${fractionalPart} ${currencySymbol}`;
+    } catch (error) {
+      console.error("Failed to parse Amount:", amount, error);
+      return `0 ${currencySymbol}`;
+    }
   } else {
-    return `0 ${currencySymbol}`;
+    // Handle any other type (object, etc.)
+    try {
+      const stringValue = String(amount);
+      const numericAmount = BigInt(stringValue);
+      const divisor = BigInt(CURRENCY.DIVISOR);
+      const integerPart = numericAmount / divisor;
+      const remainder = numericAmount % divisor;
+
+      const fractionalPart = remainder.toString().padStart(CURRENCY.DECIMALS, "0");
+
+      return `${Number(integerPart).toLocaleString("en-US")}.${fractionalPart} ${currencySymbol}`;
+    } catch (error) {
+      console.error("Failed to parse Amount:", amount, error);
+      return `0 ${currencySymbol}`;
+    }
   }
 };
 

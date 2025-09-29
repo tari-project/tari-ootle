@@ -31,16 +31,14 @@ interface IAccordionIconButton {
   open: boolean;
 }
 
-export const AccordionIconButton = styled(IconButton)<IAccordionIconButton>(
-  ({ theme, open }) => ({
-    backgroundColor: open ? theme.palette.primary.main : "#fff",
-    color: open ? "#fff" : theme.palette.primary.main,
-    "&:hover": {
-      backgroundColor: theme.palette.primary.main,
-      color: "#fff",
-    },
-  })
-);
+export const AccordionIconButton = styled(IconButton)<IAccordionIconButton>(({ theme, open }) => ({
+  backgroundColor: open ? theme.palette.primary.main : "#fff",
+  color: open ? "#fff" : theme.palette.primary.main,
+  "&:hover": {
+    backgroundColor: theme.palette.primary.main,
+    color: "#fff",
+  },
+}));
 
 export const StyledPaper = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(3),
@@ -49,6 +47,7 @@ export const StyledPaper = styled(Paper)(({ theme }) => ({
 
 export const DataTableCell = styled(TableCell)(({ theme }) => ({
   fontFamily: "'Courier New', Courier, monospace",
+  fontSize: "14px",
 }));
 
 export const CodeBlock = styled(Box)(({ theme }) => ({

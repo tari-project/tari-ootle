@@ -848,6 +848,16 @@ impl JsonRpcHandlers {
         }
 
         let limit = req.limit.unwrap_or(100);
+        if limit > 1000 {
+            return Err(JsonRpcResponse::error(
+                answer_id.clone(),
+                JsonRpcError::new(
+                    JsonRpcErrorReason::InvalidParams,
+                    "Limit cannot be greater than 1000".to_string(),
+                    json::Value::Null,
+                ),
+            ));
+        }
 
         let transactions = self
             .transaction_manager

@@ -419,15 +419,7 @@ pub struct GetNetworkSyncStateResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(
-        export,
-        export_to = "tari-indexer-client/",
-        rename = "IndexerGetEpochManagerStatsResponse"
-    )
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 pub struct NetworkDescription {
     pub epoch: Epoch,
     // (shard group, num members)
@@ -436,15 +428,7 @@ pub struct NetworkDescription {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(
-        export,
-        export_to = "tari-indexer-client/",
-        rename = "IndexerGetEpochManagerStatsResponse"
-    )
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 pub struct SyncProgress {
     pub last_epoch: Epoch,
     pub checkpoint_progress: Vec<(ShardGroup, Epoch)>,

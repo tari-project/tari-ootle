@@ -234,7 +234,7 @@ where
             return Err(ConfidentialTransferApiError::InvalidParameter {
                 param: "resource_address",
                 reason: format!(
-                    "Resource {} is {}. Expected confidential,",
+                    "Resource {} is {}. Expected confidential.",
                     params.resource_address, src_vault.resource_type
                 ),
             });

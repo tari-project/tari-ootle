@@ -29,7 +29,7 @@ Feature: Claim Fees
 
     When I check the balance of VN_FEES on wallet daemon WALLET_D the amount is exactly 0
 
-    # Claim fees into ACC2
+    # Claim fees into VN_FEES
     When I claim fees for validator VN into account VN_FEES using the wallet daemon WALLET_D
 
     # Check that there is a net gain

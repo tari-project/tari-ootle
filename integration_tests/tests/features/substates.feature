@@ -6,7 +6,6 @@
 Feature: Substates
 
   Scenario: Transactions with DOWN local substates are rejected
-    #FIX
     Given a network with registered validator VN and wallet daemon WALLET_D
 
     # Create account

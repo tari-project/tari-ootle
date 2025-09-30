@@ -74,8 +74,12 @@ impl EventQuery {
         );
         let substate_id = substate_id.map(|str| SubstateId::from_str(&str)).transpose()?;
         let event_manager = ctx.data_unchecked::<EventManager>();
+        let limit = limit.unwrap_or(100);
+        if limit > 1000 {
+            return Err(anyhow::anyhow!("Limit cannot be greater than 1000"));
+        }
         event_manager
-            .get_events_from_db(topic, substate_id, offset.unwrap_or(0), limit.unwrap_or(100))
+            .get_events_from_db(topic, substate_id, offset.unwrap_or(0), limit)
             .await?
             .into_iter()
             .map(Event::from_engine_event)

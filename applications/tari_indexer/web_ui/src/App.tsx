@@ -54,7 +54,7 @@ export const breadcrumbRoutes = [
   },
   {
     label: "Resources",
-    path: "/resources/:resourceAddress",
+    path: "/:resourceAddress",
     dynamic: true,
   },
   {
@@ -80,7 +80,7 @@ export default function App() {
         <Route path="/" element={<Layout />}>
           <Route index element={<ValidatorNode />} />
           <Route path="connections" element={<Connections />} />
-          <Route path="resources/:resourceAddress" element={<Resources />} />
+          <Route path=":resourceAddress" element={<Resources />} />
           <Route path="transactions" element={<RecentTransactions />} />
           <Route path="transactions/:transaction_id" element={<TransactionDetails />} />
           <Route path="events" element={<Events />} />

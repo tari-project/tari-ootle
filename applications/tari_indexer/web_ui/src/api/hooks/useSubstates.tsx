@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useQuery } from "@tanstack/react-query";
-import { listSubstates } from "../../utils/json_rpc";
+import { listSubstates, getSubstate, getNonFungibles } from "../../utils/json_rpc";
 
 interface UseListSubstatesProps {
   offset: number;
@@ -44,5 +44,61 @@ export const useListSubstates = ({ offset, limit, filter_by_template, filter_by_
       return await listSubstates(params);
     },
     refetchInterval: 30 * 1000,
+  });
+};
+
+interface UseGetSubstateProps {
+  address: any;
+  version?: number | null;
+  local_search_only?: boolean;
+  enabled?: boolean;
+}
+
+export const useGetSubstate = ({
+  address,
+  version = null,
+  local_search_only = false,
+  enabled = true,
+}: UseGetSubstateProps) => {
+  return useQuery({
+    queryKey: ["substate", address, version, local_search_only],
+    queryFn: async () => {
+      // @ts-ignore
+      return await getSubstate({
+        address,
+        version,
+        local_search_only,
+      });
+    },
+    enabled: enabled && !!address,
+    staleTime: 5 * 60 * 1000,
+  });
+};
+
+interface UseGetNonFungiblesProps {
+  address: any;
+  start_index?: number;
+  end_index?: number;
+  enabled?: boolean;
+}
+
+export const useGetNonFungibles = ({
+  address,
+  start_index = 0,
+  end_index = 10,
+  enabled = true,
+}: UseGetNonFungiblesProps) => {
+  return useQuery({
+    queryKey: ["nonFungibles", address, start_index, end_index],
+    queryFn: async () => {
+      // @ts-ignore
+      return await getNonFungibles({
+        address,
+        start_index,
+        end_index,
+      });
+    },
+    enabled: enabled && !!address,
+    staleTime: 5 * 60 * 1000,
   });
 };

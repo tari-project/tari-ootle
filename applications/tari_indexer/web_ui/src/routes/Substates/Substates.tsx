@@ -46,10 +46,9 @@ import CopyToClipboard from "../../Components/CopyToClipboard";
 import saveAs from "file-saver";
 import JsonDialog from "../../Components/JsonDialog";
 import { ListSubstateItem, shortenSubstateId, substateIdToString } from "@tari-project/typescript-bindings";
-import { getSubstate } from "../../utils/json_rpc";
 import { Link } from "react-router-dom";
 import FetchStatusCheck from "../../Components/FetchStatusCheck";
-import { useListSubstates } from "../../api/hooks/useSubstates";
+import { useListSubstates, useGetSubstate } from "../../api/hooks/useSubstates";
 
 const SUBSTATE_TYPES = [
   "Component",
@@ -69,7 +68,7 @@ function SubstatesLayout() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [jsonDialogOpen, setJsonDialogOpen] = React.useState(false);
-  const [selectedContent, setSelectedContent] = useState({});
+  const [selectedSubstate, setSelectedSubstate] = useState<any>(null);
   const [filter, setFilter] = useState({
     filter_by_template: "",
     filter_by_type: "",
@@ -84,6 +83,11 @@ function SubstatesLayout() {
 
   const substates = data?.substates || [];
 
+  const { data: substateData } = useGetSubstate({
+    address: selectedSubstate?.substate_id,
+    enabled: !!selectedSubstate,
+  });
+
   const extendedSubstates = useMemo(
     () => substates.map((substate) => ({ ...substate, id: substateIdToString(substate.substate_id) })),
     [substates]
@@ -96,7 +100,6 @@ function SubstatesLayout() {
     setFilteredSubstates(extendedSubstates);
   }, [extendedSubstates]);
 
-
   const handleChangePage = (_event: React.MouseEvent<HTMLButtonElement> | null, newPage: number) => {
     setPage(newPage);
   };
@@ -106,31 +109,30 @@ function SubstatesLayout() {
     setPage(0);
   };
 
-  const handleContentDownload = async (substate: any) => {
-    const data = await getSubstate({
-      address: substate.substate_id,
-      version: null,
-      local_search_only: false,
-    });
-
-    const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
-    const filename = `substates-${substate.address}-${substate.version}.json`;
-    saveAs(blob, filename);
+  const handleContentDownload = (substate: any) => {
+    setSelectedSubstate(substate);
+    // We'll handle the download when substateData changes
   };
 
-  const handleContentView = async (substate: any) => {
-    const data = await getSubstate({
-      address: substate.substate_id,
-      version: null,
-      local_search_only: false,
-    });
-    setSelectedContent(data);
+  const handleContentView = (substate: any) => {
+    setSelectedSubstate(substate);
     setJsonDialogOpen(true);
   };
 
+  // Handle download when substateData is available
+  useEffect(() => {
+    if (substateData && selectedSubstate && !jsonDialogOpen) {
+      const json = JSON.stringify(substateData, null, 2);
+      const blob = new Blob([json], { type: "application/json" });
+      const filename = `substates-${substateIdToString(selectedSubstate.substate_id)}-${selectedSubstate.version}.json`;
+      saveAs(blob, filename);
+      setSelectedSubstate(null); // Reset after download
+    }
+  }, [substateData, selectedSubstate, jsonDialogOpen]);
+
   const handleJsonDialogClose = () => {
     setJsonDialogOpen(false);
+    setSelectedSubstate(null); // Reset selected substate when closing dialog
   };
 
   const onFilterChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -210,7 +212,7 @@ function SubstatesLayout() {
                       >
                         <DataTableCell>
                           {substateIdToString(row.substate_id).startsWith("resource_") ? (
-                            <Link to={`/resources/${substateIdToString(row.substate_id)}`}>
+                            <Link to={`/${substateIdToString(row.substate_id)}`}>
                               {shortenSubstateId(row.substate_id)}
                             </Link>
                           ) : (
@@ -256,7 +258,7 @@ function SubstatesLayout() {
           </FetchStatusCheck>
         </StyledPaper>
       </Grid>
-      <JsonDialog open={jsonDialogOpen} onClose={handleJsonDialogClose} data={selectedContent} />
+      <JsonDialog open={jsonDialogOpen} onClose={handleJsonDialogClose} data={substateData || {}} />
     </>
   );
 }

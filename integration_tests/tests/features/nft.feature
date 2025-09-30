@@ -9,13 +9,13 @@ Feature: NFTs
     Given a network with registered validator VN and wallet daemon WALLET_D
 
     # Publish the "basic_nft" template
-    When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
+    When I create an account ACC via the wallet daemon WALLET_D with 2000000 XTR
     When wallet daemon WALLET_D publishes the template "basic_nft" using account ACC
 
     ###### Scenario
     # Create two accounts to deposit the minted NFTs
-    When I create an account ACC1 via the wallet daemon WALLET_D with 10000 free coins
-    When I create an account ACC2 via the wallet daemon WALLET_D with 10000 free coins
+    When I create an account ACC1 via the wallet daemon WALLET_D with 10000 XTR
+    When I create an account ACC2 via the wallet daemon WALLET_D with 10000 XTR
 
     # Mint a basic NFT
     When I mint a new non fungible token NFT_X on ACC1 using wallet daemon WALLET_D
@@ -29,11 +29,11 @@ Feature: NFTs
 
     # Submit a transaction with NFT operations
     When I submit a transaction manifest via wallet daemon WALLET_D with inputs "NFT, ACC1, ACC2" named "TX1"
-  ```
+  """
   let sparkle_nft = global!["NFT/components/SparkleNft"];
-  let sparkle_res = global!["NFT/resources/0"];
-  let mut acc1 = global!["ACC1/components/Account"];
-  let mut acc2 = global!["ACC2/components/Account"];
+  let sparkle_res = global!["NFT/resources/SPKL"];
+  let mut acc1 = global!["ACC1/accounts/ACC1"];
+  let mut acc2 = global!["ACC2/accounts/ACC2"];
 
   // mint a new nft with random id
   let nft_bucket = sparkle_nft.mint("NFT1", "http://example.com");
@@ -55,19 +55,19 @@ Feature: NFTs
   acc1.deposit(nft_bucket);
   let acc_bucket = acc1.withdraw_non_fungible(sparkle_res, NonFungibleId("Burn!"));
   sparkle_nft.burn(acc_bucket);
-  ```
+  """
 
 
   Scenario: Create resource and mint in one transaction
     Given a network with registered validator VN and wallet daemon WALLET_D
 
     # Publish the "basic_nft" template
-    When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
+    When I create an account ACC via the wallet daemon WALLET_D with 2000000 XTR
     When wallet daemon WALLET_D publishes the template "basic_nft" using account ACC
 
     ###### Scenario
     # Create an account to deposit the minted NFT
-    When I create an account ACC1 via the wallet daemon WALLET_D with 10000 free coins
+    When I create an account ACC1 via the wallet daemon WALLET_D with 10000 XTR
 
     # Create a new BasicNft component and mint in the same transaction.
     # Note the updated NFT address format or parsing the manifest will fail.
@@ -75,11 +75,11 @@ Feature: NFTs
 
     # Check that the initial NFT was actually minted by trying to deposit it into an account
     When I submit a transaction manifest via wallet daemon WALLET_D with inputs "NFT, ACC1" named "TX1"
-  ```
+  """
   let sparkle_nft = global!["NFT/components/SparkleNft"];
-  let mut acc1 = global!["ACC1/components/Account"];
+  let mut acc1 = global!["ACC1/accounts/ACC1"];
 
   // get the initailly NFT from the component's vault
   let nft_bucket = sparkle_nft.take_initial_nft();
   acc1.deposit(nft_bucket);
-  ```
+  """

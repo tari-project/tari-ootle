@@ -22,6 +22,7 @@
 
 use std::{ops::RangeInclusive, path::PathBuf, sync::Arc, time::Duration};
 
+use indexmap::IndexMap;
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
 use tari_base_node_client::types::BaseLayerValidatorNode;
@@ -38,6 +39,7 @@ use tari_ootle_common_types::{
     Epoch,
     NodeHeight,
     PeerAddress,
+    StateVersion,
     SubstateAddress,
 };
 use tari_ootle_storage::{
@@ -199,6 +201,7 @@ pub struct GetConsensusStatusResponse {
     pub epoch: Epoch,
     pub height: NodeHeight,
     pub state: String,
+    pub state_versions: Option<IndexMap<Shard, StateVersion>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -13,7 +13,7 @@ import {
 } from "@mui/material";
 import { useState } from "react";
 import { useStealthUtxosList } from "@/services/api/hooks/useAccounts";
-import { Account, OutputStatus, ResourceAddress } from "@tari-project/typescript-bindings";
+import { Account, OutputStatus, ResourceAddress, XTR } from "@tari-project/typescript-bindings";
 import FetchStatusCheck from "@/components/FetchStatusCheck";
 import { DataTableCell } from "@components/StyledComponents";
 import StatusChip from "./components/StatusChip";
@@ -30,17 +30,18 @@ import CopyToClipboard from "@components/CopyToClipboard";
 import PlaceHolder from "./components/PlaceHolder";
 import SortableHeader from "./components/SortableHeader";
 import useCurrencyStore from "@store/currencyStore";
+import { useParams } from "react-router-dom";
 
 function StealthUtxoList({ account }: { account: Account }) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [statusFilter, setStatusFilter] = useState<OutputStatus | "all">("all");
   const { data: balancesData } = useAccountsGetBalances(substateIdToString(account.component_address));
-  const { currencySymbol } = useCurrencyStore();
+  const params = useParams();
+  const resourceAddress = params.resource_address || XTR;
 
-  const stealthResources = balancesData?.balances?.filter((balance) => balance.resource_type === "Stealth") || [];
-
-  const resourceToUse = stealthResources[0]?.resource_address;
+  const resourceBalance = balancesData?.balances?.find((balance) => balance.resource_address === resourceAddress);
+  const currencySymbol = resourceBalance ? resourceBalance.token_symbol || "" : "";
 
   const getStatusDisplayName = (status: OutputStatus | "all") => {
     switch (status) {
@@ -57,7 +58,7 @@ function StealthUtxoList({ account }: { account: Account }) {
 
   const { data, isLoading, isError, error } = useStealthUtxosList(
     account.component_address,
-    resourceToUse!,
+    resourceAddress,
     statusFilter === "all" ? null : statusFilter,
   );
 
@@ -69,14 +70,6 @@ function StealthUtxoList({ account }: { account: Account }) {
     5: "10%",
     6: "10%",
   };
-
-  if (!resourceToUse) {
-    return (
-      <Stack minHeight={300} alignItems="center" justifyContent="center">
-        <PlaceHolder status="empty" />
-      </Stack>
-    );
-  }
 
   return (
     <Stack minHeight={300}>

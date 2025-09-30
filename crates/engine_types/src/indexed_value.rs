@@ -146,7 +146,6 @@ pub struct IndexedWellKnownTypes {
     component_addresses: Vec<ComponentAddress>,
     resource_addresses: Vec<ResourceAddress>,
     transaction_receipt_addresses: Vec<TransactionReceiptAddress>,
-    // #[serde(with = "serde_with::hex::vec")]
     non_fungible_addresses: Vec<NonFungibleAddress>,
     vault_ids: Vec<VaultId>,
     metadata: Vec<Metadata>,

@@ -233,40 +233,24 @@ impl JsonRpcHandlers {
         let request: GetStateRequest = value.parse_params()?;
 
         let tx = self.state_store.create_read_tx().unwrap();
-        match SubstateRecord::get(&tx, &request.address).optional() {
-            Ok(Some(state)) => {
-                let Some(substate) = state.into_substate() else {
-                    return Err(JsonRpcResponse::error(
-                        answer_id,
-                        JsonRpcError::new(
-                            JsonRpcErrorReason::ApplicationError(100),
-                            format!("Substate {} is DOWN", request.address),
-                            json::Value::Null,
-                        ),
-                    ));
-                };
+        let state = SubstateRecord::get(&tx, &request.address)
+            .optional()
+            .map_err(internal_error(answer_id.clone()))?
+            .ok_or_else(|| not_found(answer_id.clone(), format!("Substate {} not found", request.address)))?;
+        let Some(substate) = state.into_substate() else {
+            return Err(JsonRpcResponse::error(
+                answer_id.clone(),
+                JsonRpcError::new(
+                    JsonRpcErrorReason::ApplicationError(100),
+                    format!("Substate {} is DOWN", request.address),
+                    json::Value::Null,
+                ),
+            ));
+        };
 
-                Ok(JsonRpcResponse::success(answer_id, GetStateResponse {
-                    data: substate.to_bytes(),
-                }))
-            },
-            Ok(None) => Err(JsonRpcResponse::error(
-                answer_id,
-                JsonRpcError::new(
-                    JsonRpcErrorReason::ApplicationError(404),
-                    "state not found".to_string(),
-                    json::Value::Null,
-                ),
-            )),
-            Err(e) => Err(JsonRpcResponse::error(
-                answer_id,
-                JsonRpcError::new(
-                    JsonRpcErrorReason::InvalidParams,
-                    format!("Something went wrong: {}", e),
-                    json::Value::Null,
-                ),
-            )),
-        }
+        Ok(JsonRpcResponse::success(answer_id, GetStateResponse {
+            data: substate.to_bytes(),
+        }))
     }
 
     pub async fn get_recent_transactions(&self, value: JsonRpcExtractor) -> JrpcResult {
@@ -275,22 +259,13 @@ impl JsonRpcHandlers {
             .state_store
             .create_read_tx()
             .map_err(internal_error(answer_id.clone()))?;
-        match tx.transactions_get_paginated(1000, 0, Some(Ordering::Descending)) {
-            Ok(recent_transactions) => {
-                let res = GetRecentTransactionsResponse {
-                    transactions: recent_transactions.into_iter().map(|t| t.transaction).collect(),
-                };
-                Ok(JsonRpcResponse::success(answer_id, res))
-            },
-            Err(e) => Err(JsonRpcResponse::error(
-                answer_id,
-                JsonRpcError::new(
-                    JsonRpcErrorReason::InvalidParams,
-                    format!("Something went wrong: {}", e),
-                    json::Value::Null,
-                ),
-            )),
-        }
+        let recent_transactions = tx
+            .transactions_get_paginated(1000, 0, Some(Ordering::Descending))
+            .map_err(internal_error(answer_id.clone()))?;
+        let res = GetRecentTransactionsResponse {
+            transactions: recent_transactions.into_iter().map(|t| t.transaction).collect(),
+        };
+        Ok(JsonRpcResponse::success(answer_id, res))
     }
 
     pub async fn list_blocks(&self, value: JsonRpcExtractor) -> JrpcResult {
@@ -562,17 +537,11 @@ impl JsonRpcHandlers {
 
     pub async fn get_mempool_stats(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
-        let size = self.mempool.get_mempool_size().await.map_err(|err| {
-            error!(target: LOG_TARGET, "Error getting mempool size: {}", err);
-            JsonRpcResponse::error(
-                answer_id.clone(),
-                JsonRpcError::new(
-                    JsonRpcErrorReason::InvalidParams,
-                    "Something went wrong".to_string(),
-                    json::Value::Null,
-                ),
-            )
-        })?;
+        let size = self
+            .mempool
+            .get_mempool_size()
+            .await
+            .map_err(internal_error(answer_id.clone()))?;
         Ok(JsonRpcResponse::success(answer_id, GetMempoolStatsResponse { size }))
     }
 
@@ -696,6 +665,21 @@ impl JsonRpcHandlers {
         let mut networking = self.networking.clone();
         let peer_id = public_key_to_peer_id(public_key);
 
+        if *self.networking.local_peer_id() == peer_id {
+            return if wait_for_dial {
+                Err(JsonRpcResponse::error(
+                    answer_id,
+                    JsonRpcError::new(
+                        JsonRpcErrorReason::InvalidParams,
+                        "Cannot add self as peer".to_string(),
+                        json::Value::Null,
+                    ),
+                ))
+            } else {
+                Ok(JsonRpcResponse::success(answer_id, AddPeerResponse {}))
+            };
+        }
+
         let dial_wait = networking
             .dial_peer(
                 DialOpts::peer_id(peer_id)
@@ -746,22 +730,13 @@ impl JsonRpcHandlers {
     pub async fn get_committee(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
         let request = value.parse_params::<GetCommitteeRequest>()?;
-        if let Ok(committee) = self
+        let committee = self
             .epoch_manager
             .get_committee_for_substate(request.epoch, request.substate_address)
             .await
-        {
-            Ok(JsonRpcResponse::success(answer_id, GetCommitteeResponse { committee }))
-        } else {
-            Err(JsonRpcResponse::error(
-                answer_id,
-                JsonRpcError::new(
-                    JsonRpcErrorReason::InvalidParams,
-                    "Something went wrong".to_string(),
-                    json::Value::Null,
-                ),
-            ))
-        }
+            .map_err(internal_error(answer_id.clone()))?;
+
+        Ok(JsonRpcResponse::success(answer_id, GetCommitteeResponse { committee }))
     }
 
     pub async fn get_all_vns(&self, value: JsonRpcExtractor) -> JrpcResult {
@@ -789,13 +764,34 @@ impl JsonRpcHandlers {
     pub async fn get_consensus_status(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
         let epoch = self.consensus.current_epoch();
+        let committee_info = self
+            .epoch_manager
+            .get_local_committee_info(epoch)
+            .await
+            .map(Some)
+            .or_else(|err| {
+                if err.is_not_registered_error() {
+                    Ok(None)
+                } else {
+                    Err(internal_error(answer_id.clone())(err))
+                }
+            })?;
         let height = self.consensus.current_view().get_height();
         let state = self.consensus.get_current_state();
+        let state_versions = committee_info
+            .map(|committee_info| {
+                self.state_store
+                    .with_read_tx(|tx| tx.state_tree_versions_get_latest_for_shard_group(committee_info.shard_group()))
+                    .map_err(internal_error(answer_id.clone()))
+                    .map(|sv| sv.convert_to_map(committee_info.shard_group()))
+            })
+            .transpose()?;
 
         Ok(JsonRpcResponse::success(answer_id, GetConsensusStatusResponse {
             epoch,
             height,
-            state: format!("{:?}", state),
+            state: state.to_string(),
+            state_versions,
         }))
     }
 

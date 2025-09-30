@@ -9,7 +9,7 @@ Feature: Counter template
     Given a network with registered validator VN and wallet daemon WALLET_D
 
     # Create the sender account
-    When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
+    When I create an account ACC via the wallet daemon WALLET_D with 2 XTR
 
     # Publish the "counter" template
     When wallet daemon WALLET_D publishes the template "counter" using account ACC
@@ -29,7 +29,7 @@ Feature: Counter template
     Given a network with registered validator VN and wallet daemon WALLET_D
 
     # Create the sender account
-    When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
+    When I create an account ACC via the wallet daemon WALLET_D with 2 XTR
 
     # Publish the "counter" template
     When wallet daemon WALLET_D publishes the template "counter" using account ACC

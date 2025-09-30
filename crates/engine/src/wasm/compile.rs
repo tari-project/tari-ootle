@@ -89,6 +89,9 @@ where
 {
     compile_template_internal(package_dir, features, envs)
 }
+
+const CRATE_DIR: &str = env!("CARGO_MANIFEST_DIR");
+
 fn compile_template_internal<P, TEnvs, K, V>(package_dir: P, features: &[&str], envs: TEnvs) -> io::Result<WasmModule>
 where
     P: AsRef<Path>,
@@ -96,28 +99,26 @@ where
     K: AsRef<OsStr>,
     V: AsRef<OsStr>,
 {
-    if !package_dir.as_ref().exists() {
+    let pkg_dir = Path::new(CRATE_DIR).join(package_dir);
+    if !pkg_dir.exists() {
         return Err(io::Error::new(
             ErrorKind::NotFound,
-            format!("Package directory not found: {}", package_dir.as_ref().display(),),
+            format!("Package directory not found: {}", pkg_dir.display(),),
         ));
     }
 
-    let mut args = ["build", "--target", "wasm32-unknown-unknown", "--release"]
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>();
+    let mut command = Command::new("cargo");
+    command
+        .current_dir(&pkg_dir)
+        .envs(envs)
+        .args(["build", "--target", "wasm32-unknown-unknown", "--release"]);
 
     if !features.is_empty() {
-        args.push("--features".to_string());
-        args.extend(features.iter().map(ToString::to_string));
+        command.arg("--features");
+        command.args(features.iter().map(ToString::to_string));
     }
 
-    let output = Command::new("cargo")
-        .current_dir(package_dir.as_ref())
-        .envs(envs)
-        .args(args)
-        .output()?;
+    let output = command.output()?;
     if !output.status.success() {
         eprintln!("stdout:");
         eprintln!("{}", String::from_utf8_lossy(&output.stdout));
@@ -125,12 +126,12 @@ where
         eprintln!("{}", String::from_utf8_lossy(&output.stderr));
         return Err(io::Error::other(format!(
             "Failed to compile package: {}",
-            package_dir.as_ref().display()
+            pkg_dir.display()
         )));
     }
 
     // resolve wasm name
-    let manifest = Manifest::from_path(package_dir.as_ref().join("Cargo.toml")).unwrap();
+    let manifest = Manifest::from_path(pkg_dir.join("Cargo.toml")).unwrap();
     let wasm_name = if let Some(Product { name: Some(name), .. }) = manifest.lib {
         // lib name
         name
@@ -139,8 +140,7 @@ where
         pkg.name.replace('-', "_")
     } else {
         // file name
-        package_dir
-            .as_ref()
+        pkg_dir
             .file_name()
             .unwrap()
             .to_str()
@@ -150,8 +150,7 @@ where
     };
 
     // path of the wasm executable
-    let path = package_dir
-        .as_ref()
+    let path = pkg_dir
         .join("target")
         .join("wasm32-unknown-unknown")
         .join("release")

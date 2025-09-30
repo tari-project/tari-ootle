@@ -127,7 +127,7 @@ mod composability {
         pub fn call_component_with_args(
             component_address: ComponentAddress,
             method_name: String,
-            args: Vec<Vec<u8>>,
+            args: Vec<Bytes>,
         ) -> tari_bor::Value {
             ComponentManager::get(component_address).call(method_name, args)
         }

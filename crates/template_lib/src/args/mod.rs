@@ -42,13 +42,21 @@ macro_rules! __expr_counter {
 
 /// Low-level macro used for encoding the arguments of engine calls. Not intended for general usage
 #[macro_export]
+macro_rules! invoke_arg {
+    ($args:expr) => {{
+        $crate::types::bytes::Bytes::from_vec($crate::prelude::tari_bor::encode(&$args).unwrap())
+    }};
+}
+
+/// Low-level macro used for encoding the arguments of engine calls. Not intended for general usage
+#[macro_export]
 macro_rules! invoke_args {
-    () => (Vec::new());
+    () => (Vec::<$crate::types::bytes::Bytes>::new());
 
     ($($args:expr),+) => {{
-        let mut args = Vec::<Vec<u8>>::with_capacity($crate::__expr_counter!($($args),+));
+        let mut args = Vec::<_>::with_capacity($crate::__expr_counter!($($args),+));
         $(
-            $crate::args::__push(&mut args, $crate::prelude::tari_bor::encode(&$args).unwrap());
+            $crate::args::__push(&mut args, $crate::invoke_arg!(&$args));
         )+
         args
     }}

@@ -209,7 +209,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
     fs::write(config.common.base_path.join("pid"), std::process::id().to_string())
         .map_err(|e| ExitError::new(ExitCode::IOError, e))?;
 
-    let mut scanning_interval = time::interval(config.indexer.scanning_interval);
+    let mut scanning_interval = time::interval(config.indexer.block_scanning_interval);
     // Skip - because we assume that the reason we missed it is because of scanning
     scanning_interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
 

@@ -94,7 +94,9 @@ pub struct IndexerConfig {
     pub web_ui_public_graphql_url: Option<String>,
     /// How often do we want to scan the second layer for new versions
     #[serde(with = "serializers::seconds")]
-    pub scanning_interval: Duration,
+    pub block_scanning_interval: Duration,
+    #[serde(with = "serializers::seconds")]
+    pub state_scanning_interval: Duration,
     /// Template config
     pub templates: TemplateConfig,
     /// The sidechain to listen on.
@@ -138,7 +140,8 @@ impl Default for IndexerConfig {
             web_ui_address: Some("127.0.0.1:15000".parse().unwrap()),
             web_ui_public_json_rpc_url: None,
             web_ui_public_graphql_url: None,
-            scanning_interval: Duration::from_secs(10),
+            block_scanning_interval: Duration::from_secs(10),
+            state_scanning_interval: Duration::from_secs(60),
             templates: TemplateConfig::default(),
             sidechain_id: None,
             templates_sidechain_id: None,

@@ -98,11 +98,13 @@ pub fn get_account_with_inputs(
     sdk: &WalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>,
 ) -> Result<(AccountWithAddress, HashSet<SubstateRequirement>), anyhow::Error> {
     let account = get_account_or_default(account, &sdk.accounts_api())?;
-
-    // Add all versioned account child addresses as inputs
-    let inputs = sdk
-        .substate_api()
-        .load_dependent_substates(&[&account.account.component_address.into()])?;
+    let inputs = if account.is_confirmed_on_chain() {
+        // Add all versioned account child addresses as inputs
+        sdk.substate_api()
+            .load_dependent_substates(&[&account.account.component_address.into()])?
+    } else {
+        HashSet::new()
+    };
 
     Ok((account, inputs))
 }

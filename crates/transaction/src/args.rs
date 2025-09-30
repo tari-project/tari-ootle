@@ -6,6 +6,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use tari_bor::encode;
 use tari_engine_types::serde_with;
+use tari_template_lib::prelude::Bytes;
 
 pub type WorkspaceId = u16;
 
@@ -64,9 +65,12 @@ pub enum InstructionArg {
     Workspace(#[cfg_attr(feature = "ts", ts(type = "number"))] WorkspaceOffsetId),
     /// The argument is a value specified in the transaction
     Literal(
-        #[serde(with = "serde_with::hex")]
+        #[serde(
+            serialize_with = "serde_with::hex::serialize",
+            deserialize_with = "serde_with::hex::deserialize_from_vec"
+        )]
         #[cfg_attr(feature = "ts", ts(type = "string"))]
-        Vec<u8>,
+        Bytes,
     ),
     // Literal(tari_bor::Value),
 }
@@ -75,11 +79,15 @@ impl InstructionArg {
     pub fn literal(value: tari_bor::Value) -> Result<Self, tari_bor::BorError> {
         // TODO: Unfortunately, CBOR value does not serialize consistently in JSON so we have to use the byte encoded
         // form for now.
-        Ok(Self::Literal(encode(&value)?))
+        Ok(Self::raw_literal_bytes(encode(&value)?))
+    }
+
+    pub fn raw_literal_bytes<T: Into<Bytes>>(bytes: T) -> Self {
+        Self::Literal(bytes.into())
     }
 
     pub fn from_type<T: Serialize>(val: &T) -> Result<Self, tari_bor::BorError> {
-        Ok(Self::Literal(encode(val)?))
+        Ok(Self::Literal(encode(val)?.into()))
     }
 
     pub fn workspace(id: WorkspaceId, offset: Option<usize>) -> Self {
@@ -228,5 +236,37 @@ mod tests {
             args[2],
             InstructionArg::literal(tari_bor::to_value(&123u64).unwrap()).unwrap()
         );
+    }
+
+    #[test]
+    fn decode_encode_json() {
+        let arg = InstructionArg::workspace(1, Some(2));
+        let json = serde_json::to_string(&arg).unwrap();
+        let decoded: InstructionArg = serde_json::from_str(&json).unwrap();
+        assert_eq!(arg, decoded);
+
+        let arg = InstructionArg::raw_literal_bytes(vec![1, 2, 3]);
+        let json = serde_json::to_string(&arg).unwrap();
+        let decoded: InstructionArg = serde_json::from_str(&json).unwrap();
+        match decoded {
+            InstructionArg::Literal(bytes) => assert_eq!(bytes.as_ref(), vec![1, 2, 3].as_slice()),
+            _ => panic!("Expected literal"),
+        }
+    }
+
+    #[test]
+    fn decode_encode_binary() {
+        let arg = InstructionArg::workspace(1, Some(2));
+        let bytes = encode(&arg).unwrap();
+        let decoded: InstructionArg = tari_bor::decode_exact(&bytes).unwrap();
+        assert_eq!(arg, decoded);
+
+        let arg = InstructionArg::raw_literal_bytes(vec![1, 2, 3]);
+        let bytes = encode(&arg).unwrap();
+        let decoded: InstructionArg = tari_bor::decode_exact(&bytes).unwrap();
+        match decoded {
+            InstructionArg::Literal(bytes) => assert_eq!(bytes.as_ref(), vec![1, 2, 3].as_slice()),
+            _ => panic!("Expected literal"),
+        }
     }
 }

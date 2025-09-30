@@ -14,4 +14,5 @@ mod worker;
 pub use block_scanner::*;
 pub use config::*;
 pub use event_filter::*;
+pub use sync_progress::*;
 pub use worker::*;

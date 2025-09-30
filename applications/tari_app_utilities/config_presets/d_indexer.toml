@@ -29,7 +29,8 @@
 #web_ui_address = "127.0.0.1:15000"
 
 # How often do we want to scan for changes. (default = 10)
-#scanning_interval=10
+#block_scanning_interval=10
+#state_scanning_interval=60
 
 [indexer.p2p]
 #transport = "tor"

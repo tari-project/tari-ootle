@@ -20,11 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    time::{Duration, SystemTime},
-};
+use std::{path::PathBuf, time::Duration};
 
 use multiaddr::multiaddr;
 use reqwest::Url;
@@ -32,8 +28,6 @@ use tari_common::{
     configuration::{CommonConfig, StringList},
     exit_codes::ExitError,
 };
-use tari_crypto::tari_utilities::{hex::Hex, message_format::MessageFormat};
-use tari_engine_types::substate::SubstateId;
 use tari_indexer::{
     config::{ApplicationConfig, IndexerConfig},
     run_indexer,
@@ -46,12 +40,13 @@ use tari_indexer_client::{
 use tari_ootle_app_utilities::{epoch_oracle_config::EpochOracleConfig, p2p_config::PeerSeedsConfig};
 use tari_ootle_common_types::Network;
 use tari_shutdown::Shutdown;
-use tari_template_lib::{prelude::RistrettoPublicKeyBytes, types::ObjectKey};
+use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tokio::task;
 
 use crate::{
     helpers::{check_join_handle, get_address_from_output, get_os_assigned_ports, wait_listener_on_local_port},
     logging::get_base_dir_for_scenario,
+    util::cucumber_log,
     TariWorld,
 };
 
@@ -120,34 +115,6 @@ impl IndexerProcess {
         resp.non_fungibles
     }
 
-    pub async fn insert_event_mock_data(&mut self) {
-        let mut graphql_client = self.get_graphql_indexer_client().await;
-        let substate_id = SubstateId::Component(ObjectKey::default().into()).to_string();
-        let template_address = [0u8; 32].to_hex();
-        let tx_hash = [0u8; 32].to_hex();
-        let topic = "my_event".to_string();
-        let version = 0;
-        let payload = HashMap::<String, String>::from([("my".to_string(), "event".to_string())])
-            .to_json()
-            .unwrap();
-        let timestamp = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
-        let query = format!(
-            "{{ saveEvent(substateId: {:?}, templateAddress: {:?}, txHash: {:?}, topic: {:?}, payload: {:?}, version: \
-             {:?}, timestamp: {}) {{ substateId templateAddress txHash topic payload }} }}",
-            substate_id, template_address, tx_hash, topic, payload, version, timestamp
-        );
-        let res = graphql_client
-            .send_request::<HashMap<String, tari_indexer::graphql::model::events::Event>>(&query, None, None)
-            .await
-            .unwrap_or_else(|e| panic!("Failed to save event via graphql client: {}", e));
-        let res = res.get("saveEvent").unwrap();
-
-        assert_eq!(res.substate_id, Some(substate_id.to_string()));
-    }
-
     pub fn get_jrpc_indexer_client(&self) -> IndexerJsonRpcClient {
         let endpoint: Url = Url::parse(&format!("http://localhost:{}", self.json_rpc_port)).unwrap();
         IndexerJsonRpcClient::connect(endpoint).unwrap()
@@ -196,7 +163,8 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
         config.indexer.tor_identity_file = base_dir.join("indexer_tor_id.json");
         config.epoch_oracle.base_layer.base_node_grpc_url =
             Some(format!("http://127.0.0.1:{}", base_node_grpc_port).parse().unwrap());
-        config.indexer.scanning_interval = Duration::from_secs(5);
+        config.indexer.block_scanning_interval = Duration::from_secs(5);
+        config.indexer.state_scanning_interval = Duration::from_secs(5);
         config.indexer.p2p.listener_port = port;
 
         config.indexer.p2p.enable_mdns = false;
@@ -231,5 +199,7 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
         shutdown,
         db_path,
     };
+
+    cucumber_log(format!("Indexer {} started", indexer_name));
     world.indexers.insert(name, indexer_process);
 }

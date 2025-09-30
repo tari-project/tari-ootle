@@ -14,6 +14,7 @@ lol_alloc = "0.4.0"
 crate-type = ["cdylib", "lib"]
 
 [features]
+no_template_def = []
 return_null_abi = []
 return_empty_abi = []
 unexpected_export_function = []

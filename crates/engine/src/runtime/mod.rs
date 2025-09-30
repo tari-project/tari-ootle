@@ -61,7 +61,6 @@ use tari_engine_types::{
     indexed_value::IndexedValue,
     limits,
     lock::LockFlag,
-    substate::SubstateValue,
     ValidatorFeePoolAddress,
 };
 use tari_template_lib::{
@@ -111,7 +110,6 @@ pub trait RuntimeInterface: Send + Sync {
 
     fn lock_component(&self, address: ComponentAddress, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError>;
 
-    fn get_substate(&self, lock: &LockedSubstate) -> Result<SubstateValue, RuntimeError>;
     fn component_invoke(
         &self,
         component_ref: ComponentRef,

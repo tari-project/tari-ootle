@@ -23,22 +23,20 @@
 use std::{fmt, fmt::Formatter, sync::Arc};
 
 use tari_engine_types::limits;
-use tari_template_abi::{FunctionDef, TemplateDef, ABI_TEMPLATE_DEF_GLOBAL_NAME};
+use tari_template_abi::{FunctionDef, TemplateDef, Type, ABI_TEMPLATE_DEF_GLOBAL_NAME};
 use wasmer::{
     imports,
     sys::{BaseTunables, CompilerConfig, Cranelift, CraneliftOptLevel, NativeEngineExt, Target},
     AsStoreMut,
     Engine,
     ExportError,
-    ExternType,
     Function,
     Instance,
-    Module,
     Pages,
     Store,
-    Type,
     TypedFunction,
     WasmPtr,
+    WASM_PAGE_SIZE,
 };
 
 use crate::{
@@ -79,9 +77,19 @@ impl WasmModule {
         let mut env = WasmEnv::new(());
         let memory = instance.exports.get_memory("memory")?.clone();
         env.set_memory(memory);
+
+        // Check memory size limit
+        let size = env.memory_size(&mut store)?;
+        if size / WASM_PAGE_SIZE > limits::WASM_LIMITS.max_memory_pages {
+            return Err(TemplateLoaderError::WasmModuleError(
+                WasmExecutionError::MemoryExportTooLarge,
+            ));
+        }
+
         let template = env.load_abi(&mut store, &instance)?;
         let main_fn = format!("{}_main", template.template_name());
         validate_instance(&mut store, &instance, &main_fn)?;
+        validate_functions(&template)?;
 
         let engine = store.engine().clone();
 
@@ -182,16 +190,18 @@ fn validate_instance<S: AsStoreMut>(
     instance: &Instance,
     main_fn: &str,
 ) -> Result<(), WasmExecutionError> {
-    fn is_func_permitted(name: &str) -> bool {
-        name.ends_with("_main") || name == "tari_alloc" || name == "tari_free"
+    fn is_func_permitted(name: &str, main_fn: &str) -> bool {
+        name == main_fn || name == "tari_alloc" || name == "tari_free"
     }
+
+    instance.exports.get_memory("memory")?;
 
     // Enforce that only permitted functions are allowed
     let unexpected_abi_func = instance
         .exports
         .iter()
         .functions()
-        .find(|(name, _)| !is_func_permitted(name));
+        .find(|(name, _)| !is_func_permitted(name, main_fn));
 
     if let Some((name, _)) = unexpected_abi_func {
         return Err(WasmExecutionError::UnexpectedAbiFunction { name: name.to_string() });
@@ -204,53 +214,72 @@ fn validate_instance<S: AsStoreMut>(
         .i32()
         .ok_or(WasmExecutionError::ExportError(ExportError::IncompatibleType))?;
 
-    // Check that the main function exists
+    // Check that the main function exists and it's signature is correct
     let _main: MainFunction = instance.exports.get_typed_function(store, main_fn)?;
-
-    validate_functions(instance.module())?;
 
     Ok(())
 }
 
-fn validate_functions(module: &Module) -> Result<(), WasmValidationError> {
-    let mut function_count = 0usize;
-    for export in module.exports() {
-        if let ExternType::Function(func) = export.ty() {
-            function_count += 1;
-            let fn_name = export.name();
-            if fn_name.len() > limits::WASM_LIMITS.max_function_name_length {
-                return Err(WasmValidationError::FunctionNameTooLong {
-                    name: format!(
-                        "{}...",
-                        fn_name
-                            .get(..limits::WASM_LIMITS.max_function_name_length)
-                            .expect("len > limits::MAX_FUNCTION_NAME_LENGTH")
-                    ),
-                    max_length: limits::WASM_LIMITS.max_function_name_length,
-                });
-            }
-            if func.params().len() > limits::WASM_LIMITS.max_function_arguments {
-                return Err(WasmValidationError::FunctionTooManyArguments {
-                    name: fn_name.to_string(),
-                    max_args: limits::WASM_LIMITS.max_function_arguments,
-                    num_args: func.params().len(),
-                });
-            }
-
+fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionError> {
+    match template_def {
+        TemplateDef::V1(def) => {
+            let function_count = def.functions.len();
             if function_count > limits::WASM_LIMITS.max_functions {
                 return Err(WasmValidationError::TooManyFunctions {
                     max_functions: limits::WASM_LIMITS.max_functions,
-                });
+                }
+                .into());
             }
+            for func in &def.functions {
+                if func.name.len() > limits::WASM_LIMITS.max_function_name_length {
+                    return Err(WasmValidationError::FunctionNameTooLong {
+                        name: func.name.clone(),
+                        max_length: limits::WASM_LIMITS.max_function_name_length,
+                    }
+                    .into());
+                }
 
-            if func.params().iter().any(|t| matches!(t, Type::F32 | Type::F64)) ||
-                func.results().iter().any(|t| matches!(t, Type::F32 | Type::F64))
-            {
-                return Err(WasmValidationError::FunctionContainsFloats {
-                    name: fn_name.to_string(),
-                });
+                if func.arguments.len() > limits::WASM_LIMITS.max_function_arguments {
+                    return Err(WasmValidationError::FunctionTooManyArguments {
+                        name: func.name.clone(),
+                        max_args: limits::WASM_LIMITS.max_function_arguments,
+                        num_args: func.arguments.len(),
+                    }
+                    .into());
+                }
+                for arg in &func.arguments {
+                    if arg.name.len() > limits::WASM_LIMITS.max_function_name_length {
+                        return Err(WasmValidationError::FunctionNameTooLong {
+                            name: arg.name.clone(),
+                            max_length: limits::WASM_LIMITS.max_function_name_length,
+                        }
+                        .into());
+                    }
+                    match &arg.arg_type {
+                        Type::Tuple(tuple) => {
+                            if tuple.len() > limits::WASM_LIMITS.max_function_arguments {
+                                return Err(WasmValidationError::FunctionTooManyTupleReturn {
+                                    name: func.name.clone(),
+                                    max_tuple_size: limits::WASM_LIMITS.max_function_arguments,
+                                    tuple_size: tuple.len(),
+                                }
+                                .into());
+                            }
+                        },
+                        Type::Other { name } => {
+                            if name.len() > limits::WASM_LIMITS.max_function_name_length {
+                                return Err(WasmValidationError::FunctionNameTooLong {
+                                    name: name.clone(),
+                                    max_length: limits::WASM_LIMITS.max_function_name_length,
+                                }
+                                .into());
+                            }
+                        },
+                        _ => {},
+                    }
+                }
             }
-        }
+        },
     }
     Ok(())
 }

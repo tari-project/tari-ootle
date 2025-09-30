@@ -26,6 +26,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use multiaddr::Multiaddr;
 use reqwest::Url;
 use tari_common::configuration::{CommonConfig, StringList};
 use tari_engine_types::FromByteType;
@@ -36,10 +37,8 @@ use tari_ootle_app_utilities::{
 };
 use tari_ootle_common_types::{
     layer_one_transaction::{LayerOneTransactionDef, ValidatorRegistrationParams},
-    optional::Optional,
     Network,
 };
-use tari_ootle_wallet_sdk::models::AccountWithAddress;
 use tari_shutdown::Shutdown;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_validator_node::{run_validator_node, ApplicationConfig, ValidatorNodeConfig};
@@ -47,12 +46,12 @@ use tari_validator_node_client::{
     types::{LayerOneTransactionParams, PrepareLayerOneTransactionRequest},
     ValidatorNodeClient,
 };
-use tari_wallet_daemon_client::types::AccountsCreateRequest;
 use tokio::task;
 
 use crate::{
     helpers::{check_join_handle, get_os_assigned_port, get_os_assigned_ports, wait_listener_on_local_port},
     logging::get_base_dir_for_scenario,
+    util::cucumber_log,
     TariWorld,
 };
 
@@ -72,6 +71,13 @@ pub struct ValidatorNodeProcess {
 impl ValidatorNodeProcess {
     pub fn create_client(&self) -> ValidatorNodeClient {
         get_vn_client(self.json_rpc_port)
+    }
+
+    pub fn get_addresses(&self) -> Vec<Multiaddr> {
+        let addr = format!("/ip4/127.0.0.1/tcp/{}", self.p2p_port)
+            .parse()
+            .expect("Could not parse multiaddr");
+        vec![addr]
     }
 
     pub fn layer_one_transaction_path(&self) -> PathBuf {
@@ -107,8 +113,8 @@ impl ValidatorNodeProcess {
             attempts -= 1;
             if attempts == 0 {
                 panic!(
-                    "Validator node did not start consensus in time: status: {}, epoch: {}",
-                    resp.state, resp.epoch
+                    "Validator node {} did not start consensus in time: status: {}, epoch: {}",
+                    self.name, resp.state, resp.epoch
                 );
             }
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -120,44 +126,25 @@ pub async fn spawn_validator_node(
     world: &mut TariWorld,
     validator_node_name: String,
     base_node_name: String,
-    wallet_daemon_name: String,
-    claim_fee_key_name: String,
+    claim_account_name: Option<&str>,
 ) -> ValidatorNodeProcess {
     // each spawned VN will use different ports
     let (port, json_rpc_port) = get_os_assigned_ports();
     let web_ui_port = get_os_assigned_port();
     let base_node_grpc_port = world.base_nodes.get(&base_node_name).unwrap().grpc_port;
-    let walletd = match world.wallet_daemons.get(&wallet_daemon_name) {
-        Some(walletd) => walletd,
-        None => {
-            panic!("No wallet daemon named {} found", wallet_daemon_name);
-        },
-    };
-    let mut wallet_client = walletd.get_authed_client().await;
-
     // get the default wallet account public key
-    let account = match wallet_client.accounts_get_default().await.optional().unwrap() {
-        Some(account) => AccountWithAddress {
-            account: account.account,
-            address: account.address,
-        },
-        None => {
-            let resp = wallet_client
-                .create_account(AccountsCreateRequest {
-                    account_name: None,
-                    is_default: None,
-                    key_id: None,
-                })
-                .await
-                .unwrap();
-
-            AccountWithAddress {
-                account: resp.account,
-                address: resp.address,
-            }
-        },
-    };
-    world.wallet_keys.insert(claim_fee_key_name, account.account.key_index);
+    let account = claim_account_name.map(|n| {
+        world
+            .wallet_accounts
+            .get(n)
+            .unwrap_or_else(|| {
+                panic!(
+                    "No account named {} found in world.wallet_accounts",
+                    claim_account_name.unwrap()
+                )
+            })
+            .clone()
+    });
 
     // let wallet_account_pub = wallet_client.accounts_get_default().await.unwrap().public_key;
     let name = validator_node_name.clone();
@@ -205,8 +192,10 @@ pub async fn spawn_validator_node(
             config.validator_node.web_ui_listener_address = Some(format!("127.0.0.1:{}", web_ui_port).parse().unwrap());
             config.validator_node.p2p.listener_port = port;
 
-            config.validator_node.fee_claim_public_key =
-                account.address.account_public_key().try_from_byte_type().unwrap();
+            config.validator_node.fee_claim_public_key = account
+                .as_ref()
+                .map(|account| account.address.account_public_key().try_from_byte_type().unwrap())
+                .unwrap_or_default();
 
             // Add all other VNs as peer seeds
             config.peer_seeds.peer_seeds = StringList::from(peer_seeds);
@@ -224,6 +213,7 @@ pub async fn spawn_validator_node(
     // get the public key of the VN
     let public_key = get_vn_identity(json_rpc_port).await;
 
+    cucumber_log(format!("Validator node {} started", name));
     // make the new vn able to be referenced by other processes
     ValidatorNodeProcess {
         name: name.clone(),

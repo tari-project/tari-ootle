@@ -5,6 +5,7 @@ mod base_node;
 mod indexer;
 mod miner;
 mod network;
+mod outputs;
 mod validator_node;
 mod wallet;
 mod wallet_daemon;

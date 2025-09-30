@@ -4,14 +4,21 @@
 use tari_template_lib::prelude::*;
 
 #[template]
-mod fees {
-    pub struct FeesTest {
-        // value: u32,
+mod template {
+    use super::*;
+
+    /// Used to create transactions that cost a lot of fees
+    pub struct FeeRunnerUpper {
+        costly_data: Bytes,
     }
 
-    impl FeesTest {
-        pub fn new() -> Self {
-            Self {}
+    impl FeeRunnerUpper {
+        pub fn new(costly_data: Bytes) -> Self {
+            Self { costly_data }
+        }
+
+        pub fn set_data(&mut self, data: Bytes) {
+            self.costly_data = data;
         }
     }
 }

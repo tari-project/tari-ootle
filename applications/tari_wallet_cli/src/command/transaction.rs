@@ -382,11 +382,26 @@ pub async fn handle_send(args: SendArgs, client: &mut WalletDaemonClient) -> Res
             dry_run: false,
         })
         .await?;
+    let resp = client
+        .wait_transaction_result(TransactionWaitResultRequest {
+            transaction_id: resp.transaction_id,
+            timeout_secs: common.wait_for_result_timeout_secs,
+        })
+        .await?;
+    if resp.timed_out {
+        println!("❌ Transaction {} result timed out.", resp.transaction_id);
+        println!();
+        return Ok(());
+    }
 
     println!("Transaction: {}", resp.transaction_id);
-    println!("Fee: {} ({} refunded)", resp.fee, resp.fee_refunded);
+    println!(
+        "Fee: {} ({} refunded)",
+        resp.final_fee,
+        resp.result.as_ref().unwrap().fee_receipt.total_refunded()
+    );
     println!();
-    summarize_finalize_result(&resp.result);
+    summarize_finalize_result(resp.result.as_ref().unwrap());
 
     Ok(())
 }
@@ -417,11 +432,22 @@ pub async fn handle_confidential_transfer(
             dry_run: false,
         })
         .await?;
+    let resp = client
+        .wait_transaction_result(TransactionWaitResultRequest {
+            transaction_id: resp.transaction_id,
+            timeout_secs: common.wait_for_result_timeout_secs,
+        })
+        .await?;
+    if resp.timed_out {
+        println!("❌ Transaction result timed out.",);
+        println!();
+        return Ok(());
+    }
 
     println!("Transaction: {}", resp.transaction_id);
-    println!("Fee: {}", resp.fee);
+    println!("Fee: {}", resp.final_fee);
     println!();
-    summarize_finalize_result(&resp.result);
+    summarize_finalize_result(&resp.result.unwrap());
 
     Ok(())
 }

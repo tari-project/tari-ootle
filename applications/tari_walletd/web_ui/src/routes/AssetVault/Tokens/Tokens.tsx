@@ -113,7 +113,7 @@ function BalanceRow({
           />
           {resource_type === "Stealth" && (
             <Tooltip title="View Stealth UTXOs">
-              <IconButton size="small" onClick={() => navigate("/stealth-utxos")} color="primary">
+              <IconButton size="small" onClick={() => navigate(`/stealth-utxos/${resource_address}`)} color="primary">
                 <IoWalletOutline />
               </IconButton>
             </Tooltip>

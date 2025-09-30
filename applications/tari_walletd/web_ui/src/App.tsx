@@ -124,8 +124,8 @@ export const breadcrumbRoutes = [
   },
   {
     label: "Stealth UTXOs",
-    path: "/stealth-utxos",
-    dynamic: false,
+    path: "/stealth-utxos/:resource_address",
+    dynamic: true,
   },
 ];
 
@@ -279,7 +279,7 @@ function App() {
               }
             />
             <Route
-              path="stealth-utxos"
+              path="stealth-utxos/:resource_address"
               element={
                 <GuardedRoute
                   isAuthenticated={isAuthenticated}

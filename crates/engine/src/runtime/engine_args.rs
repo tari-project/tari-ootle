@@ -5,12 +5,13 @@ use std::any::type_name;
 
 use serde::de::DeserializeOwned;
 use tari_bor::decode_exact;
+use tari_template_lib::types::bytes::Bytes;
 
 use crate::runtime::RuntimeError;
 
 #[derive(Debug, Clone, Default)]
 pub struct EngineArgs {
-    args: Vec<Vec<u8>>,
+    args: Vec<Bytes>,
 }
 
 impl EngineArgs {
@@ -77,8 +78,14 @@ impl EngineArgs {
     }
 }
 
-impl From<Vec<Vec<u8>>> for EngineArgs {
-    fn from(args: Vec<Vec<u8>>) -> Self {
+impl From<Vec<Bytes>> for EngineArgs {
+    fn from(args: Vec<Bytes>) -> Self {
         Self { args }
+    }
+}
+
+impl From<Bytes> for EngineArgs {
+    fn from(arg: Bytes) -> Self {
+        Self { args: vec![arg] }
     }
 }

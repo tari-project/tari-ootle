@@ -4984,6 +4984,7 @@ dependencies = [
  "reqwest 0.11.27",
  "serde",
  "serde_json",
+ "serde_yaml",
  "tari_base_node_client",
  "tari_common",
  "tari_common_sqlite",
@@ -4998,11 +4999,13 @@ dependencies = [
  "tari_ootle_address",
  "tari_ootle_app_utilities",
  "tari_ootle_common_types",
+ "tari_ootle_storage",
  "tari_ootle_wallet_sdk",
  "tari_ootle_walletd",
  "tari_p2p",
  "tari_shutdown",
  "tari_sidechain",
+ "tari_template_builtin",
  "tari_template_lib",
  "tari_transaction",
  "tari_transaction_components",
@@ -11567,14 +11570,18 @@ name = "tari_ootle_wallet_sdk_services"
 version = "0.11.2"
 dependencies = [
  "anyhow",
+ "futures-bounded",
  "log",
  "reqwest 0.11.27",
+ "tari_bor",
  "tari_crypto",
  "tari_engine_types",
  "tari_indexer_client",
  "tari_ootle_common_types",
  "tari_ootle_wallet_sdk",
+ "tari_shutdown",
  "tari_template_abi",
+ "tari_template_builtin",
  "tari_template_lib",
  "tari_transaction",
  "tari_transaction_components",
@@ -11620,7 +11627,6 @@ dependencies = [
  "config",
  "either",
  "futures 0.3.31",
- "futures-bounded",
  "humantime-serde",
  "include_dir",
  "indexmap 2.11.4",
@@ -11634,7 +11640,6 @@ dependencies = [
  "reqwest 0.11.27",
  "serde",
  "serde_json",
- "tari_bor",
  "tari_common",
  "tari_common_types",
  "tari_crypto",
@@ -11650,7 +11655,6 @@ dependencies = [
  "tari_template_builtin",
  "tari_template_lib",
  "tari_transaction",
- "tari_transaction_components",
  "tari_transaction_manifest",
  "tari_utilities",
  "tari_wallet_daemon_client",
@@ -11956,7 +11960,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_abi"
-version = "0.13.1"
+version = "0.14.0"
 dependencies = [
  "hashbrown 0.13.2",
  "serde",
@@ -11976,7 +11980,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_lib"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "borsh",
  "serde",
@@ -11990,7 +11994,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_lib_types"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bincode 2.0.1",
  "bnum",
@@ -12006,7 +12010,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_macros"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "indoc",
  "proc-macro2",
@@ -12297,6 +12301,7 @@ dependencies = [
 name = "tari_validator_node_client"
 version = "0.11.2"
 dependencies = [
+ "indexmap 2.11.4",
  "multiaddr 0.18.1",
  "reqwest 0.11.27",
  "serde",

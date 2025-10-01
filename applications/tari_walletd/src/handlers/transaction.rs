@@ -14,6 +14,7 @@ use tari_ootle_wallet_sdk::{
     apis::{config::ConfigKey, key_manager::KeyBranch, transaction::TransactionApiError},
     network::WalletQueryErrorStatus,
 };
+use tari_ootle_wallet_sdk_services::{events::WalletEvent, transaction_service::TransactionServiceError};
 use tari_transaction::{args, Transaction};
 use tari_transaction_manifest::parse_manifest;
 use tari_wallet_daemon_client::{
@@ -41,13 +42,10 @@ use tari_wallet_daemon_client::{
 use tokio::time;
 
 use super::context::HandlerContext;
-use crate::{
-    handlers::{
-        helpers::{get_account, get_account_or_default, invalid_params, not_found, transaction_rejected},
-        wasm_optimizer::optimize_wasm_template,
-        HandlerError,
-    },
-    services::{transaction_service::TransactionServiceError, WalletEvent},
+use crate::handlers::{
+    helpers::{get_account, get_account_or_default, invalid_params, not_found, transaction_rejected},
+    wasm_optimizer::optimize_wasm_template,
+    HandlerError,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::transaction";

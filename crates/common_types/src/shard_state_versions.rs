@@ -3,6 +3,7 @@
 
 use bounded_vec::BoundedVec;
 pub use bounded_vec::BoundedVecOutOfBounds;
+use indexmap::IndexMap;
 use tari_bor::{Deserialize, Serialize};
 
 use crate::{shard::Shard, NumPreshards, ShardGroup, StateVersion};
@@ -74,6 +75,19 @@ impl ShardStateVersions {
     pub fn get_by_shard_checked(&self, shard_group: ShardGroup, shard: Shard) -> Option<StateVersion> {
         let index = Self::shard_to_index(shard_group, shard)?;
         self.inner.get(index).copied()
+    }
+
+    pub fn convert_to_map(&self, shard_group: ShardGroup) -> IndexMap<Shard, StateVersion> {
+        let mut map = IndexMap::with_capacity(self.len());
+        for (i, version) in self.as_slice().iter().enumerate() {
+            let shard = if i == 0 {
+                Shard::global()
+            } else {
+                Shard::from(shard_group.start().as_u32() + (i as u32 - 1))
+            };
+            map.insert(shard, *version);
+        }
+        map
     }
 
     pub fn len(&self) -> usize {

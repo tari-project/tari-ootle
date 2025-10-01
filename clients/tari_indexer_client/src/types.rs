@@ -15,7 +15,14 @@ use tari_engine_types::{
     template_lib_models::{NonFungibleAddress, ResourceAddress, UtxoId},
     Utxo,
 };
-use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, StateVersion};
+use tari_ootle_common_types::{
+    shard::Shard,
+    substate_type::SubstateType,
+    Epoch,
+    NumPreshards,
+    ShardGroup,
+    StateVersion,
+};
 use tari_ootle_storage::time::PrimitiveDateTime;
 use tari_ootle_wallet_sdk::models::UtxoUpdateSet;
 use tari_template_abi::TemplateDef;
@@ -394,4 +401,36 @@ pub struct GetUnspentUtxosRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 pub struct GetUnspentUtxosResponse {
     pub utxos: Vec<(UtxoId, Utxo)>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "tari-indexer-client/",
+        rename = "IndexerGetEpochManagerStatsResponse"
+    )
+)]
+pub struct GetNetworkSyncStateResponse {
+    pub network_desc: NetworkDescription,
+    pub sync_progress: Option<SyncProgress>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+pub struct NetworkDescription {
+    pub epoch: Epoch,
+    // (shard group, num members)
+    pub shard_groups: Vec<(ShardGroup, u32)>,
+    pub num_preshards: NumPreshards,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+pub struct SyncProgress {
+    pub last_epoch: Epoch,
+    pub checkpoint_progress: Vec<(ShardGroup, Epoch)>,
+    pub last_state_versions: Vec<(Shard, (StateVersion, Epoch))>,
 }

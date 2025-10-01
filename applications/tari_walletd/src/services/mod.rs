@@ -1,21 +1,11 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-mod events;
-pub use events::*;
-
-mod account_monitor;
-pub use account_monitor::AccountMonitorHandle;
-
-pub mod transaction_service;
 mod webauthn;
 pub use webauthn::*;
 
 mod session_store;
 mod template_monitor;
-
-pub mod recovery_service;
-mod stealth_utxo_scanner;
 
 // -------------------------------- Spawn -------------------------------- //
 use anyhow::anyhow;
@@ -27,22 +17,17 @@ use tari_ootle_wallet_sdk::{
     storage::WalletStore,
     WalletSdk,
 };
-use tari_ootle_wallet_sdk_services::utxo_scanner::UtxoRecovery;
-use tari_shutdown::ShutdownSignal;
-use tokio::{sync::oneshot, task::JoinHandle};
-use transaction_service::TransactionService;
-pub use transaction_service::TransactionServiceHandle;
-
-use crate::{
+use tari_ootle_wallet_sdk_services::{
+    account_monitor::{AccountMonitor, AccountMonitorHandle},
+    events::WalletEvent,
     notify::Notify,
-    services::{
-        account_monitor::AccountMonitor,
-        stealth_utxo_scanner::StealthUtxoScannerWorker,
-        template_monitor::TemplateMonitor,
-    },
+    transaction_service::{TransactionService, TransactionServiceHandle},
+    utxo_scanner::{StealthUtxoScannerWorker, UtxoRecovery},
 };
+use tari_shutdown::ShutdownSignal;
+use tokio::task::JoinHandle;
 
-type Reply<T> = oneshot::Sender<T>;
+use crate::services::template_monitor::TemplateMonitor;
 
 pub fn spawn_services<TStore, TNetworkInterface>(
     shutdown_signal: ShutdownSignal,
@@ -97,8 +82,5 @@ pub struct Services {
 async fn try_select_any<I>(handles: I) -> Result<(), anyhow::Error>
 where I: IntoIterator<Item = JoinHandle<Result<(), anyhow::Error>>> {
     let (res, _, _) = future::select_all(handles).await;
-    match res {
-        Ok(res) => res,
-        Err(e) => Err(anyhow!("Task panicked: {}", e)),
-    }
+    res.unwrap_or_else(|e| Err(anyhow!("Task panicked: {}", e)))
 }

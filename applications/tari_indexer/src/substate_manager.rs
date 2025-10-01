@@ -24,6 +24,7 @@ use std::{collections::HashMap, convert::TryInto};
 
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
+use tari_consensus::hotstuff::substate_store::SubstateStoreError;
 use tari_engine_types::{
     substate::{Substate, SubstateId, SubstateValue},
     Utxo,
@@ -49,7 +50,8 @@ use tari_template_lib::{
 use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClientFactory};
 
 use crate::{
-    storage_sqlite::{IndexerStore, IndexerStoreReadTransaction, SqliteIndexerStore},
+    network_state_sync::SyncProgress,
+    storage_sqlite::{models::Key, IndexerStore, IndexerStoreReadTransaction, SqliteIndexerStore},
     substate_file_cache::SubstateFileCache,
 };
 
@@ -86,6 +88,13 @@ impl SubstateManager {
             substate_scanner,
             substate_store,
         }
+    }
+
+    pub fn get_sync_progress(&self) -> Result<SyncProgress, SubstateStoreError> {
+        let progress = self
+            .substate_store
+            .with_read_tx(|tx| tx.key_value_get_value(Key::SyncProgress))?;
+        Ok(progress)
     }
 
     pub fn get_stored_substates_by_filters(

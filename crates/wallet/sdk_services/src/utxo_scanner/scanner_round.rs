@@ -25,11 +25,11 @@ use tokio::sync::watch;
 
 use crate::utxo_scanner::StealthScannerApiError;
 
-const LOG_TARGET: &str = "tari::ootle::wallet::scanner_round";
+const LOG_TARGET: &str = "tari::ootle::wallet_services::scanner_round";
 // TODO: either fetch num preshards from the network or we should hardcode it to a single value for all apps
 const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
 
-pub(crate) struct UtxoScannerRound<'a, TStore, TNetworkInterface> {
+pub struct UtxoScannerRound<'a, TStore, TNetworkInterface> {
     network: Network,
     account: &'a AccountWithAddress,
     view_key: &'a DerivedKey,

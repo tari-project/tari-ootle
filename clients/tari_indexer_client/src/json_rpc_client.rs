@@ -31,6 +31,7 @@ use crate::{
         AddPeerRequest,
         AddPeerResponse,
         GetEpochManagerStatsResponse,
+        GetNetworkSyncStateResponse,
         GetNonFungiblesRequest,
         GetNonFungiblesResponse,
         GetSubstateRequest,
@@ -164,6 +165,10 @@ impl IndexerJsonRpcClient {
         req: GetUnspentUtxosRequest,
     ) -> Result<GetUnspentUtxosResponse, IndexerClientError> {
         self.send_request("get_unspent_utxos", req).await
+    }
+
+    pub async fn get_network_sync_state(&mut self) -> Result<GetNetworkSyncStateResponse, IndexerClientError> {
+        self.send_request("get_network_sync_state", ()).await
     }
 
     pub async fn wait_until_ready(&mut self) -> Result<IndexerReadyResponse, IndexerClientError> {

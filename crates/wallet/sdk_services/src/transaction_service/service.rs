@@ -25,11 +25,11 @@ use super::{
     handle::{TransactionServiceHandle, TransactionServiceRequest},
 };
 use crate::{
+    events::{TransactionFinalizedEvent, TransactionInvalidEvent, TransactionSubmittedEvent, WalletEvent},
     notify::Notify,
-    services::{TransactionFinalizedEvent, TransactionInvalidEvent, TransactionSubmittedEvent, WalletEvent},
 };
 
-const LOG_TARGET: &str = "tari::ootle::wallet_daemon::transaction_service";
+const LOG_TARGET: &str = "tari::ootle::wallet_services::transaction_service";
 
 pub struct TransactionService<TStore, TNetworkInterface> {
     rx_request: mpsc::Receiver<TransactionServiceRequest>,

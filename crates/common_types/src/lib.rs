@@ -51,6 +51,8 @@ pub use shard_group::*;
 pub use shard_state_versions::*;
 pub use state_version::*;
 pub use substate_address::*;
+// Re-export
+pub use tari_engine_types as engine_types;
 pub use tari_engine_types::serde_with;
 pub use validator_metadata::*;
 pub use versioned_substate_id::*;

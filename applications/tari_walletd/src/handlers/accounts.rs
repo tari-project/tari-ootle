@@ -30,6 +30,7 @@ use tari_ootle_wallet_sdk::{
     },
     models::NewAccountData,
 };
+use tari_ootle_wallet_sdk_services::events::TransactionSubmittedEvent;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
@@ -93,7 +94,6 @@ use crate::{
         wait_for_result_and_account,
     },
     jrpc_server::ApplicationErrorCode,
-    services::TransactionSubmittedEvent,
     DEFAULT_FEE,
 };
 
@@ -812,18 +812,11 @@ pub async fn handle_transfer(
     // If dry run we can return the result immediately
     if req.dry_run {
         let transaction_id = transaction.calculate_id();
-        let execute_result = context
+        let _execute_result = context
             .transaction_service()
             .submit_dry_run_transaction(transaction)
             .await?;
-        let finalize = execute_result.finalize;
-        return Ok(AccountsTransferResponse {
-            transaction_id,
-            // TODO: technically this could cause a crash, update the api to a u64
-            fee: finalize.fee_receipt.total_fees_paid,
-            fee_refunded: finalize.fee_receipt.total_fee_payment - finalize.fee_receipt.total_fees_paid,
-            result: finalize,
-        });
+        return Ok(AccountsTransferResponse { transaction_id });
     }
 
     // Otherwise submit and wait for a result
@@ -848,12 +841,7 @@ pub async fn handle_transfer(
         finalized.final_fee
     );
 
-    Ok(AccountsTransferResponse {
-        transaction_id: tx_id,
-        fee: finalized.final_fee,
-        fee_refunded: max_fee - finalized.final_fee,
-        result: finalized.finalize,
-    })
+    Ok(AccountsTransferResponse { transaction_id: tx_id })
 }
 
 pub async fn handle_confidential_transfer(
@@ -892,19 +880,12 @@ pub async fn handle_confidential_transfer(
 
         if req.dry_run {
             let transaction_id = transfer.transaction.calculate_id();
-            let exec_result = transaction_service
+            let _exec_result = transaction_service
                 .submit_dry_run_transaction(transfer.transaction)
                 .await?;
-            let finalize = exec_result.finalize;
-            return Ok(ConfidentialTransferResponse {
-                transaction_id,
-                // TODO: technically this could cause a crash, update the api to a u64
-                fee: finalize.fee_receipt.total_fees_paid,
-                result: finalize,
-            });
+            return Ok(ConfidentialTransferResponse { transaction_id });
         }
 
-        let mut events = notifier.subscribe();
         let tx_id = transaction_service.submit_transaction(transfer.transaction).await?;
 
         notifier.notify(TransactionSubmittedEvent {
@@ -912,22 +893,7 @@ pub async fn handle_confidential_transfer(
             new_account: None,
         });
 
-        let finalized = wait_for_result(&mut events, tx_id).await?;
-        if let Some(reject) = finalized.finalize.result.fee_reject() {
-            return Err(anyhow::anyhow!("Fee transaction rejected: {}", reject));
-        }
-        if let Some(reason) = finalized.finalize.fee_reject() {
-            return Err(anyhow::anyhow!(
-                "Fee transaction succeeded (fees charged) however the transaction failed: {}",
-                reason
-            ));
-        }
-
-        Ok(ConfidentialTransferResponse {
-            transaction_id: tx_id,
-            fee: finalized.final_fee,
-            result: finalized.finalize,
-        })
+        Ok(ConfidentialTransferResponse { transaction_id: tx_id })
     })
     .await?
 }

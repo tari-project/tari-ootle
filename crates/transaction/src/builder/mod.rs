@@ -459,7 +459,7 @@ impl TransactionBuilder {
 
     fn resolve_arg(&self, arg: NamedArg) -> Result<InstructionArg, ParseWorkspaceKeyError> {
         match arg {
-            NamedArg::Literal(bytes) => Ok(InstructionArg::Literal(bytes)),
+            NamedArg::Literal(bytes) => Ok(InstructionArg::Literal(bytes.into())),
             NamedArg::Workspace(key) => {
                 let parsed = parse_workspace_key(key)?;
                 let id = self.workspace_ids.get(parsed.name.as_ref()).unwrap_or_else(|| {

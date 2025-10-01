@@ -490,11 +490,6 @@ pub struct AccountsTransferRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct AccountsTransferResponse {
     pub transaction_id: TransactionId,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub fee: u64,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub fee_refunded: u64,
-    pub result: FinalizeResult,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -568,9 +563,6 @@ pub struct ConfidentialTransferRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ConfidentialTransferResponse {
     pub transaction_id: TransactionId,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub fee: u64,
-    pub result: FinalizeResult,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -889,8 +881,6 @@ pub struct WalletSubstateInfo {
     pub parent_id: Option<SubstateId>,
     pub module_name: Option<String>,
     pub version: u32,
-    #[serde(default, with = "serde_with::string::option")]
-    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     pub template_address: Option<TemplateAddress>,
 }
 

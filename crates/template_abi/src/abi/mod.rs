@@ -47,11 +47,13 @@ pub fn call_engine<T: Serialize + fmt::Debug, U: DeserializeOwned>(op: EngineOp,
     let mut encoded = Vec::with_capacity(len);
     encode_into_writer(input, &mut encoded).unwrap();
     let len = encoded.len();
-    let input_ptr = wrap_ptr(encoded) as *const _;
+    let input_ptr = encoded.as_mut_ptr();
     let ptr = unsafe { tari_engine(op.as_i32(), input_ptr, len) };
     if ptr.is_null() {
         panic!("Engine call returned null for op {:?}", op);
     }
+    // Deallocate the input data after the call
+    drop(encoded);
     let slice = unsafe { slice::from_raw_parts(ptr as *const _, 4) };
     let len = decode_len(slice).unwrap();
     // Take ownership of the data and deallocate it at the end of the function

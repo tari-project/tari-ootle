@@ -15,7 +15,10 @@ use tari_ootle_wallet_sdk::{
     storage::WalletStore,
     WalletSdk,
 };
-use tari_ootle_wallet_sdk_services::indexer_jrpc_impl::IndexerJsonRpcNetworkInterface;
+use tari_ootle_wallet_sdk_services::{
+    events::{TransactionFinalizedEvent, WalletEvent},
+    indexer_jrpc::IndexerJsonRpcNetworkInterface,
+};
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::models::ComponentAddress;
@@ -23,10 +26,7 @@ use tari_transaction::TransactionId;
 use tari_wallet_daemon_client::ComponentAddressOrName;
 use tokio::sync::broadcast;
 
-use crate::{
-    jrpc_server::ApplicationErrorCode,
-    services::{TransactionFinalizedEvent, WalletEvent},
-};
+use crate::jrpc_server::ApplicationErrorCode;
 
 pub async fn wait_for_result(
     events: &mut broadcast::Receiver<WalletEvent>,
@@ -98,11 +98,13 @@ pub fn get_account_with_inputs(
     sdk: &WalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>,
 ) -> Result<(AccountWithAddress, HashSet<SubstateRequirement>), anyhow::Error> {
     let account = get_account_or_default(account, &sdk.accounts_api())?;
-
-    // Add all versioned account child addresses as inputs
-    let inputs = sdk
-        .substate_api()
-        .load_dependent_substates(&[&account.account.component_address.into()])?;
+    let inputs = if account.is_confirmed_on_chain() {
+        // Add all versioned account child addresses as inputs
+        sdk.substate_api()
+            .load_dependent_substates(&[&account.account.component_address.into()])?
+    } else {
+        HashSet::new()
+    };
 
     Ok((account, inputs))
 }

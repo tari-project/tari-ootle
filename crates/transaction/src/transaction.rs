@@ -305,7 +305,7 @@ mod tests {
     };
     use tari_engine_types::ToByteType;
     use tari_ootle_common_types::crypto::create_key_pair;
-    use tari_template_lib::types::TemplateAddress;
+    use tari_template_lib::{prelude::Bytes, types::TemplateAddress};
 
     use super::*;
     use crate::{args, call_args};
@@ -319,7 +319,8 @@ mod tests {
                 2,
                 3,
                 "string",
-                call_args![1, 2]
+                call_args![1, 2],
+                Bytes::from_vec(vec![12; 100])
             ])
             .call_function(TemplateAddress::from_array([1; 32]), "function", args![
                 1,

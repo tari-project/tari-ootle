@@ -35,7 +35,7 @@ pub enum NetworkingError {
     GossipPublishError(#[from] gossipsub::PublishError),
     #[error("Failed to send message to peer: {0}")]
     SwarmError(#[from] TariSwarmError),
-    #[error("Service has shutdown")]
+    #[error(transparent)]
     NetworkingHandleError(#[from] NetworkingHandleError),
     #[error("Failed to subscribe to topic: {0}")]
     SubscriptionError(#[from] SubscriptionError),
@@ -71,7 +71,7 @@ impl<T> From<mpsc::error::SendError<T>> for NetworkingError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum NetworkingHandleError {
-    #[error("Service has shutdown")]
+    #[error("Networking service has shutdown")]
     ServiceHasShutdown,
     #[error("Service dropped reply sender without sending a reply")]
     ServiceAbandonedRequest,

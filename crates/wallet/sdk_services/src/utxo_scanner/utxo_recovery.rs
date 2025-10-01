@@ -19,7 +19,7 @@ use tokio::sync::watch;
 
 use crate::utxo_scanner::StealthScannerApiError;
 
-const LOG_TARGET: &str = "tari::ootle::wallet::utxo_recovery";
+const LOG_TARGET: &str = "tari::ootle::wallet_services::utxo_recovery";
 
 pub struct UtxoRecovery<TStore, TNetworkInterface> {
     sdk: WalletSdk<TStore, TNetworkInterface>,

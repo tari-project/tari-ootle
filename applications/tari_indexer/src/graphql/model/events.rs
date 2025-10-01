@@ -26,6 +26,7 @@ use async_graphql::{Context, EmptyMutation, EmptySubscription, Object, Schema, S
 use log::*;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
+use tari_ootle_common_types::displayable::Displayable;
 
 use crate::event_manager::EventManager;
 
@@ -64,17 +65,21 @@ impl EventQuery {
         ctx: &Context<'_>,
         topic: Option<String>,
         substate_id: Option<String>,
-        offset: u32,
-        limit: u32,
+        offset: Option<u32>,
+        limit: Option<u32>,
     ) -> Result<Vec<Event>, anyhow::Error> {
         info!(
             target: LOG_TARGET,
-            "Querying events. topic: {:?}, substate_id: {:?}, offset: {}, limit: {}, ", topic, substate_id, offset, limit,
+            "Querying events. topic: {}, substate_id: {}, offset: {}, limit: {}, ", topic.display(), substate_id.display(), offset.display(), limit.display(),
         );
         let substate_id = substate_id.map(|str| SubstateId::from_str(&str)).transpose()?;
         let event_manager = ctx.data_unchecked::<EventManager>();
+        let limit = limit.unwrap_or(100);
+        if limit > 1000 {
+            return Err(anyhow::anyhow!("Limit cannot be greater than 1000"));
+        }
         event_manager
-            .get_events_from_db(topic, substate_id, offset, limit)
+            .get_events_from_db(topic, substate_id, offset.unwrap_or(0), limit)
             .await?
             .into_iter()
             .map(Event::from_engine_event)

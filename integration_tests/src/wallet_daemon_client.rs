@@ -32,8 +32,7 @@ use tari_ootle_wallet_sdk::{
     models::{Account, AccountWithAddress, NonFungibleToken},
 };
 use tari_template_lib::{
-    constants::STEALTH_TARI_RESOURCE_ADDRESS,
-    prelude::{ResourceAddress, RistrettoPublicKeyBytes, XTR},
+    prelude::{ResourceAddress, RistrettoPublicKeyBytes},
     resource::TOKEN_SYMBOL,
     types::Amount,
 };
@@ -66,7 +65,7 @@ use tokio::{task::JoinSet, time::timeout};
 use crate::{
     helpers::get_address_from_output,
     util::{cucumber_log, transaction_builder},
-    validator_node_cli::add_substate_ids,
+    validator_node_cli::add_outputs_from_diff,
     TariWorld,
 };
 
@@ -99,13 +98,14 @@ pub async fn claim_fees(
     client.claim_validator_fees(request).await
 }
 
-pub async fn transfer_confidential(
+pub async fn transfer_stealth(
     world: &mut TariWorld,
     source_account_name: String,
     dest_account_name: String,
-    amount: u64,
+    amount: Amount,
     wallet_daemon_name: String,
     outputs_name: String,
+    resource_address: ResourceAddress,
 ) {
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
@@ -120,11 +120,11 @@ pub async fn transfer_confidential(
     let resp = client
         .accounts_stealth_transfer(StealthTransferRequest {
             owner_account: source_account_name,
-            input_selection: ConfidentialTransferInputSelection::ConfidentialOnly,
-            resource_address: XTR,
+            input_selection: ConfidentialTransferInputSelection::PreferRevealed,
+            resource_address,
             destination_address: dest_account.address,
-            max_fee: 5000,
-            blinded_output_amount: amount.into(),
+            max_fee: 2000,
+            blinded_output_amount: amount,
             revealed_output_amount: Default::default(),
             dry_run: false,
         })
@@ -185,7 +185,7 @@ pub async fn transfer_confidential(
         panic!("Transaction failed: {}", reason);
     }
 
-    add_substate_ids(
+    add_outputs_from_diff(
         world,
         outputs_name,
         &wait_resp
@@ -198,8 +198,8 @@ pub async fn transfer_confidential(
 
 pub async fn create_account(
     world: &mut TariWorld,
-    account_name: String,
     wallet_daemon_name: String,
+    account_name: String,
 ) -> AccountWithAddress {
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
@@ -209,60 +209,69 @@ pub async fn create_account(
         key_id: None,
     };
 
-    let resp = timeout(Duration::from_secs(240), client.create_account(request))
+    let resp = timeout(Duration::from_secs(5), client.create_account(request))
         .await
         .unwrap()
         .unwrap();
-
-    world
-        .account_addresses
-        .insert(account_name.clone(), resp.address.clone());
-
-    AccountWithAddress {
-        account: resp.account,
+    let account = AccountWithAddress {
+        account: resp.account.clone(),
         address: resp.address,
-    }
+    };
+
+    world.wallet_accounts.insert(account_name.clone(), account.clone());
+
+    account
 }
 
-pub async fn create_account_with_free_coins(
+pub async fn create_account_with_free_coins<A: Into<Amount>>(
     world: &mut TariWorld,
     account_name: String,
     wallet_daemon_name: String,
-    amount: Amount,
-    key_name: Option<String>,
+    amount: A,
 ) {
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
-    let key_index = key_name.map(|k| {
-        *world
-            .wallet_keys
-            .get(&k)
-            .unwrap_or_else(|| panic!("Wallet {} not found", wallet_daemon_name))
-    });
-    let account = client
-        .create_account(AccountsCreateRequest {
-            account_name: Some(account_name.clone()),
-            is_default: None,
-            key_id: key_index,
-        })
-        .await
-        .unwrap();
+    let account = world.wallet_accounts.get(&account_name).cloned();
+
+    let account = match account {
+        Some(a) => a,
+        None => {
+            let resp = client
+                .create_account(AccountsCreateRequest {
+                    account_name: Some(account_name.clone()),
+                    is_default: None,
+                    key_id: account.as_ref().map(|a| a.account.key_index),
+                })
+                .await
+                .unwrap();
+
+            let account = AccountWithAddress {
+                account: resp.account,
+                address: resp.address,
+            };
+            world.wallet_accounts.insert(account_name.clone(), account.clone());
+            account
+        },
+    };
 
     let request = AccountsCreateFreeTestCoinsRequest {
         account: account.account.component_address.into(),
-        amount,
+        amount: amount.into(),
         max_fee: None,
     };
 
     let resp = client.create_free_test_coins(request).await.unwrap();
-    world.account_addresses.insert(account_name.clone(), resp.address);
+    world.wallet_accounts.insert(account_name.clone(), AccountWithAddress {
+        address: resp.address,
+        account: resp.account,
+    });
     let wait_req = TransactionWaitResultRequest {
         transaction_id: resp.result.transaction_hash.into_array().into(),
         timeout_secs: Some(120),
     };
     let _wait_resp = client.wait_transaction_result(wait_req).await.unwrap();
 
-    add_substate_ids(
+    add_outputs_from_diff(
         world,
         account_name,
         &resp.result.result.expect("Failed to obtain substate diffs"),
@@ -307,7 +316,7 @@ pub async fn mint_new_nft_on_account(
         .await
         .expect("Wait response failed");
 
-    add_substate_ids(
+    add_outputs_from_diff(
         world,
         account_name,
         &resp.finalize.result.expect("Failed to obtain substate diffs"),
@@ -334,7 +343,12 @@ pub async fn list_account_nfts(
     submit_resp.nfts
 }
 
-pub async fn get_balance(world: &mut TariWorld, account_name: &str, wallet_daemon_name: &str) -> Amount {
+pub async fn get_balance(
+    world: &mut TariWorld,
+    account_name: &str,
+    wallet_daemon_name: &str,
+    resource_addr: ResourceAddress,
+) -> Amount {
     let account_name = ComponentAddressOrName::Name(account_name.to_string());
     let get_balance_req = AccountsGetBalancesRequest {
         account: Some(account_name),
@@ -347,7 +361,11 @@ pub async fn get_balance(world: &mut TariWorld, account_name: &str, wallet_daemo
         .await
         .expect("Failed to get balance from account");
     cucumber_log(format!("resp = {}", serde_json::to_string_pretty(&resp).unwrap()));
-    resp.balances.iter().map(|e| e.balance + e.confidential_balance).sum()
+    resp.balances
+        .iter()
+        .find(|b| b.resource_address == resource_addr)
+        .map(|e| e.balance + e.confidential_balance)
+        .unwrap_or_default()
 }
 
 pub async fn get_confidential_balance(
@@ -445,7 +463,7 @@ pub async fn submit_manifest_with_signing_keys(
         panic!("Transaction failed: {}", reason);
     }
 
-    add_substate_ids(
+    add_outputs_from_diff(
         world,
         outputs_name,
         &wait_resp
@@ -530,7 +548,7 @@ pub async fn submit_manifest(
     {
         panic!("Transaction failed: {:?}", reason);
     }
-    add_substate_ids(
+    add_outputs_from_diff(
         world,
         outputs_name,
         &wait_resp
@@ -646,7 +664,7 @@ pub async fn create_component(
         panic!("Create component tx failed: {}", reason);
     }
 
-    add_substate_ids(
+    add_outputs_from_diff(
         world,
         outputs_name,
         &wait_resp
@@ -730,7 +748,7 @@ pub async fn call_component(
         source_component_name
     };
 
-    add_substate_ids(
+    add_outputs_from_diff(
         world,
         final_outputs_name,
         &resp
@@ -781,7 +799,7 @@ pub async fn concurrent_call_component(
         match result {
             Ok(response) => match response {
                 Ok(resp) => {
-                    add_substate_ids(
+                    add_outputs_from_diff(
                         world,
                         output_ref.clone(),
                         &resp
@@ -825,7 +843,18 @@ pub async fn transfer(
     };
 
     let resp = client.accounts_transfer(request).await.unwrap();
-    add_substate_ids(world, outputs_name, resp.result.result.any_accept().unwrap());
+    let resp = client
+        .wait_transaction_result(TransactionWaitResultRequest {
+            transaction_id: resp.transaction_id,
+            timeout_secs: Some(120),
+        })
+        .await
+        .unwrap();
+    if resp.timed_out {
+        panic!("No result after 120s. Time out.");
+    }
+
+    add_outputs_from_diff(world, outputs_name, resp.result.as_ref().unwrap().any_accept().unwrap());
 }
 
 pub async fn confidential_transfer(
@@ -835,6 +864,7 @@ pub async fn confidential_transfer(
     amount: Amount,
     wallet_daemon_name: String,
     outputs_name: String,
+    resource_address: ResourceAddress,
 ) {
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
@@ -846,7 +876,7 @@ pub async fn confidential_transfer(
         amount,
         destination_address,
         max_fee,
-        resource_address: STEALTH_TARI_RESOURCE_ADDRESS,
+        resource_address,
         proof_from_badge_resource: None,
         dry_run: false,
         input_selection: ConfidentialTransferInputSelection::PreferRevealed,
@@ -854,7 +884,21 @@ pub async fn confidential_transfer(
     };
 
     let resp = client.accounts_confidential_transfer(request).await.unwrap();
-    add_substate_ids(world, outputs_name, resp.result.result.any_accept().unwrap());
+    let resp = client
+        .wait_transaction_result(TransactionWaitResultRequest {
+            transaction_id: resp.transaction_id,
+            timeout_secs: Some(120),
+        })
+        .await
+        .unwrap();
+    if resp.timed_out {
+        panic!("No result after 120s. Time out.");
+    }
+    if let Some(reason) = resp.result.as_ref().and_then(|finalize| finalize.any_reject()) {
+        panic!("Confidential transfer tx failed: {}", reason);
+    }
+
+    add_outputs_from_diff(world, outputs_name, resp.result.unwrap().accept().unwrap());
 }
 
 pub async fn get_auth_wallet_daemon_client(world: &TariWorld, name: &str) -> WalletDaemonClient {

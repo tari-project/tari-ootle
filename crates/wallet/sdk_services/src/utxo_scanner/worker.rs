@@ -3,6 +3,7 @@
 
 use std::{
     fmt::Display,
+    future::poll_fn,
     task::{ready, Context, Poll},
     time::Duration,
 };
@@ -21,10 +22,13 @@ use tokio::{
     task::JoinHandle,
 };
 
-const LOG_TARGET: &str = "tari::ootle::wallet_daemon::stealth_utxo_scanner";
+use crate::utxo_scanner::UtxoScanner;
+
+const LOG_TARGET: &str = "tari::ootle::wallet_services::stealth_utxo_scanner";
 
 const MAX_CONCURRENT_SCANS: usize = 10;
 
+#[derive(Debug, Clone)]
 pub struct UtxoScannerHandle {
     tx: mpsc::UnboundedSender<UtxoScanRequest>,
     notify_sub: watch::Receiver<()>,
@@ -40,7 +44,7 @@ impl UtxoScannerHandle {
         }
     }
 
-    pub(crate) fn subscribe_notifications(&self) -> watch::Receiver<()> {
+    pub fn subscribe_notifications(&self) -> watch::Receiver<()> {
         self.notify_sub.clone()
     }
 }
@@ -77,7 +81,7 @@ where
     async fn run(&mut self, mut work_queue: mpsc::UnboundedReceiver<UtxoScanRequest>) {
         info!(target: LOG_TARGET, "🔍️ Stealth UTXO scanner worker started");
         loop {
-            let poll_fut = futures::future::poll_fn(|cx| self.scanner.poll(cx));
+            let poll_fut = poll_fn(|cx| self.scanner.poll(cx));
             tokio::select! {
                 biased;
                 maybe_req = work_queue.recv() => {
@@ -181,7 +185,7 @@ where
 {
     info!(target: LOG_TARGET, "🔍 Scanning for UTXOs for {}", task);
     let account = sdk.accounts_api().get_account_by_address(&task.account_address)?;
-    tari_ootle_wallet_sdk_services::utxo_scanner::UtxoScanner::new(sdk)
+    UtxoScanner::new(sdk)
         .scan_and_recover_utxos(&account, &task.resource_address, &notify_tx)
         .await?;
 

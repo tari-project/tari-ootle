@@ -3,7 +3,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::crypto::{PublicKey, SignaturePayload};
+use crate::{
+    bytes::Bytes,
+    crypto::{PublicKey, SignaturePayload},
+};
 
 // -------------------------------- Signature -------------------------------- //
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,13 +17,15 @@ pub enum SignatureAction {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SignatureInvokeArg {
     pub action: SignatureAction,
-    pub args: Vec<Vec<u8>>,
+    pub args: Vec<Bytes>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SignatureVerifyArgRef<'a> {
     pub public_key: &'a PublicKey,
+    #[serde(serialize_with = "crate::bytes::serialize")]
     pub domain: &'a [u8],
+    #[serde(serialize_with = "crate::bytes::serialize")]
     pub message: &'a [u8],
     pub payload: &'a SignaturePayload,
 }
@@ -28,7 +33,7 @@ pub struct SignatureVerifyArgRef<'a> {
 #[derive(Debug, Clone, Deserialize)]
 pub struct SignatureVerifyArg {
     pub public_key: PublicKey,
-    pub domain: Vec<u8>,
-    pub message: Vec<u8>,
+    pub domain: Bytes,
+    pub message: Bytes,
     pub payload: SignaturePayload,
 }

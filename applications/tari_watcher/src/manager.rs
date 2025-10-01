@@ -13,7 +13,7 @@ use tokio::{
 use crate::{
     config::{ChannelConfig, Config},
     minotari::{MinotariNodes, TipStatus},
-    monitoring::{process_status_alert, process_status_log, ProcessStatus, Transaction},
+    monitoring::{process_status_alert, process_status_log, ProcessStatus, TransactionRefInBlock},
     process::{start_validator, ChildChannel},
 };
 
@@ -115,7 +115,7 @@ impl ProcessManager {
                     // send registration response to logger
                     if let Some(tx_log) = tx_log {
                         if let Err(e) = tx_log
-                            .send(ProcessStatus::Submitted(Transaction::new(
+                            .send(ProcessStatus::Submitted(TransactionRefInBlock::new(
                                 response.transaction_id,
                                 block,
                             )))
@@ -127,7 +127,7 @@ impl ProcessManager {
                     if let Some(tx_alert) = tx_alert {
                         // send registration response to alerting
                         if let Err(e) = tx_alert
-                            .send(ProcessStatus::Submitted(Transaction::new(
+                            .send(ProcessStatus::Submitted(TransactionRefInBlock::new(
                                 response.transaction_id,
                                 block,
                             )))

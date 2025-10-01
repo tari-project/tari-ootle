@@ -22,7 +22,7 @@
 
 const LOG_TARGET: &str = "tari::validator_node::json_rpc::handlers";
 
-use std::fmt::Display;
+use std::{env, fmt::Display};
 
 use axum_jrpc::{
     error::{JsonRpcError, JsonRpcErrorReason},
@@ -46,11 +46,14 @@ use axum_jrpc::{
 /// Creates a handler for internal errors. This will log the error and return a generic message to the user.
 pub fn internal_error<T: Display>(answer_id: axum_jrpc::Id) -> impl FnOnce(T) -> JsonRpcResponse {
     move |err| {
-        let msg = if cfg!(debug_assertions) || option_env!("CI").is_some() {
-            err.to_string()
+        log::error!(target: LOG_TARGET, "🚨 Internal error: {}", err);
+        let msg = if cfg!(debug_assertions) ||
+            env::var("CI").is_ok() ||
+            env::var("DEBUG_MODE").ok().as_deref() == Some("1")
+        {
+            format!("An internal error occurred: {}", err)
         } else {
-            log::error!(target: LOG_TARGET, "🚨 Internal error: {}", err);
-            "Something went wrong".to_string()
+            "An internal error occurred".to_string()
         };
         JsonRpcResponse::error(
             answer_id,

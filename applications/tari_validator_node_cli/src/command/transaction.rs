@@ -191,7 +191,7 @@ pub async fn handle_submit(
                 .map(|s| {
                     s.into_named_arg()
                         .into_literal_bytes()
-                        .map(InstructionArg::Literal)
+                        .map(InstructionArg::raw_literal_bytes)
                         .expect("CliArg does not support workspace args")
                 })
                 .collect(),
@@ -211,7 +211,7 @@ pub async fn handle_submit(
                 .map(|s| {
                     s.into_named_arg()
                         .into_literal_bytes()
-                        .map(InstructionArg::Literal)
+                        .map(InstructionArg::raw_literal_bytes)
                         .expect("CliArg does not support workspace args")
                 })
                 .collect(),

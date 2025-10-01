@@ -25,6 +25,7 @@
 
 pub use tari_bor;
 pub use tari_template_lib_types::{
+    bytes::Bytes,
     crypto::{
         BalanceProofSignature,
         PedersenCommitmentBytes,

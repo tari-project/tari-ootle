@@ -10,6 +10,8 @@ pub fn transaction_builder() -> TransactionBuilder {
 }
 
 pub fn cucumber_log<T: AsRef<str>>(msg: T) {
-    // eprintln!("CUCUMBER: {}", msg.as_ref());
-    info!(target: "cucumber", "{}", msg.as_ref());
+    if option_env!("CUC_DEBUG") == Some("1") {
+        eprintln!("🥒 {}", msg.as_ref());
+    }
+    info!(target: "cucumber", "🥒 {}", msg.as_ref());
 }

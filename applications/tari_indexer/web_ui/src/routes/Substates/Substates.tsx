@@ -111,7 +111,6 @@ function SubstatesLayout() {
 
   const handleContentDownload = (substate: any) => {
     setSelectedSubstate(substate);
-    // We'll handle the download when substateData changes
   };
 
   const handleContentView = (substate: any) => {
@@ -119,20 +118,19 @@ function SubstatesLayout() {
     setJsonDialogOpen(true);
   };
 
-  // Handle download when substateData is available
   useEffect(() => {
     if (substateData && selectedSubstate && !jsonDialogOpen) {
       const json = JSON.stringify(substateData, null, 2);
       const blob = new Blob([json], { type: "application/json" });
       const filename = `substates-${substateIdToString(selectedSubstate.substate_id)}-${selectedSubstate.version}.json`;
       saveAs(blob, filename);
-      setSelectedSubstate(null); // Reset after download
+      setSelectedSubstate(null);
     }
   }, [substateData, selectedSubstate, jsonDialogOpen]);
 
   const handleJsonDialogClose = () => {
     setJsonDialogOpen(false);
-    setSelectedSubstate(null); // Reset selected substate when closing dialog
+    setSelectedSubstate(null);
   };
 
   const onFilterChange = (e: React.ChangeEvent<HTMLInputElement>) => {

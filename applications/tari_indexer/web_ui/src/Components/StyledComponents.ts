@@ -26,6 +26,7 @@ import { styled } from "@mui/material/styles";
 import Box from "@mui/material/Box";
 import IconButton from "@mui/material/IconButton";
 import Typography from "@mui/material/Typography";
+import Card, { CardProps } from "@mui/material/Card";
 
 interface IAccordionIconButton {
   open: boolean;
@@ -76,4 +77,14 @@ export const SubHeading = styled(Typography)(() => ({
   marginTop: "20px",
   marginBottom: "20px",
   textAlign: "center",
+}));
+
+export const NftCard: React.FC<CardProps> = styled(Card)(() => ({
+  height: "100%",
+  display: "flex",
+  flexDirection: "column",
+  transition: "transform 0.3s ease",
+  "&:hover": {
+    transform: "scale(1.02)",
+  },
 }));

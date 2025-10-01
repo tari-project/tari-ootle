@@ -9,7 +9,6 @@ license.workspace = true
 
 [dependencies]
 minotari_app_utilities = { workspace = true }
-tari_bor = { workspace = true }
 tari_common = { workspace = true }
 tari_common_types = { workspace = true }
 tari_crypto = { workspace = true }
@@ -17,7 +16,7 @@ tari_ootle_app_utilities = { workspace = true }
 tari_shutdown = { workspace = true }
 tari_ootle_wallet_crypto = { workspace = true }
 tari_ootle_wallet_sdk = { workspace = true }
-tari_ootle_wallet_sdk_services = { workspace = true }
+tari_ootle_wallet_sdk_services = { workspace = true, features = ["indexer_jrpc"] }
 tari_ootle_wallet_storage_sqlite = { workspace = true }
 tari_transaction = { workspace = true }
 tari_ootle_common_types = { workspace = true }
@@ -27,7 +26,6 @@ tari_template_builtin = { workspace = true }
 # TODO: Ideally we should not have to include the WASM template lib, we should perhaps extract the address types into a separate crate (e.g. template_types)
 tari_template_lib = { workspace = true }
 tari_template_abi = { workspace = true }
-tari_transaction_components = { workspace = true }
 tari_transaction_manifest = { workspace = true }
 
 async-trait = { workspace = true }
@@ -71,7 +69,6 @@ webauthn-rs = { workspace = true }
 uuid = { workspace = true }
 wasm-opt = "0.116.1"
 tempfile.workspace = true
-futures-bounded = { workspace = true }
 
 [dev-dependencies]
 tari_utilities = { workspace = true }

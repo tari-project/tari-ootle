@@ -7,4 +7,4 @@ mod service;
 
 pub use error::*;
 pub use handle::*;
-pub(super) use service::*;
+pub use service::*;

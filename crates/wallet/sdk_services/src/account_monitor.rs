@@ -45,11 +45,13 @@ use tokio::{
 };
 
 use crate::{
+    events::{AccountChangedEvent, AccountCreatedEvent, WalletEvent},
     notify::Notify,
-    services::{stealth_utxo_scanner::UtxoScannerHandle, AccountChangedEvent, AccountCreatedEvent, Reply, WalletEvent},
+    utxo_scanner::UtxoScannerHandle,
+    Reply,
 };
 
-const LOG_TARGET: &str = "tari::ootle::wallet_daemon::account_monitor";
+const LOG_TARGET: &str = "tari::ootle::wallet_services::account_monitor";
 
 pub struct AccountMonitor<TStore, TNetworkInterface> {
     notify: Notify<WalletEvent>,

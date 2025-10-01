@@ -19,7 +19,7 @@ use tari_template_lib::{
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS},
     models::{ComponentAddress, ResourceAddress},
 };
-use tari_transaction::{args, TransactionId};
+use tari_transaction::args;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{
@@ -33,13 +33,11 @@ use tari_wallet_daemon_client::{
         TransferNftResponse,
     },
 };
-use tokio::sync::broadcast;
 
 use super::{context::HandlerContext, helpers::get_account_or_default};
 use crate::{
-    handlers::helpers::{application_error, get_account, get_account_with_inputs, invalid_params},
+    handlers::helpers::{application_error, get_account, get_account_with_inputs, invalid_params, wait_for_result},
     jrpc_server::ApplicationErrorCode,
-    services::{TransactionFinalizedEvent, WalletEvent},
     DEFAULT_FEE,
 };
 
@@ -287,7 +285,7 @@ pub async fn handle_transfer(
     let transaction = builder
         .with_dry_run(req.dry_run)
         .fee_transaction_pay_from_component(fee_payer_account_address, req.max_fee)
-        .with_inputs(inputs)
+        .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         // Seal signer is the fee payer account
         .with_authorized_seal_signer()
         .add_signer(
@@ -341,17 +339,4 @@ pub async fn handle_transfer(
         fee_refunded: req.max_fee - finalized.final_fee,
         result: finalized.finalize,
     })
-}
-
-async fn wait_for_result(
-    events: &mut broadcast::Receiver<WalletEvent>,
-    transaction_id: TransactionId,
-) -> Result<TransactionFinalizedEvent, anyhow::Error> {
-    loop {
-        let wallet_event = events.recv().await?;
-        match wallet_event {
-            WalletEvent::TransactionFinalized(event) if event.transaction_id == transaction_id => return Ok(event),
-            _ => {},
-        }
-    }
 }

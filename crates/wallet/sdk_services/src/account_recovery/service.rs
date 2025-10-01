@@ -12,20 +12,16 @@ use tari_ootle_common_types::{
     substate_type::SubstateType,
 };
 use tari_ootle_wallet_sdk::{
-    apis::{
-        accounts::AccountsApiError,
-        config::ConfigKey,
-        key_manager::{KeyBranch, KeyManagerApiError},
-    },
+    apis::{config::ConfigKey, key_manager::KeyBranch},
     network::{StatusResponseError, WalletNetworkInterface},
-    storage::{WalletStorageError, WalletStore},
+    storage::WalletStore,
     WalletSdk,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_transaction_components::key_manager::tari_key_manager::DerivedKey;
 use tokio::time;
 
-use crate::services::{account_monitor::AccountMonitorError, AccountMonitorHandle};
+use crate::{account_monitor::AccountMonitorHandle, account_recovery::AccountRecoveryError};
 
 const LOG_TARGET: &str = "tari::ootle_wallet_daemon::resource_scanner";
 
@@ -149,7 +145,7 @@ where
 
     /// Attempt to recover an account by the provided public key. Returning true if the account was found on-chain,
     /// false if not.
-    async fn try_recover_account(&self, key: &DerivedKey) -> Result<bool, AccountScannerError> {
+    async fn try_recover_account(&self, key: &DerivedKey) -> Result<bool, AccountRecoveryError> {
         let network_interface = self.wallet_sdk.get_network_interface();
 
         let public_key = RistrettoPublicKey::from_secret_key(&key.key).to_byte_type();
@@ -162,7 +158,7 @@ where
             .query_substate(&account_addr.into(), None, false)
             .await
             .optional()
-            .map_err(|e| AccountScannerError::NetworkInterfaceError { details: e.to_string() })?;
+            .map_err(|e| AccountRecoveryError::NetworkInterfaceError { details: e.to_string() })?;
 
         match result {
             None => {
@@ -185,15 +181,16 @@ where
                 Ok(false)
             },
             Some(result) => {
-                let component = result
-                    .substate
-                    .as_component()
-                    .ok_or_else(|| AccountScannerError::InvalidResponse {
-                        details: format!(
-                            "Expected component substate for address {account_addr}, got {}",
-                            SubstateType::from(&result.substate)
-                        ),
-                    })?;
+                let component =
+                    result
+                        .substate
+                        .as_component()
+                        .ok_or_else(|| AccountRecoveryError::InvalidResponse {
+                            details: format!(
+                                "Expected component substate for address {account_addr}, got {}",
+                                SubstateType::from(&result.substate)
+                            ),
+                        })?;
 
                 if component.owner_key.is_none() {
                     warn!(target: LOG_TARGET, "⚠️ Account {} has no owner key. This wallet may not be able tio sign for this account", account_addr);
@@ -233,20 +230,4 @@ where
             },
         }
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum AccountScannerError {
-    #[error("Wallet store error: {0}")]
-    WalletStoreError(#[from] WalletStorageError),
-    #[error("Key manager API error: {0}")]
-    KeyManagerApiError(#[from] KeyManagerApiError),
-    #[error("Accounts API error: {0}")]
-    AccountsApiError(#[from] AccountsApiError),
-    #[error("Network interface error: {details}")]
-    NetworkInterfaceError { details: String },
-    #[error("Account monitor error: {0}")]
-    AccountMonitorError(#[from] AccountMonitorError),
-    #[error("Invalid response: {details}")]
-    InvalidResponse { details: String },
 }

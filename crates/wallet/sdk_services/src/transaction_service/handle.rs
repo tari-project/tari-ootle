@@ -7,7 +7,7 @@ use tari_transaction::{Transaction, TransactionId};
 use tokio::sync::{mpsc, oneshot};
 
 use super::TransactionServiceError;
-use crate::services::Reply;
+use crate::Reply;
 
 #[derive(Debug)]
 pub(super) enum TransactionServiceRequest {

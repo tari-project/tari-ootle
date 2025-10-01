@@ -14,11 +14,10 @@ use tari_ootle_wallet_sdk::{
     storage::WalletStore,
     WalletSdk,
 };
+use tari_ootle_wallet_sdk_services::{events::WalletEvent, notify::Notify};
 use tari_shutdown::ShutdownSignal;
 use tari_template_abi::TemplateDef;
 use tari_template_lib::types::TemplateAddress;
-
-use crate::{notify::Notify, services::WalletEvent};
 
 const LOG_TARGET: &str = "tari::ootle_wallet_daemon::services::template_monitor";
 

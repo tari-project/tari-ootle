@@ -26,7 +26,6 @@ mod handlers;
 #[cfg(feature = "web_ui")]
 mod http_ui;
 mod jrpc_server;
-mod notify;
 mod services;
 mod webrtc;
 
@@ -43,7 +42,11 @@ use tari_ootle_wallet_sdk::{
     WalletSdk,
     WalletSdkConfig,
 };
-use tari_ootle_wallet_sdk_services::indexer_jrpc_impl::IndexerJsonRpcNetworkInterface;
+use tari_ootle_wallet_sdk_services::{
+    account_recovery::AccountRecoveryService,
+    indexer_jrpc::IndexerJsonRpcNetworkInterface,
+    notify::Notify,
+};
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib::constants::XTR;
@@ -51,8 +54,7 @@ use tari_template_lib::constants::XTR;
 use crate::{
     config::ApplicationConfig,
     handlers::{auth::create_authenticator, HandlerContext},
-    notify::Notify,
-    services::{recovery_service, spawn_services},
+    services::spawn_services,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon";
@@ -91,7 +93,7 @@ pub async fn run_tari_ootle_walletd(
 
     // trigger account scanning if needed
     if needs_seed_recovery {
-        let scanner = recovery_service::AccountRecoveryService::new(
+        let scanner = AccountRecoveryService::new(
             wallet_sdk.clone(),
             services.account_monitor_handle.clone(),
             config.ootle_wallet_daemon.recovery_abandon_count,

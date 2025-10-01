@@ -15,7 +15,10 @@ use tari_ootle_wallet_sdk::{
     storage::WalletStore,
     WalletSdk,
 };
-use tari_ootle_wallet_sdk_services::indexer_jrpc_impl::IndexerJsonRpcNetworkInterface;
+use tari_ootle_wallet_sdk_services::{
+    events::{TransactionFinalizedEvent, WalletEvent},
+    indexer_jrpc::IndexerJsonRpcNetworkInterface,
+};
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::models::ComponentAddress;
@@ -23,10 +26,7 @@ use tari_transaction::TransactionId;
 use tari_wallet_daemon_client::ComponentAddressOrName;
 use tokio::sync::broadcast;
 
-use crate::{
-    jrpc_server::ApplicationErrorCode,
-    services::{TransactionFinalizedEvent, WalletEvent},
-};
+use crate::jrpc_server::ApplicationErrorCode;
 
 pub async fn wait_for_result(
     events: &mut broadcast::Receiver<WalletEvent>,

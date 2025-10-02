@@ -21,7 +21,7 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use clap::Subcommand;
-use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
+use tari_ootle_wallet_sdk::{apis::key_manager::KeyBranch, models::KeyId};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_wallet_daemon_client::WalletDaemonClient;
 
@@ -66,12 +66,12 @@ impl KeysSubcommand {
     }
 }
 
-fn print_keys(keys: Vec<(u64, RistrettoPublicKeyBytes, bool)>) {
+fn print_keys(keys: Vec<(KeyId, RistrettoPublicKeyBytes, bool)>) {
     println!("Key pairs:");
     println!();
 
     let mut table = Table::new();
-    table.set_titles(vec!["Index", "Public Key", "Active"]);
+    table.set_titles(vec!["KeyId", "Public Key", "Active"]);
     for (index, key, is_active) in keys {
         table.add_row(table_row![index, key, if is_active { "✅" } else { "" }]);
     }

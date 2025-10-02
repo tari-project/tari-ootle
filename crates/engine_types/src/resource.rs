@@ -27,8 +27,8 @@ use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArrayError}
 use tari_template_lib::{
     auth::{AuthHook, OwnerRule, Ownership, ResourceAccessRules},
     models::Metadata,
-    resource::{ResourceType, TOKEN_SYMBOL},
-    types::{crypto::RistrettoPublicKeyBytes, Amount},
+    resource::TOKEN_SYMBOL,
+    types::{crypto::RistrettoPublicKeyBytes, Amount, ResourceType},
 };
 
 use crate::ConvertFromByteType;

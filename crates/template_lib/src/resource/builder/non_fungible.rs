@@ -3,13 +3,14 @@
 
 use serde::Serialize;
 use tari_bor::to_value;
+use tari_template_lib_types::ResourceType;
 
 use super::{IMAGE_URL, TOKEN_SYMBOL};
 use crate::{
     args::MintArg,
     auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
     models::{Bucket, ComponentAddress, Metadata, NonFungibleId, ResourceAddress, ResourceAddressAllocation},
-    resource::{ResourceManager, ResourceType},
+    resource::ResourceManager,
 };
 
 /// Utility for building non-fungible resources inside templates

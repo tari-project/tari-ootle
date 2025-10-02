@@ -186,7 +186,7 @@ where
     info!(target: LOG_TARGET, "🔍 Scanning for UTXOs for {}", task);
     let account = sdk.accounts_api().get_account_by_address(&task.account_address)?;
     UtxoScanner::new(sdk)
-        .scan_and_recover_utxos(&account, &task.resource_address, &notify_tx)
+        .scan_and_enqueue_utxos(&account, &task.resource_address, &notify_tx)
         .await?;
 
     Ok(())

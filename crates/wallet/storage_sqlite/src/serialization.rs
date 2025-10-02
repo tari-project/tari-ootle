@@ -14,8 +14,8 @@ pub fn serialize_json<T: Serialize + ?Sized>(t: &T) -> Result<String, WalletStor
     })
 }
 
-pub fn deserialize_json<T: serde::de::DeserializeOwned>(s: &str) -> Result<T, WalletStorageError> {
-    serde_json::from_str(s).map_err(|e| WalletStorageError::DecodingError {
+pub fn deserialize_json<T: serde::de::DeserializeOwned, S: AsRef<str>>(s: S) -> Result<T, WalletStorageError> {
+    serde_json::from_str(s.as_ref()).map_err(|e| WalletStorageError::DecodingError {
         operation: "deserialize_json",
         item: type_name::<T>(),
         details: e.to_string(),

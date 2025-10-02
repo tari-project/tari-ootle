@@ -7,8 +7,7 @@ use tari_template_lib::{
     args::VaultAction,
     constants::XTR,
     models::{ComponentAddress, ResourceAddress},
-    prelude::ResourceType,
-    types::Amount,
+    types::{Amount, ResourceType},
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 use tari_transaction::{args, Transaction};

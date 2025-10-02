@@ -91,7 +91,11 @@ pub async fn handle_mint_faucet(
     let account = get_account(&req.account, &sdk.accounts_api())?;
     let account = account.account;
 
-    let signing_key = key_manager_api.derive_account_key(account.key_index)?;
+    let account_owner_key_id = account
+        .owner_key_id
+        .ok_or_else(|| invalid_params("account", Some("The account does not have an owner key ID")))?;
+
+    let signing_key = key_manager_api.get_account_owner_key(account_owner_key_id)?;
 
     info!(target: LOG_TARGET, "🎮 Minting new NFT with metadata {}", req.mutable_data);
 
@@ -118,7 +122,7 @@ pub async fn handle_mint_faucet(
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .add_input(NFT_FAUCET_COMPONENT_ADDRESS)
         .add_input(NFT_FAUCET_RESOURCE_ADDRESS)
-        .build_and_seal(&signing_key.key);
+        .build_and_seal(&signing_key.secret);
 
     let mut events = context.notifier().subscribe();
     let tx_id = context.transaction_service().submit_transaction(transaction).await?;
@@ -224,8 +228,20 @@ pub async fn handle_transfer(
     // fetch accounts and its inputs
     let (fee_payer_account, fee_payer_account_inputs) = get_account_with_inputs(Some(&req.fee_payer_account), sdk)?;
     let fee_payer_account = fee_payer_account.account;
+    let fee_payer_key_id = fee_payer_account.owner_key_id.ok_or_else(|| {
+        invalid_params(
+            "fee_payer_account",
+            Some("The fee payer account does not have an owner key ID"),
+        )
+    })?;
     let fee_payer_account_address = fee_payer_account.component_address;
     let (source_account, mut inputs) = get_account_with_inputs(Some(&req.source_account), sdk)?;
+    let account_owner_key_id = source_account.account.owner_key_id().ok_or_else(|| {
+        invalid_params(
+            "source_account",
+            Some("The source account does not have an owner key ID"),
+        )
+    })?;
     inputs.extend(fee_payer_account_inputs);
     let source_account_address = *source_account.component_address();
 
@@ -276,11 +292,9 @@ pub async fn handle_transfer(
             .call_method(target_account_address, "deposit", args![Workspace(format!("b-{i}"))]);
     }
 
-    let (fee_payer_account_secret_key, fee_payer_account_public_key) = sdk
-        .key_manager_api()
-        .derive_account_keypair(fee_payer_account.key_index)?;
+    let fee_owner_key = sdk.key_manager_api().get_account_owner_key(fee_payer_key_id)?;
 
-    let source_account_secret_key = sdk.key_manager_api().derive_account_key(source_account.key_index())?;
+    let source_account_secret_key = sdk.key_manager_api().get_account_owner_key(account_owner_key_id)?;
 
     let transaction = builder
         .with_dry_run(req.dry_run)
@@ -289,10 +303,10 @@ pub async fn handle_transfer(
         // Seal signer is the fee payer account
         .with_authorized_seal_signer()
         .add_signer(
-            &fee_payer_account_public_key.to_byte_type(),
-            &source_account_secret_key.key,
+            &fee_owner_key.to_public_key().to_byte_type(),
+            &source_account_secret_key.secret,
         )
-        .build_and_seal(&fee_payer_account_secret_key.key);
+        .build_and_seal(&fee_owner_key.secret);
 
     // if dry run, we can return the result immediately
     if req.dry_run {

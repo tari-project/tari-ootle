@@ -10,7 +10,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_wallet_sdk::{
     apis::accounts::{AccountsApi, AccountsApiError},
-    models::AccountWithAddress,
+    models::{AccountWithAddress, DerivedKeyIndex},
     network::{StatusResponseError, WalletNetworkInterface},
     storage::WalletStore,
     WalletSdk,
@@ -124,16 +124,16 @@ where
 
 pub(crate) fn get_account_by_key_index<TStore, TNetworkInterface>(
     sdk: &WalletSdk<TStore, TNetworkInterface>,
-    key_index: u64,
+    key_index: DerivedKeyIndex,
 ) -> Result<AccountWithAddress, AccountsApiError>
 where
     TStore: WalletStore,
     TNetworkInterface: WalletNetworkInterface,
     TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
 {
-    let (_, pk) = sdk.key_manager_api().derive_account_keypair(key_index)?;
-    let pk = pk.to_byte_type();
-    let address = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &pk);
+    let key = sdk.key_manager_api().derive_account_address(key_index)?;
+    let address =
+        derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &key.address.account_key().to_byte_type());
     sdk.accounts_api().get_account_by_address(&address)
 }
 

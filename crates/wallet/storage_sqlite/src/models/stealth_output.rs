@@ -12,7 +12,10 @@ use tari_template_lib::{
 };
 use time::PrimitiveDateTime;
 
-use crate::{schema::stealth_outputs, serialization::deserialize_hex_try_from};
+use crate::{
+    schema::stealth_outputs,
+    serialization::{deserialize_hex_try_from, deserialize_json},
+};
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
 #[diesel(table_name = stealth_outputs)]
@@ -26,7 +29,8 @@ pub struct StealthOutput {
     pub status: String,
     pub locked_at: Option<PrimitiveDateTime>,
     pub locked_by_proof: Option<i32>,
-    pub encryption_secret_key_index: i64,
+    pub view_only_key_id: String,
+    pub owner_key_id: Option<String>,
     pub encrypted_data: Vec<u8>,
     pub tag_byte: i32,
     pub is_burnt: bool,
@@ -64,7 +68,8 @@ impl StealthOutput {
                     ),
                 }
             })?,
-            encryption_secret_key_index: self.encryption_secret_key_index as u64,
+            view_only_key_id: deserialize_json(&self.view_only_key_id)?,
+            owner_key_id: self.owner_key_id.as_ref().map(deserialize_json).transpose()?,
             encrypted_data: EncryptedData::try_from(self.encrypted_data).map_err(|len| {
                 WalletStorageError::DecodingError {
                     operation: "try_into_output",

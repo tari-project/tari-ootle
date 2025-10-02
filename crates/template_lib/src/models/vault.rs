@@ -57,9 +57,8 @@ use crate::{
         VaultWithdrawArg,
     },
     newtype_struct_serde_impl,
-    prelude::ResourceType,
     resource::ResourceManager,
-    types::Amount,
+    types::{Amount, ResourceType},
 };
 
 const TAG: u64 = BinaryTag::VaultId as u64;

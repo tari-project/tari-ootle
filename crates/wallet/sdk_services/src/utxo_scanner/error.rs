@@ -3,7 +3,12 @@
 
 use tari_ootle_common_types::optional::IsNotFoundError;
 use tari_ootle_wallet_sdk::{
-    apis::{config::ConfigApiError, key_manager::KeyManagerApiError, stealth_outputs::StealthOutputsApiError},
+    apis::{
+        accounts::AccountsApiError,
+        config::ConfigApiError,
+        key_manager::KeyManagerApiError,
+        stealth_outputs::StealthOutputsApiError,
+    },
     storage::WalletStorageError,
 };
 
@@ -21,6 +26,8 @@ pub enum StealthScannerApiError {
     StealthOutputsError(#[from] StealthOutputsApiError),
     #[error("Key manager error: {0}")]
     KeyManagerError(#[from] KeyManagerApiError),
+    #[error("Account API error: {0}")]
+    AccountApiError(#[from] AccountsApiError),
 }
 
 impl IsNotFoundError for StealthScannerApiError {

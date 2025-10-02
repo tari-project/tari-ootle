@@ -213,6 +213,14 @@ pub struct RistrettoOotleAddress {
 }
 
 impl RistrettoOotleAddress {
+    pub fn new(network: Network, view_only_key: RistrettoPublicKey, account_key: RistrettoPublicKey) -> Self {
+        Self {
+            network,
+            view_only_key,
+            account_key,
+        }
+    }
+
     pub fn network(&self) -> Network {
         self.network
     }

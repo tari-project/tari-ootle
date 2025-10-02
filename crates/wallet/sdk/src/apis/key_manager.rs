@@ -2,29 +2,42 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use blake2::Blake2b;
-use digest::consts::U64;
+use digest::{consts::U64, crypto_common::rand_core::OsRng};
 use tari_bor::{Deserialize, Serialize};
-use tari_common_types::seeds::cipher_seed::CipherSeed;
-use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
+use tari_crypto::{
+    keys::{PublicKey as _, SecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    tari_utilities::ByteArray,
+};
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
     Network,
 };
-use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
-use tari_transaction_components::{
-    key_manager,
-    key_manager::tari_key_manager::{DerivedKey, TariKeyManager},
-};
+use tari_ootle_wallet_crypto::encryption::{decrypt_with_password, encrypt_with_password};
+use tari_transaction_components::{key_manager, key_manager::tari_key_manager::TariKeyManager};
 
 use crate::{
-    models::{DerivedAddress, KeyPair, WalletKey},
+    apis::password_manager::{PasswordManagerApi, PasswordManagerApiError},
+    cipher_seed::WalletCipherSeed,
+    models::{
+        DerivedKeyIndex,
+        DerivedKeyPair,
+        DerivedWalletKey,
+        ImportedKeyId,
+        ImportedWalletKey,
+        Key,
+        KeyId,
+        KeyType,
+        WalletKeyRecord,
+        WalletOotleAddressWithKeyIds,
+    },
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
 pub type WalletKeyManager = TariKeyManager<Blake2b<U64>>;
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 #[serde(rename_all = "snake_case")]
 pub enum KeyBranch {
@@ -66,18 +79,26 @@ impl AsRef<str> for KeyBranch {
     }
 }
 
+#[derive(Clone)]
 pub struct KeyManagerApi<'a, TStore> {
     network: Network,
     store: &'a TStore,
-    cipher_seed: &'a CipherSeed,
+    cipher_seed: &'a WalletCipherSeed,
+    password_manager: PasswordManagerApi<'a, TStore>,
 }
 
 impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
-    pub(crate) fn new(network: Network, store: &'a TStore, cipher_seed: &'a CipherSeed) -> Self {
+    pub(crate) fn new(
+        network: Network,
+        store: &'a TStore,
+        cipher_seed: &'a WalletCipherSeed,
+        password_manager: PasswordManagerApi<'a, TStore>,
+    ) -> Self {
         Self {
             network,
             store,
             cipher_seed,
+            password_manager,
         }
     }
 
@@ -92,102 +113,167 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         Ok(())
     }
 
-    pub fn get_all_keys(&self, branch: KeyBranch) -> Result<Vec<WalletKey>, KeyManagerApiError> {
+    pub fn get_all_derived_keys(&self, branch: KeyBranch) -> Result<Vec<WalletKeyRecord>, KeyManagerApiError> {
         let all_keys = self.store.with_read_tx(|tx| tx.key_manager_get_all(branch.as_str()))?;
         let mut keys = Vec::with_capacity(all_keys.len());
-        let km = self.get_key_manager(branch.as_str(), 0);
+        let km = self.get_key_manager(branch.as_str())?;
         for (index, active) in all_keys {
             let key = km
                 .derive_key(index)
                 .map_err(key_manager::error::KeyManagerServiceError::from)?;
             let pk = RistrettoPublicKey::from_secret_key(&key.key);
-            keys.push(WalletKey {
-                branch,
-                key_pair: KeyPair {
-                    public_key: pk,
-                    secret_key: key,
-                },
+            keys.push(WalletKeyRecord {
+                key_id: KeyId::derived(index),
+                public_key: pk,
+                secret_key: key.key,
                 is_active: active,
             });
         }
         Ok(keys)
     }
 
-    pub fn derive_key(&self, branch: KeyBranch, index: u64) -> Result<DerivedKey, KeyManagerApiError> {
-        let km = self.get_key_manager(branch, 0);
-        let key = km
-            .derive_key(index)
-            .expect("derive_key only panics if the hasher does not produce 32 bytes");
-        Ok(key)
-    }
-
-    pub fn derive_keypair(&self, branch: KeyBranch, index: u64) -> Result<KeyPair, KeyManagerApiError> {
-        let key = self.derive_key(branch, index)?;
-        let public_key = RistrettoPublicKey::from_secret_key(&key.key);
-        Ok(KeyPair {
-            public_key,
-            secret_key: key,
+    pub fn get_imported_key(&self, id: ImportedKeyId) -> Result<ImportedWalletKey, KeyManagerApiError> {
+        let password = self.password_manager.get_cipher_seed_password()?;
+        self.store.with_read_tx(|tx| {
+            let (key_type, encrypted_key) = tx.key_manager_get_raw_imported_key(id)?;
+            let decrypted = decrypt_with_password(&encrypted_key, password.reveal()).map_err(|e| {
+                KeyManagerApiError::StoreError(WalletStorageError::DecryptionError {
+                    operation: "KeyManagerApi::get_imported_key",
+                    details: format!("Failed to decrypt imported key: {}", e),
+                })
+            })?;
+            Ok(ImportedWalletKey {
+                key: RistrettoSecretKey::from_canonical_bytes(&decrypted).map_err(|_| {
+                    KeyManagerApiError::StoreError(WalletStorageError::DecodingError {
+                        operation: "KeyManagerApi::get_imported_key",
+                        item: "imported_key",
+                        details: "Failed to decode imported key".to_string(),
+                    })
+                })?,
+                import_id: id,
+                key_type,
+            })
         })
     }
 
-    pub fn derive_account_keypair(&self, index: u64) -> Result<(DerivedKey, RistrettoPublicKey), KeyManagerApiError> {
+    pub fn import_key(
+        &self,
+        label: &str,
+        secret_key: &RistrettoSecretKey,
+        key_type: KeyType,
+    ) -> Result<KeyId, KeyManagerApiError> {
+        let password = self.password_manager.get_cipher_seed_password()?;
+        let encrypted_key = encrypt_with_password(secret_key.as_bytes(), password.reveal()).map_err(|e| {
+            KeyManagerApiError::StoreError(WalletStorageError::EncryptionError {
+                operation: "KeyManagerApi::import_key",
+                details: format!("Failed to encrypt imported key: {}", e),
+            })
+        })?;
+        let id = self
+            .store
+            .with_write_tx(|tx| tx.key_manager_insert_imported_key(label, &encrypted_key, key_type))?;
+        Ok(KeyId::imported(id))
+    }
+
+    pub fn get_account_owner_key(&self, key_id: KeyId) -> Result<Key, KeyManagerApiError> {
+        self.get_key(KeyBranch::Account, key_id)
+    }
+
+    pub fn get_view_only_key(&self, key_id: KeyId) -> Result<Key, KeyManagerApiError> {
+        self.get_key(KeyBranch::ViewOnlyKey, key_id)
+    }
+
+    pub fn get_key(&self, branch: KeyBranch, key_id: KeyId) -> Result<Key, KeyManagerApiError> {
+        match key_id {
+            KeyId::Imported { local_key_id } => {
+                let imported_key = self.get_imported_key(local_key_id)?;
+                Ok(imported_key.into())
+            },
+            KeyId::Derived { index } => {
+                let derived_key = self.derive_key(branch, index)?;
+                Ok(derived_key.into())
+            },
+        }
+    }
+
+    pub fn derive_key(
+        &self,
+        branch: KeyBranch,
+        index: DerivedKeyIndex,
+    ) -> Result<DerivedWalletKey, KeyManagerApiError> {
+        let km = self.get_key_manager(branch)?;
+        let key = km
+            .derive_key(index)
+            .expect("derive_key only panics if the hasher does not produce 32 bytes");
+        Ok(key.into())
+    }
+
+    pub fn derive_keypair(
+        &self,
+        branch: KeyBranch,
+        key_index: DerivedKeyIndex,
+    ) -> Result<DerivedKeyPair, KeyManagerApiError> {
+        let derived_key = self.derive_key(branch, key_index)?;
+        Ok(DerivedKeyPair {
+            public_key: derived_key.to_public_key(),
+            derived_key,
+        })
+    }
+
+    pub fn derive_account_keypair(
+        &self,
+        index: u64,
+    ) -> Result<(DerivedWalletKey, RistrettoPublicKey), KeyManagerApiError> {
         let key = self.derive_account_key(index)?;
         let public_key = RistrettoPublicKey::from_secret_key(&key.key);
         Ok((key, public_key))
     }
 
-    pub fn derive_account_key(&self, index: u64) -> Result<DerivedKey, KeyManagerApiError> {
+    pub fn derive_account_key(&self, index: DerivedKeyIndex) -> Result<DerivedWalletKey, KeyManagerApiError> {
         self.derive_key(KeyBranch::Account, index)
     }
 
-    pub fn derive_account_address(&self, index: u64) -> Result<DerivedAddress, KeyManagerApiError> {
+    pub fn derive_account_address(
+        &self,
+        index: DerivedKeyIndex,
+    ) -> Result<WalletOotleAddressWithKeyIds, KeyManagerApiError> {
         let key = self.derive_account_key(index)?;
         let view_only_key = self.derive_view_only_key(index)?;
-        Ok(DerivedAddress {
+        Ok(WalletOotleAddressWithKeyIds {
             address: RistrettoOotleAddress {
                 network: self.network,
                 view_only_key: RistrettoPublicKey::from_secret_key(&view_only_key.key),
                 account_key: RistrettoPublicKey::from_secret_key(&key.key),
             },
-            key_index: key.key_index,
+            view_only_key_id: key.as_key_id(),
+            owner_key_id: key.as_key_id(),
         })
     }
 
-    pub fn next_account_address(&self) -> Result<DerivedAddress, KeyManagerApiError> {
+    pub fn next_account_address(&self) -> Result<WalletOotleAddressWithKeyIds, KeyManagerApiError> {
         let key = self.next_key(KeyBranch::Account)?;
-        let view_only_key = self.derive_view_only_key(key.key_index)?;
-        let account_key = RistrettoPublicKey::from_secret_key(&key.key);
-        let view_only_key = RistrettoPublicKey::from_secret_key(&view_only_key.key);
-
-        Ok(DerivedAddress {
-            address: RistrettoOotleAddress {
-                network: self.network,
-                view_only_key,
-                account_key,
-            },
-            key_index: key.key_index,
-        })
+        self.derive_account_address(key.key_index)
     }
 
-    pub fn derive_view_only_key(&self, index: u64) -> Result<DerivedKey, KeyManagerApiError> {
+    pub fn derive_view_only_key(&self, index: DerivedKeyIndex) -> Result<DerivedWalletKey, KeyManagerApiError> {
         self.derive_key(KeyBranch::ViewOnlyKey, index)
     }
 
-    pub fn derive_view_only_keypair(&self, index: u64) -> Result<KeyPair, KeyManagerApiError> {
+    pub fn derive_view_only_keypair(&self, index: u64) -> Result<DerivedKeyPair, KeyManagerApiError> {
         let key = self.derive_view_only_key(index)?;
         let public_key = RistrettoPublicKey::from_secret_key(&key.key);
-        Ok(KeyPair {
+        Ok(DerivedKeyPair {
             public_key,
-            secret_key: key,
+            derived_key: key,
         })
     }
 
-    pub fn derive_account_key_pair(&self, index: u64) -> Result<KeyPair, KeyManagerApiError> {
+    pub fn derive_account_key_pair(&self, index: u64) -> Result<DerivedKeyPair, KeyManagerApiError> {
         let key = self.derive_account_key(index)?;
         let public_key = RistrettoPublicKey::from_secret_key(&key.key);
-        Ok(KeyPair {
+        Ok(DerivedKeyPair {
             public_key,
-            secret_key: key,
+            derived_key: key,
         })
     }
 
@@ -198,24 +284,32 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
 
     /// Derives the next key in the specified branch, increments the index, and sets it as the active key.
     /// If the branch does not exist, it will be created with index 0 and the first key will be returned.
-    /// NOTE: if there is another active DB transaction this function will block until it can acquire it.
-    pub fn next_key(&self, branch: KeyBranch) -> Result<DerivedKey, KeyManagerApiError> {
+    /// TODO: if there is another active DB transaction this function will block until it can acquire it.
+    pub fn next_key(&self, branch: KeyBranch) -> Result<DerivedWalletKey, KeyManagerApiError> {
         let mut tx = self.store.create_write_tx()?;
-        let index = tx.key_manager_get_last_index(branch.as_str()).optional()?.unwrap_or(0);
-        let mut key_manager = WalletKeyManager::from(self.cipher_seed.clone(), branch.as_str().to_string(), index);
+        let next_index = tx
+            .key_manager_get_last_index(branch.as_str())
+            .optional()?
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let key_manager = self.get_key_manager(branch.as_str())?;
         let key = key_manager
-            .next_key()
+            .derive_key(next_index)
             // TODO: Key manager shouldn't return other errors
             .map_err(key_manager::error::KeyManagerServiceError::from)?;
         // Index of account keys and view keys should always match to allow UTXO recovery when the specific account is
         // unknown
         if matches!(branch, KeyBranch::Account) {
             // Ensure the view key branch is created if it doesn't exist
-            tx.key_manager_insert_or_ignore(KeyBranch::ViewOnlyKey.as_str(), key_manager.key_index())?;
+            tx.key_manager_insert_or_ignore(KeyBranch::ViewOnlyKey.as_str(), next_index)?;
         }
-        tx.key_manager_insert_or_ignore(&key_manager.branch_seed, key_manager.key_index())?;
+        tx.key_manager_insert_or_ignore(&key_manager.branch_seed, next_index)?;
         tx.commit()?;
-        Ok(key)
+        Ok(key.into())
+    }
+
+    pub fn create_throwaway_nonce(&self) -> RistrettoSecretKey {
+        RistrettoSecretKey::random(&mut OsRng)
     }
 
     pub fn set_active_key<B: AsRef<str>>(&self, branch: B, index: u64) -> Result<(), KeyManagerApiError> {
@@ -235,81 +329,36 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         Ok(())
     }
 
-    pub fn get_active_key(&self, branch: KeyBranch) -> Result<(u64, DerivedKey), KeyManagerApiError> {
-        let index = self
+    pub fn get_active_key(&self, branch: KeyBranch) -> Result<DerivedWalletKey, KeyManagerApiError> {
+        let key_index = self
             .store
             .with_read_tx(|tx| tx.key_manager_get_active_index(branch.as_str()))
             .optional()?
             .unwrap_or(0);
-        Ok((index, self.derive_key(branch, index)?))
+        self.derive_key(branch, key_index)
     }
 
-    pub fn get_key_or_active(
-        &self,
-        branch: KeyBranch,
-        maybe_index: Option<u64>,
-    ) -> Result<(u64, DerivedKey), KeyManagerApiError> {
-        match maybe_index {
-            Some(index) => Ok((index, self.derive_key(branch, index)?)),
-            None => self.get_active_key(branch),
-        }
-    }
-
-    /// Brute force key search
-    /// WARNING: searching from 0 to u64::MAX will take in excess of 584942 years (assuming 1 microsecond per search)
-    /// for a key not to be found. Do not use this unless you are using a small range.
-    pub fn search_for_key_within_range(
-        &self,
-        branch: &str,
-        public_key: &RistrettoPublicKeyBytes,
-        start_index: u64,
-        end_index: u64,
-    ) -> Result<(u64, DerivedKey), KeyManagerApiError> {
-        let km = self.get_or_create_key_manager(branch)?;
-        for index in start_index..=end_index {
-            let key = km
-                .derive_key(index)
-                .map_err(key_manager::error::KeyManagerServiceError::from)?;
-            if RistrettoPublicKey::from_secret_key(&key.key).as_bytes() == public_key.as_bytes() {
-                return Ok((index, key));
-            }
-        }
-        // For huge search ranges, it would take many years to get here!
-        Err(KeyManagerApiError::KeyNotFound {
-            key: *public_key,
-            branch: branch.to_string(),
-        })
-    }
-
-    fn get_or_create_key_manager<K: AsRef<str>>(&self, branch: K) -> Result<WalletKeyManager, KeyManagerApiError> {
-        let branch_str = branch.as_ref();
-        let mut tx = self.store.create_write_tx()?;
-        let index = match tx.key_manager_get_active_index(branch_str).optional()? {
-            Some(index) => {
-                tx.rollback()?;
-                index
-            },
+    pub fn get_key_or_active(&self, branch: KeyBranch, maybe_key_id: Option<KeyId>) -> Result<Key, KeyManagerApiError> {
+        match maybe_key_id {
+            Some(id) => Ok(self.get_key(branch, id)?),
             None => {
-                tx.key_manager_insert_or_ignore(branch_str, 0)?;
-                tx.commit()?;
-                0
+                let key = self.get_active_key(branch)?;
+                Ok(key.into())
             },
-        };
-        Ok(self.get_key_manager(branch_str, index))
+        }
     }
 
-    fn get_key_manager<B: AsRef<str>>(&self, branch: B, index: u64) -> WalletKeyManager {
-        WalletKeyManager::from(self.cipher_seed.clone(), branch.as_ref().to_string(), index)
+    fn get_key_manager<B: AsRef<str>>(&self, branch: B) -> Result<WalletKeyManager, KeyManagerApiError> {
+        let cipher_seed = self.cipher_seed.cipher_seed().ok_or(KeyManagerApiError::ReadOnlyMode)?;
+        // We dont ever use the index in the key manager i.e. we dont ever call next_key on it, instead we always use
+        // derive_key
+        Ok(WalletKeyManager::from(
+            cipher_seed.clone(),
+            branch.as_ref().to_string(),
+            0,
+        ))
     }
 }
-
-impl<TStore> Clone for KeyManagerApi<'_, TStore> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<TStore> Copy for KeyManagerApi<'_, TStore> {}
 
 #[derive(Debug, thiserror::Error)]
 pub enum KeyManagerApiError {
@@ -317,11 +366,12 @@ pub enum KeyManagerApiError {
     StoreError(#[from] WalletStorageError),
     #[error("Key manager error: {0}")]
     KeyManagerError(#[from] key_manager::error::KeyManagerServiceError),
-    #[error("Key for public key {key}, branch {branch} not found")]
-    KeyNotFound {
-        key: RistrettoPublicKeyBytes,
-        branch: String,
-    },
+    #[error("Key {key_id} not found")]
+    KeyNotFound { key_id: KeyId },
+    #[error("Password manager error: {0}")]
+    PasswordManagerApiError(#[from] PasswordManagerApiError),
+    #[error("Key manager is in read only mode")]
+    ReadOnlyMode,
 }
 
 impl IsNotFoundError for KeyManagerApiError {

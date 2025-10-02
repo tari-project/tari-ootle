@@ -539,7 +539,7 @@ where
         };
 
         // If we're spending from the owner account, add the inputs
-        if inputs_to_spend.revealed.is_positive() {
+        if inputs_to_spend.revealed.is_positive() || fee_inputs_to_spend.revealed.is_positive() {
             substate_inputs.push(SubstateRequirement::unversioned(*owner_account.component_address()));
 
             // Add the vaults for XTR (fees) and the spending resource if different
@@ -635,19 +635,27 @@ where
     ) -> Result<Transaction, StealthTransferApiError> {
         let revealed_input_amount = transfer_statement.inputs_statement.revealed_amount;
         let revealed_output_amount = transfer_statement.outputs_statement.revealed_output_amount;
+        let owner_key_id = owner_account
+            .owner_key_id()
+            .ok_or_else(|| StealthTransferApiError::InvalidParameter {
+                param: "owner_account",
+                reason: "Owner account has no owner key".to_string(),
+            })?;
 
-        let signer_secret = if revealed_input_amount.is_positive() {
-            self.key_manager_api.derive_account_key(owner_account.key_index())?
+        let signer_key = if revealed_input_amount.is_positive() ||
+            fee_transfer_statement.inputs_statement.revealed_amount.is_positive()
+        {
+            self.key_manager_api.get_account_owner_key(owner_key_id)?
         } else {
             // Since we don't require account auth, use a throwaway nonce to sign the transaction
-            self.key_manager_api.next_key(KeyBranch::Nonce)?
+            self.key_manager_api.next_key(KeyBranch::Nonce)?.into()
         };
 
         let transaction = Transaction::builder()
             .for_network(params.destination_address.network().as_byte())
             .with_dry_run(params.is_dry_run)
             .with_fee_instructions_builder(|builder| {
-                if revealed_input_amount.is_positive() {
+                if fee_transfer_statement.inputs_statement.revealed_amount.is_positive() {
                     builder
                         .call_method(*owner_account.component_address(), "withdraw", args![
                             XTR,
@@ -695,7 +703,9 @@ where
                     })
             })
             .with_inputs(inputs)
-            .build_and_seal(&signer_secret.key);
+            // TODO: remove the need to add this input
+            .add_input(XTR)
+            .build_and_seal(&signer_key.secret);
 
         Ok(transaction)
     }
@@ -765,7 +775,8 @@ where
                 .to_byte_type(),
             value: output_value,
             sender_public_nonce: output.statement.sender_public_nonce.to_byte_type(),
-            encryption_secret_key_index: account.key_index(),
+            view_only_key_id: account.view_only_key_id(),
+            owner_key_id: account.owner_key_id(),
             encrypted_data: output.statement.encrypted_data.clone(),
             status: OutputStatus::LockedUnconfirmed,
             tag_byte: output.tag,

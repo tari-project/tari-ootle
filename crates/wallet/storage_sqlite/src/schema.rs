@@ -5,7 +5,9 @@ diesel::table! {
         id -> Integer,
         name -> Nullable<Text>,
         address -> Text,
-        owner_key_index -> BigInt,
+        owner_public_key -> Text,
+        view_only_key_id -> Text,
+        owner_key_id -> Nullable<Text>,
         is_default -> Bool,
         is_confirmed_on_chain -> Bool,
         stealth_resources -> Text,
@@ -45,7 +47,8 @@ diesel::table! {
         commitment -> Text,
         value -> BigInt,
         sender_public_nonce -> Nullable<Text>,
-        encryption_secret_key_index -> BigInt,
+        view_only_key_id -> Text,
+        owner_key_id -> Nullable<Text>,
         public_asset_tag -> Nullable<Text>,
         status -> Text,
         locked_at -> Nullable<Timestamp>,
@@ -64,6 +67,16 @@ diesel::table! {
         is_encrypted -> Bool,
         created_at -> Timestamp,
         updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    key_manager_imported_keys (id) {
+        id -> Integer,
+        label -> Text,
+        encrypted_secret -> Binary,
+        key_type -> Text,
+        created_at -> Timestamp,
     }
 }
 
@@ -142,7 +155,8 @@ diesel::table! {
         status -> Text,
         locked_at -> Nullable<Timestamp>,
         lock_id -> Nullable<Integer>,
-        encryption_secret_key_index -> BigInt,
+        view_only_key_id -> Text,
+        owner_key_id -> Nullable<Text>,
         encrypted_data -> Binary,
         tag_byte -> Integer,
         is_burnt -> Bool,
@@ -190,7 +204,7 @@ diesel::table! {
 diesel::table! {
     utxo_process_queue (id) {
         id -> Integer,
-        account_key_index -> BigInt,
+        account_id -> Integer,
         resource_address -> Text,
         utxo_tag -> Integer,
         public_nonce -> Text,
@@ -250,6 +264,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     authored_templates,
     confidential_outputs,
     config,
+    key_manager_imported_keys,
     key_manager_states,
     locks,
     non_fungible_tokens,

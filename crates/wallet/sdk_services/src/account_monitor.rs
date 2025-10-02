@@ -59,6 +59,8 @@ pub struct AccountMonitor<TStore, TNetworkInterface> {
     request_rx: mpsc::Receiver<AccountMonitorRequest>,
     pending_accounts: HashMap<TransactionId, NewAccountData>,
     utxo_scanner_handle: UtxoScannerHandle,
+    periodic_scan_interval: Duration,
+    enable_periodic_scanning_with_utxos: bool,
     shutdown_signal: ShutdownSignal,
 }
 
@@ -82,21 +84,35 @@ where
                 wallet_sdk,
                 request_rx,
                 pending_accounts: HashMap::new(),
+                periodic_scan_interval: Duration::from_secs(60),
                 utxo_scanner_handle,
+                enable_periodic_scanning_with_utxos: true,
                 shutdown_signal,
             },
             AccountMonitorHandle { sender: request_tx },
         )
     }
 
+    pub fn with_periodic_scan_interval(mut self, interval: Duration) -> Self {
+        self.periodic_scan_interval = interval;
+        self
+    }
+
+    pub fn disable_periodic_scanning_with_utxos(mut self) -> Self {
+        self.enable_periodic_scanning_with_utxos = false;
+        self
+    }
+
     pub async fn run(mut self) -> Result<(), anyhow::Error> {
+        info!(target: LOG_TARGET, "👁️‍🗨️ Account monitor started");
         let mut events_subscription = self.notify.subscribe();
-        let mut poll_interval = time::interval(Duration::from_secs(60));
+        let mut poll_interval = time::interval(self.periodic_scan_interval);
         poll_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         loop {
             tokio::select! {
                 _ = self.shutdown_signal.wait() => {
+                    info!(target: LOG_TARGET, "👁️‍🗨️ Account monitor shutting down");
                     break Ok(());
                 }
 
@@ -119,9 +135,14 @@ where
     }
 
     async fn handle_request(&self, req: AccountMonitorRequest) {
+        debug!(target: LOG_TARGET, "👁️‍🗨️ Account monitor received request: {:?}", req);
         match req {
-            AccountMonitorRequest::RefreshAccount { account, reply } => {
-                let _ignore = reply.send(self.refresh_account(account).await);
+            AccountMonitorRequest::RefreshAccount {
+                account,
+                scan_for_utxos,
+                reply,
+            } => {
+                let _ignore = reply.send(self.refresh_account(account, scan_for_utxos).await);
             },
         }
     }
@@ -137,15 +158,13 @@ where
         // TODO: There could be more than 100 accounts
         let accounts = accounts_api.get_many(0, 100)?;
         for account in accounts {
-            info!(
-                target: LOG_TARGET,
-                "👁️‍🗨️ Refreshing account {}", account
-            );
-            let is_updated = self.refresh_account(account.component_address).await?;
+            let is_updated = self
+                .refresh_account(*account.component_address(), self.enable_periodic_scanning_with_utxos)
+                .await?;
 
             if is_updated {
                 self.notify.notify(AccountChangedEvent {
-                    account_address: account.component_address,
+                    account_address: *account.component_address(),
                 });
             } else {
                 info!(
@@ -157,7 +176,15 @@ where
         Ok(())
     }
 
-    async fn refresh_account(&self, account_address: ComponentAddress) -> Result<bool, AccountMonitorError> {
+    async fn refresh_account(
+        &self,
+        account_address: ComponentAddress,
+        scan_for_utxos: bool,
+    ) -> Result<bool, AccountMonitorError> {
+        info!(
+            target: LOG_TARGET,
+            "👁️‍🗨️ Refreshing account {}", account_address
+        );
         let substate_api = self.wallet_sdk.substate_api();
         let accounts_api = self.wallet_sdk.accounts_api();
 
@@ -165,6 +192,14 @@ where
             // This is not our account
             return Ok(false);
         };
+
+        let mut associated_resources = accounts_api.get_associated_stealth_resources(account.component_address())?;
+        associated_resources.insert(XTR);
+        // Stealth outputs reference resources, so we need to ensure we have an entry for them. If they are already
+        // cached, this is a relatively cheap check.
+        for addr in &associated_resources {
+            self.ensure_resource_is_cached(addr).await?;
+        }
 
         let mut is_updated = false;
         let maybe_scan_result = substate_api
@@ -182,8 +217,10 @@ where
             }
             // Otherwise, the account is not on-chain, so we wouldn't expect the indexer to have it
 
-            // Scan for associated stealth resources
-            self.refresh_stealth_utxos(account_address)?;
+            if scan_for_utxos {
+                // Scan for associated stealth resources
+                self.refresh_stealth_utxos(associated_resources, account_address)?;
+            }
 
             return Ok(false);
         };
@@ -288,19 +325,19 @@ where
             }
         }
 
-        // Scan for all stealth resources
-        self.refresh_stealth_utxos(account_address)?;
+        if scan_for_utxos {
+            // Scan for all stealth resources
+            self.refresh_stealth_utxos(associated_resources, account_address)?;
+        }
 
         Ok(is_updated)
     }
 
-    fn refresh_stealth_utxos(&self, account_address: ComponentAddress) -> Result<(), AccountMonitorError> {
-        let mut stealth_resources = self
-            .wallet_sdk
-            .accounts_api()
-            .get_associated_stealth_resources(&account_address)?;
-        stealth_resources.insert(XTR);
-
+    fn refresh_stealth_utxos(
+        &self,
+        stealth_resources: HashSet<ResourceAddress>,
+        account_address: ComponentAddress,
+    ) -> Result<(), AccountMonitorError> {
         info!(
             target: LOG_TARGET,
             "👁️‍🗨️ Requesting UTXO scan for account {} for {} stealth resource(s)",
@@ -348,7 +385,7 @@ where
                     account_address
                 );
 
-                let resource = self.fetch_resource(*latest_vault.resource_address()).await?;
+                let resource = self.fetch_and_cache_resource(latest_vault.resource_address()).await?;
                 let token_symbol = resource.token_symbol().map(|s| s.to_string());
                 let divisibility = resource.divisibility();
 
@@ -402,9 +439,8 @@ where
 
         // If the vault has revealed stealth tokens, we should also to scan for UTXOs
         if latest_vault.resource_type().is_stealth() {
-            self.wallet_sdk
-                .accounts_api()
-                .associate_stealth_resource(&account_address, *latest_vault.resource_address())?;
+            self.associate_resource_with_account(&account_address, *latest_vault.resource_address())
+                .await?;
         }
 
         let outputs_api = self.wallet_sdk.confidential_outputs_api();
@@ -428,6 +464,31 @@ where
             self.notify.notify(AccountChangedEvent { account_address });
         }
 
+        Ok(())
+    }
+
+    async fn associate_resource_with_account(
+        &self,
+        account_address: &ComponentAddress,
+        resource_address: ResourceAddress,
+    ) -> Result<(), AccountMonitorError> {
+        let accounts_api = self.wallet_sdk.accounts_api();
+        self.ensure_resource_is_cached(&resource_address).await?;
+        accounts_api.associate_stealth_resource(account_address, resource_address)?;
+        Ok(())
+    }
+
+    async fn ensure_resource_is_cached(&self, resource_address: &ResourceAddress) -> Result<(), AccountMonitorError> {
+        let resources_api = self.wallet_sdk.resources_api();
+        if resources_api.exists(resource_address)? {
+            return Ok(());
+        }
+        debug!(
+            target: LOG_TARGET,
+            "Resource {} not in local store. Fetching from network.",
+            resource_address
+        );
+        let _resource = self.fetch_and_cache_resource(resource_address).await?;
         Ok(())
     }
 
@@ -729,16 +790,16 @@ where
         Ok(())
     }
 
-    async fn fetch_resource(&self, resx_addr: ResourceAddress) -> Result<Resource, AccountMonitorError> {
-        if let Some(resx) = self.wallet_sdk.resources_api().get(&resx_addr).optional()? {
+    async fn fetch_and_cache_resource(&self, resx_addr: &ResourceAddress) -> Result<Resource, AccountMonitorError> {
+        if let Some(resx) = self.wallet_sdk.resources_api().get(resx_addr).optional()? {
             return Ok(resx);
         }
 
-        let substate = self.fetch_substate(&SubstateId::Resource(resx_addr)).await?;
+        let substate = self.fetch_substate(&SubstateId::Resource(*resx_addr)).await?;
         let resx = substate.into_substate_value().into_resource().ok_or_else(|| {
             AccountMonitorError::UnexpectedSubstate(format!("Expected {} to be a resource.", resx_addr))
         })?;
-        self.wallet_sdk.resources_api().upsert_resource(&resx_addr, &resx)?;
+        self.wallet_sdk.resources_api().upsert_resource(resx_addr, &resx)?;
         Ok(resx)
     }
 
@@ -773,7 +834,7 @@ where
         if accounts_api.has_vault(&vault_id)? {
             return Ok(());
         }
-        let maybe_resource = match self.fetch_resource(*vault.resource_address()).await {
+        let maybe_resource = match self.fetch_and_cache_resource(vault.resource_address()).await {
             Ok(r) => Some(r),
             Err(e) => {
                 warn!(
@@ -836,6 +897,7 @@ where
 enum AccountMonitorRequest {
     RefreshAccount {
         account: ComponentAddress,
+        scan_for_utxos: bool,
         reply: Reply<Result<bool, AccountMonitorError>>,
     },
 }
@@ -846,11 +908,27 @@ pub struct AccountMonitorHandle {
 }
 
 impl AccountMonitorHandle {
+    /// Triggers an immediate refresh of the specified account. Returns `true` if the account was updated, otherwise
+    /// `false`.
     pub async fn refresh_account(&self, account: ComponentAddress) -> Result<bool, AccountMonitorError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.sender
             .send(AccountMonitorRequest::RefreshAccount {
                 account,
+                scan_for_utxos: false,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| AccountMonitorError::ServiceShutdown)?;
+        reply_rx.await.map_err(|_| AccountMonitorError::ServiceShutdown)?
+    }
+
+    pub async fn refresh_account_with_utxos(&self, account: ComponentAddress) -> Result<bool, AccountMonitorError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.sender
+            .send(AccountMonitorRequest::RefreshAccount {
+                account,
+                scan_for_utxos: true,
                 reply: reply_tx,
             })
             .await

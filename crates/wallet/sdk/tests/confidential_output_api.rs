@@ -6,7 +6,7 @@ mod support;
 use tari_crypto::commitment::HomomorphicCommitmentFactory;
 use tari_engine_types::{crypto::get_commitment_factory, ToByteType};
 use tari_ootle_wallet_sdk::{
-    models::{ConfidentialOutputModel, OutputStatus},
+    models::{ConfidentialOutputModel, KeyId, OutputStatus},
     storage::{WalletStore, WalletStoreReader},
 };
 use tari_template_lib::models::EncryptedData;
@@ -32,7 +32,7 @@ fn outputs_locked_and_released() {
 
     let locked = test
         .store()
-        .with_read_tx(|tx| tx.outputs_get_locked_by_lock_id(lock_id))
+        .with_read_tx(|tx| tx.confidential_outputs_get_locked_by_lock_id(lock_id))
         .unwrap();
 
     assert!(locked.iter().any(|l| l.commitment == commitment_25));
@@ -46,7 +46,7 @@ fn outputs_locked_and_released() {
 
     let locked = test
         .store()
-        .with_read_tx(|tx| tx.outputs_get_locked_by_lock_id(lock_id))
+        .with_read_tx(|tx| tx.confidential_outputs_get_locked_by_lock_id(lock_id))
         .unwrap();
     assert_eq!(locked.len(), 0);
 }
@@ -70,7 +70,7 @@ fn outputs_locked_and_finalized() {
 
     let locked = test
         .store()
-        .with_read_tx(|tx| tx.outputs_get_locked_by_lock_id(proof_id))
+        .with_read_tx(|tx| tx.confidential_outputs_get_locked_by_lock_id(proof_id))
         .unwrap();
 
     assert!(locked.iter().any(|l| l.commitment == commitment_25));
@@ -88,7 +88,8 @@ fn outputs_locked_and_finalized() {
             commitment: commitment_change,
             value: 24.into(),
             sender_public_nonce: None,
-            encryption_secret_key_index: 0,
+            view_only_key_id: KeyId::derived(0),
+            owner_key_id: Some(KeyId::derived(0)),
             encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
             public_asset_tag: None,
             status: OutputStatus::LockedUnconfirmed,
@@ -103,16 +104,18 @@ fn outputs_locked_and_finalized() {
 
     {
         let mut tx = test.store().create_read_tx().unwrap();
-        let locked = tx.outputs_get_locked_by_lock_id(proof_id).unwrap();
+        let locked = tx.confidential_outputs_get_locked_by_lock_id(proof_id).unwrap();
         assert_eq!(locked.len(), 0);
 
         let unspent = tx
-            .outputs_get_by_account_and_status(&Test::test_account_address(), OutputStatus::Unspent)
+            .confidential_outputs_get_by_account_and_status(&Test::test_account_address(), OutputStatus::Unspent)
             .unwrap();
         assert!(unspent.iter().any(|l| l.commitment == commitment_change));
         assert!(unspent.iter().any(|l| l.commitment == commitment_100));
         assert_eq!(unspent.len(), 2);
-        let balance = tx.outputs_get_unspent_balance(&Test::test_vault_address()).unwrap();
+        let balance = tx
+            .confidential_outputs_get_unspent_balance(&Test::test_vault_address())
+            .unwrap();
         assert_eq!(balance, 124);
     }
 }

@@ -14,13 +14,12 @@ use tari_ootle_common_types::{
     StateVersion,
 };
 use tari_ootle_wallet_sdk::{
-    models::{AccountWithAddress, UtxoSpent, UtxoUnspent, WalletUtxoUpdate},
+    models::{AccountWithAddress, Key, UtxoSpent, UtxoUnspent, WalletUtxoUpdate},
     network::{StatusResponseError, WalletNetworkInterface},
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
     WalletSdk,
 };
-use tari_template_lib::models::ResourceAddress;
-use tari_transaction_components::key_manager::tari_key_manager::DerivedKey;
+use tari_template_lib::models::{ComponentAddress, ResourceAddress};
 use tokio::sync::watch;
 
 use crate::utxo_scanner::StealthScannerApiError;
@@ -32,14 +31,14 @@ const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
 pub struct UtxoScannerRound<'a, TStore, TNetworkInterface> {
     network: Network,
     account: &'a AccountWithAddress,
-    view_key: &'a DerivedKey,
+    view_key: &'a Key,
     resource_address: &'a ResourceAddress,
 
     sdk: &'a WalletSdk<TStore, TNetworkInterface>,
     notify_tx: &'a watch::Sender<()>,
 
     shard_state_versions_to_set: HashMap<Shard, StateVersion>,
-    utxos_to_recover: Vec<(u64, UtxoUnspent)>,
+    utxos_to_recover: Vec<(ComponentAddress, UtxoUnspent)>,
     utxos_to_spend: Vec<UtxoSpent>,
 }
 
@@ -54,7 +53,7 @@ where
         sdk: &'a WalletSdk<TStore, TNetworkInterface>,
         notify_tx: &'a watch::Sender<()>,
         account: &'a AccountWithAddress,
-        view_key: &'a DerivedKey,
+        view_key: &'a Key,
         resource_address: &'a ResourceAddress,
     ) -> Self {
         Self {
@@ -70,22 +69,22 @@ where
         }
     }
 
-    pub async fn scan_for_utxo_updates(&mut self) -> Result<(), StealthScannerApiError> {
-        let mut any_found = false;
+    pub async fn scan_for_utxo_updates(&mut self) -> Result<usize, StealthScannerApiError> {
+        let mut num_found = 0;
         loop {
             if !self.scan().await? {
                 break;
             }
-            any_found = true;
+            num_found += 1;
         }
 
-        if any_found {
+        if num_found > 0 {
             // Notify that there are new UTXOs to process
             debug!(target: LOG_TARGET, "Notifying that new UTXOs are available for processing");
             let _ignore = self.notify_tx.send(());
         }
 
-        Ok(())
+        Ok(num_found)
     }
 
     async fn scan(&mut self) -> Result<bool, StealthScannerApiError> {
@@ -154,7 +153,7 @@ where
                                 "🏷️ Stealth output tag {} matches. Queueing for recovery.",
                                 unspent.tag
                             );
-                            self.utxos_to_recover.push((self.account.key_index(), unspent));
+                            self.utxos_to_recover.push((*self.account.component_address(), unspent));
                         }
                     },
                     WalletUtxoUpdate::Spent(spent) => {
@@ -218,7 +217,7 @@ where
 
         let tag = self.sdk.stealth_crypto_api().derive_stealth_output_tag(
             self.network,
-            &self.view_key.key,
+            &self.view_key.secret,
             &public_nonce,
             self.resource_address,
         );

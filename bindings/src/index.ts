@@ -175,6 +175,7 @@ export * from "./validator-node-client";
 export * from "./wallet-daemon-client";
 export * from "./helpers/BigAmount";
 export * from "./helpers/consts";
+export * from "./helpers/enum";
 export * from "./helpers/helpers";
 export * from "./helpers/NetworkByte";
 export * from "./helpers/ootleAddress";

@@ -44,11 +44,11 @@ pub async fn handle_list(
 ) -> Result<KeysListResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::KeyList])?;
-    let keys = sdk.key_manager_api().get_all_keys(req.branch)?;
+    let keys = sdk.key_manager_api().get_all_derived_keys(req.branch)?;
     Ok(KeysListResponse {
         keys: keys
             .into_iter()
-            .map(|key| (key.key_index(), key.public_key().to_byte_type(), key.is_active))
+            .map(|key| (key.key_id(), key.public_key().to_byte_type(), key.is_active()))
             .collect(),
     })
 }
@@ -62,9 +62,9 @@ pub async fn handle_set_active(
     context.check_auth(token, &[JrpcPermission::Admin])?;
     let km = sdk.key_manager_api();
     km.set_active_key(KeyBranch::Account, req.index)?;
-    let (_, key) = km.get_active_key(KeyBranch::Account)?;
+    let key = km.get_active_key(KeyBranch::Account)?;
 
     Ok(KeysSetActiveResponse {
-        public_key: RistrettoPublicKey::from_secret_key(&key.key).to_byte_type(),
+        public_key: key.to_public_key().to_byte_type(),
     })
 }

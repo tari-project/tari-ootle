@@ -11,11 +11,11 @@ use tari_engine_types::{
     ToByteType,
 };
 use tari_ootle_common_types::SubstateRequirement;
-use tari_ootle_wallet_sdk::models::Account;
+use tari_ootle_wallet_sdk::models::{Account, KeyId};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
-    resource::ResourceType,
+    prelude::ResourceType,
 };
 use tari_transaction::args;
 
@@ -55,7 +55,9 @@ impl Runner {
             .find(|vault_id| *vault_id != XTR_FAUCET_VAULT_ADDRESS)
             .unwrap();
 
-        self.sdk.accounts_api().add_account(None, &account, 0, true, true)?;
+        self.sdk
+            .accounts_api()
+            .add_account(None, &account, KeyId::derived(0), KeyId::derived(0), true, true)?;
         self.sdk
             .accounts_api()
             .add_vault(account, vault, XTR, ResourceType::Stealth, Some("XTR".to_string()), 6)?;
@@ -117,9 +119,14 @@ impl Runner {
                 })
                 .expect("New account not found in diff");
 
-            self.sdk
-                .accounts_api()
-                .add_account(None, &account_addr, owner.key_index, true, false)?;
+            self.sdk.accounts_api().add_account(
+                None,
+                &account_addr,
+                owner.as_key_id(),
+                owner.as_key_id(),
+                true,
+                false,
+            )?;
             let account = self.sdk.accounts_api().get_account_by_address(&account_addr)?;
             accounts.push(account.account);
         }

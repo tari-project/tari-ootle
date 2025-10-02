@@ -40,7 +40,7 @@ import {
 import { ApiError } from "@api/helpers/types";
 import queryClient from "@api/queryClient";
 import {
-  AccountOrKeyIndex,
+  AccountOrKeyId,
   ClaimBurnRequest,
   ComponentAddress,
   ComponentAddressOrName,
@@ -78,7 +78,7 @@ export const useAccountsCreate = () => {
       return await accountsCreate({
         account_name: req.accountName || "",
         is_default: req.isDefault || null,
-        key_id: req.keyId || null,
+        key_index: req.keyId || null,
       });
     },
     onError: (error: ApiError) => {
@@ -312,10 +312,10 @@ export const useAccountsGet = (account: ComponentAddress) => {
 //   });
 // };
 
-export const useValidatorFees = (accountOrKeyIndex: AccountOrKeyIndex, shardGroup = null) => {
+export const useValidatorFees = (accountOrKeyId: AccountOrKeyId, shardGroup = null) => {
   return useQuery({
     queryKey: ["validator_fees"],
-    queryFn: () => validatorsGetFees({ account_or_key: accountOrKeyIndex, shard_group: shardGroup }),
+    queryFn: () => validatorsGetFees({ account_or_key: accountOrKeyId, shard_group: shardGroup }),
   });
 };
 

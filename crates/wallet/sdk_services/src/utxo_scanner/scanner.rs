@@ -27,20 +27,23 @@ where
         Self { sdk }
     }
 
-    pub async fn scan_and_recover_utxos(
+    pub async fn scan_and_enqueue_utxos(
         &self,
         account: &AccountWithAddress,
         resource_address: &ResourceAddress,
         notify_tx: &watch::Sender<()>,
-    ) -> Result<(), StealthScannerApiError> {
+    ) -> Result<usize, StealthScannerApiError> {
         let network = self.sdk.config_api().get_network()?;
 
-        let view_key = self.sdk.key_manager_api().derive_view_only_key(account.key_index())?;
+        let view_key = self
+            .sdk
+            .key_manager_api()
+            .get_view_only_key(account.view_only_key_id())?;
 
         let mut scanner_round =
             UtxoScannerRound::new(network, &self.sdk, notify_tx, account, &view_key, resource_address);
-        scanner_round.scan_for_utxo_updates().await?;
+        let num_found = scanner_round.scan_for_utxo_updates().await?;
 
-        Ok(())
+        Ok(num_found)
     }
 }

@@ -43,7 +43,7 @@ pub struct TransactionRecord {
 
 impl TransactionRecord {
     pub fn try_into_wallet_transaction(self) -> Result<WalletTransaction, WalletStorageError> {
-        let transaction = deserialize_json::<Transaction>(&self.transaction_json)?;
+        let transaction = deserialize_json::<Transaction, _>(&self.transaction_json)?;
         let is_dry_run = transaction.is_dry_run();
 
         Ok(WalletTransaction {

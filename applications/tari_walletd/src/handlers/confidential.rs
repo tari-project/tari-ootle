@@ -56,6 +56,9 @@ pub async fn handle_create_transfer_proof(
     }
 
     let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
+    let account_owner_key_id = account
+        .owner_key_id()
+        .ok_or_else(|| invalid_request("Account does not have an owner key"))?;
     let vault = sdk
         .accounts_api()
         .get_vault_by_resource(account.component_address(), &req.resource_address)?;
@@ -83,7 +86,7 @@ pub async fn handle_create_transfer_proof(
     // TODO: Any errors from here need to unlock the outputs, ideally just roll back (refactor required but doable).
 
     // TODO: Wrap up key/encrypted data handling in the wallet SDK
-    let account_secret = sdk.key_manager_api().derive_account_key(account.key_index())?;
+    let account_key = sdk.key_manager_api().get_account_owner_key(account_owner_key_id)?;
     let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask)?;
     let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
 
@@ -98,7 +101,7 @@ pub async fn handle_create_transfer_proof(
         amount_u64,
         &output_mask.key,
         &public_nonce,
-        &account_secret.key,
+        &account_key.secret,
     )?;
 
     let resource = sdk.substate_api().fetch_resource(req.resource_address).await?;
@@ -157,7 +160,8 @@ pub async fn handle_create_transfer_proof(
                 .to_byte_type(),
             value: change_amount,
             sender_public_nonce: Some(public_nonce.to_byte_type()),
-            encryption_secret_key_index: change_mask.key_index,
+            view_only_key_id: account.view_only_key_id(),
+            owner_key_id: account.owner_key_id(),
             encrypted_data: encrypted_data.clone(),
             public_asset_tag: None,
             status: OutputStatus::LockedUnconfirmed,

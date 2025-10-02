@@ -6,7 +6,7 @@ use std::str::FromStr;
 use clap::{Args, Subcommand};
 use tari_ootle_common_types::{shard::Shard, ShardGroup};
 use tari_wallet_daemon_client::{
-    types::{AccountOrKeyIndex, ClaimValidatorFeesRequest, GetValidatorFeesRequest},
+    types::{AccountOrKeyId, ClaimValidatorFeesRequest, GetValidatorFeesRequest},
     ComponentAddressOrName,
     WalletDaemonClient,
 };
@@ -63,7 +63,7 @@ impl ValidatorSubcommand {
 pub async fn handle_get_fees(args: GetFeesArgs, client: &mut WalletDaemonClient) -> Result<(), anyhow::Error> {
     let resp = client
         .get_validator_fees(GetValidatorFeesRequest {
-            account_or_key: AccountOrKeyIndex::Account(args.account),
+            account_or_key: AccountOrKeyId::Account(args.account),
             shard_group: args.shard_group,
         })
         .await?;

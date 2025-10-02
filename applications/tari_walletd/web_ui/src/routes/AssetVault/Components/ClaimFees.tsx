@@ -37,6 +37,8 @@ import {
   AccountInfo,
   getRejectReasonFromTransactionResult,
   GetValidatorFeesResponse,
+  KeyId,
+  matchesTypeEnum,
   rejectReasonToString,
   substateIdToString,
   TransactionResult,
@@ -92,8 +94,8 @@ export default function ClaimFees() {
     if (keyIndex === formState.keyIndex) {
       return;
     }
-    const selected_account = dataAccountsList?.accounts.find(
-      (account: AccountInfo) => account.account.key_index === keyIndex,
+    const selected_account = dataAccountsList?.accounts.find((account: AccountInfo) =>
+      matchesTypeEnum(account.account.owner_key_id, { Derived: { index: BigInt(keyIndex) } }),
     );
     const account = selected_account?.account.component_address
       ? substateIdToString(selected_account!.account.component_address)
@@ -186,7 +188,7 @@ export default function ClaimFees() {
     setIsLoading(true);
     try {
       const fees = await validatorsGetFees({
-        account_or_key: { KeyIndex: formState.keyIndex },
+        account_or_key: { KeyId: { Derived: { index: BigInt(formState.keyIndex) } } },
         shard_group: null,
       });
       setScannedFees(fees);
@@ -198,11 +200,31 @@ export default function ClaimFees() {
     }
   };
 
-  const formatKey = ([index, publicKey, _isActive]: [number, string, boolean]) => {
-    let account = dataAccountsList?.accounts.find((account: AccountInfo) => account.account.key_index === +index);
+  function extractKeyIndex(keyId: KeyId): bigint | null {
+    if ("Derived" in keyId) {
+      return keyId.Derived.index;
+    }
+    return null;
+  }
+
+  const formatKey = ([keyId, publicKey, _isActive]: [KeyId, string, boolean]) => {
+    let account = dataAccountsList?.accounts.find((account: AccountInfo) =>
+      matchesTypeEnum(account.account.owner_key_id, keyId),
+    );
+
+    function displayKeyId(keyId: KeyId): string {
+      if ("Derived" in keyId) {
+        return `Derived:${keyId.Derived.index}`;
+      }
+      if ("Imported" in keyId) {
+        return `Imported:${keyId.Imported.local_key_id}`;
+      }
+      return JSON.stringify(keyId);
+    }
+
     return (
       <div>
-        <b>{index}</b> {publicKey}
+        <b>{displayKeyId(keyId)}</b> {publicKey}
         <br></br>Account <i>{account?.account.name || "<None>"}</i>
       </div>
     );
@@ -228,8 +250,8 @@ export default function ClaimFees() {
                 style={{ flexGrow: 1, minWidth: "200px" }}
                 disabled={disabled}
               >
-                {dataKeysList?.keys.map((account: [number, string, boolean]) => (
-                  <MenuItem key={account[0]} value={account[0]}>
+                {dataKeysList?.keys.map((account: [KeyId, string, boolean], i) => (
+                  <MenuItem key={i} value={extractKeyIndex(account[0])!.toString()}>
                     {formatKey(account)}
                   </MenuItem>
                 ))}

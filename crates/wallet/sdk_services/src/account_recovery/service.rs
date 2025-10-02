@@ -13,12 +13,12 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_wallet_sdk::{
     apis::{config::ConfigKey, key_manager::KeyBranch},
+    models::{DerivedWalletKey, KeyId},
     network::{StatusResponseError, WalletNetworkInterface},
     storage::WalletStore,
     WalletSdk,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_transaction_components::key_manager::tari_key_manager::DerivedKey;
 use tokio::time;
 
 use crate::{account_monitor::AccountMonitorHandle, account_recovery::AccountRecoveryError};
@@ -73,7 +73,7 @@ where
         let mut not_found_accounts_count = 0;
         let mut found_accounts_count = 0;
         let initial_key_index = match key_manager_api.get_active_key(KeyBranch::Account) {
-            Ok((key_index, _)) => key_index,
+            Ok(key) => key.key_index,
             Err(err) => {
                 error!(target: LOG_TARGET, "Error getting active key: {err}. Scanning failed...");
                 return;
@@ -132,11 +132,7 @@ where
         }
 
         // Set a flag to indicate that the wallet has completed recovery
-        if let Err(err) = self
-            .wallet_sdk
-            .config_api()
-            .set(ConfigKey::RecoveryNeeded, &false, false)
-        {
+        if let Err(err) = self.wallet_sdk.config_api().set(ConfigKey::RecoveryNeeded, &false) {
             error!(target: LOG_TARGET, "Error setting recovery needed flag: {err}");
         }
 
@@ -145,7 +141,7 @@ where
 
     /// Attempt to recover an account by the provided public key. Returning true if the account was found on-chain,
     /// false if not.
-    async fn try_recover_account(&self, key: &DerivedKey) -> Result<bool, AccountRecoveryError> {
+    async fn try_recover_account(&self, key: &DerivedWalletKey) -> Result<bool, AccountRecoveryError> {
         let network_interface = self.wallet_sdk.get_network_interface();
 
         let public_key = RistrettoPublicKey::from_secret_key(&key.key).to_byte_type();
@@ -169,14 +165,17 @@ where
                 self.wallet_sdk.accounts_api().add_account(
                     Some(format!("recovered-account-{}", key.key_index).as_str()),
                     &account_addr,
-                    key.key_index,
+                    key.as_key_id(),
+                    key.as_key_id(),
                     false,
                     // if this is the first account, set it as the default
                     key.key_index == 0,
                 )?;
 
                 // Update UTXOs
-                self.account_monitor_handle.refresh_account(account_addr).await?;
+                self.account_monitor_handle
+                    .refresh_account_with_utxos(account_addr)
+                    .await?;
                 // Count this as not found for the purposes of stopping the scan after N not founds
                 Ok(false)
             },
@@ -193,13 +192,13 @@ where
                         })?;
 
                 if component.owner_key.is_none() {
-                    warn!(target: LOG_TARGET, "⚠️ Account {} has no owner key. This wallet may not be able tio sign for this account", account_addr);
+                    warn!(target: LOG_TARGET, "⚠️ Account {} has no owner key. This wallet may not be able to use this account", account_addr);
                 };
 
                 if component.owner_key.is_some_and(|pk| pk != public_key) {
                     warn!(
                         target: LOG_TARGET,
-                        "⚠️ Account {} has a different owner key {} than the one derived from the seed key {}. This wallet may not be able to sign for this account",
+                        "⚠️ Account {} has a different owner key {} than the one derived from the seed key {}. This wallet may not be able to use this account",
                         account_addr,
                         component.owner_key.unwrap_or_default(),
                         public_key
@@ -217,14 +216,17 @@ where
                 self.wallet_sdk.accounts_api().add_account(
                     Some(format!("recovered-account-{}", key.key_index).as_str()),
                     &account_addr,
-                    key.key_index,
+                    KeyId::derived(key.key_index),
+                    KeyId::derived(key.key_index),
                     true,
                     // if this is the first account, set it as the default
                     key.key_index == 0,
                 )?;
 
                 // Update vaults, UTXOs, nfts etc
-                self.account_monitor_handle.refresh_account(account_addr).await?;
+                self.account_monitor_handle
+                    .refresh_account_with_utxos(account_addr)
+                    .await?;
 
                 Ok(true)
             },

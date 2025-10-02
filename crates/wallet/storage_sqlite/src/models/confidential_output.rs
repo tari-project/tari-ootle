@@ -8,7 +8,7 @@ use tari_template_lib::{
 };
 use time::PrimitiveDateTime;
 
-use crate::schema::confidential_outputs;
+use crate::{schema::confidential_outputs, serialization::deserialize_json};
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
 #[diesel(table_name = confidential_outputs)]
@@ -20,7 +20,8 @@ pub struct ConfidentialOutput {
     // TODO: change to a string to allow arbitrary precision
     pub value: i64,
     pub sender_public_nonce: Option<String>,
-    pub encryption_secret_key_index: i64,
+    pub view_only_key_id: String,
+    pub owner_key_id: Option<String>,
     pub public_asset_tag: Option<String>,
     pub status: String,
     pub locked_at: Option<PrimitiveDateTime>,
@@ -60,7 +61,8 @@ impl ConfidentialOutput {
             sender_public_nonce: self
                 .sender_public_nonce
                 .map(|nonce| RistrettoPublicKeyBytes::from_hex(&nonce).unwrap()),
-            encryption_secret_key_index: self.encryption_secret_key_index as u64,
+            view_only_key_id: deserialize_json(&self.view_only_key_id)?,
+            owner_key_id: self.owner_key_id.map(|id| deserialize_json(&id)).transpose()?,
             encrypted_data: EncryptedData::try_from(self.encrypted_data).map_err(|len| {
                 WalletStorageError::DecodingError {
                     operation: "try_into_output",

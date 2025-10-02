@@ -5,7 +5,10 @@ use diesel::{Identifiable, Queryable};
 use tari_ootle_wallet_sdk::storage::WalletStorageError;
 use time::PrimitiveDateTime;
 
-use crate::schema::accounts;
+use crate::{
+    schema::accounts,
+    serialization::{deserialize_hex_try_from, deserialize_json},
+};
 
 #[derive(Debug, Clone, Queryable, Identifiable)]
 #[diesel(table_name = accounts)]
@@ -13,7 +16,9 @@ pub struct Account {
     pub id: i32,
     pub name: Option<String>,
     pub address: String,
-    pub owner_key_index: i64,
+    pub owner_public_key: String,
+    pub view_only_key_id: String,
+    pub owner_key_id: Option<String>,
     pub is_default: bool,
     pub is_confirmed_on_chain: bool,
     pub _stealth_resource_address: String,
@@ -30,7 +35,9 @@ impl Account {
                 item: "address",
                 details: format!("Invalid address: {}: {e}", self.address),
             })?,
-            key_index: self.owner_key_index as u64,
+            owner_key_id: self.owner_key_id.as_ref().map(deserialize_json).transpose()?,
+            view_only_key_id: deserialize_json(&self.view_only_key_id)?,
+            owner_public_key: deserialize_hex_try_from(&self.owner_public_key)?,
             is_confirmed_on_chain: self.is_confirmed_on_chain,
             is_default: self.is_default,
         })

@@ -206,7 +206,7 @@ pub async fn create_account(
     let request = AccountsCreateRequest {
         account_name: Some(account_name.clone()),
         is_default: None,
-        key_id: None,
+        key_index: None,
     };
 
     let resp = timeout(Duration::from_secs(5), client.create_account(request))
@@ -240,7 +240,10 @@ pub async fn create_account_with_free_coins<A: Into<Amount>>(
                 .create_account(AccountsCreateRequest {
                     account_name: Some(account_name.clone()),
                     is_default: None,
-                    key_id: account.as_ref().map(|a| a.account.key_index),
+                    key_index: account
+                        .as_ref()
+                        .and_then(|a| a.account.owner_key_id)
+                        .and_then(|k| k.derived_index()),
                 })
                 .await
                 .unwrap();
@@ -442,7 +445,7 @@ pub async fn submit_manifest_with_signing_keys(
 
     let transaction_submit_req = TransactionSubmitRequest {
         transaction,
-        signing_key_index: Some(account.key_index),
+        signing_key_id: account.owner_key_id,
         detect_inputs: true,
         detect_inputs_use_unversioned: true,
         proof_ids: vec![],
@@ -527,7 +530,7 @@ pub async fn submit_manifest(
 
     let transaction_submit_req = TransactionSubmitRequest {
         transaction,
-        signing_key_index: Some(account.key_index),
+        signing_key_id: account.owner_key_id,
         detect_inputs: true,
         detect_inputs_use_unversioned: true,
         proof_ids: vec![],
@@ -642,7 +645,7 @@ pub async fn create_component(
 
     let transaction_submit_req = TransactionSubmitRequest {
         transaction,
-        signing_key_index: Some(account.key_index),
+        signing_key_id: account.owner_key_id,
         detect_inputs: true,
         detect_inputs_use_unversioned: true,
         proof_ids: vec![],
@@ -931,7 +934,7 @@ async fn submit_unsigned_tx_and_wait_for_response(
     );
     let submit_req = TransactionSubmitRequest {
         transaction,
-        signing_key_index: Some(account.key_index),
+        signing_key_id: account.owner_key_id,
         detect_inputs: true,
         detect_inputs_use_unversioned: use_unversioned_inputs,
         proof_ids: vec![],

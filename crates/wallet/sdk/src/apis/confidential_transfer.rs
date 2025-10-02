@@ -36,7 +36,7 @@ const LOG_TARGET: &str = "tari::ootle::wallet_sdk::apis::confidential_transfers"
 pub struct ConfidentialTransferApi<'a, TStore, TNetworkInterface> {
     key_manager_api: KeyManagerApi<'a, TStore>,
     accounts_api: AccountsApi<'a, TStore, TNetworkInterface>,
-    outputs_api: ConfidentialOutputsApi<'a, TStore>,
+    confidential_outputs_api: ConfidentialOutputsApi<'a, TStore>,
     substate_api: SubstatesApi<'a, TStore, TNetworkInterface>,
     crypto_api: ConfidentialCryptoApi,
     config_api: ConfigApi<'a, TStore>,
@@ -51,7 +51,7 @@ where
     pub fn new(
         key_manager_api: KeyManagerApi<'a, TStore>,
         accounts_api: AccountsApi<'a, TStore, TNetworkInterface>,
-        outputs_api: ConfidentialOutputsApi<'a, TStore>,
+        confidential_outputs_api: ConfidentialOutputsApi<'a, TStore>,
         substate_api: SubstatesApi<'a, TStore, TNetworkInterface>,
         crypto_api: ConfidentialCryptoApi,
         config_api: ConfigApi<'a, TStore>,
@@ -59,7 +59,7 @@ where
         Self {
             key_manager_api,
             accounts_api,
-            outputs_api,
+            confidential_outputs_api,
             substate_api,
             crypto_api,
             config_api,
@@ -84,9 +84,11 @@ where
         match &input_selection {
             ConfidentialTransferInputSelection::ConfidentialOnly => {
                 let (confidential_inputs, _) =
-                    self.outputs_api
+                    self.confidential_outputs_api
                         .lock_outputs_by_amount(lock_id, &src_vault.id, spend_amount)?;
-                let confidential_inputs = self.outputs_api.resolve_output_masks(confidential_inputs)?;
+                let confidential_inputs = self
+                    .confidential_outputs_api
+                    .resolve_output_masks(confidential_inputs)?;
 
                 info!(
                     target: LOG_TARGET,
@@ -106,7 +108,7 @@ where
                     return Err(ConfidentialTransferApiError::InsufficientFunds);
                 }
 
-                self.outputs_api
+                self.confidential_outputs_api
                     .lock_vault_revealed_funds(lock_id, &src_vault.id, spend_amount)?;
 
                 info!(
@@ -133,8 +135,11 @@ where
                         src_vault.id,
                     );
 
-                    self.outputs_api
-                        .lock_vault_revealed_funds(lock_id, &src_vault.id, revealed_to_spend)?;
+                    self.confidential_outputs_api.lock_vault_revealed_funds(
+                        lock_id,
+                        &src_vault.id,
+                        revealed_to_spend,
+                    )?;
 
                     return Ok(InputsToSpend {
                         confidential: vec![],
@@ -143,14 +148,18 @@ where
                     });
                 }
 
-                let (confidential_inputs, _) =
-                    self.outputs_api
-                        .lock_outputs_by_amount(lock_id, &src_vault.id, confidential_to_spend)?;
-                let confidential_inputs = self.outputs_api.resolve_output_masks(confidential_inputs)?;
+                let (confidential_inputs, _) = self.confidential_outputs_api.lock_outputs_by_amount(
+                    lock_id,
+                    &src_vault.id,
+                    confidential_to_spend,
+                )?;
+                let confidential_inputs = self
+                    .confidential_outputs_api
+                    .resolve_output_masks(confidential_inputs)?;
 
                 let total_confidential_spent = confidential_inputs.iter().map(|i| i.value).sum::<Amount>();
 
-                self.outputs_api
+                self.confidential_outputs_api
                     .lock_vault_revealed_funds(lock_id, &src_vault.id, revealed_to_spend)?;
 
                 info!(
@@ -171,9 +180,9 @@ where
                 })
             },
             ConfidentialTransferInputSelection::PreferConfidential => {
-                let (confidential_inputs, amount_locked) =
-                    self.outputs_api
-                        .lock_outputs_until_partial_amount(lock_id, &src_vault.id, spend_amount)?;
+                let (confidential_inputs, amount_locked) = self
+                    .confidential_outputs_api
+                    .lock_outputs_until_partial_amount(lock_id, &src_vault.id, spend_amount)?;
 
                 let revealed_to_spend = spend_amount
                     .saturating_sub_positive(amount_locked)
@@ -183,10 +192,12 @@ where
                     return Err(ConfidentialTransferApiError::InsufficientFunds);
                 }
 
-                self.outputs_api
+                self.confidential_outputs_api
                     .lock_vault_revealed_funds(lock_id, &src_vault.id, revealed_to_spend)?;
 
-                let confidential_inputs = self.outputs_api.resolve_output_masks(confidential_inputs)?;
+                let confidential_inputs = self
+                    .confidential_outputs_api
+                    .resolve_output_masks(confidential_inputs)?;
 
                 Ok(InputsToSpend {
                     confidential: confidential_inputs,
@@ -207,6 +218,14 @@ where
             .accounts_api
             .resolve_account_by_public_key(params.destination_address.account_public_key())
             .await?;
+
+        let account_owner_key_id =
+            from_account
+                .owner_key_id()
+                .ok_or_else(|| ConfidentialTransferApiError::InvalidParameter {
+                    param: "from_account",
+                    reason: "From account does not have an owner key".to_string(),
+                })?;
 
         // Determine Transaction Inputs
         let mut inputs = Vec::new();
@@ -255,11 +274,11 @@ where
         // Reserve and lock input funds for fees
         let max_fee = params.max_fee;
 
-        let account_secret = self.key_manager_api.derive_account_key(account.key_index())?;
-        let account_public_key = PublicKey::from_secret_key(&account_secret.key);
+        let account_key = self.key_manager_api.get_account_owner_key(account_owner_key_id)?;
+        let account_public_key = PublicKey::from_secret_key(&account_key.secret);
 
         // Reserve and lock input funds
-        let lock_id = self.outputs_api.create_lock()?;
+        let lock_id = self.confidential_outputs_api.create_lock()?;
         let inputs_to_spend = match self.resolved_inputs_for_transfer(
             lock_id,
             params.from_account,
@@ -323,7 +342,7 @@ where
             let change_value = statement.amount;
 
             if change_value.is_positive() {
-                self.outputs_api.add_output(ConfidentialOutputModel {
+                self.confidential_outputs_api.add_output(ConfidentialOutputModel {
                     account_address: *account.component_address(),
                     vault_id: src_vault.id,
                     commitment: statement
@@ -332,7 +351,8 @@ where
                         .to_byte_type(),
                     value: change_value,
                     sender_public_nonce: Some(statement.sender_public_nonce.to_byte_type()),
-                    encryption_secret_key_index: account_secret.key_index,
+                    view_only_key_id: account_key.key_id,
+                    owner_key_id: Some(account_key.key_id),
                     encrypted_data: statement.encrypted_data.clone(),
                     public_asset_tag: None,
                     status: OutputStatus::LockedUnconfirmed,
@@ -390,10 +410,10 @@ where
                 }
             })
             .with_inputs(inputs)
-            .build_and_seal(&account_secret.key);
+            .build_and_seal(&account_key.secret);
 
         let tx_id = transaction.calculate_id();
-        self.outputs_api
+        self.confidential_outputs_api
             .locks_set_transaction_id(inputs_to_spend.lock_id, tx_id)?;
 
         Ok(TransferOutput {

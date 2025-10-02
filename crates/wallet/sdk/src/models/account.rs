@@ -7,13 +7,16 @@ use tari_bor::{Deserialize, Serialize};
 use tari_ootle_address::OotleAddress;
 use tari_template_lib::{models::ComponentAddress, prelude::RistrettoPublicKeyBytes};
 
+use crate::models::KeyId;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Account {
     pub name: Option<String>,
     pub component_address: ComponentAddress,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub key_index: u64,
+    pub view_only_key_id: KeyId,
+    pub owner_key_id: Option<KeyId>,
+    pub owner_public_key: RistrettoPublicKeyBytes,
     pub is_confirmed_on_chain: bool,
     pub is_default: bool,
 }
@@ -23,8 +26,16 @@ impl Account {
         &self.component_address
     }
 
-    pub fn key_index(&self) -> u64 {
-        self.key_index
+    pub fn view_only_key_id(&self) -> KeyId {
+        self.view_only_key_id
+    }
+
+    pub fn owner_key_id(&self) -> Option<KeyId> {
+        self.owner_key_id
+    }
+
+    pub fn owner_public_key(&self) -> &RistrettoPublicKeyBytes {
+        &self.owner_public_key
     }
 
     pub fn name(&self) -> Option<&String> {
@@ -69,8 +80,16 @@ impl AccountWithAddress {
         &self.address
     }
 
-    pub fn key_index(&self) -> u64 {
-        self.account.key_index
+    pub fn name(&self) -> Option<&String> {
+        self.account.name.as_ref()
+    }
+
+    pub fn view_only_key_id(&self) -> KeyId {
+        self.account.view_only_key_id
+    }
+
+    pub fn owner_key_id(&self) -> Option<KeyId> {
+        self.account.owner_key_id
     }
 
     pub fn owner_public_key(&self) -> &RistrettoPublicKeyBytes {

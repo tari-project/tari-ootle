@@ -33,7 +33,7 @@ ts-rs = { workspace = true, optional = true }
 webauthn-rs = { workspace = true }
 keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 passwords = "3.1.16"
-zeroize = { workspace = true }
+zeroize = { workspace = true, features = ["serde", "simd"] }
 
 [dev-dependencies]
 tari_ootle_wallet_storage_sqlite = { workspace = true }

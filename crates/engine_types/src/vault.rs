@@ -27,8 +27,7 @@ use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_template_lib::{
     args::VaultFreezeFlags,
     models::{ConfidentialWithdrawProof, NonFungibleId, ResourceAddress, VaultId},
-    prelude::ResourceType,
-    types::{crypto::PedersenCommitmentBytes, Amount},
+    types::{crypto::PedersenCommitmentBytes, Amount, ResourceType},
 };
 
 use crate::{

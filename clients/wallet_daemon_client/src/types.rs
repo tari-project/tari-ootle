@@ -43,6 +43,8 @@ use tari_ootle_wallet_sdk::{
     models::{
         Account,
         AuthoredTemplateModel,
+        DerivedKeyIndex,
+        KeyId,
         NonFungibleToken,
         OutputStatus,
         TransactionStatus,
@@ -111,8 +113,7 @@ pub struct CallInstructionRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransactionSubmitRequest {
     pub transaction: UnsignedTransaction,
-    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
-    pub signing_key_index: Option<u64>,
+    pub signing_key_id: Option<KeyId>,
     /// Attempt to infer inputs and their dependencies from instructions. If false, the provided transaction must
     /// contain the required inputs.
     pub detect_inputs: bool,
@@ -139,8 +140,7 @@ pub struct TransactionSubmitResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransactionSubmitDryRunRequest {
     pub transaction: UnsignedTransaction,
-    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
-    pub signing_key_index: Option<u64>,
+    pub signing_key_id: Option<KeyId>,
     pub detect_inputs: bool,
     pub detect_inputs_use_unversioned: bool,
     #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
@@ -159,8 +159,7 @@ pub struct TransactionSubmitDryRunResponse {
 pub struct TransactionSubmitManifestRequest {
     pub manifest: String,
     pub variables: HashMap<String, String>,
-    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
-    pub signing_key_index: Option<u64>,
+    pub signing_key_id: Option<KeyId>,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub max_fee: u64,
     pub dry_run: bool,
@@ -278,9 +277,8 @@ pub struct KeysListRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct KeysListResponse {
-    /// (index, public key, is_active)
-    #[cfg_attr(feature = "ts", ts(type = "Array<[number, string, boolean]>"))]
-    pub keys: Vec<(u64, RistrettoPublicKeyBytes, bool)>,
+    /// (KeyId, public key, is_active)
+    pub keys: Vec<(KeyId, RistrettoPublicKeyBytes, bool)>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -318,7 +316,7 @@ pub struct AccountsCreateRequest {
     pub account_name: Option<String>,
     pub is_default: Option<bool>,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
-    pub key_id: Option<u64>,
+    pub key_index: Option<DerivedKeyIndex>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -334,7 +332,7 @@ pub struct AccountsCreateOrGetRequest {
     pub account: Option<ComponentAddressOrName>,
     pub is_default: Option<bool>,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
-    pub key_id: Option<u64>,
+    pub key_index: Option<DerivedKeyIndex>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -598,7 +596,7 @@ pub struct ClaimBurnRequest {
 pub struct ClaimBurnProof {
     pub claim_proof: MinotariBurnClaimProof,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub owner_nonce_key_index: u64,
+    pub owner_nonce_key_index: DerivedKeyIndex,
     pub encrypted_data: EncryptedData,
 }
 
@@ -767,17 +765,17 @@ pub struct AuthGetAllJwtResponse {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct GetValidatorFeesRequest {
-    pub account_or_key: AccountOrKeyIndex,
+    pub account_or_key: AccountOrKeyId,
     pub shard_group: Option<ShardGroup>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
-pub enum AccountOrKeyIndex {
+pub enum AccountOrKeyId {
     /// Query by account. None signifies the default account.
     Account(Option<ComponentAddressOrName>),
-    /// Query by key index.
-    KeyIndex(#[cfg_attr(feature = "ts", ts(type = "number"))] u64),
+    /// Query by key id.
+    KeyId(KeyId),
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

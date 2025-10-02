@@ -41,6 +41,7 @@ use tari_template_lib::{
     auth::{ComponentAccessRules, OwnerRule},
     invoke_args,
     models::{Bucket, NonFungibleAddress, StealthTransferStatement},
+    prelude::STEALTH_TARI_RESOURCE_ADDRESS,
     types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
 };
 use tari_transaction::{
@@ -125,6 +126,9 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         let initial_auth_scope = AuthorizationScope::new(auth_params.initial_ownership_proofs);
         let mut initial_call_scope = CallScope::new();
         initial_call_scope.set_auth_scope(initial_auth_scope);
+        // Because XTR resource is immutable, we can make it available to every shard group (genesis state) and
+        // transaction (payment of fees)
+        initial_call_scope.add_substate_to_owned(STEALTH_TARI_RESOURCE_ADDRESS.into());
         for input in executable.all_inputs_iter() {
             debug!(
                 target: LOG_TARGET,

@@ -7,7 +7,7 @@ use tari_template_lib::{
     types::{crypto::UtxoTag, Amount},
 };
 
-use crate::models::{OutputStatus, WalletLockId};
+use crate::models::{KeyId, OutputStatus, WalletLockId};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StealthOutputModel {
@@ -17,7 +17,9 @@ pub struct StealthOutputModel {
     pub value: Amount,
     pub sender_public_nonce: RistrettoPublicKeyBytes,
     /// Note: this field is more for debugging. We use the account key index for all outputs belonging to an account
-    pub encryption_secret_key_index: u64,
+    pub view_only_key_id: KeyId,
+    /// None means this output cannot be spent, it's view-only
+    pub owner_key_id: Option<KeyId>,
     pub encrypted_data: EncryptedData,
     pub tag_byte: UtxoTag,
     pub status: OutputStatus,

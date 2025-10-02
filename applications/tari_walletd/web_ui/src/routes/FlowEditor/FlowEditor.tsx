@@ -208,7 +208,7 @@ function FlowEditor() {
     }
     const request = {
       transaction: { V1: transaction },
-      signing_key_index: account.account.key_index,
+      signing_key_id: account.account.owner_key_id,
       detect_inputs: true,
       detect_inputs_use_unversioned: true,
       proof_ids: [],

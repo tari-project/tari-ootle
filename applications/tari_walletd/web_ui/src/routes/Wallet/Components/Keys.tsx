@@ -35,13 +35,15 @@ import { Form } from "react-router-dom";
 import Button from "@mui/material/Button/Button";
 import { DataTableCell } from "@components/StyledComponents";
 import FetchStatusCheck from "@components/FetchStatusCheck";
+import { KeyId } from "@tari-project/typescript-bindings";
 
-function Key(key: [number, string, boolean], setActive: any) {
+function Key([key, pk, active]: [KeyId, string, boolean], setActive: (key_id: KeyId) => void) {
   return (
-    <TableRow key={key[0]}>
-      <DataTableCell>{key[0]}</DataTableCell>
-      <DataTableCell>{key[1]}</DataTableCell>
-      <DataTableCell>{key[2] ? <b>Active</b> : <div onClick={() => setActive(key[0])}>Activate</div>}</DataTableCell>
+    <TableRow>
+      {/* @ts-ignore */}
+      <DataTableCell>{key.Derived.index}</DataTableCell>
+      <DataTableCell>{pk}</DataTableCell>
+      <DataTableCell>{active ? <b>Active</b> : <div onClick={() => setActive(key)}>Activate</div>}</DataTableCell>
     </TableRow>
   );
 }
@@ -56,8 +58,10 @@ function Keys() {
     setShowAddKeyDialog(setElseToggle);
   };
 
-  const setActive = (index: number) => {
-    mutateSetActive(index);
+  const setActive = (keyId: KeyId) => {
+    if ("Derived" in keyId) {
+      mutateSetActive(keyId.Derived.index);
+    }
   };
 
   const onSubmitAddKey = () => {
@@ -101,7 +105,7 @@ function Keys() {
                   <TableCell>Active</TableCell>
                 </TableRow>
               </TableHead>
-              <TableBody>{data && data.keys.map((key: [number, string, boolean]) => Key(key, setActive))}</TableBody>
+              <TableBody>{data && data.keys.map((key: [KeyId, string, boolean]) => Key(key, setActive))}</TableBody>
             </Table>
           </TableContainer>
         </div>

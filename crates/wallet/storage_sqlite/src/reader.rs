@@ -34,6 +34,7 @@ use tari_ootle_wallet_sdk::{
         AuthoredTemplateModel,
         ConfidentialOutputModel,
         Config,
+        KeyType,
         NonFungibleToken,
         OutputStatus,
         ResourceModel,
@@ -50,8 +51,7 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_template_lib::{
     models::{ResourceAddress, VaultId},
-    prelude::{ComponentAddress, NonFungibleId, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
-    resource::ResourceType,
+    prelude::{ComponentAddress, NonFungibleId, PedersenCommitmentBytes, ResourceType, RistrettoPublicKeyBytes},
     types::{crypto::UtxoTag, TemplateAddress},
 };
 use tari_transaction::TransactionId;
@@ -158,6 +158,37 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 entity: "key_manager_state".to_string(),
                 key: branch.to_string(),
             })
+    }
+
+    fn key_manager_get_raw_imported_key(&mut self, id: u64) -> Result<(KeyType, Box<[u8]>), WalletStorageError> {
+        const OPERATION: &str = "key_manager_get_raw_imported_key";
+        use crate::schema::key_manager_imported_keys;
+
+        let (key_type, data) = key_manager_imported_keys::table
+            .select((
+                key_manager_imported_keys::key_type,
+                key_manager_imported_keys::encrypted_secret,
+            ))
+            .filter(key_manager_imported_keys::id.eq(id as i32))
+            .first::<(String, Vec<u8>)>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "imported_key".to_string(),
+                key: id.to_string(),
+            })?;
+
+        Ok((
+            key_type
+                .parse::<KeyType>()
+                .map_err(|_| WalletStorageError::DecodingError {
+                    operation: OPERATION,
+                    item: "imported_key",
+                    details: format!("Failed to parse key type: {}", key_type),
+                })?,
+            data.into_boxed_slice(),
+        ))
     }
 
     // -------------------------------- Config -------------------------------- //
@@ -638,7 +669,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
     }
 
     // -------------------------------- Outputs -------------------------------- //
-    fn outputs_get_unspent_balance(&mut self, vault_address: &VaultId) -> Result<u64, WalletStorageError> {
+    fn confidential_outputs_get_unspent_balance(&mut self, vault_address: &VaultId) -> Result<u64, WalletStorageError> {
         use crate::schema::{confidential_outputs, vaults};
 
         let vault_id = vaults::table
@@ -663,7 +694,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
         Ok(balance.map(|v| v.to_u64().expect("overflow")).unwrap_or(0))
     }
 
-    fn outputs_get_locked_by_lock_id(
+    fn confidential_outputs_get_locked_by_lock_id(
         &mut self,
         lock_id: WalletLockId,
     ) -> Result<Vec<ConfidentialOutputModel>, WalletStorageError> {
@@ -715,7 +746,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
         Ok(confidential_outputs)
     }
 
-    fn outputs_get_by_commitment(
+    fn confidential_outputs_get_by_commitment(
         &mut self,
         vault_id: &VaultId,
         commitment: &PedersenCommitmentBytes,
@@ -757,7 +788,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
         Ok(output)
     }
 
-    fn outputs_get_by_account_and_status(
+    fn confidential_outputs_get_by_account_and_status(
         &mut self,
         account_addr: &ComponentAddress,
         status: OutputStatus,
@@ -1248,18 +1279,20 @@ impl WalletStoreReader for ReadTransaction<'_> {
     fn utxo_process_queue_fetch_batch(
         &mut self,
         batch_size: usize,
-    ) -> Result<HashMap<ResourceAddress, HashMap<TagAndPublicNoncePair, u64>>, WalletStorageError> {
+    ) -> Result<HashMap<ResourceAddress, HashMap<TagAndPublicNoncePair, ComponentAddress>>, WalletStorageError> {
         const OPERATION: &str = "utxo_process_queue_fetch_batch";
-        use crate::schema::utxo_process_queue;
+        use crate::schema::{accounts, utxo_process_queue};
 
         let rows = utxo_process_queue::table
+            .inner_join(accounts::table.on(accounts::id.eq(utxo_process_queue::account_id)))
+            .select((utxo_process_queue::all_columns, accounts::address.assume_not_null()))
             .order(utxo_process_queue::id.asc())
             .limit(i64::try_from(batch_size).unwrap_or(i64::MAX))
-            .get_results::<models::UtxoProcessQueue>(self.connection())
+            .get_results::<(models::UtxoProcessQueue, String)>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
         let mut result = HashMap::new();
-        for row in &rows {
+        for (row, account_addr) in &rows {
             let resource_address =
                 ResourceAddress::from_str(&row.resource_address).map_err(|e| WalletStorageError::DecodingError {
                     operation: OPERATION,
@@ -1268,10 +1301,15 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 })?;
             let tag = UtxoTag::new(row.utxo_tag as u32);
             let public_nonce = deserialize_hex_try_from(&row.public_nonce)?;
+            let account_addr = account_addr.parse().map_err(|e| WalletStorageError::DecodingError {
+                operation: OPERATION,
+                item: "account_address",
+                details: format!("Corrupt db: invalid account address '{}': {}", account_addr, e),
+            })?;
             result
                 .entry(resource_address)
                 .or_insert_with(HashMap::new)
-                .insert((tag, public_nonce), row.account_key_index as u64);
+                .insert((tag, public_nonce), account_addr);
         }
 
         Ok(result)

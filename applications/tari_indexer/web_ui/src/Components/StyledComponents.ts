@@ -26,21 +26,20 @@ import { styled } from "@mui/material/styles";
 import Box from "@mui/material/Box";
 import IconButton from "@mui/material/IconButton";
 import Typography from "@mui/material/Typography";
+import Card, { CardProps } from "@mui/material/Card";
 
 interface IAccordionIconButton {
   open: boolean;
 }
 
-export const AccordionIconButton = styled(IconButton)<IAccordionIconButton>(
-  ({ theme, open }) => ({
-    backgroundColor: open ? theme.palette.primary.main : "#fff",
-    color: open ? "#fff" : theme.palette.primary.main,
-    "&:hover": {
-      backgroundColor: theme.palette.primary.main,
-      color: "#fff",
-    },
-  })
-);
+export const AccordionIconButton = styled(IconButton)<IAccordionIconButton>(({ theme, open }) => ({
+  backgroundColor: open ? theme.palette.primary.main : "#fff",
+  color: open ? "#fff" : theme.palette.primary.main,
+  "&:hover": {
+    backgroundColor: theme.palette.primary.main,
+    color: "#fff",
+  },
+}));
 
 export const StyledPaper = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(3),
@@ -49,6 +48,7 @@ export const StyledPaper = styled(Paper)(({ theme }) => ({
 
 export const DataTableCell = styled(TableCell)(({ theme }) => ({
   fontFamily: "'Courier New', Courier, monospace",
+  fontSize: "14px",
 }));
 
 export const CodeBlock = styled(Box)(({ theme }) => ({
@@ -77,4 +77,14 @@ export const SubHeading = styled(Typography)(() => ({
   marginTop: "20px",
   marginBottom: "20px",
   textAlign: "center",
+}));
+
+export const NftCard: React.FC<CardProps> = styled(Card)(() => ({
+  height: "100%",
+  display: "flex",
+  flexDirection: "column",
+  transition: "transform 0.3s ease",
+  "&:hover": {
+    transform: "scale(1.02)",
+  },
 }));

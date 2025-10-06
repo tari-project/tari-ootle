@@ -159,17 +159,9 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
         })
     }
 
-    pub fn get_many(&self, offset: u64, limit: u64) -> Result<Vec<AccountWithAddress>, AccountsApiError> {
+    pub fn get_many(&self, offset: usize, limit: usize) -> Result<Vec<Account>, AccountsApiError> {
         let accounts = self.store.with_read_tx(|tx| tx.accounts_get_many(offset, limit))?;
-        accounts
-            .into_iter()
-            .map(|a| {
-                self.get_address_for_account(&a).map(|address| AccountWithAddress {
-                    account: a,
-                    address: address.to_byte_type(),
-                })
-            })
-            .collect()
+        Ok(accounts)
     }
 
     pub fn count(&self) -> Result<u64, AccountsApiError> {
@@ -233,7 +225,7 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
         })
     }
 
-    fn get_address_for_account(&self, account: &Account) -> Result<RistrettoOotleAddress, AccountsApiError> {
+    pub fn get_address_for_account(&self, account: &Account) -> Result<RistrettoOotleAddress, AccountsApiError> {
         let view_only_key = match account.view_only_key_id {
             KeyId::Derived { index } => {
                 let view_only_key = self.key_manager_api.derive_view_only_key(index)?;

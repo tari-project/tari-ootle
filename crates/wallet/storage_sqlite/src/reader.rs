@@ -396,7 +396,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
         Ok(account)
     }
 
-    fn accounts_get_many(&mut self, offset: u64, limit: u64) -> Result<Vec<Account>, WalletStorageError> {
+    fn accounts_get_many(&mut self, offset: usize, limit: usize) -> Result<Vec<Account>, WalletStorageError> {
         use crate::schema::accounts;
 
         let rows = accounts::table

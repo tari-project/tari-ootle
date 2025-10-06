@@ -244,14 +244,20 @@ pub async fn handle_list(
 ) -> Result<AccountsListResponse, anyhow::Error> {
     context.check_auth(token, &[JrpcPermission::Admin])?;
     let sdk = context.wallet_sdk();
-    let accounts = sdk.accounts_api().get_many(req.offset, req.limit)?;
-    let total = sdk.accounts_api().count()?;
+    let limit = usize::try_from(req.limit)
+        .map_err(|e| invalid_params("limit", Some(&format!("limit overflowed usize: {}", e))))?;
+    let offset = usize::try_from(req.offset)
+        .map_err(|e| invalid_params("offset", Some(&format!("offset overflowed usize: {}", e))))?;
+    let accounts_api = sdk.accounts_api();
+    let accounts = accounts_api.get_many(offset, limit)?;
+    let total = accounts_api.count()?;
     let accounts = accounts
         .into_iter()
         .map(|a| {
+            let address = accounts_api.get_address_for_account(&a)?;
             Ok(AccountInfo {
-                account: a.account,
-                address: a.address,
+                account: a,
+                address: address.to_byte_type(),
             })
         })
         .collect::<Result<_, anyhow::Error>>()?;

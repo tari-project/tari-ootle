@@ -117,7 +117,7 @@ where
 
         let maybe_src_vault = self
             .accounts_api
-            .get_vault_by_resource(owner_account.address(), &resource_address)
+            .get_vault_by_resource(owner_account.component_address(), &resource_address)
             .optional()?;
 
         let available_revealed_funds = maybe_src_vault
@@ -128,7 +128,7 @@ where
         match input_selection {
             ConfidentialTransferInputSelection::ConfidentialOnly => {
                 let (input_models, total_locked) = self.outputs_api.lock_outputs_for_at_least_amount(
-                    owner_account.address(),
+                    owner_account.component_address(),
                     &resource_address,
                     lock_id,
                     spend_amount,
@@ -161,7 +161,7 @@ where
                             details: format!(
                                 "No vault found for resource {} in account {}",
                                 resource_address,
-                                owner_account.address()
+                                owner_account.component_address()
                             ),
                         })?;
 
@@ -215,14 +215,14 @@ where
                             "PreferRevealed: No vault found for resource {} in account {}. Need to spend {} revealed \
                              funds",
                             resource_address,
-                            owner_account.address(),
+                            owner_account.component_address(),
                             revealed_to_spend
                         ),
                     });
                 }
 
                 let (inputs, _) = self.outputs_api.lock_outputs_for_at_least_amount(
-                    owner_account.address(),
+                    owner_account.component_address(),
                     &resource_address,
                     lock_id,
                     utxo_amount_to_spend,
@@ -276,7 +276,7 @@ where
             ConfidentialTransferInputSelection::PreferConfidential => {
                 let lock_id = self.outputs_api.create_lock()?;
                 let (blinded_inputs, blinded_amount_locked) = self.outputs_api.lock_outputs_until_partial_amount(
-                    owner_account.address(),
+                    owner_account.component_address(),
                     &resource_address,
                     spend_amount,
                     lock_id,
@@ -306,7 +306,7 @@ where
                                     "PreferConfidential: No vault found for resource {} in account {}. Need to spend \
                                      {} revealed funds",
                                     resource_address,
-                                    owner_account.address(),
+                                    owner_account.component_address(),
                                     revealed_to_spend
                                 ),
                             });

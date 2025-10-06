@@ -22,7 +22,7 @@ pub struct Account {
 }
 
 impl Account {
-    pub fn address(&self) -> &ComponentAddress {
+    pub fn component_address(&self) -> &ComponentAddress {
         &self.component_address
     }
 

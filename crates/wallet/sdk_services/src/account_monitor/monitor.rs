@@ -145,26 +145,37 @@ where
 
     async fn refresh_all_accounts(&self) -> Result<(), AccountMonitorError> {
         let accounts_api = self.wallet_sdk.accounts_api();
-        // TODO: There could be more than 100 accounts
-        let accounts = accounts_api.get_many(0, 100)?;
-        for account in accounts {
-            let is_updated = self.scanner.refresh_account(*account.component_address()).await?;
-            if self.enable_periodic_scanning_with_utxos {
-                self.refresh_stealth_utxos(*account.component_address()).await?;
+        const PAGE_SIZE: usize = 10;
+        let mut offset = 0;
+        loop {
+            let accounts = accounts_api.get_many(offset, PAGE_SIZE)?;
+            if accounts.is_empty() {
+                break;
             }
+            for account in &accounts {
+                let is_updated = self.scanner.refresh_account(*account.component_address()).await?;
+                if self.enable_periodic_scanning_with_utxos {
+                    self.refresh_stealth_utxos(*account.component_address()).await?;
+                }
 
-            if is_updated {
-                info!(
-                    target: LOG_TARGET,
-                    "👁️‍🗨️ Account {} has been updated", account
-                );
-            } else {
-                info!(
-                    target: LOG_TARGET,
-                    "👁️‍🗨️ Account {} is up to date", account
-                );
+                if is_updated {
+                    info!(
+                        target: LOG_TARGET,
+                        "👁️‍🗨️ Account {} has been updated", account
+                    );
+                } else {
+                    info!(
+                        target: LOG_TARGET,
+                        "👁️‍🗨️ Account {} is up to date", account
+                    );
+                }
+            }
+            offset += accounts.len();
+            if accounts.len() < PAGE_SIZE {
+                break;
             }
         }
+
         Ok(())
     }
 

@@ -179,7 +179,7 @@ pub trait WalletStoreReader {
     fn substates_get_children(&mut self, parent: &SubstateId) -> Result<Vec<SubstateModel>, WalletStorageError>;
     // Accounts
     fn accounts_get(&mut self, address: &ComponentAddress) -> Result<Account, WalletStorageError>;
-    fn accounts_get_many(&mut self, offset: u64, limit: u64) -> Result<Vec<Account>, WalletStorageError>;
+    fn accounts_get_many(&mut self, offset: usize, limit: usize) -> Result<Vec<Account>, WalletStorageError>;
     fn accounts_get_default(&mut self) -> Result<Account, WalletStorageError>;
     fn accounts_count(&mut self) -> Result<u64, WalletStorageError>;
     fn accounts_get_by_name(&mut self, name: &str) -> Result<Account, WalletStorageError>;

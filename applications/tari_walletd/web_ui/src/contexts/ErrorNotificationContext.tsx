@@ -88,6 +88,7 @@ export const ErrorNotificationProvider: React.FC<{ children: React.ReactNode }> 
           <Alert
             onClose={clearNotification}
             severity={notification.severity}
+            variant="filled"
             sx={{
               width: "100%",
               borderRadius: 6,

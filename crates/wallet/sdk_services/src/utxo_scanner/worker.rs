@@ -198,7 +198,7 @@ where
         .await?;
 
     // UTXOs were found, notify the Utxo recovery worker that there is work to do
-    if stats.num_recovered > 0 {
+    if stats.num_potential_recoveries > 0 {
         let _ = notify_tx.send(());
     }
 

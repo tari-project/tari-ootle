@@ -76,10 +76,9 @@ where
 
     pub async fn scan_for_utxo_updates(&mut self) -> Result<(), StealthScannerApiError> {
         loop {
-            if !self.scan().await? {
+            if !self.process_next_batch().await? {
                 break;
             }
-            self.stats.num_recovered += 1;
         }
 
         Ok(())
@@ -90,7 +89,7 @@ where
     }
 
     #[allow(clippy::too_many_lines)]
-    async fn scan(&mut self) -> Result<bool, StealthScannerApiError> {
+    async fn process_next_batch(&mut self) -> Result<bool, StealthScannerApiError> {
         let mut shard_state_versions = self
             .sdk
             .store()
@@ -176,7 +175,7 @@ where
         // Atomically persist all changes from this round
         let num_recovered = self.utxos_to_recover.len();
         self.stats.num_received += num_received;
-        self.stats.num_recovered += num_recovered;
+        self.stats.num_potential_recoveries += num_recovered;
         let mut num_spent = 0;
         self.sdk.store().with_write_tx(|tx| {
             // Mark UTXOs as spent (if they exist)
@@ -274,7 +273,10 @@ where
 
 #[derive(Debug, Clone, Default)]
 pub struct UtxoScanRoundStats {
+    /// Number of UTXO updates received from the network
     pub num_received: usize,
-    pub num_recovered: usize,
+    /// Number of UTXOs that matched the tag and were queued for recovery
+    pub num_potential_recoveries: usize,
+    /// Number of UTXOs that were marked as spent
     pub num_spent: usize,
 }

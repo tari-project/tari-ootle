@@ -238,16 +238,9 @@ impl KeyId {
         }
     }
 
-    pub fn imported_view_key_id(&self) -> Option<ImportedKeyId> {
+    pub fn imported_key_id(&self) -> Option<ImportedKeyId> {
         match self {
             Self::Imported { local_key_id } => Some(*local_key_id),
-            Self::Derived { .. } => None,
-        }
-    }
-
-    pub fn imported_owner_key_id(&self) -> Option<ImportedKeyId> {
-        match self {
-            Self::Imported { local_key_id, .. } => Some(*local_key_id),
             Self::Derived { .. } => None,
         }
     }

@@ -178,7 +178,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
 
     pub fn release_locked_outputs(&self, lock_id: WalletLockId) -> Result<(), StealthOutputsApiError> {
         self.store.with_write_tx(|tx| {
-            tx.confidential_outputs_release_by_lock_id(lock_id)?;
+            tx.stealth_outputs_release_by_lock_id(lock_id)?;
             tx.locks_delete(lock_id)?;
             Ok(())
         })

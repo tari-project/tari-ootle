@@ -78,7 +78,7 @@ export const useAccountsCreate = () => {
       return await accountsCreate({
         account_name: req.accountName || "",
         is_default: req.isDefault || null,
-        key_index: req.keyId || null,
+        key_index: req.keyId ?? null,
       });
     },
     onError: (error: ApiError) => {

@@ -60,7 +60,13 @@ impl ConfidentialOutput {
             value: (self.value as u64).into(),
             sender_public_nonce: self
                 .sender_public_nonce
-                .map(|nonce| RistrettoPublicKeyBytes::from_hex(&nonce).unwrap()),
+                .map(|nonce| RistrettoPublicKeyBytes::from_hex(&nonce))
+                .transpose()
+                .map_err(|_| WalletStorageError::DecodingError {
+                    operation: "try_into_output",
+                    item: "output",
+                    details: "Corrupt db: invalid sender public nonce".to_string(),
+                })?,
             view_only_key_id: deserialize_json(&self.view_only_key_id)?,
             owner_key_id: self.owner_key_id.map(|id| deserialize_json(&id)).transpose()?,
             encrypted_data: EncryptedData::try_from(self.encrypted_data).map_err(|len| {
@@ -72,7 +78,13 @@ impl ConfidentialOutput {
             })?,
             public_asset_tag: self
                 .public_asset_tag
-                .map(|tag| RistrettoPublicKeyBytes::from_hex(&tag).unwrap()),
+                .map(|tag| RistrettoPublicKeyBytes::from_hex(&tag))
+                .transpose()
+                .map_err(|_| WalletStorageError::DecodingError {
+                    operation: "try_into_output",
+                    item: "output",
+                    details: "Corrupt db: invalid public asset tag".to_string(),
+                })?,
             status: self.status.parse().map_err(|_| WalletStorageError::DecodingError {
                 operation: "try_into_output",
                 item: "output",

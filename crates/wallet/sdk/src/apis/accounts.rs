@@ -96,7 +96,7 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
                 component_address: account_component_address,
                 view_only_key_id: account_address.view_only_key_id,
                 owner_key_id: Some(account_address.owner_key_id),
-                owner_public_key: Default::default(),
+                owner_public_key: account_public_key,
                 is_confirmed_on_chain: false,
                 is_default,
             },

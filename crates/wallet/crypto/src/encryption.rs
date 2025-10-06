@@ -172,7 +172,7 @@ fn derive_keys(passphrase: &[u8], salt: &[u8]) -> Result<SafeArray<u8, KEY_BYTES
     .expect("Incorrect Argon2 parameters");
 
     // Derive the main key from the password in place
-    let hasher = argon2::Argon2::new(argon2::Algorithm::Argon2d, argon2::Version::V0x13, params);
+    let hasher = argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
     hasher
         .hash_password_into(passphrase, argon2_salt, main_key.as_mut())
         .map_err(|_| CipherError("Problem generating Argon2 password hash".to_string()))?;

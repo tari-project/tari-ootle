@@ -3,6 +3,7 @@
 
 use bnum::BUint;
 use newtype_ops::newtype_ops;
+use serde::ser::Error;
 use tari_template_abi::rust::{cmp, fmt, fmt::Debug, iter::Sum, ops::Neg, str::FromStr, write};
 
 use crate::{impl_from, partial_eq_impl, partial_ord_impl};
@@ -314,6 +315,10 @@ impl Amount {
         }
     }
 
+    /// Formats the amount as a decimal string with the specified number of decimal places.
+    ///
+    /// ## Panics
+    /// Panics if `decimals` is greater than 57.
     pub fn to_decimal_string(&self, decimals: u32) -> String {
         let mut s = String::new();
         self.fmt_decimals(&mut s, decimals)
@@ -325,6 +330,11 @@ impl Amount {
         if decimals == 0 {
             write!(f, "{}", self.inner_value())?;
             return Ok(());
+        }
+
+        // I192 can represent up to ~10^57, so 57 decimal places is a safe upper bound
+        if decimals > 57 {
+            return Err(fmt::Error::custom("Too many decimal places"));
         }
 
         let ten = I192::from(10);
@@ -623,6 +633,15 @@ mod tests {
         assert_eq!(a.to_decimal_string(5), "1.23456");
         assert_eq!(a.to_decimal_string(6), "0.123456");
         assert_eq!(a.to_decimal_string(8), "0.00123456");
+
+        assert_eq!(
+            a.to_decimal_string(57),
+            "0.000000000000000000000000000000000000000000000000000123456"
+        );
+
+        // > 57 decimals errors
+        let mut s = String::new();
+        a.fmt_decimals(&mut s, 58).unwrap_err();
 
         let b = Amount::from(-123456);
         assert_eq!(b.to_decimal_string(0), "-123456");

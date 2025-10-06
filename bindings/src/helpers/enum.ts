@@ -22,14 +22,5 @@ export function matchesTypeEnum<T extends Object>(enumObject: T | null, value: T
   const enumValue = (enumObject as any)[key];
   const valueValue = (value as any)[key];
 
-  // Check for primitive types
-  if (typeof enumValue === "string" || typeof enumValue === "number" || typeof enumValue === "boolean") {
-    return typeof enumValue === typeof valueValue;
-  }
-
-  // Check for object types (shallow check)
-  if (typeof enumValue === "object" && enumValue !== null) {
-    return enumValue === valueValue;
-  }
-  return false;
+  return enumValue === valueValue;
 }

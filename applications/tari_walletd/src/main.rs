@@ -29,6 +29,7 @@ use tari_common::initialize_logging;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::ToByteType;
 use tari_ootle_app_utilities::configuration::load_configuration;
+use tari_ootle_common_types::optional::Optional;
 use tari_ootle_wallet_sdk::{apis::key_manager::KeyBranch, cipher_seed::CipherSeedRestore};
 use tari_ootle_walletd::{
     cli::{Cli, Subcommand},
@@ -90,13 +91,14 @@ async fn main() -> Result<(), anyhow::Error> {
             let public_key = account_address.address.account_key().to_byte_type();
             let view_only_public_key = account_address.address.view_only_key().to_byte_type();
             let account_addr = sdk.accounts_api().derive_account_address_from_public_key(&public_key);
+            let is_default = !sdk.accounts_api().any_accounts_exist()?;
             sdk.accounts_api().add_account(
                 name.as_deref(),
                 &account_addr,
                 account_address.view_only_key_id,
                 account_address.owner_key_id,
                 false,
-                true,
+                is_default,
             )?;
 
             if *set_active {

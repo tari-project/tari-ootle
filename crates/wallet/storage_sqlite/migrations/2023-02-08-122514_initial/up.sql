@@ -274,7 +274,7 @@ CREATE INDEX shard_state_versions_account_resource_shard_state_version_idx ON sh
 CREATE TABLE utxo_process_queue
 (
     id               INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    account_id       INTEGER  NOT NULL,
+    account_id       INTEGER  NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
     resource_address TEXT     NOT NULL,
     utxo_tag         INT      NOT NULL,
     public_nonce     TEXT     NOT NULL,

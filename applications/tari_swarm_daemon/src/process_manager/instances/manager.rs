@@ -185,7 +185,7 @@ impl InstanceManager {
                 let claim_public_key = serde_json::from_reader::<_, serde_json::Value>(reader)
                     .context("Failed to read claim public key file")?;
                 let claim_public_key = claim_public_key
-                    .get("public_key")
+                    .get("account_public_key")
                     .and_then(|pk| pk.as_str())
                     .context("Failed to extract public key from claim public key file")?;
                 info!("Setting claim public key to {}", claim_public_key);

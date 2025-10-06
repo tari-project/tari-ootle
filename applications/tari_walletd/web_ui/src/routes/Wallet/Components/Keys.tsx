@@ -37,13 +37,16 @@ import { DataTableCell } from "@components/StyledComponents";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import { KeyId } from "@tari-project/typescript-bindings";
 
-function Key([key, pk, active]: [KeyId, string, boolean], setActive: (key_id: KeyId) => void) {
+function Key([keyId, pk, active]: [KeyId, string, boolean], setActive: (key_id: KeyId) => void) {
+  const rowKey =
+    "Derived" in keyId
+      ? `derived-${keyId.Derived.index.toString()}`
+      : `imported-${keyId.Imported.local_key_id.toString()}`;
   return (
     <TableRow>
-      {/* @ts-ignore */}
-      <DataTableCell>{key.Derived.index}</DataTableCell>
+      <DataTableCell>{rowKey}</DataTableCell>
       <DataTableCell>{pk}</DataTableCell>
-      <DataTableCell>{active ? <b>Active</b> : <div onClick={() => setActive(key)}>Activate</div>}</DataTableCell>
+      <DataTableCell>{active ? <b>Active</b> : <div onClick={() => setActive(keyId)}>Activate</div>}</DataTableCell>
     </TableRow>
   );
 }

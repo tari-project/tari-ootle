@@ -67,7 +67,7 @@ function ManifestEditor() {
       manifest: manifest.code,
       variables: manifest.variables,
       max_fee: isDryRun ? 3000 : Number(fee),
-      signing_key_index: null,
+      signing_key_id: null,
       dry_run: isDryRun,
     })
       .then((response) => {

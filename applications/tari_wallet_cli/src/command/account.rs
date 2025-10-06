@@ -111,7 +111,7 @@ async fn handle_create(args: CreateArgs, client: &mut WalletDaemonClient) -> Res
         .create_account(AccountsCreateRequest {
             account_name: args.account_name,
             is_default: Some(args.is_default),
-            key_id: args.key_id,
+            key_index: args.key_id,
         })
         .await?;
 
@@ -168,7 +168,7 @@ async fn handle_create_free_test_coins(
                 .create_or_get_account(AccountsCreateOrGetRequest {
                     account: Some(account),
                     is_default: None,
-                    key_id: args.key_id,
+                    key_index: args.key_id,
                 })
                 .await?;
             resp.account
@@ -179,7 +179,7 @@ async fn handle_create_free_test_coins(
                 .create_account(AccountsCreateRequest {
                     account_name: None,
                     is_default: None,
-                    key_id: args.key_id,
+                    key_index: args.key_id,
                 })
                 .await?;
             resp.account

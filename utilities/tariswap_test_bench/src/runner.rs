@@ -7,7 +7,7 @@ use log::info;
 use tari_crypto::tari_utilities::SafePassword;
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_common_types::Network;
-use tari_ootle_wallet_sdk::{WalletSdk as Sdk, WalletSdkConfig};
+use tari_ootle_wallet_sdk::{cipher_seed::CipherSeedRestore, WalletSdk as Sdk, WalletSdkConfig};
 use tari_ootle_wallet_sdk_services::indexer_jrpc::IndexerJsonRpcNetworkInterface;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_transaction::{Transaction, TransactionBuilder, TransactionId};
@@ -121,6 +121,6 @@ fn initialize_wallet_sdk<P: AsRef<Path>>(db_path: P, indexer_url: Url) -> Result
     };
     let indexer = IndexerJsonRpcNetworkInterface::new(indexer_url);
     let mut sdk = WalletSdk::initialize(store, indexer, sdk_config)?;
-    sdk.initialize_cipher_seed(None)?;
+    sdk.initialize_cipher_seed(CipherSeedRestore::CreateNewIfRequired)?;
     Ok(sdk)
 }

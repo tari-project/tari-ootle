@@ -42,6 +42,6 @@ pub async fn handle_set(
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
     sdk.get_network_interface().set_endpoint(&req.indexer_url)?;
-    sdk.config_api().set(ConfigKey::IndexerUrl, &req.indexer_url, false)?;
+    sdk.config_api().set(ConfigKey::IndexerUrl, &req.indexer_url)?;
     Ok(SettingsSetResponse {})
 }

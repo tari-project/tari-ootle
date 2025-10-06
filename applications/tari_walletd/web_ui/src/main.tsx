@@ -29,7 +29,6 @@ import TransactionDetails from "@routes/Transactions/TransactionDetails";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import queryClient from "@api/queryClient";
-import "@utils/serialize";
 
 const router = createBrowserRouter([
   {

@@ -4,5 +4,5 @@ import type { ComponentAddressOrName } from "./ComponentAddressOrName";
 export type AccountsCreateOrGetRequest = {
   account: ComponentAddressOrName | null;
   is_default: boolean | null;
-  key_id: number | null;
+  key_index: number | null;
 };

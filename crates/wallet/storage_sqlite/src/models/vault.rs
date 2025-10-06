@@ -7,8 +7,7 @@ use diesel::{Identifiable, Queryable};
 use tari_ootle_wallet_sdk::storage::WalletStorageError;
 use tari_template_lib::{
     models::{ComponentAddress, ResourceAddress, VaultId},
-    prelude::ResourceType,
-    types::Amount,
+    types::{Amount, ResourceType},
 };
 use time::PrimitiveDateTime;
 

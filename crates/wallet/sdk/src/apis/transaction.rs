@@ -267,7 +267,7 @@ where
                         let lock_ids = tx.locks_get_by_transaction_id(transaction_id)?;
                         info!(target: LOG_TARGET, "Finalizing locked outputs for transaction {}: {:?}", transaction_id, lock_ids);
                         for lock_id in lock_ids {
-                            tx.outputs_finalize_by_lock_id(lock_id)?;
+                            tx.confidential_outputs_finalize_by_lock_id(lock_id)?;
                             tx.stealth_outputs_finalize_by_lock_id(lock_id)?;
                             tx.vaults_finalized_locked_revealed_funds(lock_id).optional()?;
                             tx.locks_delete(lock_id)?;
@@ -298,7 +298,7 @@ where
         debug!(target: LOG_TARGET, "Releasing {} locks (and associated outputs) for transaction {} that was not committed", lock_ids.len(), transaction_id);
         for lock_id in lock_ids {
             // Lock could be for confidential outputs or stealth outputs
-            tx.outputs_release_by_lock_id(lock_id)?;
+            tx.confidential_outputs_release_by_lock_id(lock_id)?;
             tx.stealth_outputs_release_by_lock_id(lock_id)?;
             // If the lock locks a vault, we need to release the revealed funds
             tx.vaults_release_lock_revealed_funds(lock_id).optional()?;

@@ -39,6 +39,7 @@ use tari_ootle_wallet_sdk::{
         config::{ConfigApi, ConfigKey},
         key_manager::KeyBranch,
     },
+    cipher_seed::CipherSeedRestore,
     WalletSdk,
     WalletSdkConfig,
 };
@@ -74,7 +75,8 @@ pub async fn run_tari_ootle_walletd(
     let wallet_store = init_wallet_store(&config)?;
     let mut wallet_sdk = initialize_wallet_sdk(&config, wallet_store.clone())?;
 
-    let needs_seed_recovery = wallet_sdk.initialize_cipher_seed(seed_words)?;
+    let needs_seed_recovery =
+        wallet_sdk.initialize_cipher_seed(seed_words.map(CipherSeedRestore::FromSeedWords).unwrap_or_default())?;
 
     wallet_sdk.key_manager_api().get_or_create_initial(KeyBranch::Account)?;
 

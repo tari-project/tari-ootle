@@ -8,7 +8,6 @@ use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 use tari_ootle_wallet_crypto::{kdfs, MaskAndValue};
 use tari_template_lib::{models::VaultId, prelude::PedersenCommitmentBytes, types::Amount};
 use tari_transaction::TransactionId;
-use tari_transaction_components::key_manager::tari_key_manager::DerivedKey;
 
 use crate::{
     apis::{
@@ -16,7 +15,7 @@ use crate::{
         confidential_crypto::{ConfidentialCryptoApi, ConfidentialCryptoApiError},
         key_manager::{KeyManagerApi, KeyManagerApiError},
     },
-    models::{Account, ConfidentialOutputModel, OutputStatus, WalletLockId},
+    models::{Account, ConfidentialOutputModel, Key, OutputStatus, WalletLockId},
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
@@ -94,7 +93,9 @@ where TStore: WalletStore
         let mut total_output_amount = Amount::zero();
         let mut outputs = Vec::new();
         while total_output_amount < amount {
-            let output = tx.outputs_lock_smallest_amount(vault_id, lock_id).optional()?;
+            let output = tx
+                .confidential_outputs_lock_smallest_amount(vault_id, lock_id)
+                .optional()?;
             match output {
                 Some(output) => {
                     total_output_amount += output.value;
@@ -111,7 +112,7 @@ where TStore: WalletStore
 
     pub fn add_output(&self, output: ConfidentialOutputModel) -> Result<(), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
-        tx.outputs_insert(output)?;
+        tx.confidential_outputs_insert(output)?;
         tx.commit()?;
         Ok(())
     }
@@ -134,7 +135,7 @@ where TStore: WalletStore
 
     pub fn release_locked_outputs(&self, lock_id: WalletLockId) -> Result<(), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
-        tx.outputs_release_by_lock_id(lock_id)?;
+        tx.confidential_outputs_release_by_lock_id(lock_id)?;
         tx.locks_delete(lock_id)?;
         tx.commit()?;
         Ok(())
@@ -142,7 +143,7 @@ where TStore: WalletStore
 
     pub fn finalize_outputs_for_lock(&self, lock_id: WalletLockId) -> Result<(), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
-        tx.outputs_finalize_by_lock_id(lock_id)?;
+        tx.confidential_outputs_finalize_by_lock_id(lock_id)?;
         tx.locks_delete(lock_id)?;
         tx.commit()?;
         Ok(())
@@ -155,9 +156,7 @@ where TStore: WalletStore
         let mut outputs_with_masks = Vec::with_capacity(outputs.len());
         for output in outputs {
             // Encryption is always done with a DH of the account's public key
-            let encryption_key = self
-                .key_manager_api
-                .derive_account_key(output.encryption_secret_key_index)?;
+            let encryption_key = self.key_manager_api.get_view_only_key(output.view_only_key_id)?;
             // Either derive the mask from the sender's public nonce or from the local key manager
             let shared_decrypt_key = match output.sender_public_nonce {
                 Some(nonce) => {
@@ -172,11 +171,11 @@ where TStore: WalletStore
                     })?;
 
                     // Derive shared secret
-                    kdfs::encrypted_data_dh_kdf_aead(&encryption_key.key, &nonce)
+                    kdfs::encrypted_data_dh_kdf_aead(&encryption_key.secret, &nonce)
                 },
                 None => {
                     // Use local secret
-                    encryption_key.key
+                    encryption_key.secret
                 },
             };
 
@@ -212,7 +211,7 @@ where TStore: WalletStore
 
     pub fn get_unspent_balance(&self, vault_id: &VaultId) -> Result<Amount, ConfidentialOutputsApiError> {
         let mut tx = self.store.create_read_tx()?;
-        let balance = tx.outputs_get_unspent_balance(vault_id)?;
+        let balance = tx.confidential_outputs_get_unspent_balance(vault_id)?;
         Ok(balance.into())
     }
 
@@ -225,12 +224,14 @@ where TStore: WalletStore
         vault_id: VaultId,
         outputs: I,
     ) -> Result<(), ConfidentialOutputsApiError> {
-        // We do not support changing of account key at this time
-        let key = self.key_manager_api.derive_account_key(account.key_index)?;
+        let view_key = self.key_manager_api.get_view_only_key(account.view_only_key_id)?;
         let mut tx = self.store.create_write_tx()?;
 
         for (commitment, output) in outputs {
-            match tx.outputs_get_by_commitment(&vault_id, commitment).optional()? {
+            match tx
+                .confidential_outputs_get_by_commitment(&vault_id, commitment)
+                .optional()?
+            {
                 Some(_) => {
                     info!(
                         target: LOG_TARGET,
@@ -241,9 +242,9 @@ where TStore: WalletStore
                 },
                 None => {
                     // Output does not exist. Add it to the store
-                    match self.validate_output(account, &key, vault_id, *commitment, output) {
+                    match self.validate_output(account, &view_key, vault_id, *commitment, output) {
                         Ok(output) => {
-                            tx.outputs_insert(output)?;
+                            tx.confidential_outputs_insert(output)?;
                         },
                         Err(e) => {
                             warn!(
@@ -265,7 +266,7 @@ where TStore: WalletStore
     fn validate_output(
         &self,
         account: &Account,
-        key: &DerivedKey,
+        key: &Key,
         vault_id: VaultId,
         commitment: PedersenCommitmentBytes,
         output: &PrivateOutput,
@@ -289,7 +290,7 @@ where TStore: WalletStore
         let unblinded_result = self.crypto_api.unblind_output(
             &commitment,
             &output.encrypted_data,
-            &key.key,
+            &key.secret,
             &output_stealth_public_nonce,
         );
         let (value, status) = match unblinded_result {
@@ -311,7 +312,8 @@ where TStore: WalletStore
             commitment,
             value,
             sender_public_nonce: Some(output_stealth_public_nonce.to_byte_type()),
-            encryption_secret_key_index: key.key_index,
+            view_only_key_id: key.key_id,
+            owner_key_id: account.owner_key_id,
             encrypted_data: output.encrypted_data.clone(),
             public_asset_tag: None,
             status,

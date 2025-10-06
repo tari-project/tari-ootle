@@ -26,7 +26,7 @@ use tari_template_abi::rust::{
     fmt::{Display, Formatter},
     str::FromStr,
 };
-use tari_template_lib_types::{bytes::Bytes, crypto::StealthValueProof};
+use tari_template_lib_types::{bytes::Bytes, crypto::StealthValueProof, ResourceType};
 
 use crate::{
     args::freeze_flags::VaultFreezeFlags,
@@ -49,7 +49,6 @@ use crate::{
         VaultRef,
     },
     prelude::{ComponentAccessRules, ConfidentialOutputStatement, TemplateAddress},
-    resource::ResourceType,
     template::BuiltinTemplate,
     types::{
         crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},

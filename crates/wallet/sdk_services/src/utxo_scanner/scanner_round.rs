@@ -14,16 +14,18 @@ use tari_ootle_common_types::{
     StateVersion,
 };
 use tari_ootle_wallet_sdk::{
-    models::{AccountWithAddress, UtxoSpent, UtxoUnspent, WalletUtxoUpdate},
+    models::{AccountWithAddress, Key, UtxoSpent, UtxoUnspent, WalletUtxoUpdate},
     network::{StatusResponseError, WalletNetworkInterface},
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
     WalletSdk,
 };
-use tari_template_lib::models::ResourceAddress;
-use tari_transaction_components::key_manager::tari_key_manager::DerivedKey;
-use tokio::sync::watch;
+use tari_template_lib::models::{ComponentAddress, ResourceAddress, UtxoAddress};
 
-use crate::utxo_scanner::StealthScannerApiError;
+use crate::{
+    events::{UtxoSpentEvent, WalletEvent},
+    notify::Notify,
+    utxo_scanner::StealthScannerApiError,
+};
 
 const LOG_TARGET: &str = "tari::ootle::wallet_services::scanner_round";
 // TODO: either fetch num preshards from the network or we should hardcode it to a single value for all apps
@@ -32,15 +34,16 @@ const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
 pub struct UtxoScannerRound<'a, TStore, TNetworkInterface> {
     network: Network,
     account: &'a AccountWithAddress,
-    view_key: &'a DerivedKey,
+    view_key: &'a Key,
     resource_address: &'a ResourceAddress,
 
     sdk: &'a WalletSdk<TStore, TNetworkInterface>,
-    notify_tx: &'a watch::Sender<()>,
+    stats: UtxoScanRoundStats,
 
     shard_state_versions_to_set: HashMap<Shard, StateVersion>,
-    utxos_to_recover: Vec<(u64, UtxoUnspent)>,
+    utxos_to_recover: Vec<(ComponentAddress, UtxoUnspent)>,
     utxos_to_spend: Vec<UtxoSpent>,
+    notify: &'a Notify<WalletEvent>,
 }
 
 impl<'a, TStore, TNetworkInterface> UtxoScannerRound<'a, TStore, TNetworkInterface>
@@ -52,43 +55,41 @@ where
     pub fn new(
         network: Network,
         sdk: &'a WalletSdk<TStore, TNetworkInterface>,
-        notify_tx: &'a watch::Sender<()>,
         account: &'a AccountWithAddress,
-        view_key: &'a DerivedKey,
+        view_key: &'a Key,
         resource_address: &'a ResourceAddress,
+        notify: &'a Notify<WalletEvent>,
     ) -> Self {
         Self {
             network,
             sdk,
-            notify_tx,
             account,
             view_key,
             resource_address,
             shard_state_versions_to_set: HashMap::new(),
             utxos_to_recover: Vec::new(),
             utxos_to_spend: Vec::new(),
+            notify,
+            stats: UtxoScanRoundStats::default(),
         }
     }
 
     pub async fn scan_for_utxo_updates(&mut self) -> Result<(), StealthScannerApiError> {
-        let mut any_found = false;
         loop {
-            if !self.scan().await? {
+            if !self.process_next_batch().await? {
                 break;
             }
-            any_found = true;
-        }
-
-        if any_found {
-            // Notify that there are new UTXOs to process
-            debug!(target: LOG_TARGET, "Notifying that new UTXOs are available for processing");
-            let _ignore = self.notify_tx.send(());
         }
 
         Ok(())
     }
 
-    async fn scan(&mut self) -> Result<bool, StealthScannerApiError> {
+    pub fn into_stats(self) -> UtxoScanRoundStats {
+        self.stats
+    }
+
+    #[allow(clippy::too_many_lines)]
+    async fn process_next_batch(&mut self) -> Result<bool, StealthScannerApiError> {
         let mut shard_state_versions = self
             .sdk
             .store()
@@ -134,7 +135,6 @@ where
         }
 
         let num_received = response.shard_updates.len();
-        let mut num_spent = 0;
 
         for (shard, update_set) in response.shard_updates {
             self.shard_state_versions_to_set
@@ -154,7 +154,7 @@ where
                                 "🏷️ Stealth output tag {} matches. Queueing for recovery.",
                                 unspent.tag
                             );
-                            self.utxos_to_recover.push((self.account.key_index(), unspent));
+                            self.utxos_to_recover.push((*self.account.component_address(), unspent));
                         }
                     },
                     WalletUtxoUpdate::Spent(spent) => {
@@ -174,10 +174,16 @@ where
 
         // Atomically persist all changes from this round
         let num_recovered = self.utxos_to_recover.len();
+        self.stats.num_received += num_received;
+        self.stats.num_potential_recoveries += num_recovered;
+        let mut num_spent = 0;
         self.sdk.store().with_write_tx(|tx| {
             // Mark UTXOs as spent (if they exist)
             for spent in self.utxos_to_spend.drain(..) {
-                if Self::spend(tx, self.resource_address, spent)? {
+                if Self::spend(tx, self.resource_address, &spent)? {
+                    self.notify.notify(UtxoSpentEvent {
+                        address: UtxoAddress::new(*self.resource_address, spent.id),
+                    });
                     num_spent += 1;
                 }
             }
@@ -202,6 +208,8 @@ where
             num_spent
         );
 
+        self.stats.num_spent += num_spent;
+
         Ok(true)
     }
 
@@ -218,7 +226,7 @@ where
 
         let tag = self.sdk.stealth_crypto_api().derive_stealth_output_tag(
             self.network,
-            &self.view_key.key,
+            &self.view_key.secret,
             &public_nonce,
             self.resource_address,
         );
@@ -242,7 +250,7 @@ where
     fn spend(
         tx: &mut TStore::WriteTransaction<'_>,
         resource_address: &ResourceAddress,
-        spent: UtxoSpent,
+        spent: &UtxoSpent,
     ) -> Result<bool, WalletStorageError> {
         match tx
             .stealth_outputs_mark_as_spent(resource_address, &spent.id)
@@ -261,4 +269,14 @@ where
             },
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct UtxoScanRoundStats {
+    /// Number of UTXO updates received from the network
+    pub num_received: usize,
+    /// Number of UTXOs that matched the tag and were queued for recovery
+    pub num_potential_recoveries: usize,
+    /// Number of UTXOs that were marked as spent
+    pub num_spent: usize,
 }

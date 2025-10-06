@@ -3,7 +3,7 @@
 
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_wallet_sdk::models::{Account, NewAccountData, TransactionStatus};
-use tari_template_lib::prelude::ComponentAddress;
+use tari_template_lib::{models::UtxoAddress, prelude::ComponentAddress};
 use tari_transaction::TransactionId;
 
 #[derive(Debug, Clone)]
@@ -14,6 +14,10 @@ pub enum WalletEvent {
     AccountCreatedOnChain(AccountCreatedEvent),
     AccountChangedOnChain(AccountChangedEvent),
     AuthLoginRequest(#[allow(dead_code)] AuthLoginRequestEvent),
+    UtxoRecoveryStarted(UtxoRecoveryStartedEvent),
+    UtxoRecovered(UtxoRecoveredEvent),
+    UtxoRecoveryCompleted(UtxoRecoveryCompletedEvent),
+    UtxoSpent(UtxoSpentEvent),
 }
 
 impl From<TransactionSubmittedEvent> for WalletEvent {
@@ -49,6 +53,30 @@ impl From<AuthLoginRequestEvent> for WalletEvent {
 impl From<AccountCreatedEvent> for WalletEvent {
     fn from(value: AccountCreatedEvent) -> Self {
         Self::AccountCreatedOnChain(value)
+    }
+}
+
+impl From<UtxoRecoveredEvent> for WalletEvent {
+    fn from(value: UtxoRecoveredEvent) -> Self {
+        Self::UtxoRecovered(value)
+    }
+}
+
+impl From<UtxoRecoveryStartedEvent> for WalletEvent {
+    fn from(value: UtxoRecoveryStartedEvent) -> Self {
+        Self::UtxoRecoveryStarted(value)
+    }
+}
+
+impl From<UtxoRecoveryCompletedEvent> for WalletEvent {
+    fn from(value: UtxoRecoveryCompletedEvent) -> Self {
+        Self::UtxoRecoveryCompleted(value)
+    }
+}
+
+impl From<UtxoSpentEvent> for WalletEvent {
+    fn from(value: UtxoSpentEvent) -> Self {
+        Self::UtxoSpent(value)
     }
 }
 
@@ -88,3 +116,25 @@ pub struct TransactionInvalidEvent {
 
 #[derive(Debug, Clone)]
 pub struct AuthLoginRequestEvent;
+
+#[derive(Debug, Clone)]
+pub struct UtxoRecoveredEvent {
+    pub address: UtxoAddress,
+    pub account_address: ComponentAddress,
+}
+
+#[derive(Debug, Clone)]
+pub struct UtxoRecoveryStartedEvent {
+    pub round_id: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct UtxoRecoveryCompletedEvent {
+    pub round_id: usize,
+    pub num_recovered: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct UtxoSpentEvent {
+    pub address: UtxoAddress,
+}

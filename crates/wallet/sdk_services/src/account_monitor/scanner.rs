@@ -1,14 +1,11 @@
-//   Copyright 2023 The Tari Project
+//   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    collections::{HashMap, HashSet},
-    time::Duration,
-};
+use std::collections::{HashMap, HashSet};
 
 use log::*;
 use tari_engine_types::{
-    indexed_value::{IndexedValueError, IndexedWellKnownTypes},
+    indexed_value::IndexedWellKnownTypes,
     non_fungible::NonFungibleContainer,
     resource::Resource,
     substate::{Substate, SubstateDiff, SubstateId, SubstateValue},
@@ -16,148 +13,48 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 use tari_ootle_wallet_sdk::{
-    apis::{
-        accounts::AccountsApiError,
-        confidential_outputs::ConfidentialOutputsApiError,
-        non_fungible_tokens::NonFungibleTokensApiError,
-        resources::ResourcesApiError,
-        stealth_outputs::StealthOutputsApiError,
-        substate::{SubstateApiError, ValidatorScanResult},
-        transaction::TransactionApiError,
-    },
+    apis::substate::ValidatorScanResult,
     models::{AccountUpdate, NewAccountData, NonFungibleToken},
     network::{StatusResponseError, WalletNetworkInterface},
     storage::WalletStore,
     WalletSdk,
 };
-use tari_shutdown::ShutdownSignal;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     models::{NonFungibleAddress, VaultId},
-    prelude::{ComponentAddress, NonFungibleId, ResourceAddress, XTR},
+    prelude::{ComponentAddress, NonFungibleId, ResourceAddress},
     resource::TOKEN_SYMBOL,
 };
 use tari_transaction::TransactionId;
-use tokio::{
-    sync::{mpsc, oneshot},
-    time,
-    time::MissedTickBehavior,
-};
 
 use crate::{
+    account_monitor::monitor::AccountMonitorError,
     events::{AccountChangedEvent, AccountCreatedEvent, WalletEvent},
     notify::Notify,
-    utxo_scanner::UtxoScannerHandle,
-    Reply,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_services::account_monitor";
 
-pub struct AccountMonitor<TStore, TNetworkInterface> {
+pub struct AccountScanner<TStore, TNetworkInterface> {
     notify: Notify<WalletEvent>,
     wallet_sdk: WalletSdk<TStore, TNetworkInterface>,
-    request_rx: mpsc::Receiver<AccountMonitorRequest>,
-    pending_accounts: HashMap<TransactionId, NewAccountData>,
-    utxo_scanner_handle: UtxoScannerHandle,
-    shutdown_signal: ShutdownSignal,
 }
 
-impl<TStore, TNetworkInterface> AccountMonitor<TStore, TNetworkInterface>
+impl<TStore, TNetworkInterface> AccountScanner<TStore, TNetworkInterface>
 where
     TStore: WalletStore,
     TNetworkInterface: WalletNetworkInterface,
     TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
 {
-    pub fn new(
-        notify: Notify<WalletEvent>,
-        wallet_sdk: WalletSdk<TStore, TNetworkInterface>,
-        utxo_scanner_handle: UtxoScannerHandle,
-        shutdown_signal: ShutdownSignal,
-    ) -> (Self, AccountMonitorHandle) {
-        let (request_tx, request_rx) = mpsc::channel(1);
-
-        (
-            Self {
-                notify,
-                wallet_sdk,
-                request_rx,
-                pending_accounts: HashMap::new(),
-                utxo_scanner_handle,
-                shutdown_signal,
-            },
-            AccountMonitorHandle { sender: request_tx },
-        )
+    pub fn new(notify: Notify<WalletEvent>, wallet_sdk: WalletSdk<TStore, TNetworkInterface>) -> Self {
+        Self { notify, wallet_sdk }
     }
 
-    pub async fn run(mut self) -> Result<(), anyhow::Error> {
-        let mut events_subscription = self.notify.subscribe();
-        let mut poll_interval = time::interval(Duration::from_secs(60));
-        poll_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-        loop {
-            tokio::select! {
-                _ = self.shutdown_signal.wait() => {
-                    break Ok(());
-                }
-
-                _ = poll_interval.tick() => {
-                    trace!(target: LOG_TARGET, "Polling for transactions");
-                    self.on_poll().await;
-                }
-
-                Some(req) = self.request_rx.recv() => {
-                    self.handle_request(req).await;
-                }
-
-                Ok(event) = events_subscription.recv() => {
-                    if let Err(e) = self.on_event(event).await {
-                        error!(target: LOG_TARGET, "Error handling event: {}", e);
-                    }
-                },
-            }
-        }
-    }
-
-    async fn handle_request(&self, req: AccountMonitorRequest) {
-        match req {
-            AccountMonitorRequest::RefreshAccount { account, reply } => {
-                let _ignore = reply.send(self.refresh_account(account).await);
-            },
-        }
-    }
-
-    async fn on_poll(&self) {
-        if let Err(err) = self.refresh_all_accounts().await {
-            error!(target: LOG_TARGET, "Error refreshing all accounts: {}", err);
-        }
-    }
-
-    async fn refresh_all_accounts(&self) -> Result<(), AccountMonitorError> {
-        let accounts_api = self.wallet_sdk.accounts_api();
-        // TODO: There could be more than 100 accounts
-        let accounts = accounts_api.get_many(0, 100)?;
-        for account in accounts {
-            info!(
-                target: LOG_TARGET,
-                "👁️‍🗨️ Refreshing account {}", account
-            );
-            let is_updated = self.refresh_account(account.component_address).await?;
-
-            if is_updated {
-                self.notify.notify(AccountChangedEvent {
-                    account_address: account.component_address,
-                });
-            } else {
-                info!(
-                    target: LOG_TARGET,
-                    "👁️‍🗨️ Account {} is up to date", account
-                );
-            }
-        }
-        Ok(())
-    }
-
-    async fn refresh_account(&self, account_address: ComponentAddress) -> Result<bool, AccountMonitorError> {
+    pub async fn refresh_account(&self, account_address: ComponentAddress) -> Result<bool, AccountMonitorError> {
+        info!(
+            target: LOG_TARGET,
+            "👁️‍🗨️ Refreshing account {}", account_address
+        );
         let substate_api = self.wallet_sdk.substate_api();
         let accounts_api = self.wallet_sdk.accounts_api();
 
@@ -181,9 +78,6 @@ where
                 warn!(target: LOG_TARGET, "❓️ Account {} does not exist according to indexer but confirmed_on_chain = true", account_address);
             }
             // Otherwise, the account is not on-chain, so we wouldn't expect the indexer to have it
-
-            // Scan for associated stealth resources
-            self.refresh_stealth_utxos(account_address)?;
 
             return Ok(false);
         };
@@ -238,39 +132,6 @@ where
                 continue;
             };
 
-            // // TODO: this is expensive for many NFTs
-            // let mut nfts = HashMap::with_capacity(latest_vault.get_non_fungible_ids().len());
-            // if !latest_vault.get_non_fungible_ids().is_empty() {
-            //     info!(
-            //         target: LOG_TARGET,
-            //         "Found {} non-fungible(s) in vault {}. Collecting NFT data for update",
-            //         latest_vault.get_non_fungible_ids().len(),
-            //         vault_id
-            //     );
-            // }
-            // for nft in latest_vault.get_non_fungible_ids() {
-            //     let addr = NonFungibleAddress::new(*latest_vault.resource_address(), nft.clone());
-            //     let Some(ValidatorScanResult { address, substate }) =
-            //         substate_api.scan_for_substate(&addr.into(), None).await.optional()?
-            //     else {
-            //         warn!(target: LOG_TARGET, "Non-fungible {} for vault {} does not exist according to indexer",
-            // nft, vault_id);         continue;
-            //     };
-            //     substate_api.save_child(versioned_vault_substate_id.substate_id(), address.as_ref(), [
-            //         (*latest_vault.resource_address()).into(),
-            //     ])?;
-            //     let nft_container = substate.into_non_fungible().ok_or_else(|| {
-            //         AccountMonitorError::UnexpectedSubstate(format!("Expected {} to be a non-fungible token.", nft))
-            //     })?;
-            //     info!(
-            //         target: LOG_TARGET,
-            //         "Found non-fungible {} in vault {}",
-            //         nft,
-            //         vault_id
-            //     );
-            //     nfts.insert(nft.clone(), nft_container);
-            // }
-
             is_updated = true;
 
             // Save the vault substate
@@ -286,31 +147,11 @@ where
                 self.refresh_vault(account_addr, *vault_id, &latest_vault, Default::default())
                     .await?;
             }
-        }
 
-        // Scan for all stealth resources
-        self.refresh_stealth_utxos(account_address)?;
+            self.notify.notify(AccountChangedEvent { account_address });
+        }
 
         Ok(is_updated)
-    }
-
-    fn refresh_stealth_utxos(&self, account_address: ComponentAddress) -> Result<(), AccountMonitorError> {
-        let mut stealth_resources = self
-            .wallet_sdk
-            .accounts_api()
-            .get_associated_stealth_resources(&account_address)?;
-        stealth_resources.insert(XTR);
-
-        info!(
-            target: LOG_TARGET,
-            "👁️‍🗨️ Requesting UTXO scan for account {} for {} stealth resource(s)",
-            account_address,
-            stealth_resources.len()
-        );
-        for resource_address in stealth_resources {
-            self.utxo_scanner_handle.request_scan(account_address, resource_address);
-        }
-        Ok(())
     }
 
     #[allow(clippy::too_many_lines)]
@@ -320,13 +161,13 @@ where
         vault_id: VaultId,
         latest_vault: &Vault,
         updated_nft_data: HashMap<NonFungibleId, NonFungibleContainer>,
-    ) -> Result<(), AccountMonitorError> {
+    ) -> Result<bool, AccountMonitorError> {
         let accounts_api = self.wallet_sdk.accounts_api();
 
         let new_balance = latest_vault.balance();
         if !accounts_api.exists_by_address(&account_address)? {
             // This is not our account
-            return Ok(());
+            return Ok(false);
         }
         let mut has_changed = false;
 
@@ -348,7 +189,7 @@ where
                     account_address
                 );
 
-                let resource = self.fetch_resource(*latest_vault.resource_address()).await?;
+                let resource = self.fetch_and_cache_resource(latest_vault.resource_address()).await?;
                 let token_symbol = resource.token_symbol().map(|s| s.to_string());
                 let divisibility = resource.divisibility();
 
@@ -402,9 +243,8 @@ where
 
         // If the vault has revealed stealth tokens, we should also to scan for UTXOs
         if latest_vault.resource_type().is_stealth() {
-            self.wallet_sdk
-                .accounts_api()
-                .associate_stealth_resource(&account_address, *latest_vault.resource_address())?;
+            self.associate_resource_with_account(&account_address, *latest_vault.resource_address())
+                .await?;
         }
 
         let outputs_api = self.wallet_sdk.confidential_outputs_api();
@@ -424,11 +264,46 @@ where
             accounts_api.update_vault_balance(vault_id, new_balance, new_confidential_balance)?;
             has_changed = true;
         }
-        if has_changed {
-            self.notify.notify(AccountChangedEvent { account_address });
+
+        Ok(has_changed)
+    }
+
+    async fn associate_resource_with_account(
+        &self,
+        account_address: &ComponentAddress,
+        resource_address: ResourceAddress,
+    ) -> Result<(), AccountMonitorError> {
+        let accounts_api = self.wallet_sdk.accounts_api();
+        self.ensure_resource_is_cached(&resource_address).await?;
+        accounts_api.associate_stealth_resource(account_address, resource_address)?;
+        Ok(())
+    }
+
+    async fn ensure_resource_is_cached(&self, resource_address: &ResourceAddress) -> Result<(), AccountMonitorError> {
+        let resources_api = self.wallet_sdk.resources_api();
+        if resources_api.exists(resource_address)? {
+            return Ok(());
+        }
+        debug!(
+            target: LOG_TARGET,
+            "Resource {} not in local store. Fetching from network.",
+            resource_address
+        );
+        let _resource = self.fetch_and_cache_resource(resource_address).await?;
+        Ok(())
+    }
+
+    async fn fetch_and_cache_resource(&self, resx_addr: &ResourceAddress) -> Result<Resource, AccountMonitorError> {
+        if let Some(resx) = self.wallet_sdk.resources_api().get(resx_addr).optional()? {
+            return Ok(resx);
         }
 
-        Ok(())
+        let substate = self.fetch_substate(&SubstateId::Resource(*resx_addr)).await?;
+        let resx = substate.into_substate_value().into_resource().ok_or_else(|| {
+            AccountMonitorError::UnexpectedSubstate(format!("Expected {} to be a resource.", resx_addr))
+        })?;
+        self.wallet_sdk.resources_api().upsert_resource(resx_addr, &resx)?;
+        Ok(resx)
     }
 
     async fn update_vault_nfts(
@@ -534,12 +409,17 @@ where
     }
 
     #[allow(clippy::too_many_lines)]
-    async fn process_result(&mut self, tx_id: TransactionId, diff: &SubstateDiff) -> Result<(), AccountMonitorError> {
+    pub async fn process_result(
+        &mut self,
+        tx_id: TransactionId,
+        diff: &SubstateDiff,
+        new_account_data: Option<NewAccountData>,
+    ) -> Result<(), AccountMonitorError> {
         let substate_api = self.wallet_sdk.substate_api();
         let accounts_api = self.wallet_sdk.accounts_api();
 
         let mut new_account = None;
-        if let Some(account) = self.pending_accounts.remove(&tx_id) {
+        if let Some(account) = new_account_data {
             let existing_account = accounts_api.get_account_by_address(&account.address).optional()?;
             // Check that the new account was created in this transaction
             if diff.up_iter().any(|(id, _)| *id == account.address) {
@@ -595,14 +475,19 @@ where
                     }
                 });
 
+        let mut updated_accounts = HashSet::new();
         // Find and process all new/existing vaults
-        for (account_addr, value) in accounts {
+        for (account_address, value) in accounts {
             // If we know about this account, mark it as on-chain (if it isn't already)
-            self.mark_account_as_on_chain(&account_addr).optional()?;
+            if self.mark_account_as_on_chain(&account_address).optional()?.is_none() {
+                continue;
+            }
+            let mut has_changed = false;
             for vault_id in value.vault_ids() {
                 // Any vaults we process here do not need to be reprocesed later
                 if let Some(vault) = vaults.remove(vault_id).and_then(|s| s.substate_value().vault()) {
-                    self.add_vault_to_account_if_not_exist(&account_addr, *vault_id, vault)
+                    has_changed |= self
+                        .add_vault_to_account_if_not_exist(&account_address, *vault_id, vault)
                         .await?;
 
                     let updated_nfts = vault
@@ -621,12 +506,17 @@ where
                         })
                         .collect();
 
-                    self.refresh_vault(account_addr, *vault_id, vault, updated_nfts).await?;
+                    has_changed |= self
+                        .refresh_vault(account_address, *vault_id, vault, updated_nfts)
+                        .await?;
                 }
+            }
+
+            if has_changed {
+                updated_accounts.insert(account_address);
             }
         }
 
-        let mut updated_accounts = HashSet::new();
         // Process all existing vaults that belong to an account
         for (vault_id, substate) in vaults {
             let vault_addr = SubstateId::Vault(vault_id);
@@ -729,19 +619,6 @@ where
         Ok(())
     }
 
-    async fn fetch_resource(&self, resx_addr: ResourceAddress) -> Result<Resource, AccountMonitorError> {
-        if let Some(resx) = self.wallet_sdk.resources_api().get(&resx_addr).optional()? {
-            return Ok(resx);
-        }
-
-        let substate = self.fetch_substate(&SubstateId::Resource(resx_addr)).await?;
-        let resx = substate.into_substate_value().into_resource().ok_or_else(|| {
-            AccountMonitorError::UnexpectedSubstate(format!("Expected {} to be a resource.", resx_addr))
-        })?;
-        self.wallet_sdk.resources_api().upsert_resource(&resx_addr, &resx)?;
-        Ok(resx)
-    }
-
     async fn fetch_substate(&self, substate_id: &SubstateId) -> Result<Substate, AccountMonitorError> {
         let substate_api = self.wallet_sdk.substate_api();
         let ValidatorScanResult { substate, id: address } =
@@ -764,16 +641,16 @@ where
         account_addr: &ComponentAddress,
         vault_id: VaultId,
         vault: &Vault,
-    ) -> Result<(), AccountMonitorError> {
+    ) -> Result<bool, AccountMonitorError> {
         let accounts_api = self.wallet_sdk.accounts_api();
         if !accounts_api.exists_by_address(account_addr)? {
             // This is not our account
-            return Ok(());
+            return Ok(false);
         }
         if accounts_api.has_vault(&vault_id)? {
-            return Ok(());
+            return Ok(false);
         }
-        let maybe_resource = match self.fetch_resource(*vault.resource_address()).await {
+        let maybe_resource = match self.fetch_and_cache_resource(vault.resource_address()).await {
             Ok(r) => Some(r),
             Err(e) => {
                 warn!(
@@ -806,86 +683,7 @@ where
             divisibility,
         )?;
 
-        Ok(())
-    }
-
-    async fn on_event(&mut self, event: WalletEvent) -> Result<(), AccountMonitorError> {
-        match event {
-            WalletEvent::TransactionSubmitted(event) => {
-                if let Some(account) = event.new_account {
-                    self.pending_accounts.insert(event.transaction_id, account);
-                }
-            },
-            WalletEvent::TransactionFinalized(event) => {
-                if let Some(diff) = event.finalize.result.any_accept() {
-                    self.process_result(event.transaction_id, diff).await?;
-                }
-            },
-            WalletEvent::TransactionInvalid(event) => {
-                self.pending_accounts.remove(&event.transaction_id);
-            },
-            WalletEvent::AccountCreatedOnChain(_) |
-            WalletEvent::AccountChangedOnChain(_) |
-            WalletEvent::AuthLoginRequest(_) => {},
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-enum AccountMonitorRequest {
-    RefreshAccount {
-        account: ComponentAddress,
-        reply: Reply<Result<bool, AccountMonitorError>>,
-    },
-}
-
-#[derive(Debug, Clone)]
-pub struct AccountMonitorHandle {
-    sender: mpsc::Sender<AccountMonitorRequest>,
-}
-
-impl AccountMonitorHandle {
-    pub async fn refresh_account(&self, account: ComponentAddress) -> Result<bool, AccountMonitorError> {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        self.sender
-            .send(AccountMonitorRequest::RefreshAccount {
-                account,
-                reply: reply_tx,
-            })
-            .await
-            .map_err(|_| AccountMonitorError::ServiceShutdown)?;
-        reply_rx.await.map_err(|_| AccountMonitorError::ServiceShutdown)?
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum AccountMonitorError {
-    #[error("Transaction API error: {0}")]
-    Transaction(#[from] TransactionApiError),
-    #[error("Accounts API error: {0}")]
-    Accounts(#[from] AccountsApiError),
-    #[error("Substate API error: {0}")]
-    Substate(#[from] SubstateApiError),
-    #[error("Outputs API error: {0}")]
-    ConfidentialOutputs(#[from] ConfidentialOutputsApiError),
-    #[error("Stealth Outputs API error: {0}")]
-    StealthOutputs(#[from] StealthOutputsApiError),
-    #[error("Non Fungibles API error: {0}")]
-    NonFungibleTokens(#[from] NonFungibleTokensApiError),
-    #[error("Resources API error: {0}")]
-    Resources(#[from] ResourcesApiError),
-    #[error("Failed to decode binary value: {0}")]
-    DecodeValueFailed(#[from] IndexedValueError),
-    #[error("Unexpected substate: {0}")]
-    UnexpectedSubstate(String),
-    #[error("Monitor service is not running")]
-    ServiceShutdown,
-}
-
-impl IsNotFoundError for AccountMonitorError {
-    fn is_not_found_error(&self) -> bool {
-        matches!(self, Self::Substate(s) if s.is_not_found_error())
+        Ok(true)
     }
 }
 

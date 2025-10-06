@@ -35,9 +35,8 @@ use super::{
 };
 use crate::{
     args::{BucketAction, BucketInvokeArg, BucketRef, InvokeResult},
-    prelude::ResourceType,
     resource::ResourceManager,
-    types::Amount,
+    types::{Amount, ResourceType},
 };
 
 const TAG: u64 = BinaryTag::BucketId.as_u64();

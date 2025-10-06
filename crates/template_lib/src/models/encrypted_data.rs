@@ -12,7 +12,7 @@ use tari_template_lib_types::serde_helpers;
 pub struct EncryptedData(
     #[serde(with = "serde_helpers::dynamic_hex")]
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    Vec<u8>,
+    Box<[u8]>,
 );
 
 impl EncryptedData {
@@ -75,6 +75,6 @@ impl TryFrom<Vec<u8>> for EncryptedData {
         if value.len() > Self::max_size() {
             return Err(value.len());
         }
-        Ok(Self(value))
+        Ok(Self(value.into_boxed_slice()))
     }
 }

@@ -306,7 +306,11 @@ where
             WalletEvent::TransactionFinalized(_) |
             WalletEvent::AccountChangedOnChain(_) |
             WalletEvent::AuthLoginRequest(_) |
-            WalletEvent::AccountCreatedOnChain(_) => {},
+            WalletEvent::AccountCreatedOnChain(_) |
+            WalletEvent::UtxoRecoveryStarted(_) |
+            WalletEvent::UtxoRecovered(_) |
+            WalletEvent::UtxoRecoveryCompleted(_) |
+            WalletEvent::UtxoSpent(_) => {},
         }
         Ok(())
     }

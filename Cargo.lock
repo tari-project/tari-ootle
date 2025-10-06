@@ -2158,9 +2158,9 @@ checksum = "fd121741cf3eb82c08dd3023eb55bf2665e5f60ec20f89760cf836ae4562e6a0"
 
 [[package]]
 name = "crc32fast"
-version = "1.4.2"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a97769d94ddab943e4510d138150169a2758b5ef3eb191a9ee688de3e23ef7b3"
+checksum = "9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511"
 dependencies = [
  "cfg-if",
 ]
@@ -11516,11 +11516,14 @@ dependencies = [
 name = "tari_ootle_wallet_crypto"
 version = "0.11.2"
 dependencies = [
+ "argon2 0.5.3",
  "blake2",
  "chacha20poly1305",
+ "crc32fast",
  "digest",
  "rand 0.8.5",
  "serde_json",
+ "subtle",
  "tari_crypto",
  "tari_engine_types",
  "tari_hashing",
@@ -11584,7 +11587,6 @@ dependencies = [
  "tari_template_builtin",
  "tari_template_lib",
  "tari_transaction",
- "tari_transaction_components",
  "thiserror 1.0.69",
  "tokio",
  "url",
@@ -11627,6 +11629,7 @@ dependencies = [
  "config",
  "either",
  "futures 0.3.31",
+ "hex",
  "humantime-serde",
  "include_dir",
  "indexmap 2.11.4",

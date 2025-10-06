@@ -36,6 +36,7 @@ axum-jrpc = { workspace = true, features = ["anyhow_error"] }
 clap = { workspace = true, features = ["derive", "env"] }
 config = { workspace = true }
 either = { workspace = true }
+hex = { workspace = true }
 humantime-serde = { workspace = true }
 futures = { workspace = true }
 include_dir = { workspace = true, optional = true }

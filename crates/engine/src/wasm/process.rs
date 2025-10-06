@@ -31,7 +31,7 @@ use tari_bor::{
     encoded_len_with_limit,
 };
 use tari_engine_types::{indexed_value::IndexedValue, instruction_result::InstructionResult, limits};
-use tari_template_abi::{version, CallInfo, EngineOp, FunctionDef};
+use tari_template_abi::{version, CallInfo, EngineOp, FunctionDef, TemplateDef};
 use tari_template_lib::{
     args::{
         AddressAllocationInvokeArg,
@@ -78,7 +78,7 @@ pub struct WasmProcess {
 
 impl WasmProcess {
     pub fn init(store: &mut Store, module: LoadedWasmTemplate, state: Runtime) -> Result<Self, WasmExecutionError> {
-        Self::validate_template_tari_version(&module)?;
+        Self::validate_template_tari_version(module.template_def())?;
 
         let mut env = WasmEnv::new(state);
         let fn_env = FunctionEnv::new(store, env.clone());
@@ -273,8 +273,8 @@ impl WasmProcess {
 
     /// Determine if the version of the template_lib crate in the WASM is valid.
     /// This is just a placeholder that logs the result, as we don't manage version incompatibilities yet
-    fn validate_template_tari_version(module: &LoadedWasmTemplate) -> Result<(), WasmExecutionError> {
-        let template_tari_version = module.template_def().tari_version();
+    pub fn validate_template_tari_version(template_def: &TemplateDef) -> Result<(), WasmExecutionError> {
+        let template_tari_version = template_def.tari_version();
 
         if are_versions_compatible(template_tari_version, version::MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION)? {
             log::debug!(target: LOG_TARGET, "The Tari version in the template WASM (\"{}\") is compatible with the one used in the engine", template_tari_version);

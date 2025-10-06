@@ -8,7 +8,7 @@ use tari_ootle_common_types::{optional::IsNotFoundError, Network};
 
 use crate::storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ConfigApi<'a, TStore> {
     store: &'a TStore,
     cached_network: OnceLock<Network>,
@@ -37,8 +37,20 @@ impl<'a, TStore: WalletStore> ConfigApi<'a, TStore> {
         Ok(network)
     }
 
-    pub fn get<T>(&self, key: ConfigKey) -> Result<T, ConfigApiError>
-    where T: DeserializeOwned {
+    pub fn get<T: DeserializeOwned>(&self, key: ConfigKey) -> Result<T, ConfigApiError> {
+        let mut tx = self.store.create_read_tx()?;
+        let record = tx.config_get(key.as_key_str())?;
+        if record.is_encrypted {
+            return Err(ConfigApiError::EncryptedItem { key });
+        }
+        Ok(record.value)
+    }
+
+    pub fn get_decrypted<T: DeserializeOwned>(
+        &self,
+        key: ConfigKey,
+        _decryption_key: impl AsRef<[u8]>,
+    ) -> Result<T, ConfigApiError> {
         let mut tx = self.store.create_read_tx()?;
         let record = tx.config_get(key.as_key_str())?;
         // TODO: decryption if record.is_encrypted
@@ -51,20 +63,34 @@ impl<'a, TStore: WalletStore> ConfigApi<'a, TStore> {
         Ok(exists)
     }
 
-    pub fn set<T: Serialize + ?Sized>(
+    pub fn set<T: Serialize + ?Sized>(&self, key: ConfigKey, value: &T) -> Result<(), ConfigApiError> {
+        self.set_opts(key, value, false)
+    }
+
+    pub fn set_encrypted<T: Serialize + ?Sized>(
+        &self,
+        key: ConfigKey,
+        value: &T,
+        _encryption_key: impl AsRef<[u8]>,
+    ) -> Result<(), ConfigApiError> {
+        // TODO: encrypt
+        self.set_opts(key, value, true)
+    }
+
+    fn set_opts<T: Serialize + ?Sized>(
         &self,
         key: ConfigKey,
         value: &T,
         is_encrypted: bool,
     ) -> Result<(), ConfigApiError> {
         let mut tx = self.store.create_write_tx()?;
-        // TODO: Actually encrypt if is_encrypted is true
         tx.config_set(key.as_key_str(), value, is_encrypted)?;
         tx.commit()?;
         Ok(())
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum ConfigKey {
     /// The network the wallet is running on. type: String
     Network,
@@ -96,6 +122,8 @@ pub enum ConfigApiError {
     StoreError(#[from] WalletStorageError),
     #[error("Failed to parse network string '{string}': {details}")]
     FailedToParseNetwork { string: String, details: String },
+    #[error("The requested item is encrypted and cannot be retrieved without decryption: {key:?}")]
+    EncryptedItem { key: ConfigKey },
 }
 
 impl IsNotFoundError for ConfigApiError {

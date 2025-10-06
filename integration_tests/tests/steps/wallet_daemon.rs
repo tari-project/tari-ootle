@@ -127,7 +127,7 @@ async fn when_i_run_up_fees(world: &mut TariWorld, amount: u64, wallet_daemon_na
 
         let transaction_submit_req = TransactionSubmitRequest {
             transaction,
-            signing_key_index: Some(account.key_index()),
+            signing_key_id: account.owner_key_id(),
             detect_inputs: true,
             detect_inputs_use_unversioned: true,
             proof_ids: vec![],

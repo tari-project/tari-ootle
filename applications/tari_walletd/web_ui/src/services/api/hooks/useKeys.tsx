@@ -48,8 +48,8 @@ export const useKeysCreate = (branch: KeyBranch) => {
 };
 
 export const useKeysSetActive = () => {
-  const setActive = async (index: number) => {
-    const result = await keysSetActive({ index });
+  const setActive = async (index: bigint) => {
+    const result = await keysSetActive({ index: Number(index) });
     return result;
   };
 

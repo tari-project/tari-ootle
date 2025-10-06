@@ -22,7 +22,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::utxo_scanner::UtxoScanner;
+use crate::{events::WalletEvent, notify::Notify, utxo_scanner::UtxoScanner};
 
 const LOG_TARGET: &str = "tari::ootle::wallet_services::stealth_utxo_scanner";
 
@@ -59,9 +59,9 @@ where
     TNetworkInterface: WalletNetworkInterface + Clone + Send + Sync + 'static,
     TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
 {
-    pub fn new(sdk: WalletSdk<TStore, TNetworkInterface>) -> Self {
+    pub fn new(sdk: WalletSdk<TStore, TNetworkInterface>, notify: Notify<WalletEvent>) -> Self {
         Self {
-            scanner: StealthUtxoScanner::new(sdk.clone()),
+            scanner: StealthUtxoScanner::new(sdk.clone(), notify),
         }
     }
 
@@ -108,6 +108,7 @@ pub struct StealthUtxoScanner<TStore, TNetworkInterface> {
     in_progress_work: futures_bounded::FuturesMap<UtxoScanRequest, ScanResult>,
     sdk: WalletSdk<TStore, TNetworkInterface>,
     notify_tx: watch::Sender<()>,
+    wallet_notify: Notify<WalletEvent>,
 }
 
 impl<TStore, TNetworkInterface> StealthUtxoScanner<TStore, TNetworkInterface>
@@ -116,12 +117,13 @@ where
     TNetworkInterface: WalletNetworkInterface + Clone + Send + Sync + 'static,
     TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
 {
-    pub(self) fn new(sdk: WalletSdk<TStore, TNetworkInterface>) -> Self {
+    pub(self) fn new(sdk: WalletSdk<TStore, TNetworkInterface>, wallet_events: Notify<WalletEvent>) -> Self {
         let (notify_tx, _) = watch::channel::<()>(());
         Self {
             in_progress_work: futures_bounded::FuturesMap::new(Duration::from_secs(300), MAX_CONCURRENT_SCANS),
             sdk,
             notify_tx,
+            wallet_notify: wallet_events,
         }
     }
 
@@ -136,10 +138,15 @@ where
             info!(target: LOG_TARGET, "🔍️ Scan for {} is already in progress, ignoring request", task);
             return;
         }
-        match self
-            .in_progress_work
-            .try_push(task, do_work(self.sdk.clone(), self.notify_tx.clone(), task))
-        {
+        match self.in_progress_work.try_push(
+            task,
+            do_work(
+                self.sdk.clone(),
+                self.notify_tx.clone(),
+                task,
+                self.wallet_notify.clone(),
+            ),
+        ) {
             Ok(()) => {},
             Err(PushError::BeyondCapacity(_)) => {
                 warn!(
@@ -177,6 +184,7 @@ async fn do_work<TStore, TNetworkInterface>(
     sdk: WalletSdk<TStore, TNetworkInterface>,
     notify_tx: watch::Sender<()>,
     task: UtxoScanRequest,
+    wallet_notify: Notify<WalletEvent>,
 ) -> ScanResult
 where
     TStore: WalletStore,
@@ -185,9 +193,14 @@ where
 {
     info!(target: LOG_TARGET, "🔍 Scanning for UTXOs for {}", task);
     let account = sdk.accounts_api().get_account_by_address(&task.account_address)?;
-    UtxoScanner::new(sdk)
-        .scan_and_recover_utxos(&account, &task.resource_address, &notify_tx)
+    let stats = UtxoScanner::new(sdk, wallet_notify)
+        .scan_and_enqueue_utxos(&account, &task.resource_address)
         .await?;
+
+    // UTXOs were found, notify the Utxo recovery worker that there is work to do
+    if stats.num_potential_recoveries > 0 {
+        let _ = notify_tx.send(());
+    }
 
     Ok(())
 }

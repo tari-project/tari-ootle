@@ -3,8 +3,7 @@
 
 use tari_template_lib::{
     models::{ComponentAddress, ResourceAddress, VaultId},
-    resource::ResourceType,
-    types::Amount,
+    types::{Amount, ResourceType},
 };
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

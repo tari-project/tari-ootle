@@ -35,6 +35,9 @@ use crate::models::{
     AuthoredTemplateModel,
     ConfidentialOutputModel,
     Config,
+    ImportedKeyId,
+    KeyId,
+    KeyType,
     NewAccountData,
     NonFungibleToken,
     OutputStatus,
@@ -112,6 +115,10 @@ pub enum WalletStorageError {
     OperationError { operation: &'static str, details: String },
     #[error("Data inconsistency for operation {operation}: {details}")]
     DataInconsistent { operation: &'static str, details: String },
+    #[error("Encryption error {operation}: {details}")]
+    EncryptionError { operation: &'static str, details: String },
+    #[error("Decryption error {operation}: {details}")]
+    DecryptionError { operation: &'static str, details: String },
 }
 
 impl IsNotFoundError for WalletStorageError {
@@ -145,6 +152,7 @@ pub trait WalletStoreReader {
     fn key_manager_get_all(&mut self, branch: &str) -> Result<Vec<(u64, bool)>, WalletStorageError>;
     fn key_manager_get_active_index(&mut self, branch: &str) -> Result<u64, WalletStorageError>;
     fn key_manager_get_last_index(&mut self, branch: &str) -> Result<u64, WalletStorageError>;
+    fn key_manager_get_raw_imported_key(&mut self, id: u64) -> Result<(KeyType, Box<[u8]>), WalletStorageError>;
     // Config
     fn config_get<T: serde::de::DeserializeOwned>(&mut self, key: &str) -> Result<Config<T>, WalletStorageError>;
     fn config_get_string(&mut self, key: &str) -> Result<Config<String>, WalletStorageError>;
@@ -171,7 +179,7 @@ pub trait WalletStoreReader {
     fn substates_get_children(&mut self, parent: &SubstateId) -> Result<Vec<SubstateModel>, WalletStorageError>;
     // Accounts
     fn accounts_get(&mut self, address: &ComponentAddress) -> Result<Account, WalletStorageError>;
-    fn accounts_get_many(&mut self, offset: u64, limit: u64) -> Result<Vec<Account>, WalletStorageError>;
+    fn accounts_get_many(&mut self, offset: usize, limit: usize) -> Result<Vec<Account>, WalletStorageError>;
     fn accounts_get_default(&mut self) -> Result<Account, WalletStorageError>;
     fn accounts_count(&mut self) -> Result<u64, WalletStorageError>;
     fn accounts_get_by_name(&mut self, name: &str) -> Result<Account, WalletStorageError>;
@@ -200,19 +208,19 @@ pub trait WalletStoreReader {
         addresses: I,
     ) -> Result<Vec<ResourceModel>, WalletStorageError>;
 
-    // Outputs
-    fn outputs_get_unspent_balance(&mut self, vault_id: &VaultId) -> Result<u64, WalletStorageError>;
-    fn outputs_get_locked_by_lock_id(
+    // Confidential Outputs
+    fn confidential_outputs_get_unspent_balance(&mut self, vault_id: &VaultId) -> Result<u64, WalletStorageError>;
+    fn confidential_outputs_get_locked_by_lock_id(
         &mut self,
         lock_id: WalletLockId,
     ) -> Result<Vec<ConfidentialOutputModel>, WalletStorageError>;
-    fn outputs_get_by_commitment(
+    fn confidential_outputs_get_by_commitment(
         &mut self,
         vault_id: &VaultId,
         commitment: &PedersenCommitmentBytes,
     ) -> Result<ConfidentialOutputModel, WalletStorageError>;
 
-    fn outputs_get_by_account_and_status(
+    fn confidential_outputs_get_by_account_and_status(
         &mut self,
         account_addr: &ComponentAddress,
         status: OutputStatus,
@@ -300,7 +308,7 @@ pub trait WalletStoreReader {
     fn utxo_process_queue_fetch_batch(
         &mut self,
         batch_size: usize,
-    ) -> Result<HashMap<ResourceAddress, HashMap<TagAndPublicNoncePair, u64>>, WalletStorageError>;
+    ) -> Result<HashMap<ResourceAddress, HashMap<TagAndPublicNoncePair, ComponentAddress>>, WalletStorageError>;
 }
 
 pub type TagAndPublicNoncePair = (UtxoTag, RistrettoPublicKeyBytes);
@@ -319,6 +327,12 @@ pub trait WalletStoreWriter {
     fn key_manager_insert_or_ignore(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
     fn key_manager_set_active_index(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
     fn key_manager_reset_index(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
+    fn key_manager_insert_imported_key(
+        &mut self,
+        label: &str,
+        encrypted_key: &[u8],
+        key_type: KeyType,
+    ) -> Result<ImportedKeyId, WalletStorageError>;
 
     // Config
     fn config_set<T: serde::Serialize + ?Sized>(
@@ -359,7 +373,10 @@ pub trait WalletStoreWriter {
         &mut self,
         account_name: Option<&str>,
         account_addr: &ComponentAddress,
-        owner_key_index: u64,
+        view_only_key_id: KeyId,
+        owner_key_id: Option<KeyId>,
+        owner_public_key: &RistrettoPublicKeyBytes,
+        associated_stealth_resources: &HashSet<ResourceAddress>,
         is_confirmed_on_chain: bool,
         is_default: bool,
     ) -> Result<(), WalletStorageError>;
@@ -395,16 +412,16 @@ pub trait WalletStoreWriter {
     // Resources
     fn resources_upsert(&mut self, address: &ResourceAddress, resource: &Resource) -> Result<(), WalletStorageError>;
     // Confidential Outputs
-    fn outputs_lock_smallest_amount(
+    fn confidential_outputs_lock_smallest_amount(
         &mut self,
         vault_id: &VaultId,
         lock_id: WalletLockId,
     ) -> Result<ConfidentialOutputModel, WalletStorageError>;
-    fn outputs_insert(&mut self, output: ConfidentialOutputModel) -> Result<(), WalletStorageError>;
+    fn confidential_outputs_insert(&mut self, output: ConfidentialOutputModel) -> Result<(), WalletStorageError>;
     /// Mark outputs as finalized
-    fn outputs_finalize_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
+    fn confidential_outputs_finalize_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
     /// Release outputs that were locked and remove pending unconfirmed outputs for this proof
-    fn outputs_release_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
+    fn confidential_outputs_release_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
 
     // Stealth Outputs
     fn stealth_outputs_lock_smallest_amount(
@@ -461,7 +478,7 @@ pub trait WalletStoreWriter {
         shard_state_versions: I,
     ) -> Result<(), WalletStorageError>;
 
-    fn utxo_process_queue_extend<I: IntoIterator<Item = (u64, UtxoUnspent)>>(
+    fn utxo_process_queue_extend<I: IntoIterator<Item = (ComponentAddress, UtxoUnspent)>>(
         &mut self,
         resource_address: &ResourceAddress,
         items: I,

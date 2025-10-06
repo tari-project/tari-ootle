@@ -62,7 +62,11 @@ function Account(account: AccountInfo, index: number) {
       <DataTableCell>
         <CopyAddress address={substateIdToString(component_address)} />
       </DataTableCell>
-      <DataTableCell>{account.account.key_index}</DataTableCell>
+      <DataTableCell>
+        {account.account.owner_key_id && "Derived" in account.account.owner_key_id
+          ? account.account.owner_key_id.Derived.index.toString()
+          : "imported"}
+      </DataTableCell>
       <DataTableCell>
         <CopyAddress address={address} />
       </DataTableCell>

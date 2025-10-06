@@ -6,7 +6,10 @@ use std::str::FromStr;
 use diesel::{Identifiable, Queryable};
 use tari_engine_types::resource::Resource;
 use tari_ootle_wallet_sdk::storage::WalletStorageError;
-use tari_template_lib::{models::ResourceAddress, prelude::ResourceType, types::Amount};
+use tari_template_lib::{
+    models::ResourceAddress,
+    types::{Amount, ResourceType},
+};
 use time::PrimitiveDateTime;
 
 use crate::{
@@ -88,16 +91,13 @@ impl ResourceModel {
             })
             .transpose()?;
         let view_key = self.view_key.as_ref().map(deserialize_hex_try_from).transpose()?;
-        let auth_hook = self
-            .auth_hook
-            .as_ref()
-            .map(|s| deserialize_json(s))
-            .transpose()
-            .map_err(|e| WalletStorageError::DecodingError {
+        let auth_hook = self.auth_hook.as_ref().map(deserialize_json).transpose().map_err(|e| {
+            WalletStorageError::DecodingError {
                 operation: "try_convert",
                 item: "resource.auth_hook",
                 details: e.to_string(),
-            })?;
+            }
+        })?;
 
         let resource = Resource::load(
             resource_type,

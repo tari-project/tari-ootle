@@ -34,8 +34,7 @@ use tari_ootle_wallet_sdk_services::events::TransactionSubmittedEvent;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
-    prelude::ResourceType,
-    types::Amount,
+    types::{Amount, ResourceType},
 };
 use tari_transaction::args;
 use tari_wallet_daemon_client::{
@@ -114,8 +113,13 @@ pub async fn handle_create(
         .map(Ok)
         .unwrap_or_else(|| accounts_api.any_accounts_exist().map(|b| !b))?;
 
+    let owner_address = match req.key_index {
+        Some(id) => sdk.key_manager_api().derive_account_address(id)?,
+        None => sdk.key_manager_api().next_account_address()?,
+    };
+
     let acc = accounts_api
-        .create_account(req.account_name.as_deref(), set_as_default, req.key_id)
+        .create_account(req.account_name.as_deref(), set_as_default, owner_address)
         .map_err(|e| {
             if e.is_name_exists_error() {
                 invalid_request(e)
@@ -158,8 +162,8 @@ pub async fn handle_create_or_get(
         Some(ComponentAddressOrName::Name(ref name)) => accounts_api.get_account_by_name(name).optional()?,
         // If we cannot find an account with this key index, we'll create one
         None => req
-            .key_id
-            .map(|id| get_account_by_key_index(sdk, id).optional())
+            .key_index
+            .map(|index| get_account_by_key_index(sdk, index).optional())
             .transpose()?
             .flatten(),
     };
@@ -181,8 +185,13 @@ pub async fn handle_create_or_get(
         .map(Ok)
         .unwrap_or_else(|| accounts_api.any_accounts_exist().map(|b| !b))?;
 
+    let wallet_keys = match req.key_index {
+        Some(id) => sdk.key_manager_api().derive_account_address(id)?,
+        None => sdk.key_manager_api().next_account_address()?,
+    };
+
     let acc = accounts_api
-        .create_account(req.account.as_ref().and_then(|a| a.name()), set_as_default, req.key_id)
+        .create_account(req.account.as_ref().and_then(|a| a.name()), set_as_default, wallet_keys)
         .map_err(|e| {
             if e.is_name_exists_error() {
                 invalid_request(e)
@@ -235,16 +244,20 @@ pub async fn handle_list(
 ) -> Result<AccountsListResponse, anyhow::Error> {
     context.check_auth(token, &[JrpcPermission::Admin])?;
     let sdk = context.wallet_sdk();
-    let accounts = sdk.accounts_api().get_many(req.offset, req.limit)?;
-    let total = sdk.accounts_api().count()?;
-    let km = sdk.key_manager_api();
+    let limit = usize::try_from(req.limit)
+        .map_err(|e| invalid_params("limit", Some(&format!("limit overflowed usize: {}", e))))?;
+    let offset = usize::try_from(req.offset)
+        .map_err(|e| invalid_params("offset", Some(&format!("offset overflowed usize: {}", e))))?;
+    let accounts_api = sdk.accounts_api();
+    let accounts = accounts_api.get_many(offset, limit)?;
+    let total = accounts_api.count()?;
     let accounts = accounts
         .into_iter()
         .map(|a| {
-            let account_addr = km.derive_account_address(a.key_index)?;
+            let address = accounts_api.get_address_for_account(&a)?;
             Ok(AccountInfo {
                 account: a,
-                address: account_addr.address.to_byte_type(),
+                address: address.to_byte_type(),
             })
         })
         .collect::<Result<_, anyhow::Error>>()?;
@@ -265,7 +278,7 @@ pub async fn handle_get_balances(
     if req.refresh {
         context
             .account_monitor()
-            .refresh_account(*account.component_address())
+            .refresh_account_with_utxos(*account.component_address())
             .await?;
     }
     let vaults = sdk.accounts_api().get_vaults_by_account(account.component_address())?;
@@ -410,6 +423,10 @@ pub async fn handle_claim_burn(
     let accounts_api = sdk.accounts_api();
     let account = get_account(&account, &accounts_api)?;
 
+    let account_owner_key_id = account
+        .owner_key_id()
+        .ok_or_else(|| invalid_params("account", Some("cannot claim burn to an account without an owner key")))?;
+
     let network = sdk.config_api().get_network()?;
     let claim_nonce_keypair = sdk
         .key_manager_api()
@@ -466,26 +483,28 @@ pub async fn handle_claim_burn(
     })?;
 
     let (nonce, output_public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
-    let account_owner = sdk.key_manager_api().derive_account_key_pair(account.key_index())?;
-    let view_only = sdk.key_manager_api().derive_view_only_keypair(account.key_index())?;
+    let account_owner = sdk.key_manager_api().get_account_owner_key(account_owner_key_id)?;
+    let account_owner_public_key = account_owner.to_public_key();
+    let view_only = sdk.key_manager_api().get_view_only_key(account.view_only_key_id())?;
+    let view_only_public_key = view_only.to_public_key();
     // NOTE: the confidential encryption format and the bullet proofs currently do not support amounts larger than
     // u64::MAX. Apart from it being insane/basically impossible to have that much XTR in a single UTXO, the L1 emission
     // will reach this much in many thousands of years.
     let encrypted_data =
         sdk.stealth_crypto_api()
-            .encrypt_value_and_mask(final_amount_u64, &mask.key, &view_only.public_key, &nonce)?;
+            .encrypt_value_and_mask(final_amount_u64, &mask.key, &view_only_public_key, &nonce)?;
 
     let tag = sdk.stealth_crypto_api().derive_stealth_output_tag(
         network,
         &nonce,
-        &view_only.public_key,
+        &view_only_public_key,
         &STEALTH_TARI_RESOURCE_ADDRESS,
     );
 
     // Create stealth address - used during spend time
     let stealth_output_owner_public_key =
         sdk.stealth_crypto_api()
-            .derive_stealth_owner_public_key(network, &account_owner.public_key, &nonce);
+            .derive_stealth_owner_public_key(network, &account_owner_public_key, &nonce);
 
     let output_statement = UnblindedStealthOutputStatement {
         statement: UnblindedOutputStatement {
@@ -557,6 +576,13 @@ pub async fn handle_create_free_test_coins(
         .optional()?
         .ok_or_else(|| not_found(format!("Account with name or address '{}' not found", account,)))?;
 
+    let account_owner_key_id = account.owner_key_id().ok_or_else(|| {
+        invalid_params(
+            "account",
+            Some("cannot create free test coins for an account without an owner key"),
+        )
+    })?;
+
     info!(
         target: LOG_TARGET,
         "💰️ Creating free test coins for account: {} with amount: {} and max fee: {}",
@@ -602,7 +628,7 @@ pub async fn handle_create_free_test_coins(
         );
     }
 
-    let account_secret_key = sdk.key_manager_api().derive_account_key(account.key_index())?;
+    let account_owner_key = sdk.key_manager_api().get_account_owner_key(account_owner_key_id)?;
 
     let transaction = context
         .transaction_builder()
@@ -623,7 +649,7 @@ pub async fn handle_create_free_test_coins(
                 .call_method(*account.component_address(), "pay_fee", args![max_fee])
         })
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
-        .build_and_seal(&account_secret_key.key);
+        .build_and_seal(&account_owner_key.secret);
 
     info!(
         target: LOG_TARGET,
@@ -693,6 +719,10 @@ pub async fn handle_transfer(
     let sdk = context.wallet_sdk().clone();
 
     let (account, mut inputs) = get_account_with_inputs(req.account.as_ref(), &sdk)?;
+
+    let account_owner_key_id = account
+        .owner_key_id()
+        .ok_or_else(|| invalid_params("account", Some("cannot transfer from an account without an owner key")))?;
 
     // get the source account component address
     let source_account_address = *account.component_address();
@@ -778,7 +808,7 @@ pub async fn handle_transfer(
 
     // build the transaction
     let max_fee = req.max_fee.unwrap_or(DEFAULT_FEE);
-    let account_secret_key = sdk.key_manager_api().derive_account_key(account.key_index())?;
+    let account_owner_key = sdk.key_manager_api().get_account_owner_key(account_owner_key_id)?;
 
     let transaction = builder
         .with_dry_run(req.dry_run)
@@ -807,7 +837,7 @@ pub async fn handle_transfer(
             }
         })
         .with_inputs(inputs.into_iter().map(|req| req.into_unversioned()))
-        .build_and_seal(&account_secret_key.key);
+        .build_and_seal(&account_owner_key.secret);
 
     // If dry run we can return the result immediately
     if req.dry_run {
@@ -967,12 +997,27 @@ pub async fn handle_associate_stealth_resource(
         ));
     }
 
+    // Ensure the resource is in the local cache
+    if !sdk.resources_api().exists(&req.resource_address)? {
+        let substate = sdk
+            .substate_api()
+            .get_substate_from_network(req.resource_address.into())
+            .await?;
+        let resource = substate.into_substate_value().into_resource().ok_or_else(|| {
+            general_error(format!(
+                "Indexer returned Substate at address {} is not a resource",
+                req.resource_address
+            ))
+        })?;
+        sdk.resources_api().upsert_resource(&req.resource_address, &resource)?;
+    }
+
     sdk.accounts_api()
         .associate_stealth_resource(account.component_address(), req.resource_address)?;
 
     context
         .account_monitor()
-        .refresh_account(*account.component_address())
+        .refresh_account_with_utxos(*account.component_address())
         .await?;
 
     Ok(AccountsAssociateStealthResourceResponse {})

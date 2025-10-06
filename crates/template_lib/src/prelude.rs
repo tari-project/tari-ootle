@@ -38,6 +38,7 @@ pub use tari_template_lib_types::{
         SignaturePayload,
     },
     custom_signature_domain,
+    ResourceType,
     TemplateAddress,
 };
 #[cfg(all(feature = "macro", target_arch = "wasm32"))]
@@ -86,7 +87,7 @@ pub use crate::{
         Verifiable,
     },
     rand,
-    resource::{ResourceBuilder, ResourceManager, ResourceType},
+    resource::{ResourceBuilder, ResourceManager},
     rule,
     template::{BuiltinTemplate, TemplateManager},
     types,

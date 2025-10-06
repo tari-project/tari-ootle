@@ -34,7 +34,7 @@ use crate::{
         stealth_crypto::{StealthCryptoApi, StealthCryptoApiError},
         stealth_transfer::InputToSpend,
     },
-    models::{Account, KeyPair, OutputStatus, StealthBalance, StealthOutputModel, WalletLockId},
+    models::{Account, AccountAndViewKeys, OutputStatus, StealthBalance, StealthOutputModel, WalletLockId},
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
@@ -178,7 +178,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
 
     pub fn release_locked_outputs(&self, lock_id: WalletLockId) -> Result<(), StealthOutputsApiError> {
         self.store.with_write_tx(|tx| {
-            tx.outputs_release_by_lock_id(lock_id)?;
+            tx.stealth_outputs_release_by_lock_id(lock_id)?;
             tx.locks_delete(lock_id)?;
             Ok(())
         })
@@ -199,9 +199,20 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
     ) -> Result<Vec<InputToSpend>, StealthOutputsApiError> {
         let network = self.config_api.get_network()?;
         // Derive owner secret - the sender does not know the owner secret
-        let owner_key_part = self.key_manager_api.derive_account_key(owner_account.key_index())?;
+        let owner_key_id = owner_account
+            .owner_key_id()
+            .ok_or_else(|| StealthOutputsApiError::InvalidParameter {
+                param: "owner_key_id",
+                reason: format!(
+                    "Account {} does not have an owner key. Cannot spend from this account",
+                    owner_account
+                ),
+            })?;
+        let owner_key_part = self.key_manager_api.get_account_owner_key(owner_key_id)?;
         // Derive the view-only secret, of which the public key is used by senders to encrypt the value and mask.
-        let view_only = self.key_manager_api.derive_view_only_key(owner_account.key_index())?;
+        let view_only = self
+            .key_manager_api
+            .get_view_only_key(owner_account.view_only_key_id())?;
         let mut inputs_with_masks = Vec::with_capacity(outputs.len());
         for output in outputs {
             // Derive the decryption key from the DHKE(sender's public nonce, encryption secret key);
@@ -215,13 +226,13 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
             let mask_and_value = self.crypto_api.decrypt_value_and_mask(
                 &output.encrypted_data,
                 &output.commitment,
-                &view_only.key,
+                &view_only.secret,
                 &nonce,
             )?;
 
             let stealth_secret = self
                 .crypto_api
-                .derive_stealth_owner_secret(network, &owner_key_part.key, &nonce);
+                .derive_stealth_owner_secret(network, &owner_key_part.secret, &nonce);
 
             inputs_with_masks.push(InputToSpend {
                 statement: UnblindedStealthInputStatement {
@@ -336,16 +347,29 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         Ok(outputs)
     }
 
+    #[allow(clippy::too_many_lines)]
     pub fn verify_and_update_outputs<'i, I: IntoIterator<Item = (UtxoAddress, &'i Utxo)>>(
         &self,
         outputs: I,
     ) -> Result<(), StealthOutputsApiError> {
         let all_used_view_only_keys = self
             .key_manager_api
-            .get_all_keys(KeyBranch::ViewOnlyKey)?
+            .get_all_derived_keys(KeyBranch::ViewOnlyKey)?
             .into_iter()
-            .map(|k| k.key_pair)
-            .collect::<Vec<_>>();
+            .map(|view_key| {
+                let account_key = self.key_manager_api.derive_account_key(
+                    view_key
+                        .key_id
+                        .derived_index()
+                        .expect("get_all_derived_keys returns only derived keys"),
+                )?;
+                Ok::<_, KeyManagerApiError>(AccountAndViewKeys {
+                    account_public_key: account_key.to_public_key().to_byte_type(),
+                    account_key: Some(account_key.into()),
+                    view_only_key: view_key.into(),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let network = self.config_api.get_network()?;
 
         let mut found_utxos_count = 0usize;
@@ -449,7 +473,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
     #[allow(clippy::too_many_lines)]
     pub fn validate_utxo(
         &self,
-        all_used_account_view_only_keys: &[KeyPair],
+        all_used_account_view_only_keys: &[AccountAndViewKeys],
         network: Network,
         resource_address: ResourceAddress,
         commitment: PedersenCommitmentBytes,
@@ -484,48 +508,53 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
             output_stealth_public_nonce,
         );
 
-        for view_only_key in all_used_account_view_only_keys {
+        for keys in all_used_account_view_only_keys {
             trace!(
                 target: LOG_TARGET,
-                "Attempting to unblind output with view key index {} {}",
-                view_only_key.key_index(),
-                view_only_key.public_key
+                "Attempting to unblind output with view key {}",
+                keys.view_only_key.key_id,
             );
             let unblinded_result = self.crypto_api.decrypt_value_and_mask(
                 &output.output.encrypted_data,
                 &commitment,
-                &view_only_key.secret_key.key,
+                &keys.view_only_key.secret,
                 &output_stealth_public_nonce,
             );
 
-            let (value, owner_key, status) = match unblinded_result {
+            let (value, status) = match unblinded_result {
                 Ok(mask_and_value) => {
-                    let owner_key = self
-                        .key_manager_api
-                        .derive_account_key_pair(view_only_key.secret_key.key_index)?;
-                    let stealth_secret = self.crypto_api.derive_stealth_owner_secret(
-                        network,
-                        &owner_key.secret_key.key,
-                        &output_stealth_public_nonce,
-                    );
-                    let stealth_address = RistrettoPublicKey::from_secret_key(&stealth_secret);
-                    if output.owner_public_key == stealth_address.to_byte_type() {
-                        (mask_and_value.value, owner_key, OutputStatus::Unspent)
-                    } else {
-                        warn!(
-                            target: LOG_TARGET,
-                            "Output owner public key does not match the expected stealth address. (expected: {}, actual: {}). Utxo cannot be spent by this wallet and will be stored as invalid.",
-                            stealth_address,
-                            output.owner_public_key
+                    if let Some(ref owner_key) = keys.account_key {
+                        let stealth_secret = self.crypto_api.derive_stealth_owner_secret(
+                            network,
+                            &owner_key.secret,
+                            &output_stealth_public_nonce,
                         );
-                        (mask_and_value.value, owner_key, OutputStatus::Invalid)
+                        let stealth_address = RistrettoPublicKey::from_secret_key(&stealth_secret);
+                        if output.owner_public_key == stealth_address.to_byte_type() {
+                            (mask_and_value.value, OutputStatus::Unspent)
+                        } else {
+                            warn!(
+                                target: LOG_TARGET,
+                                "⚠️ Output owner public key does not match the expected stealth address. (expected: {}, actual: {}). Utxo cannot be spent by this wallet and will be stored as invalid.",
+                                stealth_address,
+                                output.owner_public_key
+                            );
+                            (mask_and_value.value, OutputStatus::Invalid)
+                        }
+                    } else {
+                        info!(
+                            target: LOG_TARGET,
+                            "Output can only be viewed, not spent, as there is no owner key for view key {}",
+                            keys.view_only_key.key_id,
+                        );
+                        (mask_and_value.value, OutputStatus::Unspent)
                     }
                 },
                 Err(e) => {
                     debug!(
                         target: LOG_TARGET,
                         "Failed to unblind output for key {}. (commitment: {}, error: {})",
-                        view_only_key.secret_key.key_index,
+                        keys.view_only_key.key_id,
                         commitment,
                         e
                     );
@@ -533,10 +562,8 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                 },
             };
 
-            let owner_account = derive_component_address_from_public_key(
-                &ACCOUNT_TEMPLATE_ADDRESS,
-                &owner_key.public_key.to_byte_type(),
-            );
+            let owner_account =
+                derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &keys.account_public_key);
             info!(
                 target: LOG_TARGET,
                 "🟢 Unblinded output for account {}. (commitment: {}, value: {})",
@@ -553,7 +580,8 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                 commitment,
                 value,
                 sender_public_nonce: output_stealth_public_nonce.to_byte_type(),
-                encryption_secret_key_index: view_only_key.key_index(),
+                view_only_key_id: keys.view_only_key.key_id,
+                owner_key_id: keys.account_key.as_ref().map(|k| k.key_id),
                 encrypted_data: output.output.encrypted_data.clone(),
                 tag_byte: output.tag,
                 status,

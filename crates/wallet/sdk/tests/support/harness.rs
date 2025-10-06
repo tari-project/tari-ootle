@@ -12,7 +12,8 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{optional::Optional, shard::Shard, Network, StateVersion};
 use tari_ootle_wallet_sdk::{
-    models::{ConfidentialOutputModel, OutputStatus, UtxoUpdateSet, WalletLockId},
+    cipher_seed::CipherSeedRestore,
+    models::{ConfidentialOutputModel, KeyId, OutputStatus, UtxoUpdateSet, WalletLockId},
     network::{SubstateQueryResult, TransactionQueryResult, WalletNetworkInterface},
     storage::TagAndPublicNoncePair,
     WalletSdk,
@@ -44,10 +45,18 @@ impl Test {
             override_keyring_password: Some(SafePassword::from_str("SuuuCh Sekret W0W").unwrap()),
         })
         .unwrap();
-        sdk.initialize_cipher_seed(None).unwrap();
+        sdk.initialize_cipher_seed(CipherSeedRestore::CreateNewIfRequired)
+            .unwrap();
         let accounts_api = sdk.accounts_api();
         accounts_api
-            .add_account(Some("test"), &Test::test_account_address(), 0, true, true)
+            .add_account(
+                Some("test"),
+                &Test::test_account_address(),
+                KeyId::derived(0),
+                KeyId::derived(0),
+                true,
+                true,
+            )
             .unwrap();
         accounts_api
             .add_vault(
@@ -93,7 +102,8 @@ impl Test {
                 commitment,
                 value: amount,
                 sender_public_nonce: None,
-                encryption_secret_key_index: 0,
+                view_only_key_id: KeyId::derived(0),
+                owner_key_id: Some(KeyId::derived(0)),
                 encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
                 public_asset_tag: None,
                 status: OutputStatus::Unspent,

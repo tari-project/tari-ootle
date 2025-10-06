@@ -17,7 +17,6 @@ pub mod templates;
 pub mod transaction;
 pub mod validator;
 pub mod wallet;
-pub mod wasm_optimizer;
 pub mod webauthn;
 pub mod webrtc;
 

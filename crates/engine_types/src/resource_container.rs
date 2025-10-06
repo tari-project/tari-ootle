@@ -18,8 +18,7 @@ use tari_template_lib::{
         ResourceAddress,
         UtxoId,
     },
-    prelude::ResourceType,
-    types::{crypto::PedersenCommitmentBytes, Amount},
+    types::{crypto::PedersenCommitmentBytes, Amount, ResourceType},
 };
 
 use crate::{confidential, crypto::PrivateOutput, substate::SubstateId, ToByteType};

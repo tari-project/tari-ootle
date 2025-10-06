@@ -7,8 +7,8 @@ use crate::{
     auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
     models::{Bucket, ComponentAddress, Metadata, ResourceAddress, ResourceAddressAllocation},
     prelude::ConfidentialOutputStatement,
-    resource::{ResourceManager, ResourceType, DEFAULT_DIVISIBILITY},
-    types::crypto::RistrettoPublicKeyBytes,
+    resource::{ResourceManager, DEFAULT_DIVISIBILITY},
+    types::{crypto::RistrettoPublicKeyBytes, ResourceType},
 };
 
 /// Implements the builder pattern for Confidential resources.

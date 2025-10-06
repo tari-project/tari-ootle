@@ -232,7 +232,7 @@ CREATE TABLE webauthn_registration_passkeys
 CREATE TABLE stealth_outputs
 (
     id                  INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    owner_account_id    INTEGER  NOT NULL,
+    owner_account_id    INTEGER  NOT NULL REFERENCES accounts (id),
     resource_address    TEXT     NOT NULL,
     commitment          TEXT     NOT NULL,
     value               TEXT     NOT NULL,

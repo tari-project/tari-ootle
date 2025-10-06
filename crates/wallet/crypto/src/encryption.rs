@@ -20,7 +20,7 @@ const ENCRYPTED_DATA_TAG: &[u8] = b"TARI_WALLET_EXTEND_NONCE_VARIANT";
 
 // Fixed sizes (all in bytes)
 const TAG_SIZE: usize = size_of::<Tag>();
-const SALT_LENGTH: usize = 5;
+const SALT_LENGTH: usize = 16;
 const ARGON2_SALT_BYTES: usize = 16;
 const ENCRYPTION_KEY_BYTES_LEN: usize = 32;
 const MAC_KEY_BYTE_LEN: usize = 32;
@@ -44,21 +44,21 @@ pub fn decrypt_with_password(cipher_text: &[u8], passphrase: &[u8]) -> Result<Ze
 
     let len = cipher_text.len();
     // Verify the checksum first, to detect obvious errors
-    let (cipher_payload, checksum) = cipher_text
+    let (payload, checksum) = cipher_text
         .split_at_checked(len - CHECKSUM_LENGTH)
         .ok_or_else(|| CipherError("Ciphertext too short (checksum)".to_string()))?;
     let checksum = u32::from_le_bytes(
         copy_fixed_checked(checksum)
             .ok_or_else(|| CipherError(format!("Invalid checksum length {}", checksum.len())))?,
     );
-    let expected_checksum = crc32fast::hash(cipher_payload);
+    let expected_checksum = crc32fast::hash(payload);
     if checksum != expected_checksum {
         return Err(CipherError("Ciphertext checksum mismatch".to_string()));
     }
 
     // Derive encryption and MAC keys from passphrase and main salt
-    let len = cipher_payload.len();
-    let (cipher_payload, salt) = cipher_payload
+    let len = payload.len();
+    let (cipher_payload, salt) = payload
         .split_at_checked(len - SALT_LENGTH)
         .ok_or_else(|| CipherError("Ciphertext too short (salt)".to_string()))?;
     let salt: [u8; SALT_LENGTH] = copy_fixed_checked(salt).expect("Salt length is SALT_LENGTH");
@@ -67,13 +67,13 @@ pub fn decrypt_with_password(cipher_text: &[u8], passphrase: &[u8]) -> Result<Ze
 
     // Split off the tag, which is at a fixed position from the end
     let len = cipher_payload.len();
-    let (cipher_payload, tag) = cipher_payload
+    let (payload, tag) = cipher_payload
         .split_at_checked(len - TAG_SIZE)
         .ok_or_else(|| CipherError("Ciphertext too short (tag)".to_string()))?;
     let tag = Tag::from_slice(tag);
 
     // Decrypt the secret data: payload and MAC (without leading version byte)
-    let mut decrypted_payload = Zeroizing::new(cipher_payload[1..].to_vec());
+    let mut decrypted_payload = Zeroizing::new(payload[1..].to_vec());
     let nonce = encryption_nonce_hasher().chain(&salt).finalize();
     let nonce = nonce
         .as_slice()

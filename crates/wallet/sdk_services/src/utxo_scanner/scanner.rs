@@ -9,7 +9,6 @@ use tari_ootle_wallet_sdk::{
     WalletSdk,
 };
 use tari_template_lib::models::ResourceAddress;
-use tokio::sync::watch;
 
 use crate::utxo_scanner::{StealthScannerApiError, UtxoScannerRound};
 
@@ -31,7 +30,6 @@ where
         &self,
         account: &AccountWithAddress,
         resource_address: &ResourceAddress,
-        notify_tx: &watch::Sender<()>,
     ) -> Result<usize, StealthScannerApiError> {
         let network = self.sdk.config_api().get_network()?;
 
@@ -40,8 +38,7 @@ where
             .key_manager_api()
             .get_view_only_key(account.view_only_key_id())?;
 
-        let mut scanner_round =
-            UtxoScannerRound::new(network, &self.sdk, notify_tx, account, &view_key, resource_address);
+        let mut scanner_round = UtxoScannerRound::new(network, &self.sdk, account, &view_key, resource_address);
         let num_found = scanner_round.scan_for_utxo_updates().await?;
 
         Ok(num_found)

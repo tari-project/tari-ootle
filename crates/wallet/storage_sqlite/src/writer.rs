@@ -584,11 +584,22 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .map_err(|e| WalletStorageError::general("accounts_update", e))?;
 
         if num_rows == 0 {
-            return Err(WalletStorageError::NotFound {
-                operation: "accounts_update",
-                entity: "account".to_string(),
-                key: address.to_string(),
-            });
+            // Check if the account exists, because this could have been an update that didnt change anything
+            // (rows_affected = 0)
+            let exists = accounts::table
+                .filter(accounts::address.eq(address.to_string()))
+                .limit(1)
+                .count()
+                .get_result::<i64>(self.connection())
+                .map_err(|e| WalletStorageError::general("accounts_update", e))?;
+
+            if exists == 0 {
+                return Err(WalletStorageError::NotFound {
+                    operation: "accounts_update",
+                    entity: "account".to_string(),
+                    key: address.to_string(),
+                });
+            }
         }
 
         Ok(())

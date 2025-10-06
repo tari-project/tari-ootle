@@ -20,7 +20,6 @@ use tari_ootle_wallet_sdk::{
     WalletSdk,
 };
 use tari_template_lib::models::{ComponentAddress, ResourceAddress};
-use tokio::sync::watch;
 
 use crate::utxo_scanner::StealthScannerApiError;
 
@@ -35,7 +34,6 @@ pub struct UtxoScannerRound<'a, TStore, TNetworkInterface> {
     resource_address: &'a ResourceAddress,
 
     sdk: &'a WalletSdk<TStore, TNetworkInterface>,
-    notify_tx: &'a watch::Sender<()>,
 
     shard_state_versions_to_set: HashMap<Shard, StateVersion>,
     utxos_to_recover: Vec<(ComponentAddress, UtxoUnspent)>,
@@ -51,7 +49,6 @@ where
     pub fn new(
         network: Network,
         sdk: &'a WalletSdk<TStore, TNetworkInterface>,
-        notify_tx: &'a watch::Sender<()>,
         account: &'a AccountWithAddress,
         view_key: &'a Key,
         resource_address: &'a ResourceAddress,
@@ -59,7 +56,6 @@ where
         Self {
             network,
             sdk,
-            notify_tx,
             account,
             view_key,
             resource_address,
@@ -76,12 +72,6 @@ where
                 break;
             }
             num_found += 1;
-        }
-
-        if num_found > 0 {
-            // Notify that there are new UTXOs to process
-            debug!(target: LOG_TARGET, "Notifying that new UTXOs are available for processing");
-            let _ignore = self.notify_tx.send(());
         }
 
         Ok(num_found)

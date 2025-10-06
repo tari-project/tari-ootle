@@ -16,23 +16,19 @@ use tari_ootle_wallet_sdk::{
     WalletSdk,
 };
 use tari_template_lib::models::{ComponentAddress, ResourceAddress, UtxoAddress, UtxoId};
-use tokio::sync::{broadcast, watch};
+use tokio::sync::watch;
 
-use crate::utxo_scanner::StealthScannerApiError;
+use crate::{
+    events::{UtxoRecoveredEvent, UtxoRecoveryCompletedEvent, UtxoRecoveryStartedEvent, WalletEvent},
+    notify::Notify,
+    utxo_scanner::StealthScannerApiError,
+};
 
 const LOG_TARGET: &str = "tari::ootle::wallet_services::utxo_recovery";
 
-#[derive(Debug, Clone)]
-pub enum UtxoRecoveryEvent {
-    UtxoRecoveryRoundStarted { round_id: usize },
-    UtxoRecoveryRoundBatchStarted { round_id: usize, batch_size: usize },
-    UtxoRecovered { utxo_address: UtxoAddress },
-    UtxoRecoveryRoundCompleted { round_id: usize },
-}
-
 pub struct UtxoRecovery<TStore, TNetworkInterface> {
     sdk: WalletSdk<TStore, TNetworkInterface>,
-    events: Option<broadcast::Sender<UtxoRecoveryEvent>>,
+    notify: Option<Notify<WalletEvent>>,
     round_id: usize,
 }
 
@@ -45,13 +41,13 @@ where
     pub fn new(sdk: WalletSdk<TStore, TNetworkInterface>) -> Self {
         Self {
             sdk,
-            events: None,
+            notify: None,
             round_id: 0,
         }
     }
 
-    pub fn with_events(mut self, events: broadcast::Sender<UtxoRecoveryEvent>) -> Self {
-        self.events = Some(events);
+    pub fn with_notify(mut self, events: Notify<WalletEvent>) -> Self {
+        self.notify = Some(events);
         self
     }
 
@@ -88,14 +84,15 @@ where
         Ok(())
     }
 
-    fn publish_event(&self, event: UtxoRecoveryEvent) {
-        if let Some(events) = &self.events {
-            let _ = events.send(event);
+    fn notify<T: Into<WalletEvent>>(&self, event: T) {
+        if let Some(notify) = &self.notify {
+            notify.notify(event);
         }
     }
 
     pub async fn process_utxo_validation_queue(&mut self) -> Result<(), StealthScannerApiError> {
         let mut start_event_published = false;
+        let mut num_recovered = 0;
         loop {
             let batch = self
                 .sdk
@@ -106,11 +103,12 @@ where
                 debug!(target: LOG_TARGET, "✅ No more UTXOs to process");
 
                 if self.round_id == 0 {
-                    self.publish_event(UtxoRecoveryEvent::UtxoRecoveryRoundStarted {
+                    self.notify(UtxoRecoveryStartedEvent {
                         round_id: self.round_id,
                     });
-                    self.publish_event(UtxoRecoveryEvent::UtxoRecoveryRoundCompleted {
+                    self.notify(UtxoRecoveryCompletedEvent {
                         round_id: self.round_id,
+                        num_recovered,
                     });
 
                     self.round_id += 1;
@@ -120,16 +118,11 @@ where
 
             if !start_event_published {
                 self.round_id += 1;
-                self.publish_event(UtxoRecoveryEvent::UtxoRecoveryRoundStarted {
+                self.notify(UtxoRecoveryStartedEvent {
                     round_id: self.round_id,
                 });
                 start_event_published = true;
             }
-
-            self.publish_event(UtxoRecoveryEvent::UtxoRecoveryRoundBatchStarted {
-                round_id: self.round_id,
-                batch_size: batch.len(),
-            });
 
             for (resource_addr, tag_and_nonce_to_view_key_map) in &batch {
                 if tag_and_nonce_to_view_key_map.is_empty() {
@@ -194,13 +187,13 @@ where
                         })
                     })
                     .collect();
-
-                self.process_recovered_utxos(*resource_addr, utxos)?;
+                num_recovered += self.process_recovered_utxos(*resource_addr, utxos)?;
             }
 
             if start_event_published {
-                self.publish_event(UtxoRecoveryEvent::UtxoRecoveryRoundCompleted {
+                self.notify(UtxoRecoveryCompletedEvent {
                     round_id: self.round_id,
+                    num_recovered,
                 });
             }
         }
@@ -210,7 +203,7 @@ where
         &self,
         resource_address: ResourceAddress,
         utxos_to_recover: Vec<FoundUtxo>,
-    ) -> Result<(), StealthScannerApiError> {
+    ) -> Result<usize, StealthScannerApiError> {
         let num_attempted = utxos_to_recover.len();
         let mut num_recovered = 0;
         for utxo in utxos_to_recover {
@@ -227,7 +220,7 @@ where
             );
         }
 
-        Ok(())
+        Ok(num_recovered)
     }
 
     fn check_unspent_utxo_and_store(
@@ -265,9 +258,17 @@ where
         else {
             // The output could be burnt, frozen, or otherwise invalid. If we already have it in the db, update its
             // status, if not, do nothing.
-            outputs_api
+            let has_utxo = outputs_api
                 .update_utxo_status(&address, None, None, Some(found.is_frozen))
-                .optional()?;
+                .optional()?
+                .is_some();
+
+            if has_utxo {
+                self.notify(UtxoRecoveredEvent {
+                    address: UtxoAddress::new(resource_address, found.id),
+                    account_address: found.account_addr,
+                });
+            }
             self.sdk.store().with_write_tx(|tx| {
                 tx.utxo_process_queue_remove_item(resource_address, found.output.tag, found.output.output.public_nonce)
             })?;
@@ -281,8 +282,9 @@ where
             tx.utxo_process_queue_remove_item(resource_address, found.output.tag, found.output.output.public_nonce)
         })?;
 
-        self.publish_event(UtxoRecoveryEvent::UtxoRecovered {
-            utxo_address: UtxoAddress::new(resource_address, found.id),
+        self.notify(UtxoRecoveredEvent {
+            address: UtxoAddress::new(resource_address, found.id),
+            account_address: found.account_addr,
         });
         info!(target: LOG_TARGET, "💰️ Recovered stealth output {} for account {}", address, keys.account_public_key);
         Ok(true)

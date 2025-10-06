@@ -63,6 +63,12 @@ where
         Ok(substates)
     }
 
+    pub async fn get_substate_from_network(&self, id: SubstateId) -> Result<Substate, SubstateApiError> {
+        let mut map = self.get_substates_from_network(vec![id.clone()]).await?;
+        map.remove(&id)
+            .ok_or_else(|| SubstateApiError::SubstateDoesNotExist { address: id })
+    }
+
     pub async fn get_substates_from_network(
         &self,
         ids: Vec<SubstateId>,

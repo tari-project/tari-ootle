@@ -991,6 +991,21 @@ pub async fn handle_associate_stealth_resource(
         ));
     }
 
+    // Ensure the resource is in the local cache
+    if !sdk.resources_api().exists(&req.resource_address)? {
+        let substate = sdk
+            .substate_api()
+            .get_substate_from_network(req.resource_address.into())
+            .await?;
+        let resource = substate.into_substate_value().into_resource().ok_or_else(|| {
+            general_error(format!(
+                "Indexer returned Substate at address {} is not a resource",
+                req.resource_address
+            ))
+        })?;
+        sdk.resources_api().upsert_resource(&req.resource_address, &resource)?;
+    }
+
     sdk.accounts_api()
         .associate_stealth_resource(account.component_address(), req.resource_address)?;
 

@@ -185,9 +185,14 @@ where
 {
     info!(target: LOG_TARGET, "🔍 Scanning for UTXOs for {}", task);
     let account = sdk.accounts_api().get_account_by_address(&task.account_address)?;
-    UtxoScanner::new(sdk)
-        .scan_and_enqueue_utxos(&account, &task.resource_address, &notify_tx)
+    let num_found = UtxoScanner::new(sdk)
+        .scan_and_enqueue_utxos(&account, &task.resource_address)
         .await?;
+
+    // UTXOs were found, notify the Utxo recovery worker that there is work to do
+    if num_found > 0 {
+        let _ = notify_tx.send(());
+    }
 
     Ok(())
 }

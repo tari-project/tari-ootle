@@ -232,7 +232,8 @@ where
             WalletEvent::AuthLoginRequest(_) |
             WalletEvent::UtxoRecoveryStarted(_) |
             WalletEvent::UtxoRecovered(_) |
-            WalletEvent::UtxoRecoveryCompleted(_) => {},
+            WalletEvent::UtxoRecoveryCompleted(_) |
+            WalletEvent::UtxoSpent(_) => {},
         }
         Ok(())
     }

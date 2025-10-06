@@ -17,6 +17,7 @@ pub enum WalletEvent {
     UtxoRecoveryStarted(UtxoRecoveryStartedEvent),
     UtxoRecovered(UtxoRecoveredEvent),
     UtxoRecoveryCompleted(UtxoRecoveryCompletedEvent),
+    UtxoSpent(UtxoSpentEvent),
 }
 
 impl From<TransactionSubmittedEvent> for WalletEvent {
@@ -73,6 +74,12 @@ impl From<UtxoRecoveryCompletedEvent> for WalletEvent {
     }
 }
 
+impl From<UtxoSpentEvent> for WalletEvent {
+    fn from(value: UtxoSpentEvent) -> Self {
+        Self::UtxoSpent(value)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TransactionSubmittedEvent {
     pub transaction_id: TransactionId,
@@ -125,4 +132,9 @@ pub struct UtxoRecoveryStartedEvent {
 pub struct UtxoRecoveryCompletedEvent {
     pub round_id: usize,
     pub num_recovered: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct UtxoSpentEvent {
+    pub address: UtxoAddress,
 }

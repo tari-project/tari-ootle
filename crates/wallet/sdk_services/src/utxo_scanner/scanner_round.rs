@@ -19,9 +19,13 @@ use tari_ootle_wallet_sdk::{
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
     WalletSdk,
 };
-use tari_template_lib::models::{ComponentAddress, ResourceAddress};
+use tari_template_lib::models::{ComponentAddress, ResourceAddress, UtxoAddress};
 
-use crate::utxo_scanner::StealthScannerApiError;
+use crate::{
+    events::{UtxoSpentEvent, WalletEvent},
+    notify::Notify,
+    utxo_scanner::StealthScannerApiError,
+};
 
 const LOG_TARGET: &str = "tari::ootle::wallet_services::scanner_round";
 // TODO: either fetch num preshards from the network or we should hardcode it to a single value for all apps
@@ -34,10 +38,12 @@ pub struct UtxoScannerRound<'a, TStore, TNetworkInterface> {
     resource_address: &'a ResourceAddress,
 
     sdk: &'a WalletSdk<TStore, TNetworkInterface>,
+    stats: UtxoScanRoundStats,
 
     shard_state_versions_to_set: HashMap<Shard, StateVersion>,
     utxos_to_recover: Vec<(ComponentAddress, UtxoUnspent)>,
     utxos_to_spend: Vec<UtxoSpent>,
+    notify: &'a Notify<WalletEvent>,
 }
 
 impl<'a, TStore, TNetworkInterface> UtxoScannerRound<'a, TStore, TNetworkInterface>
@@ -52,6 +58,7 @@ where
         account: &'a AccountWithAddress,
         view_key: &'a Key,
         resource_address: &'a ResourceAddress,
+        notify: &'a Notify<WalletEvent>,
     ) -> Self {
         Self {
             network,
@@ -62,21 +69,27 @@ where
             shard_state_versions_to_set: HashMap::new(),
             utxos_to_recover: Vec::new(),
             utxos_to_spend: Vec::new(),
+            notify,
+            stats: UtxoScanRoundStats::default(),
         }
     }
 
-    pub async fn scan_for_utxo_updates(&mut self) -> Result<usize, StealthScannerApiError> {
-        let mut num_found = 0;
+    pub async fn scan_for_utxo_updates(&mut self) -> Result<(), StealthScannerApiError> {
         loop {
             if !self.scan().await? {
                 break;
             }
-            num_found += 1;
+            self.stats.num_recovered += 1;
         }
 
-        Ok(num_found)
+        Ok(())
     }
 
+    pub fn into_stats(self) -> UtxoScanRoundStats {
+        self.stats
+    }
+
+    #[allow(clippy::too_many_lines)]
     async fn scan(&mut self) -> Result<bool, StealthScannerApiError> {
         let mut shard_state_versions = self
             .sdk
@@ -123,7 +136,6 @@ where
         }
 
         let num_received = response.shard_updates.len();
-        let mut num_spent = 0;
 
         for (shard, update_set) in response.shard_updates {
             self.shard_state_versions_to_set
@@ -163,10 +175,16 @@ where
 
         // Atomically persist all changes from this round
         let num_recovered = self.utxos_to_recover.len();
+        self.stats.num_received += num_received;
+        self.stats.num_recovered += num_recovered;
+        let mut num_spent = 0;
         self.sdk.store().with_write_tx(|tx| {
             // Mark UTXOs as spent (if they exist)
             for spent in self.utxos_to_spend.drain(..) {
-                if Self::spend(tx, self.resource_address, spent)? {
+                if Self::spend(tx, self.resource_address, &spent)? {
+                    self.notify.notify(UtxoSpentEvent {
+                        address: UtxoAddress::new(*self.resource_address, spent.id),
+                    });
                     num_spent += 1;
                 }
             }
@@ -190,6 +208,8 @@ where
             num_received,
             num_spent
         );
+
+        self.stats.num_spent += num_spent;
 
         Ok(true)
     }
@@ -231,7 +251,7 @@ where
     fn spend(
         tx: &mut TStore::WriteTransaction<'_>,
         resource_address: &ResourceAddress,
-        spent: UtxoSpent,
+        spent: &UtxoSpent,
     ) -> Result<bool, WalletStorageError> {
         match tx
             .stealth_outputs_mark_as_spent(resource_address, &spent.id)
@@ -250,4 +270,11 @@ where
             },
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct UtxoScanRoundStats {
+    pub num_received: usize,
+    pub num_recovered: usize,
+    pub num_spent: usize,
 }

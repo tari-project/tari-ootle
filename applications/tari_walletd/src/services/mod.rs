@@ -48,7 +48,7 @@ where
     let template_monitor = TemplateMonitor::new(notify.clone(), wallet_sdk.clone(), shutdown_signal.clone());
     let template_monitor_join_handle = tokio::spawn(template_monitor.run());
 
-    let utxo_scanner = StealthUtxoScannerWorker::new(wallet_sdk.clone());
+    let utxo_scanner = StealthUtxoScannerWorker::new(wallet_sdk.clone(), notify.clone());
     let (utxo_scanner_join_handle, utxo_scanner_handle) = utxo_scanner.spawn();
 
     let utxo_recovery_join_handle = {

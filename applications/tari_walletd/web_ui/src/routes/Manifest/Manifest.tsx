@@ -193,28 +193,34 @@ function VariableEditor({
         </Button>
       </Stack>
 
-      <Table>
-        <TableHead>
-          <TableRow>
-            <TableCell>Key</TableCell>
-            <TableCell>Value</TableCell>
-            <TableCell>Actions</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {Object.entries(variables).map(([k, v]) => (
-            <TableRow key={k}>
-              <DataTableCell>{k}</DataTableCell>
-              <DataTableCell>{v}</DataTableCell>
-              <DataTableCell>
-                <Button variant="outlined" color="secondary" onClick={() => onRemove(k)}>
-                  Remove
-                </Button>
-              </DataTableCell>
+      {Object.keys(variables).length > 0 && (
+        <Table
+          sx={{
+            marginBottom: 2,
+          }}
+        >
+          <TableHead>
+            <TableRow>
+              <TableCell>Key</TableCell>
+              <TableCell>Value</TableCell>
+              <TableCell>Actions</TableCell>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHead>
+          <TableBody>
+            {Object.entries(variables).map(([k, v]) => (
+              <TableRow key={k}>
+                <DataTableCell>{k}</DataTableCell>
+                <DataTableCell>{v}</DataTableCell>
+                <DataTableCell>
+                  <Button variant="outlined" color="error" onClick={() => onRemove(k)}>
+                    Remove
+                  </Button>
+                </DataTableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
     </Grid>
   );
 }

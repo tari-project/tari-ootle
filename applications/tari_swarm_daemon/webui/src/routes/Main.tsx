@@ -288,6 +288,12 @@ function ShowInfo(params: any) {
       <a href={`${node.jrpc}`} target="_blank">{node.jrpc}</a>
     </div>
   );
+  const apiInfo = node?.api_url && (
+    <div>
+      <b>API</b>
+      <a href={`${node.api_url}`} target="_blank">{node.api_url}</a>
+    </div>
+  );
   const graphQLInfo = node?.graphql && (
     <div>
       <b>GraphQL</b>
@@ -353,6 +359,7 @@ function ShowInfo(params: any) {
       {nameInfo}
       {httpInfo}
       {jrpcInfo}
+      {apiInfo}
       {graphQLInfo}
       {grpcInfo}
       {showLogs && logInfo}

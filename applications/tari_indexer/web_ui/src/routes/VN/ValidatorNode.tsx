@@ -42,7 +42,7 @@ function ValidatorNode() {
       })
       .catch((reason) => {
         console.log(reason);
-        setError("Json RPC error, please check console");
+        setError("API error, please check the developer console");
       });
   }, []);
   useEffect(() => {

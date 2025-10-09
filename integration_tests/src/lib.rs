@@ -364,7 +364,7 @@ impl TariWorld {
         for (name, node) in &self.indexers {
             eprintln!(
                 "Indexer \"{}\": json rpc port \"{}\", graphql port \"{}\", web ui port  \"{}\", temp dir path \"{}\"",
-                name, node.json_rpc_port, node.graphql_port, node.web_ui_port, node.temp_dir_path
+                name, node.api_port, node.graphql_port, node.web_ui_port, node.temp_dir_path
             );
         }
 
@@ -384,8 +384,8 @@ impl TariWorld {
         // wallet daemons
         for (name, daemon) in &self.wallet_daemons {
             eprintln!(
-                "Wallet daemon \"{}\": json rpc port \"{}\", indexer jrpc port \"{}\", temp dir path \"{:?}\"",
-                name, daemon.json_rpc_port, daemon.indexer_jrpc_port, daemon.temp_path_dir
+                "Wallet daemon \"{}\": json rpc port \"{}\", indexer api port \"{}\", temp dir path \"{:?}\"",
+                name, daemon.json_rpc_port, daemon.indexer_api_port, daemon.temp_path_dir
             );
         }
 

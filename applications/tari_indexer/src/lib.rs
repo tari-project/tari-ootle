@@ -32,11 +32,11 @@ mod dry_run;
 pub mod graphql;
 #[cfg(feature = "web_ui")]
 mod http_ui;
+mod rest_api;
 
 mod block_data;
 mod event_data;
 mod event_manager;
-mod json_rpc;
 mod network_client;
 mod network_state_sync;
 mod storage_sqlite;
@@ -49,23 +49,16 @@ use std::{convert::Infallible, fs, future, future::Future};
 use log::*;
 use network_state_sync::BlockScanner;
 use serde::Serialize;
-use substate_manager::SubstateManager;
 use tari_common::exit_codes::{ExitCode, ExitError};
 use tari_consensus::consensus_constants::ConsensusConstants;
-use tari_engine::transaction::TransactionProcessorConfig;
 use tari_epoch_manager::{
     traits::{EpochManagerSpec, LayerOneTransactionSubmitter},
     EpochManagerEvent,
     EpochManagerReader,
 };
 use tari_epoch_oracles::EpochOracle;
-use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::NetworkingService;
-use tari_ootle_app_utilities::{
-    claim_burn_proof_verifier::TariClaimBurnProofVerifier,
-    keypair::setup_keypair_prompt,
-    template_download_queue::TemplateDownloadQueue,
-};
+use tari_ootle_app_utilities::{keypair::setup_keypair_prompt, template_download_queue::TemplateDownloadQueue};
 use tari_ootle_common_types::{layer_one_transaction::LayerOneTransactionDef, PeerAddress};
 use tari_ootle_storage::global::{DbFactory, GlobalDb};
 use tari_ootle_storage_sqlite::{global::SqliteGlobalDbAdapter, SqliteDbFactory};
@@ -75,12 +68,8 @@ use tokio::{task, time};
 use crate::{
     bootstrap::{spawn_services, Services},
     config::ApplicationConfig,
-    dry_run::processor::DryRunTransactionProcessor,
     event_manager::EventManager,
     graphql::server::run_graphql,
-    json_rpc::{spawn_json_rpc, JsonRpcHandlers},
-    substate_file_cache::SubstateFileCache,
-    transaction_manager::TransactionManager,
 };
 
 const LOG_TARGET: &str = "tari::indexer::app";
@@ -110,29 +99,6 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
 
     let mut epoch_manager_events = services.epoch_manager.subscribe();
 
-    let substate_cache_dir = config.common.base_path.join("substate_cache");
-    let substate_cache = SubstateFileCache::new(substate_cache_dir)
-        .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Substate cache error: {}", e)))?;
-
-    let substate_scanner = SubstateScanner::new(
-        services.epoch_manager.clone(),
-        services.validator_node_client_factory.clone(),
-        substate_cache,
-    );
-
-    let substate_manager = SubstateManager::new(substate_scanner.clone(), services.store.clone());
-    let transaction_manager = TransactionManager::new(services.network_client.clone(), services.store.clone());
-
-    // dry run
-    let dry_run_transaction_processor = DryRunTransactionProcessor::new(
-        TransactionProcessorConfig::new(config.network)
-            .with_template_binary_max_size_bytes(consensus_constants.template_binary_max_size_bytes),
-        services.epoch_manager.clone(),
-        services.validator_node_client_factory.clone(),
-        services.template_manager.clone(),
-        TariClaimBurnProofVerifier::new(config.network, services.global_db.clone()),
-    );
-
     // Run the event manager
     let event_manager = EventManager::new(services.store.clone());
 
@@ -140,35 +106,27 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
     let graphql_address = config.indexer.graphql_address;
     if let Some(address) = graphql_address {
         info!(target: LOG_TARGET, "🌐 Started GraphQL server on {}", address);
-        task::spawn(run_graphql(address, substate_manager.clone(), event_manager));
+        task::spawn(run_graphql(address, services.substate_manager.clone(), event_manager));
     }
 
-    // Run the JSON-RPC API
-    let jrpc_address = config.indexer.json_rpc_address;
-    if let Some(jrpc_address) = jrpc_address {
-        info!(target: LOG_TARGET, "🌐 Started JSON-RPC server on {}", jrpc_address);
-        let handlers = JsonRpcHandlers::new(
-            &services,
-            substate_manager,
-            transaction_manager,
-            services.global_db.clone(),
-            services.template_manager.clone(),
-            dry_run_transaction_processor,
-        );
-        let jrpc_address = spawn_json_rpc(jrpc_address, handlers).await?;
-        debug!(target: LOG_TARGET, "JSON-RPC address {}", jrpc_address);
+    // Run the REST API
+    let listen_addr = config.indexer.api_listen_address;
+    if let Some(listen_addr) = listen_addr {
+        let listen_address = rest_api::Server::spawn(listen_addr, &services, shutdown_signal.clone())
+            .await
+            .map_err(|e| ExitError::new(ExitCode::ConfigError, e))?;
+        debug!(target: LOG_TARGET, "API address {}", listen_address);
         // Run the web ui
         #[cfg(feature = "web_ui")]
         if let Some(address) = config.indexer.web_ui_address {
-            // json rpc
-            let public_jrpc_url = config
+            let public_api_url = config
                 .indexer
-                .web_ui_public_json_rpc_url
-                .unwrap_or_else(|| format!("http://{jrpc_address}/json_rpc"));
-            let public_jrpc_address = url::Url::parse(&public_jrpc_url).map_err(|err| {
+                .web_ui_public_api_url
+                .unwrap_or_else(|| format!("http://{listen_addr}"));
+            let public_api_address = url::Url::parse(&public_api_url).map_err(|err| {
                 ExitError::new(
                     ExitCode::ConfigError,
-                    format!("Invalid public JSON-rpc url '{public_jrpc_url}': {err}"),
+                    format!("Invalid public API url '{public_api_url}': {err}"),
                 )
             })?;
 
@@ -190,7 +148,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
 
             tokio::spawn(http_ui::server::run_http_ui_server(
                 address,
-                public_jrpc_address,
+                public_api_address,
                 public_graphql_url,
             ));
         }

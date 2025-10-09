@@ -95,6 +95,10 @@ impl UtxoId {
         PedersenCommitmentBytes::from_array(self.0)
     }
 
+    pub fn as_bytes(&self) -> &[u8; Self::LENGTH] {
+        &self.0
+    }
+
     pub fn to_commitment_hex_string(&self) -> String {
         // to_string happens to return the hex encoding of the commitment bytes. If that changes, so will this.
         self.to_string()

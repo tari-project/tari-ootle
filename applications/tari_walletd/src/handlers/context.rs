@@ -2,11 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use axum_extra::headers::authorization::Bearer;
-use tari_ootle_wallet_sdk::WalletSdk;
 use tari_ootle_wallet_sdk_services::{
     account_monitor::AccountMonitorHandle,
     events::WalletEvent,
-    indexer_jrpc::IndexerJsonRpcNetworkInterface,
     notify::Notify,
     transaction_service::TransactionServiceHandle,
 };
@@ -23,11 +21,12 @@ use crate::{
         WalletAuthenticator,
     },
     services::WebauthnService,
+    WalletSdk,
 };
 
 #[derive(Debug, Clone)]
 pub struct HandlerContext {
-    wallet_sdk: WalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>,
+    wallet_sdk: WalletSdk,
     notifier: Notify<WalletEvent>,
     transaction_service: TransactionServiceHandle,
     account_monitor: AccountMonitorHandle,
@@ -38,7 +37,7 @@ pub struct HandlerContext {
 
 impl HandlerContext {
     pub fn new(
-        wallet_sdk: WalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>,
+        wallet_sdk: WalletSdk,
         notifier: Notify<WalletEvent>,
         transaction_service: TransactionServiceHandle,
         account_monitor: AccountMonitorHandle,
@@ -61,7 +60,7 @@ impl HandlerContext {
         &self.notifier
     }
 
-    pub fn wallet_sdk(&self) -> &WalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface> {
+    pub fn wallet_sdk(&self) -> &WalletSdk {
         &self.wallet_sdk
     }
 

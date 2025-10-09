@@ -48,17 +48,19 @@ import type {
   ListSubstatesResponse,
   // SubstateType,
 } from "@tari-project/typescript-bindings";
+import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
+import { IndexerClient } from "@tari-project/indexer_client";
 
-const DEFAULT_WALLET_ADDRESS = new URL(
-  import.meta.env.VITE_INDEXER_JRPC_ADDRESS ||
-    import.meta.env.VITE_JSON_RPC_ADDRESS ||
-    import.meta.env.VITE_JRPC_ADDRESS ||
-    "http://localhost:9000"
+const DEFAULT_API_ADDRESS = new URL(
+  import.meta.env.VITE_INDEXER_API_ADDRESS ||
+  import.meta.env.VITE_API_ADDRESS ||
+  import.meta.env.VITE_API_ADDRESS ||
+  "http://localhost:9000",
 );
 
 export async function getClientAddress(): Promise<URL> {
   try {
-    const resp = await fetch("/json_rpc_address");
+    const resp = await fetch("/rest_api_address");
     if (resp.status === 200) {
       const url = await resp.text();
       try {
@@ -71,70 +73,57 @@ export async function getClientAddress(): Promise<URL> {
     console.warn(e);
   }
 
-  return DEFAULT_WALLET_ADDRESS;
+  return DEFAULT_API_ADDRESS;
 }
 
-async function jsonRpc(method: string, params: any = null) {
-  let id = 0;
-  id += 1;
-  let address = await getClientAddress();
-  let response = await fetch(address, {
-    method: "POST",
-    body: JSON.stringify({
-      method: method,
-      jsonrpc: "2.0",
-      id: id,
-      params: params,
-    }),
-    headers: {
-      "Content-Type": "application/json",
-    },
-  });
-  let json = await response.json();
-  if (json.error) {
-    throw json.error;
+let clientInstance: IndexerClient | null = null;
+let pendingClientInstance: Promise<IndexerClient> | null = null;
+let outerAddress: URL | null = null;
+
+export async function client() {
+  if (clientInstance) {
+    return Promise.resolve(clientInstance);
   }
-  return json.result;
+
+  const getAddress = outerAddress ? Promise.resolve(outerAddress) : getClientAddress();
+
+  pendingClientInstance = getAddress.then(async (addr) => {
+    const client = IndexerClient.usingFetchTransport(addr.toString());
+    outerAddress = addr;
+    clientInstance = client;
+    pendingClientInstance = null;
+    return client;
+  });
+
+  return pendingClientInstance;
 }
 
-export const getOpenRpcSchema = (): Promise<string> => jsonRpc("rpc.discover");
-export const getIdentity = (): Promise<IndexerGetIdentityResponse> =>
-  jsonRpc("get_identity");
-export const addPeer = (
-  request: IndexerAddPeerRequest
-): Promise<IndexerAddPeerResponse> => jsonRpc("add_peer", request);
-export const getCommsStats = (): Promise<IndexerGetCommsStatsResponse> =>
-  jsonRpc("get_comms_stats");
-export const getSubstate = (
-  request: IndexerGetSubstateRequest
-): Promise<IndexerGetSubstateResponse> => jsonRpc("get_substate", request);
-export const inspectSubstate = (
-  request: InspectSubstateRequest
-): Promise<InspectSubstateResponse> => jsonRpc("inspect_substate", request);
-export const listSubstates = (
-  request: ListSubstatesRequest
-): Promise<ListSubstatesResponse> => jsonRpc("list_substates", request);
-export const getConnections = (): Promise<IndexerGetConnectionsResponse> =>
-  jsonRpc("get_connections");
-// export const getNonFungibleCount = (
-//   request: GetNonFungibleCountRequest
-// ): Promise<GetNonFungibleCountResponse> =>
-//   jsonRpc('get_non_fungible_count', request);
-export const getNonFungibles = (
-  request: GetNonFungiblesRequest
-): Promise<GetNonFungiblesResponse> => jsonRpc("get_non_fungibles", request);
-export const submitTransaction = (
-  request: GetNonFungiblesRequest
-): Promise<IndexerSubmitTransactionResponse> =>
-  jsonRpc("submit_transaction", request);
-export const getTransactionResult = (
-  request: IndexerGetTransactionResultRequest
-): Promise<IndexerGetTransactionResultResponse> =>
-  jsonRpc("get_transaction_result", request);
 
-export const getEpochManagerStats = (): Promise<GetEpochManagerStatsResponse> =>
-  jsonRpc("get_epoch_manager_stats");
+export const getIdentity = (): Promise<IndexerGetIdentityResponse> =>
+  client().then((c) => c.identityGet());
+export const addPeer = (
+  request: IndexerAddPeerRequest,
+): Promise<IndexerAddPeerResponse> => client().then((c) => c.addConnection(request));
+export const getConnections = (): Promise<IndexerGetConnectionsResponse> =>
+  client().then((c) => c.getConnections());
+
+export const getSubstate = (
+  request: IndexerGetSubstateRequest,
+): Promise<IndexerGetSubstateResponse> => client().then((c) => c.substatesGet(request.address, request));
+export const listSubstates = (
+  request: ListSubstatesRequest,
+): Promise<ListSubstatesResponse> => client().then((c) => c.listSubstates(request));
+export const getNonFungibles = (
+  request: GetNonFungiblesRequest,
+): Promise<GetNonFungiblesResponse> => {
+  throw new Error("Not implemented");
+};
+export const getTransactionResult = (
+  request: IndexerGetTransactionResultRequest,
+): Promise<IndexerGetTransactionResultResponse> =>
+  client().then((c) => c.getTransactionResult(request.transaction_id));
+
 export const listRecentTransactions = (
-  request: ListRecentTransactionsRequest
+  request: ListRecentTransactionsRequest,
 ): Promise<ListRecentTransactionsResponse> =>
-  jsonRpc("list_recent_transactions", request);
+  client().then((c) => c.listRecentTransactions(request));

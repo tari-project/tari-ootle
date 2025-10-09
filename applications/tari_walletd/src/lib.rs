@@ -40,12 +40,12 @@ use tari_ootle_wallet_sdk::{
         key_manager::KeyBranch,
     },
     cipher_seed::CipherSeedRestore,
-    WalletSdk,
+    WalletSdk as Sdk,
     WalletSdkConfig,
 };
 use tari_ootle_wallet_sdk_services::{
     account_recovery::AccountRecoveryService,
-    indexer_jrpc::IndexerJsonRpcNetworkInterface,
+    indexer_rest_api::IndexerRestApiNetworkInterface,
     notify::Notify,
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
@@ -63,6 +63,8 @@ const LOG_TARGET: &str = "tari::ootle::wallet_daemon";
 const DEFAULT_FEE: u64 = 1500;
 // TODO: must match the global network value. All testnets currently have 256 pre-shards.
 const NUM_PRESHARDS: NumPreshards = NumPreshards::current();
+
+pub type WalletSdk = Sdk<SqliteWalletStore, IndexerRestApiNetworkInterface>;
 
 pub async fn run_tari_ootle_walletd(
     config: ApplicationConfig,
@@ -184,21 +186,18 @@ pub fn init_wallet_store(config: &ApplicationConfig) -> anyhow::Result<SqliteWal
     Ok(store)
 }
 
-pub fn initialize_wallet_sdk(
-    config: &ApplicationConfig,
-    store: SqliteWalletStore,
-) -> anyhow::Result<WalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>> {
+pub fn initialize_wallet_sdk(config: &ApplicationConfig, store: SqliteWalletStore) -> anyhow::Result<WalletSdk> {
     let sdk_config = WalletSdkConfig {
         network: config.ootle_wallet_daemon.network,
         override_keyring_password: config.ootle_wallet_daemon.override_keyring_password.clone(),
     };
     let config_api = ConfigApi::new(&store);
-    let indexer_jrpc_endpoint = if let Some(indexer_url) = config_api.get(ConfigKey::IndexerUrl).optional()? {
+    let indexer_endpoint = if let Some(indexer_url) = config_api.get(ConfigKey::IndexerUrl).optional()? {
         indexer_url
     } else {
-        config.ootle_wallet_daemon.indexer_json_rpc_url.clone()
+        config.ootle_wallet_daemon.indexer_api_url.clone()
     };
-    let indexer = IndexerJsonRpcNetworkInterface::new(indexer_jrpc_endpoint);
+    let indexer = IndexerRestApiNetworkInterface::new(indexer_endpoint);
     let sdk = WalletSdk::initialize(store, indexer, sdk_config)?;
     Ok(sdk)
 }

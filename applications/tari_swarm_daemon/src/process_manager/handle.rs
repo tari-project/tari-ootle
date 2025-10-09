@@ -141,7 +141,32 @@ impl InstanceInfo {
                 let web_port = self.ports.get("jrpc").expect("jrpc port not found");
                 format!("http://{public_ip}:{web_port}/json_rpc")
                     .parse()
-                    .expect("Invalid web URL")
+                    .expect("Invalid JSON-RPC URL")
+            },
+        }
+    }
+
+    pub fn get_public_api_url(&self) -> Url {
+        match self.settings.get("public_api_url") {
+            Some(url) => url
+                .parse()
+                .expect("Invalid API URL. Please check `public_api_url` in your config."),
+            None => {
+                let public_ip = self
+                    .settings
+                    .get("public_ip")
+                    .map(|s| {
+                        // Required for webauthn
+                        if s == "127.0.0.1" {
+                            return "localhost";
+                        }
+                        s.as_str()
+                    })
+                    .unwrap_or("localhost");
+                let web_port = self.ports.get("api").expect("api port not found");
+                format!("http://{public_ip}:{web_port}")
+                    .parse()
+                    .expect("Invalid api URL")
             },
         }
     }

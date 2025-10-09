@@ -29,7 +29,7 @@ async fn given_validator_connects_to_other_vns(world: &mut TariWorld, name: Stri
             )
         });
 
-    let mut cli = indexer.get_jrpc_indexer_client();
+    let mut cli = indexer.get_indexer_client();
     for (pk, addr) in details {
         if let Err(err) = cli
             .add_peer(AddPeerRequest {
@@ -49,7 +49,7 @@ async fn given_validator_connects_to_other_vns(world: &mut TariWorld, name: Stri
 #[then(expr = "indexer {word} has scanned to at least height {int}")]
 pub async fn indexer_has_scanned_to_at_least_height(world: &mut TariWorld, name: String, block_height: u64) {
     let indexer = world.get_indexer(&name);
-    let mut client = indexer.get_jrpc_indexer_client();
+    let mut client = indexer.get_indexer_client();
     let mut last_block_height = 0;
     let mut remaining = 10;
     loop {
@@ -250,7 +250,7 @@ async fn i_wait_for_the_indexer_to_sync_with_the_network(world: &mut TariWorld, 
 
     let indexer = world.get_indexer(&indexer_name);
     assert!(!indexer.handle.is_finished(), "Indexer {} is not running", indexer_name);
-    let mut client = indexer.get_jrpc_indexer_client();
+    let mut client = indexer.get_indexer_client();
     let mut remaining_attempts = 60;
     loop {
         if remaining_attempts == 0 {

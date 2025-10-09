@@ -10,6 +10,25 @@ use tari_template_lib::{
     types::crypto::{RistrettoPublicKeyBytes, UtxoTag},
 };
 
+#[derive(Debug, Clone)]
+pub struct UtxoUpdatePayload {
+    pub sos: Option<StartOfShard>,
+    pub update: Option<WalletUtxoUpdate>,
+    pub eos: Option<EndOfShard>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StartOfShard {
+    pub shard: Shard,
+    pub max_state_version: StateVersion,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct EndOfShard {
+    pub max_state_version: StateVersion,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UtxoUpdateSet {

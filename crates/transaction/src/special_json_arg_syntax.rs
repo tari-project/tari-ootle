@@ -61,7 +61,7 @@ fn is_arg_json(arg: &json::Value) -> bool {
     };
 
     if let Some(lit) = obj.get("Literal") {
-        // Support for {"Literal" "deadbeaf"} - common case for wallet -> indexer JSON rpc
+        // Support for {"Literal" "deadbeaf"} - common case for wallet -> indexer api
         if let Some(s) = lit.as_str() {
             return s.chars().all(|c| c.is_ascii_hexdigit());
         }

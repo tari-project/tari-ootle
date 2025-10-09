@@ -1,0 +1,12 @@
+//   Copyright 2025 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+pub mod misc;
+pub mod network;
+pub mod nfts;
+pub mod substates;
+pub mod templates;
+pub mod transactions;
+pub mod utxos;
+
+pub type HandlerResult<T> = Result<T, super::error::ErrorResponse>;

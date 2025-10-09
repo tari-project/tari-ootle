@@ -22,8 +22,8 @@
 # The relative path to store persistent data (default = "data/indexer")
 #data_dir = "data/indexer"
 
-# JSON-RPC listener address (default = "127.0.0.1:18300")
-#json_rpc_address = "127.0.0.1:18300"
+# API listener address (default = "127.0.0.1:18300")
+#api_listen_address = "127.0.0.1:18300"
 
 # HTTP UI listener address (default = "127.0.0.1:15000")
 #web_ui_address = "127.0.0.1:15000"

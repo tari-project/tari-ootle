@@ -22,6 +22,12 @@ impl UtxoTag {
     }
 }
 
+impl From<u32> for UtxoTag {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
 impl fmt::Display for UtxoTag {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "UtxoTag({})", self.0)

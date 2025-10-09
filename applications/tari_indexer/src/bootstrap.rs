@@ -33,6 +33,7 @@ use tari_common::{
 };
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_crypto::tari_utilities::ByteArray;
+use tari_engine::transaction::TransactionProcessorConfig;
 use tari_engine_types::ToByteType;
 use tari_epoch_manager::service::{EpochManagerConfig, EpochManagerHandle};
 use tari_epoch_oracles::{
@@ -42,8 +43,10 @@ use tari_epoch_oracles::{
     store::EpochOracleStore,
     EpochOracle,
 };
+use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_ootle_app_utilities::{
+    claim_burn_proof_verifier::TariClaimBurnProofVerifier,
     common::verify_correct_network,
     configuration::convert_network_to_l1_network,
     epoch_oracle_config::EpochOracleType,
@@ -61,6 +64,7 @@ use tari_template_manager::{implementation::TemplateManager, interface::Template
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
 use crate::{
+    dry_run::processor::DryRunTransactionProcessor,
     network_client::TariNetworkClient,
     network_state_sync,
     network_state_sync::NetworkWideStateSyncConfig,
@@ -71,6 +75,9 @@ use crate::{
         IndexerStoreWriteTransaction,
         SqliteIndexerStore,
     },
+    substate_file_cache::SubstateFileCache,
+    substate_manager::SubstateManager,
+    transaction_manager::TransactionManager,
     ApplicationConfig,
     IndexerEpochManagerSpec,
     Noop,
@@ -216,6 +223,29 @@ pub async fn spawn_services(
     )
     .spawn(shutdown.clone());
 
+    let substate_cache_dir = config.common.base_path.join("substate_cache");
+    let substate_cache = SubstateFileCache::new(substate_cache_dir)
+        .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Substate cache error: {}", e)))?;
+
+    let substate_scanner = SubstateScanner::new(
+        epoch_manager.clone(),
+        validator_node_client_factory.clone(),
+        substate_cache,
+    );
+
+    let substate_manager = SubstateManager::new(substate_scanner.clone(), store.clone());
+    let transaction_manager = TransactionManager::new(network_client.clone(), store.clone());
+
+    // dry run
+    let dry_run_transaction_processor = DryRunTransactionProcessor::new(
+        TransactionProcessorConfig::new(config.network)
+            .with_template_binary_max_size_bytes(consensus_constants.template_binary_max_size_bytes),
+        epoch_manager.clone(),
+        validator_node_client_factory.clone(),
+        template_manager.clone(),
+        TariClaimBurnProofVerifier::new(config.network, global_db.clone()),
+    );
+
     // Save final node identity after comms has initialized. This is required because the public_address can be
     // changed by comms during initialization when using tor.
     save_identities(config, &keypair)?;
@@ -224,11 +254,13 @@ pub async fn spawn_services(
         networking,
         epoch_manager,
         validator_node_client_factory,
-        network_client,
         store,
         global_db,
         template_manager,
         _template_manager_service: template_manager_service,
+        substate_manager,
+        transaction_manager,
+        dry_run_transaction_processor,
     })
 }
 
@@ -238,10 +270,13 @@ pub struct Services {
     pub epoch_manager: EpochManagerHandle<PeerAddress>,
     pub validator_node_client_factory: TariValidatorNodeRpcClientFactory,
     pub store: SqliteIndexerStore,
-    pub network_client: TariNetworkClient<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory>,
     pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     pub template_manager: TemplateManager<PeerAddress>,
     pub _template_manager_service: TemplateManagerHandle,
+    pub substate_manager: SubstateManager,
+    pub transaction_manager:
+        TransactionManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SqliteIndexerStore>,
+    pub dry_run_transaction_processor: DryRunTransactionProcessor,
 }
 
 fn ensure_directories_exist(config: &ApplicationConfig) -> io::Result<()> {

@@ -6,7 +6,6 @@ use std::{collections::HashMap, time::Duration};
 use bounded_vec::BoundedVec;
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, Seq};
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::Decision;
 use tari_engine_types::{
@@ -65,8 +64,6 @@ pub struct ListSubstateItem {
     ts(export, export_to = "tari-indexer-client/", rename = "IndexerGetSubstateRequest")
 )]
 pub struct GetSubstateRequest {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub address: SubstateId,
     pub version: Option<u32>,
     #[serde(default)]
     pub local_search_only: bool,
@@ -79,7 +76,6 @@ pub struct GetSubstateRequest {
     ts(export, export_to = "tari-indexer-client/", rename = "IndexerGetSubstateResponse")
 )]
 pub struct GetSubstateResponse {
-    pub address: SubstateId,
     pub version: u32,
     pub substate: SubstateValue,
 }
@@ -108,7 +104,6 @@ pub struct InspectSubstateRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 pub struct InspectSubstateResponse {
-    pub address: SubstateId,
     pub version: u32,
     pub substate: SubstateValue,
 }
@@ -161,7 +156,8 @@ pub struct TemplateMetadata {
     pub name: String,
     pub address: TemplateAddress,
     /// SHA hash of binary
-    pub binary_sha: String,
+    #[cfg_attr(feature = "ts", ts(type = "number[]"))]
+    pub binary_sha: FixedHash,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -312,11 +308,11 @@ pub struct GetEpochManagerStatsResponse {
     pub current_epoch: Epoch,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub current_block_height: u64,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[cfg_attr(feature = "ts", ts(type = "number[]"))]
     pub current_block_hash: FixedHash,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -335,7 +331,7 @@ pub struct Connection {
     pub user_agent: Option<String>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -346,7 +342,7 @@ pub enum ConnectionDirection {
     Outbound,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -373,14 +369,13 @@ pub struct GetTemplateDefinitionResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 pub struct IndexerReadyResponse {}
 
-#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 pub struct GetUtxoUpdatesRequest {
-    #[cfg_attr(feature = "ts", ts(as = "Vec<(Shard, StateVersion)>"))]
-    #[serde_as(as = "Seq<(_, _)>")]
-    pub shard_state_versions: HashMap<Shard, StateVersion>,
+    pub shard_state_versions: Vec<(Shard, StateVersion)>,
     pub resource_address: ResourceAddress,
+    #[serde(default)]
+    pub unspent_only: bool,
     pub per_shard_limit: u32,
 }
 
@@ -404,15 +399,7 @@ pub struct GetUnspentUtxosResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(
-        export,
-        export_to = "tari-indexer-client/",
-        rename = "IndexerGetEpochManagerStatsResponse"
-    )
-)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 pub struct GetNetworkSyncStateResponse {
     pub network_desc: NetworkDescription,
     pub sync_progress: Option<SyncProgress>,

@@ -15,11 +15,7 @@ use tari_ootle_wallet_sdk::{
     storage::WalletStore,
     WalletSdk,
 };
-use tari_ootle_wallet_sdk_services::{
-    events::{TransactionFinalizedEvent, WalletEvent},
-    indexer_jrpc::IndexerJsonRpcNetworkInterface,
-};
-use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
+use tari_ootle_wallet_sdk_services::events::{TransactionFinalizedEvent, WalletEvent};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::models::ComponentAddress;
 use tari_transaction::TransactionId;
@@ -93,10 +89,15 @@ pub async fn wait_for_result_and_account(
     }
 }
 
-pub fn get_account_with_inputs(
+pub fn get_account_with_inputs<TStore, TNetworkInterface>(
     account: Option<&ComponentAddressOrName>,
-    sdk: &WalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>,
-) -> Result<(AccountWithAddress, HashSet<SubstateRequirement>), anyhow::Error> {
+    sdk: &WalletSdk<TStore, TNetworkInterface>,
+) -> Result<(AccountWithAddress, HashSet<SubstateRequirement>), anyhow::Error>
+where
+    TStore: WalletStore,
+    TNetworkInterface: WalletNetworkInterface,
+    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
+{
     let account = get_account_or_default(account, &sdk.accounts_api())?;
     let inputs = if account.is_confirmed_on_chain() {
         // Add all versioned account child addresses as inputs

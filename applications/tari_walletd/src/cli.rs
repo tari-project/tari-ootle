@@ -52,8 +52,8 @@ pub struct Cli {
     #[clap(long, env = "SIGNALING_SERVER_ADDRESS")]
     pub signaling_server_address: Option<SocketAddr>,
     #[clap(long, short = 'i', alias = "indexer-url")]
-    /// Indexer JSON-RPC url override
-    pub indexer_json_rpc_url: Option<Url>,
+    /// Indexer API url override
+    pub indexer_api_url: Option<Url>,
     #[clap(flatten)]
     pub wallet_restore: WalletRestoreArgs,
     /// The OS keyring is used to store and retrieve a randomly generated password. This is used for wallet encryption.
@@ -106,10 +106,10 @@ impl ConfigOverrideProvider for Cli {
                 signaling_server_address.to_string(),
             ));
         }
-        if let Some(ref indexer_json_rpc_url) = self.indexer_json_rpc_url {
+        if let Some(ref indexer_api_url) = self.indexer_api_url {
             overrides.push((
-                "ootle_wallet_daemon.indexer_json_rpc_url".to_string(),
-                indexer_json_rpc_url.to_string(),
+                "ootle_wallet_daemon.indexer_api_url".to_string(),
+                indexer_api_url.to_string(),
             ));
         }
         if let Some(ref file) = self.value_lookup_table_file {

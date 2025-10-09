@@ -144,5 +144,4 @@ export const getNetworkCommittees = (): Promise<GetNetworkCommitteeResponse> => 
 
 // Comms
 export const addPeer = (request: VNAddPeerRequest) => jsonRpc("add_peer", request);
-export const getCommsStats = (): Promise<VNGetCommsStatsResponse> => jsonRpc("get_comms_stats");
 export const getConnections = (): Promise<VNGetConnectionsResponse> => jsonRpc("get_connections");

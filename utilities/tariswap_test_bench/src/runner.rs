@@ -8,7 +8,7 @@ use tari_crypto::tari_utilities::SafePassword;
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_common_types::Network;
 use tari_ootle_wallet_sdk::{cipher_seed::CipherSeedRestore, WalletSdk as Sdk, WalletSdkConfig};
-use tari_ootle_wallet_sdk_services::indexer_jrpc::IndexerJsonRpcNetworkInterface;
+use tari_ootle_wallet_sdk_services::indexer_rest_api::IndexerRestApiNetworkInterface;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_transaction::{Transaction, TransactionBuilder, TransactionId};
 use tari_validator_node_client::types::TemplateMetadata;
@@ -17,7 +17,7 @@ use url::Url;
 
 use crate::{cli::CommonArgs, stats::Stats, templates::get_templates};
 
-type WalletSdk = Sdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>;
+type WalletSdk = Sdk<SqliteWalletStore, IndexerRestApiNetworkInterface>;
 pub struct Runner {
     pub(crate) sdk: WalletSdk,
     pub(crate) _cli: CommonArgs,
@@ -119,7 +119,7 @@ fn initialize_wallet_sdk<P: AsRef<Path>>(db_path: P, indexer_url: Url) -> Result
         network: Network::LocalNet,
         override_keyring_password: Some(SafePassword::from_str("N3Va g0nn4 gu355").unwrap()),
     };
-    let indexer = IndexerJsonRpcNetworkInterface::new(indexer_url);
+    let indexer = IndexerRestApiNetworkInterface::new(indexer_url);
     let mut sdk = WalletSdk::initialize(store, indexer, sdk_config)?;
     sdk.initialize_cipher_seed(CipherSeedRestore::CreateNewIfRequired)?;
     Ok(sdk)

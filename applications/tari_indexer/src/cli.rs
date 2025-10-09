@@ -43,9 +43,9 @@ pub struct Cli {
     #[clap(long, short = 'i')]
     pub scanning_interval: Option<u64>,
 
-    /// Bind address for JSON-rpc server
-    #[clap(long, short = 'r', alias = "rpc-address")]
-    pub json_rpc_address: Option<SocketAddr>,
+    /// Bind address for API server
+    #[clap(long, short = 'r', alias = "api-address")]
+    pub api_listen_address: Option<SocketAddr>,
     #[clap(long, alias = "node-grpc", short = 'g', env = "TARI_INDEXER_MINOTARI_NODE_GRPC_URL")]
     pub epoch_oracle_minotari_node_grpc_url: Option<Url>,
     #[clap(long, alias = "oracle-config")]
@@ -61,9 +61,9 @@ pub struct Cli {
     pub reachability: Option<ReachabilityMode>,
     #[clap(long)]
     pub disable_mdns: bool,
-    /// Public address of the JSON RPC
-    #[clap(long, env = "TARI_INDEXER_WEB_UI_PUBLIC_JSON_RPC_URL")]
-    pub web_ui_public_json_rpc_url: Option<String>,
+    /// Public address of the API
+    #[clap(long, env = "TARI_INDEXER_WEB_UI_PUBLIC_API_URL")]
+    pub web_ui_public_api_url: Option<String>,
     /// Public address of the GraphQL API
     #[clap(long, env = "TARI_INDEXER_WEB_UI_PUBLIC_GRAPHQL_URL")]
     pub web_ui_public_graphql_url: Option<String>,
@@ -86,8 +86,8 @@ impl ConfigOverrideProvider for Cli {
         overrides.push(("indexer.override_from".to_string(), network.to_string()));
         overrides.push(("p2p.seeds.override_from".to_string(), network.to_string()));
 
-        if let Some(ref addr) = self.json_rpc_address {
-            overrides.push(("indexer.json_rpc_address".to_string(), addr.to_string()));
+        if let Some(ref addr) = self.api_listen_address {
+            overrides.push(("indexer.api_listen_address".to_string(), addr.to_string()));
         }
 
         if !self.peer_seeds.is_empty() {
@@ -99,11 +99,8 @@ impl ConfigOverrideProvider for Cli {
         if let Some(seconds) = self.scanning_interval {
             overrides.push(("indexer.scanning_interval".to_string(), seconds.to_string()));
         }
-        if let Some(ref json_rpc_url) = self.web_ui_public_json_rpc_url {
-            overrides.push((
-                "indexer.web_ui_public_json_rpc_url".to_string(),
-                json_rpc_url.to_string(),
-            ));
+        if let Some(ref api_url) = self.web_ui_public_api_url {
+            overrides.push(("indexer.web_ui_public_api_url".to_string(), api_url.to_string()));
         }
         if let Some(ref graphql_url) = self.web_ui_public_graphql_url {
             overrides.push(("indexer.web_ui_public_graphql_url".to_string(), graphql_url.to_string()));

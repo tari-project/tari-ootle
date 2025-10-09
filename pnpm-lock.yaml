@@ -50,6 +50,9 @@ importers:
       '@tanstack/react-query-devtools':
         specifier: ^5.84.2
         version: 5.85.5(@tanstack/react-query@5.81.2(react@19.1.0))(react@19.1.0)
+      '@tari-project/indexer_client':
+        specifier: link:../../../clients/javascript/indexer_client
+        version: link:../../../clients/javascript/indexer_client
       '@tari-project/typescript-bindings':
         specifier: link:../../../bindings
         version: link:../../../bindings
@@ -309,6 +312,19 @@ importers:
       vitest:
         specifier: ^3.2.4
         version: 3.2.4(@types/debug@4.1.12)(@types/node@22.14.0)(jiti@2.4.2)(lightningcss@1.30.1)(msw@2.10.2(@types/node@22.14.0)(typescript@5.8.3))
+
+  clients/javascript/indexer_client:
+    dependencies:
+      '@tari-project/typescript-bindings':
+        specifier: workspace:^
+        version: link:../../../bindings
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.14.0
+      typescript:
+        specifier: 'catalog:'
+        version: 5.8.3
 
   clients/javascript/wallet_daemon_client:
     dependencies:

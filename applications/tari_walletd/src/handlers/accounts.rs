@@ -959,22 +959,76 @@ pub async fn handle_stealth_transfer(
     task::spawn(async move {
         let transfer = sdk.stealth_transfer_api().transfer(owner_account, params).await?;
 
+        // TODO: if submitting fails we need to unlock the inputs again
         if req.dry_run {
             let transaction_id = transfer.transaction.calculate_id();
-            transaction_service
+            let result = transaction_service
                 .submit_dry_run_transaction(transfer.transaction)
-                .await?;
-            return Ok(StealthTransferResponse { transaction_id });
+                .await;
+            return match result {
+                Ok(_) => Ok(StealthTransferResponse { transaction_id }),
+                Err(e) => {
+                    if let Err(err) = sdk
+                        .stealth_outputs_api()
+                        .release_locked_outputs(transfer.transaction_lock_id)
+                    {
+                        error!(
+                            target: LOG_TARGET,
+                            "Failed to release locked outputs after dry run failure: {}",
+                            err
+                        );
+                    }
+                    if let Err(err) = sdk
+                        .stealth_outputs_api()
+                        .release_revealed_funds(transfer.transaction_lock_id)
+                    {
+                        error!(
+                            target: LOG_TARGET,
+                            "Failed to release revealed funds after dry run failure: {}",
+                            err
+                        );
+                    }
+
+                    Err(anyhow::anyhow!("Dry run transaction failed: {}", e))
+                },
+            };
         }
 
-        let tx_id = transaction_service.submit_transaction(transfer.transaction).await?;
+        let result = transaction_service.submit_transaction(transfer.transaction).await;
+        match result {
+            Ok(tx_id) => {
+                notifier.notify(TransactionSubmittedEvent {
+                    transaction_id: tx_id,
+                    new_account: None,
+                });
 
-        notifier.notify(TransactionSubmittedEvent {
-            transaction_id: tx_id,
-            new_account: None,
-        });
+                Ok(StealthTransferResponse { transaction_id: tx_id })
+            },
+            Err(e) => {
+                if let Err(err) = sdk
+                    .stealth_outputs_api()
+                    .release_locked_outputs(transfer.transaction_lock_id)
+                {
+                    error!(
+                        target: LOG_TARGET,
+                        "Failed to release locked outputs after submission failure: {}",
+                        err
+                    );
+                }
+                if let Err(err) = sdk
+                    .stealth_outputs_api()
+                    .release_revealed_funds(transfer.transaction_lock_id)
+                {
+                    error!(
+                        target: LOG_TARGET,
+                        "Failed to release revealed funds after submission failure: {}",
+                        err
+                    );
+                }
 
-        Ok(StealthTransferResponse { transaction_id: tx_id })
+                Err(anyhow::anyhow!("Transaction submission failed: {}", e))
+            },
+        }
     })
     .await?
 }

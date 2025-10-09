@@ -41,12 +41,12 @@ impl ProcessDefinition for WalletDaemon {
             .next()
             .ok_or_else(|| anyhow!("Indexer should be started before wallet daemon"))?;
         let indexer_url = format!(
-            "http://127.0.0.1:{}/json_rpc",
+            "http://127.0.0.1:{}",
             indexer
                 .instance()
                 .allocated_ports()
-                .get("jrpc")
-                .ok_or_else(|| anyhow!("Indexer jrpc port not found"))?
+                .get("api")
+                .ok_or_else(|| anyhow!("Indexer api port not found"))?
         );
 
         let auth = context

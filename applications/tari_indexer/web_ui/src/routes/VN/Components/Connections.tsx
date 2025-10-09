@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { addPeer, getConnections } from "../../../utils/json_rpc";
+import { addPeer, getConnections } from "../../../utils/api";
 import { shortenString } from "./helpers";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
@@ -150,14 +150,14 @@ function Connections() {
           {connections &&
             connections.map(
               ({
-                connection_id,
-                address,
-                age,
-                direction,
-                peer_id,
-                ping_latency,
-                user_agent,
-              }) => (
+                 connection_id,
+                 address,
+                 age,
+                 direction,
+                 peer_id,
+                 ping_latency,
+                 user_agent,
+               }) => (
                 <TableRow key={connection_id}>
                   <DataTableCell>
                     {peer_id ? shortenString(peer_id) : "--"}
@@ -173,7 +173,7 @@ function Connections() {
                     {user_agent ? user_agent.replace(/^\/tari\//, "") : "--"}
                   </DataTableCell>
                 </TableRow>
-              )
+              ),
             )}
         </TableBody>
       </Table>

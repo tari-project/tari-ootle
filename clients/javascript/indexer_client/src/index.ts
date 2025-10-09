@@ -19,7 +19,7 @@ import type {
   IndexerGetTransactionResultResponse,
   IndexerReadyResponse, ListRecentTransactionsRequest, ListRecentTransactionsResponse,
   ListSubstatesRequest,
-  ListSubstatesResponse,
+  ListSubstatesResponse, ListTemplatesResponse,
   rejectReasonToString,
   stringToSubstateId,
   SubstateId,
@@ -110,6 +110,10 @@ export class IndexerClient {
 
   public templatesGet(template_address: string): Promise<TemplatesGetResponse> {
     return this.transport.sendGet(`templates/${encodeURIComponent(template_address)}`, {});
+  }
+
+  public templatesList(limit: number = 0): Promise<ListTemplatesResponse> {
+    return this.transport.sendGet(`templates`, { limit });
   }
 
   public templatesListAuthored(params: TemplatesListAuthoredRequest): Promise<TemplatesListAuthoredResponse> {

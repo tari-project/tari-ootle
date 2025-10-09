@@ -50,7 +50,7 @@ importers:
       '@tanstack/react-query-devtools':
         specifier: ^5.84.2
         version: 5.85.5(@tanstack/react-query@5.81.2(react@19.1.0))(react@19.1.0)
-      '@tari-project/indexer_client':
+      '@tari-project/indexer-client':
         specifier: link:../../../clients/javascript/indexer_client
         version: link:../../../clients/javascript/indexer_client
       '@tari-project/typescript-bindings':

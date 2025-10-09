@@ -13,14 +13,23 @@ use log::*;
 pub struct ProtobufStream<TMsg> {
     bytes_stream: Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>,
     buf: BytesMut,
+    max_message_size: usize,
     _marker: std::marker::PhantomData<TMsg>,
 }
 
 impl<TMsg> ProtobufStream<TMsg> {
     pub fn new(bytes_stream: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static) -> Self {
+        Self::with_max_message_size(bytes_stream, 16 * 1024 * 1024) // Default to 16 MiB max message size
+    }
+
+    pub fn with_max_message_size(
+        bytes_stream: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
+        max_message_size: usize,
+    ) -> Self {
         Self {
             bytes_stream: Box::pin(bytes_stream),
-            buf: BytesMut::with_capacity(1024),
+            buf: BytesMut::with_capacity(max_message_size),
+            max_message_size,
             _marker: std::marker::PhantomData,
         }
     }
@@ -46,6 +55,13 @@ impl<TMsg: prost::Message + Default + Unpin> Stream for ProtobufStream<TMsg> {
                     }
                     let len = prost::decode_length_delimiter(tmp_slice)
                         .map_err(|e| prost::DecodeError::new(format!("Failed to decode length delimiter: {}", e)))?;
+                    if len > this.max_message_size {
+                        return Poll::Ready(Some(Err(prost::DecodeError::new(format!(
+                            "Message length {} exceeds maximum allowed size of {} bytes",
+                            len, this.max_message_size
+                        )))));
+                    }
+
                     let len_delim_len = prost::length_delimiter_len(len);
                     if this.buf.len() < len + len_delim_len {
                         // Continue buffering

@@ -23,33 +23,19 @@
 import type {
   IndexerAddPeerRequest,
   IndexerAddPeerResponse,
-  // IndexerGetAllVnsResponse,
-  IndexerGetCommsStatsResponse,
   IndexerGetConnectionsResponse,
-  GetEpochManagerStatsResponse,
   IndexerGetIdentityResponse,
-  // GetNonFungibleCollectionsResponse,
-  // GetNonFungibleCountRequest,
-  // GetNonFungibleCountResponse,
   GetNonFungiblesRequest,
   GetNonFungiblesResponse,
-  // GetRelatedTransactionsRequest,
-  // GetRelatedTransactionsResponse,
-  IndexerGetSubstateRequest,
   IndexerGetSubstateResponse,
   IndexerGetTransactionResultRequest,
   IndexerGetTransactionResultResponse,
   ListRecentTransactionsRequest,
   ListRecentTransactionsResponse,
-  InspectSubstateRequest,
-  InspectSubstateResponse,
-  IndexerSubmitTransactionResponse,
   ListSubstatesRequest,
-  ListSubstatesResponse,
-  // SubstateType,
+  ListSubstatesResponse, SubstateId,
 } from "@tari-project/typescript-bindings";
-import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
-import { IndexerClient } from "@tari-project/indexer_client";
+import { IndexerClient } from "@tari-project/indexer-client";
 
 const DEFAULT_API_ADDRESS = new URL(
   import.meta.env.VITE_INDEXER_API_ADDRESS ||
@@ -108,8 +94,13 @@ export const getConnections = (): Promise<IndexerGetConnectionsResponse> =>
   client().then((c) => c.getConnections());
 
 export const getSubstate = (
-  request: IndexerGetSubstateRequest,
-): Promise<IndexerGetSubstateResponse> => client().then((c) => c.substatesGet(request.address, request));
+  id: SubstateId,
+  version?: number | null,
+  local_search_only?: boolean,
+): Promise<IndexerGetSubstateResponse> => client().then((c) => c.substatesGet(id, {
+  version: version ?? null,
+  local_search_only: local_search_only ?? false,
+}));
 export const listSubstates = (
   request: ListSubstatesRequest,
 ): Promise<ListSubstatesResponse> => client().then((c) => c.listSubstates(request));

@@ -119,7 +119,7 @@ pub async fn list_recent_transactions(
 pub async fn get_transaction_result(
     Extension(context): Extension<HandlerContext>,
     Path(transaction_id): Path<TransactionId>,
-) -> HandlerResult<Json<SubmitTransactionResponse>> {
+) -> HandlerResult<Json<GetTransactionResultResponse>> {
     let result = context
         .transaction_manager()
         .get_transaction_result(transaction_id)
@@ -143,8 +143,5 @@ pub async fn get_transaction_result(
         },
     };
 
-    Ok(Json(SubmitTransactionResponse {
-        result: resp.result,
-        transaction_id,
-    }))
+    Ok(Json(GetTransactionResultResponse { result: resp.result }))
 }

@@ -1,6 +1,8 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::collections::HashSet;
+
 use axum::{
     http::header::HeaderMap,
     response::{IntoResponse, Response},
@@ -67,6 +69,17 @@ pub async fn stream_utxo_updates(
         })?,
         None => encoding::MimeTypeEncoder::protobuf(),
     };
+
+    // Check for duplicate shards
+    let mut seen = HashSet::new();
+    for (shard, _) in &req.shard_state_versions {
+        if !seen.insert(shard) {
+            return Err(ErrorResponse::bad_request(format!(
+                "Duplicate shard {} in shard_state_versions",
+                shard.as_u32()
+            )));
+        }
+    }
 
     let stream = UtxoUpdateStream::new(context.substate_manager().clone(), req, encoder);
     Ok(stream.into_response())

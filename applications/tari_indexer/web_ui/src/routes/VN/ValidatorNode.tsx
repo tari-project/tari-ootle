@@ -23,7 +23,7 @@
 import { useEffect, useState } from "react";
 import Connections from "./Components/Connections";
 import Info from "./Components/Info";
-import { getIdentity } from "../../utils/json_rpc";
+import { getIdentity } from "../../utils/api";
 import RecentTransactions from "../RecentTransactions/components/RecentTransactions";
 import "./ValidatorNode.css";
 import { StyledPaper } from "../../Components/StyledComponents";

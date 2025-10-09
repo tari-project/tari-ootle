@@ -1,5 +1,5 @@
 {
-  "name": "@tari-project/indexer_client",
+  "name": "@tari-project/indexer-client",
   "version": "1.0.0",
   "description": "Tari indexer REST API client library",
   "homepage": "https://github.com/tari-project/tari-ootle#readme",

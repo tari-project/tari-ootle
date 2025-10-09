@@ -38,8 +38,8 @@ export default class FetchTransport implements HttpTransport {
     return this.sendRequest<T>(path, { method: "PUT", body }, options);
   }
 
-  sendDelete<T>(path: string, params: any, options?: TransportOptions): Promise<T> {
-    return this.sendRequest<T>(path, { method: "DELETE", params }, options);
+  sendDelete<T>(path: string, body: any, options?: TransportOptions): Promise<T> {
+    return this.sendRequest<T>(path, { method: "DELETE", body }, options);
   }
 
   async sendRequest<T>(path: string, request: RequestSpec, options?: TransportOptions): Promise<T> {
@@ -81,6 +81,10 @@ export default class FetchTransport implements HttpTransport {
     });
     if (timeoutId) {
       clearTimeout(timeoutId);
+    }
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`HTTP ${response.status}: ${response.statusText}${text ? ` - ${text}` : ""}`);
     }
     const json = await response.json();
     if (json.error) {

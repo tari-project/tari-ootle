@@ -78,7 +78,8 @@ pub async fn list_templates(
     Extension(context): Extension<HandlerContext>,
     Query(req): Query<ListTemplatesRequest>,
 ) -> HandlerResult<Response> {
-    if req.limit == 0 || req.limit > 100 {
+    let limit = req.limit.unwrap_or(10);
+    if limit == 0 || limit > 100 {
         return Err(ErrorResponse::bad_request(
             "Limit must be between 1 and 100".to_string(),
         ));
@@ -86,7 +87,7 @@ pub async fn list_templates(
 
     let templates = context
         .template_manager()
-        .fetch_template_metadata(req.limit as usize)
+        .fetch_template_metadata(limit as usize)
         .map_err(ErrorResponse::anyhow)?;
     let resp = Json(ListTemplatesResponse {
         templates: templates

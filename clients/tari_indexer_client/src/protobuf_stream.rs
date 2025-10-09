@@ -39,6 +39,11 @@ impl<TMsg: prost::Message + Default + Unpin> Stream for ProtobufStream<TMsg> {
                     // Decode the length delimiter without advancing the buffer
                     // so that we can check if we have enough bytes or need to buffer more
                     let tmp_slice = &this.buf[..];
+                    // A length-delimited varint is complete once a byte with MSB 0 is seen (max 10 bytes for u64).
+                    if tmp_slice.len() < 10 && tmp_slice.iter().take(10).all(|byte| byte & 0x80 != 0) {
+                        // Need more bytes to finish reading the delimiter.
+                        continue;
+                    }
                     let len = prost::decode_length_delimiter(tmp_slice)
                         .map_err(|e| prost::DecodeError::new(format!("Failed to decode length delimiter: {}", e)))?;
                     let len_delim_len = prost::length_delimiter_len(len);

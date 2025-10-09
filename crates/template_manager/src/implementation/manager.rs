@@ -43,7 +43,7 @@ use tari_ootle_common_types::{
 use tari_ootle_p2p::proto::rpc::TemplateType;
 use tari_ootle_storage::{
     global::{DbTemplate, DbTemplateType, DbTemplateUpdate, GlobalDb, TemplateStatus},
-    time::{PrimitiveDateTime, UtcDateTime},
+    time::{OffsetDateTime, PrimitiveDateTime},
 };
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_template_builtin::{
@@ -439,6 +439,6 @@ impl<TAddr> Clone for TemplateManager<TAddr> {
 }
 
 fn now() -> PrimitiveDateTime {
-    let now = UtcDateTime::now();
+    let now = OffsetDateTime::now_utc();
     PrimitiveDateTime::new(now.date(), now.time())
 }

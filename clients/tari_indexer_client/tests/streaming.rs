@@ -8,7 +8,7 @@ use tari_ootle_common_types::{NumPreshards, StateVersion};
 #[tokio::test]
 #[ignore = "Requires a running indexer listening on a specific port"]
 async fn dev_test() {
-    let mut client = IndexerRestApiClient::connect("http://localhost:15555").unwrap();
+    let mut client = IndexerRestApiClient::connect("http://localhost:12017").unwrap();
     let mut stream = client
         .stream_utxo_updates_protobuf(GetUtxoUpdatesRequest {
             shard_state_versions: NumPreshards::current()

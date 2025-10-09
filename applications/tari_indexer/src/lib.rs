@@ -122,7 +122,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
             let public_api_url = config
                 .indexer
                 .web_ui_public_api_url
-                .unwrap_or_else(|| format!("http://{listen_addr}"));
+                .unwrap_or_else(|| format!("http://{listen_address}"));
             let public_api_address = url::Url::parse(&public_api_url).map_err(|err| {
                 ExitError::new(
                     ExitCode::ConfigError,

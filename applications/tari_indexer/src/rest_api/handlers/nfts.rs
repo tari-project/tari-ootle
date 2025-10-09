@@ -11,6 +11,12 @@ pub async fn get_non_fungibles(
     Extension(context): Extension<HandlerContext>,
     Query(req): Query<GetNonFungiblesRequest>,
 ) -> HandlerResult<Json<GetNonFungiblesResponse>> {
+    if req.end_index < req.start_index {
+        return Err(ErrorResponse::bad_request(format!(
+            "end_index ({}) must be greater than or equal to start_index ({})",
+            req.end_index, req.start_index
+        )));
+    }
     let limit = usize::try_from(req.end_index.saturating_sub(req.start_index))
         .map_err(|e| ErrorResponse::bad_request(format!("Invalid end_index: {}", e)))?;
     let offset = usize::try_from(req.start_index)

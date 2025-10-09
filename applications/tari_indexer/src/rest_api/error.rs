@@ -44,13 +44,18 @@ impl ErrorResponse {
     pub fn anyhow<E: Into<anyhow::Error>>(err: E) -> Self {
         let err = err.into();
         error!(target: LOG_TARGET, "Internal server error: {}", err);
-        Self::from(err)
+        Self::internal_error(err.to_string())
     }
 
     #[must_use]
     pub fn internal_error(msg: impl Into<Box<str>>) -> Self {
         let msg = msg.into();
         error!(target: LOG_TARGET, "Internal server error: {}", msg);
+        let msg = if cfg!(debug_assertions) || option_env!("API_DEBUG").is_some_and(|v| v != "0") {
+            msg
+        } else {
+            "Internal server error".into()
+        };
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             error: msg,
@@ -84,10 +89,7 @@ impl ErrorResponse {
 
 impl From<anyhow::Error> for ErrorResponse {
     fn from(err: anyhow::Error) -> Self {
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            error: err.to_string().into_boxed_str(),
-        }
+        Self::anyhow(err)
     }
 }
 

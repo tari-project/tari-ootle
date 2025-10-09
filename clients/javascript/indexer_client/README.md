@@ -1,5 +1,5 @@
-# Tari Ootle Wallet JSON-RPC Client
+# Tari Ootle Indexer API Client
 
 ## Overview
 
-Client library for interacting with the Tari Ootle Wallet Daemon via JSON-RPC. 
+Client library for interacting with the Tari Ootle Indexer API.

@@ -115,9 +115,9 @@ export const listSubstates = (
 ): Promise<ListSubstatesResponse> => client().then((c) => c.listSubstates(request));
 export const getNonFungibles = (
   request: GetNonFungiblesRequest,
-): Promise<GetNonFungiblesResponse> => {
-  throw new Error("Not implemented");
-};
+): Promise<GetNonFungiblesResponse> =>
+  client().then((c) => c.getNonFungibles(request));
+
 export const getTransactionResult = (
   request: IndexerGetTransactionResultRequest,
 ): Promise<IndexerGetTransactionResultResponse> =>

@@ -141,7 +141,7 @@ pub struct SubmitTransactionResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 pub struct ListTemplatesRequest {
-    pub limit: u32,
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -374,7 +374,7 @@ pub struct IndexerReadyResponse {}
 pub struct GetUtxoUpdatesRequest {
     pub shard_state_versions: Vec<(Shard, StateVersion)>,
     pub resource_address: ResourceAddress,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unspent_only: bool,
     pub per_shard_limit: u32,
 }

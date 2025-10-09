@@ -6,6 +6,6 @@ import type { StateVersion } from "../StateVersion";
 export type GetUtxoUpdatesRequest = {
   shard_state_versions: Array<[Shard, StateVersion]>;
   resource_address: ResourceAddress;
-  unspent_only: boolean;
+  unspent_only?: boolean;
   per_shard_limit: number;
 };

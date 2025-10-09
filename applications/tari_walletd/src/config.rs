@@ -96,9 +96,9 @@ impl Default for WalletDaemonConfig {
             json_rpc_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9000))),
             web_ui_public_json_rpc_url: None,
             signaling_server_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9100))),
-            indexer_api_url: "http://127.0.0.1:18300/json_rpc"
+            indexer_api_url: "http://127.0.0.1:18300"
                 .parse()
-                .expect("failed to parse default indexer_json_rpc_url"),
+                .expect("failed to parse default indexer_api_url"),
             jwt_expiry: return_default_jwt_expiry(),
             jwt_secret_key: create_secret_password(),
             web_ui_address: Some("127.0.0.1:5100".parse().unwrap()),

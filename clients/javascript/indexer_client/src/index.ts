@@ -5,7 +5,7 @@
 
 import type {
   GetEpochManagerStatsResponse,
-  GetNetworkSyncStateResponse,
+  GetNetworkSyncStateResponse, GetNonFungiblesRequest, GetNonFungiblesResponse,
   GetRecentTransactionsRequest,
   GetRecentTransactionsResponse,
   GetSubstatesRequest,
@@ -80,8 +80,12 @@ export class IndexerClient {
     return this.transport.sendGet(`network/connections`, {});
   }
 
+  public getNonFungibles(params: GetNonFungiblesRequest): Promise<GetNonFungiblesResponse> {
+    return this.transport.sendGet(`non-fungibles`, params);
+  }
+
   public substatesGet(id: SubstateId, params: IndexerGetSubstateRequest): Promise<IndexerGetSubstateResponse> {
-    return this.transport.sendGet(`substates/${id}`, params);
+    return this.transport.sendGet(`substates/${encodeURIComponent(id)}`, params);
   }
 
   public listSubstates(params: ListSubstatesRequest): Promise<ListSubstatesResponse> {
@@ -97,7 +101,7 @@ export class IndexerClient {
   }
 
   public getTransactionResult(transaction_id: TransactionId): Promise<IndexerGetTransactionResultResponse> {
-    return this.transport.sendGet(`transactions/${transaction_id}/result`, {});
+    return this.transport.sendGet(`transactions/${encodeURIComponent(transaction_id)}/result`, {});
   }
 
   public listRecentTransactions(params: ListRecentTransactionsRequest): Promise<ListRecentTransactionsResponse> {
@@ -105,7 +109,7 @@ export class IndexerClient {
   }
 
   public templatesGet(template_address: string): Promise<TemplatesGetResponse> {
-    return this.transport.sendGet(`templates/${template_address}`, {});
+    return this.transport.sendGet(`templates/${encodeURIComponent(template_address)}`, {});
   }
 
   public templatesListAuthored(params: TemplatesListAuthoredRequest): Promise<TemplatesListAuthoredResponse> {

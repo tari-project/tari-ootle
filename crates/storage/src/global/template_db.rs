@@ -28,7 +28,7 @@ use std::{
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::Epoch;
 use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
-use time::{PrimitiveDateTime, UtcDateTime};
+use time::{OffsetDateTime, PrimitiveDateTime};
 
 use crate::global::GlobalDbAdapter;
 
@@ -118,7 +118,7 @@ impl DbTemplate {
 }
 
 fn now() -> PrimitiveDateTime {
-    let now = UtcDateTime::now();
+    let now = OffsetDateTime::now_utc();
     PrimitiveDateTime::new(now.date(), now.time())
 }
 

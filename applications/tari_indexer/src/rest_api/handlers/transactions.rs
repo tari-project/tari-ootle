@@ -20,7 +20,7 @@ use tari_indexer_client::types::{
 use tari_ootle_common_types::optional::Optional;
 use tari_transaction::TransactionId;
 use tari_validator_node_rpc::client::TransactionResultStatus;
-use time::{PrimitiveDateTime, UtcDateTime};
+use time::{OffsetDateTime, PrimitiveDateTime};
 
 use crate::{
     network_client::NetworkClientError,
@@ -87,7 +87,7 @@ pub async fn submit_transaction(
 }
 
 fn now() -> PrimitiveDateTime {
-    let now = UtcDateTime::now();
+    let now = OffsetDateTime::now_utc();
     PrimitiveDateTime::new(now.date(), now.time())
 }
 

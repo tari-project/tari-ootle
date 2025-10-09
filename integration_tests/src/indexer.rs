@@ -34,8 +34,8 @@ use tari_indexer::{
 };
 use tari_indexer_client::{
     graphql_client::IndexerGraphQLClient,
-    json_rpc_client::IndexerJsonRpcClient,
-    types::{AddPeerRequest, GetNonFungiblesRequest, GetSubstateRequest, GetSubstateResponse, NonFungibleSubstate},
+    rest_api_client::IndexerRestApiClient,
+    types::{AddPeerRequest, GetNonFungiblesRequest, GetSubstateResponse, NonFungibleSubstate},
 };
 use tari_ootle_app_utilities::{epoch_oracle_config::EpochOracleConfig, p2p_config::PeerSeedsConfig};
 use tari_ootle_common_types::Network;
@@ -54,7 +54,7 @@ use crate::{
 pub struct IndexerProcess {
     pub name: String,
     pub port: u16,
-    pub json_rpc_port: u16,
+    pub api_port: u16,
     pub graphql_port: u16,
     pub base_node_grpc_port: u16,
     pub web_ui_port: u16,
@@ -66,8 +66,8 @@ pub struct IndexerProcess {
 
 impl IndexerProcess {
     pub async fn add_peer(&self, public_key: RistrettoPublicKeyBytes, port: u16) {
-        let mut jrpc_client = self.get_jrpc_indexer_client();
-        jrpc_client
+        let mut client = self.get_indexer_client();
+        client
             .add_peer(AddPeerRequest {
                 public_key,
                 addresses: vec![multiaddr!(Ip4([127, 0, 0, 1]), Tcp(port))],
@@ -79,16 +79,8 @@ impl IndexerProcess {
 
     pub async fn get_substate(&self, world: &TariWorld, output_ref: String, version: u32) -> GetSubstateResponse {
         let address = get_address_from_output(world, output_ref);
-
-        let mut jrpc_client = self.get_jrpc_indexer_client();
-        jrpc_client
-            .get_substate(GetSubstateRequest {
-                address: address.clone(),
-                version: Some(version),
-                local_search_only: true,
-            })
-            .await
-            .unwrap()
+        let mut client = self.get_indexer_client();
+        client.get_substate(address, Some(version), true).await.unwrap()
     }
 
     pub async fn get_non_fungibles(
@@ -110,14 +102,14 @@ impl IndexerProcess {
             end_index,
         };
 
-        let mut jrpc_client = self.get_jrpc_indexer_client();
-        let resp = jrpc_client.get_non_fungibles(params).await.unwrap();
+        let mut client = self.get_indexer_client();
+        let resp = client.get_non_fungibles(params).await.unwrap();
         resp.non_fungibles
     }
 
-    pub fn get_jrpc_indexer_client(&self) -> IndexerJsonRpcClient {
-        let endpoint: Url = Url::parse(&format!("http://localhost:{}", self.json_rpc_port)).unwrap();
-        IndexerJsonRpcClient::connect(endpoint).unwrap()
+    pub fn get_indexer_client(&self) -> IndexerRestApiClient {
+        let endpoint: Url = Url::parse(&format!("http://localhost:{}", self.api_port)).unwrap();
+        IndexerRestApiClient::connect(endpoint).unwrap()
     }
 
     pub async fn get_graphql_indexer_client(&self) -> IndexerGraphQLClient {
@@ -128,7 +120,7 @@ impl IndexerProcess {
 
 pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_node_name: String) {
     // each spawned indexer will use different ports
-    let (port, json_rpc_port) = get_os_assigned_ports();
+    let (port, api_port) = get_os_assigned_ports();
     let (graphql_port, web_ui_port) = get_os_assigned_ports();
     let base_node_grpc_port = world.base_nodes.get(&base_node_name).unwrap().grpc_port;
     let name = indexer_name.clone();
@@ -168,7 +160,7 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
         config.indexer.p2p.listener_port = port;
 
         config.indexer.p2p.enable_mdns = false;
-        config.indexer.json_rpc_address = Some(format!("127.0.0.1:{}", json_rpc_port).parse().unwrap());
+        config.indexer.api_listen_address = Some(format!("127.0.0.1:{}", api_port).parse().unwrap());
         config.indexer.web_ui_address = Some(format!("127.0.0.1:{}", web_ui_port).parse().unwrap());
         config.indexer.graphql_address = Some(format!("127.0.0.1:{}", graphql_port).parse().unwrap());
 
@@ -182,7 +174,7 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
     });
 
     // Wait for node to start up
-    let handle = wait_listener_on_local_port(handle, json_rpc_port).await;
+    let handle = wait_listener_on_local_port(handle, api_port).await;
     // Check if the task errored/panicked
     let handle = check_join_handle(&name, handle).await;
 
@@ -193,7 +185,7 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
         base_node_grpc_port,
         web_ui_port,
         handle,
-        json_rpc_port,
+        api_port,
         graphql_port,
         temp_dir_path: base_dir_path,
         shutdown,

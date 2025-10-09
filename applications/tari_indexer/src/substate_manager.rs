@@ -115,11 +115,12 @@ impl SubstateManager {
         resource_address: ResourceAddress,
         shard: Shard,
         from_state_version: StateVersion,
+        unspent_only: bool,
         limit: u32,
     ) -> Result<(StateVersion, Vec<WalletUtxoUpdate>), anyhow::Error> {
-        let updates = self
-            .substate_store
-            .with_read_tx(|tx| tx.utxos_get_updates(resource_address, shard, from_state_version, limit))?;
+        let updates = self.substate_store.with_read_tx(|tx| {
+            tx.utxos_get_updates(resource_address, shard, from_state_version, unspent_only, limit)
+        })?;
         Ok(updates)
     }
 
@@ -147,17 +148,17 @@ impl SubstateManager {
 
     pub async fn get_substate(
         &self,
-        substate_address: &SubstateId,
+        substate_id: &SubstateId,
         version: Option<u32>,
     ) -> Result<Option<SubstateResponse>, anyhow::Error> {
         // we store the latest version of the substates related to the events
         // so we will return the substate directly from database if it's there
-        if let Some(substate) = self.get_substate_from_db(substate_address, version).await? {
+        if let Some(substate) = self.get_substate_from_db(substate_id, version).await? {
             return Ok(Some(substate));
         }
 
         // the substate is not in db (or is not the requested version) so we fetch it from the dan layer committee
-        let substate_result = self.substate_scanner.get_substate(substate_address, version).await?;
+        let substate_result = self.substate_scanner.get_substate(substate_id, version).await?;
         match substate_result {
             SubstateResult::Up { id, substate } => Ok(Some(SubstateResponse {
                 address: id,

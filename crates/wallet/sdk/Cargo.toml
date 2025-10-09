@@ -27,6 +27,7 @@ blake2 = { workspace = true }
 digest = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true, default-features = true }
+futures = { workspace = true }
 time = { workspace = true, features = ["serde", "serde-human-readable"] }
 thiserror = { workspace = true }
 ts-rs = { workspace = true, optional = true }

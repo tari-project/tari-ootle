@@ -1,8 +1,9 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, convert::Infallible, future::Future, time::Duration};
+use std::{collections::HashMap, convert::Infallible, future::Future, pin::Pin, time::Duration};
 
+use futures::Stream;
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::Decision;
 use tari_engine_types::{
@@ -20,7 +21,10 @@ use tari_template_lib::{
 use tari_transaction::{Transaction, TransactionId};
 use time::PrimitiveDateTime;
 
-use crate::models::UtxoUpdateSet;
+use crate::models::UtxoUpdatePayload;
+
+/// A pinned, boxed stream of UTXO updates
+pub type UtxoUpdateStream<E> = Pin<Box<dyn Stream<Item = Result<UtxoUpdatePayload, E>> + Send + 'static>>;
 
 pub trait WalletNetworkInterface {
     type Error: std::error::Error + Send + Sync + 'static;
@@ -57,11 +61,12 @@ pub trait WalletNetworkInterface {
         template_address: TemplateAddress,
     ) -> impl Future<Output = Result<TemplateDef, Self::Error>> + Send;
 
-    fn query_stealth_utxo_updates(
+    fn stream_stealth_utxo_updates(
         &self,
         resource_address: ResourceAddress,
-        shard_state_versions: HashMap<Shard, StateVersion>,
-    ) -> impl Future<Output = Result<UtxoUpdateSet, Self::Error>> + Send;
+        shard_state_versions: Vec<(Shard, StateVersion)>,
+        unspent_only: bool,
+    ) -> impl Future<Output = Result<UtxoUpdateStream<Self::Error>, Self::Error>> + Send;
 
     fn get_unspent_utxos(
         &self,
@@ -101,7 +106,6 @@ pub enum WalletQueryErrorStatus {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SubstateQueryResult {
-    pub address: SubstateId,
     pub version: u32,
     pub substate: SubstateValue,
 }

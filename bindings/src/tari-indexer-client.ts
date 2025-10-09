@@ -21,6 +21,7 @@ export * from "./types/tari-indexer-client/IndexerConnection";
 export * from "./types/tari-indexer-client/GetNonFungiblesRequest";
 export * from "./types/tari-indexer-client/ListRecentTransactionsResponse";
 export * from "./types/tari-indexer-client/IndexerAddPeerRequest";
+export * from "./types/tari-indexer-client/GetNetworkSyncStateResponse";
 export * from "./types/tari-indexer-client/GetNonFungiblesResponse";
 export * from "./types/tari-indexer-client/GetTemplateDefinitionResponse";
 export * from "./types/tari-indexer-client/IndexerGetConnectionsResponse";

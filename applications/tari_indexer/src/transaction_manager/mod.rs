@@ -27,7 +27,7 @@ use tari_indexer_client::types::TransactionEntry;
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
     NodeAddressable,
-    SubstateRequirement,
+    SubstateRequirementRef,
     ToSubstateAddress,
 };
 use tari_transaction::{Transaction, TransactionId};
@@ -44,6 +44,7 @@ use crate::{
     transaction_manager::error::TransactionManagerError,
 };
 
+#[derive(Debug, Clone)]
 pub struct TransactionManager<TEpochManager, TClientFactory, TStore> {
     network_client: TariNetworkClient<TEpochManager, TClientFactory>,
     store: TStore,
@@ -92,15 +93,15 @@ where
             })
     }
 
-    pub async fn get_substate(
+    pub async fn get_substate_from_network(
         &self,
-        substate_requirement: &SubstateRequirement,
+        substate_requirement: SubstateRequirementRef<'_>,
     ) -> Result<SubstateResult, TransactionManagerError> {
-        let address = substate_requirement.to_substate_address_zero_version();
+        let address = substate_requirement.or_zero_version().to_substate_address();
         let result = self
             .network_client
             .try_single_with_committee(address, |mut client| async move {
-                client.get_substate(substate_requirement.as_ref()).await
+                client.get_substate(substate_requirement).await
             })
             .await?;
         Ok(result)

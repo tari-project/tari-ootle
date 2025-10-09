@@ -62,7 +62,7 @@ async fn spawn_seed_node(
             .unwrap();
     }
     for indexer in world.indexers.values() {
-        let mut client = indexer.get_jrpc_indexer_client();
+        let mut client = indexer.get_indexer_client();
         client
             .add_peer(tari_indexer_client::types::AddPeerRequest {
                 public_key: ident.public_key,

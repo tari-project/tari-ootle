@@ -23,6 +23,7 @@ tari_shutdown = { workspace = true }
 
 anyhow = { workspace = true }
 reqwest = { workspace = true, optional = true }
+futures = { workspace = true }
 futures-bounded = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
@@ -31,4 +32,4 @@ tokio = { workspace = true, features = ["sync", "macros", "time"] }
 
 [features]
 default = []
-indexer_jrpc = ["tari_indexer_client", "reqwest"]
+indexer_client = ["tari_indexer_client", "reqwest"]

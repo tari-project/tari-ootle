@@ -389,17 +389,26 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         resource_address: ResourceAddress,
         shard: Shard,
         from_state_version: StateVersion,
+        unspent_only: bool,
         limit: u32,
     ) -> Result<(StateVersion, Vec<WalletUtxoUpdate>), StorageError> {
         const OPERATION: &str = "get_utxo_updates";
         use crate::storage_sqlite::schema::utxos;
 
-        let rows = utxos::table
+        let mut query = utxos::table
             .filter(utxos::resource_address.eq(resource_address.to_string()))
             .filter(utxos::state_version.gt(from_state_version.as_u64() as i64))
             .filter(utxos::shard.eq(shard.as_u32() as i32))
             .limit(i64::from(limit))
             .order_by(utxos::state_version.asc())
+            .into_boxed();
+        if unspent_only {
+            // Only return unspent UTXOs
+            query = query
+                .filter(utxos::is_spent.eq(false))
+                .filter(utxos::is_burnt.eq(false));
+        }
+        let rows = query
             .load_iter::<models::UtxoRecord, _>(self.connection())
             .map_err(|e| StorageError::QueryError {
                 reason: format!("{OPERATION}: {}", e),

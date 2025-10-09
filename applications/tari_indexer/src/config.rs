@@ -80,15 +80,15 @@ pub struct IndexerConfig {
     pub data_dir: PathBuf,
     /// The p2p configuration settings
     pub p2p: P2pConfig,
-    /// JSON-RPC address of the indexer application
-    pub json_rpc_address: Option<SocketAddr>,
+    /// Listening address for the indexer API server
+    pub api_listen_address: Option<SocketAddr>,
     /// GraphQL port of the indexer application
     pub graphql_address: Option<SocketAddr>,
     /// The address of the Web UI
     pub web_ui_address: Option<SocketAddr>,
-    /// The jrpc address where the UI should connect to the JSON RPC (it can be the same as the json_rpc_address, but
-    /// doesn't have to be), if this will be None, then the listen_addr will be used.
-    pub web_ui_public_json_rpc_url: Option<String>,
+    /// The publicly-accessible URL that the UI uses to connect to the API.
+    /// If this is None, then the api_listen_address will be used.
+    pub web_ui_public_api_url: Option<String>,
     /// The jrpc address where the UI should connect to the GraphQL API(it can be the same as the json_rpc_address, but
     /// doesn't have to be), if this will be None, then the listen_addr will be used.
     pub web_ui_public_graphql_url: Option<String>,
@@ -135,10 +135,10 @@ impl Default for IndexerConfig {
             tor_identity_file: PathBuf::from("indexer_tor_id.json"),
             data_dir: PathBuf::from("data/indexer"),
             p2p: P2pConfig::default(),
-            json_rpc_address: Some("127.0.0.1:18300".parse().unwrap()),
+            api_listen_address: Some("127.0.0.1:18300".parse().unwrap()),
             graphql_address: Some("127.0.0.1:18301".parse().unwrap()),
             web_ui_address: Some("127.0.0.1:15000".parse().unwrap()),
-            web_ui_public_json_rpc_url: None,
+            web_ui_public_api_url: None,
             web_ui_public_graphql_url: None,
             block_scanning_interval: Duration::from_secs(10),
             state_scanning_interval: Duration::from_secs(60),

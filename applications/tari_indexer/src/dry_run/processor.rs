@@ -49,6 +49,7 @@ use crate::dry_run::error::DryRunTransactionProcessorError;
 
 const LOG_TARGET: &str = "tari::indexer::dry_run_transaction_processor";
 
+#[derive(Clone)]
 pub struct DryRunTransactionProcessor {
     config: TransactionProcessorConfig,
     epoch_manager: EpochManagerHandle<PeerAddress>,

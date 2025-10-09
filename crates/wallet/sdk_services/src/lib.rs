@@ -4,8 +4,8 @@
 pub mod account_monitor;
 pub mod account_recovery;
 pub mod events;
-#[cfg(feature = "indexer_jrpc")]
-pub mod indexer_jrpc;
+#[cfg(feature = "indexer_client")]
+pub mod indexer_rest_api;
 pub mod notify;
 pub mod transaction_service;
 pub mod utxo_scanner;

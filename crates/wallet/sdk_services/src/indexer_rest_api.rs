@@ -6,16 +6,18 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use anyhow::anyhow;
+use futures::{StreamExt, TryStreamExt};
 use reqwest::{IntoUrl, Url};
 use tari_engine_types::{
     substate::{Substate, SubstateId},
     Utxo,
 };
 use tari_indexer_client::{
-    error::IndexerClientError,
-    json_rpc_client::IndexerJsonRpcClient,
+    error::IndexerRestClientError,
+    protobuf,
+    rest_api_client::IndexerRestApiClient,
     types::{
-        GetSubstateRequest,
         GetSubstatesRequest,
         GetTransactionResultRequest,
         GetUnspentUtxosRequest,
@@ -24,14 +26,15 @@ use tari_indexer_client::{
         SubmitTransactionRequest,
     },
 };
-use tari_ootle_common_types::{optional::IsNotFoundError, shard::Shard, StateVersion};
+use tari_ootle_common_types::{array_utils::copy_fixed_checked, optional::IsNotFoundError, shard::Shard, StateVersion};
 use tari_ootle_wallet_sdk::{
-    models::UtxoUpdateSet,
+    models::{EndOfShard, StartOfShard, UtxoBurnt, UtxoSpent, UtxoUnspent, UtxoUpdatePayload, WalletUtxoUpdate},
     network::{
         StatusResponseError,
         SubstateQueryResult,
         TransactionFinalizedResult,
         TransactionQueryResult,
+        UtxoUpdateStream,
         WalletNetworkInterface,
         WalletQueryErrorStatus,
     },
@@ -47,38 +50,34 @@ use url::ParseError;
 const INVALID_REQUEST_CODE: i64 = 400;
 
 #[derive(Debug, Clone)]
-pub struct IndexerJsonRpcNetworkInterface {
-    indexer_jrpc_address: Arc<Mutex<Url>>,
+pub struct IndexerRestApiNetworkInterface {
+    url: Arc<Mutex<Url>>,
 }
 
-impl IndexerJsonRpcNetworkInterface {
-    pub fn new<T: IntoUrl>(indexer_jrpc_address: T) -> Self {
+impl IndexerRestApiNetworkInterface {
+    pub fn new<T: IntoUrl>(url: T) -> Self {
         Self {
-            indexer_jrpc_address: Arc::new(Mutex::new(
-                indexer_jrpc_address
-                    .into_url()
-                    .expect("Malformed indexer JSON-RPC address"),
-            )),
+            url: Arc::new(Mutex::new(url.into_url().expect("Malformed indexer JSON-RPC address"))),
         }
     }
 
-    fn get_client(&self) -> Result<IndexerJsonRpcClient, IndexerJrpcError> {
-        let client = IndexerJsonRpcClient::connect((*self.indexer_jrpc_address.lock().unwrap()).clone())?;
+    fn get_client(&self) -> Result<IndexerRestApiClient, IndexerRestApiNetworkInterfaceError> {
+        let client = IndexerRestApiClient::connect((*self.url.lock().unwrap()).clone())?;
         Ok(client)
     }
 
-    pub fn set_endpoint(&self, endpoint: &str) -> Result<(), IndexerJrpcError> {
-        *self.indexer_jrpc_address.lock().unwrap() = Url::parse(endpoint)?;
+    pub fn set_endpoint(&self, endpoint: &str) -> Result<(), IndexerRestApiNetworkInterfaceError> {
+        *self.url.lock().unwrap() = Url::parse(endpoint)?;
         Ok(())
     }
 
     pub fn get_endpoint(&self) -> Url {
-        (*self.indexer_jrpc_address.lock().unwrap()).clone()
+        (*self.url.lock().unwrap()).clone()
     }
 }
 
-impl WalletNetworkInterface for IndexerJsonRpcNetworkInterface {
-    type Error = IndexerJrpcError;
+impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
+    type Error = IndexerRestApiNetworkInterfaceError;
 
     async fn query_substate(
         &self,
@@ -87,15 +86,8 @@ impl WalletNetworkInterface for IndexerJsonRpcNetworkInterface {
         local_search_only: bool,
     ) -> Result<SubstateQueryResult, Self::Error> {
         let mut client = self.get_client()?;
-        let result = client
-            .get_substate(GetSubstateRequest {
-                address: substate_id.clone(),
-                version,
-                local_search_only,
-            })
-            .await?;
+        let result = client.get_substate(substate_id, version, local_search_only).await?;
         Ok(SubstateQueryResult {
-            address: result.address,
             version: result.version,
             substate: result.substate,
         })
@@ -104,12 +96,16 @@ impl WalletNetworkInterface for IndexerJsonRpcNetworkInterface {
     async fn get_substates(&self, substate_ids: Vec<SubstateId>) -> Result<HashMap<SubstateId, Substate>, Self::Error> {
         let mut client = self.get_client()?;
         let resp = client
-            .get_substates(GetSubstatesRequest {
+            .fetch_substates(GetSubstatesRequest {
                 requests: substate_ids.try_into().map_err(|_| {
-                    IndexerJrpcError::IndexerClientError(IndexerClientError::RequestFailedWithStatus {
-                        code: INVALID_REQUEST_CODE,
-                        message: "Too many substate IDs requested".to_string(),
-                    })
+                    // We can't send the request, but return an error that would be the same/similar to what the indexer
+                    // would return
+                    IndexerRestApiNetworkInterfaceError::IndexerClientError(
+                        IndexerRestClientError::RequestFailedWithStatus {
+                            code: INVALID_REQUEST_CODE,
+                            message: "Too many substate IDs requested".to_string(),
+                        },
+                    )
                 })?,
             })
             .await?;
@@ -173,20 +169,75 @@ impl WalletNetworkInterface for IndexerJsonRpcNetworkInterface {
         Ok(resp.definition)
     }
 
-    async fn query_stealth_utxo_updates(
+    async fn stream_stealth_utxo_updates(
         &self,
         resource_address: ResourceAddress,
-        shard_state_versions: HashMap<Shard, StateVersion>,
-    ) -> Result<UtxoUpdateSet, Self::Error> {
+        shard_state_versions: Vec<(Shard, StateVersion)>,
+        unspent_only: bool,
+    ) -> Result<UtxoUpdateStream<Self::Error>, Self::Error> {
         let mut client = self.get_client()?;
-        let resp = client
-            .get_utxo_updates(GetUtxoUpdatesRequest {
+        let stream = client
+            .stream_utxo_updates_protobuf(GetUtxoUpdatesRequest {
                 shard_state_versions,
                 resource_address,
-                per_shard_limit: 100,
+                unspent_only,
+                per_shard_limit: 1000,
             })
             .await?;
-        Ok(resp.updates)
+        let stream = stream
+            .map_err(|e| IndexerRestApiNetworkInterfaceError::StreamDecodeError(e.into()))
+            .and_then(|res| async move {
+                let sos = res.sos.map(|sos| StartOfShard {
+                    shard: Shard::from(sos.shard),
+                    max_state_version: StateVersion::from(sos.max_state_version),
+                    has_more: sos.num_updates >= 1000,
+                });
+                let update = res
+                    .update
+                    .map(|u| match u {
+                        protobuf::WalletUtxoUpdate::Unspent(unspent) => {
+                            let public_nonce =
+                                RistrettoPublicKeyBytes::from_bytes(&unspent.public_nonce).map_err(|e| {
+                                    IndexerRestApiNetworkInterfaceError::StreamDecodeError(anyhow!(
+                                        "Failed to decode public nonce: {e}"
+                                    ))
+                                })?;
+                            Ok::<_, IndexerRestApiNetworkInterfaceError>(WalletUtxoUpdate::Unspent(UtxoUnspent {
+                                tag: unspent.tag.into(),
+                                public_nonce,
+                            }))
+                        },
+                        protobuf::WalletUtxoUpdate::Spent(spent) => {
+                            let id_arr = copy_fixed_checked(&spent.id).ok_or_else(|| {
+                                IndexerRestApiNetworkInterfaceError::StreamDecodeError(anyhow!(
+                                    "Failed to decode UTXO ID, incorrect length"
+                                ))
+                            })?;
+                            Ok::<_, IndexerRestApiNetworkInterfaceError>(WalletUtxoUpdate::Spent(UtxoSpent {
+                                id: UtxoId::from_array(id_arr),
+                                version: spent.version,
+                            }))
+                        },
+                        protobuf::WalletUtxoUpdate::Burnt(burnt) => {
+                            let id_arr = copy_fixed_checked(&burnt.id).ok_or_else(|| {
+                                IndexerRestApiNetworkInterfaceError::StreamDecodeError(anyhow!(
+                                    "Failed to decode UTXO ID, incorrect length"
+                                ))
+                            })?;
+                            Ok::<_, IndexerRestApiNetworkInterfaceError>(WalletUtxoUpdate::Burnt(UtxoBurnt {
+                                id: UtxoId::from_array(id_arr),
+                                version: burnt.version,
+                            }))
+                        },
+                    })
+                    .transpose()?;
+                let eos = res.eos.map(|eos| EndOfShard {
+                    max_state_version: eos.max_state_version.into(),
+                });
+
+                Ok(UtxoUpdatePayload { sos, update, eos })
+            });
+        Ok(stream.boxed())
     }
 
     async fn get_unspent_utxos(
@@ -212,38 +263,42 @@ impl WalletNetworkInterface for IndexerJsonRpcNetworkInterface {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum IndexerJrpcError {
+pub enum IndexerRestApiNetworkInterfaceError {
     #[error("Indexer client error: {0}")]
-    IndexerClientError(#[from] IndexerClientError),
+    IndexerClientError(#[from] IndexerRestClientError),
     #[error("Indexer parse error : {0}")]
     IndexerParseError(#[from] ParseError),
+    #[error("Stream decode error: {0}")]
+    StreamDecodeError(anyhow::Error),
 }
 
-impl IsNotFoundError for IndexerJrpcError {
+impl IsNotFoundError for IndexerRestApiNetworkInterfaceError {
     fn is_not_found_error(&self) -> bool {
         match self {
-            IndexerJrpcError::IndexerClientError(err) => err.is_not_found_error(),
+            IndexerRestApiNetworkInterfaceError::IndexerClientError(err) => err.is_not_found_error(),
             _ => false,
         }
     }
 }
 
-impl StatusResponseError for IndexerJrpcError {
+impl StatusResponseError for IndexerRestApiNetworkInterfaceError {
     fn get_status(&self) -> WalletQueryErrorStatus {
         match self {
-            IndexerJrpcError::IndexerClientError(err) => {
+            IndexerRestApiNetworkInterfaceError::IndexerClientError(err) => {
                 if err.is_not_found_error() {
                     return WalletQueryErrorStatus::NotFound {
                         message: "The requested resource was not found".to_string(),
                     };
                 }
                 match err {
-                    IndexerClientError::RequestFailedWithStatus { code, message } if *code == INVALID_REQUEST_CODE => {
+                    IndexerRestClientError::RequestFailedWithStatus { code, message }
+                        if *code == INVALID_REQUEST_CODE =>
+                    {
                         WalletQueryErrorStatus::TransactionRejected {
                             message: message.clone(),
                         }
                     },
-                    IndexerClientError::RequestFailedWithStatus { code, message } => {
+                    IndexerRestClientError::RequestFailedWithStatus { code, message } => {
                         WalletQueryErrorStatus::InternalError {
                             message: format!("Indexer request failed with status {code}: {message}"),
                         }
@@ -253,8 +308,11 @@ impl StatusResponseError for IndexerJrpcError {
                     },
                 }
             },
-            IndexerJrpcError::IndexerParseError(e) => WalletQueryErrorStatus::InternalError {
+            IndexerRestApiNetworkInterfaceError::IndexerParseError(e) => WalletQueryErrorStatus::InternalError {
                 message: format!("Indexer parse error: {e}"),
+            },
+            IndexerRestApiNetworkInterfaceError::StreamDecodeError(e) => WalletQueryErrorStatus::InternalError {
+                message: format!("Indexer stream decode error: {e}"),
             },
         }
     }

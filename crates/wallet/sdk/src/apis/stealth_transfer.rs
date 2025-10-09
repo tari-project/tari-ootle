@@ -611,7 +611,7 @@ where
                 self.outputs_api.locks_set_transaction_id(lock_id, tx_id)?;
                 Ok(TransferOutput {
                     transaction,
-                    transaction_lock_id: Some(lock_id),
+                    transaction_lock_id: lock_id,
                 })
             },
             Err(err) => {
@@ -852,7 +852,7 @@ where
 
 pub struct TransferOutput {
     pub transaction: Transaction,
-    pub transaction_lock_id: Option<WalletLockId>,
+    pub transaction_lock_id: WalletLockId,
 }
 
 #[derive(Debug)]

@@ -172,7 +172,7 @@ async fn run(cli: Cli, config: ApplicationConfig) -> Result<(), anyhow::Error> {
         target: LOG_TARGET,
         "🟢 Starting wallet on {} connected to indexer {}",
         config.ootle_wallet_daemon.network,
-        config.ootle_wallet_daemon.indexer_json_rpc_url
+        config.ootle_wallet_daemon.indexer_api_url
     );
 
     run_tari_ootle_walletd(config, cli.wallet_restore.seed_words.as_ref(), shutdown_signal).await

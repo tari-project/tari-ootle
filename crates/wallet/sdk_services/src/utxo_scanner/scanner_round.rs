@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 
+use futures::StreamExt;
 use log::{debug, info, trace, warn};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::ConvertFromByteType;
@@ -14,8 +15,8 @@ use tari_ootle_common_types::{
     StateVersion,
 };
 use tari_ootle_wallet_sdk::{
-    models::{AccountWithAddress, Key, UtxoSpent, UtxoUnspent, WalletUtxoUpdate},
-    network::{StatusResponseError, WalletNetworkInterface},
+    models::{AccountWithAddress, Key, StartOfShard, UtxoSpent, UtxoUnspent, WalletUtxoUpdate},
+    network::{StatusResponseError, UtxoUpdateStream, WalletNetworkInterface},
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
     WalletSdk,
 };
@@ -95,7 +96,7 @@ where
             .store()
             .with_read_tx(|tx| tx.shard_state_version_get(self.account.component_address(), self.resource_address))?;
 
-        // Populate any missing shards with zero
+        // Populate any missing shards with zero because we want to scan all shards
         for shard in NUM_PRESHARDS.all_shards_iter() {
             shard_state_versions.entry(shard).or_insert_with(StateVersion::zero);
         }
@@ -108,44 +109,67 @@ where
             shard_state_versions.len(),
         );
 
-        let response = self
+        let stream = self
             .sdk
             .get_network_interface()
-            .query_stealth_utxo_updates(*self.resource_address, shard_state_versions)
+            .stream_stealth_utxo_updates(
+                *self.resource_address,
+                // NOTE that this will request shards in a random order (HashMap). This is good to avoid always
+                // starting with the same shard.
+                shard_state_versions.into_iter().collect(),
+                false,
+            )
             .await
             .map_err(|e| StealthScannerApiError::NetworkInterfaceError(e.into()))?;
 
-        // Keep going until there are no more
-        if response.shard_updates.is_empty() {
-            info!(
-                target: LOG_TARGET,
-                "🔍️ Scan complete for account {}: No more stealth outputs found",
-                self.account.component_address()
-            );
-            // Update state versions to avoid rescanning from previous versions that didnt contain any changes
-            self.sdk.store().with_write_tx(|tx| {
-                tx.shard_state_version_set_many(
-                    self.account.component_address(),
-                    self.resource_address,
-                    response.per_shard_high_watermark,
-                )
-            })?;
+        let has_more = self.process_stream(stream).await?;
+        Ok(has_more)
+    }
 
-            return Ok(false);
-        }
+    async fn process_stream(
+        &mut self,
+        mut stream: UtxoUpdateStream<TNetworkInterface::Error>,
+    ) -> Result<bool, StealthScannerApiError> {
+        let mut num_received = 0usize;
+        let mut sos: Option<StartOfShard> = None;
+        let mut has_more = false;
 
-        let num_received = response.shard_updates.len();
-
-        for (shard, update_set) in response.shard_updates {
-            self.shard_state_versions_to_set
-                .entry(shard)
-                .and_modify(|v| {
-                    if update_set.max_state_version > *v {
-                        *v = update_set.max_state_version
+        while let Some(result) = stream.next().await {
+            let update = result.map_err(|e| StealthScannerApiError::NetworkInterfaceError(e.into()))?;
+            if let Some(recv_sos) = update.sos {
+                debug!(target: LOG_TARGET, "Received SOS for shard {}", recv_sos.shard);
+                // Commit the previous progress and start with the next shard
+                if let Some(sos) = sos.take() {
+                    if num_received > 0 {
+                        info!(
+                            target: LOG_TARGET,
+                            "🔍️ Scan complete for account {}: No more stealth outputs found in shard {} (max state version {})",
+                            self.account.component_address(),
+                            sos.shard,
+                            sos.max_state_version
+                        );
                     }
-                })
-                .or_insert(update_set.max_state_version);
-            for update in update_set.updates {
+                    self.stats.num_received += num_received;
+                    num_received = 0;
+                    self.commit_progress()?;
+                }
+
+                self.shard_state_versions_to_set
+                    .entry(recv_sos.shard)
+                    .and_modify(|v| {
+                        if recv_sos.max_state_version > *v {
+                            *v = recv_sos.max_state_version
+                        }
+                    })
+                    .or_insert(recv_sos.max_state_version);
+
+                has_more |= recv_sos.has_more;
+
+                sos = Some(recv_sos);
+            }
+
+            if let Some(update) = update.update {
+                num_received += 1;
                 match update {
                     WalletUtxoUpdate::Unspent(unspent) => {
                         if self.check_if_tag_matches(&unspent)? {
@@ -172,11 +196,31 @@ where
             }
         }
 
-        // Atomically persist all changes from this round
-        let num_recovered = self.utxos_to_recover.len();
+        self.commit_progress()?;
         self.stats.num_received += num_received;
-        self.stats.num_potential_recoveries += num_recovered;
+
+        if !has_more {
+            info!(
+                target: LOG_TARGET,
+                "🔍️ Scan complete for account {}: No more stealth outputs found",
+                self.account.component_address()
+            );
+        }
+
+        Ok(has_more)
+    }
+
+    fn commit_progress(&mut self) -> Result<bool, StealthScannerApiError> {
+        if self.utxos_to_recover.is_empty() &&
+            self.utxos_to_spend.is_empty() &&
+            self.shard_state_versions_to_set.is_empty()
+        {
+            return Ok(false);
+        }
+
         let mut num_spent = 0;
+        let num_recovered = self.utxos_to_recover.len();
+        self.stats.num_potential_recoveries += num_recovered;
         self.sdk.store().with_write_tx(|tx| {
             // Mark UTXOs as spent (if they exist)
             for spent in self.utxos_to_spend.drain(..) {
@@ -188,28 +232,23 @@ where
                 }
             }
 
-            // Queue up tag matching UTXOs for processing
-            tx.utxo_process_queue_extend(self.resource_address, self.utxos_to_recover.drain(..))?;
+            if !self.utxos_to_recover.is_empty() {
+                // Queue up tag matching UTXOs for processing
+                tx.utxo_process_queue_extend(self.resource_address, self.utxos_to_recover.drain(..))?;
+            }
 
             // Update shard state versions
-            tx.shard_state_version_set_many(
-                self.account.component_address(),
-                self.resource_address,
-                self.shard_state_versions_to_set.drain(),
-            )
+            if !self.shard_state_versions_to_set.is_empty() {
+                tx.shard_state_version_set_many(
+                    self.account.component_address(),
+                    self.resource_address,
+                    self.shard_state_versions_to_set.drain(),
+                )?;
+            }
+            Ok::<_, StealthScannerApiError>(())
         })?;
 
-        info!(
-            target: LOG_TARGET,
-            "Scan round complete for account {}: Validated the tag of {}/{} new stealth outputs, marked {} as spent",
-            self.account.component_address(),
-            num_recovered,
-            num_received,
-            num_spent
-        );
-
         self.stats.num_spent += num_spent;
-
         Ok(true)
     }
 

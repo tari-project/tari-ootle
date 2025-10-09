@@ -185,6 +185,7 @@ pub trait IndexerStoreReadTransaction {
         resource_address: ResourceAddress,
         shard: Shard,
         from_state_version: StateVersion,
+        unspents_only: bool,
         limit: u32,
     ) -> Result<(StateVersion, Vec<WalletUtxoUpdate>), StorageError>;
 

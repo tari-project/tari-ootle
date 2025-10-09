@@ -14,7 +14,7 @@ use tari_ootle_common_types::{optional::Optional, shard::Shard, Network, StateVe
 use tari_ootle_wallet_sdk::{
     cipher_seed::CipherSeedRestore,
     models::{ConfidentialOutputModel, KeyId, OutputStatus, UtxoUpdateSet, WalletLockId},
-    network::{SubstateQueryResult, TransactionQueryResult, WalletNetworkInterface},
+    network::{SubstateQueryResult, TransactionQueryResult, UtxoUpdateStream, WalletNetworkInterface},
     storage::TagAndPublicNoncePair,
     WalletSdk,
     WalletSdkConfig,
@@ -181,11 +181,12 @@ impl WalletNetworkInterface for PanicNetworkInterface {
         panic!("PanicNetworkInterface called")
     }
 
-    async fn query_stealth_utxo_updates(
+    async fn stream_stealth_utxo_updates(
         &self,
         _resource_address: ResourceAddress,
-        _shard_state_versions: HashMap<Shard, StateVersion>,
-    ) -> Result<UtxoUpdateSet, Self::Error> {
+        _shard_state_versions: Vec<(Shard, StateVersion)>,
+        _unspent_only: bool,
+    ) -> Result<UtxoUpdateStream<Self::Error>, Self::Error> {
         panic!("PanicNetworkInterface called")
     }
 

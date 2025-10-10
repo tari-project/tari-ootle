@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::max_bytes::MaxBytes;
 
-const MAX_SIZE: usize = EncryptedData::max_size();
+const MAX_SIZE: usize = EncryptedData::ENCRYPTED_DATA_SIZE_WITHOUT_MEMO + EncryptedData::MAX_MEMO_SIZE;
 
 /// Used by the receiver to determine the value and mask of the commitment. Used in stealth and confidential transfers,
 /// as well as Minotari burns
@@ -15,7 +15,8 @@ const MAX_SIZE: usize = EncryptedData::max_size();
 pub struct EncryptedData(#[cfg_attr(feature = "ts", ts(type = "string"))] MaxBytes<MAX_SIZE>);
 
 impl EncryptedData {
-    pub const ENCRYPTED_DATA_SIZE_TOTAL: usize = Self::SIZE_NONCE + Self::SIZE_VALUE + Self::SIZE_MASK + Self::SIZE_TAG;
+    pub const ENCRYPTED_DATA_SIZE_WITHOUT_MEMO: usize =
+        Self::SIZE_NONCE + Self::SIZE_VALUE + Self::SIZE_MASK + Self::SIZE_TAG;
     pub const MAX_MEMO_SIZE: usize = 255;
     pub const SIZE_MASK: usize = 32;
     pub const SIZE_NONCE: usize = 24;
@@ -23,11 +24,11 @@ impl EncryptedData {
     pub const SIZE_VALUE: usize = size_of::<u64>();
 
     pub const fn min_size() -> usize {
-        Self::ENCRYPTED_DATA_SIZE_TOTAL
+        Self::ENCRYPTED_DATA_SIZE_WITHOUT_MEMO
     }
 
     pub const fn max_size() -> usize {
-        Self::min_size() + Self::MAX_MEMO_SIZE
+        MAX_SIZE
     }
 
     pub fn len(&self) -> usize {

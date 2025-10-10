@@ -42,7 +42,6 @@ fn generate_confidential_proof_internal(
         minimum_value_promise: 0,
         encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
         resource_view_key: view_key.clone(),
-        memo: None,
     };
 
     let change_mask = PrivateKey::random(&mut OsRng);
@@ -53,7 +52,6 @@ fn generate_confidential_proof_internal(
         minimum_value_promise: 0,
         encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
         resource_view_key: view_key,
-        memo: None,
     });
 
     let proof = confidential::create_output_statement(
@@ -158,7 +156,6 @@ fn generate_withdraw_proof_internal(
         minimum_value_promise: 0,
         encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
         resource_view_key: view_key.clone(),
-        memo: None,
     };
     let change_proof = change_amount.map(|amount| UnblindedOutputStatement {
         amount,
@@ -167,7 +164,6 @@ fn generate_withdraw_proof_internal(
         minimum_value_promise: 0,
         encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
         resource_view_key: view_key,
-        memo: None,
     });
 
     let proof = confidential::create_withdraw_proof(

@@ -489,6 +489,7 @@ pub async fn handle_claim_burn(
     let account_owner_public_key = account_owner.to_public_key();
     let view_only = sdk.key_manager_api().get_view_only_key(account.view_only_key_id())?;
     let view_only_public_key = view_only.to_public_key();
+    let memo = Memo::new_message("Claimed burned XTR from L1").expect("valid memo");
     // NOTE: the confidential encryption format and the bullet proofs currently do not support amounts larger than
     // u64::MAX. Apart from it being insane/basically impossible to have that much XTR in a single UTXO, the L1 emission
     // will reach this much in many thousands of years.
@@ -497,7 +498,7 @@ pub async fn handle_claim_burn(
         &mask.key,
         &view_only_public_key,
         &nonce,
-        None,
+        Some(&memo),
     )?;
 
     let tag = sdk.stealth_crypto_api().derive_stealth_output_tag(
@@ -519,7 +520,6 @@ pub async fn handle_claim_burn(
             sender_public_nonce: output_public_nonce.clone(),
             minimum_value_promise: 0,
             encrypted_data,
-            memo: Some(Memo::new_message("Claimed burned XTR from L1").expect("valid memo")),
             resource_view_key: None,
         },
         output_owner_public_key: stealth_output_owner_public_key,

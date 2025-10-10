@@ -457,7 +457,7 @@ where
                     params.blinded_output_amount,
                     &params.resource_address,
                     resource_view_key.clone(),
-                    params.output_memo.clone(),
+                    params.output_memo.as_ref(),
                 )
             })
             .transpose()?;
@@ -501,7 +501,13 @@ where
         )?;
 
         if let Some(ref fee_change) = fee_change_output_statement {
-            self.add_unconfirmed_output_from_statement(lock_id, &owner_account, params.resource_address, fee_change)?;
+            self.add_unconfirmed_output_from_statement(
+                lock_id,
+                &owner_account,
+                params.resource_address,
+                fee_change,
+                None,
+            )?;
         }
 
         substate_inputs.extend(
@@ -755,7 +761,7 @@ where
             None,
         )?;
 
-        self.add_unconfirmed_output_from_statement(lock_id, account, resource_address, &change)?;
+        self.add_unconfirmed_output_from_statement(lock_id, account, resource_address, &change, None)?;
 
         Ok(Some(change))
     }
@@ -766,6 +772,7 @@ where
         account: &AccountWithAddress,
         resource_address: ResourceAddress,
         output: &UnblindedStealthOutputStatement,
+        memo: Option<Memo>,
     ) -> Result<(), StealthTransferApiError> {
         let output_value = output.statement.amount;
         if output_value.is_zero() {
@@ -786,7 +793,7 @@ where
             owner_key_id: account.owner_key_id(),
             encrypted_data: output.statement.encrypted_data.clone(),
             status: OutputStatus::LockedUnconfirmed,
-            memo: output.statement.memo.clone(),
+            memo,
             tag_byte: output.tag,
             lock_id: Some(lock_id),
             is_burnt: false,
@@ -802,7 +809,7 @@ where
         amount: Amount,
         resource_address: &ResourceAddress,
         resource_view_key: Option<RistrettoPublicKey>,
-        memo: Option<Memo>,
+        memo: Option<&Memo>,
     ) -> Result<UnblindedStealthOutputStatement, StealthTransferApiError> {
         if !amount.is_positive() {
             return Err(StealthTransferApiError::InvalidParameter {
@@ -826,7 +833,7 @@ where
             &mask.key,
             destination.view_only_key(),
             &nonce_secret,
-            memo.as_ref(),
+            memo,
         )?;
 
         // Create stealth address - used during spend time
@@ -843,7 +850,6 @@ where
             encrypted_data,
             minimum_value_promise: 0,
             resource_view_key,
-            memo,
         };
 
         let derived_tag = self.crypto_api.derive_stealth_output_tag(

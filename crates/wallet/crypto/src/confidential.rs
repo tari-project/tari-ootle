@@ -154,7 +154,6 @@ mod tests {
                 sender_public_nonce: Default::default(),
                 encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
                 resource_view_key: None,
-                memo: None,
             }),
             Default::default(),
             None,

@@ -15,7 +15,6 @@ pub struct UnblindedOutputStatement {
     pub minimum_value_promise: u64,
     pub encrypted_data: EncryptedData,
     pub resource_view_key: Option<RistrettoPublicKey>,
-    pub memo: Option<Memo>,
 }
 
 impl UnblindedOutputStatement {

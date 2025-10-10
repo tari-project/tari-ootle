@@ -127,7 +127,6 @@ mod stealth_tests {
                     },
                     minimum_value_promise: 0,
                     encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
-                    memo: None,
                 };
 
                 UnblindedStealthOutputStatement {

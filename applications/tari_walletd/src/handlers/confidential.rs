@@ -121,7 +121,6 @@ pub async fn handle_create_transfer_proof(
         minimum_value_promise: 0,
         encrypted_data,
         resource_view_key: resource_view_key.clone(),
-        memo: req.memo,
     };
 
     let spend_amount = req.amount.checked_sub_positive(req.reveal_amount).ok_or_else(|| {
@@ -178,7 +177,6 @@ pub async fn handle_create_transfer_proof(
             sender_public_nonce: public_nonce,
             encrypted_data,
             minimum_value_promise: 0,
-            memo: None,
             resource_view_key,
         })
     } else {
@@ -261,7 +259,6 @@ pub async fn handle_create_output_proof(
         sender_public_nonce: public_nonce,
         minimum_value_promise: 0,
         encrypted_data,
-        memo: None,
         // TODO: the request must include the resource address so that we can fetch the view key
         resource_view_key: None,
     };

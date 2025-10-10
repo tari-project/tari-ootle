@@ -25,7 +25,6 @@ fn create_output_statement(value: Amount, view_key: &RistrettoPublicKey) -> Unbl
         minimum_value_promise: 0,
         encrypted_data: EncryptedData::try_from(vec![123; EncryptedData::min_size()]).unwrap(),
         resource_view_key: Some(view_key.clone()),
-        memo: None,
     }
 }
 

@@ -318,7 +318,7 @@ where
                 &destination_pk,
                 params.confidential_amount(),
                 resource_view_key.clone(),
-                params.memo.clone(),
+                params.memo.as_ref(),
             )?)
         };
 
@@ -430,7 +430,7 @@ where
         dest_public_key: &RistrettoPublicKey,
         confidential_amount: Amount,
         resource_view_key: Option<RistrettoPublicKey>,
-        memo: Option<Memo>,
+        memo: Option<&Memo>,
     ) -> Result<UnblindedOutputStatement, ConfidentialTransferApiError> {
         if !confidential_amount.is_positive() {
             return Err(ConfidentialTransferApiError::InvalidParameter {
@@ -454,7 +454,7 @@ where
             &mask.key,
             dest_public_key,
             &nonce,
-            memo.as_ref(),
+            memo,
         )?;
 
         Ok(UnblindedOutputStatement {
@@ -464,7 +464,6 @@ where
             encrypted_data,
             minimum_value_promise: 0,
             resource_view_key,
-            memo,
         })
     }
 }

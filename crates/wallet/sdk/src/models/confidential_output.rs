@@ -3,10 +3,11 @@
 
 use std::str::FromStr;
 
+use tari_ootle_wallet_crypto::memo::Memo;
 use tari_template_lib::{
-    models::{EncryptedData, VaultId},
+    models::VaultId,
     prelude::{ComponentAddress, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
-    types::Amount,
+    types::{Amount, EncryptedData},
 };
 
 use crate::models::{KeyId, WalletLockId};
@@ -22,6 +23,7 @@ pub struct ConfidentialOutputModel {
     pub owner_key_id: Option<KeyId>,
     pub encrypted_data: EncryptedData,
     pub public_asset_tag: Option<RistrettoPublicKeyBytes>,
+    pub memo: Option<Memo>,
     pub status: OutputStatus,
     pub lock_id: Option<WalletLockId>,
 }

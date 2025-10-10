@@ -223,11 +223,13 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                 }
             })?;
 
-            let mask_and_value = self.crypto_api.decrypt_value_and_mask(
+            let decrypted = self.crypto_api.decrypt_value_and_mask(
                 &output.encrypted_data,
                 &output.commitment,
                 &view_only.secret,
                 &nonce,
+                // We dont need to decrypt the memo to spend the output
+                true,
             )?;
 
             let stealth_secret = self
@@ -236,7 +238,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
 
             inputs_with_masks.push(InputToSpend {
                 statement: UnblindedStealthInputStatement {
-                    mask_and_value,
+                    mask_and_value: decrypted.mask_and_value,
                     owner_secret: stealth_secret,
                     public_nonce: nonce,
                 },
@@ -519,10 +521,11 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                 &commitment,
                 &keys.view_only_key.secret,
                 &output_stealth_public_nonce,
+                false,
             );
 
-            let (value, status) = match unblinded_result {
-                Ok(mask_and_value) => {
+            let (value, memo, status) = match unblinded_result {
+                Ok(decrypted) => {
                     if let Some(ref owner_key) = keys.account_key {
                         let stealth_secret = self.crypto_api.derive_stealth_owner_secret(
                             network,
@@ -531,7 +534,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                         );
                         let stealth_address = RistrettoPublicKey::from_secret_key(&stealth_secret);
                         if output.owner_public_key == stealth_address.to_byte_type() {
-                            (mask_and_value.value, OutputStatus::Unspent)
+                            (decrypted.value(), decrypted.memo, OutputStatus::Unspent)
                         } else {
                             warn!(
                                 target: LOG_TARGET,
@@ -539,7 +542,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                                 stealth_address,
                                 output.owner_public_key
                             );
-                            (mask_and_value.value, OutputStatus::Invalid)
+                            (decrypted.value(), decrypted.memo, OutputStatus::Invalid)
                         }
                     } else {
                         info!(
@@ -547,7 +550,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                             "Output can only be viewed, not spent, as there is no owner key for view key {}",
                             keys.view_only_key.key_id,
                         );
-                        (mask_and_value.value, OutputStatus::Unspent)
+                        (decrypted.value(), decrypted.memo, OutputStatus::Unspent)
                     }
                 },
                 Err(e) => {
@@ -584,6 +587,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                 owner_key_id: keys.account_key.as_ref().map(|k| k.key_id),
                 encrypted_data: output.output.encrypted_data.clone(),
                 tag_byte: output.tag,
+                memo,
                 status,
                 is_burnt: false,
                 is_frozen,

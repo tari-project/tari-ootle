@@ -3,9 +3,15 @@
 
 mod support;
 
-use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey, ristretto::RistrettoPublicKey};
+use tari_crypto::{
+    commitment::HomomorphicCommitmentFactory,
+    keys::PublicKey,
+    ristretto::RistrettoPublicKey,
+    tari_utilities::ByteArray,
+};
 use tari_engine_types::{crypto::get_commitment_factory, ToByteType};
 use tari_ootle_common_types::Network;
+use tari_ootle_wallet_crypto::memo::Memo;
 use tari_ootle_wallet_sdk::apis::stealth_crypto::StealthCryptoApi;
 
 use crate::support::{random_key, random_keypair, resource_address_from_seed};
@@ -75,12 +81,16 @@ mod encrypted_data {
         let mask = random_key();
         let (k1, p1) = random_keypair();
         let (k2, p2) = random_keypair();
-        let data = api.encrypt_value_and_mask(amount, &mask, &p2, &k1).unwrap();
+        let memo = Memo::new_message("Hello, world!").unwrap();
+        let data = api
+            .encrypt_value_and_mask(amount, &mask, &p2, &k1, Some(&memo))
+            .unwrap();
         let commitment = get_commitment_factory().commit_value(&mask, amount).to_byte_type();
 
-        let decrypted = api.decrypt_value_and_mask(&data, &commitment, &k2, &p1).unwrap();
+        let decrypted = api.decrypt_value_and_mask(&data, &commitment, &k2, &p1, false).unwrap();
 
-        assert_eq!(decrypted.value, amount);
-        assert_eq!(decrypted.mask, mask);
+        assert_eq!(decrypted.value(), amount);
+        assert_eq!(decrypted.mask().as_bytes(), mask.as_bytes());
+        assert_eq!(decrypted.memo(), Some(&memo));
     }
 }

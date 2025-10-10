@@ -126,6 +126,7 @@ pub async fn transfer_stealth(
             max_fee: 2000,
             blinded_output_amount: amount,
             revealed_output_amount: Default::default(),
+            output_memo: None,
             dry_run: false,
         })
         .await
@@ -881,6 +882,7 @@ pub async fn confidential_transfer(
         max_fee,
         resource_address,
         proof_from_badge_resource: None,
+        memo: None,
         dry_run: false,
         input_selection: ConfidentialTransferInputSelection::PreferRevealed,
         output_to_revealed: false,

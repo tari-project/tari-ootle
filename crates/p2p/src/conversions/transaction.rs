@@ -37,7 +37,6 @@ use tari_template_lib::{
         ComponentAddress,
         ConfidentialOutputStatement,
         ConfidentialWithdrawProof,
-        EncryptedData,
         StealthInput,
         UnspentOutput,
         ViewableBalanceProof,
@@ -45,6 +44,7 @@ use tari_template_lib::{
     prelude::AccessRules,
     types::{
         crypto::{BalanceProofSignature, PedersenCommitmentBytes, RangeProofBytes, RistrettoPublicKeyBytes, UtxoTag},
+        EncryptedData,
         ObjectKey,
     },
 };

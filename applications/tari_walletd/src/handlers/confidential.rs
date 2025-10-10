@@ -102,6 +102,7 @@ pub async fn handle_create_transfer_proof(
         &output_mask.key,
         &public_nonce,
         &account_key.secret,
+        req.memo.as_ref(),
     )?;
 
     let resource = sdk.substate_api().fetch_resource(req.resource_address).await?;
@@ -150,6 +151,7 @@ pub async fn handle_create_transfer_proof(
             &change_mask.key,
             &public_nonce,
             &change_mask.key,
+            None,
         )?;
 
         sdk.confidential_outputs_api().add_output(ConfidentialOutputModel {
@@ -163,6 +165,7 @@ pub async fn handle_create_transfer_proof(
             view_only_key_id: account.view_only_key_id(),
             owner_key_id: account.owner_key_id(),
             encrypted_data: encrypted_data.clone(),
+            memo: None,
             public_asset_tag: None,
             status: OutputStatus::LockedUnconfirmed,
             lock_id: Some(lock_id),
@@ -246,6 +249,8 @@ pub async fn handle_create_output_proof(
         &output_mask.key,
         &public_nonce,
         &output_mask.key,
+        // TODO: Support memos
+        None,
     )?;
 
     let statement = UnblindedOutputStatement {

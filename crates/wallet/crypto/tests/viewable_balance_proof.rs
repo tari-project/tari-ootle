@@ -11,9 +11,8 @@ use tari_crypto::{
 use tari_engine_types::crypto::validate_elgamal_verifiable_balance_proof;
 use tari_ootle_wallet_crypto::{confidential, AlwaysMissLookupTable, UnblindedOutputStatement};
 use tari_template_lib::{
-    models::EncryptedData,
     template_dependencies::{decode_exact, encode_with_len},
-    types::Amount,
+    types::{Amount, EncryptedData},
 };
 use tari_utilities::ByteArray;
 

@@ -13,8 +13,8 @@ use minotari_app_grpc::{
 use tari_engine_types::confidential::{AbridgedTransactionKernel, EncodedMerkleProof, MinotariBurnClaimProof};
 use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
 use tari_template_lib::{
-    models::EncryptedData,
     prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
+    types::EncryptedData,
 };
 use tari_transaction_components::{
     tari_amount::T,

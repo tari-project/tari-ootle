@@ -285,7 +285,7 @@ dependencies = [
  "nom",
  "num-traits",
  "rusticata-macros",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "time",
 ]
 
@@ -858,7 +858,7 @@ dependencies = [
  "mime",
  "serde",
  "serde_json",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -1187,7 +1187,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09dc0086e469182132244e9b8d313a0742e1132da43a08c24b9dd3c18e0faf3a"
 dependencies = [
  "serde",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -4147,7 +4147,7 @@ dependencies = [
  "rand 0.9.1",
  "ring 0.17.14",
  "socket2 0.5.10",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "tinyvec",
  "tokio",
  "tracing",
@@ -4175,7 +4175,7 @@ dependencies = [
  "ring 0.17.14",
  "rustls 0.23.28",
  "rustls-platform-verifier",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "tinyvec",
  "tokio",
  "tokio-rustls 0.26.2",
@@ -4199,7 +4199,7 @@ dependencies = [
  "rand 0.9.1",
  "resolv-conf",
  "smallvec 1.15.1",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "tokio",
  "tracing",
 ]
@@ -4221,7 +4221,7 @@ dependencies = [
  "resolv-conf",
  "rustls 0.23.28",
  "smallvec 1.15.1",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "tokio",
  "tokio-rustls 0.26.2",
  "tracing",
@@ -5545,7 +5545,7 @@ dependencies = [
  "multiaddr 0.18.1",
  "pin-project 1.1.10",
  "rw-stream-sink",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -5577,7 +5577,7 @@ dependencies = [
  "quick-protobuf-codec 0.3.1 (git+https://github.com/tari-project/rust-libp2p.git?rev=debc01257dd979418d7793f2dc91d25471de5c38)",
  "rand 0.8.5",
  "rand_core 0.6.4",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "tracing",
  "web-time",
 ]
@@ -5610,7 +5610,7 @@ dependencies = [
  "quick-protobuf",
  "rand 0.8.5",
  "rw-stream-sink",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "tracing",
  "unsigned-varint 0.8.0",
  "web-time",
@@ -5632,7 +5632,7 @@ dependencies = [
  "lru",
  "quick-protobuf",
  "quick-protobuf-codec 0.3.1 (git+https://github.com/tari-project/rust-libp2p.git?rev=debc01257dd979418d7793f2dc91d25471de5c38)",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "tracing",
  "web-time",
 ]
@@ -5697,7 +5697,7 @@ dependencies = [
  "quick-protobuf",
  "quick-protobuf-codec 0.3.1 (git+https://github.com/tari-project/rust-libp2p.git?rev=debc01257dd979418d7793f2dc91d25471de5c38)",
  "smallvec 1.15.1",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "tracing",
 ]
 
@@ -5715,7 +5715,7 @@ dependencies = [
  "serde",
  "sha2",
  "tari_crypto",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "tracing",
  "zeroize",
 ]
@@ -5786,7 +5786,7 @@ dependencies = [
  "rand 0.8.5",
  "snow",
  "static_assertions",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "tracing",
  "x25519-dalek",
  "zeroize",
@@ -5816,7 +5816,7 @@ dependencies = [
  "prometheus-client",
  "quick-protobuf",
  "quick-protobuf-codec 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tracing",
 ]
 
@@ -5851,7 +5851,7 @@ dependencies = [
  "ring 0.17.14",
  "rustls 0.23.28",
  "socket2 0.5.10",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "tokio",
  "tracing",
 ]
@@ -5874,7 +5874,7 @@ dependencies = [
  "quick-protobuf-codec 0.3.1 (git+https://github.com/tari-project/rust-libp2p.git?rev=debc01257dd979418d7793f2dc91d25471de5c38)",
  "rand 0.8.5",
  "static_assertions",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "tracing",
  "web-time",
 ]
@@ -5896,7 +5896,7 @@ dependencies = [
  "quick-protobuf",
  "quick-protobuf-codec 0.3.1 (git+https://github.com/tari-project/rust-libp2p.git?rev=debc01257dd979418d7793f2dc91d25471de5c38)",
  "rand 0.8.5",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "tracing",
  "web-time",
 ]
@@ -5986,7 +5986,7 @@ dependencies = [
  "ring 0.17.14",
  "rustls 0.23.28",
  "rustls-webpki 0.103.3",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "x509-parser 0.17.0",
  "yasna",
 ]
@@ -6013,7 +6013,7 @@ dependencies = [
  "either",
  "futures 0.3.31",
  "libp2p-core",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "tracing",
  "yamux 0.12.1",
  "yamux 0.13.5",
@@ -6236,7 +6236,7 @@ checksum = "656b3b27f8893f7bbf9485148ff9a65f019e3f33bd5cdc87c83cab16b3fd9ec8"
 dependencies = [
  "libc",
  "neli",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "windows-sys 0.59.0",
 ]
 
@@ -6353,7 +6353,7 @@ version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bb4bdc8b0ce69932332cf76d24af69c3a155242af95c226b2ab6c2e371ed1149"
 dependencies = [
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "zerocopy",
  "zerocopy-derive",
 ]
@@ -7146,7 +7146,7 @@ dependencies = [
  "log",
  "netlink-packet-core",
  "netlink-sys",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -7844,7 +7844,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1db05f56d34358a8b1066f67cbb203ee3e7ed2ba674a6263a1d5ec6db2204323"
 dependencies = [
  "memchr",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "ucd-trie",
 ]
 
@@ -8259,7 +8259,7 @@ dependencies = [
  "memchr",
  "parking_lot",
  "protobuf",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -8574,7 +8574,7 @@ dependencies = [
  "asynchronous-codec",
  "bytes 1.10.1",
  "quick-protobuf",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "unsigned-varint 0.8.0",
 ]
 
@@ -8602,7 +8602,7 @@ dependencies = [
  "rustc-hash 2.1.1",
  "rustls 0.23.28",
  "socket2 0.5.10",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "tokio",
  "tracing",
  "web-time",
@@ -8623,7 +8623,7 @@ dependencies = [
  "rustls 0.23.28",
  "rustls-pki-types",
  "slab",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "tinyvec",
  "tracing",
  "web-time",
@@ -10093,7 +10093,7 @@ checksum = "297f631f50729c8c99b84667867963997ec0b50f32b2a7dbcab828ef0541e8bb"
 dependencies = [
  "num-bigint",
  "num-traits",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "time",
 ]
 
@@ -10721,7 +10721,7 @@ dependencies = [
  "tari_template_lib",
  "tari_transaction_components",
  "tari_utilities",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tonic 0.13.1",
  "ts-rs",
  "url",
@@ -10951,7 +10951,7 @@ dependencies = [
  "tari_state_tree",
  "tari_template_lib_types",
  "tari_transaction",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
 ]
 
@@ -11081,7 +11081,7 @@ dependencies = [
  "tari_transaction_manifest",
  "tari_utilities",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "wasmer",
  "wasmer-middlewares",
 ]
@@ -11109,7 +11109,7 @@ dependencies = [
  "tari_hashing",
  "tari_template_abi",
  "tari_template_lib",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "ts-rs",
 ]
 
@@ -11130,7 +11130,7 @@ dependencies = [
  "tari_shutdown",
  "tari_sidechain",
  "tari_template_lib_types",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
  "url",
 ]
@@ -11155,7 +11155,7 @@ dependencies = [
  "tari_template_lib",
  "tari_transaction_components",
  "tari_utilities",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
  "url",
 ]
@@ -11232,7 +11232,7 @@ dependencies = [
  "tari_template_manager",
  "tari_transaction",
  "tari_validator_node_rpc",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "time",
  "tokio",
  "tower-http",
@@ -11265,7 +11265,7 @@ dependencies = [
  "tari_template_abi",
  "tari_template_lib_types",
  "tari_transaction",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
  "ts-rs",
  "utoipa",
@@ -11281,7 +11281,7 @@ dependencies = [
  "tari_epoch_manager",
  "tari_ootle_common_types",
  "tari_validator_node_rpc",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -11295,7 +11295,7 @@ dependencies = [
  "serde",
  "tari_crypto",
  "tari_hashing",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -11360,7 +11360,7 @@ dependencies = [
  "tari_rpc_framework",
  "tari_shutdown",
  "tari_swarm",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
 ]
 
@@ -11396,7 +11396,7 @@ dependencies = [
  "tari_engine_types",
  "tari_ootle_common_types",
  "tari_template_lib_types",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "ts-rs",
 ]
 
@@ -11433,7 +11433,7 @@ dependencies = [
  "tari_template_manager",
  "tari_transaction",
  "tari_transaction_components",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
  "toml 0.9.6",
  "url",
@@ -11463,7 +11463,7 @@ dependencies = [
  "tari_mmr",
  "tari_template_lib",
  "tari_template_lib_types",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "ts-rs",
 ]
 
@@ -11509,7 +11509,7 @@ dependencies = [
  "tari_state_tree",
  "tari_template_lib",
  "tari_transaction",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "time",
  "ts-rs",
 ]
@@ -11531,7 +11531,7 @@ dependencies = [
  "tari_ootle_storage",
  "tari_template_lib",
  "tari_utilities",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -11556,7 +11556,7 @@ dependencies = [
  "tari_transaction_manifest",
  "tari_utilities",
  "tari_wallet_daemon_client",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "time",
  "tokio",
  "url",
@@ -11573,6 +11573,7 @@ dependencies = [
  "crc32fast",
  "digest",
  "rand 0.8.5",
+ "serde",
  "serde_json",
  "subtle",
  "tari_crypto",
@@ -11580,9 +11581,9 @@ dependencies = [
  "tari_hashing",
  "tari_ootle_common_types",
  "tari_template_lib",
- "tari_template_test_tooling",
  "tari_utilities",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
+ "ts-rs",
  "zeroize",
 ]
 
@@ -11613,7 +11614,7 @@ dependencies = [
  "tari_transaction",
  "tari_transaction_components",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "time",
  "ts-rs",
  "webauthn-rs",
@@ -11640,7 +11641,7 @@ dependencies = [
  "tari_template_builtin",
  "tari_template_lib",
  "tari_transaction",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
  "url",
 ]
@@ -11715,7 +11716,7 @@ dependencies = [
  "tari_utilities",
  "tari_wallet_daemon_client",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
  "tower-http",
  "url",
@@ -11771,7 +11772,7 @@ dependencies = [
  "proto_builder",
  "tari_metrics",
  "tari_shutdown",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
  "tokio-util 0.7.16",
  "tower 0.5.2",
@@ -11804,7 +11805,7 @@ dependencies = [
  "tari_state_tree",
  "tari_template_manager",
  "tari_validator_node_rpc",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -11876,7 +11877,7 @@ dependencies = [
  "tari_hashing",
  "tari_jellyfish",
  "tari_utilities",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -11899,7 +11900,7 @@ dependencies = [
  "tari_ootle_common_types",
  "tari_shutdown",
  "tari_utilities",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
  "tower-http",
  "webrtc",
@@ -11928,7 +11929,7 @@ dependencies = [
  "tari_template_lib_types",
  "tari_transaction",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -11943,7 +11944,7 @@ dependencies = [
  "tari_jellyfish",
  "tari_ootle_common_types",
  "tari_template_lib",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -11965,7 +11966,7 @@ dependencies = [
  "libp2p",
  "libp2p-messaging",
  "libp2p-substream",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -12006,7 +12007,7 @@ dependencies = [
  "tari_transaction_components",
  "tari_validator_node_client",
  "tari_wallet_daemon_client",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
  "toml 0.9.6",
  "tonic 0.13.1",
@@ -12103,7 +12104,7 @@ dependencies = [
  "tari_template_builtin",
  "tari_template_lib",
  "tari_validator_node_rpc",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
  "tokio-stream",
 ]
@@ -12126,7 +12127,7 @@ dependencies = [
  "tari_template_lib",
  "tari_transaction",
  "tari_transaction_manifest",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -12158,7 +12159,7 @@ dependencies = [
  "tari_engine_types",
  "tari_ootle_common_types",
  "tari_template_lib",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "ts-rs",
 ]
 
@@ -12241,7 +12242,7 @@ dependencies = [
  "tari_template_builtin",
  "tari_template_lib",
  "tari_transaction",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -12319,7 +12320,7 @@ dependencies = [
  "tari_transaction_components",
  "tari_validator_node_client",
  "tari_validator_node_rpc",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
  "tower-http",
  "url",
@@ -12348,7 +12349,7 @@ dependencies = [
  "tari_transaction",
  "tari_transaction_manifest",
  "tari_validator_node_client",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "time",
  "tokio",
 ]
@@ -12372,7 +12373,7 @@ dependencies = [
  "tari_template_abi",
  "tari_template_lib_types",
  "tari_transaction",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "ts-rs",
 ]
 
@@ -12394,7 +12395,7 @@ dependencies = [
  "tari_rpc_framework",
  "tari_rpc_macros",
  "tari_transaction",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
 ]
 
@@ -12412,7 +12413,7 @@ dependencies = [
  "tari_template_abi",
  "tari_template_lib",
  "tari_transaction",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "time",
  "ts-rs",
  "webauthn-rs-proto",
@@ -12533,11 +12534,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.12"
+version = "2.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "567b8a2dae586314f7be2a752ec7474332959c6460e02bde30d702a66d488708"
+checksum = "f63587ca0f12b72a0600bcba1d40081f830876000bb46dd2337a3051618f4fc8"
 dependencies = [
- "thiserror-impl 2.0.12",
+ "thiserror-impl 2.0.17",
 ]
 
 [[package]]
@@ -12553,9 +12554,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.12"
+version = "2.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f7cf42b4507d8ea322120659672cf1b9dbb93f8f2d4ecfd6e51350ff5b17a1d"
+checksum = "3ff15c8ecd7de3849db632e14d18d2571fa09dfc5ed93479bc4485c7a517c913"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -13159,7 +13160,7 @@ checksum = "6ef1b7a6d914a34127ed8e1fa927eb7088903787bcded4fa3eef8f85ee1568be"
 dependencies = [
  "chrono",
  "indexmap 2.11.4",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "ts-rs-macros",
 ]
 
@@ -13201,7 +13202,7 @@ dependencies = [
  "log",
  "rand 0.9.1",
  "sha1 0.10.6",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "utf-8",
 ]
 
@@ -14880,7 +14881,7 @@ dependencies = [
  "nom",
  "oid-registry 0.8.1",
  "rusticata-macros",
- "thiserror 2.0.12",
+ "thiserror 2.0.17",
  "time",
 ]
 

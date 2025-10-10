@@ -13,6 +13,7 @@ mod unblinded_statement;
 mod value_lookup;
 
 pub mod encryption;
+pub mod memo;
 pub mod viewable_balance_proof;
 
 pub use error::*;

@@ -40,6 +40,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_wallet_sdk::{
     apis::{confidential_transfer::ConfidentialTransferInputSelection, key_manager::KeyBranch},
+    crypto::memo::Memo,
     models::{
         Account,
         AuthoredTemplateModel,
@@ -54,17 +55,9 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_template_abi::{FunctionDef, TemplateDef};
 use tari_template_lib::{
-    models::{
-        ConfidentialOutputStatement,
-        EncryptedData,
-        NonFungibleId,
-        ResourceAddress,
-        UtxoAddress,
-        UtxoId,
-        VaultId,
-    },
+    models::{ConfidentialOutputStatement, NonFungibleId, ResourceAddress, UtxoAddress, UtxoId, VaultId},
     prelude::{ComponentAddress, ConfidentialWithdrawProof, ResourceType, RistrettoPublicKeyBytes},
-    types::{crypto::PedersenCommitmentBytes, Amount, TemplateAddress},
+    types::{crypto::PedersenCommitmentBytes, Amount, EncryptedData, TemplateAddress},
 };
 use tari_transaction::{Instruction, Transaction, TransactionId, UnsignedTransaction};
 use time::PrimitiveDateTime;
@@ -497,10 +490,10 @@ pub struct ProofsGenerateRequest {
     pub reveal_amount: Amount,
     #[serde(deserialize_with = "opt_string_or_struct")]
     pub account: Option<ComponentAddressOrName>,
-    // TODO: #[serde(deserialize_with = "string_or_struct")]
     pub resource_address: ResourceAddress,
-    // TODO: For now, we assume that this is obtained "somehow" from the destination account
     pub destination_public_key: RistrettoPublicKeyBytes,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memo: Option<Memo>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -554,6 +547,8 @@ pub struct ConfidentialTransferRequest {
     pub max_fee: Option<u64>,
     pub output_to_revealed: bool,
     pub proof_from_badge_resource: Option<ResourceAddress>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memo: Option<Memo>,
     pub dry_run: bool,
 }
 
@@ -1070,6 +1065,8 @@ pub struct StealthTransferRequest {
     pub max_fee: u64,
     pub blinded_output_amount: Amount,
     pub revealed_output_amount: Amount,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_memo: Option<Memo>,
     pub dry_run: bool,
 }
 
@@ -1110,6 +1107,7 @@ pub struct UtxoInfo {
     pub address: UtxoAddress,
     pub value: Amount,
     pub status: OutputStatus,
+    pub memo: Option<Memo>,
     pub is_burnt: bool,
     pub is_frozen: bool,
     pub is_on_chain: bool,

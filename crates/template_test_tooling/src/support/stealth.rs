@@ -18,11 +18,12 @@ use tari_ootle_wallet_crypto::{
     UnblindedStealthOutputStatement,
 };
 use tari_template_lib::{
-    models::{EncryptedData, StealthOutputsStatement, StealthTransferStatement},
+    models::{StealthOutputsStatement, StealthTransferStatement},
     prelude::{crypto::ValueKnowledgeProof, RistrettoPublicKeyBytes},
     types::{
         crypto::{StealthValueProof, UtxoTag},
         Amount,
+        EncryptedData,
     },
 };
 

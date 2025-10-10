@@ -161,10 +161,7 @@ mod tests {
         ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     };
     use tari_engine_types::stealth::validate_stealth_outputs_statement;
-    use tari_template_lib::{
-        models::EncryptedData,
-        types::{crypto::UtxoTag, Amount},
-    };
+    use tari_template_lib::types::{crypto::UtxoTag, Amount, EncryptedData};
 
     use super::*;
     use crate::UnblindedOutputStatement;

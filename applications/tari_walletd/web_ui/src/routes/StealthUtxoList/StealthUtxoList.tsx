@@ -31,6 +31,7 @@ import PlaceHolder from "./components/PlaceHolder";
 import SortableHeader from "./components/SortableHeader";
 import useCurrencyStore from "@store/currencyStore";
 import { useParams } from "react-router-dom";
+import { Memo } from "@components/Memo";
 
 function StealthUtxoList({ account }: { account: Account }) {
   const [page, setPage] = useState(0);
@@ -63,12 +64,13 @@ function StealthUtxoList({ account }: { account: Account }) {
   );
 
   const columnWidths = {
-    1: "30%",
-    2: "20%",
+    1: "10%",
+    2: "15%",
     3: "20%",
-    4: "10%",
+    4: "25%",
     5: "10%",
     6: "10%",
+    7: "10%",
   };
 
   return (
@@ -88,9 +90,10 @@ function StealthUtxoList({ account }: { account: Account }) {
                     getDisplayName={getStatusDisplayName}
                   />
                 </TableCell>
-                <TableCell width={columnWidths[4]}>Burnt</TableCell>
-                <TableCell width={columnWidths[5]}>Frozen</TableCell>
-                <TableCell width={columnWidths[6]}>On Chain</TableCell>
+                <TableCell width={columnWidths[4]}>Memo</TableCell>
+                <TableCell width={columnWidths[5]}>Burnt</TableCell>
+                <TableCell width={columnWidths[6]}>Frozen</TableCell>
+                <TableCell width={columnWidths[7]}>On Chain</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -107,6 +110,9 @@ function StealthUtxoList({ account }: { account: Account }) {
                       </DataTableCell>
                       <DataTableCell>
                         <StatusChip status={utxo.status} />
+                      </DataTableCell>
+                      <DataTableCell>
+                        <Memo memo={utxo.memo} />
                       </DataTableCell>
                       <DataTableCell>{utxo.is_burnt ? "Yes" : "No"}</DataTableCell>
                       <DataTableCell>{utxo.is_frozen ? "Yes" : "No"}</DataTableCell>

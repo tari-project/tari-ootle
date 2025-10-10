@@ -140,7 +140,7 @@ mod tests {
     use rand::rngs::OsRng;
     use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
     use tari_engine_types::confidential::validate_confidential_statement;
-    use tari_template_lib::{models::EncryptedData, types::Amount};
+    use tari_template_lib::types::{Amount, EncryptedData};
 
     use super::*;
 

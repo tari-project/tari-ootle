@@ -10,7 +10,7 @@ use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine_types::{FromByteType, ToByteType};
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{optional::IsNotFoundError, SubstateRequirement};
-use tari_ootle_wallet_crypto::{MaskAndValue, UnblindedOutputStatement};
+use tari_ootle_wallet_crypto::{memo::Memo, MaskAndValue, UnblindedOutputStatement};
 use tari_template_lib::{
     models::{ComponentAddress, ResourceAddress, VaultId},
     types::Amount,
@@ -318,6 +318,7 @@ where
                 &destination_pk,
                 params.confidential_amount(),
                 resource_view_key.clone(),
+                params.memo.as_ref(),
             )?)
         };
 
@@ -337,6 +338,7 @@ where
                 &account_public_key,
                 change_confidential_amount,
                 resource_view_key,
+                None,
             )?;
 
             let change_value = statement.amount;
@@ -355,6 +357,7 @@ where
                     owner_key_id: Some(account_key.key_id),
                     encrypted_data: statement.encrypted_data.clone(),
                     public_asset_tag: None,
+                    memo: None,
                     status: OutputStatus::LockedUnconfirmed,
                     lock_id: Some(inputs_to_spend.lock_id),
                 })?;
@@ -427,6 +430,7 @@ where
         dest_public_key: &RistrettoPublicKey,
         confidential_amount: Amount,
         resource_view_key: Option<RistrettoPublicKey>,
+        memo: Option<&Memo>,
     ) -> Result<UnblindedOutputStatement, ConfidentialTransferApiError> {
         if !confidential_amount.is_positive() {
             return Err(ConfidentialTransferApiError::InvalidParameter {
@@ -450,6 +454,7 @@ where
             &mask.key,
             dest_public_key,
             &nonce,
+            memo,
         )?;
 
         Ok(UnblindedOutputStatement {
@@ -486,6 +491,9 @@ pub struct ConfidentialTransferParams {
     pub output_to_revealed: bool,
     /// If some, instructions are added that create a access rule proof for this resource before calling withdraw
     pub proof_from_resource: Option<ResourceAddress>,
+    /// A memo to include in the output, if any. This memo is encrypted in the output and can only be decrypted by the
+    /// recipient
+    pub memo: Option<Memo>,
     /// Run as a dry run, no funds will be transferred if true
     pub is_dry_run: bool,
 }

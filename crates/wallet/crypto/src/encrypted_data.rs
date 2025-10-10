@@ -21,11 +21,11 @@ use tari_crypto::{
 };
 use tari_engine_types::{crypto::get_commitment_factory, ToByteType};
 use tari_hashing::TransactionSecureNonceKdfDomain;
-use tari_template_lib::types::{crypto::PedersenCommitmentBytes, EncryptedData, Memo};
+use tari_template_lib::types::{crypto::PedersenCommitmentBytes, EncryptedData};
 use tari_utilities::{safe_array::SafeArray, ByteArray};
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::{kdfs, kdfs::EncryptedDataKey, DecryptedData, MaskAndValue, WalletCryptoError};
+use crate::{kdfs, kdfs::EncryptedDataKey, memo::Memo, DecryptedData, MaskAndValue, WalletCryptoError};
 
 pub fn unblind_output(
     output_commitment: &PedersenCommitmentBytes,

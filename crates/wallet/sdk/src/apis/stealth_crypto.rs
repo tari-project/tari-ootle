@@ -12,6 +12,7 @@ use tari_ootle_wallet_crypto::{
     confidential,
     encrypted_data::{encrypt_data, unblind_output},
     kdfs,
+    memo::Memo,
     stealth,
     ConfidentialProofError,
     DecryptedData,
@@ -23,7 +24,7 @@ use tari_ootle_wallet_crypto::{
 use tari_template_lib::{
     models::{ConfidentialOutputStatement, ResourceAddress, StealthTransferStatement},
     prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes},
-    types::{crypto::UtxoTag, Amount, EncryptedData, Memo},
+    types::{crypto::UtxoTag, Amount, EncryptedData},
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet::sdk::stealth_crypto";

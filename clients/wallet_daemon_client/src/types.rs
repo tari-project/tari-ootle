@@ -40,6 +40,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_wallet_sdk::{
     apis::{confidential_transfer::ConfidentialTransferInputSelection, key_manager::KeyBranch},
+    crypto::memo::Memo,
     models::{
         Account,
         AuthoredTemplateModel,
@@ -56,7 +57,7 @@ use tari_template_abi::{FunctionDef, TemplateDef};
 use tari_template_lib::{
     models::{ConfidentialOutputStatement, NonFungibleId, ResourceAddress, UtxoAddress, UtxoId, VaultId},
     prelude::{ComponentAddress, ConfidentialWithdrawProof, ResourceType, RistrettoPublicKeyBytes},
-    types::{crypto::PedersenCommitmentBytes, Amount, EncryptedData, Memo, TemplateAddress},
+    types::{crypto::PedersenCommitmentBytes, Amount, EncryptedData, TemplateAddress},
 };
 use tari_transaction::{Instruction, Transaction, TransactionId, UnsignedTransaction};
 use time::PrimitiveDateTime;

@@ -3,7 +3,9 @@
 
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey};
 use tari_engine_types::crypto::commit_amount_checked;
-use tari_template_lib::types::{crypto::UtxoTag, Amount, EncryptedData, Memo};
+use tari_template_lib::types::{crypto::UtxoTag, Amount, EncryptedData};
+
+use crate::memo::Memo;
 
 #[derive(Debug, Clone)]
 pub struct UnblindedOutputStatement {

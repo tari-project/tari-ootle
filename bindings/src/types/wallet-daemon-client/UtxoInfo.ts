@@ -8,7 +8,7 @@ export type UtxoInfo = {
   address: UtxoAddress;
   value: Amount;
   status: OutputStatus;
-  memo?: Memo | null;
+  memo: Memo | null;
   is_burnt: boolean;
   is_frozen: boolean;
   is_on_chain: boolean;

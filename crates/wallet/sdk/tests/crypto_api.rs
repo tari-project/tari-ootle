@@ -3,9 +3,15 @@
 
 mod support;
 
-use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey, ristretto::RistrettoPublicKey};
+use tari_crypto::{
+    commitment::HomomorphicCommitmentFactory,
+    keys::PublicKey,
+    ristretto::RistrettoPublicKey,
+    tari_utilities::ByteArray,
+};
 use tari_engine_types::{crypto::get_commitment_factory, ToByteType};
 use tari_ootle_common_types::Network;
+use tari_ootle_wallet_crypto::memo::Memo;
 use tari_ootle_wallet_sdk::apis::stealth_crypto::StealthCryptoApi;
 
 use crate::support::{random_key, random_keypair, resource_address_from_seed};
@@ -54,8 +60,6 @@ mod stealth_address {
 }
 
 mod encrypted_data {
-    use tari_crypto::tari_utilities::ByteArray;
-    use tari_template_lib::types::Memo;
 
     use super::*;
 

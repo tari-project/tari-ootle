@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_lib::types::Memo;
+use tari_ootle_wallet_crypto::memo::Memo;
 use tari_transaction_components::transaction_components::{memo_field::TxType, MemoField};
 
 #[test]

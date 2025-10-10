@@ -41,12 +41,12 @@ use tari_engine_types::{
 };
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{Epoch, SubstateAddress, SubstateRequirement};
-use tari_ootle_wallet_sdk::apis::confidential_transfer::ConfidentialTransferInputSelection;
+use tari_ootle_wallet_sdk::{apis::confidential_transfer::ConfidentialTransferInputSelection, crypto::memo::Memo};
 use tari_template_lib::{
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
     models::{BucketId, NonFungibleAddress, NonFungibleId},
     prelude::{ResourceAddress, RistrettoPublicKeyBytes},
-    types::{Amount, Memo, TemplateAddress},
+    types::{Amount, TemplateAddress},
 };
 use tari_transaction::{
     args,

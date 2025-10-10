@@ -1,9 +1,9 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_abi::rust::{cmp, io};
+use std::{cmp, io};
 
-use crate::{max_bytes::MaxBytes, max_string::MaxString};
+use tari_template_lib::types::{MaxBytes, MaxString};
 
 /// These are selected to be out of range of the Minotari memo field tags
 /// See:
@@ -25,7 +25,8 @@ impl MemoTag {
 }
 
 const MAX_BYTES_LENGTH: usize = 253;
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Memo {
     /// UTF-8 encoded string message
@@ -35,7 +36,7 @@ pub enum Memo {
 }
 
 impl Memo {
-    /// EncryptedData memo size (255) - 1 (enum tag + length (u8))
+    /// EncryptedData memo size (255) - 2 (enum tag + length (u8))
     pub const MAX_BYTES_LENGTH: usize = MAX_BYTES_LENGTH;
 
     pub fn new_message(s: impl Into<Box<str>>) -> Option<Self> {
@@ -158,8 +159,9 @@ fn read_until_len_or_eof<R: io::Read>(mut buf: &mut [u8], reader: &mut R, max_le
 
 #[cfg(test)]
 mod tests {
+    use tari_template_lib::types::EncryptedData;
+
     use super::*;
-    use crate::EncryptedData;
 
     #[test]
     fn it_returns_none_if_max_bytes_len_exceeded() {

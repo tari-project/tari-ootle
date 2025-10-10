@@ -10,10 +10,10 @@ use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine_types::{FromByteType, ToByteType};
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{optional::IsNotFoundError, SubstateRequirement};
-use tari_ootle_wallet_crypto::{MaskAndValue, UnblindedOutputStatement};
+use tari_ootle_wallet_crypto::{memo::Memo, MaskAndValue, UnblindedOutputStatement};
 use tari_template_lib::{
     models::{ComponentAddress, ResourceAddress, VaultId},
-    types::{Amount, Memo},
+    types::Amount,
 };
 use tari_transaction::{args, Transaction};
 

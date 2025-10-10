@@ -17,6 +17,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
 use tari_ootle_wallet_crypto::{
+    memo::Memo,
     UnblindedOutputStatement,
     UnblindedStealthInputStatement,
     UnblindedStealthOutputStatement,
@@ -34,7 +35,7 @@ use tari_ootle_wallet_sdk_services::events::TransactionSubmittedEvent;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
-    types::{Amount, Memo, ResourceType},
+    types::{Amount, ResourceType},
 };
 use tari_transaction::args;
 use tari_wallet_daemon_client::{

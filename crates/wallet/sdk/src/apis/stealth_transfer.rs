@@ -15,6 +15,7 @@ use tari_ootle_common_types::{
     SubstateRequirement,
 };
 use tari_ootle_wallet_crypto::{
+    memo::Memo,
     MaskAndValue,
     UnblindedOutputStatement,
     UnblindedStealthInputStatement,
@@ -30,7 +31,7 @@ use tari_template_lib::{
         UtxoAddress,
         VaultId,
     },
-    types::{Amount, Memo},
+    types::Amount,
 };
 use tari_transaction::{args, Transaction};
 

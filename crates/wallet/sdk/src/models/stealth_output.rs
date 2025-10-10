@@ -1,10 +1,11 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_ootle_wallet_crypto::memo::Memo;
 use tari_template_lib::{
     models::{ComponentAddress, UtxoAddress},
     prelude::{PedersenCommitmentBytes, ResourceAddress, RistrettoPublicKeyBytes},
-    types::{crypto::UtxoTag, Amount, EncryptedData, Memo},
+    types::{crypto::UtxoTag, Amount, EncryptedData},
 };
 
 use crate::models::{KeyId, OutputStatus, WalletLockId};

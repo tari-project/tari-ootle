@@ -11573,6 +11573,7 @@ dependencies = [
  "crc32fast",
  "digest",
  "rand 0.8.5",
+ "serde",
  "serde_json",
  "subtle",
  "tari_crypto",
@@ -11582,6 +11583,7 @@ dependencies = [
  "tari_template_lib",
  "tari_utilities",
  "thiserror 2.0.17",
+ "ts-rs",
  "zeroize",
 ]
 

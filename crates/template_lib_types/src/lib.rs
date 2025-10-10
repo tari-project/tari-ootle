@@ -12,9 +12,8 @@ mod entity_id;
 mod error;
 mod hash;
 pub mod hex;
-pub mod max_bytes;
-pub mod max_string;
-mod memo;
+mod max_bytes;
+mod max_string;
 mod resource_type;
 pub mod serde_helpers;
 
@@ -23,7 +22,8 @@ pub use encrypted_data::*;
 pub use entity_id::*;
 pub use error::*;
 pub use hash::*;
-pub use memo::*;
+pub use max_bytes::MaxBytes;
+pub use max_string::MaxString;
 pub use resource_type::*;
 
 /// The address of a Template

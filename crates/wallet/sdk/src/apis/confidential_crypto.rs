@@ -7,6 +7,7 @@ use tari_ootle_wallet_crypto::{
     confidential,
     encrypted_data::{decrypt_data, encrypt_data, unblind_output},
     kdfs,
+    memo::Memo,
     ConfidentialProofError,
     DecryptedData,
     MaskAndValue,
@@ -16,7 +17,7 @@ use tari_ootle_wallet_crypto::{
 use tari_template_lib::{
     models::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
     prelude::PedersenCommitmentBytes,
-    types::{Amount, EncryptedData, Memo},
+    types::{Amount, EncryptedData},
 };
 
 pub struct ConfidentialCryptoApi;

@@ -122,26 +122,26 @@ tari_wallet_daemon_client = { path = "clients/wallet_daemon_client" }
 transaction_generator = { path = "utilities/transaction_generator" }
 
 # external minotari/tari dependencies
-minotari_app_grpc = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
-minotari_app_utilities = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
-minotari_console_wallet = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
-minotari_node = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
-minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
-minotari_wallet = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
-minotari_wallet_grpc_client = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
-tari_common = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
-tari_common_sqlite = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
-tari_common_types = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
-tari_hashing = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
-tari_jellyfish = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
-tari_metrics = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
-tari_mmr = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
-tari_node_components = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
-tari_p2p = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
-tari_shutdown = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
-tari_sidechain = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
-tari_transaction_components = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
-tari_transaction_key_manager = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
+minotari_app_grpc = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
+minotari_app_utilities = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
+minotari_console_wallet = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
+minotari_node = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
+minotari_node_grpc_client = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
+minotari_wallet = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
+minotari_wallet_grpc_client = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
+tari_common = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
+tari_common_sqlite = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
+tari_common_types = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
+tari_hashing = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
+tari_jellyfish = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
+tari_metrics = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
+tari_mmr = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
+tari_node_components = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
+tari_p2p = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
+tari_shutdown = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
+tari_sidechain = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
+tari_transaction_components = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
+tari_transaction_key_manager = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
 
 tari_crypto = "0.22.0"
 tari_utilities = "0.8.0"
@@ -249,7 +249,7 @@ toml = "0.9"
 ts-rs = { version = "11.0", features = ["chrono-impl", "no-serde-warnings", "indexmap-impl"] }
 url = "2.4.1"
 urlencoding = "2.1.3"
-wasmer = "6.0.1"
+wasmer = "6.1.0"
 wasmer-middlewares = "6.0.1"
 webrtc = "0.9.0"
 zeroize = "1"

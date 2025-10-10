@@ -320,7 +320,7 @@ impl TariWorld {
 
     pub async fn script_key_id(&self) -> TariKeyId {
         self.key_manager
-            .import_key(self.minotari_wallet_private_key.clone())
+            .import_key(self.minotari_wallet_private_key.clone(), None)
             .await
             .unwrap()
     }

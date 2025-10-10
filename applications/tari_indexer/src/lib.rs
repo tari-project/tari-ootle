@@ -35,7 +35,6 @@ mod http_ui;
 mod rest_api;
 
 mod block_data;
-mod event_data;
 mod event_manager;
 mod network_client;
 mod network_state_sync;

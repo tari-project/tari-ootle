@@ -102,7 +102,7 @@ macro_rules! row {
 }
 
 pub fn decode_hex_prefix(prefix_hex: &str) -> Result<Vec<u8>, WebError> {
-    if prefix_hex.len() % 2 == 0 {
+    if prefix_hex.len().is_multiple_of(2) {
         hex::decode(prefix_hex)
             .map_err(|e| WebError::bad_request(format!("Failed to decode hex prefix: {}. Error: {}", prefix_hex, e)))
     } else {

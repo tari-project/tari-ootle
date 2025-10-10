@@ -46,8 +46,8 @@ tari_base_node_client = { workspace = true }
 tari_transaction_manifest = { workspace = true }
 tari_ootle_wallet_sdk = { workspace = true }
 
-tari_comms = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
-tari_comms_dht = { git = "https://github.com/tari-project/tari.git", branch = "feature/wallet-stateless-burn-proof" }
+tari_comms = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
+tari_comms_dht = { git = "https://github.com/tari-project/tari.git", tag = "v5.1.0-rc.1" }
 
 anyhow = { workspace = true }
 config = { workspace = true }

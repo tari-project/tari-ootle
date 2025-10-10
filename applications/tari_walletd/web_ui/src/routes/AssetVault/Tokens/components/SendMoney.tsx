@@ -57,6 +57,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     amount: "",
     fee: "",
     badge: null,
+    memo: "",
   };
 
   const [activeStep, setActiveStep] = useState(0);

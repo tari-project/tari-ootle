@@ -1,9 +1,9 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
-import { Memo } from "@tari-project/typescript-bindings";
+import { Memo as TyMemo } from "@tari-project/typescript-bindings";
 
 export type MemoProps = {
-  memo?: Memo | null;
+  memo?: TyMemo | null;
 };
 
 export function Memo({ memo }: MemoProps) {

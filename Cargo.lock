@@ -2026,9 +2026,9 @@ dependencies = [
 
 [[package]]
 name = "corosensei"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d1ea1c2a2f898d2a6ff149587b8a04f41ee708d248c723f01ac2f0f01edc0b3"
+checksum = "878ba85678ef5d34ffe1b5da981b0828232b4c7f2726b20984f59c7e79f6d514"
 dependencies = [
  "autocfg",
  "cfg-if",
@@ -2847,7 +2847,16 @@ version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a9b99b9cbbe49445b21764dc0625032a89b145a2642e67603e1c936f5458d05"
 dependencies = [
- "derive_more-impl",
+ "derive_more-impl 1.0.0",
+]
+
+[[package]]
+name = "derive_more"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "093242cf7570c207c83073cf82f79706fe7b8317e98620a47d5be7c3d8497678"
+dependencies = [
+ "derive_more-impl 2.0.1",
 ]
 
 [[package]]
@@ -2855,6 +2864,18 @@ name = "derive_more-impl"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb7330aeadfbe296029522e6c40f315320aba36fc43a5b3632f3795348f3bd22"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.103",
+ "unicode-xid",
+]
+
+[[package]]
+name = "derive_more-impl"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bda628edc44c4bb645fbe0f758797143e4e07926f7ebf4e9bdfbd3d2ce621df3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6550,8 +6571,8 @@ dependencies = [
 
 [[package]]
 name = "minotari_app_grpc"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "argon2 0.4.1",
  "base64 0.13.1",
@@ -6581,8 +6602,8 @@ dependencies = [
 
 [[package]]
 name = "minotari_app_utilities"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "clap 3.2.25",
  "dialoguer 0.10.4",
@@ -6604,8 +6625,8 @@ dependencies = [
 
 [[package]]
 name = "minotari_console_wallet"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "blake2",
  "chrono",
@@ -6659,16 +6680,16 @@ dependencies = [
 
 [[package]]
 name = "minotari_ledger_wallet_common"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "bs58 0.5.1",
 ]
 
 [[package]]
 name = "minotari_ledger_wallet_comms"
-version = "5.0.1"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "borsh",
  "dialoguer 0.11.0",
@@ -6689,8 +6710,8 @@ dependencies = [
 
 [[package]]
 name = "minotari_node"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6743,16 +6764,16 @@ dependencies = [
 
 [[package]]
 name = "minotari_node_grpc_client"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "minotari_app_grpc",
 ]
 
 [[package]]
 name = "minotari_node_wallet_client"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6769,8 +6790,8 @@ dependencies = [
 
 [[package]]
 name = "minotari_wallet"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "anyhow",
  "argon2 0.4.1",
@@ -6825,7 +6846,7 @@ dependencies = [
 [[package]]
 name = "minotari_wallet_grpc_client"
 version = "0.1.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "minotari_app_grpc",
  "tari_common",
@@ -9023,7 +9044,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams",
  "web-sys",
- "webpki-roots 0.25.4",
+ "webpki-roots",
  "winreg",
 ]
 
@@ -10762,8 +10783,8 @@ dependencies = [
 
 [[package]]
 name = "tari_common"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "anyhow",
  "cargo_toml 0.20.5",
@@ -10788,8 +10809,8 @@ dependencies = [
 
 [[package]]
 name = "tari_common_sqlite"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "diesel",
  "diesel_migrations",
@@ -10805,8 +10826,8 @@ dependencies = [
 
 [[package]]
 name = "tari_common_types"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "argon2 0.4.1",
  "base64 0.21.7",
@@ -10842,8 +10863,8 @@ dependencies = [
 
 [[package]]
 name = "tari_comms"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10889,8 +10910,8 @@ dependencies = [
 
 [[package]]
 name = "tari_comms_dht"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "anyhow",
  "bitflags 2.9.2",
@@ -10923,8 +10944,8 @@ dependencies = [
 
 [[package]]
 name = "tari_comms_rpc_macros"
-version = "5.0.1"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10973,8 +10994,8 @@ dependencies = [
 
 [[package]]
 name = "tari_core"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11162,13 +11183,13 @@ dependencies = [
 
 [[package]]
 name = "tari_features"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 
 [[package]]
 name = "tari_hashing"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "blake2",
  "borsh",
@@ -11209,7 +11230,6 @@ dependencies = [
  "tari_base_node_client",
  "tari_bor",
  "tari_common",
- "tari_common_types",
  "tari_consensus",
  "tari_consensus_types",
  "tari_crypto",
@@ -11286,8 +11306,8 @@ dependencies = [
 
 [[package]]
 name = "tari_jellyfish"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "borsh",
  "digest",
@@ -11300,8 +11320,8 @@ dependencies = [
 
 [[package]]
 name = "tari_libtor"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "derivative",
  "libtor",
@@ -11314,8 +11334,8 @@ dependencies = [
 
 [[package]]
 name = "tari_max_size"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "borsh",
  "serde",
@@ -11325,8 +11345,8 @@ dependencies = [
 
 [[package]]
 name = "tari_metrics"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "once_cell",
  "prometheus",
@@ -11335,8 +11355,8 @@ dependencies = [
 
 [[package]]
 name = "tari_mmr"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "borsh",
  "digest",
@@ -11366,8 +11386,8 @@ dependencies = [
 
 [[package]]
 name = "tari_node_components"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "blake2",
  "borsh",
@@ -11728,8 +11748,8 @@ dependencies = [
 
 [[package]]
 name = "tari_p2p"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "anyhow",
  "futures 0.3.31",
@@ -11824,8 +11844,8 @@ dependencies = [
 
 [[package]]
 name = "tari_script"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "blake2",
  "borsh",
@@ -11842,8 +11862,8 @@ dependencies = [
 
 [[package]]
 name = "tari_service_framework"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11857,16 +11877,16 @@ dependencies = [
 
 [[package]]
 name = "tari_shutdown"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "futures 0.3.31",
 ]
 
 [[package]]
 name = "tari_sidechain"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "borsh",
  "hex",
@@ -11949,8 +11969,8 @@ dependencies = [
 
 [[package]]
 name = "tari_storage"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "bincode 1.3.3",
  "lmdb-zero",
@@ -12132,8 +12152,8 @@ dependencies = [
 
 [[package]]
 name = "tari_test_utils"
-version = "5.0.1"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "futures 0.3.31",
  "rand 0.8.5",
@@ -12165,8 +12185,8 @@ dependencies = [
 
 [[package]]
 name = "tari_transaction_components"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12213,8 +12233,8 @@ dependencies = [
 
 [[package]]
 name = "tari_transaction_key_manager"
-version = "5.1.0-pre.0"
-source = "git+https://github.com/tari-project/tari.git?branch=feature%2Fwallet-stateless-burn-proof#8674633d4413a98d19e41a878ac650fe051f5107"
+version = "5.1.0-rc.1"
+source = "git+https://github.com/tari-project/tari.git?tag=v5.1.0-rc.1#710a22c85f0b6ca21764c72daedd35d8cd6fe133"
 dependencies = [
  "async-trait",
  "chacha20poly1305",
@@ -13396,22 +13416,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d49784317cd0d1ee7ec5c716dd598ec5b4483ea832a2dced265471cc0f690ae"
 
 [[package]]
-name = "ureq"
-version = "2.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02d1a66277ed75f640d608235660df48c8e3c19f3b4edb6a263315626cc3c01d"
-dependencies = [
- "base64 0.22.1",
- "flate2",
- "log",
- "once_cell",
- "rustls 0.23.28",
- "rustls-pki-types",
- "url",
- "webpki-roots 0.26.11",
-]
-
-[[package]]
 name = "url"
 version = "2.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13739,16 +13743,15 @@ dependencies = [
 
 [[package]]
 name = "wasmer"
-version = "6.0.1"
+version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f25dccc6251837449135914ee1978731c2c3df9fc727088eb7e098736c0f15d1"
+checksum = "2d85671948f8886a1cc946141c0b688a5617603c103699a5fceeebeb4e75b0b6"
 dependencies = [
  "bindgen 0.70.1",
  "bytes 1.10.1",
  "cfg-if",
  "cmake",
- "derive_more 1.0.0",
- "idna_adapter",
+ "derive_more 2.0.1",
  "indexmap 2.11.4",
  "js-sys",
  "more-asserts",
@@ -13761,7 +13764,6 @@ dependencies = [
  "target-lexicon",
  "thiserror 1.0.69",
  "tracing",
- "ureq",
  "wasm-bindgen",
  "wasmer-compiler",
  "wasmer-compiler-cranelift",
@@ -13775,9 +13777,9 @@ dependencies = [
 
 [[package]]
 name = "wasmer-compiler"
-version = "6.0.1"
+version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f35baeb0d5b20710b5b9c59477dbf813b1ac53da33ee46cb22f8c4190e3986e"
+checksum = "4946475adc0af265af8f10aadf4d4a3c64845bcd3801c655bdd81ce5e3ee869b"
 dependencies = [
  "backtrace",
  "bytes 1.10.1",
@@ -13806,9 +13808,9 @@ dependencies = [
 
 [[package]]
 name = "wasmer-compiler-cranelift"
-version = "6.0.1"
+version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d657a96003ce3f54a3cbbf681fcd782b983f9362c97cfbbe243cbf66790e004"
+checksum = "780f9c2050941b4e3f6bb82d32bd796a6c1750d2f97cbd892f07b384bb6af6f8"
 dependencies = [
  "cranelift-codegen",
  "cranelift-entity",
@@ -13826,9 +13828,9 @@ dependencies = [
 
 [[package]]
 name = "wasmer-derive"
-version = "6.0.1"
+version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62b57be80a67de03c2a02d697bfd763e097546b11f0020cf9930ebaa4f8cf965"
+checksum = "c546f3380840cd63fdcc390f04cd19002f2dfa19b4691b77ecbd27642bd93452"
 dependencies = [
  "proc-macro-error2",
  "proc-macro2",
@@ -13838,9 +13840,9 @@ dependencies = [
 
 [[package]]
 name = "wasmer-middlewares"
-version = "6.0.1"
+version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e61dce6fcf320ab506a9cbf6f12255ccc894e93c5d7a530f14cc7717e81a3c94"
+checksum = "f4fdc1455c09a2b8e3aae9df8e163430d87353a2b467a3c48ceeb3e3bbeeed69"
 dependencies = [
  "wasmer",
  "wasmer-types",
@@ -13849,9 +13851,9 @@ dependencies = [
 
 [[package]]
 name = "wasmer-types"
-version = "6.0.1"
+version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b8424d15f5c19a8df972fc9367d75ba3b87af63b279208d50a32e9a298d944b"
+checksum = "94a4027ce165e8dc776dc5e2a3231a96983e6dc7330efd97b793cfc4e973ad0c"
 dependencies = [
  "bytecheck 0.6.12",
  "enum-iterator",
@@ -13869,9 +13871,9 @@ dependencies = [
 
 [[package]]
 name = "wasmer-vm"
-version = "6.0.1"
+version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "faabfffefc6fc350bb5b07301f05ba604a18c3d2d97c6354183f15792577056d"
+checksum = "9c37d5be291eea00a00d077ce3a427bb3074709ee386ec358f18f0b7da33be01"
 dependencies = [
  "backtrace",
  "cc",
@@ -13888,6 +13890,7 @@ dependencies = [
  "memoffset 0.9.1",
  "more-asserts",
  "region",
+ "rustversion",
  "scopeguard",
  "thiserror 1.0.69",
  "wasmer-types",
@@ -14046,24 +14049,6 @@ name = "webpki-roots"
 version = "0.25.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f20c57d8d7db6d3b86154206ae5d8fba62dd39573114de97c2cb0578251f8e1"
-
-[[package]]
-name = "webpki-roots"
-version = "0.26.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
-dependencies = [
- "webpki-roots 1.0.0",
-]
-
-[[package]]
-name = "webpki-roots"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2853738d1cc4f2da3a225c18ec6c3721abb31961096e9dbf5ab35fa88b19cfdb"
-dependencies = [
- "rustls-pki-types",
-]
 
 [[package]]
 name = "webrtc"

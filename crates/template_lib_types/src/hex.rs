@@ -18,7 +18,7 @@ pub fn fixed_bytes_from_hex<const L: usize>(s: &str) -> Result<[u8; L], HashPars
 }
 
 pub fn bytes_from_hex(s: &str) -> Result<Vec<u8>, HashParseError> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return Err(HashParseError);
     }
 

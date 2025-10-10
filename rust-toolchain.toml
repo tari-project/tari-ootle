@@ -8,10 +8,8 @@
 # AND update the action-buildlibs dockerfile.
 
 
-# Hours spent updating the Rust Toolchain = 11
+# Hours spent updating the Rust Toolchain = 12
 # other places to check:
 # - the CI files in .github folder
-# - the Makefile in base_layer/key_manager/Makefile
 [toolchain]
-# Locked to 1.88 due to an issue with wasmer (https://github.com/wasmerio/wasmer/issues/5610)
-channel = "1.88"
+channel = "stable"

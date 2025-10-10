@@ -23,7 +23,6 @@
 use std::{collections::HashMap, convert::TryInto};
 
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::FixedHash;
 use tari_consensus::hotstuff::substate_store::SubstateStoreError;
 use tari_engine_types::{
     substate::{Substate, SubstateId, SubstateValue},
@@ -60,12 +59,6 @@ pub struct SubstateResponse {
     pub address: SubstateId,
     pub version: u32,
     pub substate: SubstateValue,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct EventResponse {
-    pub address: SubstateId,
-    pub created_by_transaction: FixedHash,
 }
 
 #[derive(Debug, Clone)]

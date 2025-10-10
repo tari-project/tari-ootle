@@ -1031,11 +1031,6 @@ mod tickets {
 
     use super::*;
 
-    #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-    pub struct Ticket {
-        pub is_redeemed: bool,
-    }
-
     #[test]
     #[allow(clippy::too_many_lines)]
     fn buy_and_redeem_ticket() {

@@ -2,9 +2,12 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use tari_bor::{Deserialize, Serialize};
-use tari_template_lib_types::crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag};
+use tari_template_lib_types::{
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
+    EncryptedData,
+};
 
-use crate::models::{EncryptedData, ViewableBalanceProof};
+use crate::models::ViewableBalanceProof;
 
 /// An unspent output that does not reveal the value and the owner of the coin it represents.
 ///

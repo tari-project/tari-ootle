@@ -16,8 +16,7 @@ use tari_ootle_wallet_crypto::{
     UnblindedStealthInputStatement,
     UnblindedStealthOutputStatement,
 };
-use tari_template_lib::{models::EncryptedData, types::Amount};
-use tari_template_test_tooling::support::stealth::test_sender_public_nonce;
+use tari_template_lib::types::Amount;
 
 #[test]
 fn it_create_a_valid_revealed_only_proof() {
@@ -29,7 +28,7 @@ fn it_create_a_valid_revealed_only_proof() {
 }
 
 mod stealth_tests {
-    use tari_template_lib::types::crypto::UtxoTag;
+    use tari_template_lib::types::{crypto::UtxoTag, EncryptedData};
 
     use super::*;
 
@@ -122,9 +121,13 @@ mod stealth_tests {
                     mask: output_mask,
                     resource_view_key: None,
                     // This is client/wallet on-chain data and not required for spending in tests
-                    sender_public_nonce: test_sender_public_nonce(),
+                    sender_public_nonce: {
+                        let (_sk, pk) = create_key_pair_from_seed(0);
+                        pk
+                    },
                     minimum_value_promise: 0,
                     encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
+                    memo: None,
                 };
 
                 UnblindedStealthOutputStatement {

@@ -34,7 +34,7 @@ use tari_ootle_wallet_sdk_services::events::TransactionSubmittedEvent;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
-    types::{Amount, ResourceType},
+    types::{Amount, Memo, ResourceType},
 };
 use tari_transaction::args;
 use tari_wallet_daemon_client::{
@@ -455,17 +455,18 @@ pub async fn handle_claim_burn(
         .burn_public_key
         .try_from_byte_type()
         .map_err(|e| invalid_params("claim_proof.reciprocal_claim_public_key", Some(e)))?;
-    let mask_and_value = sdk.stealth_crypto_api().decrypt_value_and_mask(
+    let decrypted = sdk.stealth_crypto_api().decrypt_value_and_mask(
         &claimed_encrypted_data,
         &claim_proof.commitment,
         claim_nonce_keypair.secret_key(),
         &reciprocal_claim_public_key_expanded,
+        true,
     )?;
 
     let mask = sdk.key_manager_api().next_key(KeyBranch::StealthMask)?;
 
-    let final_amount = mask_and_value
-        .value
+    let final_amount = decrypted
+        .value()
         .checked_sub_positive(max_fee.into())
         .ok_or_else(|| invalid_params("max_fee", Some("more fees paid than claimed amount")))?;
 
@@ -490,9 +491,13 @@ pub async fn handle_claim_burn(
     // NOTE: the confidential encryption format and the bullet proofs currently do not support amounts larger than
     // u64::MAX. Apart from it being insane/basically impossible to have that much XTR in a single UTXO, the L1 emission
     // will reach this much in many thousands of years.
-    let encrypted_data =
-        sdk.stealth_crypto_api()
-            .encrypt_value_and_mask(final_amount_u64, &mask.key, &view_only_public_key, &nonce)?;
+    let encrypted_data = sdk.stealth_crypto_api().encrypt_value_and_mask(
+        final_amount_u64,
+        &mask.key,
+        &view_only_public_key,
+        &nonce,
+        None,
+    )?;
 
     let tag = sdk.stealth_crypto_api().derive_stealth_output_tag(
         network,
@@ -513,6 +518,7 @@ pub async fn handle_claim_burn(
             sender_public_nonce: output_public_nonce.clone(),
             minimum_value_promise: 0,
             encrypted_data,
+            memo: Some(Memo::new_message("Claimed burned XTR from L1").expect("valid memo")),
             resource_view_key: None,
         },
         output_owner_public_key: stealth_output_owner_public_key,
@@ -521,7 +527,7 @@ pub async fn handle_claim_burn(
 
     // Generate the correct secret to spend the claimed output
     let input = UnblindedStealthInputStatement {
-        mask_and_value,
+        mask_and_value: decrypted.into_mask_and_value(),
         owner_secret: claim_nonce_keypair.secret_key().clone(),
         public_nonce: reciprocal_claim_public_key_expanded,
     };
@@ -904,6 +910,7 @@ pub async fn handle_confidential_transfer(
                 max_fee: req.max_fee.unwrap_or(DEFAULT_FEE),
                 output_to_revealed: req.output_to_revealed,
                 proof_from_resource: req.proof_from_badge_resource,
+                memo: req.memo,
                 is_dry_run: req.dry_run,
             })
             .await?;
@@ -946,6 +953,7 @@ pub async fn handle_stealth_transfer(
         max_fee: req.max_fee,
         blinded_output_amount: req.blinded_output_amount,
         revealed_output_amount: req.revealed_output_amount,
+        output_memo: req.output_memo,
         is_dry_run: req.dry_run,
     };
     if let Err(err) = params.validate(network) {

@@ -50,6 +50,7 @@ diesel::table! {
         view_only_key_id -> Text,
         owner_key_id -> Nullable<Text>,
         public_asset_tag -> Nullable<Text>,
+        memo_json -> Nullable<Text>,
         status -> Text,
         locked_at -> Nullable<Timestamp>,
         lock_id -> Nullable<Integer>,
@@ -159,6 +160,7 @@ diesel::table! {
         owner_key_id -> Nullable<Text>,
         encrypted_data -> Binary,
         tag_byte -> Integer,
+        memo_json -> Nullable<Text>,
         is_burnt -> Bool,
         is_frozen -> Bool,
         is_on_chain -> Bool,
@@ -254,6 +256,8 @@ diesel::joinable!(confidential_outputs -> vaults (vault_id));
 diesel::joinable!(non_fungible_tokens -> vaults (vault_id));
 diesel::joinable!(shard_state_versions -> accounts (account_id));
 diesel::joinable!(shard_state_versions -> resources (resource_id));
+diesel::joinable!(stealth_outputs -> accounts (owner_account_id));
+diesel::joinable!(utxo_process_queue -> accounts (account_id));
 diesel::joinable!(vaults -> accounts (account_id));
 diesel::joinable!(vaults -> locks (locked_by));
 diesel::joinable!(webauthn_registration_passkeys -> webauthn_registrations (registration_id));

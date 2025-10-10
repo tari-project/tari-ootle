@@ -23,8 +23,9 @@ use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_abi::TemplateDef;
 use tari_template_lib::{
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
-    models::{ComponentAddress, EncryptedData, ResourceAddress, UtxoId, VaultId},
+    models::{ComponentAddress, ResourceAddress, UtxoId, VaultId},
     prelude::{Amount, PedersenCommitmentBytes, ResourceType, TemplateAddress},
+    types::EncryptedData,
 };
 use tari_transaction::{Transaction, TransactionId};
 
@@ -106,6 +107,7 @@ impl Test {
                 owner_key_id: Some(KeyId::derived(0)),
                 encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
                 public_asset_tag: None,
+                memo: None,
                 status: OutputStatus::Unspent,
                 lock_id: None,
             })

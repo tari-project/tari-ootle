@@ -46,6 +46,7 @@ import {
   ComponentAddressOrName,
   ConfidentialTransferInputSelection,
   decodeOotleAddress,
+  Memo,
   OutputStatus,
   ResourceAddress,
   ResourceType,
@@ -125,6 +126,7 @@ export interface TransferParams {
   input_selection: ConfidentialTransferInputSelection;
   badge: string | null;
   dry_run: boolean;
+  output_memo?: Memo;
 }
 
 export const useAccountsTransfer = () => {
@@ -143,6 +145,7 @@ export const useAccountsTransfer = () => {
           proof_from_badge_resource: params.badge,
           input_selection: params.input_selection,
           output_to_revealed: params.output_to_revealed,
+          output_memo: params.output_memo || null,
           dry_run: params.dry_run,
         };
         return accountsConfidentialTransfer(transferRequest);
@@ -155,6 +158,7 @@ export const useAccountsTransfer = () => {
           max_fee,
           blinded_output_amount: params.output_to_revealed ? 0 : params.amount,
           revealed_output_amount: params.output_to_revealed ? params.amount : 0,
+          output_memo: params.output_memo || null,
           dry_run: params.dry_run,
         };
         return accountsStealthTransfer(transferRequest);

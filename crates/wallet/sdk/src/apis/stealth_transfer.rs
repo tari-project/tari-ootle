@@ -30,7 +30,7 @@ use tari_template_lib::{
         UtxoAddress,
         VaultId,
     },
-    types::Amount,
+    types::{Amount, Memo},
 };
 use tari_transaction::{args, Transaction};
 
@@ -456,6 +456,7 @@ where
                     params.blinded_output_amount,
                     &params.resource_address,
                     resource_view_key.clone(),
+                    params.output_memo.clone(),
                 )
             })
             .transpose()?;
@@ -474,7 +475,7 @@ where
         // Generate fee change outputs if required
         let fee_change_output_statement = fee_change
             .is_positive()
-            .then(|| self.create_output_statement(&owner_address, fee_change, &params.resource_address, None))
+            .then(|| self.create_output_statement(&owner_address, fee_change, &params.resource_address, None, None))
             .transpose()
             .inspect_err(|e| {
                 warn!(target: LOG_TARGET, "Unlocking fee fund locks after error: {}", e);
@@ -745,8 +746,13 @@ where
                     reason: format!("Invalid owner account address: {e}"),
                 })?;
 
-        let change =
-            self.create_output_statement(&change_address, change_amount, &resource_address, resource_view_key)?;
+        let change = self.create_output_statement(
+            &change_address,
+            change_amount,
+            &resource_address,
+            resource_view_key,
+            None,
+        )?;
 
         self.add_unconfirmed_output_from_statement(lock_id, account, resource_address, &change)?;
 
@@ -779,6 +785,7 @@ where
             owner_key_id: account.owner_key_id(),
             encrypted_data: output.statement.encrypted_data.clone(),
             status: OutputStatus::LockedUnconfirmed,
+            memo: output.statement.memo.clone(),
             tag_byte: output.tag,
             lock_id: Some(lock_id),
             is_burnt: false,
@@ -794,6 +801,7 @@ where
         amount: Amount,
         resource_address: &ResourceAddress,
         resource_view_key: Option<RistrettoPublicKey>,
+        memo: Option<Memo>,
     ) -> Result<UnblindedStealthOutputStatement, StealthTransferApiError> {
         if !amount.is_positive() {
             return Err(StealthTransferApiError::InvalidParameter {
@@ -817,6 +825,7 @@ where
             &mask.key,
             destination.view_only_key(),
             &nonce_secret,
+            memo.as_ref(),
         )?;
 
         // Create stealth address - used during spend time
@@ -833,6 +842,7 @@ where
             encrypted_data,
             minimum_value_promise: 0,
             resource_view_key,
+            memo,
         };
 
         let derived_tag = self.crypto_api.derive_stealth_output_tag(
@@ -863,6 +873,8 @@ pub struct StealthTransferParams {
     pub blinded_output_amount: Amount,
     /// Amount of the inputs to spend to a revealed output
     pub revealed_output_amount: Amount,
+    /// Optional memo to include a memo in the output. This memo is encrypted and can only be read by the recipient.
+    pub output_memo: Option<Memo>,
     /// Destination address used to derive the UTXO encryption keys, owner signature and the account in which to
     /// deposit revealed funds
     pub destination_address: OotleAddress,

@@ -8,15 +8,10 @@ use minotari_node_grpc_client::grpc;
 use minotari_wallet_grpc_client::WalletGrpcClient;
 use serde::Serialize;
 use tari_crypto::tari_utilities::ByteArray;
-use tari_engine_types::{
-    confidential::{AbridgedTransactionKernel, EncodedMerkleProof, MinotariBurnClaimProof},
-    template_lib_models::EncryptedData,
-};
-use tari_template_lib_types::crypto::{
-    PedersenCommitmentBytes,
-    RistrettoPublicKeyBytes,
-    Scalar32Bytes,
-    SchnorrSignatureBytes,
+use tari_engine_types::confidential::{AbridgedTransactionKernel, EncodedMerkleProof, MinotariBurnClaimProof};
+use tari_template_lib_types::{
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
+    EncryptedData,
 };
 use tari_transaction_components::transaction_components::{memo_field::TxType, MemoField};
 use tari_wallet_daemon_client::types::ClaimBurnProof;

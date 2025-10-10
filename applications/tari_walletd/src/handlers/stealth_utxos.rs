@@ -46,6 +46,7 @@ pub async fn handle_list(
                 address: o.to_utxo_address(),
                 value: o.value,
                 status: o.status,
+                memo: o.memo,
                 is_burnt: o.is_burnt,
                 is_frozen: o.is_frozen,
                 is_on_chain: o.is_on_chain,

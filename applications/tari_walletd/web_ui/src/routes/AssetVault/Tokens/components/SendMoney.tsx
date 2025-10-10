@@ -190,6 +190,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         output_to_revealed: !transferFormState.outputToConfidential,
         input_selection: transferFormState.inputSelection as ConfidentialTransferInputSelection,
         badge: transferFormState.badge,
+        output_memo: transferFormState.memo ? { Message: transferFormState.memo } : undefined,
       };
 
       const result = await sendIt?.({ ...currentTransfer, dry_run: true, max_fee: 3000 });
@@ -253,6 +254,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         output_to_revealed: !transferFormState.outputToConfidential,
         input_selection: transferFormState.inputSelection as ConfidentialTransferInputSelection,
         badge: transferFormState.badge,
+        output_memo: transferFormState.memo ? { Message: transferFormState.memo } : undefined,
       };
 
       await sendIt?.({

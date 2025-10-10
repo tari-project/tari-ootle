@@ -3,10 +3,7 @@
 
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey};
 use tari_engine_types::crypto::commit_amount_checked;
-use tari_template_lib::{
-    models::EncryptedData,
-    types::{crypto::UtxoTag, Amount},
-};
+use tari_template_lib::types::{crypto::UtxoTag, Amount, EncryptedData, Memo};
 
 #[derive(Debug, Clone)]
 pub struct UnblindedOutputStatement {
@@ -16,6 +13,7 @@ pub struct UnblindedOutputStatement {
     pub minimum_value_promise: u64,
     pub encrypted_data: EncryptedData,
     pub resource_view_key: Option<RistrettoPublicKey>,
+    pub memo: Option<Memo>,
 }
 
 impl UnblindedOutputStatement {
@@ -44,6 +42,34 @@ impl MaskAndValue {
 
     pub fn to_commitment(&self) -> Option<PedersenCommitment> {
         commit_amount_checked(&self.mask, self.value)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DecryptedData {
+    pub mask_and_value: MaskAndValue,
+    pub memo: Option<Memo>,
+}
+
+impl DecryptedData {
+    pub fn into_mask_and_value(self) -> MaskAndValue {
+        self.mask_and_value
+    }
+
+    pub fn value(&self) -> Amount {
+        self.mask_and_value.value
+    }
+
+    pub fn mask(&self) -> &RistrettoSecretKey {
+        &self.mask_and_value.mask
+    }
+
+    pub fn memo(&self) -> Option<&Memo> {
+        self.memo.as_ref()
+    }
+
+    pub fn to_commitment(&self) -> Option<PedersenCommitment> {
+        self.mask_and_value.to_commitment()
     }
 }
 

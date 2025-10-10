@@ -161,10 +161,7 @@ mod tests {
         ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     };
     use tari_engine_types::stealth::validate_stealth_outputs_statement;
-    use tari_template_lib::{
-        models::EncryptedData,
-        types::{crypto::UtxoTag, Amount},
-    };
+    use tari_template_lib::types::{crypto::UtxoTag, Amount, EncryptedData};
 
     use super::*;
     use crate::UnblindedOutputStatement;
@@ -180,6 +177,7 @@ mod tests {
                     sender_public_nonce: Default::default(),
                     encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
                     resource_view_key: None,
+                    memo: None,
                 },
                 output_owner_public_key: RistrettoPublicKey::default(),
                 tag: UtxoTag::new(0),

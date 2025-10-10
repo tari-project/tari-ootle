@@ -236,7 +236,7 @@ smallvec = "2.0.0-alpha.11"
 std-semaphore = "0.1.0"
 syn = "2.0"
 tempfile = "3.3.0"
-thiserror = "1.0.59"
+thiserror = "2.0.17"
 time = "0.3.15"
 tokio = { version = "1.47.1", default-features = false }
 tokio-stream = "0.1.17"

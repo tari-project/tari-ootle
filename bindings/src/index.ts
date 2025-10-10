@@ -63,6 +63,7 @@ export * from "./types/LeaderFee";
 export * from "./types/LockFlag";
 export * from "./types/LogEntry";
 export * from "./types/LogLevel";
+export * from "./types/Memo";
 export * from "./types/Metadata";
 export * from "./types/MinotariBurnClaimProof";
 export * from "./types/Network";

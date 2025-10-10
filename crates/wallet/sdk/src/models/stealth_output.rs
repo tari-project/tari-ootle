@@ -2,9 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_template_lib::{
-    models::{ComponentAddress, EncryptedData, UtxoAddress},
+    models::{ComponentAddress, UtxoAddress},
     prelude::{PedersenCommitmentBytes, ResourceAddress, RistrettoPublicKeyBytes},
-    types::{crypto::UtxoTag, Amount},
+    types::{crypto::UtxoTag, Amount, EncryptedData, Memo},
 };
 
 use crate::models::{KeyId, OutputStatus, WalletLockId};
@@ -22,6 +22,7 @@ pub struct StealthOutputModel {
     pub owner_key_id: Option<KeyId>,
     pub encrypted_data: EncryptedData,
     pub tag_byte: UtxoTag,
+    pub memo: Option<Memo>,
     pub status: OutputStatus,
     pub is_burnt: bool,
     pub is_frozen: bool,

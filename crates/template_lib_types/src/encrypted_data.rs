@@ -1,22 +1,22 @@
-//    Copyright 2025 The Tari Project
-//    SPDX-License-Identifier: BSD-3-Clause
+//   Copyright 2025 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_bor::{Deserialize, Serialize};
-use tari_template_lib_types::serde_helpers;
+use serde::{Deserialize, Serialize};
+
+use crate::max_bytes::MaxBytes;
+
+const MAX_SIZE: usize = EncryptedData::max_size();
 
 /// Used by the receiver to determine the value and mask of the commitment. Used in stealth and confidential transfers,
 /// as well as Minotari burns
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct EncryptedData(
-    #[serde(with = "serde_helpers::dynamic_hex")]
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    Box<[u8]>,
-);
+pub struct EncryptedData(#[cfg_attr(feature = "ts", ts(type = "string"))] MaxBytes<MAX_SIZE>);
 
 impl EncryptedData {
     pub const ENCRYPTED_DATA_SIZE_TOTAL: usize = Self::SIZE_NONCE + Self::SIZE_VALUE + Self::SIZE_MASK + Self::SIZE_TAG;
+    pub const MAX_MEMO_SIZE: usize = 255;
     pub const SIZE_MASK: usize = 32;
     pub const SIZE_NONCE: usize = 24;
     pub const SIZE_TAG: usize = 16;
@@ -27,7 +27,7 @@ impl EncryptedData {
     }
 
     pub const fn max_size() -> usize {
-        Self::min_size() + 256
+        Self::min_size() + Self::MAX_MEMO_SIZE
     }
 
     pub fn len(&self) -> usize {
@@ -69,12 +69,14 @@ impl TryFrom<Vec<u8>> for EncryptedData {
     type Error = usize;
 
     fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
-        if value.len() < Self::min_size() {
-            return Err(value.len());
+        let len = value.len();
+        if len < Self::min_size() {
+            return Err(len);
         }
-        if value.len() > Self::max_size() {
-            return Err(value.len());
+        if len > Self::max_size() {
+            return Err(len);
         }
-        Ok(Self(value.into_boxed_slice()))
+        let bytes = value.try_into().map_err(|_| len)?;
+        Ok(Self(bytes))
     }
 }

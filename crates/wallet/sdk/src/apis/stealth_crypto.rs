@@ -10,20 +10,20 @@ use tari_engine_types::{crypto::get_commitment_factory, ConvertFromByteType};
 use tari_ootle_common_types::{base_layer_hashing::ownership_proof_hasher64, Network};
 use tari_ootle_wallet_crypto::{
     confidential,
-    encrypted_data::{encrypt_value_and_mask, unblind_output},
+    encrypted_data::{encrypt_data, unblind_output},
     kdfs,
     stealth,
     ConfidentialProofError,
-    MaskAndValue,
+    DecryptedData,
     UnblindedOutputStatement,
     UnblindedStealthInputStatement,
     UnblindedStealthOutputStatement,
     WalletCryptoError,
 };
 use tari_template_lib::{
-    models::{ConfidentialOutputStatement, EncryptedData, ResourceAddress, StealthTransferStatement},
+    models::{ConfidentialOutputStatement, ResourceAddress, StealthTransferStatement},
     prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes},
-    types::{crypto::UtxoTag, Amount},
+    types::{crypto::UtxoTag, Amount, EncryptedData, Memo},
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet::sdk::stealth_crypto";
@@ -105,9 +105,10 @@ impl StealthCryptoApi {
         mask: &RistrettoSecretKey,
         public_key: &RistrettoPublicKey,
         secret: &RistrettoSecretKey,
+        memo: Option<&Memo>,
     ) -> Result<EncryptedData, StealthCryptoApiError> {
         let encryption_key = kdfs::encrypted_data_dh_kdf_aead(secret, public_key);
-        let data = encrypt_value_and_mask(amount, mask, &encryption_key)?;
+        let data = encrypt_data(amount, mask, &encryption_key, memo)?;
         Ok(data)
     }
 
@@ -131,14 +132,16 @@ impl StealthCryptoApi {
         output_commitment: &PedersenCommitmentBytes,
         claim_secret: &RistrettoSecretKey,
         reciprocal_public_key: &RistrettoPublicKey,
-    ) -> Result<MaskAndValue, StealthCryptoApiError> {
-        let unmasked_output = unblind_output(
+        skip_memo: bool,
+    ) -> Result<DecryptedData, StealthCryptoApiError> {
+        let decrypted = unblind_output(
             output_commitment,
             output_encrypted_value,
             claim_secret,
             reciprocal_public_key,
+            skip_memo,
         )?;
-        Ok(unmasked_output)
+        Ok(decrypted)
     }
 
     pub fn validate_burn_claim_ownership_proof(

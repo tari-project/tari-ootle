@@ -2,9 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_wallet_sdk::{models::ConfidentialOutputModel, storage::WalletStorageError};
-use tari_template_lib::{
-    models::EncryptedData,
-    types::crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+use tari_template_lib::types::{
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    EncryptedData,
 };
 use time::PrimitiveDateTime;
 
@@ -23,6 +23,7 @@ pub struct ConfidentialOutput {
     pub view_only_key_id: String,
     pub owner_key_id: Option<String>,
     pub public_asset_tag: Option<String>,
+    pub memo_json: Option<String>,
     pub status: String,
     pub locked_at: Option<PrimitiveDateTime>,
     pub locked_by_proof: Option<i32>,
@@ -85,6 +86,7 @@ impl ConfidentialOutput {
                     item: "output",
                     details: "Corrupt db: invalid public asset tag".to_string(),
                 })?,
+            memo: self.memo_json.as_ref().map(deserialize_json).transpose()?,
             status: self.status.parse().map_err(|_| WalletStorageError::DecodingError {
                 operation: "try_into_output",
                 item: "output",

@@ -41,6 +41,7 @@ export interface SendMoneyFormState {
   amount: string;
   fee: string;
   badge: string | null;
+  memo: string;
 }
 
 interface FormStepProps {
@@ -174,6 +175,17 @@ export default function FormStep({
               }
               label="Send Confidential Outputs"
             />
+            {transferFormState.outputToConfidential ? (
+              <TextField
+                name="memo"
+                label="Memo message (optional, max 253 characters)"
+                inputProps={{ maxLength: 253 }}
+                value={transferFormState.memo}
+                onChange={onFormValueChange}
+                style={{ flexGrow: 1 }}
+                disabled={disabled}
+              />
+            ) : null}
             <InputLabel id="select-input-selection">Input Selection</InputLabel>
             <Select
               name="inputSelection"

@@ -4,10 +4,11 @@
 use diesel::dsl;
 use tari_ootle_wallet_sdk::{models::StealthOutputModel, storage::WalletStorageError};
 use tari_template_lib::{
-    models::{ComponentAddress, EncryptedData},
+    models::ComponentAddress,
     types::{
         amount,
         crypto::{RistrettoPublicKeyBytes, UtxoTag},
+        EncryptedData,
     },
 };
 use time::PrimitiveDateTime;
@@ -33,6 +34,7 @@ pub struct StealthOutput {
     pub owner_key_id: Option<String>,
     pub encrypted_data: Vec<u8>,
     pub tag_byte: i32,
+    pub memo_json: Option<String>,
     pub is_burnt: bool,
     pub is_frozen: bool,
     pub is_on_chain: bool,
@@ -78,6 +80,7 @@ impl StealthOutput {
                 }
             })?,
             tag_byte: UtxoTag::new(self.tag_byte as u32),
+            memo: self.memo_json.as_ref().map(deserialize_json).transpose()?,
             status: self.status.parse().map_err(|_| WalletStorageError::DecodingError {
                 operation: "try_into_output",
                 item: "output",

@@ -45,10 +45,11 @@ use tari_ootle_wallet_sdk::{
     storage::{WalletStorageError, WalletStoreReader, WalletStoreWriter},
 };
 use tari_template_lib::{
-    models::{ComponentAddress, EncryptedData, NonFungibleId, ResourceAddress, UtxoAddress, UtxoId, VaultId},
+    models::{ComponentAddress, NonFungibleId, ResourceAddress, UtxoAddress, UtxoId, VaultId},
     types::{
         crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
         Amount,
+        EncryptedData,
         TemplateAddress,
     },
 };
@@ -947,6 +948,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 }
             })?,
             public_asset_tag: None,
+            memo: locked_output.memo_json.as_ref().map(deserialize_json).transpose()?,
             status: OutputStatus::LockedForSpend,
             lock_id: Some(lock_id),
         })
@@ -978,6 +980,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 confidential_outputs::view_only_key_id.eq(serialize_json(&output.view_only_key_id)?),
                 confidential_outputs::owner_key_id.eq(output.owner_key_id.as_ref().map(serialize_json).transpose()?),
                 confidential_outputs::encrypted_data.eq(output.encrypted_data.as_ref()),
+                confidential_outputs::memo_json.eq(output.memo.as_ref().map(serialize_json).transpose()?),
                 confidential_outputs::status.eq(output.status.as_key_str()),
                 confidential_outputs::lock_id.eq(output.lock_id),
             ))
@@ -1121,6 +1124,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 stealth_outputs::owner_key_id.eq(output.owner_key_id.as_ref().map(serialize_json).transpose()?),
                 stealth_outputs::encrypted_data.eq(output.encrypted_data.as_ref()),
                 stealth_outputs::tag_byte.eq(output.tag_byte.value() as i32),
+                stealth_outputs::memo_json.eq(output.memo.as_ref().map(serialize_json).transpose()?),
                 stealth_outputs::is_on_chain.eq(output.is_on_chain),
                 stealth_outputs::status.eq(output.status.as_key_str()),
                 stealth_outputs::is_burnt.eq(output.is_burnt),

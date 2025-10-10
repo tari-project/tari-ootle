@@ -140,7 +140,7 @@ mod tests {
     use rand::rngs::OsRng;
     use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
     use tari_engine_types::confidential::validate_confidential_statement;
-    use tari_template_lib::{models::EncryptedData, types::Amount};
+    use tari_template_lib::types::{Amount, EncryptedData};
 
     use super::*;
 
@@ -154,6 +154,7 @@ mod tests {
                 sender_public_nonce: Default::default(),
                 encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
                 resource_view_key: None,
+                memo: None,
             }),
             Default::default(),
             None,

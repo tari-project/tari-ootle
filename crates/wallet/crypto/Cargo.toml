@@ -25,7 +25,6 @@ thiserror = { workspace = true }
 zeroize = { workspace = true, features = ["simd"] }
 
 [dev-dependencies]
-tari_template_test_tooling = { workspace = true }
 serde_json = { workspace = true }
 
 [features]

@@ -15,6 +15,19 @@ pub enum BytesCow<'a> {
     Owned(Box<[u8]>),
 }
 
+impl<'a> BytesCow<'a> {
+    pub const fn len(&self) -> usize {
+        match self {
+            BytesCow::Borrowed(v) => v.len(),
+            BytesCow::Owned(v) => v.len(),
+        }
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
 impl BytesCow<'_> {
     pub fn into_owned(self) -> Box<[u8]> {
         match self {

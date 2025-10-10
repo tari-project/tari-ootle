@@ -6,8 +6,8 @@ use std::{fmt, fmt::Display};
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_template_lib::{
-    models::EncryptedData,
     prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes},
+    types::EncryptedData,
 };
 
 use crate::serde_with;

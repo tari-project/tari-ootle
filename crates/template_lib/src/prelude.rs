@@ -38,6 +38,8 @@ pub use tari_template_lib_types::{
         SignaturePayload,
     },
     custom_signature_domain,
+    max_bytes::MaxBytes,
+    max_string::MaxString,
     ResourceType,
     TemplateAddress,
 };

@@ -46,7 +46,7 @@ use tari_template_lib::{
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
     models::{BucketId, NonFungibleAddress, NonFungibleId},
     prelude::{ResourceAddress, RistrettoPublicKeyBytes},
-    types::{Amount, TemplateAddress},
+    types::{Amount, Memo, TemplateAddress},
 };
 use tari_transaction::{
     args,
@@ -153,6 +153,9 @@ pub struct ConfidentialTransferArgs {
     /// The address of the resource to send. If not provided, use the default Tari confidential resource
     #[clap(long)]
     resource_address: Option<ResourceAddress>,
+    /// An optional memo to include in the confidential output
+    #[clap(long, short = 'm')]
+    memo_message: Option<String>,
 }
 
 #[derive(Debug, Subcommand, Clone)]
@@ -416,6 +419,7 @@ pub async fn handle_confidential_transfer(
         amount,
         destination_address,
         common,
+        memo_message,
     } = args;
 
     // let AccountByNameResponse { account, .. } = client.accounts_get_by_name(&source_account_name).await?;
@@ -429,6 +433,9 @@ pub async fn handle_confidential_transfer(
             max_fee: common.max_fee,
             output_to_revealed: false,
             proof_from_badge_resource: None,
+            memo: memo_message
+                .map(|s| Memo::new_message(s).ok_or_else(|| anyhow!("Invalid memo length")))
+                .transpose()?,
             dry_run: false,
         })
         .await?;

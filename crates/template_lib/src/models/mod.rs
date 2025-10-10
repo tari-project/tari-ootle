@@ -31,7 +31,6 @@ mod bucket;
 mod claimed_output_tombstone;
 mod component;
 mod confidential_proof;
-mod encrypted_data;
 #[macro_use]
 mod metadata;
 mod non_fungible;
@@ -52,7 +51,6 @@ pub use bucket::*;
 pub use claimed_output_tombstone::*;
 pub use component::*;
 pub use confidential_proof::*;
-pub use encrypted_data::*;
 pub use metadata::*;
 pub use non_fungible::*;
 pub use proof::*;

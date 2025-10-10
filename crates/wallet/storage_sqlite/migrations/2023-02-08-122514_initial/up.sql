@@ -152,6 +152,7 @@ CREATE TABLE confidential_outputs
     view_only_key_id    TEXT     NOT NULL,
     owner_key_id        TEXT     NULL,
     public_asset_tag    TEXT     NULL,
+    memo_json           TEXT     NULL,
     -- Status can be "Unspent", "Spent", "Locked", "LockedUnconfirmed", "Invalid"
     status              TEXT     NOT NULL,
     locked_at           DATETIME NULL,
@@ -245,6 +246,7 @@ CREATE TABLE stealth_outputs
     owner_key_id        TEXT     NULL,
     encrypted_data      BLOB     NOT NULL DEFAULT '',
     tag_byte            INTEGER  NOT NULL,
+    memo_json           TEXT     NULL,
     is_burnt            BOOLEAN  NOT NULL DEFAULT 0,
     is_frozen           BOOLEAN  NOT NULL DEFAULT 0,
     is_on_chain         BOOLEAN  NOT NULL,

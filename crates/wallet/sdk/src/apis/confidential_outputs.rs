@@ -179,16 +179,15 @@ where TStore: WalletStore
                 },
             };
 
-            let (_, mask) = self.crypto_api.extract_value_and_mask(
+            let decrypted = self.crypto_api.decrypt_output_data(
                 &shared_decrypt_key,
                 &output.commitment,
                 &output.encrypted_data,
+                true,
             )?;
 
-            outputs_with_masks.push(MaskAndValue {
-                value: output.value,
-                mask,
-            });
+            // We're resolving for spending so we don't need the memo
+            outputs_with_masks.push(decrypted.into_mask_and_value());
         }
         Ok(outputs_with_masks)
     }
@@ -292,9 +291,10 @@ where TStore: WalletStore
             &output.encrypted_data,
             &key.secret,
             &output_stealth_public_nonce,
+            false,
         );
-        let (value, status) = match unblinded_result {
-            Ok(output) => (output.value, OutputStatus::Unspent),
+        let (value, memo, status) = match unblinded_result {
+            Ok(output) => (output.value(), output.memo, OutputStatus::Unspent),
             Err(e) => {
                 warn!(
                     target: LOG_TARGET,
@@ -302,7 +302,7 @@ where TStore: WalletStore
                     commitment,
                     e
                 );
-                (Amount::zero(), OutputStatus::Invalid)
+                (Amount::zero(), None, OutputStatus::Invalid)
             },
         };
 
@@ -316,6 +316,7 @@ where TStore: WalletStore
             owner_key_id: account.owner_key_id,
             encrypted_data: output.encrypted_data.clone(),
             public_asset_tag: None,
+            memo,
             status,
             lock_id: None,
         })

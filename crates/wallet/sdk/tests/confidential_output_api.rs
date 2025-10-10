@@ -9,7 +9,7 @@ use tari_ootle_wallet_sdk::{
     models::{ConfidentialOutputModel, KeyId, OutputStatus},
     storage::{WalletStore, WalletStoreReader},
 };
-use tari_template_lib::models::EncryptedData;
+use tari_template_lib::types::EncryptedData;
 
 use crate::support::Test;
 
@@ -92,6 +92,7 @@ fn outputs_locked_and_finalized() {
             owner_key_id: Some(KeyId::derived(0)),
             encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
             public_asset_tag: None,
+            memo: None,
             status: OutputStatus::LockedUnconfirmed,
             lock_id: Some(proof_id),
         })

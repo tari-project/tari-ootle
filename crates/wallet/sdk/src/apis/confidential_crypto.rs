@@ -5,17 +5,18 @@ use tari_common_types::types::PrivateKey;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_ootle_wallet_crypto::{
     confidential,
-    encrypted_data::{encrypt_value_and_mask, extract_value_and_mask, unblind_output},
+    encrypted_data::{decrypt_data, encrypt_data, unblind_output},
     kdfs,
     ConfidentialProofError,
+    DecryptedData,
     MaskAndValue,
     UnblindedOutputStatement,
     WalletCryptoError,
 };
 use tari_template_lib::{
-    models::{ConfidentialOutputStatement, ConfidentialWithdrawProof, EncryptedData},
+    models::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
     prelude::PedersenCommitmentBytes,
-    types::Amount,
+    types::{Amount, EncryptedData, Memo},
 };
 
 pub struct ConfidentialCryptoApi;
@@ -68,20 +69,22 @@ impl ConfidentialCryptoApi {
         mask: &PrivateKey,
         public_nonce: &RistrettoPublicKey,
         secret: &PrivateKey,
+        memo: Option<&Memo>,
     ) -> Result<EncryptedData, ConfidentialCryptoApiError> {
         let key = kdfs::encrypted_data_dh_kdf_aead(secret, public_nonce);
-        let data = encrypt_value_and_mask(amount, mask, &key)?;
+        let data = encrypt_data(amount, mask, &key, memo)?;
         Ok(data)
     }
 
-    pub fn extract_value_and_mask(
+    pub fn decrypt_output_data(
         &self,
         encryption_key: &PrivateKey,
         commitment: &PedersenCommitmentBytes,
         encrypted_data: &EncryptedData,
-    ) -> Result<(u64, PrivateKey), ConfidentialCryptoApiError> {
-        let value_and_mask = extract_value_and_mask(encryption_key, commitment, encrypted_data)?;
-        Ok(value_and_mask)
+        skip_memo: bool,
+    ) -> Result<DecryptedData, ConfidentialCryptoApiError> {
+        let decrypted = decrypt_data(encryption_key, commitment, encrypted_data, skip_memo)?;
+        Ok(decrypted)
     }
 
     pub fn generate_output_proof<A: Into<Amount>>(
@@ -104,14 +107,16 @@ impl ConfidentialCryptoApi {
         output_encrypted_value: &EncryptedData,
         claim_secret: &PrivateKey,
         reciprocal_public_key: &RistrettoPublicKey,
-    ) -> Result<MaskAndValue, ConfidentialCryptoApiError> {
-        let unmasked_output = unblind_output(
+        skip_memo: bool,
+    ) -> Result<DecryptedData, ConfidentialCryptoApiError> {
+        let decrypted = unblind_output(
             output_commitment,
             output_encrypted_value,
             claim_secret,
             reciprocal_public_key,
+            skip_memo,
         )?;
-        Ok(unmasked_output)
+        Ok(decrypted)
     }
 }
 

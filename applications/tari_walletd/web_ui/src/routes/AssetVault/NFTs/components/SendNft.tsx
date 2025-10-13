@@ -206,9 +206,8 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       const result = await calculateFeeEstimate?.();
 
       if (result && "Accept" in result.result.result) {
-        const fee = result.fee + 100; // Add buffer as per original comment
-        setTransferFormState({ maxFee: fee.toString() });
-        return fee;
+        setTransferFormState({ maxFee: result.fee.toString() });
+        return result.fee;
       } else {
         console.error("Fee estimation rejected:", result);
         throw new Error("Could not estimate transfer fee");
@@ -232,9 +231,8 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       const result = await calculateFeeEstimate?.();
 
       if (result && "Accept" in result.result.result) {
-        const fee = result.fee + 100; // Add buffer
-        setTransferFormState({ maxFee: fee.toString() });
-        return fee;
+        setTransferFormState({ maxFee: result.fee.toString() });
+        return result.fee;
       } else {
         console.error("Fee estimation rejected:", result);
         throw new Error("Could not estimate transfer fee");

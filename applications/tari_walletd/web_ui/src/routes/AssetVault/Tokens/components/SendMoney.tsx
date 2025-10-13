@@ -202,7 +202,11 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         throw new Error("Fee estimation failed");
       }
 
-      const fee = resp.final_fee + 100;
+      let fee = resp.final_fee;
+      if (props.resource_type === "Confidential") {
+        // TODO: Add extra amount for confidential transactions, since the bullet proof size is variable
+        fee += 100;
+      }
       setTransferFormState((prevState) => ({ ...prevState, fee: fee.toString() }));
     } catch (error) {
       console.error("Fee estimation error:", error);

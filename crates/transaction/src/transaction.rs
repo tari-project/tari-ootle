@@ -176,8 +176,8 @@ impl Transaction {
         self.inputs().iter().map(|i| i.substate_id())
     }
 
-    pub fn is_shard_applicable(&self) -> bool {
-        self.involved_substate_addresses_iter().next().is_some()
+    pub fn has_inputs(&self) -> bool {
+        !self.inputs().is_empty()
     }
 
     /// Returns true if the provided committee is involved in at least one input or known output of this transaction.

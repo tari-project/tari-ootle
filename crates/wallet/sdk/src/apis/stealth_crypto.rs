@@ -16,9 +16,9 @@ use tari_ootle_wallet_crypto::{
     stealth,
     ConfidentialProofError,
     DecryptedData,
-    UnblindedOutputStatement,
-    UnblindedStealthInputStatement,
-    UnblindedStealthOutputStatement,
+    UnblindedOutputWitness,
+    UnblindedStealthInputWitness,
+    UnblindedStealthOutputWitness,
     WalletCryptoError,
 };
 use tari_template_lib::{
@@ -54,8 +54,8 @@ impl StealthCryptoApi {
     ) -> Result<StealthTransferStatement, StealthCryptoApiError>
     where
         A: Into<Amount>,
-        Inputs: IntoIterator<Item = &'a UnblindedStealthInputStatement>,
-        Outputs: IntoIterator<Item = &'a UnblindedStealthOutputStatement> + Clone,
+        Inputs: IntoIterator<Item = &'a UnblindedStealthInputWitness>,
+        Outputs: IntoIterator<Item = &'a UnblindedStealthOutputWitness> + Clone,
     {
         let stmt = stealth::create_transfer_statement(
             inputs,
@@ -115,7 +115,7 @@ impl StealthCryptoApi {
 
     pub fn generate_output_proof<A: Into<Amount>>(
         &self,
-        statement: &UnblindedOutputStatement,
+        statement: &UnblindedOutputWitness,
         revealed_amount: A,
     ) -> Result<ConfidentialOutputStatement, StealthCryptoApiError> {
         let proof = confidential::create_output_statement(

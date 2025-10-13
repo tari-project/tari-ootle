@@ -69,9 +69,17 @@ where
         config: WalletSdkConfig,
     ) -> Result<WalletSdk<TStore, TNetworkInterface>, WalletSdkError> {
         // initialize network
-        let config_api = ConfigApi::new(&store);
-        if !config_api.exists(ConfigKey::Network)? {
-            config_api.set(ConfigKey::Network, config.network.as_key_str())?;
+        if let Some(network) = Self::get_store_network(&store)? {
+            if config.network != network {
+                return Err(WalletSdkError::InvariantError {
+                    details: format!(
+                        "Network mismatch. Config network is {:?} but database network is {:?}",
+                        config.network, network
+                    ),
+                });
+            }
+        } else {
+            ConfigApi::new(&store).set(ConfigKey::Network, config.network.as_key_str())?;
         }
 
         Ok(Self {
@@ -80,6 +88,12 @@ where
             config,
             loaded_cipher_seed: WalletCipherSeed::None,
         })
+    }
+
+    pub fn get_store_network(store: &TStore) -> Result<Option<Network>, WalletSdkError> {
+        let config_api = ConfigApi::new(store);
+        let network = config_api.get(ConfigKey::Network).optional()?;
+        Ok(network)
     }
 
     /// Initializes the cipher seed for the wallet. Either creating a new cipher seed or recovering it from the provided
@@ -201,11 +215,9 @@ where
 
     pub fn stealth_transfer_api(&self) -> StealthTransferApi<'_, TStore, TNetworkInterface> {
         StealthTransferApi::new(
-            self.key_manager_api(),
             self.accounts_api(),
             self.stealth_outputs_api(),
             self.substate_api(),
-            self.stealth_crypto_api(),
             self.config_api(),
         )
     }
@@ -273,13 +285,11 @@ where
     }
 
     /// Retrieve the seed words from current cipher seed stored.
-    pub fn load_seed_words(&mut self) -> Result<SeedWords, WalletSdkError> {
+    pub fn load_seed_words(&mut self) -> Result<Option<SeedWords>, WalletSdkError> {
         let seed_words = self
             .load_cipher_seed()?
-            .ok_or_else(|| WalletSdkError::InvariantError {
-                details: "call to load_cipher_seed without initializing the cipher seed".to_string(),
-            })?
-            .to_mnemonic(MnemonicLanguage::English, None)?;
+            .map(|s| s.to_mnemonic(MnemonicLanguage::English, None))
+            .transpose()?;
         Ok(seed_words)
     }
 }

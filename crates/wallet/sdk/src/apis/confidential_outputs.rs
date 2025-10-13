@@ -141,11 +141,27 @@ where TStore: WalletStore
         Ok(())
     }
 
+    pub fn release_revealed_funds(&self, lock_id: WalletLockId) -> Result<(), ConfidentialOutputsApiError> {
+        let mut tx = self.store.create_write_tx()?;
+        tx.vaults_release_lock_revealed_funds(lock_id)?;
+        tx.commit()?;
+
+        Ok(())
+    }
+
     pub fn finalize_outputs_for_lock(&self, lock_id: WalletLockId) -> Result<(), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
         tx.confidential_outputs_finalize_by_lock_id(lock_id)?;
         tx.locks_delete(lock_id)?;
         tx.commit()?;
+        Ok(())
+    }
+
+    pub fn finalize_locked_revealed_funds(&self, lock_id: WalletLockId) -> Result<(), ConfidentialOutputsApiError> {
+        let mut tx = self.store.create_write_tx()?;
+        tx.vaults_finalized_locked_revealed_funds(lock_id)?;
+        tx.commit()?;
+
         Ok(())
     }
 
@@ -190,22 +206,6 @@ where TStore: WalletStore
             outputs_with_masks.push(decrypted.into_mask_and_value());
         }
         Ok(outputs_with_masks)
-    }
-
-    pub fn finalize_locked_revealed_funds(&self, lock_id: WalletLockId) -> Result<(), ConfidentialOutputsApiError> {
-        let mut tx = self.store.create_write_tx()?;
-        tx.vaults_finalized_locked_revealed_funds(lock_id)?;
-        tx.commit()?;
-
-        Ok(())
-    }
-
-    pub fn release_revealed_funds(&self, lock_id: WalletLockId) -> Result<(), ConfidentialOutputsApiError> {
-        let mut tx = self.store.create_write_tx()?;
-        tx.vaults_release_lock_revealed_funds(lock_id)?;
-        tx.commit()?;
-
-        Ok(())
     }
 
     pub fn get_unspent_balance(&self, vault_id: &VaultId) -> Result<Amount, ConfidentialOutputsApiError> {

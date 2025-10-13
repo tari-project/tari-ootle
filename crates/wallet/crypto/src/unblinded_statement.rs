@@ -8,7 +8,7 @@ use tari_template_lib::types::{crypto::UtxoTag, Amount, EncryptedData};
 use crate::memo::Memo;
 
 #[derive(Debug, Clone)]
-pub struct UnblindedOutputStatement {
+pub struct UnblindedOutputWitness {
     pub amount: Amount,
     pub mask: RistrettoSecretKey,
     pub sender_public_nonce: RistrettoPublicKey,
@@ -17,15 +17,15 @@ pub struct UnblindedOutputStatement {
     pub resource_view_key: Option<RistrettoPublicKey>,
 }
 
-impl UnblindedOutputStatement {
+impl UnblindedOutputWitness {
     pub fn to_commitment(&self) -> Option<PedersenCommitment> {
         commit_amount_checked(&self.mask, self.amount)
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct UnblindedStealthOutputStatement {
-    pub statement: UnblindedOutputStatement,
+pub struct UnblindedStealthOutputWitness {
+    pub witness: UnblindedOutputWitness,
     pub output_owner_public_key: RistrettoPublicKey,
     pub tag: UtxoTag,
 }
@@ -75,7 +75,7 @@ impl DecryptedData {
 }
 
 #[derive(Debug, Clone)]
-pub struct UnblindedStealthInputStatement {
+pub struct UnblindedStealthInputWitness {
     pub mask_and_value: MaskAndValue,
     pub owner_secret: RistrettoSecretKey,
     pub public_nonce: RistrettoPublicKey,

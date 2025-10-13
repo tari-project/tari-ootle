@@ -92,6 +92,10 @@ impl Key {
         &self.secret
     }
 
+    pub fn key_id(&self) -> &KeyId {
+        &self.key_id
+    }
+
     pub fn to_public_key(&self) -> RistrettoPublicKey {
         RistrettoPublicKey::from_secret_key(&self.secret)
     }

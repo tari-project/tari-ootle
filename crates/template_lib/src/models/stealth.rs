@@ -21,8 +21,6 @@ pub struct StealthOutputsStatement {
     pub revealed_output_amount: Amount,
     /// Bulletproof range proof for the output commitments proving that values are in the range
     /// [minimum_value_promise, 2^64)
-    // TODO: consider creating multiple batches of outputs each with an aggregate BP, since BP+ initialization for
-    // arbitrary number (tested 512) is expensive and slow
     pub agg_range_proof: RangeProofBytes,
 }
 

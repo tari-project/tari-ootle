@@ -113,11 +113,11 @@ pub fn validate_transfer(
         balance_proof.get_public_nonce()
     );
 
-    let message = messages::stealth_transfer64(
+    let message = messages::stealth_balance_proof64(
         &public_excess,
         balance_proof.get_public_nonce(),
-        &transfer.inputs_statement.revealed_amount,
-        &transfer.outputs_statement.revealed_output_amount,
+        &transfer.inputs_statement,
+        &transfer.outputs_statement,
     );
 
     if !balance_proof.verify_raw_uniform(&public_excess, &message) {

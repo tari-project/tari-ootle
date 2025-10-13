@@ -3,10 +3,9 @@
 
 use std::cmp;
 
-use digest::crypto_common::rand_core::OsRng;
 use log::*;
-use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
-use tari_engine_types::{substate::SubstateId, ConvertFromByteType, FromByteType, ToByteType};
+use tari_crypto::ristretto::RistrettoPublicKey;
+use tari_engine_types::{substate::SubstateId, ConvertFromByteType, FromByteType};
 use tari_ootle_address::{OotleAddress, RistrettoOotleAddress};
 use tari_ootle_common_types::{
     displayable::Displayable,
@@ -14,13 +13,7 @@ use tari_ootle_common_types::{
     Network,
     SubstateRequirement,
 };
-use tari_ootle_wallet_crypto::{
-    memo::Memo,
-    MaskAndValue,
-    UnblindedOutputStatement,
-    UnblindedStealthInputStatement,
-    UnblindedStealthOutputStatement,
-};
+use tari_ootle_wallet_crypto::{memo::Memo, UnblindedStealthInputWitness};
 use tari_template_lib::{
     constants::XTR,
     models::{
@@ -28,24 +21,24 @@ use tari_template_lib::{
         ComponentAddress,
         ResourceAddress,
         StealthTransferStatement,
+        StealthUnspentOutput,
         UtxoAddress,
         VaultId,
     },
     types::Amount,
 };
-use tari_transaction::{args, Transaction};
+use tari_transaction::{args, Transaction, UnsignedTransaction};
 
 use crate::{
     apis::{
         accounts::{derive_account_address_from_public_key, AccountsApi, AccountsApiError},
         confidential_transfer::ConfidentialTransferInputSelection,
         config::{ConfigApi, ConfigApiError},
-        key_manager::{KeyBranch, KeyManagerApi, KeyManagerApiError},
-        stealth_crypto::{StealthCryptoApi, StealthCryptoApiError},
-        stealth_outputs::{StealthOutputsApi, StealthOutputsApiError},
+        stealth_crypto::StealthCryptoApiError,
+        stealth_outputs::{StealthOutputsApi, StealthOutputsApiError, TransferStatementParams},
         substate::{SubstateApiError, SubstatesApi, ValidatorScanResult},
     },
-    models::{Account, AccountWithAddress, OutputStatus, StealthOutputModel, WalletLockId},
+    models::{Account, AccountWithAddress, InputSpendData, OutputStatus, StealthOutputModel, WalletLockId},
     network::WalletNetworkInterface,
     storage::{WalletStorageError, WalletStore},
 };
@@ -53,11 +46,9 @@ use crate::{
 const LOG_TARGET: &str = "tari::ootle::wallet_sdk::apis::stealth_transfers";
 
 pub struct StealthTransferApi<'a, TStore, TNetworkInterface> {
-    key_manager_api: KeyManagerApi<'a, TStore>,
     accounts_api: AccountsApi<'a, TStore, TNetworkInterface>,
     outputs_api: StealthOutputsApi<'a, TStore>,
     substate_api: SubstatesApi<'a, TStore, TNetworkInterface>,
-    crypto_api: StealthCryptoApi,
     config_api: ConfigApi<'a, TStore>,
 }
 
@@ -68,30 +59,26 @@ where
     TNetworkInterface::Error: IsNotFoundError,
 {
     pub fn new(
-        key_manager_api: KeyManagerApi<'a, TStore>,
         accounts_api: AccountsApi<'a, TStore, TNetworkInterface>,
         outputs_api: StealthOutputsApi<'a, TStore>,
         substate_api: SubstatesApi<'a, TStore, TNetworkInterface>,
-        crypto_api: StealthCryptoApi,
         config_api: ConfigApi<'a, TStore>,
     ) -> Self {
         Self {
-            key_manager_api,
             accounts_api,
             outputs_api,
             substate_api,
-            crypto_api,
             config_api,
         }
     }
 
-    fn resolve_fee_inputs(
+    fn lock_fee_inputs(
         &self,
         lock_id: WalletLockId,
         owner_account: &AccountWithAddress,
         params: &StealthTransferParams,
     ) -> Result<InputsToSpend, StealthTransferApiError> {
-        self.resolved_inputs_for_transfer(
+        self.lock_inputs_for_transfer(
             lock_id,
             owner_account.account(),
             XTR,
@@ -101,7 +88,7 @@ where
     }
 
     #[allow(clippy::too_many_lines)]
-    fn resolved_inputs_for_transfer(
+    fn lock_inputs_for_transfer(
         &self,
         lock_id: WalletLockId,
         owner_account: &Account,
@@ -128,15 +115,12 @@ where
 
         match input_selection {
             ConfidentialTransferInputSelection::ConfidentialOnly => {
-                let (input_models, total_locked) = self.outputs_api.lock_outputs_for_at_least_amount(
+                let (inputs, total_locked) = self.outputs_api.lock_outputs_for_at_least_amount(
                     owner_account.component_address(),
                     &resource_address,
                     lock_id,
                     spend_amount,
                 )?;
-                let inputs = self
-                    .outputs_api
-                    .resolve_output_masks_for_spending(owner_account, input_models)?;
 
                 info!(
                     target: LOG_TARGET,
@@ -146,7 +130,7 @@ where
                 );
 
                 Ok(InputsToSpend {
-                    inputs,
+                    inputs: inputs.into_iter().map(|i| i.into_spend_data()).collect(),
                     revealed: Amount::zero(),
                 })
             },
@@ -197,7 +181,7 @@ where
                         self.outputs_api.lock_funds_in_vault(lock_id, &src_vault.id, revealed_to_spend)
                             .inspect_err(|_| {
                                 // TODO: atomic rollback will help with this
-                                if let Err(err) = self.outputs_api.release_locked_outputs(lock_id) {
+                                if let Err(err) = self.outputs_api.release_lock(lock_id) {
                                     error!(target: LOG_TARGET, "Failed to release lock outputs for resource {}: {}", resource_address, err);
                                 }
                             })?;
@@ -230,21 +214,12 @@ where
                 )
                     .inspect_err(|_| {
                         // TODO: atomic rollback will help with this
-                        if let Err(err) = self.outputs_api.release_locked_outputs(lock_id) {
-                            error!(target: LOG_TARGET, "Failed to release lock outputs for resource {}: {}", resource_address, err);
-                        }
-                    })?;
-                let inputs = self
-                    .outputs_api
-                    .resolve_output_masks_for_spending(owner_account, inputs)
-                    .inspect_err(|_| {
-                        // TODO: atomic rollback will help with this
-                        if let Err(err) = self.outputs_api.release_locked_outputs(lock_id) {
+                        if let Err(err) = self.outputs_api.release_lock(lock_id) {
                             error!(target: LOG_TARGET, "Failed to release lock outputs for resource {}: {}", resource_address, err);
                         }
                     })?;
 
-                let total_confidential_spent = Amount::sum_from_positive(inputs.iter().map(|i| i.value()))
+                let total_confidential_spent = Amount::sum_from_positive(inputs.iter().map(|i| i.value))
                     // The wallet has somehow stored a negative amount, which should not happen.
                     .expect("BUG: an unblinded input amount was negative");
 
@@ -252,7 +227,7 @@ where
                     self.outputs_api.lock_revealed_funds(lock_id, &src_vault.id, revealed_to_spend)
                         .inspect_err(|_| {
                             // TODO: atomic rollback will help with this
-                            if let Err(err) = self.outputs_api.release_locked_outputs(lock_id) {
+                            if let Err(err) = self.outputs_api.release_lock(lock_id) {
                                 error!(target: LOG_TARGET, "Failed to release lock outputs for resource {}: {}", resource_address, err);
                             }
                         })?;
@@ -270,13 +245,13 @@ where
                 );
 
                 Ok(InputsToSpend {
-                    inputs,
+                    inputs: inputs.into_iter().map(|i| i.into_spend_data()).collect(),
                     revealed: revealed_to_spend,
                 })
             },
             ConfidentialTransferInputSelection::PreferConfidential => {
                 let lock_id = self.outputs_api.create_lock()?;
-                let (blinded_inputs, blinded_amount_locked) = self.outputs_api.lock_outputs_until_partial_amount(
+                let (inputs, blinded_amount_locked) = self.outputs_api.lock_outputs_until_partial_amount(
                     owner_account.component_address(),
                     &resource_address,
                     spend_amount,
@@ -288,7 +263,7 @@ where
                     .unwrap_or_else(Amount::zero);
 
                 if available_revealed_funds < revealed_to_spend {
-                    self.outputs_api.release_locked_outputs(lock_id)?;
+                    self.outputs_api.release_lock(lock_id)?;
                     return Err(StealthTransferApiError::InsufficientFunds);
                 }
 
@@ -299,7 +274,7 @@ where
                                 .lock_revealed_funds(lock_id, &vault.id, revealed_to_spend)?;
                         },
                         None => {
-                            if let Err(err) = self.outputs_api.release_locked_outputs(lock_id) {
+                            if let Err(err) = self.outputs_api.release_lock(lock_id) {
                                 error!(target: LOG_TARGET, "🚨 Failed to release lock outputs for resource {}: {}", resource_address, err);
                             }
                             return Err(StealthTransferApiError::InsufficientRevealedFunds {
@@ -315,12 +290,8 @@ where
                     }
                 }
 
-                let inputs = self
-                    .outputs_api
-                    .resolve_output_masks_for_spending(owner_account, blinded_inputs)?;
-
                 Ok(InputsToSpend {
-                    inputs,
+                    inputs: inputs.into_iter().map(|i| i.into_spend_data()).collect(),
                     revealed: revealed_to_spend,
                 })
             },
@@ -336,6 +307,16 @@ where
         let network = self.config_api.get_network()?;
         params.validate(network)?;
 
+        let Some(owner_key_id) = owner_account.owner_key_id() else {
+            return Err(StealthTransferApiError::InvalidParameter {
+                param: "owner_account",
+                reason: format!(
+                    "Account {} is view only and does not have the required secrets for transfers",
+                    owner_account.component_address()
+                ),
+            });
+        };
+
         let destination_account =
             derive_account_address_from_public_key(params.destination_address.account_public_key());
 
@@ -347,7 +328,7 @@ where
                 .try_from_byte_type()
                 .map_err(|e| StealthTransferApiError::InvalidParameter {
                     param: "owner_account",
-                    reason: format!("Invalid owner account address: {e}"),
+                    reason: format!("Non-canonical owner account address: {e}"),
                 })?;
 
         // add the input for the resource address to be transferred
@@ -448,79 +429,51 @@ where
             .try_from_byte_type()
             .expect("already validated");
 
-        let output_statement = params
-            .blinded_output_amount
-            .is_positive()
-            .then(|| {
-                self.create_output_statement(
-                    &destination_address,
-                    params.blinded_output_amount,
-                    &params.resource_address,
-                    resource_view_key.clone(),
-                    params.output_memo.as_ref(),
-                )
-            })
-            .transpose()?;
-
         // Resolve fee inputs
         let lock_id = self.outputs_api.create_lock()?;
-        let fee_inputs_to_spend = self.resolve_fee_inputs(lock_id, &owner_account, &params)?;
+        let fee_inputs_to_spend = self.lock_fee_inputs(lock_id, &owner_account, &params)?;
 
         // TODO: use single db transaction across calls
         // --- Any error from here can result in funds staying locked ---
 
-        let fee_change = fee_inputs_to_spend
+        let fee_stealth_change_amt = fee_inputs_to_spend
             .total_stealth_input_amount()
             .saturating_sub(params.max_fee.into());
 
         // Generate fee change outputs if required
-        let fee_change_output_statement = fee_change
-            .is_positive()
-            .then(|| self.create_output_statement(&owner_address, fee_change, &params.resource_address, None, None))
-            .transpose()
-            .inspect_err(|e| {
-                warn!(target: LOG_TARGET, "Unlocking fee fund locks after error: {}", e);
-                // This is a hack that addresses the case where output creation fails after the fee transaction.
-                // However, any error after this point do not undo locking. This is a limitation
-                // of the current design - the db transaction should be passed in and
-                // automatically rolled back on error.
-                if let Err(err) = self.outputs_api.release_locked_outputs(lock_id) {
-                    error!(
-                        target: LOG_TARGET,
-                        "Failed to release fee inputs for transfer: {}",
-                        err
-                    );
-                }
-            })?;
-        // Generate fee reveal statement
-        let fee_transfer_statement = self.crypto_api.generate_transfer_statement(
-            fee_inputs_to_spend.statements_iter(),
-            fee_inputs_to_spend.revealed,
-            fee_change_output_statement.iter(),
-            Amount::from(params.max_fee),
-        )?;
+        let fee_change_output = Some(OutputToCreate {
+            owner_address: &owner_address,
+            amount: fee_stealth_change_amt,
+            memo: None,
+        })
+        .filter(|o| o.amount.is_positive());
 
-        if let Some(ref fee_change) = fee_change_output_statement {
+        // Generate fee transfer statement
+        let fee_transfer_statement = self.outputs_api.generate_transfer_statement(TransferStatementParams {
+            spend_key_id: owner_key_id,
+            view_only_key_id: owner_account.view_only_key_id(),
+            resource_address: &params.resource_address,
+            resource_view_key: resource_view_key.clone(),
+            inputs: &fee_inputs_to_spend.inputs,
+            input_revealed_amount: fee_inputs_to_spend.revealed,
+            outputs: fee_change_output.into_iter(),
+            output_revealed_amount: Amount::from(params.max_fee),
+        })?;
+
+        // Add the unconfirmed fee change output to the wallet store
+        if let Some(output) = fee_transfer_statement.outputs_statement.outputs.first() {
             self.add_unconfirmed_output_from_statement(
                 lock_id,
                 &owner_account,
                 params.resource_address,
-                fee_change,
+                output,
+                fee_stealth_change_amt,
                 None,
             )?;
         }
 
-        substate_inputs.extend(
-            fee_inputs_to_spend
-                .inputs
-                .iter()
-                .filter(|i| i.is_on_chain)
-                .map(|i| &i.statement)
-                .map(|i| SubstateRequirement::unversioned(to_utxo_address(XTR, &i.mask_and_value))),
-        );
-
         // Reserve and lock input funds
-        let inputs_to_spend = match self.resolved_inputs_for_transfer(
+        let inputs_to_spend = match self.lock_inputs_for_transfer(
             lock_id,
             owner_account.account(),
             params.resource_address,
@@ -534,7 +487,7 @@ where
                 // However, any error after this point do not undo locking. This is a limitation
                 // of the current design - the db transaction should be passed in and
                 // automatically rolled back on error.
-                if let Err(err) = self.outputs_api.release_locked_outputs(lock_id) {
+                if let Err(err) = self.outputs_api.release_lock(lock_id) {
                     error!(
                         target: LOG_TARGET,
                         "Failed to release fee inputs for transfer: {}",
@@ -571,38 +524,65 @@ where
             }
         }
 
+        // Any change outputs?
+        let change_amount = inputs_to_spend
+            .total_amount()
+            .checked_sub_positive(params.total_output_amount())
+            .unwrap_or_else(|| {
+                // This is a bug because the wallet chooses inputs based on the required outputs. This function should
+                // not have been called if there are insufficient funds.
+                error!(
+                    target: LOG_TARGET,
+                    "BUG: total_stealth_input_amount or params.total_amount() are negative after validation"
+                );
+                panic!("BUG: total_stealth_input_amount or params.total_amount() are negative after validation");
+            });
+
+        let change_output = Some(OutputToCreate {
+            owner_address: &owner_address,
+            amount: change_amount,
+            memo: None,
+        })
+        .filter(|o| o.amount.is_positive());
+
+        let transfer_statement = self.outputs_api.generate_transfer_statement(TransferStatementParams {
+            spend_key_id: owner_key_id,
+            view_only_key_id: owner_account.view_only_key_id(),
+            resource_address: &params.resource_address,
+            resource_view_key,
+            inputs: &inputs_to_spend.inputs,
+            input_revealed_amount: inputs_to_spend.revealed,
+            outputs: Some(OutputToCreate {
+                amount: params.blinded_output_amount,
+                owner_address: &destination_address,
+                memo: params.output_memo.as_ref(),
+            })
+            .into_iter()
+            .chain(change_output),
+            output_revealed_amount: params.revealed_output_amount,
+        })?;
+
         // Add all input UTXO substates to transaction inputs
+        substate_inputs.extend(
+            fee_inputs_to_spend
+                .inputs
+                .iter()
+                // If spending XTR, we may lock the fee change UTXO for spending, however since this does not exist yet we do not include it as a tx input
+                .filter(|i| i.is_on_chain)
+                .map(|i| &i.commitment)
+                .map(|commitment| UtxoAddress::new(XTR, (*commitment).into()))
+                .map(SubstateRequirement::unversioned),
+        );
+
         substate_inputs.extend(
             inputs_to_spend
                 .inputs
                 .iter()
                 .filter(|i| i.is_on_chain)
-                .map(|i| &i.statement)
-                .map(|i| SubstateRequirement::unversioned(to_utxo_address(params.resource_address, &i.mask_and_value))),
+                .map(|i| &i.commitment)
+                .map(|commitment| UtxoAddress::new(params.resource_address, (*commitment).into()))
+                .map(SubstateRequirement::unversioned),
         );
-
-        // Any change outputs?
-        let maybe_change_statement = self.generate_change_statement(
-            lock_id,
-            &owner_account,
-            params.resource_address,
-            resource_view_key,
-            &inputs_to_spend,
-            params.total_output_amount(),
-        )?;
-
-        let outputs = output_statement
-            .filter(|o| o.statement.amount.is_positive())
-            .into_iter()
-            .chain(maybe_change_statement)
-            .collect::<Vec<_>>();
-
-        let transfer_statement = self.crypto_api.generate_transfer_statement(
-            inputs_to_spend.statements_iter(),
-            inputs_to_spend.revealed,
-            &outputs,
-            params.revealed_output_amount,
-        )?;
 
         let result = self.generate_transfer_transaction(
             &owner_account,
@@ -614,17 +594,15 @@ where
         );
 
         match result {
-            Ok(transaction) => {
-                let tx_id = transaction.calculate_id();
-                self.outputs_api.locks_set_transaction_id(lock_id, tx_id)?;
-                Ok(TransferOutput {
-                    transaction,
-                    transaction_lock_id: lock_id,
-                })
-            },
+            Ok(transaction) => Ok(TransferOutput {
+                transaction,
+                lock_id,
+                fee_inputs: fee_inputs_to_spend,
+                transfer_inputs: inputs_to_spend,
+            }),
             Err(err) => {
                 // Unlock inputs
-                if let Err(e) = self.outputs_api.release_locked_outputs(lock_id) {
+                if let Err(e) = self.outputs_api.release_lock(lock_id) {
                     error!(target: LOG_TARGET, "Failed to release inputs lock after error: {}", e);
                 }
                 Err(err)
@@ -640,24 +618,9 @@ where
         fee_transfer_statement: StealthTransferStatement,
         transfer_statement: StealthTransferStatement,
         need_to_create_account: bool,
-    ) -> Result<Transaction, StealthTransferApiError> {
+    ) -> Result<UnsignedTransaction, StealthTransferApiError> {
         let revealed_input_amount = transfer_statement.inputs_statement.revealed_amount;
         let revealed_output_amount = transfer_statement.outputs_statement.revealed_output_amount;
-        let owner_key_id = owner_account
-            .owner_key_id()
-            .ok_or_else(|| StealthTransferApiError::InvalidParameter {
-                param: "owner_account",
-                reason: "Owner account has no owner key".to_string(),
-            })?;
-
-        let signer_key = if revealed_input_amount.is_positive() ||
-            fee_transfer_statement.inputs_statement.revealed_amount.is_positive()
-        {
-            self.key_manager_api.get_account_owner_key(owner_key_id)?
-        } else {
-            // Since we don't require account auth, use a throwaway nonce to sign the transaction
-            self.key_manager_api.next_key(KeyBranch::Nonce)?.into()
-        };
 
         let transaction = Transaction::builder()
             .for_network(params.destination_address.network().as_byte())
@@ -713,57 +676,9 @@ where
             .with_inputs(inputs)
             // TODO: remove the need to add this input
             .add_input(XTR)
-            .build_and_seal(&signer_key.secret);
+            .build_unsigned_transaction();
 
         Ok(transaction)
-    }
-
-    fn generate_change_statement(
-        &self,
-        lock_id: WalletLockId,
-        account: &AccountWithAddress,
-        resource_address: ResourceAddress,
-        resource_view_key: Option<RistrettoPublicKey>,
-        inputs_to_spend: &InputsToSpend,
-        total_output_amount: Amount,
-    ) -> Result<Option<UnblindedStealthOutputStatement>, StealthTransferApiError> {
-        let change_amount = inputs_to_spend
-            .total_amount()
-            .checked_sub_positive(total_output_amount)
-            .unwrap_or_else(|| {
-                // This is a bug because the wallet chooses inputs based on the required outputs. This function should
-                // not have been called if there are insufficient funds.
-                error!(
-                    target: LOG_TARGET,
-                    "BUG: total_stealth_input_amount or params.total_amount() are negative after validation"
-                );
-                panic!("BUG: total_stealth_input_amount or params.total_amount() are negative after validation");
-            });
-
-        if change_amount.is_zero() {
-            return Ok(None);
-        }
-
-        let change_address =
-            account
-                .address
-                .try_from_byte_type()
-                .map_err(|e| StealthTransferApiError::InvalidParameter {
-                    param: "owner_account",
-                    reason: format!("Invalid owner account address: {e}"),
-                })?;
-
-        let change = self.create_output_statement(
-            &change_address,
-            change_amount,
-            &resource_address,
-            resource_view_key,
-            None,
-        )?;
-
-        self.add_unconfirmed_output_from_statement(lock_id, account, resource_address, &change, None)?;
-
-        Ok(Some(change))
     }
 
     fn add_unconfirmed_output_from_statement(
@@ -771,29 +686,22 @@ where
         lock_id: WalletLockId,
         account: &AccountWithAddress,
         resource_address: ResourceAddress,
-        output: &UnblindedStealthOutputStatement,
+        output: &StealthUnspentOutput,
+        value: Amount,
         memo: Option<Memo>,
     ) -> Result<(), StealthTransferApiError> {
-        let output_value = output.statement.amount;
-        if output_value.is_zero() {
-            return Ok(());
-        }
-
         self.outputs_api.add_output(&StealthOutputModel {
             owner_account: *account.component_address(),
             resource_address,
-            commitment: output
-                .statement
-                .to_commitment()
-                .expect("BUG: to_commitment negative amount")
-                .to_byte_type(),
-            value: output_value,
-            sender_public_nonce: output.statement.sender_public_nonce.to_byte_type(),
+            commitment: output.output.commitment,
+            value,
+            sender_public_nonce: output.output.sender_public_nonce,
             view_only_key_id: account.view_only_key_id(),
             owner_key_id: account.owner_key_id(),
-            encrypted_data: output.statement.encrypted_data.clone(),
+            encrypted_data: output.output.encrypted_data.clone(),
             status: OutputStatus::LockedUnconfirmed,
             memo,
+            minimum_value_promise: output.output.minimum_value_promise,
             tag_byte: output.tag,
             lock_id: Some(lock_id),
             is_burnt: false,
@@ -802,74 +710,13 @@ where
         })?;
         Ok(())
     }
-
-    fn create_output_statement(
-        &self,
-        destination: &RistrettoOotleAddress,
-        amount: Amount,
-        resource_address: &ResourceAddress,
-        resource_view_key: Option<RistrettoPublicKey>,
-        memo: Option<&Memo>,
-    ) -> Result<UnblindedStealthOutputStatement, StealthTransferApiError> {
-        if !amount.is_positive() {
-            return Err(StealthTransferApiError::InvalidParameter {
-                param: "amount",
-                reason: format!("Amount must be positive, got {}", amount),
-            });
-        }
-
-        let mask = self.key_manager_api.next_key(KeyBranch::StealthMask)?;
-
-        let (nonce_secret, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
-        let encrypted_data = self.crypto_api.encrypt_value_and_mask(
-            amount
-                .to_u64_checked()
-                .ok_or_else(|| StealthTransferApiError::AmountOverflow {
-                    param: "amount",
-                    details: "Stealth amount exceeds u64::MAX. This is currently a limitation due to the format of \
-                              EncryptedData"
-                        .to_string(),
-                })?,
-            &mask.key,
-            destination.view_only_key(),
-            &nonce_secret,
-            memo,
-        )?;
-
-        // Create stealth address - used during spend time
-        let output_owner_public_key = self.crypto_api.derive_stealth_owner_public_key(
-            destination.network(),
-            destination.account_key(),
-            &nonce_secret,
-        );
-
-        let statement = UnblindedOutputStatement {
-            amount,
-            mask: mask.key,
-            sender_public_nonce: public_nonce,
-            encrypted_data,
-            minimum_value_promise: 0,
-            resource_view_key,
-        };
-
-        let derived_tag = self.crypto_api.derive_stealth_output_tag(
-            destination.network(),
-            &nonce_secret,
-            destination.view_only_key(),
-            resource_address,
-        );
-
-        Ok(UnblindedStealthOutputStatement {
-            statement,
-            output_owner_public_key,
-            tag: derived_tag,
-        })
-    }
 }
 
 pub struct TransferOutput {
-    pub transaction: Transaction,
-    pub transaction_lock_id: WalletLockId,
+    pub transaction: UnsignedTransaction,
+    pub lock_id: WalletLockId,
+    pub fee_inputs: InputsToSpend,
+    pub transfer_inputs: InputsToSpend,
 }
 
 #[derive(Debug)]
@@ -947,26 +794,32 @@ impl StealthTransferParams {
 }
 
 #[derive(Debug)]
-pub struct InputToSpend {
-    pub statement: UnblindedStealthInputStatement,
-    pub is_on_chain: bool,
+pub struct UnblindedInputToSpend {
+    pub witness: UnblindedStealthInputWitness,
 }
 
-impl InputToSpend {
+impl UnblindedInputToSpend {
     pub fn value(&self) -> Amount {
-        self.statement.mask_and_value.value
+        self.witness.mask_and_value.value
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct OutputToCreate<'a> {
+    pub owner_address: &'a RistrettoOotleAddress,
+    pub amount: Amount,
+    pub memo: Option<&'a Memo>,
 }
 
 #[derive(Debug)]
 pub struct InputsToSpend {
-    pub inputs: Vec<InputToSpend>,
+    pub inputs: Vec<InputSpendData>,
     pub revealed: Amount,
 }
 
 impl InputsToSpend {
-    pub fn statements_iter(&self) -> impl Iterator<Item = &UnblindedStealthInputStatement> + '_ {
-        self.inputs.iter().map(|i| &i.statement)
+    pub fn inputs_iter(&self) -> impl Iterator<Item = &InputSpendData> + '_ {
+        self.inputs.iter()
     }
 
     pub fn total_amount(&self) -> Amount {
@@ -974,7 +827,7 @@ impl InputsToSpend {
     }
 
     pub fn total_stealth_input_amount(&self) -> Amount {
-        self.inputs.iter().map(|i| i.statement.mask_and_value.value).sum()
+        self.inputs.iter().map(|i| i.value).sum()
     }
 }
 
@@ -990,8 +843,6 @@ pub enum StealthTransferApiError {
     SubstateApi(#[from] SubstateApiError),
     #[error("Insufficient funds")]
     InsufficientFunds,
-    #[error("Key manager error: {0}")]
-    KeyManager(#[from] KeyManagerApiError),
     #[error("Accounts API error: {0}")]
     Accounts(#[from] AccountsApiError),
     #[error("Invalid parameter `{param}`: {reason}")]
@@ -1016,15 +867,4 @@ pub struct AccountDetails {
     pub address: ComponentAddress,
     pub vaults: Vec<VaultId>,
     pub exists: bool,
-}
-
-fn to_utxo_address(resource_address: ResourceAddress, mask_and_value: &MaskAndValue) -> UtxoAddress {
-    UtxoAddress::new(
-        resource_address,
-        mask_and_value
-            .to_commitment()
-            .expect("BUG: value not u64")
-            .to_byte_type()
-            .into(),
-    )
 }

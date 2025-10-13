@@ -50,7 +50,8 @@ where
         Ok(transaction)
     }
 
-    pub async fn insert_new_transaction(
+    /// Inserts a new transaction into the wallet database with status `New`.
+    pub fn insert_new_transaction(
         &self,
         transaction: Transaction,
         new_account_info: Option<NewAccountData>,
@@ -63,6 +64,11 @@ where
         Ok(tx_id)
     }
 
+    /// Submits a transaction to the network. The transaction must be in the `New` status.
+    /// If the submission is successful, the transaction status is updated to `Pending`.
+    /// If the transaction is rejected, the status is updated to `InvalidTransaction` and the
+    /// rejection reason is stored.
+    /// Returns `Ok(true)` if the transaction was successfully submitted, `Ok(false)` if it was rejected
     pub async fn submit_transaction(&self, transaction_id: TransactionId) -> Result<bool, TransactionApiError> {
         let transaction = self.store.with_read_tx(|tx| tx.transactions_get(transaction_id))?;
 

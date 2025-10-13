@@ -1,6 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use digest::crypto_common::rand_core::OsRng;
 use log::*;
 use tari_crypto::{
     keys::PublicKey,
@@ -13,14 +14,20 @@ use tari_engine_types::{
     Utxo,
     UtxoOutput,
 };
+use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
     Network,
 };
-use tari_ootle_wallet_crypto::UnblindedStealthInputStatement;
+use tari_ootle_wallet_crypto::{
+    memo::Memo,
+    UnblindedOutputWitness,
+    UnblindedStealthInputWitness,
+    UnblindedStealthOutputWitness,
+};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    models::{ComponentAddress, ResourceAddress, UtxoAddress, VaultId},
+    models::{ComponentAddress, ResourceAddress, StealthTransferStatement, UtxoAddress, VaultId},
     prelude::PedersenCommitmentBytes,
     types::Amount,
 };
@@ -29,12 +36,21 @@ use tari_transaction::TransactionId;
 use crate::{
     apis::{
         accounts::AccountsApiError,
+        confidential_outputs::ConfidentialOutputsApiError,
         config::{ConfigApi, ConfigApiError},
         key_manager::{KeyBranch, KeyManagerApi, KeyManagerApiError},
         stealth_crypto::{StealthCryptoApi, StealthCryptoApiError},
-        stealth_transfer::InputToSpend,
+        stealth_transfer::{OutputToCreate, UnblindedInputToSpend},
     },
-    models::{Account, AccountAndViewKeys, OutputStatus, StealthBalance, StealthOutputModel, WalletLockId},
+    models::{
+        AccountAndViewKeys,
+        InputSpendData,
+        KeyId,
+        OutputStatus,
+        StealthBalance,
+        StealthOutputModel,
+        WalletLockId,
+    },
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
@@ -176,76 +192,30 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         Ok(lock_id)
     }
 
-    pub fn release_locked_outputs(&self, lock_id: WalletLockId) -> Result<(), StealthOutputsApiError> {
+    pub fn release_lock(&self, lock_id: WalletLockId) -> Result<(), StealthOutputsApiError> {
         self.store.with_write_tx(|tx| {
             tx.stealth_outputs_release_by_lock_id(lock_id)?;
-            tx.locks_delete(lock_id)?;
-            Ok(())
-        })
+            tx.vaults_release_lock_revealed_funds(lock_id).optional()?;
+            tx.locks_delete(lock_id)
+        })?;
+        Ok(())
+    }
+
+    pub fn finalize_lock(&self, lock_id: WalletLockId) -> Result<(), ConfidentialOutputsApiError> {
+        let mut tx = self.store.create_write_tx()?;
+        tx.stealth_outputs_finalize_by_lock_id(lock_id)?;
+        tx.locks_delete(lock_id)?;
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn finalize_outputs(&self, lock_id: WalletLockId) -> Result<(), StealthOutputsApiError> {
         self.store.with_write_tx(|tx| {
             tx.stealth_outputs_finalize_by_lock_id(lock_id)?;
+            tx.vaults_finalized_locked_revealed_funds(lock_id).optional()?;
             tx.locks_delete(lock_id)?;
             Ok(())
         })
-    }
-
-    pub fn resolve_output_masks_for_spending(
-        &self,
-        owner_account: &Account,
-        outputs: Vec<StealthOutputModel>,
-    ) -> Result<Vec<InputToSpend>, StealthOutputsApiError> {
-        let network = self.config_api.get_network()?;
-        // Derive owner secret - the sender does not know the owner secret
-        let owner_key_id = owner_account
-            .owner_key_id()
-            .ok_or_else(|| StealthOutputsApiError::InvalidParameter {
-                param: "owner_key_id",
-                reason: format!(
-                    "Account {} does not have an owner key. Cannot spend from this account",
-                    owner_account
-                ),
-            })?;
-        let owner_key_part = self.key_manager_api.get_account_owner_key(owner_key_id)?;
-        // Derive the view-only secret, of which the public key is used by senders to encrypt the value and mask.
-        let view_only = self
-            .key_manager_api
-            .get_view_only_key(owner_account.view_only_key_id())?;
-        let mut inputs_with_masks = Vec::with_capacity(outputs.len());
-        for output in outputs {
-            // Derive the decryption key from the DHKE(sender's public nonce, encryption secret key);
-            let nonce = output.sender_public_nonce.try_from_byte_type().map_err(|e| {
-                StealthOutputsApiError::InvalidParameter {
-                    param: "sender_public_nonce",
-                    reason: format!("Sender public nonce bytes are not a canonical public key: {e}"),
-                }
-            })?;
-
-            let decrypted = self.crypto_api.decrypt_value_and_mask(
-                &output.encrypted_data,
-                &output.commitment,
-                &view_only.secret,
-                &nonce,
-                // We dont need to decrypt the memo to spend the output
-                true,
-            )?;
-
-            let stealth_secret = self
-                .crypto_api
-                .derive_stealth_owner_secret(network, &owner_key_part.secret, &nonce);
-
-            inputs_with_masks.push(InputToSpend {
-                statement: UnblindedStealthInputStatement {
-                    mask_and_value: decrypted.mask_and_value,
-                    owner_secret: stealth_secret,
-                    public_nonce: nonce,
-                },
-                is_on_chain: output.is_on_chain,
-            });
-        }
-        Ok(inputs_with_masks)
     }
 
     pub fn lock_revealed_funds<A: Into<Amount>>(
@@ -260,20 +230,51 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         Ok(())
     }
 
-    pub fn finalize_locked_revealed_funds(&self, lock_id: WalletLockId) -> Result<(), StealthOutputsApiError> {
-        let mut tx = self.store.create_write_tx()?;
-        tx.vaults_finalized_locked_revealed_funds(lock_id)?;
-        tx.commit()?;
+    pub fn resolve_output_masks_for_spending(
+        &self,
+        owner_key_id: KeyId,
+        view_only_key_id: KeyId,
+        inputs: &[InputSpendData],
+    ) -> Result<Vec<UnblindedInputToSpend>, StealthOutputsApiError> {
+        let network = self.config_api.get_network()?;
 
-        Ok(())
-    }
+        let owner_key_part = self.key_manager_api.get_account_owner_key(owner_key_id)?;
+        // Derive the view-only secret, of which the public key is used by senders to encrypt the value and mask.
+        let view_only = self.key_manager_api.get_view_only_key(view_only_key_id)?;
+        let mut inputs_with_masks = Vec::with_capacity(inputs.len());
+        for input in inputs {
+            // Derive the decryption key from the DHKE(sender's public nonce, encryption secret key);
+            let nonce =
+                input
+                    .public_nonce
+                    .try_from_byte_type()
+                    .map_err(|e| StealthOutputsApiError::InvalidParameter {
+                        param: "sender_public_nonce",
+                        reason: format!("Sender public nonce bytes are not a canonical public key: {e}"),
+                    })?;
 
-    pub fn release_revealed_funds(&self, lock_id: WalletLockId) -> Result<(), StealthOutputsApiError> {
-        let mut tx = self.store.create_write_tx()?;
-        tx.vaults_release_lock_revealed_funds(lock_id)?;
-        tx.commit()?;
+            let decrypted = self.crypto_api.decrypt_value_and_mask(
+                &input.encrypted_data,
+                &input.commitment,
+                &view_only.secret,
+                &nonce,
+                // We dont need to decrypt the memo to spend the output
+                true,
+            )?;
 
-        Ok(())
+            let stealth_secret = self
+                .crypto_api
+                .derive_stealth_owner_secret(network, &owner_key_part.secret, &nonce);
+
+            inputs_with_masks.push(UnblindedInputToSpend {
+                witness: UnblindedStealthInputWitness {
+                    mask_and_value: decrypted.mask_and_value,
+                    owner_secret: stealth_secret,
+                    public_nonce: nonce,
+                },
+            });
+        }
+        Ok(inputs_with_masks)
     }
 
     pub fn get_unspent_outputs_by_account(
@@ -588,6 +589,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                 encrypted_data: output.output.encrypted_data.clone(),
                 tag_byte: output.tag,
                 memo,
+                minimum_value_promise: output.output.minimum_value_promise,
                 status,
                 is_burnt: false,
                 is_frozen,
@@ -598,6 +600,125 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
 
         Ok(None)
     }
+
+    pub fn create_output_witness(
+        &self,
+        destination: &RistrettoOotleAddress,
+        amount: Amount,
+        resource_address: &ResourceAddress,
+        resource_view_key: Option<RistrettoPublicKey>,
+        memo: Option<&Memo>,
+    ) -> Result<UnblindedStealthOutputWitness, StealthOutputsApiError> {
+        if !amount.is_positive() {
+            return Err(StealthOutputsApiError::InvalidParameter {
+                param: "amount",
+                reason: format!("Amount must be positive, got {}", amount),
+            });
+        }
+
+        let mask = self.key_manager_api.next_key(KeyBranch::StealthMask)?;
+
+        let (nonce_secret, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
+        let encrypted_data = self.crypto_api.encrypt_value_and_mask(
+            amount
+                .to_u64_checked()
+                .ok_or_else(|| StealthOutputsApiError::InvalidParameter {
+                    param: "amount",
+                    reason: "Stealth amount exceeds u64::MAX. This is currently a limitation due to the format of \
+                             EncryptedData"
+                        .to_string(),
+                })?,
+            &mask.key,
+            destination.view_only_key(),
+            &nonce_secret,
+            memo,
+        )?;
+
+        // Create stealth address - used during spend time
+        let output_owner_public_key = self.crypto_api.derive_stealth_owner_public_key(
+            destination.network(),
+            destination.account_key(),
+            &nonce_secret,
+        );
+
+        let witness = UnblindedOutputWitness {
+            amount,
+            mask: mask.key,
+            sender_public_nonce: public_nonce,
+            encrypted_data,
+            minimum_value_promise: 0,
+            resource_view_key,
+        };
+
+        let derived_tag = self.crypto_api.derive_stealth_output_tag(
+            destination.network(),
+            &nonce_secret,
+            destination.view_only_key(),
+            resource_address,
+        );
+
+        Ok(UnblindedStealthOutputWitness {
+            witness,
+            output_owner_public_key,
+            tag: derived_tag,
+        })
+    }
+
+    pub fn generate_transfer_statement<I>(
+        &self,
+        params: TransferStatementParams<'_, I>,
+    ) -> Result<StealthTransferStatement, StealthOutputsApiError>
+    where
+        I: IntoIterator<Item = OutputToCreate<'a>>,
+    {
+        let unblinded_inputs =
+            self.resolve_output_masks_for_spending(params.spend_key_id, params.view_only_key_id, params.inputs)?;
+        let outputs = params
+            .outputs
+            .into_iter()
+            .map(|output| {
+                self.create_output_witness(
+                    output.owner_address,
+                    output.amount,
+                    params.resource_address,
+                    params.resource_view_key.clone(),
+                    output.memo,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let total_input_amount =
+            unblinded_inputs.iter().map(|i| i.value()).sum::<Amount>() + params.input_revealed_amount;
+        let total_output_amount =
+            outputs.iter().map(|o| o.witness.amount).sum::<Amount>() + params.output_revealed_amount;
+        if total_input_amount != total_output_amount {
+            return Err(StealthOutputsApiError::InvalidParameter {
+                param: "inputs/outputs",
+                reason: format!(
+                    "Input and output amounts do not balance. Input: {}, Output: {}",
+                    total_input_amount, total_output_amount
+                ),
+            });
+        }
+
+        let statement = self.crypto_api.generate_transfer_statement(
+            unblinded_inputs.iter().map(|i| &i.witness),
+            params.input_revealed_amount,
+            &outputs,
+            params.output_revealed_amount,
+        )?;
+        Ok(statement)
+    }
+}
+
+pub struct TransferStatementParams<'a, I> {
+    pub spend_key_id: KeyId,
+    pub view_only_key_id: KeyId,
+    pub resource_address: &'a ResourceAddress,
+    pub resource_view_key: Option<RistrettoPublicKey>,
+    pub inputs: &'a [InputSpendData],
+    pub input_revealed_amount: Amount,
+    pub outputs: I,
+    pub output_revealed_amount: Amount,
 }
 
 #[derive(Debug, thiserror::Error)]

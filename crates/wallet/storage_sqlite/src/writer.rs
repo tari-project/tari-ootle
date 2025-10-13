@@ -1125,6 +1125,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 stealth_outputs::encrypted_data.eq(output.encrypted_data.as_ref()),
                 stealth_outputs::tag_byte.eq(output.tag_byte.value() as i32),
                 stealth_outputs::memo_json.eq(output.memo.as_ref().map(serialize_json).transpose()?),
+                stealth_outputs::minimum_value_promise.eq(output.minimum_value_promise as i64),
                 stealth_outputs::is_on_chain.eq(output.is_on_chain),
                 stealth_outputs::status.eq(output.status.as_key_str()),
                 stealth_outputs::is_burnt.eq(output.is_burnt),

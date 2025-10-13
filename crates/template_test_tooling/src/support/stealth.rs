@@ -13,9 +13,9 @@ use tari_engine_types::{
 use tari_ootle_wallet_crypto::{
     stealth,
     MaskAndValue,
-    UnblindedOutputStatement,
-    UnblindedStealthInputStatement,
-    UnblindedStealthOutputStatement,
+    UnblindedOutputWitness,
+    UnblindedStealthInputWitness,
+    UnblindedStealthOutputWitness,
 };
 use tari_template_lib::{
     models::{StealthOutputsStatement, StealthTransferStatement},
@@ -86,8 +86,8 @@ fn generate_stealth_statement_internal(
     let output_statements = output_amounts
         .iter()
         .zip(&masks)
-        .map(|(amount, mask)| UnblindedStealthOutputStatement {
-            statement: UnblindedOutputStatement {
+        .map(|(amount, mask)| UnblindedStealthOutputWitness {
+            witness: UnblindedOutputWitness {
                 amount: *amount,
                 mask: mask.clone(),
                 sender_public_nonce: test_sender_public_nonce(),
@@ -174,7 +174,7 @@ fn generate_transfer_data_internal<I: IntoIterator<Item = A>, A: Into<Amount>>(
             };
             // For testing purposes, we use the mask as the owner key
             let output_owner_public_key = RistrettoPublicKey::from_secret_key(&output_mask);
-            let statement = UnblindedOutputStatement {
+            let statement = UnblindedOutputWitness {
                 amount,
                 mask: output_mask,
                 resource_view_key: view_key.clone(),
@@ -184,8 +184,8 @@ fn generate_transfer_data_internal<I: IntoIterator<Item = A>, A: Into<Amount>>(
                 encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
             };
 
-            UnblindedStealthOutputStatement {
-                statement,
+            UnblindedStealthOutputWitness {
+                witness: statement,
                 output_owner_public_key,
                 tag: UtxoTag::new(0),
             }
@@ -196,7 +196,7 @@ fn generate_transfer_data_internal<I: IntoIterator<Item = A>, A: Into<Amount>>(
         .iter()
         .map(|input| {
             let mask_and_value = input.clone();
-            UnblindedStealthInputStatement {
+            UnblindedStealthInputWitness {
                 mask_and_value,
                 // For testing purposes, we use the mask as the owner key
                 owner_secret: input.mask.clone(),
@@ -214,7 +214,7 @@ fn generate_transfer_data_internal<I: IntoIterator<Item = A>, A: Into<Amount>>(
     .unwrap();
 
     StealthUnblindedTransferData {
-        output_masks: outputs.into_iter().map(|m| m.statement.mask).collect(),
+        output_masks: outputs.into_iter().map(|m| m.witness.mask).collect(),
         statement: transfer,
     }
 }

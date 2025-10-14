@@ -95,6 +95,16 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
     fn prepare_next_epoch(&mut self, epoch_ticker_data: EpochTickerData) -> anyhow::Result<()> {
         let next_epoch = epoch_ticker_data.epoch;
         let epoch_hash = epoch_ticker_data.epoch_hash;
+        if next_epoch.is_zero() {
+            // If at epoch 0, just emit the epoch changed and done for now events
+            self.pending_events.push_back(EpochEvent::EpochChanged {
+                epoch: next_epoch,
+                epoch_hash,
+            });
+
+            return Ok(());
+        }
+
         let done_for_now = epoch_ticker_data.done_for_now;
         let prev_epoch = next_epoch - Epoch(1);
         self.store

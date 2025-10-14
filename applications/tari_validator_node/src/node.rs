@@ -66,6 +66,11 @@ impl ValidatorNode {
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {
                     info!(target: LOG_TARGET, "💤 Received SIGINT");
+                    // Second SIGINT forces shutdown
+                    if shutdown.is_triggered() {
+                        warn!(target: LOG_TARGET, "💤 Shutdown NOW");
+                        break;
+                    }
                     shutdown.trigger();
                 },
 

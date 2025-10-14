@@ -55,7 +55,7 @@ mod tariswap {
 
             // create the lp resource
             // TODO: add lp resource minting/burning security, only this component should be allowed
-            let lp_resource = ResourceBuilder::fungible().with_token_symbol("LP").build();
+            let lp_resource = ResourceBuilder::public_fungible().with_token_symbol("LP").build();
 
             Component::new(Self {
                 pools,

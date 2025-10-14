@@ -17,7 +17,7 @@ mod template {
 
     impl Burn {
         pub fn new(confidential_supply: ConfidentialOutputStatement) -> Component<Self> {
-            let fungible = ResourceBuilder::fungible()
+            let fungible = ResourceBuilder::public_fungible()
                 .burnable(rule!(allow_all))
                 .initial_supply(1_000_000);
 

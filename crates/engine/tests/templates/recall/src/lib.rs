@@ -25,7 +25,7 @@ mod template {
             ResourceAddress,
             ResourceAddress,
         ) {
-            let fungible = ResourceBuilder::fungible()
+            let fungible = ResourceBuilder::public_fungible()
                 .recallable(rule!(allow_all))
                 .initial_supply(1_000_000);
 

@@ -65,28 +65,34 @@ impl Server {
                 "/network/connections",
                 get(handlers::network::get_connections).post(handlers::network::add_connection),
             )
-            .route("/substates/{substate_id}", get(handlers::substates::get_substate))
-            .route(
-                "/substates",
-                get(handlers::substates::list_substates).post(handlers::substates::fetch_substates),
+            .nest("/substates", Router::new()
+                .route("/fetch", post(handlers::substates::fetch_substates))
+                .route("/{substate_id}", get(handlers::substates::get_substate))
+                .route("/", get(handlers::substates::list_substates))
             )
-            .route("/transactions", post(handlers::transactions::submit_transaction))
-            .route(
-                "/transactions/recent",
-                get(handlers::transactions::list_recent_transactions),
+            .nest("/transactions", Router::new()
+                .route("/", post(handlers::transactions::submit_transaction))
+                .route(
+                    "/recent",
+                    get(handlers::transactions::list_recent_transactions),
+                )
+                .route(
+                    "/{transaction_id}/result",
+                    get(handlers::transactions::get_transaction_result),
+                )
             )
-            .route(
-                "/transactions/{transaction_id}/result",
-                get(handlers::transactions::get_transaction_result),
+            .nest("/templates", Router::new()
+                .route(
+                    "/{template_address}",
+                    get(handlers::templates::get_template_definition),
+                )
+                .route("/", get(handlers::templates::list_templates))
             )
-            .route(
-                "/templates/{template_address}",
-                get(handlers::templates::get_template_definition),
-            )
-            .route("/templates", get(handlers::templates::list_templates))
             .route("/non-fungibles", get(handlers::nfts::get_non_fungibles)) // Placeholder for future non-fungible endpoints
-            .route("/utxos/fetch", post(handlers::utxos::fetch_utxos))
-            .route("/utxos/stream", post(handlers::utxos::stream_utxo_updates))
+            .nest("/utxos", Router::new()
+                .route("/fetch", post(handlers::utxos::fetch_utxos))
+                .route("/stream", post(handlers::utxos::stream_utxo_updates))
+            )
             .layer(CorsLayer::permissive())
             .layer(RequestBodyLimitLayer::new(REQUEST_BODY_LIMIT))
             .merge(SwaggerUi::new("/swagger-ui").url("/openapi.json", ApiDoc::openapi()))

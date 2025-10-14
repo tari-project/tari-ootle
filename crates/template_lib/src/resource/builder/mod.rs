@@ -51,7 +51,7 @@ impl ResourceBuilder {
     ///
     /// WARNING: this resource is not confidential. Balances in vaults will be visible to anyone with access to the
     /// ledger.
-    pub fn fungible() -> FungibleResourceBuilder {
+    pub fn public_fungible() -> FungibleResourceBuilder {
         FungibleResourceBuilder::new()
     }
 

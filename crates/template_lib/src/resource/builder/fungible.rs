@@ -21,7 +21,7 @@ use crate::{
 ///
 /// # Usage
 ///
-/// You typically start by creating a new builder via [`ResourceBuilder::fungible()`],
+/// You typically start by creating a new builder via [`ResourceBuilder::public_fungible()`],
 /// then chain configuration methods like `.with_owner_rule()`, `.mintable()`, or
 /// `.with_token_symbol()`, and finally call `.build()` or `.initial_supply()` to create
 /// the resource.
@@ -32,7 +32,7 @@ use crate::{
 /// ```ignore
 /// use tari_template_lib::resource::builder::ResourceBuilder;
 ///
-/// let resource_address = ResourceBuilder::fungible()
+/// let resource_address = ResourceBuilder::public_fungible()
 ///     .with_token_symbol("TARI")
 ///     .with_divisibility(9)
 ///     .mintable(rule!(allow_all))
@@ -44,7 +44,7 @@ use crate::{
 /// use tari_template_lib::resource::builder::ResourceBuilder;
 /// use tari_template_lib::types::Amount;
 ///
-/// let bucket = ResourceBuilder::fungible()
+/// let bucket = ResourceBuilder::public_fungible()
 ///     .with_token_symbol("YOUR_TOKEN")
 ///     .initial_supply(Amount::from(1_000_000));
 /// ```
@@ -80,7 +80,7 @@ impl FungibleResourceBuilder {
     ///
     /// ```ignore
     /// use tari_template_lib::prelude::*;
-    /// let resource = ResourceBuilder::fungible()
+    /// let resource = ResourceBuilder::public_fungible()
     ///    .with_owner_rule(rule!(allow_all))
     ///   .then(|builder| {
     ///     if some_condition {
@@ -133,7 +133,7 @@ impl FungibleResourceBuilder {
     /// ```rust, ignore
     /// use tari_template_lib::auth::AccessRule;
     /// use tari_template_lib::resource::builder::ResourceBuilder;
-    /// ResourceBuilder::fungible()
+    /// ResourceBuilder::public_fungible()
     ///     .mintable(rule!(allow_all))
     ///     .build();
     /// ```
@@ -152,7 +152,7 @@ impl FungibleResourceBuilder {
     /// ```rust, ignore
     /// use tari_template_lib::auth::AccessRule;
     /// use tari_template_lib::resource::builder::ResourceBuilder;
-    /// ResourceBuilder::fungible()
+    /// ResourceBuilder::public_fungible()
     ///     .burnable(rule!(allow_all))
     ///     .build();
     /// ```
@@ -174,7 +174,7 @@ impl FungibleResourceBuilder {
     /// ```rust, ignore
     /// use tari_template_lib::auth::AccessRule;
     /// use tari_template_lib::resource::builder::ResourceBuilder;
-    /// ResourceBuilder::fungible()
+    /// ResourceBuilder::public_fungible()
     ///    .recallable(rule!(allow_all))
     ///   .build();
     /// ```
@@ -200,7 +200,7 @@ impl FungibleResourceBuilder {
     /// ```rust, ignore
     /// use tari_template_lib::auth::AccessRule;
     /// use tari_template_lib::resource::builder::ResourceBuilder;
-    /// ResourceBuilder::fungible()
+    /// ResourceBuilder::public_fungible()
     ///     .withdrawable(AccessRule::DenyAll)
     ///     .build();
     /// ```
@@ -220,7 +220,7 @@ impl FungibleResourceBuilder {
     /// ```rust, ignore
     /// use tari_template_lib::auth::AccessRule;
     /// use tari_template_lib::resource::builder::ResourceBuilder;
-    /// ResourceBuilder::fungible()
+    /// ResourceBuilder::public_fungible()
     ///    .depositable(rule!(allow_all))
     ///     .build();
     /// ```
@@ -241,7 +241,7 @@ impl FungibleResourceBuilder {
     /// ```rust, ignore
     /// use tari_template_lib::auth::AccessRule;
     /// use tari_template_lib::resource::builder::ResourceBuilder;
-    /// ResourceBuilder::fungible()
+    /// ResourceBuilder::public_fungible()
     ///     .update_access_rules(AccessRule::require_owner())
     ///     .build();
     /// ```
@@ -255,7 +255,7 @@ impl FungibleResourceBuilder {
     /// # Examples
     /// ```rust, ignore
     ///  use tari_template_lib::resource::builder::ResourceBuilder;
-    /// ResourceBuilder::fungible()
+    /// ResourceBuilder::public_fungible()
     ///     .with_token_symbol("MY_TOKEN")
     ///     .build();
     /// ```
@@ -275,7 +275,7 @@ impl FungibleResourceBuilder {
     /// # Examples
     /// ```rust, ignore
     /// use tari_template_lib::resource::builder::ResourceBuilder;
-    /// ResourceBuilder::fungible()
+    /// ResourceBuilder::public_fungible()
     ///    .add_metadata("CharacterName", "Tari")
     ///    .add_metadata("CharacterType", "Mascot")
     ///    .add_metadata("CharacterLvl", "99")
@@ -298,7 +298,7 @@ impl FungibleResourceBuilder {
     ///     ("Type", "NFT"),
     ///     ("Creator", "Tari Project"),
     /// ]);
-    /// let address = ResourceBuilder::fungible()
+    /// let address = ResourceBuilder::public_fungible()
     ///     .with_metadata(metadata)
     ///     .build();
     /// ```
@@ -315,7 +315,7 @@ impl FungibleResourceBuilder {
     /// # Examples
     /// ```rust, ignore
     /// use tari_template_lib::resource::builder::ResourceBuilder;
-    /// ResourceBuilder::fungible()
+    /// ResourceBuilder::public_fungible()
     ///     .with_image_url("https://example.com/my_token_image.png".to_string())
     ///     .build();
     /// ```
@@ -335,7 +335,7 @@ impl FungibleResourceBuilder {
     /// # Examples
     /// ```rust, ignore
     /// use tari_template_lib::resource::builder::ResourceBuilder;
-    /// ResourceBuilder::fungible()
+    /// ResourceBuilder::public_fungible()
     ///     .with_divisibility(9)
     ///     .build();
     /// ```
@@ -358,7 +358,7 @@ impl FungibleResourceBuilder {
     /// Building a resource with a hook from within a component
     /// ```ignore
     /// use tari_template_lib::{caller_context::CallerContext, prelude::ResourceBuilder};
-    /// ResourceBuilder::fungible()
+    /// ResourceBuilder::public_fungible()
     ///     .with_authorization_hook(CallerContext::current_component_address(), "my_hook")
     ///     .build();
     /// ```
@@ -368,7 +368,7 @@ impl FungibleResourceBuilder {
     /// ```ignore
     /// use tari_template_lib::{caller_context::CallerContext, prelude::ResourceBuilder};
     /// let alloc = CallerContext::allocate_component_address();
-    /// ResourceBuilder::fungible()
+    /// ResourceBuilder::public_fungible()
     ///     .with_authorization_hook(*alloc.address(), "my_hook")
     ///     .build();
     /// ```
@@ -385,7 +385,7 @@ impl FungibleResourceBuilder {
     /// # Examples
     /// ```rust, ignore
     /// use tari_template_lib::resource::builder::ResourceBuilder;
-    /// ResourceBuilder::fungible()
+    /// ResourceBuilder::public_fungible()
     ///     .disable_total_supply_tracking()
     ///     .build();
     /// ```
@@ -409,7 +409,7 @@ impl FungibleResourceBuilder {
     /// ```rust, ignore
     /// use tari_template_lib::resource::builder::ResourceBuilder;
     /// use tari_template_lib::types::Amount;
-    /// let bucket = ResourceBuilder::fungible()
+    /// let bucket = ResourceBuilder::public_fungible()
     ///     .with_token_symbol("YOUR_TOKEN")
     ///     .initial_supply(Amount::from(1_000_000));
     /// ```

@@ -57,7 +57,7 @@ tari_ootle_walletd --network igor -b <yourdesiredconfigfolderpath>
 
 This will start a wallet connected to the Igor Testnet. You can view the public Nodes here:
 
-- Validator Node: [http://18.217.22.26:12006]](http://18.217.22.26:12006)
+- Validator Node: [http://18.217.22.26:12006](http://18.217.22.26:12006)
 - Indexer: [http://18.217.22.26:12502](http://18.217.22.26:12502)
 
 Navigate to http://127.0.0.1:5100 to create an account, claim test tokens and start testing features.

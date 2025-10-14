@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use log::info;
 use tari_engine_types::{indexed_value::decode_value_at_path, ToByteType};
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
-use tari_ootle_wallet_sdk::models::Account;
+use tari_ootle_wallet_sdk::models::{Account, KeyBranch};
 use tari_template_lib::{
     models::{ComponentAddress, VaultId},
     prelude::{ResourceAddress, ResourceType, XTR},
@@ -91,12 +91,12 @@ impl Runner {
         amount_b: Amount,
         faucet: &Faucet,
     ) -> anyhow::Result<()> {
-        let primary_account_key = self
-            .sdk
-            .key_manager_api()
-            .get_account_owner_key(primary_account.owner_key_id.expect("no owner key id"))?;
+        let primary_account_key = self.sdk.key_manager_api().get_public_key(
+            KeyBranch::Account,
+            primary_account.owner_key_id.expect("no owner key id"),
+        )?;
         let mut tx_ids = Vec::with_capacity(200);
-        let primary_account_pk = primary_account_key.to_public_key().to_byte_type();
+        let primary_account_pk = primary_account_key.public_key().to_byte_type();
 
         for i in 0..5 {
             let _timer = TraceTimer::info("tariswap", "add_liquidity")
@@ -104,10 +104,6 @@ impl Runner {
 
             for (i, tariswap) in tariswaps.iter().enumerate().skip(i * 200).take(200) {
                 let account = &accounts[i % accounts.len()];
-                let key = self
-                    .sdk
-                    .key_manager_api()
-                    .get_account_owner_key(account.owner_key_id.expect("no owner key id"))?;
                 let xtr_vault = self
                     .sdk
                     .accounts_api()
@@ -150,8 +146,22 @@ impl Runner {
                     .put_last_instruction_output_on_workspace("lp")
                     .call_method(account.component_address, "deposit", args![Workspace("lp")])
                     .with_authorized_seal_signer()
-                    .add_signer(&primary_account_pk, key.secret())
-                    .build_and_seal(primary_account_key.secret());
+                    .then(|builder| {
+                        // First sign with the account key to authorize the use of the account component
+                        self.sdk.local_signer_api().sign_with_context(
+                            KeyBranch::Account,
+                            account.owner_key_id.expect("no owner key id"),
+                            &primary_account_pk,
+                            builder,
+                        )
+                    })?
+                    .build();
+
+                // Then sign with the primary account key to pay the fee
+                let transaction =
+                    self.sdk
+                        .local_signer_api()
+                        .sign(KeyBranch::Account, primary_account_key.key_id(), transaction)?;
 
                 assert!(
                     transaction.verify_all_signatures(),
@@ -209,21 +219,17 @@ impl Runner {
         amount_b_for_a: Amount,
         faucet: &Faucet,
     ) -> anyhow::Result<()> {
-        let primary_account_key = self
-            .sdk
-            .key_manager_api()
-            .get_account_owner_key(primary_account.owner_key_id.expect("no owner key id"))?;
-        let primary_account_pk = primary_account_key.to_public_key().to_byte_type();
+        let primary_account_key = self.sdk.key_manager_api().get_public_key(
+            KeyBranch::Account,
+            primary_account.owner_key_id.expect("no owner key id"),
+        )?;
+        let primary_account_pk = primary_account_key.public_key.to_byte_type();
 
         let mut tx_ids = vec![];
         // Swap XTR for faucet
         for i in 0..5 {
             for (i, account) in accounts.iter().enumerate().skip(i * 200).take(200) {
                 let tariswap = &tariswaps[i % tariswaps.len()];
-                let key = self
-                    .sdk
-                    .key_manager_api()
-                    .get_account_owner_key(account.owner_key_id.expect("no owner key id"))?;
                 let xtr_vault = self
                     .sdk
                     .accounts_api()
@@ -268,9 +274,20 @@ impl Runner {
                     ])
                     .put_last_instruction_output_on_workspace("swapped")
                     .call_method(account.component_address, "deposit", args![Workspace("swapped")])
-                    .with_authorized_seal_signer()
-                    .add_signer(&primary_account_pk, key.secret())
-                    .build_and_seal(primary_account_key.secret());
+                    .with_authorized_seal_signer();
+
+                let transaction = self.sdk.local_signer_api().sign_with_context(
+                    KeyBranch::Account,
+                    account.owner_key_id.expect("no owner key id"),
+                    &primary_account_pk,
+                    transaction,
+                )?;
+
+                let transaction = self.sdk.local_signer_api().sign(
+                    KeyBranch::Account,
+                    primary_account_key.key_id(),
+                    transaction.build(),
+                )?;
 
                 tx_ids.push(self.submit_transaction(transaction).await?);
             }
@@ -294,10 +311,6 @@ impl Runner {
         // Swap faucet for XTR
         for i in 0..5 {
             for (i, account) in accounts.iter().enumerate().skip(i * 200).take(200) {
-                let key = self
-                    .sdk
-                    .key_manager_api()
-                    .get_account_owner_key(account.owner_key_id.expect("no owner key id"))?;
                 let xtr_vault = self
                     .sdk
                     .accounts_api()
@@ -337,7 +350,13 @@ impl Runner {
                     .call_method(tariswap.component_address, "swap", args![Workspace("b"), XTR,])
                     .put_last_instruction_output_on_workspace("swapped")
                     .call_method(account.component_address, "deposit", args![Workspace("swapped")])
-                    .build_and_seal(key.secret());
+                    .build();
+
+                let transaction = self.sdk.local_signer_api().sign(
+                    KeyBranch::Account,
+                    account.owner_key_id.expect("no owner key id"),
+                    transaction,
+                )?;
 
                 tx_ids.push(self.submit_transaction(transaction).await?);
             }

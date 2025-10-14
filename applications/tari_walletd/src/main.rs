@@ -29,7 +29,7 @@ use tari_common::initialize_logging;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::ToByteType;
 use tari_ootle_app_utilities::configuration::load_configuration;
-use tari_ootle_wallet_sdk::{apis::key_manager::KeyBranch, cipher_seed::CipherSeedRestore};
+use tari_ootle_wallet_sdk::{cipher_seed::CipherSeedRestore, models::KeyBranch};
 use tari_ootle_walletd::{
     cli::{Cli, Subcommand},
     config::ApplicationConfig,

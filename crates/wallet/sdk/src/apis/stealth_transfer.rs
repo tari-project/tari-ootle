@@ -38,7 +38,7 @@ use crate::{
         stealth_outputs::{StealthOutputsApi, StealthOutputsApiError, TransferStatementParams},
         substate::{SubstateApiError, SubstatesApi, ValidatorScanResult},
     },
-    models::{Account, AccountWithAddress, InputSpendData, OutputStatus, StealthOutputModel, WalletLockId},
+    models::{Account, AccountWithAddress, InputSpendData, KeyBranch, OutputStatus, StealthOutputModel, WalletLockId},
     network::WalletNetworkInterface,
     storage::{WalletStorageError, WalletStore},
 };
@@ -450,6 +450,7 @@ where
 
         // Generate fee transfer statement
         let fee_transfer_statement = self.outputs_api.generate_transfer_statement(TransferStatementParams {
+            spend_key_branch: KeyBranch::Account,
             spend_key_id: owner_key_id,
             view_only_key_id: owner_account.view_only_key_id(),
             resource_address: &params.resource_address,
@@ -546,6 +547,7 @@ where
         .filter(|o| o.amount.is_positive());
 
         let transfer_statement = self.outputs_api.generate_transfer_statement(TransferStatementParams {
+            spend_key_branch: KeyBranch::Account,
             spend_key_id: owner_key_id,
             view_only_key_id: owner_account.view_only_key_id(),
             resource_address: &params.resource_address,

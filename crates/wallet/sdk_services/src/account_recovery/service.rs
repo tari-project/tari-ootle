@@ -12,8 +12,8 @@ use tari_ootle_common_types::{
     substate_type::SubstateType,
 };
 use tari_ootle_wallet_sdk::{
-    apis::{config::ConfigKey, key_manager::KeyBranch},
-    models::{DerivedWalletKey, KeyId},
+    apis::config::ConfigKey,
+    models::{DerivedWalletKey, KeyBranch, KeyId},
     network::{StatusResponseError, WalletNetworkInterface},
     storage::WalletStore,
     WalletSdk,

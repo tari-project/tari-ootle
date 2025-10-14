@@ -15,7 +15,7 @@ use crate::{
         confidential_crypto::{ConfidentialCryptoApi, ConfidentialCryptoApiError},
         key_manager::{KeyManagerApi, KeyManagerApiError},
     },
-    models::{Account, ConfidentialOutputModel, Key, OutputStatus, WalletLockId},
+    models::{Account, ConfidentialOutputModel, OutputStatus, WalletLockId, WalletSecretKey},
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
@@ -265,7 +265,7 @@ where TStore: WalletStore
     fn validate_output(
         &self,
         account: &Account,
-        key: &Key,
+        key: &WalletSecretKey,
         vault_id: VaultId,
         commitment: PedersenCommitmentBytes,
         output: &PrivateOutput,

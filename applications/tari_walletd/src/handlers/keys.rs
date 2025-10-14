@@ -2,9 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use axum_extra::headers::authorization::Bearer;
-use tari_crypto::{keys::PublicKey as PublicKeyTrait, ristretto::RistrettoPublicKey};
 use tari_engine_types::ToByteType;
-use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
+use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId};
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{
@@ -29,11 +28,11 @@ pub async fn handle_create(
     let key_manager = sdk.key_manager_api();
     let key = req
         .specific_index
-        .map(|idx| key_manager.derive_key(req.branch, idx))
-        .unwrap_or_else(|| key_manager.next_key(req.branch))?;
+        .map(|idx| key_manager.get_public_key(req.branch, KeyId::derived(idx)))
+        .unwrap_or_else(|| key_manager.next_public_key(req.branch))?;
     Ok(KeysCreateResponse {
-        id: key.key_index,
-        public_key: RistrettoPublicKey::from_secret_key(&key.key).to_byte_type(),
+        id: key.key_id.derived_index().expect("Key is derived"),
+        public_key: key.public_key.to_byte_type(),
     })
 }
 

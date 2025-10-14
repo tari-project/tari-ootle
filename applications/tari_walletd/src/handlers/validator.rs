@@ -9,6 +9,7 @@ use either::Either;
 use log::*;
 use tari_engine_types::{substate::SubstateId, ToByteType};
 use tari_ootle_common_types::{derive_fee_pool_address, SubstateAddress, SubstateRequirement};
+use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId};
 use tari_template_lib::constants::XTR;
 use tari_transaction::args;
 use tari_wallet_daemon_client::{
@@ -48,11 +49,12 @@ pub async fn handle_get_validator_fees(
             let account_key_id = account.owner_key_id().ok_or_else(|| {
                 anyhow!("The specified account does not have an associated owner key to derive the claim key from")
             })?;
-            sdk.key_manager_api().get_account_owner_key(account_key_id)?
+            sdk.key_manager_api()
+                .get_public_key(KeyBranch::Account, account_key_id)?
         },
-        AccountOrKeyId::KeyId(key_id) => sdk.key_manager_api().get_account_owner_key(key_id)?,
+        AccountOrKeyId::KeyId(key_id) => sdk.key_manager_api().get_public_key(KeyBranch::Account, key_id)?,
     };
-    let claim_public_key = claim_key.to_public_key().to_byte_type();
+    let claim_public_key = claim_key.public_key().to_byte_type();
 
     let shards = req
         .shard_group
@@ -115,25 +117,25 @@ pub async fn handle_claim_validator_fees(
         anyhow!("The specified account does not have an associated owner key to derive the claim key from")
     })?;
     let account_component_address = *account.component_address();
-    let account_key = sdk.key_manager_api().get_account_owner_key(account_key_id)?;
 
-    let (claim_public_key, claim_secret) = match req.claim_key_index {
-        Some(index) => {
-            let (claim_key, claim_pk) = sdk.key_manager_api().derive_account_keypair(index)?;
-            (claim_pk, Some(claim_key))
-        },
-        None => (account_key.to_public_key(), None),
+    let claim_public_key = match req.claim_key_index {
+        Some(index) => sdk
+            .key_manager_api()
+            .get_public_key(KeyBranch::Account, KeyId::derived(index))?
+            .public_key
+            .to_byte_type(),
+        None => *account.address.account_public_key(),
     };
 
     let fee_pool_addresses = req
         .shards
         .into_iter()
-        .map(|shard| derive_fee_pool_address(&claim_public_key.to_byte_type(), NUM_PRESHARDS, shard));
+        .map(|shard| derive_fee_pool_address(&claim_public_key, NUM_PRESHARDS, shard));
 
     // build the transaction
     let max_fee = req.max_fee.unwrap_or(DEFAULT_FEE);
 
-    let transaction = context
+    let unsigned_transaction = context
         .transaction_builder()
         .with_dry_run(req.dry_run)
         .with_fee_instructions_builder(|builder| {
@@ -178,16 +180,30 @@ pub async fn handle_claim_validator_fees(
         .with_inputs(fee_pool_addresses.map(SubstateRequirement::unversioned))
         .add_input(XTR)
         .then(|builder| {
-            if let Some(secret) = claim_secret {
-                // If the claim key is different from the account secret, we need to sign with both
-                builder
-                    .with_authorized_seal_signer()
-                    .add_signer(&account_key.to_public_key().to_byte_type(), &secret.key)
+            if let Some(index) = req.claim_key_index {
+                if claim_public_key == *account.address.account_public_key() {
+                    builder
+                } else {
+                    // If the claim key is different from the account secret, we need to sign with both
+                    sdk.local_signer_api()
+                        .sign_with_context(
+                            KeyBranch::Account,
+                            KeyId::derived(index),
+                            account.address.account_public_key(),
+                            builder.with_authorized_seal_signer(),
+                        )
+                        // We happen to know that signing with a derived key is infallible
+                        .expect("Signing with should work")
+                }
             } else {
                 builder
             }
         })
-        .build_and_seal(&account_key.secret);
+        .build();
+
+    let transaction = sdk
+        .local_signer_api()
+        .sign(KeyBranch::Account, account_key_id, unsigned_transaction)?;
 
     // send the transaction
     if req.dry_run {

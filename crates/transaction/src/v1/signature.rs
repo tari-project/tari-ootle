@@ -94,7 +94,7 @@ impl TransactionSignature {
         transaction: &UnsignedTransactionV1,
     ) -> Self {
         let public_key = RistrettoPublicKey::from_secret_key(secret_key);
-        let message = Self::create_message(seal_signer, transaction);
+        let message = Self::create_message(1, seal_signer, transaction);
 
         Self {
             signature: RistrettoSchnorr::sign(secret_key, message, &mut OsRng)
@@ -104,8 +104,8 @@ impl TransactionSignature {
         }
     }
 
-    pub fn verify(&self, seal_signer: &RistrettoPublicKeyBytes, transaction: &UnsignedTransactionV1) -> bool {
-        let message = Self::create_message(seal_signer, transaction);
+    pub fn verify_v1(&self, seal_signer: &RistrettoPublicKeyBytes, transaction: &UnsignedTransactionV1) -> bool {
+        let message = Self::create_message(1, seal_signer, transaction);
         let Ok(public_key) = self.public_key.try_from_byte_type() else {
             return false;
         };
@@ -123,9 +123,14 @@ impl TransactionSignature {
         &self.public_key
     }
 
-    fn create_message(seal_signer: &RistrettoPublicKeyBytes, transaction: &UnsignedTransactionV1) -> [u8; 64] {
+    pub fn create_message(
+        schema_version: u16,
+        seal_signer: &RistrettoPublicKeyBytes,
+        transaction: &UnsignedTransactionV1,
+    ) -> [u8; 64] {
         let signature_fields = TransactionSignatureFields::from(transaction);
         engine_hasher64(EngineHashDomainLabel::TransactionSignature)
+            .chain(&schema_version)
             .chain(seal_signer)
             .chain(&signature_fields)
             .result()

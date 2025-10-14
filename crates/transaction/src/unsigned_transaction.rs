@@ -6,8 +6,8 @@ use std::collections::HashSet;
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{indexed_value::IndexedValueError, substate::SubstateId};
-use tari_ootle_common_types::{Epoch, SubstateRequirement};
-use tari_template_lib::models::ComponentAddress;
+use tari_ootle_common_types::{Epoch, Signable, SubstateRequirement};
+use tari_template_lib::{models::ComponentAddress, prelude::RistrettoPublicKeyBytes};
 
 use crate::{Instruction, TransactionSignature, UnsealedTransactionV1, UnsignedTransactionV1};
 
@@ -18,6 +18,12 @@ pub enum UnsignedTransaction {
 }
 
 impl UnsignedTransaction {
+    pub fn schema_version(&self) -> u16 {
+        match self {
+            Self::V1(_) => 1,
+        }
+    }
+
     pub fn set_network<N: Into<u8>>(&mut self, network: N) -> &mut Self {
         match self {
             Self::V1(tx) => tx.set_network(network),
@@ -25,7 +31,7 @@ impl UnsignedTransaction {
         self
     }
 
-    pub fn set_dry_run(&mut self, dry_run: bool) -> &mut Self {
+    pub(crate) fn set_dry_run(&mut self, dry_run: bool) -> &mut Self {
         match self {
             Self::V1(tx) => tx.set_dry_run(dry_run),
         };
@@ -146,5 +152,15 @@ impl From<UnsignedTransactionV1> for UnsignedTransaction {
 impl Default for UnsignedTransaction {
     fn default() -> Self {
         Self::V1(UnsignedTransactionV1::default())
+    }
+}
+
+impl Signable<&RistrettoPublicKeyBytes> for UnsignedTransaction {
+    type MessageOutput = [u8; 64];
+
+    fn as_signing_message(&self, sealed_signer: &RistrettoPublicKeyBytes) -> Self::MessageOutput {
+        match &self {
+            Self::V1(tx) => tx.as_signing_message(sealed_signer),
+        }
     }
 }

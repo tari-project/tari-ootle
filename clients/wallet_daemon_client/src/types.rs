@@ -39,12 +39,13 @@ use tari_ootle_common_types::{
     SubstateRequirement,
 };
 use tari_ootle_wallet_sdk::{
-    apis::{confidential_transfer::ConfidentialTransferInputSelection, key_manager::KeyBranch},
+    apis::confidential_transfer::ConfidentialTransferInputSelection,
     crypto::memo::Memo,
     models::{
         Account,
         AuthoredTemplateModel,
         DerivedKeyIndex,
+        KeyBranch,
         KeyId,
         NonFungibleToken,
         OutputStatus,

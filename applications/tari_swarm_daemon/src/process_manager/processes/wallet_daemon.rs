@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use anyhow::anyhow;
-use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
+use tari_ootle_wallet_sdk::models::KeyBranch;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_wallet_daemon_client::{
     types::{AuthLoginAcceptRequest, AuthLoginRequest, AuthLoginResponse, WebauthnFinishAuthRequest},

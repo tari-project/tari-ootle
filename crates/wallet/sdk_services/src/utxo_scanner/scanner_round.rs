@@ -15,7 +15,7 @@ use tari_ootle_common_types::{
     StateVersion,
 };
 use tari_ootle_wallet_sdk::{
-    models::{AccountWithAddress, Key, StartOfShard, UtxoSpent, UtxoUnspent, WalletUtxoUpdate},
+    models::{AccountWithAddress, StartOfShard, UtxoSpent, UtxoUnspent, WalletSecretKey, WalletUtxoUpdate},
     network::{StatusResponseError, UtxoUpdateStream, WalletNetworkInterface},
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
     WalletSdk,
@@ -35,7 +35,7 @@ const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
 pub struct UtxoScannerRound<'a, TStore, TNetworkInterface> {
     network: Network,
     account: &'a AccountWithAddress,
-    view_key: &'a Key,
+    view_key: &'a WalletSecretKey,
     resource_address: &'a ResourceAddress,
 
     sdk: &'a WalletSdk<TStore, TNetworkInterface>,
@@ -57,7 +57,7 @@ where
         network: Network,
         sdk: &'a WalletSdk<TStore, TNetworkInterface>,
         account: &'a AccountWithAddress,
-        view_key: &'a Key,
+        view_key: &'a WalletSecretKey,
         resource_address: &'a ResourceAddress,
         notify: &'a Notify<WalletEvent>,
     ) -> Self {

@@ -11,7 +11,7 @@ use minotari_app_grpc::{
     tari_rpc::{GetBalanceRequest, SubmitValidatorEvictionProofRequest, ValidateRequest},
 };
 use tari_engine_types::confidential::{AbridgedTransactionKernel, EncodedMerkleProof, MinotariBurnClaimProof};
-use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
+use tari_ootle_wallet_sdk::models::KeyBranch;
 use tari_template_lib::{
     prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
     types::EncryptedData,

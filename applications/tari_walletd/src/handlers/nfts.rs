@@ -13,7 +13,7 @@ use tari_engine_types::{
     ToByteType,
 };
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
-use tari_ootle_wallet_sdk::apis::substate::ValidatorScanResult;
+use tari_ootle_wallet_sdk::{apis::substate::ValidatorScanResult, models::KeyBranch};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS},
@@ -85,7 +85,6 @@ pub async fn handle_mint_faucet(
     req: MintFaucetNftRequest,
 ) -> Result<MintFaucetNftResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    let key_manager_api = sdk.key_manager_api();
     context.check_auth(token, &[JrpcPermission::Admin])?;
 
     let account = get_account(&req.account, &sdk.accounts_api())?;
@@ -94,8 +93,6 @@ pub async fn handle_mint_faucet(
     let account_owner_key_id = account
         .owner_key_id
         .ok_or_else(|| invalid_params("account", Some("The account does not have an owner key ID")))?;
-
-    let signing_key = key_manager_api.get_account_owner_key(account_owner_key_id)?;
 
     info!(target: LOG_TARGET, "🎮 Minting new NFT with metadata {}", req.mutable_data);
 
@@ -122,7 +119,11 @@ pub async fn handle_mint_faucet(
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .add_input(NFT_FAUCET_COMPONENT_ADDRESS)
         .add_input(NFT_FAUCET_RESOURCE_ADDRESS)
-        .build_and_seal(&signing_key.secret);
+        .build();
+
+    let transaction = sdk
+        .local_signer_api()
+        .sign(KeyBranch::Account, account_owner_key_id, transaction)?;
 
     let mut events = context.notifier().subscribe();
     let tx_id = context.transaction_service().submit_transaction(transaction).await?;
@@ -292,9 +293,9 @@ pub async fn handle_transfer(
             .call_method(target_account_address, "deposit", args![Workspace(format!("b-{i}"))]);
     }
 
-    let fee_owner_key = sdk.key_manager_api().get_account_owner_key(fee_payer_key_id)?;
-
-    let source_account_secret_key = sdk.key_manager_api().get_account_owner_key(account_owner_key_id)?;
+    let fee_owner_key = sdk
+        .key_manager_api()
+        .get_public_key(KeyBranch::Account, fee_payer_key_id)?;
 
     let transaction = builder
         .with_dry_run(req.dry_run)
@@ -302,11 +303,19 @@ pub async fn handle_transfer(
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         // Seal signer is the fee payer account
         .with_authorized_seal_signer()
-        .add_signer(
-            &fee_owner_key.to_public_key().to_byte_type(),
-            &source_account_secret_key.secret,
-        )
-        .build_and_seal(&fee_owner_key.secret);
+        .then(|builder| {
+            sdk.local_signer_api().sign_with_context(
+                KeyBranch::Account,
+                account_owner_key_id,
+                &fee_owner_key.public_key().to_byte_type(),
+                builder,
+            )
+        })?
+        .build();
+
+    let transaction = sdk
+        .local_signer_api()
+        .sign(KeyBranch::Account, account_owner_key_id, transaction)?;
 
     // if dry run, we can return the result immediately
     if req.dry_run {

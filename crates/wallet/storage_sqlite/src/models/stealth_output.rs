@@ -35,6 +35,7 @@ pub struct StealthOutput {
     pub encrypted_data: Vec<u8>,
     pub tag_byte: i32,
     pub memo_json: Option<String>,
+    pub minimum_value_promise: i64,
     pub is_burnt: bool,
     pub is_frozen: bool,
     pub is_on_chain: bool,
@@ -81,6 +82,7 @@ impl StealthOutput {
             })?,
             tag_byte: UtxoTag::new(self.tag_byte as u32),
             memo: self.memo_json.as_ref().map(deserialize_json).transpose()?,
+            minimum_value_promise: self.minimum_value_promise as u64,
             status: self.status.parse().map_err(|_| WalletStorageError::DecodingError {
                 operation: "try_into_output",
                 item: "output",

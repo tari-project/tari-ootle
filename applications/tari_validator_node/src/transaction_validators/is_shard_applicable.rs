@@ -24,7 +24,7 @@ impl Validator<Transaction> for IsShardApplicable {
     type Error = TransactionValidationError;
 
     fn validate(&self, _context: &(), transaction: &Transaction) -> Result<(), Self::Error> {
-        if !transaction.is_shard_applicable() {
+        if !transaction.has_inputs() {
             warn!(target: LOG_TARGET, "HasInputs - FAIL: No input shards");
             return Err(TransactionValidationError::NoInputs {
                 transaction_id: transaction.calculate_id(),

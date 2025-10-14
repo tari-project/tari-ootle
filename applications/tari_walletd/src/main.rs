@@ -144,7 +144,9 @@ async fn main() -> Result<(), anyhow::Error> {
                     .map(CipherSeedRestore::FromSeedWords)
                     .unwrap_or(CipherSeedRestore::CreateNewIfRequired),
             )?;
-            let seed_words = sdk.load_seed_words()?;
+            let seed_words = sdk
+                .load_seed_words()?
+                .expect("Bug: seed words were initialized however load_seed_words returned None");
             println!("{}", seed_words.join(" ").reveal())
         },
     }

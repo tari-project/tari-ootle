@@ -24,6 +24,7 @@ pub struct StealthOutputModel {
     pub encrypted_data: EncryptedData,
     pub tag_byte: UtxoTag,
     pub memo: Option<Memo>,
+    pub minimum_value_promise: u64,
     pub status: OutputStatus,
     pub is_burnt: bool,
     pub is_frozen: bool,
@@ -35,6 +36,25 @@ impl StealthOutputModel {
     pub fn to_utxo_address(&self) -> UtxoAddress {
         UtxoAddress::new(self.resource_address, self.commitment.into())
     }
+
+    pub fn into_spend_data(self) -> InputSpendData {
+        InputSpendData {
+            commitment: self.commitment,
+            public_nonce: self.sender_public_nonce,
+            encrypted_data: self.encrypted_data,
+            value: self.value,
+            is_on_chain: self.is_on_chain,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct InputSpendData {
+    pub commitment: PedersenCommitmentBytes,
+    pub public_nonce: RistrettoPublicKeyBytes,
+    pub encrypted_data: EncryptedData,
+    pub value: Amount,
+    pub is_on_chain: bool,
 }
 
 pub struct StealthBalance {

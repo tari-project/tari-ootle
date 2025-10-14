@@ -3,7 +3,7 @@
 
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
 use tari_template_lib::{
-    models::ViewableBalanceProofChallengeFields,
+    models::{StealthInputsStatement, StealthOutputsStatement, ViewableBalanceProofChallengeFields},
     prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     types::Amount,
 };
@@ -36,29 +36,25 @@ pub fn viewable_balance_proof64(
         .result()
 }
 
-pub fn stealth_transfer64(
+pub fn stealth_balance_proof64(
     public_excess: &RistrettoPublicKey,
     public_nonce: &RistrettoPublicKey,
-    input_revealed_amount: &Amount,
-    output_revealed_amount: &Amount,
+    stealth_inputs_statement: &StealthInputsStatement,
+    stealth_outputs_statement: &StealthOutputsStatement,
 ) -> [u8; 64] {
-    engine_hasher64(EngineHashDomainLabel::StealthTransfer)
+    engine_hasher64(EngineHashDomainLabel::StealthBalanceProof)
         .chain(public_excess)
         .chain(public_nonce)
-        .chain(input_revealed_amount)
-        .chain(output_revealed_amount)
+        .chain(stealth_inputs_statement)
+        .chain(stealth_outputs_statement)
         .result()
 }
 
 pub fn stealth_ownership64(
-    public_key: &RistrettoPublicKeyBytes,
-    public_nonce: &RistrettoPublicKeyBytes,
     commitment: &PedersenCommitmentBytes,
     public_output_nonce: &RistrettoPublicKeyBytes,
 ) -> [u8; 64] {
     engine_hasher64(EngineHashDomainLabel::StealthOwnership)
-        .chain(public_key)
-        .chain(public_nonce)
         .chain(commitment)
         .chain(public_output_nonce)
         .result()

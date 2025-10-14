@@ -4,8 +4,8 @@
 use std::{collections::HashMap, time::Duration};
 
 use log::*;
-use tari_engine_types::indexed_value::IndexedValueError;
-use tari_ootle_common_types::optional::IsNotFoundError;
+use tari_engine_types::{indexed_value::IndexedValueError, resource::Resource};
+use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 use tari_ootle_wallet_sdk::{
     apis::{
         accounts::AccountsApiError,
@@ -22,7 +22,7 @@ use tari_ootle_wallet_sdk::{
     WalletSdk,
 };
 use tari_shutdown::ShutdownSignal;
-use tari_template_lib::prelude::ComponentAddress;
+use tari_template_lib::{models::ResourceAddress, prelude::ComponentAddress};
 use tari_transaction::TransactionId;
 use tokio::{
     sync::{broadcast, mpsc},
@@ -134,7 +134,35 @@ where
             } => {
                 let _ignore = reply.send(self.refresh_account(account, scan_for_utxos).await);
             },
+            AccountMonitorRequest::AssociateResource {
+                account,
+                resource,
+                reply,
+            } => {
+                let _ignore = reply.send(self.associate_resource_with_account(&account, resource).await);
+            },
         }
+    }
+
+    async fn associate_resource_with_account(
+        &self,
+        account_address: &ComponentAddress,
+        resource_address: ResourceAddress,
+    ) -> Result<(), AccountMonitorError> {
+        let accounts_api = self.wallet_sdk.accounts_api();
+        self.fetch_and_cache_resource(&resource_address).await?;
+        accounts_api.associate_stealth_resource(account_address, resource_address)?;
+        Ok(())
+    }
+
+    async fn fetch_and_cache_resource(&self, resx_addr: &ResourceAddress) -> Result<Resource, AccountMonitorError> {
+        if let Some(resx) = self.wallet_sdk.resources_api().get(resx_addr).optional()? {
+            return Ok(resx);
+        }
+
+        let resource = self.wallet_sdk.substate_api().fetch_resource(*resx_addr).await?;
+        self.wallet_sdk.resources_api().upsert_resource(resx_addr, &resource)?;
+        Ok(resource)
     }
 
     async fn on_poll(&self) {

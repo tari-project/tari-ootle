@@ -38,7 +38,7 @@ where
     }
 
     pub async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, NetworkClientError> {
-        if !transaction.is_shard_applicable() {
+        if !transaction.has_inputs() {
             return Err(NetworkClientError::NoInputsProvided);
         }
 

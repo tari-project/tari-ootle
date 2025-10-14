@@ -36,6 +36,8 @@ pub enum TransactionValidationError {
     NoInvolvedShards { transaction_id: TransactionId },
     #[error("Invalid transaction signature")]
     InvalidSignature,
+    #[error("Transaction {transaction_id} has no main signer")]
+    NoMainSigner { transaction_id: TransactionId },
     #[error("Transaction {transaction_id} is not signed")]
     TransactionNotSigned { transaction_id: TransactionId },
     #[error("Network error: {0}")]

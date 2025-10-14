@@ -2,6 +2,7 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use log::warn;
+use tari_engine::executables::Executable;
 use tari_transaction::Transaction;
 
 use crate::{transaction_validators::TransactionValidationError, validator::Validator};
@@ -16,6 +17,13 @@ impl Validator<Transaction> for TransactionSignatureValidator {
     type Error = TransactionValidationError;
 
     fn validate(&self, _context: &(), transaction: &Transaction) -> Result<(), TransactionValidationError> {
+        if transaction.main_signer().is_none() {
+            warn!(target: LOG_TARGET, "TransactionSignatureValidator - FAIL: No main signer");
+            return Err(TransactionValidationError::NoMainSigner {
+                transaction_id: transaction.to_id(),
+            });
+        }
+
         if !transaction.verify_all_signatures() {
             warn!(target: LOG_TARGET, "TransactionSignatureValidator - FAIL: Invalid signature");
             return Err(TransactionValidationError::InvalidSignature);

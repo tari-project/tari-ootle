@@ -22,19 +22,14 @@ pub fn verify_utxo_spend_permission(utxo: &UtxoOutput, input: &StealthInput) -> 
         details: "Malformed ownership proof".to_string(),
     })?;
 
-    let message = messages::stealth_ownership64(
-        &utxo.owner_public_key,
-        input.owner_proof.public_nonce(),
-        &input.commitment,
-        &utxo.output.public_nonce,
-    );
+    let message = messages::stealth_ownership64(&input.commitment, &utxo.output.public_nonce);
     let signer_pk = RistrettoPublicKey::convert_from_byte_type(&utxo.owner_public_key).map_err(|_| {
         ResourceError::InvalidSpend {
             details: "Non-canonical compressed owner public key".to_string(),
         }
     })?;
 
-    if !balance_proof.verify_raw_uniform(&signer_pk, &message) {
+    if !balance_proof.verify(&signer_pk, message) {
         return Err(ResourceError::InvalidSpend {
             details: format!("Invalid ownership proof for input with commitment {}", input.commitment),
         });

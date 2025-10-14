@@ -102,17 +102,6 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         }
     }
 
-    pub fn get_or_create_initial(&self, branch: KeyBranch) -> Result<(), KeyManagerApiError> {
-        let mut tx = self.store.create_write_tx()?;
-        if tx.key_manager_get_active_index(branch.as_str()).optional()?.is_none() {
-            tx.key_manager_insert_or_ignore(branch.as_str(), 0)?;
-            tx.commit()?;
-        } else {
-            tx.rollback()?;
-        }
-        Ok(())
-    }
-
     pub fn get_all_derived_keys(&self, branch: KeyBranch) -> Result<Vec<WalletKeyRecord>, KeyManagerApiError> {
         let all_keys = self.store.with_read_tx(|tx| tx.key_manager_get_all(branch.as_str()))?;
         let mut keys = Vec::with_capacity(all_keys.len());
@@ -286,26 +275,25 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
     /// If the branch does not exist, it will be created with index 0 and the first key will be returned.
     /// TODO: if there is another active DB transaction this function will block until it can acquire it.
     pub fn next_key(&self, branch: KeyBranch) -> Result<DerivedWalletKey, KeyManagerApiError> {
+        let next_key_id = self.next_derived_key_index(branch)?;
+        let key = self.derive_key(branch, next_key_id)?;
+        Ok(key)
+    }
+
+    pub fn next_derived_key_index(&self, branch: KeyBranch) -> Result<DerivedKeyIndex, KeyManagerApiError> {
         let mut tx = self.store.create_write_tx()?;
         let next_index = tx
             .key_manager_get_last_index(branch.as_str())
             .optional()?
             .map(|i| i + 1)
             .unwrap_or(0);
-        let key_manager = self.get_key_manager(branch.as_str())?;
-        let key = key_manager
-            .derive_key(next_index)
-            // TODO: Key manager shouldn't return other errors
-            .map_err(key_manager::error::KeyManagerServiceError::from)?;
-        // Index of account keys and view keys should always match to allow UTXO recovery when the specific account is
-        // unknown
         if matches!(branch, KeyBranch::Account) {
             // Ensure the view key branch is created if it doesn't exist
             tx.key_manager_insert_or_ignore(KeyBranch::ViewOnlyKey.as_str(), next_index)?;
         }
-        tx.key_manager_insert_or_ignore(&key_manager.branch_seed, next_index)?;
+        tx.key_manager_insert_or_ignore(branch.as_str(), next_index)?;
         tx.commit()?;
-        Ok(key.into())
+        Ok(next_index)
     }
 
     pub fn create_throwaway_nonce(&self) -> RistrettoSecretKey {

@@ -18,9 +18,9 @@ use tari_engine_types::{
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
 use tari_ootle_wallet_crypto::{
     memo::Memo,
-    UnblindedOutputStatement,
-    UnblindedStealthInputStatement,
-    UnblindedStealthOutputStatement,
+    UnblindedOutputWitness,
+    UnblindedStealthInputWitness,
+    UnblindedStealthOutputWitness,
 };
 use tari_ootle_wallet_sdk::{
     apis::{
@@ -513,8 +513,8 @@ pub async fn handle_claim_burn(
         sdk.stealth_crypto_api()
             .derive_stealth_owner_public_key(network, &account_owner_public_key, &nonce);
 
-    let output_statement = UnblindedStealthOutputStatement {
-        statement: UnblindedOutputStatement {
+    let output_statement = UnblindedStealthOutputWitness {
+        witness: UnblindedOutputWitness {
             amount: final_amount,
             mask: mask.key,
             sender_public_nonce: output_public_nonce.clone(),
@@ -527,7 +527,7 @@ pub async fn handle_claim_burn(
     };
 
     // Generate the correct secret to spend the claimed output
-    let input = UnblindedStealthInputStatement {
+    let input = UnblindedStealthInputWitness {
         mask_and_value: decrypted.into_mask_and_value(),
         owner_secret: claim_nonce_keypair.secret_key().clone(),
         public_nonce: reciprocal_claim_public_key_expanded,
@@ -946,6 +946,12 @@ pub async fn handle_stealth_transfer(
     let network = sdk.sdk_config().network;
     let notifier = context.notifier().clone();
     let owner_account = get_account(&req.owner_account, &sdk.accounts_api())?;
+    let Some(owner_key_id) = owner_account.owner_key_id() else {
+        return Err(invalid_params(
+            "owner_account",
+            Some("cannot transfer from an account without an owner key"),
+        ));
+    };
 
     let params = StealthTransferParams {
         input_selection: req.input_selection,
@@ -968,32 +974,42 @@ pub async fn handle_stealth_transfer(
     task::spawn(async move {
         let transfer = sdk.stealth_transfer_api().transfer(owner_account, params).await?;
 
+        let must_sign_with_account_key =
+            transfer.fee_inputs.revealed.is_positive() || transfer.transfer_inputs.revealed.is_positive();
+        let signer_key = if must_sign_with_account_key {
+            sdk.key_manager_api().get_account_owner_key(owner_key_id)?
+        } else {
+            // Since we don't require account auth, use a throwaway nonce to sign the transaction
+            sdk.key_manager_api().next_key(KeyBranch::Nonce)?.into()
+        };
+
+        let transaction = transfer
+            .transaction
+            .authorized_sealed_signer()
+            .build(vec![])
+            .seal(&signer_key.secret);
+
         // TODO: if submitting fails we need to unlock the inputs again
         if req.dry_run {
-            let transaction_id = transfer.transaction.calculate_id();
-            let result = transaction_service
-                .submit_dry_run_transaction(transfer.transaction)
-                .await;
+            // Release the lock immediately as dry run does not submit the transaction
+            // TODO: maybe transfer() should not lock the outputs if it's a dry run
+            if let Err(err) = sdk.stealth_outputs_api().release_lock(transfer.lock_id) {
+                error!(
+                    target: LOG_TARGET,
+                    "Failed to release locked outputs for dry run : {}",
+                    err
+                );
+            }
+            let result = transaction_service.submit_dry_run_transaction(transaction).await;
             return match result {
-                Ok(_) => Ok(StealthTransferResponse { transaction_id }),
+                Ok(res) => Ok(StealthTransferResponse {
+                    transaction_id: res.finalize.transaction_hash.into(),
+                }),
                 Err(e) => {
-                    if let Err(err) = sdk
-                        .stealth_outputs_api()
-                        .release_locked_outputs(transfer.transaction_lock_id)
-                    {
+                    if let Err(err) = sdk.stealth_outputs_api().release_lock(transfer.lock_id) {
                         error!(
                             target: LOG_TARGET,
                             "Failed to release locked outputs after dry run failure: {}",
-                            err
-                        );
-                    }
-                    if let Err(err) = sdk
-                        .stealth_outputs_api()
-                        .release_revealed_funds(transfer.transaction_lock_id)
-                    {
-                        error!(
-                            target: LOG_TARGET,
-                            "Failed to release revealed funds after dry run failure: {}",
                             err
                         );
                     }
@@ -1003,7 +1019,11 @@ pub async fn handle_stealth_transfer(
             };
         }
 
-        let result = transaction_service.submit_transaction(transfer.transaction).await;
+        // Associate lock with transaction
+        sdk.stealth_outputs_api()
+            .locks_set_transaction_id(transfer.lock_id, transaction.calculate_id())?;
+
+        let result = transaction_service.submit_transaction(transaction).await;
         match result {
             Ok(tx_id) => {
                 notifier.notify(TransactionSubmittedEvent {
@@ -1014,23 +1034,10 @@ pub async fn handle_stealth_transfer(
                 Ok(StealthTransferResponse { transaction_id: tx_id })
             },
             Err(e) => {
-                if let Err(err) = sdk
-                    .stealth_outputs_api()
-                    .release_locked_outputs(transfer.transaction_lock_id)
-                {
+                if let Err(err) = sdk.stealth_outputs_api().release_lock(transfer.lock_id) {
                     error!(
                         target: LOG_TARGET,
                         "Failed to release locked outputs after submission failure: {}",
-                        err
-                    );
-                }
-                if let Err(err) = sdk
-                    .stealth_outputs_api()
-                    .release_revealed_funds(transfer.transaction_lock_id)
-                {
-                    error!(
-                        target: LOG_TARGET,
-                        "Failed to release revealed funds after submission failure: {}",
                         err
                     );
                 }
@@ -1060,23 +1067,10 @@ pub async fn handle_associate_stealth_resource(
         ));
     }
 
-    // Ensure the resource is in the local cache
-    if !sdk.resources_api().exists(&req.resource_address)? {
-        let substate = sdk
-            .substate_api()
-            .get_substate_from_network(req.resource_address.into())
-            .await?;
-        let resource = substate.into_substate_value().into_resource().ok_or_else(|| {
-            general_error(format!(
-                "Indexer returned Substate at address {} is not a resource",
-                req.resource_address
-            ))
-        })?;
-        sdk.resources_api().upsert_resource(&req.resource_address, &resource)?;
-    }
-
-    sdk.accounts_api()
-        .associate_stealth_resource(account.component_address(), req.resource_address)?;
+    context
+        .account_monitor()
+        .associate_resource(*account.component_address(), req.resource_address)
+        .await?;
 
     context
         .account_monitor()

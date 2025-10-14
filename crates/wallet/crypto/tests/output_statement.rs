@@ -12,9 +12,9 @@ use tari_ootle_wallet_crypto::{
     confidential,
     stealth::create_transfer_statement,
     MaskAndValue,
-    UnblindedOutputStatement,
-    UnblindedStealthInputStatement,
-    UnblindedStealthOutputStatement,
+    UnblindedOutputWitness,
+    UnblindedStealthInputWitness,
+    UnblindedStealthOutputWitness,
 };
 use tari_template_lib::types::Amount;
 
@@ -89,12 +89,12 @@ mod stealth_tests {
         stealth::validate_transfer(&statement, None).unwrap_err(); // Invalid, output is less than input
     }
 
-    fn make_input_statements(amounts: &[(u8, u64)]) -> Vec<UnblindedStealthInputStatement> {
+    fn make_input_statements(amounts: &[(u8, u64)]) -> Vec<UnblindedStealthInputWitness> {
         amounts
             .iter()
             .map(|&(seed, amount)| {
                 let (mask, public_key) = create_key_pair_from_seed(seed);
-                UnblindedStealthInputStatement {
+                UnblindedStealthInputWitness {
                     mask_and_value: MaskAndValue::new(Amount::from(amount), mask.clone()),
                     owner_secret: mask,
                     public_nonce: public_key,
@@ -103,7 +103,7 @@ mod stealth_tests {
             .collect()
     }
 
-    fn make_output_statements<A: Into<Amount> + Copy>(amounts: &[A]) -> Vec<UnblindedStealthOutputStatement> {
+    fn make_output_statements<A: Into<Amount> + Copy>(amounts: &[A]) -> Vec<UnblindedStealthOutputWitness> {
         amounts
             .iter()
             .map(|&amount| {
@@ -116,7 +116,7 @@ mod stealth_tests {
                 };
                 // For testing purposes, we use the mask as the owner key
                 let output_owner_public_key = RistrettoPublicKey::from_secret_key(&output_mask);
-                let statement = UnblindedOutputStatement {
+                let statement = UnblindedOutputWitness {
                     amount,
                     mask: output_mask,
                     resource_view_key: None,
@@ -129,8 +129,8 @@ mod stealth_tests {
                     encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
                 };
 
-                UnblindedStealthOutputStatement {
-                    statement,
+                UnblindedStealthOutputWitness {
+                    witness: statement,
                     output_owner_public_key,
                     tag: UtxoTag::new(0),
                 }

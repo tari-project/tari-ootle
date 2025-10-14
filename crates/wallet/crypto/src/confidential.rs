@@ -14,16 +14,16 @@ use crate::{
     error::ConfidentialProofError,
     viewable_balance_proof::create_viewable_balance_proof,
     MaskAndValue,
-    UnblindedOutputStatement,
+    UnblindedOutputWitness,
     WalletCryptoError,
 };
 
 pub fn create_withdraw_proof(
     inputs: &[MaskAndValue],
     input_revealed_amount: Amount,
-    output_statement: Option<&UnblindedOutputStatement>,
+    output_statement: Option<&UnblindedOutputWitness>,
     output_revealed_amount: Amount,
-    change_statement: Option<&UnblindedOutputStatement>,
+    change_statement: Option<&UnblindedOutputWitness>,
     change_revealed_amount: Amount,
 ) -> Result<ConfidentialWithdrawProof, WalletCryptoError> {
     let output_proof = create_output_statement(
@@ -72,9 +72,9 @@ pub fn create_withdraw_proof(
 }
 
 pub fn create_output_statement(
-    output_statement: Option<&UnblindedOutputStatement>,
+    output_statement: Option<&UnblindedOutputWitness>,
     output_revealed_amount: Amount,
-    change_statement: Option<&UnblindedOutputStatement>,
+    change_statement: Option<&UnblindedOutputWitness>,
     change_revealed_amount: Amount,
 ) -> Result<ConfidentialOutputStatement, ConfidentialProofError> {
     let proof_change_statement = change_statement
@@ -147,7 +147,7 @@ mod tests {
     fn create_valid_proof(amount: Amount, minimum_value_promise: u64) -> ConfidentialOutputStatement {
         let mask = RistrettoSecretKey::random(&mut OsRng);
         create_output_statement(
-            Some(&UnblindedOutputStatement {
+            Some(&UnblindedOutputWitness {
                 amount,
                 minimum_value_promise,
                 mask,

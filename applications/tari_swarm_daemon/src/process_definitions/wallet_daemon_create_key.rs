@@ -43,8 +43,6 @@ impl ProcessDefinition for WalletDaemonCreateAccount {
             "create-account",
             "--name",
             "Validator Fees",
-            "--key",
-            "0",
             "--set-active",
             "--output",
             output_path

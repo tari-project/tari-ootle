@@ -236,7 +236,7 @@ where
             return Err(e.into());
         }
 
-        if !transaction.is_shard_applicable() {
+        if !transaction.has_inputs() {
             warn!(target: LOG_TARGET, "⚠ No involved shards for transaction {tx_id}");
             return Err(MempoolError::TransactionValidationError(
                 TransactionValidationError::NoInvolvedShards { transaction_id: tx_id },

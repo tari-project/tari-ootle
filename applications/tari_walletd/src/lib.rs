@@ -35,10 +35,7 @@ use log::*;
 use tari_common_types::seeds::seed_words::SeedWords;
 use tari_ootle_common_types::{optional::Optional, NumPreshards};
 use tari_ootle_wallet_sdk::{
-    apis::{
-        config::{ConfigApi, ConfigKey},
-        key_manager::KeyBranch,
-    },
+    apis::config::{ConfigApi, ConfigKey},
     cipher_seed::CipherSeedRestore,
     WalletSdk as Sdk,
     WalletSdkConfig,
@@ -79,8 +76,6 @@ pub async fn run_tari_ootle_walletd(
 
     let needs_seed_recovery =
         wallet_sdk.initialize_cipher_seed(seed_words.map(CipherSeedRestore::FromSeedWords).unwrap_or_default())?;
-
-    wallet_sdk.key_manager_api().get_or_create_initial(KeyBranch::Account)?;
 
     tokio::spawn({
         let wallet_sdk = wallet_sdk.clone();

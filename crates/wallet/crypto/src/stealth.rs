@@ -1,10 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_crypto::{
-    keys::PublicKey,
-    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
-};
+use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::ToByteType;
 use tari_template_lib::{
     models::{
@@ -23,8 +20,8 @@ use crate::{
     bullet_proof::generate_extended_bullet_proof,
     error::ConfidentialProofError,
     viewable_balance_proof::create_viewable_balance_proof,
-    UnblindedStealthInputStatement,
-    UnblindedStealthOutputStatement,
+    UnblindedStealthInputWitness,
+    UnblindedStealthOutputWitness,
     WalletCryptoError,
 };
 
@@ -35,8 +32,8 @@ pub fn create_transfer_statement<'a, Inputs, Outputs>(
     revealed_output_amount: Amount,
 ) -> Result<StealthTransferStatement, WalletCryptoError>
 where
-    Inputs: IntoIterator<Item = &'a UnblindedStealthInputStatement>,
-    Outputs: IntoIterator<Item = &'a UnblindedStealthOutputStatement> + Clone,
+    Inputs: IntoIterator<Item = &'a UnblindedStealthInputWitness>,
+    Outputs: IntoIterator<Item = &'a UnblindedStealthOutputWitness> + Clone,
 {
     if revealed_input_amount.is_negative() {
         return Err(WalletCryptoError::InvalidArgument {
@@ -67,13 +64,11 @@ where
                         name: "input value",
                         details: format!("Input value {} must be non-negative", input.mask_and_value.value),
                     })?;
-            let stealth_public_key = RistrettoPublicKey::from_secret_key(&input.owner_secret).to_byte_type();
 
             let signature = generate_stealth_owner_proof_signature(
                 &input.owner_secret,
-                &stealth_public_key,
-                &commitment.to_byte_type(),
                 &input.public_nonce.to_byte_type(),
+                &commitment.to_byte_type(),
             );
             inputs.push(StealthInput {
                 commitment: commitment.to_byte_type(),
@@ -86,17 +81,21 @@ where
     let agg_output_mask = output_statements
         .clone()
         .into_iter()
-        .map(|stmt| &stmt.statement.mask)
+        .map(|stmt| &stmt.witness.mask)
         .fold(RistrettoSecretKey::default(), |agg, mask| agg + mask);
+
+    let inputs_statement = StealthInputsStatement {
+        inputs: inputs_to_spend.clone(),
+        revealed_amount: revealed_input_amount,
+    };
+    let outputs_statement = create_outputs_statement(output_statements, revealed_output_amount)?;
 
     let balance_proof = generate_stealth_balance_proof_signature(
         &agg_input_mask,
         &agg_output_mask,
-        &revealed_input_amount,
-        &revealed_output_amount,
+        &inputs_statement,
+        &outputs_statement,
     );
-
-    let outputs_statement = create_outputs_statement(output_statements, revealed_output_amount)?;
 
     Ok(StealthTransferStatement {
         inputs_statement: StealthInputsStatement {
@@ -108,7 +107,7 @@ where
     })
 }
 
-pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a UnblindedStealthOutputStatement> + Clone>(
+pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a UnblindedStealthOutputWitness> + Clone>(
     output_statements: Outputs,
     revealed_output_amount: Amount,
 ) -> Result<StealthOutputsStatement, ConfidentialProofError> {
@@ -116,9 +115,9 @@ pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a UnblindedSt
         .clone()
         .into_iter()
         .map(|output_stmt| {
-            let unblinded_stmt = &output_stmt.statement;
+            let unblinded_stmt = &output_stmt.witness;
             let commitment = output_stmt
-                .statement
+                .witness
                 .to_commitment()
                 .ok_or(ConfidentialProofError::NegativeAmount)?;
             let output = UnspentOutput {
@@ -144,7 +143,7 @@ pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a UnblindedSt
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let output_range_proof = generate_extended_bullet_proof(output_statements.into_iter().map(|o| &o.statement))?;
+    let output_range_proof = generate_extended_bullet_proof(output_statements.into_iter().map(|o| &o.witness))?;
 
     Ok(StealthOutputsStatement {
         outputs,
@@ -164,13 +163,13 @@ mod tests {
     use tari_template_lib::types::{crypto::UtxoTag, Amount, EncryptedData};
 
     use super::*;
-    use crate::UnblindedOutputStatement;
+    use crate::UnblindedOutputWitness;
 
     fn create_valid_proof(amount: Amount, minimum_value_promise: u64) -> StealthOutputsStatement {
         let mask = RistrettoSecretKey::random(&mut OsRng);
         create_outputs_statement(
-            &[UnblindedStealthOutputStatement {
-                statement: UnblindedOutputStatement {
+            &[UnblindedStealthOutputWitness {
+                witness: UnblindedOutputWitness {
                     amount,
                     minimum_value_promise,
                     mask,

@@ -161,6 +161,7 @@ diesel::table! {
         encrypted_data -> Binary,
         tag_byte -> Integer,
         memo_json -> Nullable<Text>,
+        minimum_value_promise -> BigInt,
         is_burnt -> Bool,
         is_frozen -> Bool,
         is_on_chain -> Bool,

@@ -350,7 +350,7 @@ pub async fn handle_submit_manifest(
     let transaction = transaction
         .with_inputs(inputs)
         .authorized_sealed_signer()
-        .build(signatures);
+        .build_with_signatures(signatures);
 
     let transaction = sdk
         .local_signer_api()

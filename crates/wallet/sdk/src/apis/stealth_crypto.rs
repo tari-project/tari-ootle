@@ -51,6 +51,7 @@ impl StealthCryptoApi {
         input_revealed_amount: A,
         output_statements: Outputs,
         output_revealed_amount: A,
+        required_signer: RistrettoPublicKeyBytes,
     ) -> Result<StealthTransferStatement, StealthCryptoApiError>
     where
         A: Into<Amount>,
@@ -68,6 +69,7 @@ impl StealthCryptoApi {
                 .into()
                 .non_negative_checked()
                 .ok_or(StealthCryptoApiError::NegativeAmount)?,
+            required_signer,
         )?;
         Ok(stmt)
     }

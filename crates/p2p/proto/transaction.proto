@@ -232,6 +232,7 @@ message StealthInput {
 message StealthInputsStatement {
   repeated StealthInput inputs = 1;
   tari.ootle.common.Amount revealed_amount = 2;
+  bytes required_signer = 3;
 }
 
 

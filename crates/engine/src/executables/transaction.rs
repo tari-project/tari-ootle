@@ -20,11 +20,14 @@ impl Executable for Transaction {
         // TODO: If the seal signer is authorized we use this as the signer public key, if not we use the first
         // signature as the "default" owner. This is due to limitations of the current transaction model.
         // We could remove the idea of a default owner (OwnedBySigner) entirely.
-        Some(self.seal_signature())
+        self.signers_iter().next().copied()
+    }
+
+    fn signers_iter(&self) -> impl Iterator<Item = &RistrettoPublicKeyBytes> {
+        Some(self.seal_signature().public_key())
             .filter(|_| self.is_seal_signer_authorized())
-            .map(|s| s.public_key())
-            .or(self.signatures().first().map(|s| s.public_key()))
-            .copied()
+            .into_iter()
+            .chain(self.signatures().iter().map(|s| s.public_key()))
     }
 
     fn into_instructions(self) -> Instructions {

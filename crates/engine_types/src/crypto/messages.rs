@@ -59,11 +59,13 @@ pub fn stealth_balance_proof64(
 pub fn stealth_ownership64(
     commitment: &PedersenCommitmentBytes,
     public_output_nonce: &RistrettoPublicKeyBytes,
+    required_signer: &RistrettoPublicKeyBytes,
     metadata_hash: &Hash64,
 ) -> Hash64 {
     engine_hasher64(EngineHashDomainLabel::StealthOwnership)
         .chain(commitment)
         .chain(public_output_nonce)
+        .chain(required_signer)
         .chain(metadata_hash)
         .result()
         .into()

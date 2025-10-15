@@ -23,7 +23,11 @@ use tari_ootle_wallet_crypto::{
     UnblindedStealthInputWitness,
     UnblindedStealthOutputWitness,
 };
-use tari_template_lib::types::{crypto::UtxoTag, Amount, EncryptedData};
+use tari_template_lib::types::{
+    crypto::{RistrettoPublicKeyBytes, UtxoTag},
+    Amount,
+    EncryptedData,
+};
 
 #[test]
 fn it_create_a_valid_revealed_only_proof() {
@@ -39,7 +43,14 @@ mod stealth_tests {
 
     #[test]
     fn it_errors_for_noop_transfer() {
-        let statement = create_transfer_statement(&[], Amount::zero(), &[], Amount::zero()).unwrap();
+        let statement = create_transfer_statement(
+            &[],
+            Amount::zero(),
+            &[],
+            Amount::zero(),
+            RistrettoPublicKeyBytes::zero(),
+        )
+        .unwrap();
         stealth::validate_transfer_balance(&statement, None).unwrap_err();
     }
 
@@ -56,6 +67,7 @@ mod stealth_tests {
             revealed_input_amount,
             &output_statements,
             revealed_output_amount,
+            RistrettoPublicKeyBytes::zero(),
         )
         .unwrap();
 
@@ -75,6 +87,7 @@ mod stealth_tests {
             revealed_input_amount,
             &output_statements,
             revealed_output_amount,
+            RistrettoPublicKeyBytes::zero(),
         )
         .unwrap();
 
@@ -85,17 +98,32 @@ mod stealth_tests {
     fn it_creates_a_valid_statement_with_revealed_only() {
         let revealed_input_amount = Amount::from(6000);
         let revealed_output_amount = Amount::from(6000);
-        let statement = create_transfer_statement(&[], revealed_input_amount, &[], revealed_output_amount).unwrap();
+        let statement = create_transfer_statement(
+            &[],
+            revealed_input_amount,
+            &[],
+            revealed_output_amount,
+            RistrettoPublicKeyBytes::zero(),
+        )
+        .unwrap();
         stealth::validate_transfer_balance(&statement, None).unwrap();
 
         let revealed_input_amount = Amount::from(6000);
         let revealed_output_amount = Amount::from(5999);
-        let statement = create_transfer_statement(&[], revealed_input_amount, &[], revealed_output_amount).unwrap();
+        let statement = create_transfer_statement(
+            &[],
+            revealed_input_amount,
+            &[],
+            revealed_output_amount,
+            RistrettoPublicKeyBytes::zero(),
+        )
+        .unwrap();
         stealth::validate_transfer_balance(&statement, None).unwrap_err(); // Invalid, output is less than input
     }
 
     #[test]
     fn it_fails_to_validate_if_outputs_are_replaced() {
+        let required_signer = RistrettoPublicKeyBytes::zero();
         let inputs = make_input_statements(&[(1, 1000), (2, 2000), (3, 3000)]);
         let revealed_input_amount = Amount::from(6000);
 
@@ -107,6 +135,7 @@ mod stealth_tests {
             revealed_input_amount,
             &output_statements,
             revealed_output_amount,
+            required_signer,
         )
         .unwrap();
 
@@ -153,7 +182,7 @@ mod stealth_tests {
             };
 
             // This fails because the outputs have been malleated
-            let err = stealth::validate_ownership_proof(&utxo, input, &metadata_hash).unwrap_err();
+            let err = stealth::validate_ownership_proof(&utxo, input, &required_signer, &metadata_hash).unwrap_err();
             assert!(matches!(err, ResourceError::InvalidSpend { .. }));
         }
     }

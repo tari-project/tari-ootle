@@ -18,6 +18,7 @@ pub trait Executable {
     fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateRequirementRef<'_>> + '_;
 
     fn main_signer(&self) -> Option<RistrettoPublicKeyBytes>;
+    fn signers_iter(&self) -> impl Iterator<Item = &RistrettoPublicKeyBytes>;
 
     fn into_instructions(self) -> Instructions;
 }

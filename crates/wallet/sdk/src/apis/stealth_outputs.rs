@@ -29,7 +29,7 @@ use tari_ootle_wallet_crypto::{
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     models::{ComponentAddress, ResourceAddress, StealthTransferStatement, UtxoAddress, VaultId},
-    prelude::PedersenCommitmentBytes,
+    prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     types::{Amount, EncryptedData},
 };
 use tari_transaction::TransactionId;
@@ -712,6 +712,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
             params.input_revealed_amount,
             &outputs,
             params.output_revealed_amount,
+            params.required_signer,
         )?;
         Ok(statement)
     }
@@ -762,6 +763,7 @@ pub struct TransferStatementParams<'a, I> {
     pub input_revealed_amount: Amount,
     pub outputs: I,
     pub output_revealed_amount: Amount,
+    pub required_signer: RistrettoPublicKeyBytes,
 }
 
 #[derive(Debug, thiserror::Error)]

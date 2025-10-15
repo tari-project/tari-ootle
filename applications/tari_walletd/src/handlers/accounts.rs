@@ -28,7 +28,7 @@ use tari_ootle_wallet_sdk::{
         stealth_transfer::StealthTransferParams,
         substate::ValidatorScanResult,
     },
-    models::{KeyBranch, KeyId, NewAccountData},
+    models::{KeyBranch, NewAccountData},
 };
 use tari_ootle_wallet_sdk_services::events::TransactionSubmittedEvent;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
@@ -534,11 +534,14 @@ pub async fn handle_claim_burn(
         public_nonce: reciprocal_claim_public_key_expanded,
     };
 
+    let public_signer_key = sdk.key_manager_api().next_public_key(KeyBranch::Nonce)?;
+
     let pay_fee_and_mint_output = sdk.stealth_crypto_api().generate_transfer_statement(
         array::from_ref(&input),
         0,
         array::from_ref(&output_statement),
         max_fee,
+        public_signer_key.public_key.to_byte_type(),
     )?;
     // We'll create an output with the same encrypted data that was used on L1 burn. Note that this is not strictly
     // necessary. The engine will create the output with whatever you give it, so we could reencrypt.
@@ -556,12 +559,9 @@ pub async fn handle_claim_burn(
         .add_input(XTR)
         .build();
 
-    // The signer does not authorize this transaction, as the claim burn instruction is authorized by the proofs. So we
-    // can sign with any key.
-    let nonce = sdk.key_manager_api().next_public_key(KeyBranch::Nonce)?;
     let transaction = sdk
         .local_signer_api()
-        .sign(KeyBranch::Nonce, nonce.key_id, transaction)?;
+        .sign(KeyBranch::Nonce, public_signer_key.key_id, transaction)?;
 
     let tx_id = context.transaction_service().submit_transaction(transaction).await?;
 
@@ -959,7 +959,7 @@ pub async fn handle_stealth_transfer(
     let network = sdk.sdk_config().network;
     let notifier = context.notifier().clone();
     let owner_account = get_account(&req.owner_account, &sdk.accounts_api())?;
-    let Some(owner_key_id) = owner_account.owner_key_id() else {
+    if owner_account.owner_key_id().is_none() {
         return Err(invalid_params(
             "owner_account",
             Some("cannot transfer from an account without an owner key"),
@@ -987,22 +987,11 @@ pub async fn handle_stealth_transfer(
     task::spawn(async move {
         let transfer = sdk.stealth_transfer_api().transfer(owner_account, params).await?;
 
-        let must_sign_with_account_key =
-            transfer.fee_inputs.revealed.is_positive() || transfer.transfer_inputs.revealed.is_positive();
+        let transaction = transfer.transaction.authorized_sealed_signer().build();
 
-        let transaction = transfer.transaction.authorized_sealed_signer().build(vec![]);
-
-        let (key_branch, key_id) = if must_sign_with_account_key {
-            (KeyBranch::Account, owner_key_id)
-        } else {
-            // Since we don't require account auth, use a throwaway nonce to sign the transaction
-            (
-                KeyBranch::Nonce,
-                KeyId::derived(sdk.key_manager_api().next_derived_key_index(KeyBranch::Nonce)?),
-            )
-        };
-
-        let transaction = sdk.local_signer_api().sign(key_branch, key_id, transaction)?;
+        let transaction =
+            sdk.local_signer_api()
+                .sign(transfer.signing_key_branch, transfer.signing_key_id, transaction)?;
 
         // TODO: if submitting fails we need to unlock the inputs again
         if req.dry_run {

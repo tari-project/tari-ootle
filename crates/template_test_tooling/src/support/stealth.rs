@@ -42,6 +42,7 @@ pub fn generate_mint_statement<I: IntoIterator<Item = A>, A: Into<Amount> + Copy
     stealth_output_amounts: I,
     revealed_output_amount: A,
     view_key: Option<&RistrettoPublicKey>,
+    required_signer: RistrettoPublicKeyBytes,
 ) -> StealthUnblindedTransferData {
     let stealth_output_amounts = stealth_output_amounts.into_iter().map(Into::into).collect::<Vec<_>>();
     let total_revealed_inputs = stealth_output_amounts.iter().copied().sum::<Amount>() + revealed_output_amount.into();
@@ -52,12 +53,15 @@ pub fn generate_mint_statement<I: IntoIterator<Item = A>, A: Into<Amount> + Copy
             stealth_output_amounts,
             revealed_output_amount.into(),
             view_key,
+            required_signer,
         ),
+
         None => generate_transfer_data(
             &[],
             total_revealed_inputs,
             stealth_output_amounts,
             revealed_output_amount.into(),
+            required_signer,
         ),
     }
 }
@@ -114,6 +118,7 @@ pub fn generate_transfer_data<O, A>(
     revealed_input_amount: A,
     output_amounts: O,
     revealed_output_amount: A,
+    required_signer: RistrettoPublicKeyBytes,
 ) -> StealthUnblindedTransferData
 where
     O: IntoIterator<Item = A>,
@@ -125,6 +130,7 @@ where
         output_amounts,
         revealed_output_amount,
         None,
+        required_signer,
     )
 }
 
@@ -134,6 +140,7 @@ pub fn generate_transfer_data_with_view_key<I: IntoIterator<Item = A>, A: Into<A
     output_amounts: I,
     revealed_output_amount: A,
     view_key: &RistrettoPublicKey,
+    required_signer: RistrettoPublicKeyBytes,
 ) -> StealthUnblindedTransferData {
     generate_transfer_data_internal(
         inputs,
@@ -141,6 +148,7 @@ pub fn generate_transfer_data_with_view_key<I: IntoIterator<Item = A>, A: Into<A
         output_amounts,
         revealed_output_amount,
         Some(view_key.clone()),
+        required_signer,
     )
 }
 
@@ -161,6 +169,7 @@ fn generate_transfer_data_internal<I: IntoIterator<Item = A>, A: Into<Amount>>(
     output_amounts: I,
     revealed_output_amount: A,
     view_key: Option<RistrettoPublicKey>,
+    required_signer: RistrettoPublicKeyBytes,
 ) -> StealthUnblindedTransferData {
     let outputs = output_amounts
         .into_iter()
@@ -210,6 +219,7 @@ fn generate_transfer_data_internal<I: IntoIterator<Item = A>, A: Into<Amount>>(
         revealed_input_amount.into(),
         &outputs,
         revealed_output_amount.into(),
+        required_signer,
     )
     .unwrap();
 

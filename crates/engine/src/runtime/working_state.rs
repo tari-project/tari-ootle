@@ -273,6 +273,20 @@ impl WorkingState {
         stmt: &StealthTransferStatement,
         view_key: Option<&RistrettoPublicKey>,
     ) -> Result<ValidatedStealthTransfer, RuntimeError> {
+        let required_signer = &stmt.inputs_statement.required_signer;
+
+        // Check that the required_signed is in scope
+        let proofs = self.base_call_scope().auth_scope().virtual_proofs();
+        if proofs
+            .iter()
+            .filter(|p| *p.resource_address() == PUBLIC_IDENTITY_RESOURCE_ADDRESS)
+            .all(|p| p.id().as_u256().map(|b| b.as_slice()) != Some(required_signer.as_bytes()))
+        {
+            return Err(RuntimeError::AccessDeniedStealthTransferSigner {
+                required_signer: *required_signer,
+            });
+        }
+
         let metadata_hash = messages::stealth_statement_metadata64(&stmt.outputs_statement);
         for input in &stmt.inputs_statement.inputs {
             let address = UtxoAddress::new(resource_address, input.commitment.into());
@@ -290,7 +304,7 @@ impl WorkingState {
                 details: format!("Utxo {} is burnt", address),
             })?;
 
-            stealth::validate_ownership_proof(output, input, &metadata_hash)?;
+            stealth::validate_ownership_proof(output, input, required_signer, &metadata_hash)?;
         }
 
         let valid_transfer = stealth::validate_transfer_balance(stmt, view_key)?;

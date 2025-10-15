@@ -58,9 +58,10 @@ pub(crate) fn generate_stealth_owner_proof_signature(
     secret_key: &RistrettoSecretKey,
     public_output_nonce: &RistrettoPublicKeyBytes,
     commitment: &PedersenCommitmentBytes,
+    required_signer: &RistrettoPublicKeyBytes,
     metadata_hash: &Hash64,
 ) -> SchnorrSignatureBytes {
-    let message = messages::stealth_ownership64(commitment, public_output_nonce, metadata_hash);
+    let message = messages::stealth_ownership64(commitment, public_output_nonce, required_signer, metadata_hash);
     let sig = EngineSchnorrSignature::sign(secret_key, message, &mut OsRng).unwrap();
     sig.to_byte_type()
 }

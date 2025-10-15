@@ -227,6 +227,7 @@ where
             self.accounts_api(),
             self.stealth_outputs_api(),
             self.substate_api(),
+            self.key_manager_api(),
             self.config_api(),
         )
     }

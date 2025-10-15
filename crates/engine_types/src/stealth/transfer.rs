@@ -8,6 +8,7 @@ use tari_crypto::{
 };
 use tari_template_lib::{
     models::{StealthInput, StealthTransferStatement},
+    prelude::RistrettoPublicKeyBytes,
     types::Amount,
 };
 
@@ -135,6 +136,7 @@ pub fn validate_transfer_balance(
 pub fn validate_ownership_proof(
     utxo: &UtxoOutput,
     input: &StealthInput,
+    required_signer: &RistrettoPublicKeyBytes,
     metadata_hash: &Hash64,
 ) -> Result<(), ResourceError> {
     if input.owner_proof.public_nonce().is_zero() {
@@ -153,7 +155,12 @@ pub fn validate_ownership_proof(
         }
     })?;
 
-    let message = messages::stealth_ownership64(&input.commitment, &utxo.output.public_nonce, metadata_hash);
+    let message = messages::stealth_ownership64(
+        &input.commitment,
+        &utxo.output.public_nonce,
+        required_signer,
+        metadata_hash,
+    );
     if !owner_proof.verify(&signer_pk, message) {
         return Err(ResourceError::InvalidSpend {
             details: format!("Invalid ownership proof for input with commitment {}", input.commitment),

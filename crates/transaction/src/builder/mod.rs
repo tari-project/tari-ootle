@@ -426,7 +426,7 @@ impl TransactionBuilder {
             }
         });
 
-        builder.unsigned_transaction.build(builder.signatures)
+        builder.unsigned_transaction.build_with_signatures(builder.signatures)
     }
 
     pub fn build_and_seal(self, secret_key: &RistrettoSecretKey) -> Transaction {

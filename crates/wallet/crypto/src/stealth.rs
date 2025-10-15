@@ -12,6 +12,7 @@ use tari_template_lib::{
         StealthUnspentOutput,
         UnspentOutput,
     },
+    prelude::RistrettoPublicKeyBytes,
     types::Amount,
 };
 
@@ -30,6 +31,7 @@ pub fn create_transfer_statement<'a, Inputs, Outputs>(
     revealed_input_amount: Amount,
     output_statements: Outputs,
     revealed_output_amount: Amount,
+    required_signer: RistrettoPublicKeyBytes,
 ) -> Result<StealthTransferStatement, WalletCryptoError>
 where
     Inputs: IntoIterator<Item = &'a UnblindedStealthInputWitness>,
@@ -73,6 +75,7 @@ where
                 &input.owner_secret,
                 &input.public_nonce.to_byte_type(),
                 &commitment.to_byte_type(),
+                &required_signer,
                 &outputs_statement_hash,
             );
             inputs.push(StealthInput {
@@ -91,6 +94,7 @@ where
     let inputs_statement = StealthInputsStatement {
         inputs: inputs_to_spend.clone(),
         revealed_amount: revealed_input_amount,
+        required_signer,
     };
 
     let balance_proof = generate_stealth_balance_proof_signature(
@@ -104,6 +108,7 @@ where
         inputs_statement: StealthInputsStatement {
             inputs: inputs_to_spend,
             revealed_amount: revealed_input_amount,
+            required_signer,
         },
         outputs_statement,
         balance_proof,

@@ -10,6 +10,7 @@ use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
+use tari_engine::runtime::RuntimeError;
 use tari_engine_types::{
     crypto::{get_commitment_factory, ElgamalVerifiableBalance, ValueLookupTable},
     resource_container::ResourceError,
@@ -37,10 +38,11 @@ const TEMPLATE_PATHS: &[&str] = &["tests/templates/stealth"];
 const TEMPLATE_NAME: &str = "StealthFaucet";
 
 fn setup(
+    test: &mut TemplateTest,
     transfer_data: &StealthUnblindedTransferData,
     view_key: Option<&RistrettoPublicKey>,
-) -> (TemplateTest, ComponentAddress, ResourceAddress) {
-    let mut test = TemplateTest::new(TEMPLATE_PATHS);
+) -> (ComponentAddress, ResourceAddress) {
+    test.enable_auto_add_proofs_from_signers();
     let template_addr = test.get_template_address(TEMPLATE_NAME);
     let initial_supply = transfer_data.statement.inputs_statement.revealed_amount;
 
@@ -58,7 +60,6 @@ fn setup(
     let resx = test.get_previous_output_address(SubstateType::Resource);
 
     (
-        test,
         faucet.as_component_address().unwrap(),
         resx.as_resource_address().unwrap(),
     )
@@ -66,9 +67,10 @@ fn setup(
 
 #[test]
 fn mint_initial_supply() {
+    let mut test = TemplateTest::new(TEMPLATE_PATHS);
     let outputs = vec![100, 1000, 10000];
-    let mint = stealth::generate_mint_statement(outputs, 0, None);
-    let (test, _faucet, faucet_resx) = setup(&mint, None);
+    let mint = stealth::generate_mint_statement(outputs, 0, None, test.to_public_key_bytes());
+    let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
 
     let resource = test.read_only_state_store().get_resource(&faucet_resx).unwrap();
     let total_supply = resource.total_supply().unwrap();
@@ -77,8 +79,9 @@ fn mint_initial_supply() {
 
 #[test]
 fn mint_more_later() {
-    let mint = stealth::generate_mint_statement([1200], 0, None);
-    let (mut test, faucet, faucet_resx) = setup(&mint, None);
+    let mut test = TemplateTest::new(TEMPLATE_PATHS);
+    let mint = stealth::generate_mint_statement([1200], 0, None, test.to_public_key_bytes());
+    let (faucet, faucet_resx) = setup(&mut test, &mint, None);
 
     test.call_method::<()>(faucet, "mint", call_args![11100], vec![]);
 
@@ -89,9 +92,10 @@ fn mint_more_later() {
 
 #[test]
 fn basic_transfer() {
+    let mut test = TemplateTest::new(TEMPLATE_PATHS);
     let outputs = vec![100, 1000, 10000];
-    let mint = stealth::generate_mint_statement(outputs, 0, None);
-    let (mut test, _faucet, faucet_resx) = setup(&mint, None);
+    let mint = stealth::generate_mint_statement(outputs, 0, None, test.to_public_key_bytes());
+    let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
 
     let transfer = stealth::generate_transfer_data(
         &[MaskAndValue {
@@ -101,6 +105,7 @@ fn basic_transfer() {
         0,
         Some(100),
         0,
+        test.to_public_key_bytes(),
     );
     let result = test.execute_expect_success(
         Transaction::builder()
@@ -120,9 +125,10 @@ fn basic_transfer() {
 
 #[test]
 fn programmatic_transfer() {
+    let mut test = TemplateTest::new(TEMPLATE_PATHS);
     let outputs = vec![100, 1000, 10000];
-    let mint = stealth::generate_mint_statement(outputs, 100, None);
-    let (mut test, faucet, _faucet_resx) = setup(&mint, None);
+    let mint = stealth::generate_mint_statement(outputs, 100, None, test.to_public_key_bytes());
+    let (faucet, _faucet_resx) = setup(&mut test, &mint, None);
 
     let vault_id = test
         .get_previous_output_address(SubstateType::Vault)
@@ -137,6 +143,7 @@ fn programmatic_transfer() {
         0,
         Some(75),
         25,
+        test.to_public_key_bytes(),
     );
     let result = test.execute_expect_success(
         Transaction::builder()
@@ -158,9 +165,10 @@ fn programmatic_transfer() {
 
 #[test]
 fn transfer_with_revealed_outputs() {
+    let mut test = TemplateTest::new(TEMPLATE_PATHS);
     let outputs = [100, 1000, 10000];
-    let mint = stealth::generate_mint_statement(outputs, 0, None);
-    let (mut test, _faucet, faucet_resx) = setup(&mint, None);
+    let mint = stealth::generate_mint_statement(outputs, 0, None, test.to_public_key_bytes());
+    let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
     let (account, _proof, _sk) = test.create_empty_account();
 
     let transfer = stealth::generate_transfer_data(
@@ -171,6 +179,7 @@ fn transfer_with_revealed_outputs() {
         0,
         [100, 200],
         700,
+        test.to_public_key_bytes(),
     );
     let result = test.execute_expect_success(
         Transaction::builder()
@@ -195,11 +204,13 @@ fn transfer_with_revealed_outputs() {
 
 #[test]
 fn transfer_revealed_between_accounts() {
-    let outputs = [100, 1000, 10000];
-    let mint = stealth::generate_mint_statement(outputs, 0, None);
-    let (mut test, _faucet, faucet_resx) = setup(&mint, None);
+    let mut test = TemplateTest::new(TEMPLATE_PATHS);
     let (alice, alice_proof, alice_sk) = test.create_empty_account();
     let (bob, _proof, _sk) = test.create_empty_account();
+
+    let outputs = [100, 1000, 10000];
+    let mint = stealth::generate_mint_statement(outputs, 0, None, test.to_public_key_bytes());
+    let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
 
     let transfer_from_faucet = stealth::generate_transfer_data(
         &[
@@ -215,8 +226,10 @@ fn transfer_revealed_between_accounts() {
         0,
         [999, 9901],
         100,
+        alice_proof.to_public_key().unwrap(),
     );
-    let transfer_from_alice_to_bob = stealth::generate_transfer_data(&[], 100, [25, 25, 25], 25);
+    let transfer_from_alice_to_bob =
+        stealth::generate_transfer_data(&[], 100, [25, 25, 25], 25, alice_proof.to_public_key().unwrap());
     let result = test.execute_expect_success(
         Transaction::builder()
             .stealth_transfer(faucet_resx, transfer_from_faucet.statement)
@@ -248,9 +261,10 @@ fn transfer_revealed_between_accounts() {
 
 #[test]
 fn transfer_invalid_balance_in_statement() {
+    let mut test = TemplateTest::new(TEMPLATE_PATHS);
     let outputs = [100, 1000];
-    let mint = stealth::generate_mint_statement(outputs, 0, None);
-    let (mut test, _faucet, faucet_resx) = setup(&mint, None);
+    let mint = stealth::generate_mint_statement(outputs, 0, None, test.to_public_key_bytes());
+    let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
     let (alice, _proof, _sk) = test.create_empty_account();
 
     let transfer_from_faucet = stealth::generate_transfer_data(
@@ -262,6 +276,7 @@ fn transfer_invalid_balance_in_statement() {
         [99],
         // Try to skim a little (1) off the top
         2,
+        test.to_public_key_bytes(),
     );
     let reason = test.execute_expect_failure(
         Transaction::builder()
@@ -279,9 +294,10 @@ fn transfer_invalid_balance_in_statement() {
 
 #[test]
 fn transfer_invalid_ownership_proof() {
+    let mut test = TemplateTest::new(TEMPLATE_PATHS);
     let outputs = [100, 1000];
-    let mint = stealth::generate_mint_statement(outputs, 0, None);
-    let (mut test, _faucet, faucet_resx) = setup(&mint, None);
+    let mint = stealth::generate_mint_statement(outputs, 0, None, test.to_public_key_bytes());
+    let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
 
     let mut transfer_from_faucet = stealth::generate_transfer_data(
         &[MaskAndValue {
@@ -291,6 +307,7 @@ fn transfer_invalid_ownership_proof() {
         0,
         [99],
         0,
+        test.to_public_key_bytes(),
     );
     // Set an invalid ownership proof
     let sig = transfer_from_faucet.statement.inputs_statement.inputs[0].owner_proof;
@@ -314,9 +331,10 @@ fn transfer_invalid_ownership_proof() {
 
 #[test]
 fn transfer_invalid_range_proof_in_statement() {
+    let mut test = TemplateTest::new(TEMPLATE_PATHS);
     let outputs = [100, 1000];
-    let mint = stealth::generate_mint_statement(outputs, 0, None);
-    let (mut test, _faucet, faucet_resx) = setup(&mint, None);
+    let mint = stealth::generate_mint_statement(outputs, 0, None, test.to_public_key_bytes());
+    let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
     let (alice, _proof, _sk) = test.create_empty_account();
 
     let mut transfer_from_faucet = stealth::generate_transfer_data(
@@ -327,6 +345,7 @@ fn transfer_invalid_range_proof_in_statement() {
         0,
         [99],
         1,
+        test.to_public_key_bytes(),
     );
     let mut rp = transfer_from_faucet
         .statement
@@ -352,12 +371,13 @@ fn transfer_invalid_range_proof_in_statement() {
 
 #[test]
 fn many_outputs_in_one_transfer() {
+    let mut test = TemplateTest::new(TEMPLATE_PATHS);
     use std::{iter, time::Instant};
 
     use tari_engine_types::limits;
     let outputs = [1000];
-    let mint = stealth::generate_mint_statement(outputs, 0, None);
-    let (mut test, _faucet, faucet_resx) = setup(&mint, None);
+    let mint = stealth::generate_mint_statement(outputs, 0, None, test.to_public_key_bytes());
+    let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
 
     let timer = Instant::now();
 
@@ -377,6 +397,7 @@ fn many_outputs_in_one_transfer() {
             limits::STEALTH_LIMITS.max_outputs,
         ),
         0,
+        test.to_public_key_bytes(),
     );
 
     // Release mode: ± 23s on M1 Mac, 3.7s on Ryzen 5950x (single thread, total test time 6.1s) for 500 outputs - actual
@@ -429,9 +450,10 @@ where
 
 #[test]
 fn mint_with_view_key() {
+    let mut test = TemplateTest::new(TEMPLATE_PATHS);
     let (view_key_secret, view_key) = RistrettoPublicKey::random_keypair(&mut OsRng);
-    let mint = stealth::generate_mint_statement([1000], 0, Some(&view_key));
-    let (mut test, _faucet, faucet_resx) = setup(&mint, Some(&view_key));
+    let mint = stealth::generate_mint_statement([1000], 0, Some(&view_key), test.to_public_key_bytes());
+    let (_faucet, faucet_resx) = setup(&mut test, &mint, Some(&view_key));
 
     let withdraw_proof = stealth::generate_transfer_data_with_view_key(
         &[MaskAndValue {
@@ -442,6 +464,7 @@ fn mint_with_view_key() {
         [100, 200, 200, 200, 200, 100],
         0,
         &view_key,
+        test.to_public_key_bytes(),
     );
     let result = test.execute_expect_success(
         Transaction::builder()
@@ -470,9 +493,10 @@ fn mint_with_view_key() {
 
 #[test]
 fn freeze_then_attempt_spend() {
+    let mut test = TemplateTest::new(TEMPLATE_PATHS);
     let outputs = vec![100u64, 1000, 10000];
-    let mint = stealth::generate_mint_statement(outputs.clone(), 0, None);
-    let (mut test, faucet, faucet_resx) = setup(&mint, None);
+    let mint = stealth::generate_mint_statement(outputs.clone(), 0, None, test.to_public_key_bytes());
+    let (faucet, faucet_resx) = setup(&mut test, &mint, None);
 
     let transfer = stealth::generate_transfer_data(
         &[
@@ -488,6 +512,7 @@ fn freeze_then_attempt_spend() {
         0,
         Some(1100),
         0,
+        test.to_public_key_bytes(),
     );
     let owner = test.owner_proof();
     let utxos = mint.output_masks
@@ -543,9 +568,10 @@ fn freeze_then_attempt_spend() {
 
 #[test]
 fn burn_then_attempt_spend() {
+    let mut test = TemplateTest::new(TEMPLATE_PATHS);
     let outputs = vec![100u64, 1000, 10000];
-    let mint = stealth::generate_mint_statement(outputs.clone(), 0, None);
-    let (mut test, faucet, faucet_resx) = setup(&mint, None);
+    let mint = stealth::generate_mint_statement(outputs.clone(), 0, None, test.to_public_key_bytes());
+    let (faucet, faucet_resx) = setup(&mut test, &mint, None);
 
     let transfer = stealth::generate_transfer_data(
         &[
@@ -561,6 +587,7 @@ fn burn_then_attempt_spend() {
         0,
         Some(outputs[0] + outputs[1]),
         0,
+        test.to_public_key_bytes(),
     );
     let owner = test.owner_proof();
     let utxos_and_proofs = mint.output_masks
@@ -598,4 +625,47 @@ fn burn_then_attempt_spend() {
             .unwrap();
         assert!(utxo.is_burnt());
     }
+}
+
+#[test]
+fn transfer_fails_if_tx_signed_by_wrong_signer() {
+    let mut test = TemplateTest::new(TEMPLATE_PATHS);
+    let (alice, alice_proof, _alice_sk) = test.create_empty_account();
+
+    let outputs = [100, 1000, 10000];
+    let mint = stealth::generate_mint_statement(outputs, 0, None, test.to_public_key_bytes());
+    let (_faucet, faucet_resx) = setup(&mut test, &mint, None);
+
+    // Allows us to manually specify proofs rather than auto-adding from signers
+    test.disable_auto_add_proofs_from_signers();
+
+    let transfer_from_faucet = stealth::generate_transfer_data(
+        &[
+            MaskAndValue {
+                mask: mint.output_masks[2].clone(),
+                value: 10000.into(),
+            },
+            MaskAndValue {
+                mask: mint.output_masks[1].clone(),
+                value: 1000.into(),
+            },
+        ],
+        0,
+        [],
+        11000,
+        // Require alice to sign
+        alice_proof.to_public_key().unwrap(),
+    );
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .stealth_transfer(faucet_resx, transfer_from_faucet.statement)
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(alice, "deposit", args![Workspace("bucket")])
+            .build_and_seal(test.secret_key()), // Signed by test owner, not alice
+        vec![test.owner_proof()],
+    );
+
+    assert_reject_reason(reason, RuntimeError::AccessDeniedStealthTransferSigner {
+        required_signer: alice_proof.to_public_key().unwrap(),
+    });
 }

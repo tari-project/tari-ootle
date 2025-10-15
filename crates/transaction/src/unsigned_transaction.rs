@@ -129,11 +129,15 @@ impl UnsignedTransaction {
         self
     }
 
-    pub fn build(self, signatures: Vec<TransactionSignature>) -> UnsealedTransactionV1 {
+    pub fn build_with_signatures(self, signatures: Vec<TransactionSignature>) -> UnsealedTransactionV1 {
         // Obviously this will not work if we have more than one version - dealing with that is left for another time
         match self {
             UnsignedTransaction::V1(tx) => UnsealedTransactionV1::new(tx, signatures),
         }
+    }
+
+    pub fn build(self) -> UnsealedTransactionV1 {
+        self.build_with_signatures(vec![])
     }
 
     pub(crate) fn inputs_mut(&mut self) -> &mut IndexSet<SubstateRequirement> {

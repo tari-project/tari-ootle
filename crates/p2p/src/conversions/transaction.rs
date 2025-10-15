@@ -813,6 +813,8 @@ impl TryFrom<proto::transaction::StealthInputsStatement> for tari_template_lib::
         Ok(Self {
             inputs,
             revealed_amount: value.revealed_amount.unwrap_or_default().into(),
+            required_signer: RistrettoPublicKeyBytes::from_bytes(&value.required_signer)
+                .context("Invalid required signer")?,
         })
     }
 }
@@ -822,6 +824,7 @@ impl From<tari_template_lib::models::StealthInputsStatement> for proto::transact
         Self {
             inputs: value.inputs.iter().map(Into::into).collect(),
             revealed_amount: Some(value.revealed_amount.into()),
+            required_signer: value.required_signer.as_bytes().to_vec(),
         }
     }
 }

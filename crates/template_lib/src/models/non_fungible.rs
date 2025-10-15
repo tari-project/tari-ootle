@@ -173,9 +173,9 @@ impl NonFungibleId {
         }
     }
 
-    pub fn as_u256(&self) -> Option<[u8; 32]> {
+    pub fn as_u256(&self) -> Option<&[u8; 32]> {
         match self {
-            NonFungibleId::U256(i) => Some(*i),
+            NonFungibleId::U256(i) => Some(i),
             _ => None,
         }
     }

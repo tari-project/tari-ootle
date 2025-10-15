@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_engine_types::ToByteType;
+use tari_engine_types::{crypto::messages, ToByteType};
 use tari_template_lib::{
     models::{
         StealthInput,
@@ -53,6 +53,10 @@ where
         let (lower, upper) = input_iter.size_hint();
         upper.unwrap_or(lower)
     };
+
+    let outputs_statement = create_outputs_statement(output_statements.clone(), revealed_output_amount)?;
+    let outputs_statement_hash = messages::stealth_statement_metadata64(&outputs_statement);
+
     let (inputs_to_spend, agg_input_mask) = input_iter.try_fold(
         (Vec::with_capacity(num_inputs_estimate), RistrettoSecretKey::default()),
         |(mut inputs, agg_input), input| {
@@ -69,6 +73,7 @@ where
                 &input.owner_secret,
                 &input.public_nonce.to_byte_type(),
                 &commitment.to_byte_type(),
+                &outputs_statement_hash,
             );
             inputs.push(StealthInput {
                 commitment: commitment.to_byte_type(),
@@ -79,7 +84,6 @@ where
     )?;
 
     let agg_output_mask = output_statements
-        .clone()
         .into_iter()
         .map(|stmt| &stmt.witness.mask)
         .fold(RistrettoSecretKey::default(), |agg, mask| agg + mask);
@@ -88,7 +92,6 @@ where
         inputs: inputs_to_spend.clone(),
         revealed_amount: revealed_input_amount,
     };
-    let outputs_statement = create_outputs_statement(output_statements, revealed_output_amount)?;
 
     let balance_proof = generate_stealth_balance_proof_signature(
         &agg_input_mask,

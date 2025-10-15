@@ -334,7 +334,7 @@ fn transfer_invalid_range_proof_in_statement() {
         .agg_range_proof
         .clone()
         .into_vec();
-    rp[100] = rp[100].wrapping_add(1); // Corrupt the range proof
+    rp[100] ^= 0xFF; // Corrupt the range proof
     transfer_from_faucet.statement.outputs_statement.agg_range_proof = rp.try_into().unwrap();
 
     let reason = test.execute_expect_failure(
@@ -346,7 +346,8 @@ fn transfer_invalid_range_proof_in_statement() {
         vec![],
     );
 
-    assert_reject_reason(reason, "Invalid range proof");
+    // The ownership proof fails to validate first due to output malleation so range proof isnt validated.
+    assert_reject_reason(reason, "Invalid ownership proof");
 }
 
 #[test]

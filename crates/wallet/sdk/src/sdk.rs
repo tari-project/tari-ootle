@@ -45,7 +45,7 @@ use crate::{
 
 const LOG_TARGET: &str = "wallet::sdk::api";
 
-pub type LocalSignerApi<'a, TStore> = SignerApi<LocalKeyManager<'a, LocalKeyStore<'a, TStore>>>;
+pub type LocalSignerApi<'a, TStore> = SignerApi<LocalKeyManager<LocalKeyStore<'a, TStore>>>;
 
 #[derive(Debug, Clone)]
 pub struct WalletSdkConfig {
@@ -161,26 +161,16 @@ where
         KeyManagerApi::new(
             network,
             &self.store,
-            &self.loaded_cipher_seed,
+            LocalKeyStore::new(&self.loaded_cipher_seed, self.password_manager_api(), &self.store),
             self.password_manager_api(),
         )
     }
 
     /// Returns the Signer API for the wallet if the cipher seed has been initialized. This signer uses the local key
     /// store where key material is kept in the local database.
-    ///
-    /// ## Panics
-    /// This function will panic if the cipher seed has not been initialized i.e. `initialize_cipher_seed` has not been
-    /// called once before calling this.
     pub fn local_signer_api(&self) -> LocalSignerApi<'_, TStore> {
-        let cipher_seed = self
-            .loaded_cipher_seed
-            .cipher_seed()
-            .expect("Cipher seed not initialized");
-        let backend = LocalKeyManager::new(
-            cipher_seed,
-            LocalKeyStore::new(self.password_manager_api(), &self.store),
-        );
+        let store = LocalKeyStore::new(&self.loaded_cipher_seed, self.password_manager_api(), &self.store);
+        let backend = LocalKeyManager::new(store);
         SignerApi::new(backend)
     }
 

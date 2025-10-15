@@ -66,7 +66,11 @@ impl TransactionBuilder {
         }
     }
 
-    pub fn then<F: FnOnce(Self) -> T, T>(self, f: F) -> T {
+    pub fn then<F: FnOnce(Self) -> Self>(self, f: F) -> Self {
+        f(self)
+    }
+
+    pub fn map<F: FnOnce(Self) -> T, T>(self, f: F) -> T {
         f(self)
     }
 

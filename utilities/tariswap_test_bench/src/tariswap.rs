@@ -146,7 +146,7 @@ impl Runner {
                     .put_last_instruction_output_on_workspace("lp")
                     .call_method(account.component_address, "deposit", args![Workspace("lp")])
                     .with_authorized_seal_signer()
-                    .then(|builder| {
+                    .map(|builder| {
                         // First sign with the account key to authorize the use of the account component
                         self.sdk.local_signer_api().sign_with_context(
                             KeyBranch::Account,
@@ -350,6 +350,7 @@ impl Runner {
                     .call_method(tariswap.component_address, "swap", args![Workspace("b"), XTR,])
                     .put_last_instruction_output_on_workspace("swapped")
                     .call_method(account.component_address, "deposit", args![Workspace("swapped")])
+                    .with_authorized_seal_signer()
                     .build();
 
                 let transaction = self.sdk.local_signer_api().sign(

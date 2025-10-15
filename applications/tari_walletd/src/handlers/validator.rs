@@ -179,26 +179,23 @@ pub async fn handle_claim_validator_fees(
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .with_inputs(fee_pool_addresses.map(SubstateRequirement::unversioned))
         .add_input(XTR)
-        .then(|builder| {
+        .map(|builder| {
             if let Some(index) = req.claim_key_index {
                 if claim_public_key == *account.address.account_public_key() {
-                    builder
+                    Ok(builder)
                 } else {
                     // If the claim key is different from the account secret, we need to sign with both
-                    sdk.local_signer_api()
-                        .sign_with_context(
-                            KeyBranch::Account,
-                            KeyId::derived(index),
-                            account.address.account_public_key(),
-                            builder.with_authorized_seal_signer(),
-                        )
-                        // We happen to know that signing with a derived key is infallible
-                        .expect("Signing with should work")
+                    sdk.local_signer_api().sign_with_context(
+                        KeyBranch::Account,
+                        KeyId::derived(index),
+                        account.address.account_public_key(),
+                        builder.with_authorized_seal_signer(),
+                    )
                 }
             } else {
-                builder
+                Ok(builder)
             }
-        })
+        })?
         .build();
 
     let transaction = sdk

@@ -23,6 +23,10 @@ impl EncryptedData {
     pub const SIZE_TAG: usize = 16;
     pub const SIZE_VALUE: usize = size_of::<u64>();
 
+    pub fn empty() -> Self {
+        Self(MaxBytes::empty())
+    }
+
     pub const fn min_size() -> usize {
         Self::ENCRYPTED_DATA_SIZE_WITHOUT_MEMO
     }

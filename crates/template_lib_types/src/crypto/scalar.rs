@@ -25,6 +25,10 @@ impl Scalar32Bytes {
         Self([0u8; Self::length()])
     }
 
+    pub fn is_zero(&self) -> bool {
+        self.0.iter().all(|&b| b == 0)
+    }
+
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, InvalidByteLengthError> {
         if bytes.len() != Self::length() {
             return Err(InvalidByteLengthError {

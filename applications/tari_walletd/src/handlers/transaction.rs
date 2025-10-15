@@ -327,7 +327,7 @@ pub async fn handle_submit_manifest(
             }
         })
         .with_instructions(instructions.instructions)
-        .then(|builder| {
+        .map(|builder| {
             if signing_key_id == account_owner_key_id {
                 Ok(builder)
             } else {

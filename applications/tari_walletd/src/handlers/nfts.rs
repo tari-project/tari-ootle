@@ -303,7 +303,7 @@ pub async fn handle_transfer(
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         // Seal signer is the fee payer account
         .with_authorized_seal_signer()
-        .then(|builder| {
+        .map(|builder| {
             sdk.local_signer_api().sign_with_context(
                 KeyBranch::Account,
                 account_owner_key_id,

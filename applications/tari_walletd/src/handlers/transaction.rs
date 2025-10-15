@@ -10,7 +10,8 @@ use log::*;
 use tari_engine_types::ToByteType;
 use tari_ootle_common_types::{optional::Optional, Epoch, Network};
 use tari_ootle_wallet_sdk::{
-    apis::{config::ConfigKey, key_manager::KeyBranch, transaction::TransactionApiError},
+    apis::{config::ConfigKey, transaction::TransactionApiError},
+    models::KeyBranch,
     network::WalletQueryErrorStatus,
 };
 use tari_ootle_wallet_sdk_services::{events::WalletEvent, transaction_service::TransactionServiceError};
@@ -104,8 +105,7 @@ pub async fn handle_submit(
     let sdk = context.wallet_sdk();
     let key_api = sdk.key_manager_api();
     // Fetch the key to sign the transaction
-    // TODO: Ideally the SDK should take care of signing the transaction internally
-    let key = key_api.get_key_or_active(KeyBranch::Account, req.signing_key_id)?;
+    let signing_key = key_api.get_key_or_active(KeyBranch::Account, req.signing_key_id)?;
 
     let detected_inputs = if req.detect_inputs {
         // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
@@ -149,7 +149,10 @@ pub async fn handle_submit(
         .transaction_builder()
         .with_unsigned_transaction(req.transaction)
         .with_inputs(detected_inputs)
-        .build_and_seal(&key.secret);
+        .build();
+    let transaction = sdk
+        .local_signer_api()
+        .sign(KeyBranch::Account, signing_key.key_id, transaction)?;
 
     if log_enabled!(log::Level::Debug) {
         for input in transaction.inputs() {
@@ -212,7 +215,6 @@ pub async fn handle_submit_dry_run(
     let sdk = context.wallet_sdk();
     let key_api = sdk.key_manager_api();
     // Fetch the key to sign the transaction
-    // TODO: Ideally the SDK should take care of signing the transaction internally
     let key = key_api.get_key_or_active(KeyBranch::Account, req.signing_key_id)?;
 
     let detected_inputs = if req.detect_inputs {
@@ -242,7 +244,10 @@ pub async fn handle_submit_dry_run(
         .with_unsigned_transaction(req.transaction)
         .with_inputs(detected_inputs)
         .with_dry_run(true)
-        .build_and_seal(&key.secret);
+        .build();
+    let transaction = sdk
+        .local_signer_api()
+        .sign(KeyBranch::Account, key.key_id, transaction)?;
 
     for proof_id in req.proof_ids {
         // update the proofs table with the corresponding transaction hash
@@ -307,13 +312,11 @@ pub async fn handle_submit_manifest(
     let key = sdk
         .key_manager_api()
         .get_key_or_active(KeyBranch::Account, Some(signing_key_id))?;
-    let seal_signer_pk = key.to_public_key();
 
     let network = context.wallet_sdk().config_api().get::<Network>(ConfigKey::Network)?;
 
     let fee_amount = req.max_fee;
 
-    let acc_key = sdk.key_manager_api().get_account_owner_key(account_owner_key_id)?;
     let builder = Transaction::builder()
         .for_network(network.as_byte())
         .with_fee_instructions_builder(|builder| {
@@ -326,28 +329,32 @@ pub async fn handle_submit_manifest(
         .with_instructions(instructions.instructions)
         .then(|builder| {
             if signing_key_id == account_owner_key_id {
-                builder
+                Ok(builder)
             } else {
-                builder.add_signer(&seal_signer_pk.to_byte_type(), &acc_key.secret)
+                sdk.local_signer_api().sign_with_context(
+                    KeyBranch::Account,
+                    signing_key_id,
+                    &key.public_key().to_byte_type(),
+                    builder,
+                )
             }
-        });
+        })?;
     let signatures = builder.signatures().to_vec();
-    let mut transaction = builder.build_unsigned_transaction();
+    let transaction = builder.with_dry_run(req.dry_run).build_unsigned_transaction();
 
     // Detect inputs
-    let substates = transaction.to_referenced_substates()?;
-    let substates = substates.into_iter().collect::<Vec<_>>();
+    let substates = transaction.to_referenced_substates()?.into_iter().collect::<Vec<_>>();
     let dependencies = sdk.substate_api().locate_dependent_substates(&substates, true).await?;
     let inputs = dependencies.into_iter().map(|input| input.into_unversioned());
-
-    // set currently requested dry run status
-    transaction.set_dry_run(req.dry_run);
 
     let transaction = transaction
         .with_inputs(inputs)
         .authorized_sealed_signer()
-        .build(signatures)
-        .seal(&key.secret);
+        .build(signatures);
+
+    let transaction = sdk
+        .local_signer_api()
+        .sign(KeyBranch::Account, key.key_id, transaction)?;
 
     if req.dry_run {
         let exec_result = context

@@ -21,6 +21,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_wallet_crypto::{
     memo::Memo,
+    DecryptedData,
     UnblindedOutputWitness,
     UnblindedStealthInputWitness,
     UnblindedStealthOutputWitness,
@@ -29,7 +30,7 @@ use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     models::{ComponentAddress, ResourceAddress, StealthTransferStatement, UtxoAddress, VaultId},
     prelude::PedersenCommitmentBytes,
-    types::Amount,
+    types::{Amount, EncryptedData},
 };
 use tari_transaction::TransactionId;
 
@@ -38,13 +39,14 @@ use crate::{
         accounts::AccountsApiError,
         confidential_outputs::ConfidentialOutputsApiError,
         config::{ConfigApi, ConfigApiError},
-        key_manager::{KeyBranch, KeyManagerApi, KeyManagerApiError},
+        key_manager::{KeyManagerApi, KeyManagerApiError},
         stealth_crypto::{StealthCryptoApi, StealthCryptoApiError},
         stealth_transfer::{OutputToCreate, UnblindedInputToSpend},
     },
     models::{
         AccountAndViewKeys,
         InputSpendData,
+        KeyBranch,
         KeyId,
         OutputStatus,
         StealthBalance,
@@ -230,17 +232,16 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         Ok(())
     }
 
-    pub fn resolve_output_masks_for_spending(
+    fn resolve_output_masks_for_spending(
         &self,
+        spend_key_branch: KeyBranch,
         owner_key_id: KeyId,
         view_only_key_id: KeyId,
         inputs: &[InputSpendData],
     ) -> Result<Vec<UnblindedInputToSpend>, StealthOutputsApiError> {
         let network = self.config_api.get_network()?;
 
-        let owner_key_part = self.key_manager_api.get_account_owner_key(owner_key_id)?;
-        // Derive the view-only secret, of which the public key is used by senders to encrypt the value and mask.
-        let view_only = self.key_manager_api.get_view_only_key(view_only_key_id)?;
+        let owner_key_part = self.key_manager_api.get_key(spend_key_branch, owner_key_id)?;
         let mut inputs_with_masks = Vec::with_capacity(inputs.len());
         for input in inputs {
             // Derive the decryption key from the DHKE(sender's public nonce, encryption secret key);
@@ -253,10 +254,12 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                         reason: format!("Sender public nonce bytes are not a canonical public key: {e}"),
                     })?;
 
-            let decrypted = self.crypto_api.decrypt_value_and_mask(
+            // Derive the view-only secret, of which the public key is used by senders to encrypt the value and mask.
+            let decrypted = self.decrypt_value_and_mask(
                 &input.encrypted_data,
                 &input.commitment,
-                &view_only.secret,
+                KeyBranch::ViewOnlyKey,
+                view_only_key_id,
                 &nonce,
                 // We dont need to decrypt the memo to spend the output
                 true,
@@ -671,8 +674,12 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
     where
         I: IntoIterator<Item = OutputToCreate<'a>>,
     {
-        let unblinded_inputs =
-            self.resolve_output_masks_for_spending(params.spend_key_id, params.view_only_key_id, params.inputs)?;
+        let unblinded_inputs = self.resolve_output_masks_for_spending(
+            params.spend_key_branch,
+            params.spend_key_id,
+            params.view_only_key_id,
+            params.inputs,
+        )?;
         let outputs = params
             .outputs
             .into_iter()
@@ -708,9 +715,45 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         )?;
         Ok(statement)
     }
+
+    pub fn decrypt_value_and_mask(
+        &self,
+        output_encrypted_value: &EncryptedData,
+        output_commitment: &PedersenCommitmentBytes,
+        key_branch: KeyBranch,
+        claim_secret_key_id: KeyId,
+        reciprocal_public_key: &RistrettoPublicKey,
+        skip_memo: bool,
+    ) -> Result<DecryptedData, StealthOutputsApiError> {
+        let key = self.key_manager_api.get_key(key_branch, claim_secret_key_id)?;
+        let decrypted = self.crypto_api.decrypt_value_and_mask(
+            output_encrypted_value,
+            output_commitment,
+            &key.secret,
+            reciprocal_public_key,
+            skip_memo,
+        )?;
+        Ok(decrypted)
+    }
+
+    pub fn encrypt_value_and_mask(
+        &self,
+        amount: u64,
+        public_key: &RistrettoPublicKey,
+        memo: Option<&Memo>,
+    ) -> Result<(RistrettoPublicKey, EncryptedData), StealthOutputsApiError> {
+        let nonce_secret = self.key_manager_api.create_throwaway_nonce();
+        let public_nonce = RistrettoPublicKey::from_secret_key(&nonce_secret);
+        let mask = self.key_manager_api.next_key(KeyBranch::StealthMask)?;
+        let data = self
+            .crypto_api
+            .encrypt_value_and_mask(amount, &mask.key, public_key, &nonce_secret, memo)?;
+        Ok((public_nonce, data))
+    }
 }
 
 pub struct TransferStatementParams<'a, I> {
+    pub spend_key_branch: KeyBranch,
     pub spend_key_id: KeyId,
     pub view_only_key_id: KeyId,
     pub resource_address: &'a ResourceAddress,

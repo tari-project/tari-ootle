@@ -55,10 +55,10 @@ pub fn calculate_leader_fee(transaction_fee: u64, num_involved_shards: NonZeroU6
         // Pay each leader 1 more
         leader_fee += 1;
 
-        // We burn a little less due to the remainder
+        // We burn a little less (< num_involved_shards) due to the remainder
         target_burn.saturating_sub(num_involved_shards.get() - excess_remainder_burn)
     } else {
-        // We burn a little more due to the remainder
+        // We burn a little more (< num_involved_shards) due to the remainder
         target_burn + excess_remainder_burn
     };
 

@@ -242,7 +242,7 @@ impl Transaction {
         }
     }
 
-    pub const fn schema_version(&self) -> u64 {
+    pub const fn schema_version(&self) -> u16 {
         match self {
             Self::V1(tx) => tx.schema_version(),
         }

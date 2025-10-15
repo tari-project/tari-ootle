@@ -10,6 +10,7 @@ pub mod key_manager;
 pub mod non_fungible_tokens;
 pub mod password_manager;
 pub mod resources;
+pub mod signer;
 pub mod stealth_crypto;
 pub mod stealth_outputs;
 pub mod stealth_transfer;

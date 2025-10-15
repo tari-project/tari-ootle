@@ -41,7 +41,7 @@ impl TransactionV1 {
         }
     }
 
-    pub const fn schema_version(&self) -> u64 {
+    pub const fn schema_version(&self) -> u16 {
         self.body.schema_version()
     }
 

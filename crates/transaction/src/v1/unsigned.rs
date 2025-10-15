@@ -9,10 +9,10 @@ use tari_engine_types::{
     indexed_value::{IndexedValue, IndexedValueError},
     substate::SubstateId,
 };
-use tari_ootle_common_types::{Epoch, SubstateRequirement};
-use tari_template_lib::models::ComponentAddress;
+use tari_ootle_common_types::{Epoch, Signable, SubstateRequirement};
+use tari_template_lib::{models::ComponentAddress, prelude::RistrettoPublicKeyBytes};
 
-use crate::{builder::TransactionBuilder, ComponentCall, Instruction};
+use crate::{builder::TransactionBuilder, ComponentCall, Instruction, TransactionSignature};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -142,5 +142,13 @@ impl UnsignedTransactionV1 {
 
     pub fn has_inputs_without_version(&self) -> bool {
         self.inputs().iter().any(|i| i.version().is_none())
+    }
+}
+
+impl Signable<&RistrettoPublicKeyBytes> for UnsignedTransactionV1 {
+    type MessageOutput = [u8; 64];
+
+    fn as_signing_message(&self, seal_signer: &RistrettoPublicKeyBytes) -> Self::MessageOutput {
+        TransactionSignature::create_message(1, seal_signer, self)
     }
 }

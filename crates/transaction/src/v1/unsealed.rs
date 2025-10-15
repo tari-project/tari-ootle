@@ -5,9 +5,14 @@ use std::collections::HashSet;
 
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
-use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_engine_types::{indexed_value::IndexedValueError, substate::SubstateId};
-use tari_ootle_common_types::{Epoch, SubstateRequirement};
+use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey};
+use tari_engine_types::{
+    hashing::{engine_hasher64, EngineHashDomainLabel},
+    indexed_value::IndexedValueError,
+    substate::SubstateId,
+    ToByteType,
+};
+use tari_ootle_common_types::{Epoch, IntoSigned, Signable, SubstateRequirement};
 use tari_template_lib::{models::ComponentAddress, types::crypto::RistrettoPublicKeyBytes};
 
 use crate::{
@@ -34,7 +39,7 @@ impl UnsealedTransactionV1 {
         }
     }
 
-    pub const fn schema_version(&self) -> u64 {
+    pub const fn schema_version(&self) -> u16 {
         1
     }
 
@@ -79,7 +84,7 @@ impl UnsealedTransactionV1 {
         }
 
         self.signatures().iter().enumerate().all(|(i, sig)| {
-            if sig.verify(seal_signer, &self.transaction) {
+            if sig.verify_v1(seal_signer, &self.transaction) {
                 true
             } else {
                 log::debug!(target: LOG_TARGET, "Failed to verify signature at index {}", i);
@@ -116,5 +121,27 @@ impl UnsealedTransactionV1 {
 
     pub fn has_inputs_without_version(&self) -> bool {
         self.inputs().iter().any(|i| i.version().is_none())
+    }
+}
+
+impl Signable for UnsealedTransactionV1 {
+    type MessageOutput = [u8; 64];
+
+    fn as_signing_message(&self, _context: ()) -> Self::MessageOutput {
+        engine_hasher64(EngineHashDomainLabel::TransactionSignature)
+            .chain(&self.schema_version())
+            .chain(self)
+            .result()
+    }
+}
+
+impl IntoSigned for UnsealedTransactionV1 {
+    type SignedOutput = Transaction;
+
+    fn into_signed(self, public_key: RistrettoPublicKey, signature: RistrettoSchnorr) -> Self::SignedOutput {
+        self.set_seal_signature(TransactionSealSignature::new(
+            public_key.to_byte_type(),
+            signature.to_byte_type(),
+        ))
     }
 }

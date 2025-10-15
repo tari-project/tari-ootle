@@ -26,7 +26,13 @@ use tari_indexer_client::{
         SubmitTransactionRequest,
     },
 };
-use tari_ootle_common_types::{array_utils::copy_fixed_checked, optional::IsNotFoundError, shard::Shard, StateVersion};
+use tari_ootle_common_types::{
+    array_utils::copy_fixed_checked,
+    displayable::Displayable,
+    optional::IsNotFoundError,
+    shard::Shard,
+    StateVersion,
+};
 use tari_ootle_wallet_sdk::{
     models::{EndOfShard, StartOfShard, UtxoBurnt, UtxoSpent, UtxoUnspent, UtxoUpdatePayload, WalletUtxoUpdate},
     network::{
@@ -301,6 +307,17 @@ impl StatusResponseError for IndexerRestApiNetworkInterfaceError {
                     IndexerRestClientError::RequestFailedWithStatus { code, message } => {
                         WalletQueryErrorStatus::InternalError {
                             message: format!("Indexer request failed with status {code}: {message}"),
+                        }
+                    },
+                    IndexerRestClientError::ErrorResponse { source, details } => {
+                        if source.status().map(|s| s.as_u16()) == Some(INVALID_REQUEST_CODE as u16) {
+                            WalletQueryErrorStatus::TransactionRejected {
+                                message: format!("Indexer error response: {}. Details: {}", source, details.display()),
+                            }
+                        } else {
+                            WalletQueryErrorStatus::InternalError {
+                                message: format!("Indexer error response: {}", source),
+                            }
                         }
                     },
                     _ => WalletQueryErrorStatus::InternalError {

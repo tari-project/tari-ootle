@@ -23,10 +23,10 @@ use crate::{
         confidential_crypto::{ConfidentialCryptoApi, ConfidentialCryptoApiError},
         confidential_outputs::{ConfidentialOutputsApi, ConfidentialOutputsApiError},
         config::{ConfigApi, ConfigApiError},
-        key_manager::{KeyBranch, KeyManagerApi, KeyManagerApiError},
+        key_manager::{KeyManagerApi, KeyManagerApiError},
         substate::{SubstateApiError, SubstatesApi},
     },
-    models::{ConfidentialOutputModel, OutputStatus, WalletLockId},
+    models::{ConfidentialOutputModel, KeyBranch, OutputStatus, WalletLockId},
     network::WalletNetworkInterface,
     storage::{WalletStorageError, WalletStore},
 };

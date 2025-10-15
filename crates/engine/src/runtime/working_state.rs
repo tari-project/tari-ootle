@@ -1048,16 +1048,18 @@ impl WorkingState {
             vault_mut.resource_container_mut().deposit(resx.withdraw_all()?)?;
         }
 
+        let total_fees_paid = fee_resource
+            .amount()
+            .to_u64_checked()
+            .expect("FeeState guarantees that the total fee payments fit in an u64");
+
         Ok(TransactionReceipt {
             transaction_hash: self.transaction_hash,
             events: self.events.clone(),
             logs: self.logs.clone(),
             fee_receipt: FeeReceipt {
                 total_fee_payment,
-                total_fees_paid: fee_resource
-                    .amount()
-                    .to_u64_checked()
-                    .expect("FeeState guarantees that the total fee payments fit in an u64"),
+                total_fees_paid,
                 total_fee_overcharge,
                 cost_breakdown: self.fee_state.take_fee_charges(),
             },

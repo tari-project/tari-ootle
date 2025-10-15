@@ -27,6 +27,7 @@ pub mod services;
 pub mod shard;
 mod shard_group;
 mod shard_state_versions;
+mod signable;
 mod state_version;
 mod substate_address;
 pub mod substate_type;
@@ -50,6 +51,7 @@ pub use num_preshards::*;
 pub use peer_address::*;
 pub use shard_group::*;
 pub use shard_state_versions::*;
+pub use signable::*;
 pub use state_version::*;
 pub use substate_address::*;
 // Re-export

@@ -8,7 +8,6 @@ use axum_extra::headers::authorization::Bearer;
 use indexmap::IndexMap;
 use log::info;
 use tari_ootle_wallet_crypto::{AlwaysMissLookupTable, IoReaderValueLookup};
-use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
 use tari_template_lib::models::UtxoAddress;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
@@ -80,9 +79,7 @@ pub async fn handle_decrypt_value(
     let substates = sdk.substate_api().get_substates_from_network(utxo_ids).await?;
 
     // Get view secret key
-    let view_key = sdk
-        .key_manager_api()
-        .derive_key(KeyBranch::ElgamalEncryptionViewKey, req.view_key_id)?;
+    let view_key = sdk.key_manager_api().get_elgamal_encrypted_view_key(req.view_key_id)?;
 
     let value_range = req.minimum_expected_value.unwrap_or(0)..=req.maximum_expected_value.unwrap_or(10_000_000_000);
 

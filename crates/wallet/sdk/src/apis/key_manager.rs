@@ -3,7 +3,6 @@
 
 use blake2::Blake2b;
 use digest::{consts::U64, crypto_common::rand_core::OsRng};
-use tari_bor::{Deserialize, Serialize};
 use tari_crypto::{
     keys::{PublicKey as _, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
@@ -26,58 +25,18 @@ use crate::{
         DerivedWalletKey,
         ImportedKeyId,
         ImportedWalletKey,
-        Key,
+        KeyBranch,
         KeyId,
         KeyType,
         WalletKeyRecord,
         WalletOotleAddressWithKeyIds,
+        WalletPublicKey,
+        WalletSecretKey,
     },
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
 pub type WalletKeyManager = TariKeyManager<Blake2b<U64>>;
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
-#[serde(rename_all = "snake_case")]
-pub enum KeyBranch {
-    /// The account key branch, used for deriving account keys.
-    Account,
-    /// The transaction key branch, used to sign transactions that do not need to be signed with the account key.
-    Transaction,
-    /// The Elgamal encryption view key branch, used to derive a view key for resources with "viewable balance"
-    /// enabled.
-    ElgamalEncryptionViewKey,
-    /// The stealth mask branch, used to derive masks for stealth addresses.
-    StealthMask,
-    /// The confidential mask branch, used to derive masks for confidential transactions.
-    ConfidentialMask,
-    /// Used to generate nonces that need to be recreated later, e.g. to derive the DH secret for claim burn
-    Nonce,
-    /// Branch used to derive view-only keys. This key is used to derive an encryption key for wallet recovery. But
-    /// does not allow spending.
-    ViewOnlyKey,
-}
-
-impl KeyBranch {
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Account => "account",
-            Self::Transaction => "transactions",
-            Self::ElgamalEncryptionViewKey => "elgamal_view_key",
-            Self::StealthMask => "stealth_mask",
-            Self::ConfidentialMask => "confidential_mask",
-            Self::Nonce => "nonce",
-            Self::ViewOnlyKey => "view_only_key",
-        }
-    }
-}
-
-impl AsRef<str> for KeyBranch {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
 
 #[derive(Clone)]
 pub struct KeyManagerApi<'a, TStore> {
@@ -164,15 +123,15 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         Ok(KeyId::imported(id))
     }
 
-    pub fn get_account_owner_key(&self, key_id: KeyId) -> Result<Key, KeyManagerApiError> {
+    pub fn get_account_owner_key(&self, key_id: KeyId) -> Result<WalletSecretKey, KeyManagerApiError> {
         self.get_key(KeyBranch::Account, key_id)
     }
 
-    pub fn get_view_only_key(&self, key_id: KeyId) -> Result<Key, KeyManagerApiError> {
+    pub fn get_view_only_key(&self, key_id: KeyId) -> Result<WalletSecretKey, KeyManagerApiError> {
         self.get_key(KeyBranch::ViewOnlyKey, key_id)
     }
 
-    pub fn get_key(&self, branch: KeyBranch, key_id: KeyId) -> Result<Key, KeyManagerApiError> {
+    pub(crate) fn get_key(&self, branch: KeyBranch, key_id: KeyId) -> Result<WalletSecretKey, KeyManagerApiError> {
         match key_id {
             KeyId::Imported { local_key_id } => {
                 let imported_key = self.get_imported_key(local_key_id)?;
@@ -185,7 +144,34 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         }
     }
 
-    pub fn derive_key(
+    pub fn get_public_key(&self, branch: KeyBranch, key_id: KeyId) -> Result<WalletPublicKey, KeyManagerApiError> {
+        match key_id {
+            KeyId::Imported { local_key_id } => {
+                // TODO: could be implemented without fetching the secret key, if we stored the public key in the DB
+                let imported_key = self.get_imported_key(local_key_id)?;
+                Ok(WalletPublicKey {
+                    public_key: imported_key.to_public_key(),
+                    key_id,
+                })
+            },
+            KeyId::Derived { index } => {
+                let derived_key = self.derive_key(branch, index)?;
+                Ok(WalletPublicKey {
+                    public_key: derived_key.to_public_key(),
+                    key_id,
+                })
+            },
+        }
+    }
+
+    pub fn get_elgamal_encrypted_view_key(
+        &self,
+        index: DerivedKeyIndex,
+    ) -> Result<DerivedWalletKey, KeyManagerApiError> {
+        self.derive_key(KeyBranch::ElgamalEncryptionViewKey, index)
+    }
+
+    pub(crate) fn derive_key(
         &self,
         branch: KeyBranch,
         index: DerivedKeyIndex,
@@ -207,15 +193,6 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
             public_key: derived_key.to_public_key(),
             derived_key,
         })
-    }
-
-    pub fn derive_account_keypair(
-        &self,
-        index: u64,
-    ) -> Result<(DerivedWalletKey, RistrettoPublicKey), KeyManagerApiError> {
-        let key = self.derive_account_key(index)?;
-        let public_key = RistrettoPublicKey::from_secret_key(&key.key);
-        Ok((key, public_key))
     }
 
     pub fn derive_account_key(&self, index: DerivedKeyIndex) -> Result<DerivedWalletKey, KeyManagerApiError> {
@@ -280,6 +257,18 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         Ok(key)
     }
 
+    /// Derives the next key in the specified branch, increments the index, and sets it as the active key.
+    /// If the branch does not exist, it will be created with index 0 and the first key will be returned.
+    /// TODO: if there is another active DB transaction this function will block until it can acquire it.
+    pub fn next_public_key(&self, branch: KeyBranch) -> Result<WalletPublicKey, KeyManagerApiError> {
+        let next_key_id = self.next_derived_key_index(branch)?;
+        let key = self.derive_key(branch, next_key_id)?;
+        Ok(WalletPublicKey {
+            public_key: key.to_public_key(),
+            key_id: key.as_key_id(),
+        })
+    }
+
     pub fn next_derived_key_index(&self, branch: KeyBranch) -> Result<DerivedKeyIndex, KeyManagerApiError> {
         let mut tx = self.store.create_write_tx()?;
         let next_index = tx
@@ -326,9 +315,13 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         self.derive_key(branch, key_index)
     }
 
-    pub fn get_key_or_active(&self, branch: KeyBranch, maybe_key_id: Option<KeyId>) -> Result<Key, KeyManagerApiError> {
+    pub fn get_key_or_active(
+        &self,
+        branch: KeyBranch,
+        maybe_key_id: Option<KeyId>,
+    ) -> Result<WalletPublicKey, KeyManagerApiError> {
         match maybe_key_id {
-            Some(id) => Ok(self.get_key(branch, id)?),
+            Some(id) => Ok(self.get_public_key(branch, id)?),
             None => {
                 let key = self.get_active_key(branch)?;
                 Ok(key.into())

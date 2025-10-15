@@ -9,13 +9,14 @@ mod tests;
 mod workspace_ids;
 
 pub use named_component_call::*;
-use tari_crypto::ristretto::RistrettoSecretKey;
+use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey};
 use tari_engine_types::{
     confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
     substate::SubstateId,
+    ToByteType,
     ValidatorFeePoolAddress,
 };
-use tari_ootle_common_types::{Epoch, SubstateRequirement};
+use tari_ootle_common_types::{Epoch, IntoSigned, Signable, SubstateRequirement};
 use tari_template_lib::{
     auth::OwnerRule,
     models::{ResourceAddress, StealthTransferStatement},
@@ -65,7 +66,7 @@ impl TransactionBuilder {
         }
     }
 
-    pub fn then<F: FnOnce(Self) -> Self>(self, f: F) -> Self {
+    pub fn then<F: FnOnce(Self) -> T, T>(self, f: F) -> T {
         f(self)
     }
 
@@ -478,5 +479,24 @@ impl TransactionBuilder {
             panic!("Workspace key '{}' not found", parsed.name);
         };
         WorkspaceOffsetId::new(id).with_offset_opt(parsed.offset)
+    }
+}
+
+impl Signable<&RistrettoPublicKeyBytes> for TransactionBuilder {
+    type MessageOutput = [u8; 64];
+
+    fn as_signing_message(&self, sealed_signer: &RistrettoPublicKeyBytes) -> Self::MessageOutput {
+        self.unsigned_transaction.as_signing_message(sealed_signer)
+    }
+}
+
+impl IntoSigned<&RistrettoPublicKeyBytes> for TransactionBuilder {
+    type SignedOutput = Self;
+
+    fn into_signed(self, public_key: RistrettoPublicKey, signature: RistrettoSchnorr) -> Self::SignedOutput {
+        self.add_signature(TransactionSignature::new(
+            public_key.to_byte_type(),
+            signature.to_byte_type(),
+        ))
     }
 }

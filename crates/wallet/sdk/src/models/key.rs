@@ -3,12 +3,55 @@
 
 use std::{fmt::Display, str::FromStr};
 
+use tari_bor::{Deserialize, Serialize};
 use tari_crypto::{
-    keys::PublicKey,
+    keys::PublicKey as _,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+#[serde(rename_all = "snake_case")]
+pub enum KeyBranch {
+    /// The account key branch, used for deriving account keys.
+    Account,
+    /// The transaction key branch, used to sign transactions that do not need to be signed with the account key.
+    Transaction,
+    /// The Elgamal encryption view key branch, used to derive a view key for resources with "viewable balance"
+    /// enabled.
+    ElgamalEncryptionViewKey,
+    /// The stealth mask branch, used to derive masks for stealth addresses.
+    StealthMask,
+    /// The confidential mask branch, used to derive masks for confidential transactions.
+    ConfidentialMask,
+    /// Used to generate nonces that need to be recreated later, e.g. to derive the DH secret for claim burn
+    Nonce,
+    /// Branch used to derive view-only keys. This key is used to derive an encryption key for wallet recovery. But
+    /// does not allow spending.
+    ViewOnlyKey,
+}
+
+impl KeyBranch {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Account => "account",
+            Self::Transaction => "transactions",
+            Self::ElgamalEncryptionViewKey => "elgamal_view_key",
+            Self::StealthMask => "stealth_mask",
+            Self::ConfidentialMask => "confidential_mask",
+            Self::Nonce => "nonce",
+            Self::ViewOnlyKey => "view_only_key",
+        }
+    }
+}
+
+impl AsRef<str> for KeyBranch {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
 
 #[derive(Clone)]
 pub struct WalletKeyRecord {
@@ -82,12 +125,37 @@ impl From<tari_transaction_components::key_manager::tari_key_manager::DerivedKey
 }
 
 #[derive(Clone)]
-pub struct Key {
+pub struct WalletPublicKey {
+    pub public_key: RistrettoPublicKey,
+    pub key_id: KeyId,
+}
+
+impl WalletPublicKey {
+    pub fn public_key(&self) -> &RistrettoPublicKey {
+        &self.public_key
+    }
+
+    pub fn key_id(&self) -> KeyId {
+        self.key_id
+    }
+}
+
+impl From<DerivedWalletKey> for WalletPublicKey {
+    fn from(derived: DerivedWalletKey) -> Self {
+        Self {
+            key_id: derived.as_key_id(),
+            public_key: derived.to_public_key(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct WalletSecretKey {
     pub secret: RistrettoSecretKey,
     pub key_id: KeyId,
 }
 
-impl Key {
+impl WalletSecretKey {
     pub fn secret(&self) -> &RistrettoSecretKey {
         &self.secret
     }
@@ -101,7 +169,7 @@ impl Key {
     }
 }
 
-impl From<DerivedKeyPair> for Key {
+impl From<DerivedKeyPair> for WalletSecretKey {
     fn from(pair: DerivedKeyPair) -> Self {
         Self {
             key_id: pair.derived_key.as_key_id(),
@@ -110,7 +178,7 @@ impl From<DerivedKeyPair> for Key {
     }
 }
 
-impl From<DerivedWalletKey> for Key {
+impl From<DerivedWalletKey> for WalletSecretKey {
     fn from(derived: DerivedWalletKey) -> Self {
         Self {
             key_id: derived.as_key_id(),
@@ -119,7 +187,7 @@ impl From<DerivedWalletKey> for Key {
     }
 }
 
-impl From<ImportedWalletKey> for Key {
+impl From<ImportedWalletKey> for WalletSecretKey {
     fn from(imported: ImportedWalletKey) -> Self {
         Self {
             key_id: imported.as_key_id(),
@@ -128,7 +196,7 @@ impl From<ImportedWalletKey> for Key {
     }
 }
 
-impl From<WalletKeyRecord> for Key {
+impl From<WalletKeyRecord> for WalletSecretKey {
     fn from(record: WalletKeyRecord) -> Self {
         Self {
             secret: record.secret_key,
@@ -140,8 +208,8 @@ impl From<WalletKeyRecord> for Key {
 #[derive(Clone)]
 pub struct AccountAndViewKeys {
     pub account_public_key: RistrettoPublicKeyBytes,
-    pub account_key: Option<Key>,
-    pub view_only_key: Key,
+    pub account_key: Option<WalletSecretKey>,
+    pub view_only_key: WalletSecretKey,
 }
 
 #[derive(Clone)]

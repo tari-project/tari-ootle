@@ -4,14 +4,13 @@
 use std::ops::RangeInclusive;
 
 use log::info;
-use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
     component::derive_component_address_from_public_key,
     indexed_value::IndexedWellKnownTypes,
     ToByteType,
 };
 use tari_ootle_common_types::SubstateRequirement;
-use tari_ootle_wallet_sdk::models::{Account, KeyId};
+use tari_ootle_wallet_sdk::models::{Account, KeyBranch, KeyId};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
@@ -23,8 +22,11 @@ use crate::{faucet::Faucet, runner::Runner};
 
 impl Runner {
     pub async fn create_account_with_free_coins(&mut self) -> anyhow::Result<Account> {
-        let key = self.sdk.key_manager_api().derive_account_key(0)?;
-        let owner_public_key = RistrettoPublicKey::from_secret_key(&key.key).to_byte_type();
+        let owner_key = self
+            .sdk
+            .key_manager_api()
+            .get_public_key(KeyBranch::Account, KeyId::derived(0))?;
+        let owner_public_key = owner_key.public_key.to_byte_type();
 
         let account_address = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &owner_public_key);
 
@@ -41,7 +43,12 @@ impl Runner {
                 SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
                 SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
             ])
-            .build_and_seal(&key.key);
+            .build();
+
+        let transaction = self
+            .sdk
+            .local_signer_api()
+            .sign(KeyBranch::Account, owner_key.key_id, transaction)?;
 
         let finalize = self.submit_transaction_and_wait(transaction).await?;
         let diff = finalize.result.any_accept().unwrap();
@@ -71,35 +78,46 @@ impl Runner {
         pay_fee_account: &Account,
         account_key_indexes: RangeInclusive<u64>,
     ) -> anyhow::Result<Vec<Account>> {
-        let key = self.sdk.key_manager_api().derive_account_key(0)?;
+        let key = self
+            .sdk
+            .key_manager_api()
+            .get_public_key(KeyBranch::Account, KeyId::derived(0))?;
         let key_index_start = *account_key_indexes.start();
         let num_accounts = *account_key_indexes.end() as usize - key_index_start as usize + 1;
         let owners = account_key_indexes
             .map(|idx| {
-                let key = self.sdk.key_manager_api().derive_account_key(idx)?;
+                let key = self
+                    .sdk
+                    .key_manager_api()
+                    .get_public_key(KeyBranch::Account, KeyId::derived(idx))?;
                 Ok(key)
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
-
-        let mut builder = self
-            .new_transaction_builder()
-            .fee_transaction_pay_from_component(pay_fee_account.component_address, 1000 * owners.len());
-        for owner in &owners {
-            builder = builder.create_account(RistrettoPublicKey::from_secret_key(&owner.key).to_byte_type());
-        }
 
         let pay_fee_vault = self
             .sdk
             .accounts_api()
             .get_vault_by_resource(&pay_fee_account.component_address, &XTR)?;
 
-        let transaction = builder
+        let transaction = self
+            .new_transaction_builder()
+            .fee_transaction_pay_from_component(pay_fee_account.component_address, 1000 * owners.len())
+            .then(|builder| {
+                owners.iter().fold(builder, |builder, owner| {
+                    builder.create_account(owner.public_key.to_byte_type())
+                })
+            })
             .with_inputs([
                 SubstateRequirement::unversioned(pay_fee_account.component_address),
                 SubstateRequirement::unversioned(pay_fee_vault.id),
                 SubstateRequirement::unversioned(pay_fee_vault.resource_address),
             ])
-            .build_and_seal(&key.key);
+            .build();
+
+        let transaction = self
+            .sdk
+            .local_signer_api()
+            .sign(KeyBranch::Account, key.key_id, transaction)?;
 
         let finalize = self.submit_transaction_and_wait(transaction).await?;
         let diff = finalize.result.any_accept().unwrap();
@@ -114,19 +132,14 @@ impl Runner {
                 .find(|addr| {
                     derive_component_address_from_public_key(
                         &ACCOUNT_TEMPLATE_ADDRESS,
-                        &RistrettoPublicKey::from_secret_key(&owner.key).to_byte_type(),
+                        &owner.public_key.to_byte_type(),
                     ) == *addr
                 })
                 .expect("New account not found in diff");
 
-            self.sdk.accounts_api().add_account(
-                None,
-                &account_addr,
-                owner.as_key_id(),
-                owner.as_key_id(),
-                true,
-                false,
-            )?;
+            self.sdk
+                .accounts_api()
+                .add_account(None, &account_addr, owner.key_id, owner.key_id, true, false)?;
             let account = self.sdk.accounts_api().get_account_by_address(&account_addr)?;
             accounts.push(account.account);
         }

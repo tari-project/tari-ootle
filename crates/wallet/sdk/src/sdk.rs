@@ -27,6 +27,7 @@ use crate::{
         non_fungible_tokens::NonFungibleTokensApi,
         password_manager::{PasswordManagerApi, PasswordManagerApiError},
         resources::ResourcesApi,
+        signer::SignerApi,
         stealth_crypto::StealthCryptoApi,
         stealth_outputs::StealthOutputsApi,
         stealth_transfer::StealthTransferApi,
@@ -36,11 +37,15 @@ use crate::{
         viewable_balance::ViewableBalanceApi,
     },
     cipher_seed::{CipherSeedRestore, WalletCipherSeed},
+    key_managers::local::LocalKeyManager,
+    local_key_store::LocalKeyStore,
     network::{StatusResponseError, WalletNetworkInterface},
     storage::{WalletStorageError, WalletStore},
 };
 
 const LOG_TARGET: &str = "wallet::sdk::api";
+
+pub type LocalSignerApi<'a, TStore> = SignerApi<LocalKeyManager<'a, LocalKeyStore<'a, TStore>>>;
 
 #[derive(Debug, Clone)]
 pub struct WalletSdkConfig {
@@ -151,10 +156,6 @@ where
     }
 
     /// Returns the KeyManager API for the wallet.
-    ///
-    /// ## Panics
-    /// This function will panic if the cipher seed has not been initialized i.e. `initialize_cipher_seed` has not been
-    /// called once before calling this.
     pub fn key_manager_api(&self) -> KeyManagerApi<'_, TStore> {
         let network = self.config.network;
         KeyManagerApi::new(
@@ -163,6 +164,24 @@ where
             &self.loaded_cipher_seed,
             self.password_manager_api(),
         )
+    }
+
+    /// Returns the Signer API for the wallet if the cipher seed has been initialized. This signer uses the local key
+    /// store where key material is kept in the local database.
+    ///
+    /// ## Panics
+    /// This function will panic if the cipher seed has not been initialized i.e. `initialize_cipher_seed` has not been
+    /// called once before calling this.
+    pub fn local_signer_api(&self) -> LocalSignerApi<'_, TStore> {
+        let cipher_seed = self
+            .loaded_cipher_seed
+            .cipher_seed()
+            .expect("Cipher seed not initialized");
+        let backend = LocalKeyManager::new(
+            cipher_seed,
+            LocalKeyStore::new(self.password_manager_api(), &self.store),
+        );
+        SignerApi::new(backend)
     }
 
     pub(crate) fn password_manager_api(&self) -> PasswordManagerApi<'_, TStore> {

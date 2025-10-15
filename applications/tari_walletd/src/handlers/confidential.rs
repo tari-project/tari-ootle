@@ -12,10 +12,7 @@ use serde_json::json;
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{crypto::get_commitment_factory, ToByteType};
 use tari_ootle_wallet_crypto::{AlwaysMissLookupTable, IoReaderValueLookup, UnblindedOutputWitness};
-use tari_ootle_wallet_sdk::{
-    apis::key_manager::KeyBranch,
-    models::{ConfidentialOutputModel, OutputStatus},
-};
+use tari_ootle_wallet_sdk::models::{ConfidentialOutputModel, KeyBranch, OutputStatus};
 use tari_template_lib::types::Amount;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
@@ -290,9 +287,7 @@ pub async fn handle_view_vault_balance(
         .ok_or_else(|| invalid_params("vault_id", Some("Vault does not contain a confidential resource")))?;
 
     // Get view secret key
-    let view_key = sdk
-        .key_manager_api()
-        .derive_key(KeyBranch::ElgamalEncryptionViewKey, req.view_key_id)?;
+    let view_key = sdk.key_manager_api().get_elgamal_encrypted_view_key(req.view_key_id)?;
 
     let value_range = req.minimum_expected_value.unwrap_or(0)..=req.maximum_expected_value.unwrap_or(10_000_000_000);
 

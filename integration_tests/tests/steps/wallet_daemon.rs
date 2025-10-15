@@ -12,7 +12,7 @@ use integration_tests::{
 };
 use rand::{rngs::OsRng, Rng};
 use tari_engine_types::commit_result::FinalizeResult;
-use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
+use tari_ootle_wallet_sdk::models::KeyBranch;
 use tari_template_lib::{
     constants::XTR,
     types::{bytes::Bytes, crypto::PedersenCommitmentBytes, Amount},

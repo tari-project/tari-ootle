@@ -25,11 +25,10 @@ use tari_ootle_wallet_crypto::{
 use tari_ootle_wallet_sdk::{
     apis::{
         confidential_transfer::ConfidentialTransferParams,
-        key_manager::KeyBranch,
         stealth_transfer::StealthTransferParams,
         substate::ValidatorScanResult,
     },
-    models::NewAccountData,
+    models::{KeyBranch, KeyId, NewAccountData},
 };
 use tari_ootle_wallet_sdk_services::events::TransactionSubmittedEvent;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
@@ -429,6 +428,8 @@ pub async fn handle_claim_burn(
         .ok_or_else(|| invalid_params("account", Some("cannot claim burn to an account without an owner key")))?;
 
     let network = sdk.config_api().get_network()?;
+    // We derive secrets directly here because claim burn is a unique case, making it difficult to use the higher
+    // level stealth output api that takes care of keys but assumes that this is a regular transfer.
     let claim_nonce_keypair = sdk
         .key_manager_api()
         .derive_keypair(KeyBranch::Nonce, owner_nonce_key_index)?;
@@ -553,7 +554,14 @@ pub async fn handle_claim_burn(
                 .pay_fee_stealth(pay_fee_and_mint_output)
         })
         .add_input(XTR)
-        .build_and_seal(claim_nonce_keypair.secret_key());
+        .build();
+
+    // The signer does not authorize this transaction, as the claim burn instruction is authorized by the proofs. So we
+    // can sign with any key.
+    let nonce = sdk.key_manager_api().next_public_key(KeyBranch::Nonce)?;
+    let transaction = sdk
+        .local_signer_api()
+        .sign(KeyBranch::Nonce, nonce.key_id, transaction)?;
 
     let tx_id = context.transaction_service().submit_transaction(transaction).await?;
 
@@ -635,8 +643,6 @@ pub async fn handle_create_free_test_coins(
         );
     }
 
-    let account_owner_key = sdk.key_manager_api().get_account_owner_key(account_owner_key_id)?;
-
     let transaction = context
         .transaction_builder()
         .with_fee_instructions_builder(|fee_builder| {
@@ -656,7 +662,11 @@ pub async fn handle_create_free_test_coins(
                 .call_method(*account.component_address(), "pay_fee", args![max_fee])
         })
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
-        .build_and_seal(&account_owner_key.secret);
+        .build();
+
+    let transaction = sdk
+        .local_signer_api()
+        .sign(KeyBranch::Account, account_owner_key_id, transaction)?;
 
     info!(
         target: LOG_TARGET,
@@ -815,7 +825,6 @@ pub async fn handle_transfer(
 
     // build the transaction
     let max_fee = req.max_fee.unwrap_or(DEFAULT_FEE);
-    let account_owner_key = sdk.key_manager_api().get_account_owner_key(account_owner_key_id)?;
 
     let transaction = builder
         .with_dry_run(req.dry_run)
@@ -844,7 +853,11 @@ pub async fn handle_transfer(
             }
         })
         .with_inputs(inputs.into_iter().map(|req| req.into_unversioned()))
-        .build_and_seal(&account_owner_key.secret);
+        .build();
+
+    let transaction = sdk
+        .local_signer_api()
+        .sign(KeyBranch::Account, account_owner_key_id, transaction)?;
 
     // If dry run we can return the result immediately
     if req.dry_run {
@@ -976,18 +989,20 @@ pub async fn handle_stealth_transfer(
 
         let must_sign_with_account_key =
             transfer.fee_inputs.revealed.is_positive() || transfer.transfer_inputs.revealed.is_positive();
-        let signer_key = if must_sign_with_account_key {
-            sdk.key_manager_api().get_account_owner_key(owner_key_id)?
+
+        let transaction = transfer.transaction.authorized_sealed_signer().build(vec![]);
+
+        let (key_branch, key_id) = if must_sign_with_account_key {
+            (KeyBranch::Account, owner_key_id)
         } else {
             // Since we don't require account auth, use a throwaway nonce to sign the transaction
-            sdk.key_manager_api().next_key(KeyBranch::Nonce)?.into()
+            (
+                KeyBranch::Nonce,
+                KeyId::derived(sdk.key_manager_api().next_derived_key_index(KeyBranch::Nonce)?),
+            )
         };
 
-        let transaction = transfer
-            .transaction
-            .authorized_sealed_signer()
-            .build(vec![])
-            .seal(&signer_key.secret);
+        let transaction = sdk.local_signer_api().sign(key_branch, key_id, transaction)?;
 
         // TODO: if submitting fails we need to unlock the inputs again
         if req.dry_run {

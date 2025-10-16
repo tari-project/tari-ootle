@@ -4,6 +4,7 @@
 use std::{fmt, fmt::Display, ops::Deref};
 
 use smallvec::SmallVec;
+use tari_template_lib_types::hex::write_hex_fmt;
 
 /// A **immutable** byte buffer that can be stack-allocated if the buffer is smaller than L or heap-allocated if it is
 /// larger.
@@ -115,9 +116,7 @@ impl<const L: usize> Display for SmallBytes<L> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if f.alternate() {
             // Hex
-            for b in self.as_slice() {
-                write!(f, "{:02x}", b)?;
-            }
+            write_hex_fmt(f, self.as_slice())?;
         } else {
             // Try to print as UTF-8
             write!(f, "{}", String::from_utf8_lossy(self.as_slice()))?;

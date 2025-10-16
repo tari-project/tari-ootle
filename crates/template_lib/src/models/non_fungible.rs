@@ -8,7 +8,7 @@ use tari_template_abi::{
     rust::{fmt, fmt::Display, str::FromStr, write},
     EngineOp,
 };
-use tari_template_lib_types::{serde_helpers, Hash};
+use tari_template_lib_types::{hex::write_hex_fmt, serde_helpers, Hash};
 
 use super::{address_prefixes, BinaryTag};
 use crate::{
@@ -286,9 +286,7 @@ impl From<RistrettoPublicKeyBytes> for NonFungibleAddress {
 impl Display for NonFungibleAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}_", address_prefixes::NON_FUNGIBLE)?;
-        for byte in self.resource_address().as_bytes() {
-            write!(f, "{:02x}", byte)?;
-        }
+        write_hex_fmt(f, self.resource_address().as_bytes())?;
         write!(f, "_{}", self.id())
     }
 }

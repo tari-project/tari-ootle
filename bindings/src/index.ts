@@ -51,6 +51,7 @@ export * from "./types/FeeSource";
 export * from "./types/FinalizeResult";
 export * from "./types/ForeignProposalAtom";
 export * from "./types/FunctionDef";
+export * from "./types/Hash64";
 export * from "./types/Hash";
 export * from "./types/IndexedValue";
 export * from "./types/IndexedWellKnownTypes";

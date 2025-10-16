@@ -35,7 +35,7 @@ import {
   XTR,
 } from "@tari-project/typescript-bindings";
 import { transactionsWaitResult } from "@utils/json_rpc";
-import FormStep, { SendMoneyFormState } from "../steps/FormStep";
+import FormStep, { FormError, SendMoneyFormState } from "../steps/FormStep";
 import ConfirmationStep from "../steps/ConfirmationStep";
 import ResultStep, { TransferResult } from "../steps/ResultStep";
 import PopupTitle from "@/components/PopupTitle";
@@ -66,6 +66,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   const [isEstimatingFee, setIsEstimatingFee] = useState(false);
   const [transferFormState, setTransferFormState] = useState(INITIAL_VALUES);
   const [transferResult, setTransferResult] = useState<TransferResult | undefined>();
+  const [formError, setFormError] = useState<FormError | null>(null);
   const { mutateAsync: sendIt } = useAccountsTransfer();
 
   const { account } = useAccountStore();
@@ -120,6 +121,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   const availableBalance = calculateAvailableBalance();
 
   function setFormValue(e: React.ChangeEvent<HTMLInputElement>) {
+    setFormError(null);
     const { name, value } = e.target;
 
     // For amount field, parse the input to allow decimal values
@@ -145,6 +147,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   }
 
   function setSelectFormValue(e: SelectChangeEvent<unknown>) {
+    setFormError(null);
     setTransferFormState({
       ...transferFormState,
       [e.target.name]: e.target.value,
@@ -152,6 +155,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   }
 
   function setCheckboxFormValue(e: React.ChangeEvent<HTMLInputElement>) {
+    setFormError(null);
     setTransferFormState({
       ...transferFormState,
       [e.target.name]: e.target.checked,
@@ -159,6 +163,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   }
 
   const handleUseBadgeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormError(null);
     setUseBadge(e.target.checked);
     if (!e.target.checked) {
       setTransferFormState({
@@ -208,9 +213,6 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         fee += 100;
       }
       setTransferFormState((prevState) => ({ ...prevState, fee: fee.toString() }));
-    } catch (error) {
-      console.error("Fee estimation error:", error);
-      // Don't block the user if fee estimation fails
     } finally {
       setIsEstimatingFee(false);
     }
@@ -232,6 +234,10 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
       try {
         await estimateFee();
       } catch (error) {
+        setFormError({
+          type: "general",
+          message: `Failed to estimate fee: ${error}`,
+        });
         console.error("Fee estimation failed:", error);
         return;
       }
@@ -316,6 +322,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
             availableBalance={availableBalance}
             token_symbol={props.token_symbol}
             divisibility={balanceEntry.divisibility}
+            formError={formError}
             onSubmit={handleFormSubmit}
             onCancel={handleClose}
             onFormValueChange={setFormValue}

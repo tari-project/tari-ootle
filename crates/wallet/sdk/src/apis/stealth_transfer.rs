@@ -492,7 +492,7 @@ where
         // withdraw auth signature, then we can use a nonce key.
         let must_sign_with_account_key =
             fee_inputs_to_spend.revealed.is_positive() || inputs_to_spend.revealed.is_positive();
-        let (key_branch, key_id) = if must_sign_with_account_key {
+        let (signing_key_branch, signing_key_id) = if must_sign_with_account_key {
             (KeyBranch::Account, owner_key_id)
         } else {
             (
@@ -501,7 +501,9 @@ where
                 KeyId::derived(self.key_manager_api.next_derived_key_index(KeyBranch::Nonce)?),
             )
         };
-        let required_signer = self.key_manager_api.get_public_key(key_branch, key_id)?;
+        let required_signer = self
+            .key_manager_api
+            .get_public_key(signing_key_branch, signing_key_id)?;
         let required_signer_pk = required_signer.public_key.to_byte_type();
 
         // Generate fee transfer statement
@@ -575,19 +577,6 @@ where
             memo: None,
         })
         .filter(|o| o.amount.is_positive());
-
-        let must_sign_with_account_key =
-            fee_inputs_to_spend.revealed.is_positive() || inputs_to_spend.revealed.is_positive();
-        let (signing_key_branch, signing_key_id) = if must_sign_with_account_key {
-            (KeyBranch::Account, owner_key_id)
-        } else {
-            // Since we don't require account auth, use a nonce to sign the transaction
-            (
-                KeyBranch::Nonce,
-                // Only usage of key manager - too bad :/
-                KeyId::derived(self.key_manager_api.next_derived_key_index(KeyBranch::Nonce)?),
-            )
-        };
 
         let transfer_statement = self.outputs_api.generate_transfer_statement(TransferStatementParams {
             spend_key_branch: KeyBranch::Account,

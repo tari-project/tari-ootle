@@ -9,6 +9,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use tari_template_lib::types::hex::write_hex_fmt;
 
 use crate::serde_with;
 
@@ -51,10 +52,7 @@ impl Hash64 {
     }
 
     pub fn write_hex_fmt<W: fmt::Write>(&self, writer: &mut W) -> fmt::Result {
-        for b in self.0 {
-            write!(writer, "{:02x?}", b)?;
-        }
-        Ok(())
+        write_hex_fmt(writer, &self.0)
     }
 
     pub fn try_from_slice(data: &[u8]) -> Result<Self, HashParseError> {
@@ -151,10 +149,7 @@ impl Default for Hash64 {
 
 impl Display for Hash64 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        for x in self.0 {
-            write!(f, "{:02x?}", x)?;
-        }
-        Ok(())
+        write_hex_fmt(f, &self.0)
     }
 }
 

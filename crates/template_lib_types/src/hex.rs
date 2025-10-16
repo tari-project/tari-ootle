@@ -38,7 +38,19 @@ pub fn bytes_to_hex<T: AsRef<[u8]>>(bytes: T) -> String {
 
 pub fn write_hex_fmt<W: fmt::Write>(writer: &mut W, bytes: &[u8]) -> fmt::Result {
     for b in bytes {
-        write!(writer, "{:02x?}", b)?;
+        write!(writer, "{:02x}", b)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_formats_as_hex() {
+        let bytes = [0xde, 0xad, 0xbe, 0xef];
+        let hex = bytes_to_hex(bytes);
+        assert_eq!(hex, "deadbeef");
+    }
 }

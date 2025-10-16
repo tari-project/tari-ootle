@@ -300,6 +300,17 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         Ok(balance)
     }
 
+    pub fn count_unspent_outputs_for_account(
+        &self,
+        account_address: &ComponentAddress,
+        resource_address: &ResourceAddress,
+    ) -> Result<u64, StealthOutputsApiError> {
+        let count = self.store.with_read_tx(|tx| {
+            tx.stealth_outputs_count_by_status(account_address, resource_address, OutputStatus::Unspent)
+        })?;
+        Ok(count)
+    }
+
     pub fn upsert_utxo(&self, utxo: &StealthOutputModel) -> Result<(), StealthOutputsApiError> {
         self.store.with_write_tx(|tx| {
             // TODO(perf): consider a dedicated exists query

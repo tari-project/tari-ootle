@@ -858,6 +858,33 @@ impl WalletStoreReader for ReadTransaction<'_> {
         })
     }
 
+    fn stealth_outputs_count_by_status(
+        &mut self,
+        account_addr: &ComponentAddress,
+        resource_address: &ResourceAddress,
+        status: OutputStatus,
+    ) -> Result<u64, WalletStorageError> {
+        const OPERATION: &str = "stealth_outputs_count_by_status";
+        use crate::schema::stealth_outputs;
+
+        let count = stealth_outputs::table
+            .filter(
+                stealth_outputs::owner_account_id.eq(accounts::table
+                    .select(accounts::id)
+                    .filter(accounts::address.eq(account_addr.to_string()))
+                    .limit(1)
+                    .single_value()
+                    .assume_not_null()),
+            )
+            .filter(stealth_outputs::resource_address.eq(resource_address.to_string()))
+            .filter(stealth_outputs::status.eq(status.as_key_str()))
+            .count()
+            .first::<i64>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(count as u64)
+    }
+
     fn stealth_outputs_get_unspent_by_account(
         &mut self,
         account_addr: &ComponentAddress,

@@ -13,7 +13,7 @@ use tari_template_lib::types::hex::write_hex_fmt;
 
 use crate::serde_with;
 
-/// Representation of a 32-byte hash value
+/// Representation of a 64-byte hash value
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Serialize, Deserialize, borsh::BorshSerialize)]
 #[serde(transparent)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -63,7 +63,7 @@ impl Hash64 {
     ///
     /// # Panics
     ///
-    /// Panics if `N` is greater than Self::LENGTH (32)
+    /// Panics if `N` is greater than Self::LENGTH (64)
     pub fn leading_bytes<const N: usize>(&self) -> [u8; N] {
         self.0
             .get(..N)
@@ -76,7 +76,7 @@ impl Hash64 {
     ///
     /// # Panics
     ///
-    /// Panics if `N` is greater than Self::LENGTH (32)
+    /// Panics if `N` is greater than Self::LENGTH (64)
     pub fn trailing_bytes<const N: usize>(&self) -> [u8; N] {
         self.0
             .get((Self::LENGTH - N)..Self::LENGTH)

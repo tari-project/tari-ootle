@@ -117,7 +117,6 @@ export default function FormStep({
       maximumFractionDigits: divisibility,
     });
   };
-  console.log(formError);
 
   return (
     <Form onSubmit={onSubmit}>

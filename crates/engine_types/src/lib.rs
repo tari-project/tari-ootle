@@ -32,6 +32,7 @@ pub mod entity_id_provider;
 pub mod id_provider;
 
 mod borsh;
+mod hash;
 pub mod json_cbor;
 pub mod published_template;
 mod substate_serde;
@@ -39,6 +40,7 @@ mod utxo;
 mod validator_fee;
 
 pub use byte_types::*;
+pub use hash::*;
 pub use template::{calculate_template_binary_hash, parse_template_address};
 pub use utxo::*;
 pub use validator_fee::*;

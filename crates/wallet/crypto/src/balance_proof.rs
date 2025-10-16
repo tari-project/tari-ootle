@@ -6,7 +6,7 @@ use tari_crypto::{
     keys::PublicKey,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_engine_types::{crypto::messages, hashing::EngineSchnorrSignature, ToByteType};
+use tari_engine_types::{crypto::messages, hashing::EngineSchnorrSignature, Hash64, ToByteType};
 use tari_template_lib::{
     models::{StealthInputsStatement, StealthOutputsStatement},
     prelude::{Amount, BalanceProofSignature, PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes},
@@ -35,13 +35,17 @@ pub(crate) fn generate_confidential_balance_proof(
     sig.to_byte_type()
 }
 
-pub(crate) fn generate_stealth_balance_proof_signature(
+pub fn generate_stealth_balance_proof_signature(
     agg_input_mask: &RistrettoSecretKey,
     agg_output_mask: &RistrettoSecretKey,
     inputs_statement: &StealthInputsStatement,
     outputs_statement: &StealthOutputsStatement,
 ) -> BalanceProofSignature {
     let secret_excess = agg_input_mask - agg_output_mask;
+    if secret_excess == RistrettoSecretKey::default() {
+        // This is a revealed only proof
+        return BalanceProofSignature::zero();
+    }
     let public_excess = RistrettoPublicKey::from_secret_key(&secret_excess);
     let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
     let message = messages::stealth_balance_proof64(&public_excess, &public_nonce, inputs_statement, outputs_statement);
@@ -54,8 +58,10 @@ pub(crate) fn generate_stealth_owner_proof_signature(
     secret_key: &RistrettoSecretKey,
     public_output_nonce: &RistrettoPublicKeyBytes,
     commitment: &PedersenCommitmentBytes,
+    required_signer: &RistrettoPublicKeyBytes,
+    metadata_hash: &Hash64,
 ) -> SchnorrSignatureBytes {
-    let message = messages::stealth_ownership64(commitment, public_output_nonce);
+    let message = messages::stealth_ownership64(commitment, public_output_nonce, required_signer, metadata_hash);
     let sig = EngineSchnorrSignature::sign(secret_key, message, &mut OsRng).unwrap();
     sig.to_byte_type()
 }

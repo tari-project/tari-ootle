@@ -29,7 +29,7 @@ use tari_ootle_wallet_crypto::{
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     models::{ComponentAddress, ResourceAddress, StealthTransferStatement, UtxoAddress, VaultId},
-    prelude::PedersenCommitmentBytes,
+    prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     types::{Amount, EncryptedData},
 };
 use tari_transaction::TransactionId;
@@ -298,6 +298,17 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
             .store
             .with_read_tx(|tx| tx.stealth_outputs_get_unspent_balance(resource_address))?;
         Ok(balance)
+    }
+
+    pub fn count_unspent_outputs_for_account(
+        &self,
+        account_address: &ComponentAddress,
+        resource_address: &ResourceAddress,
+    ) -> Result<u64, StealthOutputsApiError> {
+        let count = self.store.with_read_tx(|tx| {
+            tx.stealth_outputs_count_by_status(account_address, resource_address, OutputStatus::Unspent)
+        })?;
+        Ok(count)
     }
 
     pub fn upsert_utxo(&self, utxo: &StealthOutputModel) -> Result<(), StealthOutputsApiError> {
@@ -712,6 +723,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
             params.input_revealed_amount,
             &outputs,
             params.output_revealed_amount,
+            params.required_signer,
         )?;
         Ok(statement)
     }
@@ -762,6 +774,7 @@ pub struct TransferStatementParams<'a, I> {
     pub input_revealed_amount: Amount,
     pub outputs: I,
     pub output_revealed_amount: Amount,
+    pub required_signer: RistrettoPublicKeyBytes,
 }
 
 #[derive(Debug, thiserror::Error)]

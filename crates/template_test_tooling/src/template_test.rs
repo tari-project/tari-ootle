@@ -14,7 +14,7 @@ use serde::de::DeserializeOwned;
 use tari_crypto::{
     keys::PublicKey as _,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
-    tari_utilities::{hex::Hex, ByteArray},
+    tari_utilities::hex::Hex,
 };
 use tari_engine::{
     executables::Executable,
@@ -87,6 +87,7 @@ pub struct TemplateTest {
     fee_table: FeeTable,
     virtual_substates: VirtualSubstates,
     key_seed: u8,
+    auto_add_proofs_from_signers: bool,
 }
 
 impl TemplateTest {
@@ -177,6 +178,7 @@ impl TemplateTest {
                 per_signature_verification_cost: 1,
             },
             key_seed: 1,
+            auto_add_proofs_from_signers: true,
         }
     }
 
@@ -220,6 +222,16 @@ impl TemplateTest {
 
     pub fn disable_fees(&mut self) -> &mut Self {
         self.enable_fees = false;
+        self
+    }
+
+    pub fn enable_auto_add_proofs_from_signers(&mut self) -> &mut Self {
+        self.auto_add_proofs_from_signers = true;
+        self
+    }
+
+    pub fn disable_auto_add_proofs_from_signers(&mut self) -> &mut Self {
+        self.auto_add_proofs_from_signers = false;
         self
     }
 
@@ -389,11 +401,6 @@ impl TemplateTest {
         (self.owner_proof(), self.secret_key.clone())
     }
 
-    #[deprecated(note = "Please use owner_proof instead. This method will be removed.")]
-    pub fn get_test_proof(&self) -> NonFungibleAddress {
-        self.owner_proof()
-    }
-
     pub fn owner_proof(&self) -> NonFungibleAddress {
         NonFungibleAddress::from_public_key(self.public_key.to_byte_type())
     }
@@ -406,8 +413,8 @@ impl TemplateTest {
         &self.public_key
     }
 
-    pub fn get_test_public_key_bytes(&self) -> RistrettoPublicKeyBytes {
-        RistrettoPublicKeyBytes::from_bytes(self.public_key.as_bytes()).unwrap()
+    pub fn to_public_key_bytes(&self) -> RistrettoPublicKeyBytes {
+        self.public_key.to_byte_type()
     }
 
     pub fn create_empty_account(&mut self) -> (ComponentAddress, NonFungibleAddress, RistrettoSecretKey) {
@@ -514,12 +521,20 @@ impl TemplateTest {
     pub fn try_execute(
         &mut self,
         transaction: Transaction,
-        proofs: Vec<NonFungibleAddress>,
+        mut proofs: Vec<NonFungibleAddress>,
     ) -> Result<ExecuteResult, TransactionError> {
         let mut modules: Vec<Arc<dyn RuntimeModule>> = vec![Arc::new(self.track_calls.clone())];
 
         if self.enable_fees {
             modules.push(Arc::new(FeeModule::new(0, self.fee_table.clone())));
+        }
+
+        if self.auto_add_proofs_from_signers {
+            proofs.extend(
+                transaction
+                    .signers_iter()
+                    .map(|pk| NonFungibleAddress::from_public_key(*pk)),
+            );
         }
 
         let auth_params = AuthParams {

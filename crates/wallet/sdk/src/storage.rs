@@ -232,6 +232,13 @@ pub trait WalletStoreReader {
         resource_address: &ResourceAddress,
     ) -> Result<StealthBalance, WalletStorageError>;
 
+    fn stealth_outputs_count_by_status(
+        &mut self,
+        account_addr: &ComponentAddress,
+        resource_address: &ResourceAddress,
+        status: OutputStatus,
+    ) -> Result<u64, WalletStorageError>;
+
     fn stealth_outputs_get_unspent_by_account(
         &mut self,
         account_addr: &ComponentAddress,

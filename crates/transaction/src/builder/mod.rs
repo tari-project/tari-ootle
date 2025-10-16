@@ -66,7 +66,11 @@ impl TransactionBuilder {
         }
     }
 
-    pub fn then<F: FnOnce(Self) -> T, T>(self, f: F) -> T {
+    pub fn then<F: FnOnce(Self) -> Self>(self, f: F) -> Self {
+        f(self)
+    }
+
+    pub fn map<F: FnOnce(Self) -> T, T>(self, f: F) -> T {
         f(self)
     }
 
@@ -422,7 +426,7 @@ impl TransactionBuilder {
             }
         });
 
-        builder.unsigned_transaction.build(builder.signatures)
+        builder.unsigned_transaction.build_with_signatures(builder.signatures)
     }
 
     pub fn build_and_seal(self, secret_key: &RistrettoSecretKey) -> Transaction {

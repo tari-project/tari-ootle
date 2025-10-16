@@ -5,7 +5,7 @@ use std::cmp;
 
 use log::*;
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::{substate::SubstateId, ConvertFromByteType, FromByteType};
+use tari_engine_types::{substate::SubstateId, ConvertFromByteType, FromByteType, ToByteType};
 use tari_ootle_address::{OotleAddress, RistrettoOotleAddress};
 use tari_ootle_common_types::{
     displayable::Displayable,
@@ -34,11 +34,21 @@ use crate::{
         accounts::{derive_account_address_from_public_key, AccountsApi, AccountsApiError},
         confidential_transfer::ConfidentialTransferInputSelection,
         config::{ConfigApi, ConfigApiError},
+        key_manager::{KeyManagerApi, KeyManagerApiError},
         stealth_crypto::StealthCryptoApiError,
         stealth_outputs::{StealthOutputsApi, StealthOutputsApiError, TransferStatementParams},
         substate::{SubstateApiError, SubstatesApi, ValidatorScanResult},
     },
-    models::{Account, AccountWithAddress, InputSpendData, KeyBranch, OutputStatus, StealthOutputModel, WalletLockId},
+    models::{
+        Account,
+        AccountWithAddress,
+        InputSpendData,
+        KeyBranch,
+        KeyId,
+        OutputStatus,
+        StealthOutputModel,
+        WalletLockId,
+    },
     network::WalletNetworkInterface,
     storage::{WalletStorageError, WalletStore},
 };
@@ -49,6 +59,7 @@ pub struct StealthTransferApi<'a, TStore, TNetworkInterface> {
     accounts_api: AccountsApi<'a, TStore, TNetworkInterface>,
     outputs_api: StealthOutputsApi<'a, TStore>,
     substate_api: SubstatesApi<'a, TStore, TNetworkInterface>,
+    key_manager_api: KeyManagerApi<'a, TStore>,
     config_api: ConfigApi<'a, TStore>,
 }
 
@@ -62,12 +73,14 @@ where
         accounts_api: AccountsApi<'a, TStore, TNetworkInterface>,
         outputs_api: StealthOutputsApi<'a, TStore>,
         substate_api: SubstatesApi<'a, TStore, TNetworkInterface>,
+        key_manager_api: KeyManagerApi<'a, TStore>,
         config_api: ConfigApi<'a, TStore>,
     ) -> Self {
         Self {
             accounts_api,
             outputs_api,
             substate_api,
+            key_manager_api,
             config_api,
         }
     }
@@ -429,51 +442,11 @@ where
             .try_from_byte_type()
             .expect("already validated");
 
-        // Resolve fee inputs
         let lock_id = self.outputs_api.create_lock()?;
+
+        // Lock up funds for fees and transfer
         let fee_inputs_to_spend = self.lock_fee_inputs(lock_id, &owner_account, &params)?;
 
-        // TODO: use single db transaction across calls
-        // --- Any error from here can result in funds staying locked ---
-
-        let fee_stealth_change_amt = fee_inputs_to_spend
-            .total_stealth_input_amount()
-            .saturating_sub(params.max_fee.into());
-
-        // Generate fee change outputs if required
-        let fee_change_output = Some(OutputToCreate {
-            owner_address: &owner_address,
-            amount: fee_stealth_change_amt,
-            memo: None,
-        })
-        .filter(|o| o.amount.is_positive());
-
-        // Generate fee transfer statement
-        let fee_transfer_statement = self.outputs_api.generate_transfer_statement(TransferStatementParams {
-            spend_key_branch: KeyBranch::Account,
-            spend_key_id: owner_key_id,
-            view_only_key_id: owner_account.view_only_key_id(),
-            resource_address: &params.resource_address,
-            resource_view_key: resource_view_key.clone(),
-            inputs: &fee_inputs_to_spend.inputs,
-            input_revealed_amount: fee_inputs_to_spend.revealed,
-            outputs: fee_change_output.into_iter(),
-            output_revealed_amount: Amount::from(params.max_fee),
-        })?;
-
-        // Add the unconfirmed fee change output to the wallet store
-        if let Some(output) = fee_transfer_statement.outputs_statement.outputs.first() {
-            self.add_unconfirmed_output_from_statement(
-                lock_id,
-                &owner_account,
-                params.resource_address,
-                output,
-                fee_stealth_change_amt,
-                None,
-            )?;
-        }
-
-        // Reserve and lock input funds
         let inputs_to_spend = match self.lock_inputs_for_transfer(
             lock_id,
             owner_account.account(),
@@ -499,6 +472,65 @@ where
                 return Err(e);
             },
         };
+
+        // TODO: use single db transaction across calls
+        // --- Any error from here can result in funds staying locked ---
+
+        let fee_stealth_change_amt = fee_inputs_to_spend
+            .total_stealth_input_amount()
+            .saturating_sub(params.max_fee.into());
+
+        // Generate fee change outputs if required
+        let fee_change_output = Some(OutputToCreate {
+            owner_address: &owner_address,
+            amount: fee_stealth_change_amt,
+            memo: None,
+        })
+        .filter(|o| o.amount.is_positive());
+
+        // Figure out which signing key to use - if there are no revealed funds, which necessitate using a account
+        // withdraw auth signature, then we can use a nonce key.
+        let must_sign_with_account_key =
+            fee_inputs_to_spend.revealed.is_positive() || inputs_to_spend.revealed.is_positive();
+        let (signing_key_branch, signing_key_id) = if must_sign_with_account_key {
+            (KeyBranch::Account, owner_key_id)
+        } else {
+            (
+                KeyBranch::Nonce,
+                // Only usage of key manager - too bad :/
+                KeyId::derived(self.key_manager_api.next_derived_key_index(KeyBranch::Nonce)?),
+            )
+        };
+        let required_signer = self
+            .key_manager_api
+            .get_public_key(signing_key_branch, signing_key_id)?;
+        let required_signer_pk = required_signer.public_key.to_byte_type();
+
+        // Generate fee transfer statement
+        let fee_transfer_statement = self.outputs_api.generate_transfer_statement(TransferStatementParams {
+            spend_key_branch: KeyBranch::Account,
+            spend_key_id: owner_key_id,
+            view_only_key_id: owner_account.view_only_key_id(),
+            resource_address: &params.resource_address,
+            resource_view_key: resource_view_key.clone(),
+            inputs: &fee_inputs_to_spend.inputs,
+            input_revealed_amount: fee_inputs_to_spend.revealed,
+            outputs: fee_change_output.into_iter(),
+            output_revealed_amount: Amount::from(params.max_fee),
+            required_signer: required_signer_pk,
+        })?;
+
+        // Add the unconfirmed fee change output to the wallet store
+        if let Some(output) = fee_transfer_statement.outputs_statement.outputs.first() {
+            self.add_unconfirmed_output_from_statement(
+                lock_id,
+                &owner_account,
+                params.resource_address,
+                output,
+                fee_stealth_change_amt,
+                None,
+            )?;
+        }
 
         // If we're spending from the owner account, add the inputs
         if inputs_to_spend.revealed.is_positive() || fee_inputs_to_spend.revealed.is_positive() {
@@ -562,6 +594,7 @@ where
             .into_iter()
             .chain(change_output),
             output_revealed_amount: params.revealed_output_amount,
+            required_signer: required_signer_pk,
         })?;
 
         // Add all input UTXO substates to transaction inputs
@@ -601,6 +634,8 @@ where
                 lock_id,
                 fee_inputs: fee_inputs_to_spend,
                 transfer_inputs: inputs_to_spend,
+                signing_key_branch,
+                signing_key_id,
             }),
             Err(err) => {
                 // Unlock inputs
@@ -719,6 +754,8 @@ pub struct TransferOutput {
     pub lock_id: WalletLockId,
     pub fee_inputs: InputsToSpend,
     pub transfer_inputs: InputsToSpend,
+    pub signing_key_branch: KeyBranch,
+    pub signing_key_id: KeyId,
 }
 
 #[derive(Debug)]
@@ -843,6 +880,8 @@ pub enum StealthTransferApiError {
     OutputsApi(#[from] StealthOutputsApiError),
     #[error("Substate API error: {0}")]
     SubstateApi(#[from] SubstateApiError),
+    #[error("Key manager error: {0}")]
+    KeyManagerApi(#[from] KeyManagerApiError),
     #[error("Insufficient funds")]
     InsufficientFunds,
     #[error("Accounts API error: {0}")]

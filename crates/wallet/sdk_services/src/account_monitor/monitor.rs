@@ -49,7 +49,7 @@ pub struct AccountMonitor<TStore, TNetworkInterface> {
     pending_accounts: HashMap<TransactionId, NewAccountData>,
     utxo_scanner_handle: UtxoScannerHandle,
     periodic_scan_interval: Duration,
-    enable_periodic_scanning_with_utxos: bool,
+    enable_periodic_scanning_of_utxos: bool,
     scanner: AccountScanner<TStore, TNetworkInterface>,
     shutdown_signal: ShutdownSignal,
 }
@@ -76,7 +76,7 @@ where
                 pending_accounts: HashMap::new(),
                 periodic_scan_interval: Duration::from_secs(60),
                 utxo_scanner_handle,
-                enable_periodic_scanning_with_utxos: true,
+                enable_periodic_scanning_of_utxos: true,
                 scanner: AccountScanner::new(notify, wallet_sdk),
                 shutdown_signal,
             },
@@ -89,8 +89,8 @@ where
         self
     }
 
-    pub fn disable_periodic_scanning_with_utxos(mut self) -> Self {
-        self.enable_periodic_scanning_with_utxos = false;
+    pub fn disable_periodic_scanning_of_utxos(mut self) -> Self {
+        self.enable_periodic_scanning_of_utxos = false;
         self
     }
 
@@ -182,7 +182,7 @@ where
             }
             for account in &accounts {
                 let is_updated = self.scanner.refresh_account(*account.component_address()).await?;
-                if self.enable_periodic_scanning_with_utxos {
+                if self.enable_periodic_scanning_of_utxos {
                     self.refresh_stealth_utxos(*account.component_address()).await?;
                 }
 

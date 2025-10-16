@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use log::*;
 use tari_engine::{
+    executables::Executable,
     fees::{FeeModule, FeeTable},
     runtime::{AuthParams, RuntimeModule},
     state_store::{memory::ReadOnlyMemoryStateStore, StateStoreError},
@@ -120,10 +121,7 @@ where TTemplateProvider: TemplateProvider<Template = LoadedTemplate>
         // Include signature public key badges for all transaction signers in the initial auth scope
         // NOTE: we assume all signatures have already been validated.
         let initial_ownership_proofs = transaction
-            .signatures()
-            .iter()
-            .map(|p| p.public_key())
-            .chain(Some(transaction.seal_signature().public_key()).filter(|_| transaction.is_seal_signer_authorized()))
+            .signers_iter()
             .map(|pk| NonFungibleAddress::from_public_key(*pk))
             .collect();
         let auth_params = AuthParams {

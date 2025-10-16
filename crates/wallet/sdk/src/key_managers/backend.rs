@@ -3,7 +3,7 @@
 
 use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey};
 
-use crate::models::KeyId;
+use crate::models::{DerivedKeyIndex, KeyId};
 
 pub struct SignatureOutput {
     pub signature: RistrettoSchnorr,
@@ -18,6 +18,8 @@ pub trait KeyManagerBackend<M> {
 
 pub trait WalletKeyStore<K> {
     type Error;
+
+    fn derive_secret(&self, branch: &str, key_index: DerivedKeyIndex) -> Result<RistrettoSecretKey, Self::Error>;
 
     fn get_imported_secret(&self, key: K) -> Result<RistrettoSecretKey, Self::Error>;
 }

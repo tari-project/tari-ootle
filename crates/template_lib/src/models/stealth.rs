@@ -3,7 +3,13 @@
 
 use serde::{Deserialize, Serialize};
 use tari_template_lib_types::{
-    crypto::{BalanceProofSignature, PedersenCommitmentBytes, RangeProofBytes, SchnorrSignatureBytes},
+    crypto::{
+        BalanceProofSignature,
+        PedersenCommitmentBytes,
+        RangeProofBytes,
+        RistrettoPublicKeyBytes,
+        SchnorrSignatureBytes,
+    },
     Amount,
 };
 
@@ -44,11 +50,13 @@ pub struct StealthInputsStatement {
     pub inputs: Vec<StealthInput>,
     /// The total amount of revealed funds being spent.
     pub revealed_amount: Amount,
+    /// The signer that must sign the transaction to allow these inputs to be spent.
+    pub required_signer: RistrettoPublicKeyBytes,
 }
 
 impl StealthInputsStatement {
-    pub fn new(inputs: Vec<StealthInput>, revealed_amount: Amount) -> Self {
-        assert!(!revealed_amount.is_negative(), "Revealed amount must be positive");
+    pub fn new(inputs: Vec<StealthInput>, revealed_amount: Amount, required_signer: RistrettoPublicKeyBytes) -> Self {
+        assert!(!revealed_amount.is_negative(), "Revealed amount must be non-negative");
         assert!(
             !inputs.is_empty() || !revealed_amount.is_zero(),
             "At least one input or a revealed amount must be provided"
@@ -56,11 +64,13 @@ impl StealthInputsStatement {
         Self {
             inputs,
             revealed_amount,
+            required_signer,
         }
     }
 
-    pub fn new_revealed(amount: Amount) -> Self {
-        Self::new(vec![], amount)
+    /// Create a new input statement with no stealth inputs, only a revealed amount.
+    pub fn new_revealed_only(amount: Amount, required_signer: RistrettoPublicKeyBytes) -> Self {
+        Self::new(vec![], amount, required_signer)
     }
 }
 

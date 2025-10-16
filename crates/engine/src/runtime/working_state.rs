@@ -14,7 +14,7 @@ use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::{
     bucket::Bucket,
     component::ComponentHeader,
-    crypto::verify_utxo_spend_permission,
+    crypto::messages,
     events::Event,
     fees::FeeReceipt,
     id_provider::{IdProvider, ObjectIds},
@@ -27,6 +27,7 @@ use tari_engine_types::{
     resource::Resource,
     resource_container::{ResourceContainer, ResourceError},
     stealth,
+    stealth::ValidatedStealthTransfer,
     substate::{Substate, SubstateDiff, SubstateId, SubstateValue},
     transaction_receipt::TransactionReceipt,
     vault::Vault,
@@ -49,7 +50,6 @@ use tari_template_lib::{
         NonFungibleAddress,
         ProofId,
         ResourceAddress,
-        StealthInputsStatement,
         StealthTransferStatement,
         UtxoAddress,
         VaultId,
@@ -267,15 +267,32 @@ impl WorkingState {
         Ok(resource)
     }
 
-    pub fn spend_stealth_utxos(
+    pub fn validate_and_spend_stealth_utxos(
         &mut self,
         resource_address: ResourceAddress,
-        stmt: &StealthInputsStatement,
-    ) -> Result<(), RuntimeError> {
-        for input in &stmt.inputs {
+        stmt: &StealthTransferStatement,
+        view_key: Option<&RistrettoPublicKey>,
+    ) -> Result<ValidatedStealthTransfer, RuntimeError> {
+        let required_signer = &stmt.inputs_statement.required_signer;
+
+        // Check that the required_signed is in scope
+        let proofs = self.base_call_scope().auth_scope().virtual_proofs();
+        if proofs
+            .iter()
+            .filter(|p| *p.resource_address() == PUBLIC_IDENTITY_RESOURCE_ADDRESS)
+            .all(|p| p.id().as_u256().map(|b| b.as_slice()) != Some(required_signer.as_bytes()))
+        {
+            return Err(RuntimeError::AccessDeniedStealthTransferSigner {
+                required_signer: *required_signer,
+            });
+        }
+
+        let metadata_hash = messages::stealth_statement_metadata64(&stmt.outputs_statement);
+        for input in &stmt.inputs_statement.inputs {
             let address = UtxoAddress::new(resource_address, input.commitment.into());
             let lock_id = self.store.try_lock(&address.clone().into(), LockFlag::Write)?;
             let utxo = self.store.down_utxo(lock_id)?;
+            self.store.try_unlock(lock_id)?;
             if utxo.is_frozen() {
                 return Err(ResourceError::InvalidSpend {
                     details: format!("Utxo {} is frozen", address),
@@ -287,9 +304,11 @@ impl WorkingState {
                 details: format!("Utxo {} is burnt", address),
             })?;
 
-            verify_utxo_spend_permission(output, input)?;
+            stealth::validate_ownership_proof(output, input, required_signer, &metadata_hash)?;
         }
-        Ok(())
+
+        let valid_transfer = stealth::validate_transfer_balance(stmt, view_key)?;
+        Ok(valid_transfer)
     }
 
     pub fn get_non_fungible(&self, locked: &LockedSubstate) -> Result<&NonFungibleContainer, RuntimeError> {
@@ -1526,8 +1545,6 @@ impl WorkingState {
             },
         }
 
-        self.spend_stealth_utxos(resource_address, &statement.inputs_statement)?;
-
         let resource = self.get_resource(&resource_lock)?;
         let view_key = resource
             .view_key()
@@ -1541,7 +1558,7 @@ impl WorkingState {
                 }
             })?;
 
-        let valid_transfer = stealth::validate_transfer(&statement, view_key.as_ref())?;
+        let valid_transfer = self.validate_and_spend_stealth_utxos(resource_address, &statement, view_key.as_ref())?;
 
         for output in valid_transfer.outputs {
             let address = UtxoAddress::new(resource_address, output.output.commitment.to_byte_type().into());

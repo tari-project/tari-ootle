@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_engine_types::ToByteType;
+use tari_engine_types::{crypto::messages, ToByteType};
 use tari_template_lib::{
     models::{
         StealthInput,
@@ -12,6 +12,7 @@ use tari_template_lib::{
         StealthUnspentOutput,
         UnspentOutput,
     },
+    prelude::RistrettoPublicKeyBytes,
     types::Amount,
 };
 
@@ -30,6 +31,7 @@ pub fn create_transfer_statement<'a, Inputs, Outputs>(
     revealed_input_amount: Amount,
     output_statements: Outputs,
     revealed_output_amount: Amount,
+    required_signer: RistrettoPublicKeyBytes,
 ) -> Result<StealthTransferStatement, WalletCryptoError>
 where
     Inputs: IntoIterator<Item = &'a UnblindedStealthInputWitness>,
@@ -53,6 +55,10 @@ where
         let (lower, upper) = input_iter.size_hint();
         upper.unwrap_or(lower)
     };
+
+    let outputs_statement = create_outputs_statement(output_statements.clone(), revealed_output_amount)?;
+    let outputs_statement_hash = messages::stealth_statement_metadata64(&outputs_statement);
+
     let (inputs_to_spend, agg_input_mask) = input_iter.try_fold(
         (Vec::with_capacity(num_inputs_estimate), RistrettoSecretKey::default()),
         |(mut inputs, agg_input), input| {
@@ -69,6 +75,8 @@ where
                 &input.owner_secret,
                 &input.public_nonce.to_byte_type(),
                 &commitment.to_byte_type(),
+                &required_signer,
+                &outputs_statement_hash,
             );
             inputs.push(StealthInput {
                 commitment: commitment.to_byte_type(),
@@ -79,7 +87,6 @@ where
     )?;
 
     let agg_output_mask = output_statements
-        .clone()
         .into_iter()
         .map(|stmt| &stmt.witness.mask)
         .fold(RistrettoSecretKey::default(), |agg, mask| agg + mask);
@@ -87,8 +94,8 @@ where
     let inputs_statement = StealthInputsStatement {
         inputs: inputs_to_spend.clone(),
         revealed_amount: revealed_input_amount,
+        required_signer,
     };
-    let outputs_statement = create_outputs_statement(output_statements, revealed_output_amount)?;
 
     let balance_proof = generate_stealth_balance_proof_signature(
         &agg_input_mask,
@@ -101,6 +108,7 @@ where
         inputs_statement: StealthInputsStatement {
             inputs: inputs_to_spend,
             revealed_amount: revealed_input_amount,
+            required_signer,
         },
         outputs_statement,
         balance_proof,

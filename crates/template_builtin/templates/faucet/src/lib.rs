@@ -25,10 +25,11 @@ mod template {
             amount: Amount,
             output: StealthOutputsStatement,
             balance_proof: BalanceProofSignature,
+            required_signer: RistrettoPublicKeyBytes,
         ) -> Option<Bucket> {
             let revealed_bucket = self.vault.withdraw(amount);
             let transfer = StealthTransferStatement {
-                inputs_statement: StealthInputsStatement::new_revealed(amount),
+                inputs_statement: StealthInputsStatement::new_revealed_only(amount, required_signer),
                 outputs_statement: output,
                 balance_proof,
             };

@@ -86,7 +86,6 @@ pub struct WalletOotleAddressWithKeyIds {
 pub struct ImportedWalletKey {
     pub key: RistrettoSecretKey,
     pub import_id: ImportedKeyId,
-    pub key_type: KeyType,
 }
 
 impl ImportedWalletKey {

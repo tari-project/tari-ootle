@@ -8,7 +8,7 @@ use tari_template_abi::rust::{
     str::FromStr,
 };
 
-use crate::serde_helpers;
+use crate::{hex::write_hex_fmt, serde_helpers};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -43,10 +43,7 @@ impl EntityId {
     }
 
     pub fn write_hex_fmt<W: fmt::Write>(&self, writer: &mut W) -> fmt::Result {
-        for b in self.0 {
-            write!(writer, "{:02x?}", b)?;
-        }
-        Ok(())
+        write_hex_fmt(writer, &self.0)
     }
 }
 
@@ -170,10 +167,7 @@ impl ObjectKey {
     }
 
     pub fn write_hex_fmt<W: fmt::Write>(&self, writer: &mut W) -> fmt::Result {
-        for b in self.0 {
-            write!(writer, "{:02x?}", b)?;
-        }
-        Ok(())
+        write_hex_fmt(writer, &self.0)
     }
 
     pub fn try_from_slice(data: &[u8]) -> Result<Self, KeyParseError> {
@@ -250,10 +244,7 @@ impl DerefMut for ObjectKey {
 
 impl Display for ObjectKey {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        for x in self.0 {
-            write!(f, "{:02x?}", x)?;
-        }
-        Ok(())
+        write_hex_fmt(f, &self.0)
     }
 }
 

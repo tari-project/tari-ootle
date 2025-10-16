@@ -55,6 +55,7 @@ interface FormStepProps {
   availableBalance?: number;
   token_symbol: string;
   divisibility: number;
+  formError?: FormError | null;
   onSubmit: (e: FormEvent) => void;
   onCancel: () => void;
   onFormValueChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -62,6 +63,11 @@ interface FormStepProps {
   onCheckboxFormValueChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onUseBadgeChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
+
+export type FormError = {
+  type: "general" | "address" | "amount" | "fee";
+  message: string;
+};
 
 export default function FormStep({
   resource_address,
@@ -74,6 +80,7 @@ export default function FormStep({
   availableBalance,
   token_symbol,
   divisibility,
+  formError,
   onSubmit,
   onCancel,
   onFormValueChange,
@@ -151,6 +158,7 @@ export default function FormStep({
           </>
         )}
         <Stack direction="column" spacing={0.5}>
+          <DisplayFormError forType="address" formError={formError} />
           <TextField
             name="address"
             label="To Address"
@@ -202,6 +210,7 @@ export default function FormStep({
           </>
         )}
 
+        <DisplayFormError forType="amount" formError={formError} />
         <TextField
           name="amount"
           label="Amount"
@@ -248,6 +257,8 @@ export default function FormStep({
         />
 
         <Divider />
+
+        <DisplayFormError forType="general" formError={formError} />
         <Stack direction="row" justifyContent="space-between" sx={{ mt: 3 }}>
           <Button variant="outlined" onClick={onCancel} disabled={disabled}>
             Cancel
@@ -258,5 +269,15 @@ export default function FormStep({
         </Stack>
       </Stack>
     </Form>
+  );
+}
+
+function DisplayFormError({ forType, formError }: { forType: FormError["type"]; formError?: FormError | null }) {
+  if (!formError) return null;
+  if (formError.type !== forType) return null;
+  return (
+    <Typography color="error" sx={{ mb: 2 }}>
+      {formError.message}
+    </Typography>
   );
 }

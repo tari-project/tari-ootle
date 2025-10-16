@@ -109,6 +109,11 @@ where
             shard_state_versions.len(),
         );
 
+        let unspent_count = self
+            .sdk
+            .stealth_outputs_api()
+            .count_unspent_outputs_for_account(self.account.component_address(), self.resource_address)?;
+
         let stream = self
             .sdk
             .get_network_interface()
@@ -117,7 +122,9 @@ where
                 // NOTE that this will request shards in a random order (HashMap). This is good to avoid always
                 // starting with the same shard.
                 shard_state_versions.into_iter().collect(),
-                false,
+                // Optimisation: If we do not have any unspent outputs, we only need to sync unspent updates (we
+                // already know all outputs are spent)
+                unspent_count == 0,
             )
             .await
             .map_err(|e| StealthScannerApiError::NetworkInterfaceError(e.into()))?;

@@ -72,7 +72,7 @@ fn test_state() {
     assert_eq!(component.module_name, "State");
 
     let component = store.get_component(component_address2).unwrap();
-    assert_eq!(component.owner_key, Some(template_test.get_test_public_key_bytes()));
+    assert_eq!(component.owner_key, Some(template_test.to_public_key_bytes()));
     assert_eq!(component.module_name, "State");
 
     // call the "set" method to update the instance value

@@ -327,7 +327,7 @@ pub async fn handle_submit_manifest(
             }
         })
         .with_instructions(instructions.instructions)
-        .then(|builder| {
+        .map(|builder| {
             if signing_key_id == account_owner_key_id {
                 Ok(builder)
             } else {
@@ -350,7 +350,7 @@ pub async fn handle_submit_manifest(
     let transaction = transaction
         .with_inputs(inputs)
         .authorized_sealed_signer()
-        .build(signatures);
+        .build_with_signatures(signatures);
 
     let transaction = sdk
         .local_signer_api()

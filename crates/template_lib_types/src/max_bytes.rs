@@ -35,6 +35,10 @@ impl<const N: usize> MaxBytes<N> {
     pub fn into_vec(self) -> Vec<u8> {
         self.bytes.into_vec()
     }
+
+    pub fn empty() -> Self {
+        Self { bytes: Box::new([]) }
+    }
 }
 
 impl<const N: usize> AsRef<[u8]> for MaxBytes<N> {
@@ -52,9 +56,7 @@ impl<const N: usize> DerefMut for MaxBytes<N> {
 
 impl<const N: usize> Default for MaxBytes<N> {
     fn default() -> Self {
-        Self {
-            bytes: vec![0u8; N].into_boxed_slice(),
-        }
+        Self::empty()
     }
 }
 

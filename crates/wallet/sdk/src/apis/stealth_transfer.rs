@@ -39,16 +39,7 @@ use crate::{
         stealth_outputs::{StealthOutputsApi, StealthOutputsApiError, TransferStatementParams},
         substate::{SubstateApiError, SubstatesApi, ValidatorScanResult},
     },
-    models::{
-        Account,
-        AccountWithAddress,
-        InputSpendData,
-        KeyBranch,
-        KeyId,
-        OutputStatus,
-        StealthOutputModel,
-        WalletLockId,
-    },
+    models::{AccountWithAddress, InputSpendData, KeyBranch, KeyId, OutputStatus, StealthOutputModel, WalletLockId},
     network::WalletNetworkInterface,
     storage::{WalletStorageError, WalletStore},
 };
@@ -93,7 +84,7 @@ where
     ) -> Result<InputsToSpend, StealthTransferApiError> {
         self.lock_inputs_for_transfer(
             lock_id,
-            owner_account.account(),
+            owner_account.account().component_address(),
             XTR,
             params.max_fee.into(),
             params.input_selection,
@@ -101,10 +92,10 @@ where
     }
 
     #[allow(clippy::too_many_lines)]
-    fn lock_inputs_for_transfer(
+    pub fn lock_inputs_for_transfer(
         &self,
         lock_id: WalletLockId,
-        owner_account: &Account,
+        owner_account_component_address: &ComponentAddress,
         resource_address: ResourceAddress,
         spend_amount: Amount,
         input_selection: ConfidentialTransferInputSelection,
@@ -118,7 +109,7 @@ where
 
         let maybe_src_vault = self
             .accounts_api
-            .get_vault_by_resource(owner_account.component_address(), &resource_address)
+            .get_vault_by_resource(owner_account_component_address, &resource_address)
             .optional()?;
 
         let available_revealed_funds = maybe_src_vault
@@ -129,7 +120,7 @@ where
         match input_selection {
             ConfidentialTransferInputSelection::ConfidentialOnly => {
                 let (inputs, total_locked) = self.outputs_api.lock_outputs_for_at_least_amount(
-                    owner_account.component_address(),
+                    owner_account_component_address,
                     &resource_address,
                     lock_id,
                     spend_amount,
@@ -158,8 +149,7 @@ where
                         .ok_or_else(|| StealthTransferApiError::InsufficientRevealedFunds {
                             details: format!(
                                 "No vault found for resource {} in account {}",
-                                resource_address,
-                                owner_account.component_address()
+                                resource_address, owner_account_component_address
                             ),
                         })?;
 
@@ -212,15 +202,13 @@ where
                         details: format!(
                             "PreferRevealed: No vault found for resource {} in account {}. Need to spend {} revealed \
                              funds",
-                            resource_address,
-                            owner_account.component_address(),
-                            revealed_to_spend
+                            resource_address, owner_account_component_address, revealed_to_spend
                         ),
                     });
                 }
 
                 let (inputs, _) = self.outputs_api.lock_outputs_for_at_least_amount(
-                    owner_account.component_address(),
+                    owner_account_component_address,
                     &resource_address,
                     lock_id,
                     utxo_amount_to_spend,
@@ -265,7 +253,7 @@ where
             ConfidentialTransferInputSelection::PreferConfidential => {
                 let lock_id = self.outputs_api.create_lock()?;
                 let (inputs, blinded_amount_locked) = self.outputs_api.lock_outputs_until_partial_amount(
-                    owner_account.component_address(),
+                    owner_account_component_address,
                     &resource_address,
                     spend_amount,
                     lock_id,
@@ -294,9 +282,7 @@ where
                                 details: format!(
                                     "PreferConfidential: No vault found for resource {} in account {}. Need to spend \
                                      {} revealed funds",
-                                    resource_address,
-                                    owner_account.component_address(),
-                                    revealed_to_spend
+                                    resource_address, owner_account_component_address, revealed_to_spend
                                 ),
                             });
                         },
@@ -449,7 +435,7 @@ where
 
         let inputs_to_spend = match self.lock_inputs_for_transfer(
             lock_id,
-            owner_account.account(),
+            owner_account.account().component_address(),
             params.resource_address,
             params.total_output_amount(),
             params.input_selection,

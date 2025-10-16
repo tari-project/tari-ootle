@@ -67,3 +67,73 @@ pub fn calculate_leader_fee(transaction_fee: u64, num_involved_shards: NonZeroU6
         global_exhaust_burn: actual_burn,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_calculates_the_correct_leader_fee_and_burn() {
+        let test_cases = [
+            // (transaction_fee, num_involved_shards, exhaust_divisor, expected_leader_fee, expected_burn)
+            // 10% burn target
+            (100, 1, 10, 90, 10),
+            (100, 2, 10, 45, 10),
+            (100, 3, 10, 30, 10),
+            (100, 4, 10, 23, 8),
+            (100, 5, 10, 18, 10),
+            (100, 6, 10, 15, 10),
+            (100, 7, 10, 13, 9),
+            (100, 8, 10, 11, 12),
+            (100, 9, 10, 10, 10),
+            (100, 10, 10, 9, 10),
+            // 20% burn target
+            (100, 1, 5, 80, 20),
+            (100, 2, 5, 40, 20),
+            (100, 3, 5, 27, 19),
+            (100, 4, 5, 20, 20),
+            (100, 5, 5, 16, 20),
+            (100, 6, 5, 13, 22),
+            (100, 7, 5, 12, 16),
+            (100, 8, 5, 10, 20),
+            (100, 9, 5, 9, 19),
+            (100, 10, 5, 8, 20),
+            // 20% burn target
+            (55, 3, 5, 15, 10),
+            (55, 4, 5, 11, 11),
+            (55, 5, 5, 9, 10),
+            (55, 6, 5, 7, 13),
+            (55, 7, 5, 6, 13),
+            (55, 8, 5, 6, 7),
+            (55, 9, 5, 5, 10),
+            (55, 10, 5, 4, 15),
+        ];
+
+        for (transaction_fee, num_involved_shards, exhaust_divisor, expected_leader_fee, expected_burn) in test_cases {
+            let num_involved_shards = NonZeroU64::new(num_involved_shards).unwrap();
+            let leader_fee = calculate_leader_fee(transaction_fee as u64, num_involved_shards, exhaust_divisor as u64);
+            assert_eq!(
+                leader_fee.fee * num_involved_shards.get() + leader_fee.global_exhaust_burn,
+                transaction_fee as u64,
+                "In/deflation! transaction_fee: {transaction_fee}, num_involved_shards: {num_involved_shards}, \
+                 exhaust_divisor: {exhaust_divisor}",
+            );
+            assert_eq!(
+                leader_fee.fee(),
+                expected_leader_fee as u64,
+                "Failed for transaction_fee: {}, num_involved_shards: {}, exhaust_divisor: {}",
+                transaction_fee,
+                num_involved_shards,
+                exhaust_divisor
+            );
+            assert_eq!(
+                leader_fee.global_exhaust_burn(),
+                expected_burn as u64,
+                "Failed for transaction_fee: {}, num_involved_shards: {}, exhaust_divisor: {}",
+                transaction_fee,
+                num_involved_shards,
+                exhaust_divisor
+            );
+        }
+    }
+}

@@ -770,7 +770,7 @@ where TConsensusSpec: ConsensusSpec
         }
 
         let tx = substate_store.read_transaction();
-        let transaction = TransactionRecord::get(tx, tx_rec.transaction_id())?;
+        let transaction = tx_rec.get_transaction(tx)?;
         let execution = self.execute_transaction(tx, parent_block, transaction)?;
 
         // Try to lock all local outputs

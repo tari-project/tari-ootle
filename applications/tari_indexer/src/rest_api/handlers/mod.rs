@@ -6,6 +6,7 @@ pub mod network;
 pub mod nfts;
 pub mod substates;
 pub mod templates;
+pub mod transaction_receipts;
 pub mod transactions;
 pub mod utxos;
 

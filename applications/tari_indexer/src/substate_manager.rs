@@ -50,7 +50,8 @@ use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClient
 
 use crate::{
     network_state_sync::SyncProgress,
-    storage_sqlite::{models::Key, IndexerStore, IndexerStoreReadTransaction, SqliteIndexerStore},
+    storage_sqlite::{models::Key, SqliteIndexerStore},
+    store::{IndexerStoreReadTransaction, IndexerStoreReader},
     substate_file_cache::SubstateFileCache,
 };
 

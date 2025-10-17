@@ -62,6 +62,17 @@ create table events
 -- DB index for faster collection scan queries
 create index events_indexer on events (template_address, tx_hash);
 
+-- Transaction receipts
+create table transaction_receipts
+(
+    id         integer   not NULL primary key AUTOINCREMENT,
+    address    text      not NULL,
+    data       text      not NULL,
+    created_at timestamp not null default current_timestamp
+);
+
+create unique index transaction_receipts_address_uniq on transaction_receipts (address);
+
 -- Latest scanned blocks, separately by committee (epoch + shard)
 -- Used mostly for efficient scanning of events in the whole network
 create table scanned_block_ids

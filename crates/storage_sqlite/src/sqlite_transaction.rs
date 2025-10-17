@@ -62,7 +62,7 @@ impl<'a> SqliteTransaction<'a> {
             .execute(self.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "execute sql".to_string(),
+                operation: "execute sql",
             })?;
 
         Ok(())

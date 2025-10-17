@@ -85,31 +85,19 @@ mod account_template {
         }
 
         pub fn withdraw(&mut self, resource: ResourceAddress, amount: Amount) -> Bucket {
-            emit_event("withdraw", [
-                ("amount", amount.to_string()),
-                ("resource", resource.to_string()),
-            ]);
+            // An event is emitted by the vault.withdraw method
             let v = self.get_vault_mut(resource);
             v.withdraw(amount)
         }
 
         pub fn withdraw_non_fungible(&mut self, resource: ResourceAddress, nf_id: NonFungibleId) -> Bucket {
-            emit_event("withdraw_non_fungible", [
-                ("id", nf_id.to_string()),
-                ("resource", resource.to_string()),
-            ]);
+            // An event is emitted by the vault.withdraw_non_fungibles method
             let v = self.get_vault_mut(resource);
             v.withdraw_non_fungibles([nf_id])
         }
 
         pub fn withdraw_many_non_fungibles(&mut self, resource: ResourceAddress, nf_ids: Vec<NonFungibleId>) -> Bucket {
-            emit_event("withdraw_many_non_fungibles", [
-                ("resource", resource.to_string()),
-                (
-                    "ids",
-                    nf_ids.iter().map(ToString::to_string).collect::<Vec<_>>().join(","),
-                ),
-            ]);
+            // An event is emitted by the vault.withdraw_non_fungibles method
             let v = self.get_vault_mut(resource);
             v.withdraw_non_fungibles(nf_ids)
         }
@@ -119,21 +107,13 @@ mod account_template {
             resource: ResourceAddress,
             withdraw_proof: ConfidentialWithdrawProof,
         ) -> Bucket {
-            emit_event("withdraw_confidential", [
-                ("num_inputs", withdraw_proof.inputs.len().to_string()),
-                ("resource", resource.to_string()),
-            ]);
-
+            // An event is emitted by the vault.withdraw_confidential method
             let v = self.get_vault_mut(resource);
             v.withdraw_confidential(withdraw_proof)
         }
 
         pub fn deposit(&mut self, bucket: Bucket) {
-            emit_event("deposit", [
-                ("amount", bucket.amount().to_string()),
-                ("resource", bucket.resource_address().to_string()),
-                ("resource_type", bucket.resource_type().to_string()),
-            ]);
+            // An event is emitted by the vault.deposit method
             let resource_address = bucket.resource_address();
             let vault_mut = self
                 .vaults
@@ -168,10 +148,7 @@ mod account_template {
         /// vault. It will panic if the proof is invalid or the resource type contained in the vault is not
         /// confidential. This is useful for converting confidential tokens into revealed tokens and vice versa.
         pub fn join_confidential(&mut self, resource: ResourceAddress, proof: ConfidentialWithdrawProof) {
-            emit_event("join_confidential", [
-                ("num_inputs", proof.inputs.len().to_string()),
-                ("resource", resource.to_string()),
-            ]);
+            // An event is emitted by the vault.withdraw_confidential and vault.deposit methods
             let vault_mut = self.get_vault_mut(resource);
             let bucket = vault_mut.withdraw_confidential(proof);
             vault_mut.deposit(bucket);

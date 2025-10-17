@@ -12,6 +12,7 @@ use tari_engine_types::{
     commit_result::ExecuteResult,
     substate::{Substate, SubstateId, SubstateValue},
     template_lib_models::{NonFungibleAddress, ResourceAddress, UtxoId},
+    transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
     Utxo,
 };
 use tari_ootle_common_types::{
@@ -22,7 +23,7 @@ use tari_ootle_common_types::{
     ShardGroup,
     StateVersion,
 };
-use tari_ootle_storage::time::PrimitiveDateTime;
+use tari_ootle_storage::{time::PrimitiveDateTime, Ordering};
 use tari_ootle_wallet_sdk::models::UtxoUpdateSet;
 use tari_template_abi::TemplateDef;
 use tari_template_lib_types::{
@@ -420,4 +421,27 @@ pub struct SyncProgress {
     pub last_epoch: Epoch,
     pub checkpoint_progress: Vec<(ShardGroup, Epoch)>,
     pub last_state_versions: Vec<(Shard, (StateVersion, Epoch))>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+pub struct ListTransactionReceiptsRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_id: Option<TransactionReceiptAddress>,
+    #[serde(default)]
+    pub ordering: Ordering,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+pub struct ListTransactionReceiptsResponse {
+    pub receipts: Vec<(TransactionReceiptAddress, TransactionReceipt)>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+pub struct GetTransactionReceiptResponse {
+    pub receipt: TransactionReceipt,
 }

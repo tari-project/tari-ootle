@@ -118,3 +118,9 @@ impl From<Hash> for TransactionId {
         Self::new(hash.into_array())
     }
 }
+
+impl From<TransactionReceiptAddress> for TransactionId {
+    fn from(address: TransactionReceiptAddress) -> Self {
+        Self::new(address.as_object_key().into_array())
+    }
+}

@@ -248,28 +248,18 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         })
     }
 
-    fn emit_std_event(
+    fn emit_std_event<T: Into<SubstateId>>(
         &self,
         object_name: &str,
         action: &str,
-        substate_id: SubstateId,
+        substate_id: T,
         payload: Metadata,
-        state: &mut WorkingState,
+        state_mut: &mut WorkingState,
     ) -> Result<(), RuntimeError> {
-        let tx_hash = self.entity_id_provider.transaction_hash();
-        let (&template_address, _) = state.current_template()?;
-
-        let event = Event::std(
-            Some(substate_id),
-            template_address,
-            tx_hash,
-            object_name,
-            action,
-            payload,
-        );
+        let (&template_address, _) = state_mut.current_template()?;
+        let event = Event::std(Some(substate_id.into()), template_address, object_name, action, payload);
         debug!(target: LOG_TARGET, "Emitted event {}", event);
-        state.push_event(event)?;
-
+        state_mut.push_event(event)?;
         Ok(())
     }
 
@@ -457,13 +447,12 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             )
         })?;
         let substate_id = component_address_option.map(SubstateId::Component);
-        let tx_hash = self.entity_id_provider.transaction_hash();
         let template_address = self.tracker.get_template_address()?;
         let module = self.tracker.get_template_module_name()?;
         let topic = format!("{module}.{topic}");
 
         self.tracker
-            .add_event(Event::custom(substate_id, template_address, tx_hash, topic, payload))?;
+            .add_event(Event::custom(substate_id, template_address, topic, payload))?;
         Ok(())
     }
 
@@ -837,7 +826,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         payload.insert(IMAGE_URL, image_url);
                     }
 
-                    self.emit_std_event("resource", "create", resource_address.into(), payload, state_mut)?;
+                    self.emit_std_event("resource", "create", resource_address, payload, state_mut)?;
 
                     state_mut.new_substate(resource_address, resource)?;
                     let resource_lock = state_mut.write_lock_substate(&SubstateId::Resource(resource_address))?;
@@ -931,7 +920,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         ("resource_type", resource.resource_type().to_string()),
                         ("amount", resource.amount().to_string()),
                     ]);
-                    self.emit_std_event("resource", "mint", resource_address.into(), payload, state_mut)?;
+                    self.emit_std_event("resource", "mint", resource_address, payload, state_mut)?;
 
                     state_mut.new_bucket(bucket_id, resource)?;
                     let bucket = tari_template_lib::models::Bucket::from_id(bucket_id);
@@ -982,7 +971,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         ("vault_id", arg.vault_id.to_string()),
                         ("recall_desc", arg.resource.to_string()),
                     ]);
-                    self.emit_std_event("resource", "recall", resource_address.into(), payload, state_mut)?;
+                    self.emit_std_event("resource", "recall", resource_address, payload, state_mut)?;
 
                     let bucket_id = state_mut.id_provider()?.new_bucket_id();
                     state_mut.new_bucket(bucket_id, resource)?;
@@ -1078,7 +1067,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     self.emit_std_event(
                         "resource",
                         "update_nonfungible_data",
-                        resource_address.into(),
+                        resource_address,
                         payload,
                         state_mut,
                     )?;
@@ -1121,13 +1110,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let resource_mut = state_mut.get_resource_mut(&resource_lock)?;
                     resource_mut.set_access_rules(access_rules);
                     let payload = Metadata::from_iter([("resource_type", resource_mut.resource_type().to_string())]);
-                    self.emit_std_event(
-                        "resource",
-                        "update_access_rules",
-                        resource_address.into(),
-                        payload,
-                        state_mut,
-                    )?;
+                    self.emit_std_event("resource", "update_access_rules", resource_address, payload, state_mut)?;
 
                     state_mut.unlock_substate(resource_lock)?;
 
@@ -1179,7 +1162,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let payload =
                         Metadata::from_iter([("vault_id", arg.vault_id.to_string()), ("flags", arg.flags.to_string())]);
                     let action = if arg.flags.is_empty() { "freeze" } else { "unfreeze" };
-                    self.emit_std_event("resource", action, resource_address.into(), payload, state_mut)?;
+                    self.emit_std_event("resource", action, resource_address, payload, state_mut)?;
 
                     state_mut.unlock_substate(vault_lock)?;
 
@@ -1478,7 +1461,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         ("amount", bucket.amount().to_string()),
                     ]);
 
-                    self.emit_std_event("vault", "deposit", vault_id.into(), payload, state_mut)?;
+                    self.emit_std_event("vault", "deposit", vault_id, payload, state_mut)?;
 
                     let vault_mut = state_mut.get_vault_mut(&vault_lock)?;
 
@@ -1567,7 +1550,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         ("amount", public_amount.to_string()),
                     ]);
 
-                    self.emit_std_event("vault", "withdraw", vault_id.into(), payload, state)?;
+                    self.emit_std_event("vault", "withdraw", vault_id, payload, state)?;
 
                     let bucket_id = state.id_provider()?.new_bucket_id();
                     state.new_bucket(bucket_id, resource_container)?;
@@ -1714,6 +1697,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                             reason: "Fee payment has zero value".to_string(),
                         });
                     }
+
+                    self.emit_std_event(
+                        "vault",
+                        "pay_fee",
+                        vault_id,
+                        Metadata::from_iter([("amount", container.amount().to_string())]),
+                        state_mut,
+                    )?;
 
                     state_mut.pay_fee(container, Some(vault_id))?;
 
@@ -2672,12 +2663,12 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
     fn publish_template(&self, template: Vec<u8>) -> Result<(), RuntimeError> {
         self.invoke_modules_on_runtime_call("publish_template")?;
-        self.tracker.write_with(|state| {
+        self.tracker.write_with(|state_mut| {
             let template_byte_size = template.len();
             let binary_hash = hash_template_code(&template);
             let template_address =
                 PublishedTemplateAddress::from_author_and_binary_hash(&self.seal_signer_public_key, &binary_hash);
-            state.new_substate(
+            state_mut.new_substate(
                 template_address,
                 SubstateValue::Template(PublishedTemplate {
                     // We essentially store the pre-image of the template address in the substate
@@ -2686,15 +2677,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 }),
             )?;
             // Mark template substate as owned by current call stack
-            let scope_mut = state.current_call_scope_mut()?;
+            let scope_mut = state_mut.current_call_scope_mut()?;
             scope_mut.move_node_to_owned(&template_address.into())?;
             // Publish template event
             let mut metadata = Metadata::new();
             metadata.insert("template_byte_size".to_string(), template_byte_size.to_string());
-            state.push_event(Event::std(
+            state_mut.push_event(Event::std(
                 Some(template_address.into()),
                 template_address.as_hash(),
-                state.transaction_hash(),
                 "template",
                 "publish",
                 metadata,

@@ -23,10 +23,7 @@
 use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
-use tari_template_lib::{
-    models::Metadata,
-    types::{Hash, TemplateAddress},
-};
+use tari_template_lib::{models::Metadata, types::TemplateAddress};
 
 use crate::substate::SubstateId;
 
@@ -42,7 +39,6 @@ fn std_event(object_name: &str, action_name: &str) -> String {
 pub struct Event {
     substate_id: Option<SubstateId>,
     template_address: TemplateAddress,
-    tx_hash: Hash,
     topic: String,
     payload: Metadata,
 }
@@ -51,14 +47,12 @@ impl Event {
     pub fn new(
         substate_id: Option<SubstateId>,
         template_address: TemplateAddress,
-        tx_hash: Hash,
         topic: String,
         payload: Metadata,
     ) -> Self {
         Self {
             substate_id,
             template_address,
-            tx_hash,
             topic,
             payload,
         }
@@ -67,17 +61,15 @@ impl Event {
     pub fn custom(
         substate_id: Option<SubstateId>,
         template_address: TemplateAddress,
-        tx_hash: Hash,
         topic: String,
         payload: Metadata,
     ) -> Self {
-        Self::new(substate_id, template_address, tx_hash, topic, payload)
+        Self::new(substate_id, template_address, topic, payload)
     }
 
     pub fn std(
         substate_id: Option<SubstateId>,
         template_address: TemplateAddress,
-        tx_hash: Hash,
         object_name: &str,
         action_name: &str,
         payload: Metadata,
@@ -85,7 +77,6 @@ impl Event {
         Self::new(
             substate_id,
             template_address,
-            tx_hash,
             std_event(object_name, action_name),
             payload,
         )
@@ -117,20 +108,12 @@ impl Event {
         self.template_address
     }
 
-    pub fn tx_hash(&self) -> Hash {
-        self.tx_hash
+    pub fn topic(&self) -> &str {
+        &self.topic
     }
 
-    pub fn topic(&self) -> String {
-        self.topic.clone()
-    }
-
-    pub fn add_payload(&mut self, key: String, value: String) {
-        self.payload.insert(key, value);
-    }
-
-    pub fn get_payload(&self, key: &str) -> Option<String> {
-        self.payload.get(key).cloned()
+    pub fn get_payload(&self, key: &str) -> Option<&str> {
+        self.payload.get(key).map(|s| s.as_str())
     }
 
     pub fn payload(&self) -> &Metadata {
@@ -146,10 +129,9 @@ impl Display for Event {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "event: substate_id {:?}, template_address {}, tx_hash {}, topic {} and payload {}",
+            "event: substate_id {:?}, template_address {}, topic {} and payload {}",
             self.substate_id.as_ref().map(|e| e.to_string()),
             self.template_address,
-            self.tx_hash,
             self.topic,
             self.payload
         )

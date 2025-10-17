@@ -43,6 +43,8 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
     handlers::templates::list_templates,
     handlers::utxos::fetch_utxos,
     handlers::utxos::stream_utxo_updates,
+    handlers::transaction_receipts::list_transaction_receipts,
+    handlers::transaction_receipts::get_transaction_receipt
 ))]
 pub struct ApiDoc;
 
@@ -92,6 +94,15 @@ impl Server {
             .nest("/utxos", Router::new()
                 .route("/fetch", post(handlers::utxos::fetch_utxos))
                 .route("/stream", post(handlers::utxos::stream_utxo_updates))
+            )
+            .nest(
+                "/transaction-receipts",
+                Router::new()
+                    .route("/", get(handlers::transaction_receipts::list_transaction_receipts))
+                    .route(
+                        "/{address}",
+                        get(handlers::transaction_receipts::get_transaction_receipt),
+                    ),
             )
             .layer(CorsLayer::permissive())
             .layer(RequestBodyLimitLayer::new(REQUEST_BODY_LIMIT))

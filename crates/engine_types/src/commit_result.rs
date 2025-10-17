@@ -25,7 +25,6 @@ use std::{
     time::Duration,
 };
 
-use borsh::BorshSerialize;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tari_template_lib::types::Hash;
 
@@ -35,6 +34,7 @@ use crate::{
     instruction_result::InstructionResult,
     logs::LogEntry,
     substate::SubstateDiff,
+    transaction_receipt::TransactionReceipt,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,6 +216,13 @@ impl FinalizeResult {
     pub fn is_reject(&self) -> bool {
         matches!(self.result, TransactionResult::Reject(_))
     }
+
+    pub fn get_transaction_receipt(&self) -> Option<&TransactionReceipt> {
+        self.result.any_accept().and_then(|diff| {
+            diff.up_iter()
+                .find_map(|(_, s)| s.substate_value().as_transaction_receipt())
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -353,7 +360,7 @@ impl Display for RejectReason {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize, BorshSerialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum AbortReason {
     ForeignPledgeInputConflict,

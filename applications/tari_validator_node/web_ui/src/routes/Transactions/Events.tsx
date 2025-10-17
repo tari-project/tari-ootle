@@ -30,7 +30,7 @@ import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import CodeBlockDialog from "../../Components/CodeBlock";
 import { Event, shortenString, shortenSubstateId, substateIdToString } from "@tari-project/typescript-bindings";
 
-function RowData({ substate_id, template_address, topic, tx_hash, payload }: Event, index: number) {
+function RowData({ substate_id, template_address, topic, payload }: Event, index: number) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -58,10 +58,6 @@ function RowData({ substate_id, template_address, topic, tx_hash, payload }: Eve
           {shortenString(template_address)}
           <CopyToClipboard copy={template_address} />
         </DataTableCell>
-        <DataTableCell>
-          {shortenString(tx_hash)}
-          <CopyToClipboard copy={tx_hash} />
-        </DataTableCell>
       </TableRow>
       <TableRow>
         <DataTableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={5}>
@@ -84,17 +80,15 @@ export default function Events({ data }: { data: Event[] }) {
             <TableCell>Topic</TableCell>
             <TableCell>Substate Id</TableCell>
             <TableCell>Template Address</TableCell>
-            <TableCell>Transaction Hash</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
-          {data.map(({ substate_id, template_address, topic, tx_hash, payload }: Event, index: number) => {
+          {data.map(({ substate_id, template_address, topic, payload }: Event, index: number) => {
             return (
               <RowData
                 substate_id={substate_id}
                 template_address={template_address}
                 topic={topic}
-                tx_hash={tx_hash}
                 payload={payload}
                 key={index}
               />

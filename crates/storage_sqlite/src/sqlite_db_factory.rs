@@ -65,7 +65,7 @@ impl<TAddr: NodeAddressable + 'static> DbFactory for SqliteDbFactory<TAddr> {
             .execute(&mut connection)
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "set pragma".to_string(),
+                operation: "set pragma",
             })?;
         Ok(GlobalDb::new(SqliteGlobalDbAdapter::new(connection)))
     }

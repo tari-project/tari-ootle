@@ -244,7 +244,6 @@ impl WorkingState {
         self.push_event(Event::std(
             Some(locked.substate_id().clone()),
             template_address,
-            self.transaction_hash(),
             "component",
             "updated",
             tari_template_lib::models::Metadata::from([("module_name".to_string(), module_name)]),
@@ -681,7 +680,6 @@ impl WorkingState {
             Event::std(
                 Some(vault_lock.substate_id().clone()),
                 template_address,
-                self.transaction_hash(),
                 "vault",
                 "unfrozen",
                 tari_template_lib::models::Metadata::default(),
@@ -690,7 +688,6 @@ impl WorkingState {
             Event::std(
                 Some(vault_lock.substate_id().clone()),
                 template_address,
-                self.transaction_hash(),
                 "vault",
                 "set_freeze",
                 flags.iter().map(|f| (f.to_string(), "true".to_string())).collect(),
@@ -995,93 +992,17 @@ impl WorkingState {
         self.last_instruction_output = Some(output);
     }
 
-    pub fn finalize_fees(
+    pub fn finalize_transaction_receipt(
         &mut self,
-        substates_to_persist: &mut IndexMap<SubstateId, SubstateValue>,
+        diff: &SubstateDiff,
+        fee_receipt: FeeReceipt,
     ) -> Result<TransactionReceipt, RuntimeError> {
-        let total_fees = self.fee_state.total_charges();
-
-        let total_fee_payment = self.fee_state.total_payments();
-
-        let mut fee_resource = ResourceContainer::stealth(STEALTH_TARI_RESOURCE_ADDRESS, Amount::zero());
-
-        // Collect the fee
-        let mut remaining_fees = total_fees;
-        let mut total_fee_overcharge = 0;
-        // First collect fees that cannot be refunded (we have to take all fees even if they exceed the required amount)
-        for resx in self.fee_state.non_refundable_fee_payments_mut_iter() {
-            // PANIC: this is checked by FeeState
-            let paid_amount = resx.amount().to_u64_checked().expect("invalid fee entry in fee state");
-
-            debug!(
-                target: LOG_TARGET,
-                "Collecting {} of non-refundable fees", resx.amount()
-            );
-
-            // If there is no refund vault, we must take the entire amount to avoid destroying funds
-            fee_resource.deposit(resx.withdraw(resx.amount())?)?;
-            if remaining_fees < paid_amount {
-                total_fee_overcharge += paid_amount - remaining_fees;
-            }
-
-            remaining_fees = remaining_fees.saturating_sub(paid_amount);
-        }
-
-        if remaining_fees > 0 {
-            for (resx, _) in self.fee_state.refundable_fee_payments_iter_mut() {
-                if remaining_fees == 0 {
-                    break;
-                }
-
-                debug!(
-                    target: LOG_TARGET,
-                    "Collecting {} of refundable fees", resx.amount()
-                );
-
-                // PANIC: this is checked by FeeState
-                let paid_amount = resx.amount().to_u64_checked().expect("invalid fee entry in fee state");
-
-                // Withdraw only what is needed
-                let amount_to_withdraw = cmp::min(paid_amount, remaining_fees);
-                fee_resource.deposit(resx.withdraw(amount_to_withdraw.into())?)?;
-                remaining_fees = remaining_fees.saturating_sub(amount_to_withdraw);
-            }
-        }
-
-        // Refund the remaining refundable payments if any
-        for (mut resx, refund_vault) in self.fee_state.drain_refundable_fee_payments() {
-            if resx.amount().is_zero() {
-                debug_assert!(!resx.amount().is_negative());
-                continue;
-            }
-
-            debug!(
-                target: LOG_TARGET,
-                "Refunding {} of fees to vault {}", resx.amount(), refund_vault
-            );
-            let vault_mut = substates_to_persist
-                .get_mut(&SubstateId::Vault(refund_vault))
-                .expect("invariant: vault that made fee payment not in changeset")
-                .as_vault_mut()
-                .expect("invariant: substate substate_id for fee refund is not a vault");
-            vault_mut.resource_container_mut().deposit(resx.withdraw_all()?)?;
-        }
-
-        let total_fees_paid = fee_resource
-            .amount()
-            .to_u64_checked()
-            .expect("FeeState guarantees that the total fee payments fit in an u64");
-
         Ok(TransactionReceipt {
-            transaction_hash: self.transaction_hash,
-            events: self.events.clone(),
-            logs: self.logs.clone(),
-            fee_receipt: FeeReceipt {
-                total_fee_payment,
-                total_fees_paid,
-                total_fee_overcharge,
-                cost_breakdown: self.fee_state.take_fee_charges(),
-            },
+            diff_summary: diff.into(),
+            fee_withdrawals: diff.validator_fee_withdrawals().to_vec().into_boxed_slice(),
+            events: self.events.clone().into_boxed_slice(),
+            logs: self.logs.clone().into_boxed_slice(),
+            fee_receipt,
         })
     }
 
@@ -1396,9 +1317,93 @@ impl WorkingState {
         &self.logs
     }
 
+    pub fn finalize_fee_receipt(
+        &mut self,
+        substates_to_persist: &mut IndexMap<SubstateId, SubstateValue>,
+    ) -> Result<FeeReceipt, RuntimeError> {
+        let total_fees = self.fee_state.total_charges();
+
+        let total_fee_payment = self.fee_state.total_payments();
+
+        let mut fee_resource = ResourceContainer::stealth(STEALTH_TARI_RESOURCE_ADDRESS, Amount::zero());
+
+        // Collect the fee
+        let mut remaining_fees = total_fees;
+        let mut total_fee_overcharge = 0;
+        // First collect fees that cannot be refunded (we have to take all fees even if they exceed the required amount)
+        for resx in self.fee_state.non_refundable_fee_payments_mut_iter() {
+            // PANIC: this is checked by FeeState
+            let paid_amount = resx.amount().to_u64_checked().expect("invalid fee entry in fee state");
+
+            debug!(
+                target: LOG_TARGET,
+                "Collecting {} of non-refundable fees", resx.amount()
+            );
+
+            // If there is no refund vault, we must take the entire amount to avoid destroying funds
+            fee_resource.deposit(resx.withdraw(resx.amount())?)?;
+            if remaining_fees < paid_amount {
+                total_fee_overcharge += paid_amount - remaining_fees;
+            }
+
+            remaining_fees = remaining_fees.saturating_sub(paid_amount);
+        }
+
+        if remaining_fees > 0 {
+            for (resx, _) in self.fee_state.refundable_fee_payments_iter_mut() {
+                if remaining_fees == 0 {
+                    break;
+                }
+
+                debug!(
+                    target: LOG_TARGET,
+                    "Collecting {} of refundable fees", resx.amount()
+                );
+
+                // PANIC: this is checked by FeeState
+                let paid_amount = resx.amount().to_u64_checked().expect("invalid fee entry in fee state");
+
+                // Withdraw only what is needed
+                let amount_to_withdraw = cmp::min(paid_amount, remaining_fees);
+                fee_resource.deposit(resx.withdraw(amount_to_withdraw.into())?)?;
+                remaining_fees = remaining_fees.saturating_sub(amount_to_withdraw);
+            }
+        }
+
+        // Refund the remaining refundable payments if any
+        for (mut resx, refund_vault) in self.fee_state.drain_refundable_fee_payments() {
+            if resx.amount().is_zero() {
+                debug_assert!(!resx.amount().is_negative());
+                continue;
+            }
+
+            debug!(
+                target: LOG_TARGET,
+                "Refunding {} of fees to vault {}", resx.amount(), refund_vault
+            );
+            let vault_mut = substates_to_persist
+                .get_mut(&SubstateId::Vault(refund_vault))
+                .expect("invariant: vault that made fee payment not in changeset")
+                .as_vault_mut()
+                .expect("invariant: substate substate_id for fee refund is not a vault");
+            vault_mut.resource_container_mut().deposit(resx.withdraw_all()?)?;
+        }
+
+        let total_fees_paid = fee_resource
+            .amount()
+            .to_u64_checked()
+            .expect("FeeState guarantees that the total fee payments fit in an u64");
+
+        Ok(FeeReceipt {
+            total_fee_payment,
+            total_fees_paid,
+            total_fee_overcharge,
+            cost_breakdown: self.fee_state.take_fee_charges(),
+        })
+    }
+
     pub fn generate_substate_diff(
         &self,
-        transaction_receipt: TransactionReceipt,
         substates_to_persist: IndexMap<SubstateId, SubstateValue>,
         downed_utxos: IndexSet<UtxoAddress>,
         fee_withdrawals: Vec<ValidatorFeeWithdrawal>,
@@ -1426,11 +1431,6 @@ impl WorkingState {
             let spent_utxo = self.store.get_unmodified_substate(&downed_utxo.clone().into())?;
             substate_diff.down(SubstateId::Utxo(downed_utxo), spent_utxo.version());
         }
-
-        substate_diff.up(
-            SubstateId::TransactionReceipt(transaction_receipt.transaction_hash.into()),
-            Substate::new(0, SubstateValue::TransactionReceipt(transaction_receipt)),
-        );
 
         Ok(substate_diff)
     }

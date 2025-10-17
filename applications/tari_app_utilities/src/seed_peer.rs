@@ -38,6 +38,7 @@ impl SeedPeer {
     pub fn to_peer_id(&self) -> Option<PeerId> {
         let pk = self.public_key.as_ref()?;
         let pk = identity::PublicKey::from(
+            // invariant: we only construct SeedPeer with valid public keys
             identity::sr25519::PublicKey::try_from_bytes(pk.as_bytes()).expect("invariant: valid public key"),
         );
         Some(pk.to_peer_id())
@@ -59,6 +60,7 @@ impl FromStr for SeedPeer {
         }
 
         let (pk, address) = s.split_once("::").ok_or_else(|| anyhow!("Invalid seed peer format"))?;
+        // Ensure that the public key is valid
         let public_key = RistrettoPublicKey::from_hex(pk).map_err(|err| anyhow!("Invalid public key {err}"))?;
         let address = address.parse().map_err(|err| anyhow!("Invalid address {err}"))?;
         Ok(SeedPeer {
@@ -99,6 +101,14 @@ mod tests {
         assert_eq!(seed_peer.address().to_string(), "/ip4/127.0.0.1/tcp/8080");
 
         assert!(seed_peer.to_peer_id().is_some());
+    }
+
+    #[test]
+    fn it_fails_to_parse_with_invalid_public_key() {
+        let s = "deadbeaf00000000000deadbeaf0000000000000000000000000000000000000::/ip4/127.0.0.1/tcp/8080";
+
+        let err = SeedPeer::from_str(s).unwrap_err();
+        assert!(err.to_string().contains("Invalid public key"));
     }
 
     #[test]

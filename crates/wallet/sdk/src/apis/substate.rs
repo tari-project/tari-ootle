@@ -8,7 +8,6 @@ use tari_engine_types::{
     indexed_value::{IndexedValueError, IndexedWellKnownTypes},
     resource::Resource,
     substate::{Substate, SubstateId, SubstateValue},
-    transaction_receipt::TransactionReceiptAddress,
 };
 use tari_ootle_common_types::{
     displayable::Displayable,
@@ -141,10 +140,17 @@ where
                             }
                         },
                         SubstateValue::Resource(_) => {},
-                        SubstateValue::TransactionReceipt(tx_receipt) => {
-                            let tx_receipt_addr = SubstateId::TransactionReceipt(TransactionReceiptAddress::from_hash(
-                                tx_receipt.transaction_hash,
-                            ));
+                        SubstateValue::TransactionReceipt(_) => {
+                            let addr = substate_id
+                                .substate_id()
+                                .as_transaction_receipt_address()
+                                .ok_or_else(|| {
+                                    SubstateApiError::InvalidValidatorNodeResponse(format!(
+                                        "Transaction receipt substate and substate ID mismatch! Got {}",
+                                        substate_id
+                                    ))
+                                })?;
+                            let tx_receipt_addr = SubstateId::TransactionReceipt(addr);
                             if substate_ids.contains(&tx_receipt_addr) {
                                 continue;
                             }

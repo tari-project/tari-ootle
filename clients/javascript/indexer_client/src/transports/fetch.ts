@@ -67,6 +67,11 @@ export default class FetchTransport implements HttpTransport {
       query = urlParams;
     }
     if (typeof request.body === "object" && request.body !== null) {
+      // Add content-type header
+      if (!request.headers) {
+        request.headers = {};
+      }
+      request.headers["Content-Type"] = "application/json";
       request.body = JSON.stringify(request.body);
     }
 

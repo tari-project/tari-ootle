@@ -80,6 +80,15 @@ diesel::table! {
 }
 
 diesel::table! {
+    transaction_receipts (id) {
+        id -> Integer,
+        address -> Text,
+        data -> Text,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     transactions (id) {
         id -> Integer,
         transaction_id -> Text,
@@ -114,6 +123,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     scanned_block_ids,
     substate_transitions,
     substates,
+    transaction_receipts,
     transactions,
     utxos,
 );

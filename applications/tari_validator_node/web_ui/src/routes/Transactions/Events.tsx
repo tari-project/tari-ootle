@@ -30,11 +30,11 @@ import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import CodeBlockDialog from "../../Components/CodeBlock";
 import { Event, shortenString, shortenSubstateId, substateIdToString } from "@tari-project/typescript-bindings";
 
-function RowData({ substate_id, template_address, topic, payload }: Event, index: number) {
+function RowData({ substate_id, template_address, topic, payload }: Event) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <TableRow key={index}>
+      <TableRow>
         <DataTableCell sx={{ borderBottom: "none", textAlign: "center" }}>
           <AccordionIconButton
             open={open}

@@ -1161,7 +1161,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     state_mut.set_vault_freeze(&vault_lock, arg.flags)?;
                     let payload =
                         Metadata::from_iter([("vault_id", arg.vault_id.to_string()), ("flags", arg.flags.to_string())]);
-                    let action = if arg.flags.is_empty() { "freeze" } else { "unfreeze" };
+                    let action = if arg.flags.is_empty() { "unfreeze" } else { "freeze" };
                     self.emit_std_event("resource", action, resource_address, payload, state_mut)?;
 
                     state_mut.unlock_substate(vault_lock)?;

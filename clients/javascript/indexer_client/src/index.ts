@@ -112,7 +112,7 @@ export class IndexerClient {
     return this.transport.sendGet(`transaction-receipts`, params);
   }
 
-  public getRecentTransactions(address: TransactionReceiptAddress): Promise<GetTransactionReceiptResponse> {
+  public getTransactionReceipt(address: TransactionReceiptAddress): Promise<GetTransactionReceiptResponse> {
     return this.transport.sendGet(`transaction-receipts/${address}`, {});
   }
 

@@ -413,7 +413,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         if let Some(last_id) = last_id {
             let tr = alias!(transaction_receipts as tr);
             let subquery = tr
-                .select(tr.fields(transaction_receipts::id))
+                .select(tr.field(transaction_receipts::id))
                 .filter(transaction_receipts::address.eq(last_id.to_string()))
                 .limit(1)
                 .single_value()
@@ -426,8 +426,8 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         }
 
         query = match ordering {
-            Ordering::Ascending => query.order_by(transaction_receipts::address.asc()),
-            Ordering::Descending => query.order_by(transaction_receipts::address.desc()),
+            Ordering::Ascending => query.order_by(transaction_receipts::id.asc()),
+            Ordering::Descending => query.order_by(transaction_receipts::id.desc()),
         };
 
         let rows = query

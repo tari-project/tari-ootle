@@ -41,13 +41,13 @@ import queryClient from "@api/queryClient";
 import { AccountInfo, substateIdToString, shortenSubstateId } from "@tari-project/typescript-bindings";
 import CopyAddress from "@components/CopyAddress";
 
-function Account(account: AccountInfo, index: number) {
+function Account(account: AccountInfo) {
   const {
     account: { name, component_address },
     address,
   } = account;
   return (
-    <TableRow key={index}>
+    <TableRow>
       <DataTableCell>
         <Link
           to={`/accounts/${substateIdToString(component_address)}`}

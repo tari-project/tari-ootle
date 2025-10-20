@@ -39,6 +39,7 @@ mod event_manager;
 mod network_client;
 mod network_state_sync;
 mod storage_sqlite;
+mod store;
 mod substate_file_cache;
 mod substate_manager;
 mod transaction_manager;

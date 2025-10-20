@@ -40,11 +40,17 @@ impl ValidatorCommitteeRpcPool {
 
     pub async fn new_session(&mut self) -> Result<ValidatorRpcSession, ValidatorCommitteeClientError> {
         let epoch = self.epoch_manager.get_current_epoch();
+        let mut last_error = None::<ValidatorCommitteeClientError>;
         loop {
             let member = self
                 .epoch_manager
                 .get_random_committee_member(epoch, Some(self.shard_group), self.past_failed_nodes.clone())
-                .await?;
+                .await
+                .optional()?
+                .ok_or_else(|| ValidatorCommitteeClientError::AllValidatorsFailed {
+                    committee_size: self.past_failed_nodes.len(),
+                    last_error: last_error.as_ref().map(|e| e.to_string()),
+                })?;
             let result = self.session_for_peer(member.address).await;
             match result {
                 Ok(session) => return Ok(session),
@@ -53,6 +59,7 @@ impl ValidatorCommitteeRpcPool {
                         target: LOG_TARGET,
                         "Failed to create session for validator '{}': {}", member, err
                     );
+                    last_error = Some(err);
                     self.past_failed_nodes.push(member.address);
                 },
             }
@@ -94,6 +101,10 @@ impl ValidatorCommitteeRpcPool {
                 .await
                 .optional()?
             else {
+                warn!(
+                    target: LOG_TARGET,
+                    "All {} committee members have been attempted and failed.", attempted.len()
+                );
                 // No more committee members to try
                 break;
             };

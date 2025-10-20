@@ -20,13 +20,14 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::BTreeMap, str::FromStr};
-
 use log::*;
 use tari_engine_types::{events::Event, substate::SubstateId};
-use tari_template_lib::{models::Metadata, types::Hash};
+use tari_transaction::TransactionId;
 
-use crate::storage_sqlite::{IndexerStore, IndexerStoreReadTransaction, SqliteIndexerStore};
+use crate::{
+    storage_sqlite::SqliteIndexerStore,
+    store::{IndexerStoreReadTransaction, IndexerStoreReader},
+};
 
 const LOG_TARGET: &str = "tari::indexer::event_manager";
 
@@ -42,27 +43,16 @@ impl EventManager {
 
     pub async fn get_events_from_db(
         &self,
-        topic: Option<String>,
-        substate_id: Option<SubstateId>,
+        topic: Option<&str>,
+        substate_id: Option<&SubstateId>,
         offset: u32,
         limit: u32,
-    ) -> Result<Vec<Event>, anyhow::Error> {
-        let rows = self
+    ) -> Result<Vec<(TransactionId, Event)>, anyhow::Error> {
+        let events = self
             .substate_store
             .with_read_tx(|tx| tx.get_events(substate_id, topic, offset, limit))?;
 
-        debug!(target: LOG_TARGET, "Found {} events", rows.len());
-
-        let mut events = Vec::with_capacity(rows.len());
-        for row in rows {
-            let substate_id = row.substate_id.map(|str| SubstateId::from_str(&str)).transpose()?;
-            let template_address = Hash::from_hex(&row.template_address)?;
-            let tx_hash = Hash::from_hex(&row.tx_hash)?;
-            let topic = row.topic;
-            let payload = Metadata::from(serde_json::from_str::<BTreeMap<String, String>>(row.payload.as_str())?);
-            events.push(Event::new(substate_id, template_address, tx_hash, topic, payload));
-        }
-
+        debug!(target: LOG_TARGET, "Found {} events", events.len());
         Ok(events)
     }
 }

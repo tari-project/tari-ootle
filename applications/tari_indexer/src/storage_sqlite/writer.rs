@@ -6,7 +6,7 @@ use std::ops::{Deref, DerefMut};
 use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection};
 use log::{debug, info, warn};
 use serde::Serialize;
-use tari_engine_types::events::Event;
+use tari_engine_types::transaction_receipt::{TransactionReceipt, TransactionReceiptAddress};
 use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, StateVersion};
 use tari_ootle_storage::{
     consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof},
@@ -17,6 +17,7 @@ use tari_transaction::Transaction;
 
 use crate::{
     diesel::ExpressionMethods,
+    network_state_sync::EventFilter,
     storage_sqlite::{
         models::{
             NewEvent,
@@ -29,8 +30,8 @@ use crate::{
         },
         reader::SqliteStoreReadTransaction,
         serialization::{serialize_bincode, serialize_hex, serialize_json},
-        IndexerStoreWriteTransaction,
     },
+    store::IndexerStoreWriteTransaction,
 };
 
 const LOG_TARGET: &str = "tari::indexer::storage_sqlite::writer";
@@ -236,29 +237,51 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         Ok(())
     }
 
-    fn batch_insert_events<I: IntoIterator<Item = Event>>(&mut self, events: I) -> Result<(), StorageError> {
-        const OPERATION: &str = "batch_insert_events";
-        use crate::storage_sqlite::schema::events;
+    fn batch_insert_transaction_receipts<I: IntoIterator<Item = (TransactionReceiptAddress, TransactionReceipt)>>(
+        &mut self,
+        receipts: I,
+        event_filters: &[EventFilter],
+    ) -> Result<(), StorageError> {
+        const OPERATION: &str = "batch_insert_transaction_receipts";
+        use crate::storage_sqlite::schema::{events, transaction_receipts};
 
-        let events = events.into_iter().map(|event| {
-            Ok::<_, StorageError>(NewEvent {
-                template_address: event.template_address().to_string(),
-                tx_hash: event.tx_hash().to_string(),
-                topic: event.topic(),
-                payload: serialize_json(event.payload())?,
-                substate_id: event.substate_id().map(|s| s.to_string()),
-            })
-        });
+        for (receipt_addr, receipt) in receipts {
+            let receipt_addr_hex = serialize_hex(receipt_addr.as_object_key());
 
-        for result in events {
-            let event = result?;
-
-            diesel::insert_into(events::table)
-                .values(event)
+            diesel::insert_into(transaction_receipts::table)
+                .values((
+                    transaction_receipts::address.eq(&receipt_addr_hex),
+                    transaction_receipts::data.eq(serialize_json(&receipt)?),
+                ))
                 .execute(self.connection())
-                .map_err(|e| StorageError::QueryError {
-                    reason: format!("{OPERATION}: {}", e),
-                })?;
+                .map_err(|e| StorageError::general(OPERATION, e))?;
+
+            // Insert events
+            let events = receipt.events.iter()
+                // only keep the events specified by the indexer filter
+                .filter(|event| {
+                    event_filters.is_empty() || event_filters.iter().any(|filter| filter.matches(event))
+                })
+                .map(|event| {
+                    Ok::<_, StorageError>(NewEvent {
+                        template_address: event.template_address().to_string(),
+                        tx_hash: &receipt_addr_hex,
+                        topic: event.topic(),
+                        payload: serialize_json(event.payload())?,
+                        substate_id: event.substate_id().map(|s| s.to_string()),
+                    })
+                });
+
+            for result in events {
+                let event = result?;
+
+                diesel::insert_into(events::table)
+                    .values(event)
+                    .execute(self.connection())
+                    .map_err(|e| StorageError::QueryError {
+                        reason: format!("{OPERATION}: {}", e),
+                    })?;
+            }
         }
 
         Ok(())

@@ -112,7 +112,7 @@ pub async fn list_recent_transactions(
 }
 
 #[utoipa::path(
-    post,
+    get,
     path = "/transactions/{transaction_id}/result",
     description = "Get the result of a submitted transaction (by transaction ID)"
 )]

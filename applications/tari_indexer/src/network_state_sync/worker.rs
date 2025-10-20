@@ -7,7 +7,7 @@ use futures::StreamExt;
 use log::*;
 use tari_engine_types::{
     substate::{SubstateId, SubstateValue},
-    transaction_receipt::TransactionReceipt,
+    transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
 };
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerEvent, EpochManagerReader};
 use tari_networking::NetworkingHandle;
@@ -41,12 +41,10 @@ use crate::{
     },
     storage_sqlite::{
         models::{Key, UtxoSpent, UtxoUnspent, UtxoUpdateRecord},
-        IndexerStore,
-        IndexerStoreReadTransaction,
-        IndexerStoreWriteTransaction,
         SqliteIndexerStore,
         SqliteStoreWriteTransaction,
     },
+    store::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreReader, IndexerStoreWriteTransaction},
 };
 
 const LOG_TARGET: &str = "tari::indexer::network_state_sync::worker";
@@ -233,7 +231,7 @@ impl NetworkWideStateSync {
 
             // TODO: continue on failure
             for checkpoint in checkpoints {
-                info!(target: LOG_TARGET, "🌍️ Validating checkpoint for shard group {shard_group}: {:?}", checkpoint);
+                info!(target: LOG_TARGET, "🌍️ Validating checkpoint for shard group {shard_group}: {}", checkpoint.header().calculate_hash());
                 // TODO: we require historical committees to validate older checkpoints. Figure out the best way to
                 //       avoid needing the data (e.g. VN merkle inclusion proof + historic L1 block MR), or,
                 //       decide it is ok to require this data to be locally stored by all indexers. For now, to avoid
@@ -333,7 +331,7 @@ impl NetworkWideStateSync {
         sync_plan_mut: &mut SyncPlan,
         update_buf: &mut Vec<(Epoch, SubstateUpdateProof)>,
         utxos_buf: &mut Vec<UtxoUpdateRecord>,
-        transactions_buf: &mut Vec<TransactionReceipt>,
+        transactions_buf: &mut Vec<(TransactionReceiptAddress, TransactionReceipt)>,
         validator_fee_pools_buf: &mut Vec<SubstateData>,
         shard_group: ShardGroup,
         session: &mut ValidatorRpcSession,
@@ -411,6 +409,7 @@ impl NetworkWideStateSync {
 
             self.store.clone().with_write_tx(|tx| {
                 debug!(target: LOG_TARGET, "✅ Committing {} updates for shard {shard} (epoch: {msg_epoch}, state version: {state_version})", update_buf.len());
+                // TODO: this is not currently used. Consider removing. 
                 tx.batch_insert_substate_transitions(shard, state_version, update_buf.drain(..))?;
                 debug!(target: LOG_TARGET, "✅ Committing {} UTXOs for shard {shard} (epoch: {msg_epoch})", utxos_buf.len());
                 tx.batch_insert_utxo_updates(utxos_buf.drain(..))?;
@@ -439,21 +438,12 @@ impl NetworkWideStateSync {
         Ok(())
     }
 
-    fn persist_transaction_receipts<I: IntoIterator<Item = TransactionReceipt>>(
+    fn persist_transaction_receipts<I: IntoIterator<Item = (TransactionReceiptAddress, TransactionReceipt)>>(
         &self,
         tx: &mut SqliteStoreWriteTransaction<'_>,
         receipts: I,
     ) -> Result<(), StorageError> {
-        let events = receipts
-            .into_iter()
-            .flat_map(|receipt| receipt.events)
-            // only keep the events specified by the indexer filter
-            .filter(|event| {
-                self.config.event_filters.is_empty() || self.config.event_filters.iter().any(|filter| filter.matches(event))
-            });
-
-        tx.batch_insert_events(events)?;
-
+        tx.batch_insert_transaction_receipts(receipts, &self.config.event_filters)?;
         Ok(())
     }
 }
@@ -466,7 +456,7 @@ fn extend_bufs_from_substate_update(
     update_buf: &mut Vec<(Epoch, SubstateUpdateProof)>,
     templates_buf: &mut Vec<TemplateChange>,
     utxos_buf: &mut Vec<UtxoUpdateRecord>,
-    transactions_buf: &mut Vec<TransactionReceipt>,
+    transactions_buf: &mut Vec<(TransactionReceiptAddress, TransactionReceipt)>,
     validator_fee_pools_buf: &mut Vec<SubstateData>,
 ) -> Result<(), NetworkStateSyncError> {
     match &update {
@@ -489,7 +479,9 @@ fn extend_bufs_from_substate_update(
                 };
             },
             Some(SubstateValue::TransactionReceipt(receipt)) => {
-                transactions_buf.push(receipt.clone());
+                if let Some(address) = update.substate_id().as_transaction_receipt_address() {
+                    transactions_buf.push((address, receipt.clone()));
+                }
             },
             Some(SubstateValue::Template(template)) => {
                 if let Some(address) = create.substate.substate_id().as_template() {

@@ -26,6 +26,7 @@ pub fn build_transaction_from(tx: Transaction) -> TransactionRecord {
     TransactionRecord::new(tx)
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn create_execution_result_for_transaction(
     transaction: &Transaction,
     decision: Decision,
@@ -105,9 +106,10 @@ pub fn create_execution_result_for_transaction(
         diff.up(
             SubstateId::TransactionReceipt(TransactionReceiptAddress::from(transaction.calculate_id())),
             Substate::new(0, TransactionReceipt {
-                transaction_hash: transaction.calculate_id().into_array().into(),
-                events: vec![],
-                logs: vec![],
+                diff_summary: Default::default(),
+                fee_withdrawals: Default::default(),
+                events: Default::default(),
+                logs: Default::default(),
                 fee_receipt: FeeReceipt {
                     total_fee_payment: fee,
                     total_fees_paid: fee,

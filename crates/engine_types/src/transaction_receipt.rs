@@ -9,12 +9,20 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tari_bor::BorTag;
+use tari_common_types::types::FixedHash;
 use tari_template_lib::{
     models::{address_prefixes, BinaryTag},
     types::{Hash, KeyParseError, ObjectKey},
 };
 
-use crate::{events::Event, fees::FeeReceipt, logs::LogEntry};
+use crate::{
+    events::Event,
+    fees::FeeReceipt,
+    logs::LogEntry,
+    serde_with,
+    substate::{hash_substate, SubstateDiff, SubstateId},
+    ValidatorFeeWithdrawal,
+};
 
 const TAG: u64 = BinaryTag::TransactionReceipt.as_u64();
 
@@ -78,8 +86,39 @@ impl FromStr for TransactionReceiptAddress {
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionReceipt {
-    pub transaction_hash: Hash,
-    pub events: Vec<Event>,
-    pub logs: Vec<LogEntry>,
+    pub diff_summary: DiffSummary,
+    pub fee_withdrawals: Box<[ValidatorFeeWithdrawal]>,
+    pub events: Box<[Event]>,
+    pub logs: Box<[LogEntry]>,
     pub fee_receipt: FeeReceipt,
+}
+#[derive(Debug, Clone, Default, Serialize, Deserialize, borsh::BorshSerialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct DiffSummary {
+    pub upped: Box<[UpSubstate]>,
+}
+
+impl From<&SubstateDiff> for DiffSummary {
+    fn from(diff: &SubstateDiff) -> Self {
+        Self {
+            upped: diff
+                .up_iter()
+                .map(|(id, s)| UpSubstate {
+                    substate_id: id.clone(),
+                    version: s.version(),
+                    value_hash: hash_substate(s.substate_value(), s.version()),
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct UpSubstate {
+    pub substate_id: SubstateId,
+    pub version: u32,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "serde_with::hex")]
+    pub value_hash: FixedHash,
 }

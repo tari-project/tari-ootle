@@ -23,6 +23,7 @@ use crate::{
     dry_run::processor::DryRunTransactionProcessor,
     rest_api::cache::HttpCacheConfig,
     storage_sqlite::SqliteIndexerStore,
+    store::ReadOnlyStore,
     substate_manager::SubstateManager,
     transaction_manager::TransactionManager,
 };
@@ -37,6 +38,7 @@ impl HandlerContext {
         Self {
             inner: Arc::new(InnerContext {
                 cache_control_enabled: true,
+                read_only_store: ReadOnlyStore::new(services.store.clone()),
                 global_db: services.global_db.clone(),
                 epoch_manager: services.epoch_manager.clone(),
                 networking: services.networking.clone(),
@@ -80,6 +82,10 @@ impl HandlerContext {
         &self.inner.transaction_manager
     }
 
+    pub fn read_only_store(&self) -> &ReadOnlyStore<SqliteIndexerStore> {
+        &self.inner.read_only_store
+    }
+
     pub fn template_manager(&self) -> &TemplateManager<PeerAddress> {
         &self.inner.template_manager
     }
@@ -111,6 +117,7 @@ struct InnerContext {
     substate_manager: SubstateManager,
     transaction_manager:
         TransactionManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SqliteIndexerStore>,
+    read_only_store: ReadOnlyStore<SqliteIndexerStore>,
     template_manager: TemplateManager<PeerAddress>,
     dry_run_transaction_processor: DryRunTransactionProcessor,
 }

@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 export * from "./types/tari-indexer-client/IndexerSubmitTransactionResponse";
+export * from "./types/tari-indexer-client/GetTransactionReceiptResponse";
 export * from "./types/tari-indexer-client/GetTemplateDefinitionRequest";
 export * from "./types/tari-indexer-client/TemplateMetadata";
 export * from "./types/tari-indexer-client/GetUnspentUtxosResponse";
@@ -19,11 +20,13 @@ export * from "./types/tari-indexer-client/IndexerGetSubstateResponse";
 export * from "./types/tari-indexer-client/IndexerGetCommsStatsResponse";
 export * from "./types/tari-indexer-client/IndexerConnection";
 export * from "./types/tari-indexer-client/GetNonFungiblesRequest";
+export * from "./types/tari-indexer-client/ListTransactionReceiptsRequest";
 export * from "./types/tari-indexer-client/ListRecentTransactionsResponse";
 export * from "./types/tari-indexer-client/IndexerAddPeerRequest";
 export * from "./types/tari-indexer-client/GetNetworkSyncStateResponse";
 export * from "./types/tari-indexer-client/GetNonFungiblesResponse";
 export * from "./types/tari-indexer-client/GetTemplateDefinitionResponse";
+export * from "./types/tari-indexer-client/ListTransactionReceiptsResponse";
 export * from "./types/tari-indexer-client/IndexerGetConnectionsResponse";
 export * from "./types/tari-indexer-client/GetSubstatesResponse";
 export * from "./types/tari-indexer-client/IndexerSubmitTransactionRequest";

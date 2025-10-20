@@ -3,7 +3,7 @@
 
 use reqwest::{header, header::HeaderMap, IntoUrl, Url};
 use serde::{de::DeserializeOwned, Serialize};
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::{substate::SubstateId, transaction_receipt::TransactionReceiptAddress};
 
 use crate::{
     error::IndexerRestClientError,
@@ -23,6 +23,7 @@ use crate::{
         GetSubstatesResponse,
         GetTemplateDefinitionRequest,
         GetTemplateDefinitionResponse,
+        GetTransactionReceiptResponse,
         GetTransactionResultRequest,
         GetTransactionResultResponse,
         GetUnspentUtxosRequest,
@@ -33,6 +34,8 @@ use crate::{
         ListRecentTransactionsResponse,
         ListSubstatesRequest,
         ListSubstatesResponse,
+        ListTransactionReceiptsRequest,
+        ListTransactionReceiptsResponse,
         SubmitTransactionRequest,
         SubmitTransactionResponse,
     },
@@ -167,6 +170,20 @@ impl IndexerRestApiClient {
         req: GetUnspentUtxosRequest,
     ) -> Result<GetUnspentUtxosResponse, IndexerRestClientError> {
         self.send_post("utxos/fetch", req).await
+    }
+
+    pub async fn list_transaction_receipts(
+        &mut self,
+        req: ListTransactionReceiptsRequest,
+    ) -> Result<ListTransactionReceiptsResponse, IndexerRestClientError> {
+        self.send_get("transaction-receipts", req).await
+    }
+
+    pub async fn get_transaction_receipt(
+        &mut self,
+        address: TransactionReceiptAddress,
+    ) -> Result<GetTransactionReceiptResponse, IndexerRestClientError> {
+        self.send_get(format!("transaction-receipts/{}", address), ()).await
     }
 
     pub async fn get_network_sync_state(&mut self) -> Result<GetNetworkSyncStateResponse, IndexerRestClientError> {

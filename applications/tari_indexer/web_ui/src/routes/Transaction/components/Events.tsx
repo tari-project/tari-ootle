@@ -47,11 +47,11 @@ interface EventsProps {
 }
 
 function Events({
-  events,
-  expandAllTrigger = 0,
-  collapseAllTrigger = 0,
-  onExpandedChange,
-}: EventsProps) {
+                  events,
+                  expandAllTrigger = 0,
+                  collapseAllTrigger = 0,
+                  onExpandedChange,
+                }: EventsProps) {
   const [expanded, setExpanded] = useState(false);
 
   if (!events || events.length === 0) {
@@ -115,10 +115,6 @@ function Events({
                       <TableRow>
                         <TableCell>Template Address</TableCell>
                         <DataTableCell>{event.template_address}</DataTableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell>Transaction Hash</TableCell>
-                        <DataTableCell>{event.tx_hash}</DataTableCell>
                       </TableRow>
                       <TableRow>
                         <TableCell>Payload</TableCell>

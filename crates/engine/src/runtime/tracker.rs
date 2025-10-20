@@ -32,7 +32,7 @@ use tari_engine_types::{
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     lock::LockFlag,
     logs::LogEntry,
-    substate::{SubstateId, SubstateValue},
+    substate::{Substate, SubstateId, SubstateValue},
     virtual_substate::VirtualSubstates,
 };
 use tari_ootle_common_types::Epoch;
@@ -181,7 +181,6 @@ impl StateTracker {
             state.push_event(Event::std(
                 Some(substate_id),
                 template_address,
-                state.transaction_hash(),
                 "component",
                 "created",
                 Metadata::from([("module_name".to_string(), module_name)]),
@@ -261,25 +260,23 @@ impl StateTracker {
                 remaining: state.call_frame_depth(),
             });
         }
-        // Resolve the transfers to the fee pool resource and vault refunds
-        let transaction_receipt = state.finalize_fees(&mut substates_to_persist)?;
-
-        let fee_receipt = transaction_receipt.fee_receipt.clone();
 
         let fee_withdrawals = state.take_validator_fee_withdrawals();
-        let result =
-            state.generate_substate_diff(transaction_receipt, substates_to_persist, downed_utxos, fee_withdrawals);
 
-        let result = match result {
-            Ok(substate_diff) => TransactionResult::Accept(substate_diff),
-            Err(err) => TransactionResult::Reject(err.to_reject_reason()),
-        };
+        // Resolve the transfers to the fee pool resource and vault refunds
+        let fee_receipt = state.finalize_fee_receipt(&mut substates_to_persist)?;
+        let mut diff = state.generate_substate_diff(substates_to_persist, downed_utxos, fee_withdrawals)?;
+        let transaction_receipt = state.finalize_transaction_receipt(&diff, fee_receipt.clone())?;
+        diff.up(
+            SubstateId::TransactionReceipt(state.transaction_hash().into()),
+            Substate::new(0, transaction_receipt),
+        );
 
         let finalized = FinalizeResult::new(
             state.transaction_hash(),
             state.take_logs(),
             state.take_events(),
-            result,
+            TransactionResult::Accept(diff),
             fee_receipt,
         );
 

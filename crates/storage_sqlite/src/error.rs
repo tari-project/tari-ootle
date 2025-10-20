@@ -43,7 +43,7 @@ pub enum SqliteStorageError {
     #[error("General diesel error during operation {operation}: {source}")]
     DieselError {
         source: diesel::result::Error,
-        operation: String,
+        operation: &'static str,
     },
     #[error("Could not migrate the database: {source}")]
     MigrationError {
@@ -85,6 +85,12 @@ impl From<SqliteStorageError> for StorageError {
         match source {
             SqliteStorageError::ConnectionError { .. } => StorageError::ConnectionError {
                 reason: source.to_string(),
+            },
+            SqliteStorageError::DieselError { source, operation } if source == diesel::result::Error::NotFound => {
+                StorageError::NotFoundDbAdapter {
+                    operation,
+                    source: source.into(),
+                }
             },
             SqliteStorageError::DieselError { .. } => StorageError::QueryError {
                 reason: source.to_string(),

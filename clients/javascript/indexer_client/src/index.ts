@@ -9,7 +9,7 @@ import type {
   GetRecentTransactionsRequest,
   GetRecentTransactionsResponse,
   GetSubstatesRequest,
-  GetSubstatesResponse,
+  GetSubstatesResponse, GetTransactionReceiptResponse,
   IndexerAddPeerRequest,
   IndexerAddPeerResponse,
   IndexerGetConnectionsResponse,
@@ -19,7 +19,7 @@ import type {
   IndexerGetTransactionResultResponse,
   IndexerReadyResponse, ListRecentTransactionsRequest, ListRecentTransactionsResponse,
   ListSubstatesRequest,
-  ListSubstatesResponse, ListTemplatesResponse,
+  ListSubstatesResponse, ListTemplatesResponse, ListTransactionReceiptsRequest, ListTransactionReceiptsResponse,
   rejectReasonToString,
   stringToSubstateId,
   SubstateId,
@@ -27,7 +27,7 @@ import type {
   TemplatesGetResponse,
   TemplatesListAuthoredRequest,
   TemplatesListAuthoredResponse,
-  TransactionId,
+  TransactionId, TransactionReceiptAddress,
   TransactionSubmitRequest,
   TransactionSubmitResponse,
 } from "@tari-project/typescript-bindings";
@@ -106,6 +106,14 @@ export class IndexerClient {
 
   public listRecentTransactions(params: ListRecentTransactionsRequest): Promise<ListRecentTransactionsResponse> {
     return this.transport.sendGet(`transactions/recent`, params);
+  }
+
+  public listTransactionReceipts(params: ListTransactionReceiptsRequest): Promise<ListTransactionReceiptsResponse> {
+    return this.transport.sendGet(`transaction-receipts`, params);
+  }
+
+  public getTransactionReceipt(address: TransactionReceiptAddress): Promise<GetTransactionReceiptResponse> {
+    return this.transport.sendGet(`transaction-receipts/${address}`, {});
   }
 
   public templatesGet(template_address: string): Promise<TemplatesGetResponse> {

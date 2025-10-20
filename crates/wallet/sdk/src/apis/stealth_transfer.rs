@@ -181,13 +181,8 @@ where
                             src_vault.id
                         );
 
-                        self.outputs_api.lock_funds_in_vault(lock_id, &src_vault.id, revealed_to_spend)
-                            .inspect_err(|_| {
-                                // TODO: atomic rollback will help with this
-                                if let Err(err) = self.outputs_api.release_lock(lock_id) {
-                                    error!(target: LOG_TARGET, "Failed to release lock outputs for resource {}: {}", resource_address, err);
-                                }
-                            })?;
+                        self.outputs_api
+                            .lock_funds_in_vault(lock_id, &src_vault.id, revealed_to_spend)?;
 
                         return Ok(InputsToSpend {
                             inputs: vec![],
@@ -212,26 +207,15 @@ where
                     &resource_address,
                     lock_id,
                     utxo_amount_to_spend,
-                )
-                    .inspect_err(|_| {
-                        // TODO: atomic rollback will help with this
-                        if let Err(err) = self.outputs_api.release_lock(lock_id) {
-                            error!(target: LOG_TARGET, "Failed to release lock outputs for resource {}: {}", resource_address, err);
-                        }
-                    })?;
+                )?;
 
                 let total_confidential_spent = Amount::sum_from_positive(inputs.iter().map(|i| i.value))
                     // The wallet has somehow stored a negative amount, which should not happen.
                     .expect("BUG: an unblinded input amount was negative");
 
                 if let Some(ref src_vault) = maybe_src_vault {
-                    self.outputs_api.lock_revealed_funds(lock_id, &src_vault.id, revealed_to_spend)
-                        .inspect_err(|_| {
-                            // TODO: atomic rollback will help with this
-                            if let Err(err) = self.outputs_api.release_lock(lock_id) {
-                                error!(target: LOG_TARGET, "Failed to release lock outputs for resource {}: {}", resource_address, err);
-                            }
-                        })?;
+                    self.outputs_api
+                        .lock_revealed_funds(lock_id, &src_vault.id, revealed_to_spend)?;
                 }
 
                 info!(
@@ -264,29 +248,23 @@ where
                     .unwrap_or_else(Amount::zero);
 
                 if available_revealed_funds < revealed_to_spend {
-                    self.outputs_api.release_lock(lock_id)?;
                     return Err(StealthTransferApiError::InsufficientFunds);
                 }
 
                 if revealed_to_spend.is_positive() {
-                    match maybe_src_vault {
-                        Some(vault) => {
-                            self.outputs_api
-                                .lock_revealed_funds(lock_id, &vault.id, revealed_to_spend)?;
-                        },
-                        None => {
-                            if let Err(err) = self.outputs_api.release_lock(lock_id) {
-                                error!(target: LOG_TARGET, "🚨 Failed to release lock outputs for resource {}: {}", resource_address, err);
-                            }
-                            return Err(StealthTransferApiError::InsufficientRevealedFunds {
+                    let vault =
+                        maybe_src_vault
+                            .as_ref()
+                            .ok_or_else(|| StealthTransferApiError::InsufficientRevealedFunds {
                                 details: format!(
                                     "PreferConfidential: No vault found for resource {} in account {}. Need to spend \
                                      {} revealed funds",
                                     resource_address, owner_account_component_address, revealed_to_spend
                                 ),
-                            });
-                        },
-                    }
+                            })?;
+
+                    self.outputs_api
+                        .lock_revealed_funds(lock_id, &vault.id, revealed_to_spend)?;
                 }
 
                 Ok(InputsToSpend {
@@ -431,33 +409,19 @@ where
         let lock_id = self.outputs_api.create_lock()?;
 
         // Lock up funds for fees and transfer
-        let fee_inputs_to_spend = self.lock_fee_inputs(lock_id, &owner_account, &params)?;
+        let fee_inputs_to_spend =
+            self.unlock_on_failure(lock_id, self.lock_fee_inputs(lock_id, &owner_account, &params))?;
 
-        let inputs_to_spend = match self.lock_inputs_for_transfer(
+        let inputs_to_spend = self.unlock_on_failure(
             lock_id,
-            owner_account.account().component_address(),
-            params.resource_address,
-            params.total_output_amount(),
-            params.input_selection,
-        ) {
-            Ok(inputs) => inputs,
-            Err(e) => {
-                warn!(target: LOG_TARGET, "Unlocking fee fund locks after error: {}", e);
-                // This is a hack that addresses the case where input locking fails after the fee transaction.
-                // However, any error after this point do not undo locking. This is a limitation
-                // of the current design - the db transaction should be passed in and
-                // automatically rolled back on error.
-                if let Err(err) = self.outputs_api.release_lock(lock_id) {
-                    error!(
-                        target: LOG_TARGET,
-                        "Failed to release fee inputs for transfer: {}",
-                        err
-                    );
-                }
-
-                return Err(e);
-            },
-        };
+            self.lock_inputs_for_transfer(
+                lock_id,
+                owner_account.account().component_address(),
+                params.resource_address,
+                params.total_output_amount(),
+                params.input_selection,
+            ),
+        )?;
 
         // TODO: use single db transaction across calls
         // --- Any error from here can result in funds staying locked ---
@@ -481,11 +445,9 @@ where
         let (signing_key_branch, signing_key_id) = if must_sign_with_account_key {
             (KeyBranch::Account, owner_key_id)
         } else {
-            (
-                KeyBranch::Nonce,
-                // Only usage of key manager - too bad :/
-                KeyId::derived(self.key_manager_api.next_derived_key_index(KeyBranch::Nonce)?),
-            )
+            let next_index =
+                self.unlock_on_failure(lock_id, self.key_manager_api.next_derived_key_index(KeyBranch::Nonce))?;
+            (KeyBranch::Nonce, KeyId::derived(next_index))
         };
         let required_signer = self
             .key_manager_api
@@ -493,28 +455,34 @@ where
         let required_signer_pk = required_signer.public_key.to_byte_type();
 
         // Generate fee transfer statement
-        let fee_transfer_statement = self.outputs_api.generate_transfer_statement(TransferStatementParams {
-            spend_key_branch: KeyBranch::Account,
-            spend_key_id: owner_key_id,
-            view_only_key_id: owner_account.view_only_key_id(),
-            resource_address: &params.resource_address,
-            resource_view_key: resource_view_key.clone(),
-            inputs: &fee_inputs_to_spend.inputs,
-            input_revealed_amount: fee_inputs_to_spend.revealed,
-            outputs: fee_change_output.into_iter(),
-            output_revealed_amount: Amount::from(params.max_fee),
-            required_signer: required_signer_pk,
-        })?;
+        let fee_transfer_statement = self.unlock_on_failure(
+            lock_id,
+            self.outputs_api.generate_transfer_statement(TransferStatementParams {
+                spend_key_branch: KeyBranch::Account,
+                spend_key_id: owner_key_id,
+                view_only_key_id: owner_account.view_only_key_id(),
+                resource_address: &params.resource_address,
+                resource_view_key: resource_view_key.clone(),
+                inputs: &fee_inputs_to_spend.inputs,
+                input_revealed_amount: fee_inputs_to_spend.revealed,
+                outputs: fee_change_output,
+                output_revealed_amount: Amount::from(params.max_fee),
+                required_signer: required_signer_pk,
+            }),
+        )?;
 
         // Add the unconfirmed fee change output to the wallet store
         if let Some(output) = fee_transfer_statement.outputs_statement.outputs.first() {
-            self.add_unconfirmed_output_from_statement(
+            self.unlock_on_failure(
                 lock_id,
-                &owner_account,
-                params.resource_address,
-                output,
-                fee_stealth_change_amt,
-                None,
+                self.add_unconfirmed_output_from_statement(
+                    lock_id,
+                    &owner_account,
+                    params.resource_address,
+                    output,
+                    fee_stealth_change_amt,
+                    None,
+                ),
             )?;
         }
 
@@ -548,8 +516,7 @@ where
             .total_amount()
             .checked_sub_positive(params.total_output_amount())
             .unwrap_or_else(|| {
-                // This is a bug because the wallet chooses inputs based on the required outputs. This function should
-                // not have been called if there are insufficient funds.
+                // This is a bug because the wallet chooses inputs based on the required outputs.
                 error!(
                     target: LOG_TARGET,
                     "BUG: total_stealth_input_amount or params.total_amount() are negative after validation"
@@ -561,27 +528,30 @@ where
             owner_address: &owner_address,
             amount: change_amount,
             memo: None,
-        })
-        .filter(|o| o.amount.is_positive());
+        });
 
-        let transfer_statement = self.outputs_api.generate_transfer_statement(TransferStatementParams {
-            spend_key_branch: KeyBranch::Account,
-            spend_key_id: owner_key_id,
-            view_only_key_id: owner_account.view_only_key_id(),
-            resource_address: &params.resource_address,
-            resource_view_key,
-            inputs: &inputs_to_spend.inputs,
-            input_revealed_amount: inputs_to_spend.revealed,
-            outputs: Some(OutputToCreate {
-                amount: params.blinded_output_amount,
-                owner_address: &destination_address,
-                memo: params.output_memo.as_ref(),
-            })
-            .into_iter()
-            .chain(change_output),
-            output_revealed_amount: params.revealed_output_amount,
-            required_signer: required_signer_pk,
-        })?;
+        let transfer_statement = self.unlock_on_failure(
+            lock_id,
+            self.outputs_api.generate_transfer_statement(TransferStatementParams {
+                spend_key_branch: KeyBranch::Account,
+                spend_key_id: owner_key_id,
+                view_only_key_id: owner_account.view_only_key_id(),
+                resource_address: &params.resource_address,
+                resource_view_key,
+                inputs: &inputs_to_spend.inputs,
+                input_revealed_amount: inputs_to_spend.revealed,
+                outputs: Some(OutputToCreate {
+                    amount: params.blinded_output_amount,
+                    owner_address: &destination_address,
+                    memo: params.output_memo.as_ref(),
+                })
+                .into_iter()
+                .chain(change_output)
+                .filter(|o| o.amount.is_positive()),
+                output_revealed_amount: params.revealed_output_amount,
+                required_signer: required_signer_pk,
+            }),
+        )?;
 
         // Add all input UTXO substates to transaction inputs
         substate_inputs.extend(
@@ -605,30 +575,36 @@ where
                 .map(SubstateRequirement::unversioned),
         );
 
-        let result = self.generate_transfer_transaction(
-            &owner_account,
-            params,
-            substate_inputs,
-            fee_transfer_statement,
-            transfer_statement,
-            need_to_create_dest_account,
-        );
+        let transaction = self.unlock_on_failure(
+            lock_id,
+            self.generate_transfer_transaction(
+                &owner_account,
+                params,
+                substate_inputs,
+                fee_transfer_statement,
+                transfer_statement,
+                need_to_create_dest_account,
+            ),
+        )?;
 
+        Ok(TransferOutput {
+            transaction,
+            lock_id,
+            fee_inputs: fee_inputs_to_spend,
+            transfer_inputs: inputs_to_spend,
+            signing_key_branch,
+            signing_key_id,
+        })
+    }
+
+    fn unlock_on_failure<T, E>(&self, lock_id: WalletLockId, result: Result<T, E>) -> Result<T, E> {
         match result {
-            Ok(transaction) => Ok(TransferOutput {
-                transaction,
-                lock_id,
-                fee_inputs: fee_inputs_to_spend,
-                transfer_inputs: inputs_to_spend,
-                signing_key_branch,
-                signing_key_id,
-            }),
-            Err(err) => {
-                // Unlock inputs
-                if let Err(e) = self.outputs_api.release_lock(lock_id) {
-                    error!(target: LOG_TARGET, "Failed to release inputs lock after error: {}", e);
+            Ok(value) => Ok(value),
+            Err(e) => {
+                if let Err(err) = self.outputs_api.release_lock(lock_id) {
+                    error!(target: LOG_TARGET, "Failed to release inputs lock after error: {}", err);
                 }
-                Err(err)
+                Err(e)
             },
         }
     }

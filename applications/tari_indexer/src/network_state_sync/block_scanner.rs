@@ -12,13 +12,8 @@ use tari_validator_node_rpc::client::{TariValidatorNodeRpcClientFactory, Validat
 
 use crate::{
     block_data::BlockData,
-    storage_sqlite::{
-        models::NewScannedBlockId,
-        IndexerStore,
-        IndexerStoreReadTransaction,
-        IndexerStoreWriteTransaction,
-        SqliteIndexerStore,
-    },
+    storage_sqlite::{models::NewScannedBlockId, SqliteIndexerStore},
+    store::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreReader, IndexerStoreWriteTransaction},
 };
 
 const LOG_TARGET: &str = "tari::indexer::block_scanner";

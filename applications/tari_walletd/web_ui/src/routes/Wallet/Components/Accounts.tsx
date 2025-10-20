@@ -41,7 +41,7 @@ import queryClient from "@api/queryClient";
 import { AccountInfo, substateIdToString, shortenSubstateId } from "@tari-project/typescript-bindings";
 import CopyAddress from "@components/CopyAddress";
 
-function Account(account: AccountInfo) {
+function Account({ account }: { account: AccountInfo }) {
   const {
     account: { name, component_address },
     address,
@@ -188,7 +188,9 @@ function Accounts() {
               </TableHead>
               <TableBody>
                 {dataAccountsList &&
-                  dataAccountsList.accounts.map((account: AccountInfo, index: number) => Account(account, index))}
+                  dataAccountsList.accounts.map((account: AccountInfo, index) => (
+                    <Account account={account} key={index} />
+                  ))}
               </TableBody>
             </Table>
           </TableContainer>

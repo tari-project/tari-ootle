@@ -197,6 +197,10 @@ impl FinalizeResult {
         self.result.any_reject()
     }
 
+    pub fn reject(&self) -> Option<&RejectReason> {
+        self.result.reject()
+    }
+
     pub fn fee_accept_transaction_reject(&self) -> Option<(&SubstateDiff, &RejectReason)> {
         self.result.fee_accept_transaction_reject()
     }
@@ -285,6 +289,13 @@ impl TransactionResult {
             Self::Accept(_) => None,
             Self::AcceptFeeRejectRest(_, reject_result) => Some(reject_result),
             Self::Reject(reject_result) => Some(reject_result),
+        }
+    }
+
+    pub fn reject(&self) -> Option<&RejectReason> {
+        match self {
+            Self::Reject(reject_result) => Some(reject_result),
+            _ => None,
         }
     }
 

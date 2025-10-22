@@ -3,6 +3,7 @@
 
 use std::{array, collections::HashSet};
 
+use anyhow::Context;
 use axum_extra::headers::authorization::Bearer;
 use indexmap::IndexMap;
 use log::*;
@@ -36,7 +37,7 @@ use tari_template_lib::{
     constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
     types::{Amount, ResourceType},
 };
-use tari_transaction::args;
+use tari_transaction::{args, TransactionSignature};
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{
@@ -284,7 +285,7 @@ pub async fn handle_get_balances(
     let vaults = sdk.accounts_api().get_vaults_by_account(account.component_address())?;
     let stealth_outputs = sdk
         .stealth_outputs_api()
-        .get_unspent_outputs_by_account(account.component_address())?;
+        .get_unspent_outputs_by_account(account.component_address(), false)?;
 
     let mut balances = Vec::with_capacity(vaults.len());
     let mut vaulted_resources = HashSet::new();
@@ -683,6 +684,7 @@ pub async fn handle_create_free_test_coins(
             account.is_confirmed_on_chain().then(|| NewAccountData {
                 address: *account.component_address(),
             }),
+            None,
         )
         .await?;
 
@@ -987,13 +989,27 @@ pub async fn handle_stealth_transfer(
     task::spawn(async move {
         let transfer = sdk.stealth_transfer_api().transfer(owner_account, params).await?;
 
-        let transaction = transfer.transaction.authorized_sealed_signer().build();
+        let transaction = transfer.transaction.authorized_sealed_signer();
+        let main_pk = transfer.main_signer.public_key().to_byte_type();
 
+        // Add additional signature if needed
+        let additional_sig = transfer
+            .additional_signer
+            .as_ref()
+            .map(|s| {
+                sdk.local_signer_api()
+                    .get_signature(s.branch, s.key_id, &main_pk, &transaction)
+            })
+            .transpose()?
+            .map(|sig| TransactionSignature::new(sig.public_key.to_byte_type(), sig.signature.to_byte_type()));
+
+        let transaction = transaction.build_with_signatures(additional_sig.into_iter().collect());
+
+        // Sign and seal the final transaction
         let transaction =
             sdk.local_signer_api()
-                .sign(transfer.signing_key_branch, transfer.signing_key_id, transaction)?;
+                .sign(transfer.main_signer.branch, transfer.main_signer.key_id, transaction)?;
 
-        // TODO: if submitting fails we need to unlock the inputs again
         if req.dry_run {
             // Release the lock immediately as dry run does not submit the transaction
             // TODO: maybe transfer() should not lock the outputs if it's a dry run
@@ -1009,46 +1025,25 @@ pub async fn handle_stealth_transfer(
                 Ok(res) => Ok(StealthTransferResponse {
                     transaction_id: res.finalize.transaction_hash.into(),
                 }),
-                Err(e) => {
-                    if let Err(err) = sdk.stealth_outputs_api().release_lock(transfer.lock_id) {
-                        error!(
-                            target: LOG_TARGET,
-                            "Failed to release locked outputs after dry run failure: {}",
-                            err
-                        );
-                    }
-
-                    Err(anyhow::anyhow!("Dry run transaction failed: {}", e))
-                },
+                Err(e) => Err(anyhow::anyhow!("Dry run transaction failed: {}", e)),
             };
         }
 
-        // Associate lock with transaction
-        sdk.stealth_outputs_api()
-            .locks_set_transaction_id(transfer.lock_id, transaction.calculate_id())?;
+        let tx_id = sdk
+            .stealth_transfer_api()
+            .unlock_on_failure(
+                transfer.lock_id,
+                transaction_service
+                    .submit_transaction_with_opts(transaction, None, Some(transfer.lock_id))
+                    .await,
+            )
+            .context("Transaction failed to submit")?;
+        notifier.notify(TransactionSubmittedEvent {
+            transaction_id: tx_id,
+            new_account: None,
+        });
 
-        let result = transaction_service.submit_transaction(transaction).await;
-        match result {
-            Ok(tx_id) => {
-                notifier.notify(TransactionSubmittedEvent {
-                    transaction_id: tx_id,
-                    new_account: None,
-                });
-
-                Ok(StealthTransferResponse { transaction_id: tx_id })
-            },
-            Err(e) => {
-                if let Err(err) = sdk.stealth_outputs_api().release_lock(transfer.lock_id) {
-                    error!(
-                        target: LOG_TARGET,
-                        "Failed to release locked outputs after submission failure: {}",
-                        err
-                    );
-                }
-
-                Err(anyhow::anyhow!("Transaction submission failed: {}", e))
-            },
-        }
+        Ok(StealthTransferResponse { transaction_id: tx_id })
     })
     .await?
 }

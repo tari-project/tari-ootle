@@ -35,6 +35,7 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::wallet_services::account_monitor";
 
+#[derive(Debug, Clone)]
 pub struct AccountScanner<TStore, TNetworkInterface> {
     notify: Notify<WalletEvent>,
     wallet_sdk: WalletSdk<TStore, TNetworkInterface>,
@@ -53,7 +54,7 @@ where
     pub async fn refresh_account(&self, account_address: ComponentAddress) -> Result<bool, AccountMonitorError> {
         info!(
             target: LOG_TARGET,
-            "👁️‍🗨️ Refreshing account {}", account_address
+            "🏦 Refreshing account {}", account_address
         );
         let substate_api = self.wallet_sdk.substate_api();
         let accounts_api = self.wallet_sdk.accounts_api();
@@ -410,7 +411,7 @@ where
 
     #[allow(clippy::too_many_lines)]
     pub async fn process_result(
-        &mut self,
+        &self,
         tx_id: TransactionId,
         diff: &SubstateDiff,
         new_account_data: Option<NewAccountData>,
@@ -428,7 +429,7 @@ where
                 new_account = existing_account;
                 debug!(
                     target: LOG_TARGET,
-                    "👁️‍🗨️ New account {} created in transaction {}",
+                    "🏦 New account {} created in transaction {}",
                     account.address,
                     tx_id
                 );
@@ -443,7 +444,7 @@ where
             } else {
                 info!(
                     target: LOG_TARGET,
-                    "👁️‍🗨️ Account {} already exists and on-chain (processing transaction result {})",
+                    "🏦 Account {} already exists and on-chain (processing transaction result {})",
                     account.address,
                     tx_id
                 );
@@ -468,7 +469,7 @@ where
                         Err(e) => {
                             error!(
                                 target: LOG_TARGET,
-                                "👁️‍🗨️ Failed to parse account substate {} in tx {}: {}", a, tx_id, e
+                                "🏦 Failed to parse account substate {} in tx {}: {}", a, tx_id, e
                             );
                             None
                         },
@@ -521,7 +522,7 @@ where
         for (vault_id, substate) in vaults {
             let vault_addr = SubstateId::Vault(vault_id);
             let SubstateValue::Vault(vault) = substate.substate_value() else {
-                error!(target: LOG_TARGET, "👁️‍🗨️ Substate {} is not a vault. This should be impossible.", vault_addr);
+                error!(target: LOG_TARGET, "🏦 Substate {} is not a vault. This should be impossible.", vault_addr);
                 continue;
             };
 
@@ -529,13 +530,13 @@ where
             let maybe_vault_substate = substate_api.get_substate(&vault_addr).optional()?;
             let Some(vault_substate) = maybe_vault_substate else {
                 // This should be impossible.
-                error!(target: LOG_TARGET, "👁️‍🗨️ Vault {} is not a known substate.", vault_addr);
+                error!(target: LOG_TARGET, "🏦 Vault {} is not a known substate.", vault_addr);
                 continue;
             };
 
             let Some(account_addr) = vault_substate.parent_address else {
                 // Happens if this is someone else's vault
-                debug!(target: LOG_TARGET, "👁️‍🗨️ Vault {} has no parent component.", vault_addr);
+                debug!(target: LOG_TARGET, "🏦 Vault {} has no parent component.", vault_addr);
                 continue;
             };
             let account_addr = account_addr.as_component_address().unwrap_or_else(|| {
@@ -549,7 +550,7 @@ where
             if accounts_api.get_account_by_address(&account_addr).optional()?.is_none() {
                 info!(
                     target: LOG_TARGET,
-                    "👁️‍🗨️ Vault {} not in any known account",
+                    "🏦 Vault {} not in any known account",
                     vault_addr,
                 );
                 continue;
@@ -595,7 +596,7 @@ where
         if let Some(account) = new_account {
             debug!(
                 target: LOG_TARGET,
-                "👁️‍🗨️ Notifying account created for tx {}: {}",
+                "🏦 Notifying account created for tx {}: {}",
                 tx_id,
                 account
             );
@@ -607,7 +608,7 @@ where
         if !updated_accounts.is_empty() {
             debug!(
                 target: LOG_TARGET,
-                "👁️‍🗨️ Notifying {} account(s) changed for tx {}",
+                "🏦 Notifying {} account(s) changed for tx {}",
                 updated_accounts.len(),
                 tx_id
             );
@@ -655,7 +656,7 @@ where
             Err(e) => {
                 warn!(
                     target: LOG_TARGET,
-                    "👁️‍🗨️ Failed to scan vault {} from VN: {}",
+                    "🏦 Failed to scan vault {} from VN: {}",
                     vault_id,
                     e
                 );
@@ -670,7 +671,7 @@ where
 
         info!(
             target: LOG_TARGET,
-            "👁️‍🗨️ New {} in account {}",
+            "🏦 New {} in account {}",
             vault_id,
             account_addr
         );

@@ -3,6 +3,7 @@
 
 use std::str::FromStr;
 
+use bigdecimal::{BigDecimal, ToPrimitive};
 use diesel::{Identifiable, Queryable};
 use tari_ootle_wallet_sdk::storage::WalletStorageError;
 use tari_template_lib::{
@@ -23,10 +24,8 @@ pub struct Vault {
     pub resource_type: String,
     pub revealed_balance: i64,
     pub confidential_balance: i64,
-    pub locked_revealed_balance: i64,
     pub token_symbol: Option<String>,
     pub divisibility: i32,
-    pub _locked_by: Option<i32>,
     pub created_at: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
 }
@@ -35,6 +34,7 @@ impl Vault {
     pub(crate) fn try_into_vault(
         self,
         account_address: ComponentAddress,
+        locked_revealed_balance: BigDecimal,
     ) -> Result<tari_ootle_wallet_sdk::models::VaultModel, WalletStorageError> {
         Ok(tari_ootle_wallet_sdk::models::VaultModel {
             account_address,
@@ -59,7 +59,12 @@ impl Vault {
             })?,
             token_symbol: self.token_symbol,
             revealed_balance: Amount::from(self.revealed_balance),
-            locked_revealed_balance: Amount::from(self.locked_revealed_balance),
+            locked_revealed_balance: Amount::from(
+                locked_revealed_balance
+                    .to_u128()
+                    // Should be impossible because sqlite is limited to i64
+                    .expect("locked more than u128::MAX funds"),
+            ),
             confidential_balance: Amount::from(self.confidential_balance),
             divisibility: u8::try_from(self.divisibility as u32).map_err(|e| WalletStorageError::DecodingError {
                 operation: "try_into_vault",

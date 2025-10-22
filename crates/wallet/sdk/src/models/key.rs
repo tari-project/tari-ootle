@@ -58,6 +58,7 @@ pub struct WalletKeyRecord {
     pub(crate) key_id: KeyId,
     pub(crate) public_key: RistrettoPublicKey,
     pub(crate) secret_key: RistrettoSecretKey,
+    pub(crate) branch: KeyBranch,
     pub(crate) is_active: bool,
 }
 
@@ -72,6 +73,10 @@ impl WalletKeyRecord {
 
     pub fn public_key(&self) -> &RistrettoPublicKey {
         &self.public_key
+    }
+
+    pub fn branch(&self) -> KeyBranch {
+        self.branch
     }
 }
 
@@ -101,6 +106,7 @@ impl ImportedWalletKey {
 #[derive(Clone)]
 pub struct DerivedWalletKey {
     pub key: RistrettoSecretKey,
+    pub branch: KeyBranch,
     pub key_index: DerivedKeyIndex,
 }
 
@@ -114,18 +120,10 @@ impl DerivedWalletKey {
     }
 }
 
-impl From<tari_transaction_components::key_manager::tari_key_manager::DerivedKey> for DerivedWalletKey {
-    fn from(key: tari_transaction_components::key_manager::tari_key_manager::DerivedKey) -> Self {
-        Self {
-            key: key.key,
-            key_index: key.key_index,
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct WalletPublicKey {
     pub public_key: RistrettoPublicKey,
+    pub branch: KeyBranch,
     pub key_id: KeyId,
 }
 
@@ -143,6 +141,7 @@ impl From<DerivedWalletKey> for WalletPublicKey {
     fn from(derived: DerivedWalletKey) -> Self {
         Self {
             key_id: derived.as_key_id(),
+            branch: derived.branch,
             public_key: derived.to_public_key(),
         }
     }

@@ -7,7 +7,7 @@ use log::*;
 use tari_engine_types::commit_result::ExecuteResult;
 use tari_ootle_common_types::optional::IsNotFoundError;
 use tari_ootle_wallet_sdk::{
-    models::{NewAccountData, TransactionStatus},
+    models::{NewAccountData, TransactionStatus, WalletLockId},
     network::{StatusResponseError, WalletNetworkInterface},
     storage::WalletStore,
     WalletSdk,
@@ -109,10 +109,14 @@ where
             TransactionServiceRequest::SubmitTransaction {
                 transaction,
                 new_account_info,
+                lock_id,
                 reply,
             } => {
                 reply
-                    .send(self.handle_submit_transaction(transaction, new_account_info).await)
+                    .send(
+                        self.handle_submit_transaction(transaction, new_account_info, lock_id)
+                            .await,
+                    )
                     .map_err(|_| TransactionServiceError::ServiceShutdown)?;
             },
             TransactionServiceRequest::SubmitDryRunTransaction { transaction, reply } => {
@@ -149,9 +153,15 @@ where
         &self,
         transaction: Transaction,
         new_account_info: Option<NewAccountData>,
+        lock_id: Option<WalletLockId>,
     ) -> Result<TransactionId, TransactionServiceError> {
         let transaction_api = self.wallet_sdk.transaction_api();
         let transaction_id = transaction_api.insert_new_transaction(transaction, new_account_info.clone(), false)?;
+
+        if let Some(lock_id) = lock_id {
+            transaction_api.locks_set_transaction_id(lock_id, transaction_id)?;
+        }
+
         if transaction_api.submit_transaction(transaction_id).await? {
             self.notify.notify(TransactionSubmittedEvent {
                 transaction_id,

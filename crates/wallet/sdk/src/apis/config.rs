@@ -6,7 +6,7 @@ use std::{str::FromStr, sync::OnceLock};
 use serde::{de::DeserializeOwned, Serialize};
 use tari_ootle_common_types::{optional::IsNotFoundError, Network};
 
-use crate::storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter};
+use crate::storage::{CommitableStore, WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter};
 
 #[derive(Debug, Clone)]
 pub struct ConfigApi<'a, TStore> {

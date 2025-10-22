@@ -59,6 +59,7 @@ const SUBSTATE_TYPES = [
   "TransactionReceipt",
   "ValidatorFeePool",
   "Template",
+  "Utxo",
 ] as const;
 
 type ExtendedSubstateItem = ListSubstateItem & { id: string; show?: boolean };
@@ -90,7 +91,7 @@ function SubstatesLayout() {
 
   const extendedSubstates = useMemo(
     () => substates.map((substate) => ({ ...substate, id: substateIdToString(substate.substate_id) })),
-    [substates]
+    [substates],
   );
 
   const visibleSubstates = filteredSubstates.filter((substate) => substate.show !== false);

@@ -148,7 +148,7 @@ where
                 // Commit the previous progress and start with the next shard
                 if let Some(sos) = sos.take() {
                     if num_received > 0 {
-                        info!(
+                        debug!(
                             target: LOG_TARGET,
                             "🔍️ Scan complete for account {}: No more stealth outputs found in shard {} (max state version {})",
                             self.account.component_address(),

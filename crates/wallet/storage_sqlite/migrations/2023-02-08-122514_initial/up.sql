@@ -101,22 +101,32 @@ CREATE UNIQUE INDEX accounts_uniq_name ON accounts (name) WHERE name IS NOT NULL
 -- Vaults
 CREATE TABLE vaults
 (
-    id                      INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    account_id              INTEGER  NOT NULL REFERENCES accounts (id),
-    address                 TEXT     NOT NULL,
-    resource_address        TEXT     NOT NULL,
-    resource_type           TEXT     NOT NULL,
-    revealed_balance        BIGINT   NOT NULL DEFAULT 0,
-    confidential_balance    BIGINT   NOT NULL DEFAULT 0,
-    locked_revealed_balance BIGINT   NOT NULL DEFAULT 0,
-    token_symbol            TEXT     NULL,
-    divisibility            INTEGER  NOT NULL DEFAULT 0,
-    locked_by               INTEGER  NULL REFERENCES locks (id) ON DELETE SET NULL,
-    created_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id                   INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    account_id           INTEGER  NOT NULL REFERENCES accounts (id),
+    address              TEXT     NOT NULL,
+    resource_address     TEXT     NOT NULL,
+    resource_type        TEXT     NOT NULL,
+    revealed_balance     BIGINT   NOT NULL DEFAULT 0,
+    confidential_balance BIGINT   NOT NULL DEFAULT 0,
+    token_symbol         TEXT     NULL,
+    divisibility         INTEGER  NOT NULL DEFAULT 0,
+    created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE UNIQUE INDEX vaults_uniq_address ON vaults (address);
+
+-- Vault locks
+CREATE TABLE vault_locks
+(
+    id         INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    vault_id   INTEGER  NOT NULL REFERENCES vaults (id) ON DELETE CASCADE,
+    lock_id    INTEGER  NOT NULL REFERENCES locks (id) ON DELETE CASCADE,
+    amount     BIGINT   NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX vault_locks_uniq_vault_lock ON vault_locks (vault_id, lock_id);
 
 -- Resources
 CREATE TABLE resources
@@ -172,6 +182,8 @@ CREATE TABLE locks
     transaction_id TEXT     NULL,
     created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE UNIQUE INDEX locks_uniq_transaction_id ON locks (transaction_id) WHERE transaction_id IS NOT NULL;
 
 -- Auth token, we don't store the auth token, the token in this table is the jwt token that is granted when user accepts the auth login request.
 CREATE TABLE auth_status

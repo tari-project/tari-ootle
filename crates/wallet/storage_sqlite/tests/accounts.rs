@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use tari_ootle_wallet_sdk::{
     models::{AccountUpdate, KeyId},
-    storage::{WalletStore, WalletStoreReader, WalletStoreWriter},
+    storage::{CommitableStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_lib::{models::ComponentAddress, prelude::RistrettoPublicKeyBytes};
@@ -36,7 +36,6 @@ fn update_account() {
     .unwrap();
     tx.commit().unwrap();
 
-    let mut tx = db.create_read_tx().unwrap();
     let account = tx.accounts_get_by_name("foo").unwrap();
     assert_eq!(account.name.as_deref(), Some("foo"));
 }

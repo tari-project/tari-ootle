@@ -22,7 +22,7 @@ const LOG_TARGET: &str = "tari::ootle::swarm::webserver";
 macro_rules! add_cf_route {
     ($api:expr, $cf:expr) => {
         $api = $api.route(
-            &format!("/databases/:db_name/column-families/{}", $cf.as_name()),
+            &format!("/databases/{{db_name}}/column-families/{}", $cf.as_name()),
             get(handlers::tables::list(|| $cf)),
         );
     };
@@ -39,28 +39,28 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
     let mut api = Router::new()
         .route("/databases", get(handlers::databases::list))
         .route(
-            "/databases/:db_name/column-families",
+            "/databases/{db_name}/column-families",
             get(handlers::column_families::list),
         )
         // Special cases
         .route(
-            "/databases/:db_name/column-families/blocks",
+            "/databases/{db_name}/column-families/blocks",
             get(handlers::blocks::list),
         )
         .route(
-            "/databases/:db_name/column-families/state_transitions",
+            "/databases/{db_name}/column-families/state_transitions",
             get(handlers::state_transitions::list),
         )
         .route(
-            "/databases/:db_name/column-families/block_diff",
+            "/databases/{db_name}/column-families/block_diff",
             get(handlers::block_diff::list),
         )
         .route(
-            "/databases/:db_name/column-families/bookkeeping",
+            "/databases/{db_name}/column-families/bookkeeping",
             get(handlers::bookkeeping::list),
         )
         .route(
-            "/databases/:db_name/column-families/foreign_substate_pledges",
+            "/databases/{db_name}/column-families/foreign_substate_pledges",
             get(handlers::foreign_substate_pledges::list),
         );
 

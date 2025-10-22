@@ -190,7 +190,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
             },
 
             _ = shutdown_signal.wait() => {
-                dbg!("Shutting down run_substate_polling");
+                debug!(target: LOG_TARGET, "Shutting down run_substate_polling");
                 break;
             },
         }

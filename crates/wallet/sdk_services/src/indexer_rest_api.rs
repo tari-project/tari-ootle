@@ -252,6 +252,8 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
         tag_and_nonce_pairs: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
     ) -> Result<Vec<(UtxoId, Utxo)>, Self::Error> {
         let mut client = self.get_client()?;
+        // TODO: Given the potential size of substates protobuf, json + hex encoding may be too inefficient. Consider
+        // supporting the application/x-protobuf content type in the indexer REST API.
         let resp = client
             .get_unspent_utxos(GetUnspentUtxosRequest {
                 resource_address,

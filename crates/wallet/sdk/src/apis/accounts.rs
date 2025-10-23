@@ -39,7 +39,7 @@ use crate::{
         WalletOotleAddressWithKeyIds,
     },
     network::WalletNetworkInterface,
-    storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
+    storage::{CommitableStore, WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
 pub struct AccountsApi<'a, TStore, TNetworkInterface> {

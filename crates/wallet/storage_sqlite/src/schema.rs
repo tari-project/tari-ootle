@@ -216,6 +216,16 @@ diesel::table! {
 }
 
 diesel::table! {
+    vault_locks (id) {
+        id -> Integer,
+        vault_id -> Integer,
+        lock_id -> Integer,
+        amount -> BigInt,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     vaults (id) {
         id -> Integer,
         account_id -> Integer,
@@ -224,10 +234,8 @@ diesel::table! {
         resource_type -> Text,
         revealed_balance -> BigInt,
         confidential_balance -> BigInt,
-        locked_revealed_balance -> BigInt,
         token_symbol -> Nullable<Text>,
         divisibility -> Integer,
-        locked_by -> Nullable<Integer>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }
@@ -259,8 +267,9 @@ diesel::joinable!(shard_state_versions -> accounts (account_id));
 diesel::joinable!(shard_state_versions -> resources (resource_id));
 diesel::joinable!(stealth_outputs -> accounts (owner_account_id));
 diesel::joinable!(utxo_process_queue -> accounts (account_id));
+diesel::joinable!(vault_locks -> locks (lock_id));
+diesel::joinable!(vault_locks -> vaults (vault_id));
 diesel::joinable!(vaults -> accounts (account_id));
-diesel::joinable!(vaults -> locks (locked_by));
 diesel::joinable!(webauthn_registration_passkeys -> webauthn_registrations (registration_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
@@ -279,6 +288,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     substates,
     transactions,
     utxo_process_queue,
+    vault_locks,
     vaults,
     webauthn_registration_passkeys,
     webauthn_registrations,

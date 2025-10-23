@@ -28,6 +28,7 @@ use tari_template_lib::{
     types::Amount,
 };
 use tari_transaction::{args, Transaction, UnsignedTransaction};
+use tokio::sync::Semaphore;
 
 use crate::{
     apis::{
@@ -39,7 +40,16 @@ use crate::{
         stealth_outputs::{StealthOutputsApi, StealthOutputsApiError, TransferStatementParams},
         substate::{SubstateApiError, SubstatesApi, ValidatorScanResult},
     },
-    models::{AccountWithAddress, InputSpendData, KeyBranch, KeyId, OutputStatus, StealthOutputModel, WalletLockId},
+    models::{
+        AccountWithAddress,
+        InputSpendData,
+        KeyBranch,
+        KeyId,
+        OutputStatus,
+        StealthOutputModel,
+        WalletLockId,
+        WalletPublicKey,
+    },
     network::WalletNetworkInterface,
     storage::{WalletStorageError, WalletStore},
 };
@@ -52,6 +62,7 @@ pub struct StealthTransferApi<'a, TStore, TNetworkInterface> {
     substate_api: SubstatesApi<'a, TStore, TNetworkInterface>,
     key_manager_api: KeyManagerApi<'a, TStore>,
     config_api: ConfigApi<'a, TStore>,
+    semaphore: Semaphore,
 }
 
 impl<'a, TStore, TNetworkInterface> StealthTransferApi<'a, TStore, TNetworkInterface>
@@ -73,22 +84,8 @@ where
             substate_api,
             key_manager_api,
             config_api,
+            semaphore: Semaphore::new(1),
         }
-    }
-
-    fn lock_fee_inputs(
-        &self,
-        lock_id: WalletLockId,
-        owner_account: &AccountWithAddress,
-        params: &StealthTransferParams,
-    ) -> Result<InputsToSpend, StealthTransferApiError> {
-        self.lock_inputs_for_transfer(
-            lock_id,
-            owner_account.account().component_address(),
-            XTR,
-            params.max_fee.into(),
-            params.input_selection,
-        )
     }
 
     #[allow(clippy::too_many_lines)]
@@ -275,6 +272,22 @@ where
         }
     }
 
+    fn lock_fee_inputs<A: Into<Amount>>(
+        &self,
+        lock_id: WalletLockId,
+        owner_account: &AccountWithAddress,
+        max_fee: A,
+        input_selection: ConfidentialTransferInputSelection,
+    ) -> Result<InputsToSpend, StealthTransferApiError> {
+        self.lock_inputs_for_transfer(
+            lock_id,
+            owner_account.account().component_address(),
+            XTR,
+            max_fee.into(),
+            input_selection,
+        )
+    }
+
     #[allow(clippy::too_many_lines)]
     pub async fn transfer(
         &self,
@@ -335,7 +348,7 @@ where
                 },
                 None => {
                     // TODO: we're just determining if the account exists - symptom of a larger problem/missing
-                    // feature where account is created as needed by the execution layer instead of having to be
+                    // feature: the account should be created as needed by the execution layer, instead of having to be
                     // determined by the client side
                     let to_account_substate = self
                         .substate_api
@@ -406,21 +419,15 @@ where
             .try_from_byte_type()
             .expect("already validated");
 
+        // Critical section
+        let _permit = self.semaphore.acquire().await.expect("semaphore is never closed");
+
         let lock_id = self.outputs_api.create_lock()?;
 
         // Lock up funds for fees and transfer
-        let fee_inputs_to_spend =
-            self.unlock_on_failure(lock_id, self.lock_fee_inputs(lock_id, &owner_account, &params))?;
-
-        let inputs_to_spend = self.unlock_on_failure(
+        let fee_inputs_to_spend = self.unlock_on_failure(
             lock_id,
-            self.lock_inputs_for_transfer(
-                lock_id,
-                owner_account.account().component_address(),
-                params.resource_address,
-                params.total_output_amount(),
-                params.input_selection,
-            ),
+            self.lock_fee_inputs(lock_id, &owner_account, params.max_fee, params.input_selection),
         )?;
 
         // TODO: use single db transaction across calls
@@ -440,8 +447,7 @@ where
 
         // Figure out which signing key to use - if there are no revealed funds, which necessitate using a account
         // withdraw auth signature, then we can use a nonce key.
-        let must_sign_with_account_key =
-            fee_inputs_to_spend.revealed.is_positive() || inputs_to_spend.revealed.is_positive();
+        let must_sign_with_account_key = fee_inputs_to_spend.revealed.is_positive();
         let (signing_key_branch, signing_key_id) = if must_sign_with_account_key {
             (KeyBranch::Account, owner_key_id)
         } else {
@@ -453,6 +459,7 @@ where
             .key_manager_api
             .get_public_key(signing_key_branch, signing_key_id)?;
         let required_signer_pk = required_signer.public_key.to_byte_type();
+        let fee_signer = required_signer;
 
         // Generate fee transfer statement
         let fee_transfer_statement = self.unlock_on_failure(
@@ -473,18 +480,57 @@ where
 
         // Add the unconfirmed fee change output to the wallet store
         if let Some(output) = fee_transfer_statement.outputs_statement.outputs.first() {
+            debug!(
+                target: LOG_TARGET,
+                "Adding FEE unconfirmed output with commitment {} for amount {} to account {}",
+                output.output.commitment,
+                fee_stealth_change_amt,
+                owner_account.component_address()
+            );
             self.unlock_on_failure(
                 lock_id,
                 self.add_unconfirmed_output_from_statement(
                     lock_id,
                     &owner_account,
-                    params.resource_address,
+                    XTR,
                     output,
                     fee_stealth_change_amt,
                     None,
                 ),
             )?;
         }
+
+        // NOTE: important to add this after we add the fee change, because this allows us to spend the fee change
+        // UTXO (XTR case)
+        let inputs_to_spend = self.unlock_on_failure(
+            lock_id,
+            self.lock_inputs_for_transfer(
+                lock_id,
+                owner_account.account().component_address(),
+                params.resource_address,
+                params.total_output_amount(),
+                params.input_selection,
+            ),
+        )?;
+
+        // Signing key for main transfer intent
+        let must_sign_with_account_key = inputs_to_spend.revealed.is_positive();
+        let (signing_key_branch, signing_key_id) = if must_sign_with_account_key {
+            (KeyBranch::Account, owner_key_id)
+        } else {
+            let next_index =
+                self.unlock_on_failure(lock_id, self.key_manager_api.next_derived_key_index(KeyBranch::Nonce))?;
+            (KeyBranch::Nonce, KeyId::derived(next_index))
+        };
+        let main_signer = if signing_key_branch == fee_signer.branch && signing_key_id == fee_signer.key_id {
+            None
+        } else {
+            let required_signer = self
+                .key_manager_api
+                .get_public_key(signing_key_branch, signing_key_id)?;
+            Some(required_signer)
+        };
+        let required_signer_pk = main_signer.as_ref().unwrap_or(&fee_signer).public_key().to_byte_type();
 
         // If we're spending from the owner account, add the inputs
         if inputs_to_spend.revealed.is_positive() || fee_inputs_to_spend.revealed.is_positive() {
@@ -553,12 +599,43 @@ where
             }),
         )?;
 
+        // Add the unconfirmed change output to the wallet store
+        // NOTE: we can get the nth element because outputs are guaranteed to be in the order we pass them to
+        // generate_transfer_statement
+        let index = if params.blinded_output_amount.is_positive() {
+            // Change output is second element
+            1
+        } else {
+            // otherwise, it's the first element
+            0
+        };
+        if let Some(output) = transfer_statement.outputs_statement.outputs.get(index) {
+            debug!(
+                target: LOG_TARGET,
+                "Adding TRANSFER unconfirmed output with commitment {} for amount {} to account {}",
+                output.output.commitment,
+                change_amount,
+                owner_account.component_address()
+            );
+            self.unlock_on_failure(
+                lock_id,
+                self.add_unconfirmed_output_from_statement(
+                    lock_id,
+                    &owner_account,
+                    params.resource_address,
+                    output,
+                    change_amount,
+                    None,
+                ),
+            )?;
+        }
+
         // Add all input UTXO substates to transaction inputs
         substate_inputs.extend(
             fee_inputs_to_spend
                 .inputs
                 .iter()
-                // If spending XTR, we may lock the fee change UTXO for spending, however since this does not exist yet we do not include it as a tx input
+                // If spending XTR, we may lock the fee change UTXO for spending, however since this does not exist yet, we do not include it as a tx input
                 .filter(|i| i.is_on_chain)
                 .map(|i| &i.commitment)
                 .map(|commitment| UtxoAddress::new(XTR, (*commitment).into()))
@@ -592,12 +669,12 @@ where
             lock_id,
             fee_inputs: fee_inputs_to_spend,
             transfer_inputs: inputs_to_spend,
-            signing_key_branch,
-            signing_key_id,
+            additional_signer: main_signer,
+            main_signer: fee_signer,
         })
     }
 
-    fn unlock_on_failure<T, E>(&self, lock_id: WalletLockId, result: Result<T, E>) -> Result<T, E> {
+    pub fn unlock_on_failure<T, E>(&self, lock_id: WalletLockId, result: Result<T, E>) -> Result<T, E> {
         match result {
             Ok(value) => Ok(value),
             Err(e) => {
@@ -716,8 +793,8 @@ pub struct TransferOutput {
     pub lock_id: WalletLockId,
     pub fee_inputs: InputsToSpend,
     pub transfer_inputs: InputsToSpend,
-    pub signing_key_branch: KeyBranch,
-    pub signing_key_id: KeyId,
+    pub additional_signer: Option<WalletPublicKey>,
+    pub main_signer: WalletPublicKey,
 }
 
 #[derive(Debug)]

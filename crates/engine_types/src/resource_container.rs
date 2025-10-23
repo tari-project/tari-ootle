@@ -330,7 +330,7 @@ impl ResourceContainer {
                 if withdraw_amt > *revealed_amount {
                     return Err(ResourceError::InsufficientBalance {
                         details: format!(
-                            "Bucket contained insufficient revealed funds. Required: {}, Available: {}",
+                            "Bucket or vault contained insufficient revealed funds. Required: {}, Available: {}",
                             withdraw_amt, revealed_amount
                         ),
                     });
@@ -342,7 +342,7 @@ impl ResourceContainer {
                 if withdraw_amt > *revealed_amount {
                     return Err(ResourceError::InsufficientBalance {
                         details: format!(
-                            "Bucket contained insufficient revealed funds. Required: {}, Available: {}",
+                            "Bucket or vault contained insufficient revealed funds. Required: {}, Available: {}",
                             withdraw_amt, revealed_amount
                         ),
                     });

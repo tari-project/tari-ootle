@@ -12,7 +12,7 @@ use thiserror::Error;
 
 use crate::{
     models::NonFungibleToken,
-    storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
+    storage::{CommitableStore, WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
 pub struct NonFungibleTokensApi<'a, TStore> {

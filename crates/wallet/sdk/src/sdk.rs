@@ -95,6 +95,45 @@ where
         })
     }
 
+    // pub fn create_read_context(&self) -> Result<SdkReadContext<TStore>, WalletSdkError> {
+    //     let read_tx = self.store.create_read_tx()?;
+    //     Ok(SdkReadContext::new(read_tx))
+    // }
+    //
+    // pub fn with_read_context<R, F, E>(&self, f: F) -> Result<R, E>
+    // where
+    //     F: FnOnce(&mut SdkReadContext<TStore>) -> Result<R, WalletSdkError>,
+    //     E: From<WalletStorageError>,
+    // {
+    //     let mut ctx = self.create_read_context()?;
+    //     let ret = f(&mut ctx)?;
+    //     Ok(ret)
+    // }
+    //
+    // pub fn create_write_context(&self) -> Result<SdkWriteContext<TStore>, WalletSdkError> {
+    //     let write_tx = self.store.create_write_tx()?;
+    //     Ok(SdkWriteContext::new(write_tx))
+    // }
+    //
+    // pub fn with_write_context<R, F, E>(&self, f: F) -> Result<R, E>
+    // where
+    //     F: FnOnce(&mut SdkWriteContext<TStore>) -> Result<R, WalletSdkError>,
+    //     E: From<WalletSdkError>,
+    // {
+    //     let mut ctx = self.create_write_context()?;
+    //     match f(&mut ctx) {
+    //         Ok(r) => {
+    //             ctx.commit()?;
+    //             Ok(r)
+    //         },
+    //         Err(e) => {
+    //             warn!(target: LOG_TARGET, "Transaction failed! rollback");
+    //             ctx.rollback()?;
+    //             Err(e.into())
+    //         },
+    //     }
+    // }
+
     pub fn get_store_network(store: &TStore) -> Result<Option<Network>, WalletSdkError> {
         let config_api = ConfigApi::new(store);
         let network = config_api.get(ConfigKey::Network).optional()?;

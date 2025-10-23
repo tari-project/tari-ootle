@@ -6,7 +6,10 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use tari_engine_types::{resource::Resource, substate::SubstateId};
+use tari_engine_types::{
+    resource::Resource,
+    substate::{SubstateDiff, SubstateId},
+};
 use tari_ootle_common_types::{
     optional::IsNotFoundError,
     shard::Shard,
@@ -53,13 +56,24 @@ use crate::models::{
     WalletTransactionUpdate,
 };
 
-pub trait WalletStore {
+pub trait ReadableWalletStore {
     type ReadTransaction<'a>: WalletStoreReader
-    where Self: 'a;
-    type WriteTransaction<'a>: WalletStoreWriter + Deref<Target = Self::ReadTransaction<'a>> + DerefMut
     where Self: 'a;
 
     fn create_read_tx(&self) -> Result<Self::ReadTransaction<'_>, WalletStorageError>;
+
+    fn with_read_tx<F: FnOnce(&mut Self::ReadTransaction<'_>) -> Result<R, E>, R, E>(&self, f: F) -> Result<R, E>
+    where E: From<WalletStorageError> {
+        let mut tx = self.create_read_tx()?;
+        let ret = f(&mut tx)?;
+        Ok(ret)
+    }
+}
+
+pub trait WriteableWalletStore: ReadableWalletStore {
+    type WriteTransaction<'a>: WalletStoreWriter + Deref<Target = Self::ReadTransaction<'a>> + DerefMut
+    where Self: 'a;
+
     fn create_write_tx(&self) -> Result<Self::WriteTransaction<'_>, WalletStorageError>;
 
     fn with_write_tx<F: FnOnce(&mut Self::WriteTransaction<'_>) -> Result<R, E>, R, E>(&self, f: F) -> Result<R, E>
@@ -78,14 +92,11 @@ pub trait WalletStore {
             },
         }
     }
-
-    fn with_read_tx<F: FnOnce(&mut Self::ReadTransaction<'_>) -> Result<R, E>, R, E>(&self, f: F) -> Result<R, E>
-    where E: From<WalletStorageError> {
-        let mut tx = self.create_read_tx()?;
-        let ret = f(&mut tx)?;
-        Ok(ret)
-    }
 }
+
+pub trait WalletStore: ReadableWalletStore + WriteableWalletStore {}
+
+impl<T> WalletStore for T where T: ReadableWalletStore + WriteableWalletStore {}
 
 #[derive(Debug, thiserror::Error)]
 pub enum WalletStorageError {
@@ -242,6 +253,7 @@ pub trait WalletStoreReader {
     fn stealth_outputs_get_unspent_by_account(
         &mut self,
         account_addr: &ComponentAddress,
+        exclude_locked: bool,
     ) -> Result<Vec<StealthOutputModel>, WalletStorageError>;
 
     fn stealth_outputs_get_locked_by_lock_id(
@@ -265,7 +277,7 @@ pub trait WalletStoreReader {
     fn locks_get_by_transaction_id(
         &mut self,
         transaction_id: TransactionId,
-    ) -> Result<Vec<WalletLockId>, WalletStorageError>;
+    ) -> Result<WalletLockId, WalletStorageError>;
 
     // Non fungible tokens
     fn non_fungible_token_get_by_nft_id(
@@ -320,10 +332,12 @@ pub trait WalletStoreReader {
 
 pub type TagAndPublicNoncePair = (UtxoTag, RistrettoPublicKeyBytes);
 
-pub trait WalletStoreWriter {
-    fn commit(self) -> Result<(), WalletStorageError>;
-    fn rollback(self) -> Result<(), WalletStorageError>;
+pub trait CommitableStore {
+    fn commit(&mut self) -> Result<(), WalletStorageError>;
+    fn rollback(&mut self) -> Result<(), WalletStorageError>;
+}
 
+pub trait WalletStoreWriter: CommitableStore {
     // JWT
     fn jwt_add_empty_token(&mut self) -> Result<u64, WalletStorageError>;
     fn jwt_store_decision(&mut self, id: u64, permissions_token: Option<&str>) -> Result<(), WalletStorageError>;
@@ -443,10 +457,6 @@ pub trait WalletStoreWriter {
         resource_address: &ResourceAddress,
         id: &UtxoId,
     ) -> Result<(), WalletStorageError>;
-    /// Mark outputs locked by this lock id as finalized
-    fn stealth_outputs_finalize_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
-    /// Release outputs that were locked and remove pending unconfirmed outputs for this lock
-    fn stealth_outputs_release_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
     fn stealth_outputs_update(
         &mut self,
         address: &UtxoAddress,
@@ -464,6 +474,14 @@ pub trait WalletStoreWriter {
         lock_id: WalletLockId,
         transaction_id: TransactionId,
     ) -> Result<(), WalletStorageError>;
+
+    /// Release the lock including all outputs and vaults that were locked. Release is used when a transaction is
+    /// aborted.
+    fn locks_release(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
+    /// Finalize the lock according to the provided diff. Any outputs and vaults locked by this lock and included in the
+    /// diff are finalised (marked as unspent/funds removed/added as necessary). Any objects not included in the diff
+    /// are reverted and released from the lock. This is used when a transaction is committed.
+    fn locks_unlock_finalized(&mut self, lock_id: WalletLockId, diff: &SubstateDiff) -> Result<(), WalletStorageError>;
 
     // Non fungible tokens
     fn non_fungible_token_upsert(&mut self, non_fungible_token: &NonFungibleToken) -> Result<(), WalletStorageError>;

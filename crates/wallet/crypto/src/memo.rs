@@ -51,13 +51,6 @@ impl Memo {
         Some(Self::Bytes(b))
     }
 
-    pub fn as_bytes(&self) -> &[u8] {
-        match self {
-            Memo::Message(s) => s.as_bytes(),
-            Memo::Bytes(b) => b.as_ref(),
-        }
-    }
-
     pub fn len(&self) -> usize {
         match self {
             Memo::Message(s) => s.len(),

@@ -12,7 +12,7 @@ use tari_ootle_common_types::{
 use tari_ootle_wallet_sdk::{
     models::AccountAndViewKeys,
     network::{StatusResponseError, WalletNetworkInterface},
-    storage::{WalletStore, WalletStoreReader, WalletStoreWriter},
+    storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
     WalletSdk,
 };
 use tari_template_lib::models::{ComponentAddress, ResourceAddress, UtxoAddress, UtxoId};
@@ -90,6 +90,7 @@ where
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     pub async fn process_utxo_validation_queue(&mut self) -> Result<(), StealthScannerApiError> {
         let mut start_event_published = false;
         let mut num_recovered = 0;
@@ -130,6 +131,10 @@ where
                 }
                 let tag_and_nonce_pairs = tag_and_nonce_to_view_key_map.keys().copied().collect();
 
+                // TODO(perf): we should check if any UTXOs are already known (by tag and nonce?) because we
+                // created/spent them locally, and skip querying those. This would also avoid having to deal with this
+                // downstream (previous bug caused spent to be marked as unspent).
+
                 // max 3.3kB per request (excl underlying protocol overhead *cough* json + hex)
                 let utxos = self
                     .sdk
@@ -138,19 +143,32 @@ where
                     .await
                     .map_err(|e| StealthScannerApiError::NetworkInterfaceError(e.into()))?;
 
+                self.sdk.store().with_write_tx(|tx| {
+                    // We're trusting that the indexer is up to date and accurate. If any UTXOs we asked for are not
+                    // returned, remove them from the queue to avoid retrying forever because they are presumably spent.
+                    let missing_utxos = tag_and_nonce_to_view_key_map
+                        .keys()
+                        .filter(|(tag, nonce)| {
+                            !utxos.iter().any(|(_, utxo)| {
+                                utxo.output.as_ref().is_some_and(|output| utxo.tag() == Some(*tag) && output.output.public_nonce == *nonce)
+                            })
+                        });
+
+                    let mut count = 0usize;
+                    for (tag, nonce) in missing_utxos {
+                        count += 1;
+                        tx.utxo_process_queue_remove_item(*resource_addr, *tag, *nonce)?;
+                    }
+                    if count > 0 {
+                        debug!(target: LOG_TARGET, "❓️ Removed {} missing UTXOs from the processing queue for resource {} as they were not returned by the indexer.", count, resource_addr);
+                    }
+                    Ok::<_, WalletStorageError>(())
+                })?;
+
                 if utxos.is_empty() {
-                    // We asked for some UTXOs but got none back. This should never happen because UTXO recovery is
-                    // 'fed' by UTXO scanning, which should only give recovery tasks if the network
-                    // has UTXOs. This could indicate a bug in the indexer (assuming that NetworkInterface impl is
-                    // used). To prevent this case causing fast spinning, return an error that will
-                    // sleep and retry.
-                    return Err(StealthScannerApiError::UnexpectedResponse {
-                        details: format!(
-                            "{} UTXOs requested but network returned an empty set for resource {}.",
-                            tag_and_nonce_to_view_key_map.len(),
-                            resource_addr
-                        ),
-                    });
+                    // We asked for some UTXOs but got none back. This could happen if the UTXOs were all spent later.
+                    // Ignore this and continue syncing.
+                    continue;
                 }
 
                 if utxos.len() != tag_and_nonce_to_view_key_map.len() {

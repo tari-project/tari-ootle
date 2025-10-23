@@ -64,13 +64,12 @@ function StealthUtxoList({ account }: { account: Account }) {
   );
 
   const columnWidths = {
-    1: "10%",
-    2: "15%",
-    3: "20%",
-    4: "25%",
+    1: "15%",
+    2: "20%",
+    3: "15%",
+    4: "30%",
     5: "10%",
     6: "10%",
-    7: "10%",
   };
 
   return (
@@ -93,7 +92,6 @@ function StealthUtxoList({ account }: { account: Account }) {
                 <TableCell width={columnWidths[4]}>Memo</TableCell>
                 <TableCell width={columnWidths[5]}>Burnt</TableCell>
                 <TableCell width={columnWidths[6]}>Frozen</TableCell>
-                <TableCell width={columnWidths[7]}>On Chain</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -116,7 +114,6 @@ function StealthUtxoList({ account }: { account: Account }) {
                       </DataTableCell>
                       <DataTableCell>{utxo.is_burnt ? "Yes" : "No"}</DataTableCell>
                       <DataTableCell>{utxo.is_frozen ? "Yes" : "No"}</DataTableCell>
-                      <DataTableCell>{utxo.is_on_chain ? "Yes" : "No"}</DataTableCell>
                     </TableRow>
                   ))}
                   {emptyRows(page, rowsPerPage, data.utxos) > 0 && (

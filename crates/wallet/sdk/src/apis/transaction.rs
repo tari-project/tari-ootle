@@ -19,9 +19,9 @@ use tari_template_lib::{
 use tari_transaction::{Transaction, TransactionId};
 
 use crate::{
-    models::{NewAccountData, TransactionStatus, WalletTransaction, WalletTransactionUpdate},
+    models::{NewAccountData, TransactionStatus, WalletLockId, WalletTransaction, WalletTransactionUpdate},
     network::{StatusResponseError, TransactionFinalizedResult, WalletNetworkInterface, WalletQueryErrorStatus},
-    storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
+    storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_sdk::apis::transaction";
@@ -89,21 +89,21 @@ where
                     )
                 })?;
             },
-            Err(err) => match err.get_status() {
-                WalletQueryErrorStatus::TransactionRejected { message } => {
-                    warn!(target: LOG_TARGET, "Invalid transaction submission: {transaction_id} {message}");
-                    self.store.with_write_tx(|tx| {
-                        tx.transactions_update(
-                            WalletTransactionUpdate::new(transaction_id)
-                                .with_new_status(TransactionStatus::InvalidTransaction)
-                                .with_invalid_reason(&message),
-                        )
-                    })?;
-                    return Ok(false);
-                },
-                _ => {
-                    return Err(err.into());
-                },
+            Err(err) => {
+                return match err.get_status() {
+                    WalletQueryErrorStatus::TransactionRejected { message } => {
+                        warn!(target: LOG_TARGET, "Invalid transaction submission: {transaction_id} {message}");
+                        self.store.with_write_tx(|tx| {
+                            tx.transactions_update(
+                                WalletTransactionUpdate::new(transaction_id)
+                                    .with_new_status(TransactionStatus::InvalidTransaction)
+                                    .with_invalid_reason(&message),
+                            )
+                        })?;
+                        Ok(false)
+                    },
+                    _ => Err(err.into()),
+                }
             },
         }
 
@@ -256,27 +256,25 @@ where
                             .with_finalized_time(finalized_time),
                     )?;
 
-                    // if the transaction being processed is confidential,
-                    // we should make sure that the account's locked outputs
-                    // are either set to spent or released, depending if the
+
+                    // Make sure that any locked outputs are either set to spent or released, depending on if the
                     // transaction was finalized or rejected. Always release for dry runs.
-                    if transaction.is_dry_run ||
-                        !matches!(
-                            new_status,
-                            TransactionStatus::Accepted | TransactionStatus::OnlyFeeAccepted
-                        )
-                    {
+                    if transaction.is_dry_run {
                         self.release_all_locks_for_transaction_internal(tx, transaction_id)?;
                     } else {
-                        // TODO: it becomes more complicated if the transaction is Fee accepted, we'll need to finalize
-                        // spends relating to fees and release the rest
-                        let lock_ids = tx.locks_get_by_transaction_id(transaction_id)?;
-                        info!(target: LOG_TARGET, "Finalizing locked outputs for transaction {}: {:?}", transaction_id, lock_ids);
-                        for lock_id in lock_ids {
-                            tx.confidential_outputs_finalize_by_lock_id(lock_id)?;
-                            tx.stealth_outputs_finalize_by_lock_id(lock_id)?;
-                            tx.vaults_finalized_locked_revealed_funds(lock_id).optional()?;
-                            tx.locks_delete(lock_id)?;
+                        let maybe_diff = execution_result
+                            .as_ref()
+                            .and_then(|e| e.finalize.result.any_accept());
+                        match maybe_diff {
+                            Some(diff) => {
+                                if let Some(lock_id) = tx.locks_get_by_transaction_id(transaction_id).optional()? {
+                                    info!(target: LOG_TARGET, "Finalizing locked outputs for transaction {}: {}", transaction_id, lock_id);
+                                    tx.locks_unlock_finalized(lock_id, diff)?;
+                                }
+                            }
+                            None => {
+                                self.release_all_locks_for_transaction_internal(tx, transaction_id)?;
+                            }
                         }
                     }
 
@@ -294,21 +292,24 @@ where
             .with_write_tx(|tx| self.release_all_locks_for_transaction_internal(tx, transaction_id))
     }
 
-    fn release_all_locks_for_transaction_internal(
+    pub fn locks_set_transaction_id(
         &self,
-        tx: &mut <TStore as WalletStore>::WriteTransaction<'_>,
+        lock_id: WalletLockId,
         transaction_id: TransactionId,
     ) -> Result<(), TransactionApiError> {
-        let lock_ids = tx.locks_get_by_transaction_id(transaction_id)?;
+        self.store
+            .with_write_tx(|tx| tx.locks_link_transaction(lock_id, transaction_id))?;
+        Ok(())
+    }
 
-        debug!(target: LOG_TARGET, "Releasing {} locks (and associated outputs) for transaction {} that was not committed", lock_ids.len(), transaction_id);
-        for lock_id in lock_ids {
-            // Lock could be for confidential outputs or stealth outputs
-            tx.confidential_outputs_release_by_lock_id(lock_id)?;
-            tx.stealth_outputs_release_by_lock_id(lock_id)?;
-            // If the lock locks a vault, we need to release the revealed funds
-            tx.vaults_release_lock_revealed_funds(lock_id).optional()?;
-            tx.locks_delete(lock_id)?;
+    fn release_all_locks_for_transaction_internal(
+        &self,
+        tx: &mut <TStore as WriteableWalletStore>::WriteTransaction<'_>,
+        transaction_id: TransactionId,
+    ) -> Result<(), TransactionApiError> {
+        if let Some(lock_id) = tx.locks_get_by_transaction_id(transaction_id).optional()? {
+            debug!(target: LOG_TARGET, "Releasing lock {} (and associated outputs) for transaction {} that was not committed", lock_id, transaction_id);
+            tx.locks_release(lock_id)?;
         }
 
         Ok(())
@@ -352,7 +353,7 @@ where
             )?;
 
             for owned_id in indexed.referenced_substates() {
-                if let Some(pos) = other_substates.iter().position(|(addr, _)| addr == &owned_id) {
+                if let Some(pos) = other_substates.iter().position(|(addr, _)| *addr == owned_id) {
                     let (_, child) = other_substates.swap_remove(pos);
                     // If there was a previous parent for this substate, we keep it as is.
                     let parent = downed_substates_with_parents

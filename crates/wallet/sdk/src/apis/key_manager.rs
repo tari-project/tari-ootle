@@ -34,7 +34,7 @@ use crate::{
         WalletPublicKey,
         WalletSecretKey,
     },
-    storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
+    storage::{CommitableStore, WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
 pub type WalletKeyManager = TariKeyManager<Blake2b<U64>>;
@@ -76,6 +76,7 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
                 key_id: KeyId::derived(index),
                 public_key: pk,
                 secret_key: key,
+                branch,
                 is_active: active,
             });
         }
@@ -137,6 +138,7 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
                 let imported_key = self.get_imported_key(local_key_id)?;
                 Ok(WalletPublicKey {
                     public_key: imported_key.to_public_key(),
+                    branch,
                     key_id,
                 })
             },
@@ -144,6 +146,7 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
                 let derived_key = self.derive_key(branch, index)?;
                 Ok(WalletPublicKey {
                     public_key: derived_key.to_public_key(),
+                    branch,
                     key_id,
                 })
             },
@@ -168,6 +171,7 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
             .map_err(|e| KeyManagerApiError::KeyStoreError { source: e.into() })?;
         Ok(DerivedWalletKey {
             key: secret,
+            branch,
             key_index: index,
         })
     }
@@ -254,6 +258,7 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         let key = self.derive_key(branch, next_key_id)?;
         Ok(WalletPublicKey {
             public_key: key.to_public_key(),
+            branch,
             key_id: key.as_key_id(),
         })
     }

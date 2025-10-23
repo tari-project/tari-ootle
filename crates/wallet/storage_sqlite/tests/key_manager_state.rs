@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_common_types::optional::Optional;
-use tari_ootle_wallet_sdk::storage::{WalletStore, WalletStoreReader, WalletStoreWriter};
+use tari_ootle_wallet_sdk::storage::{CommitableStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore};
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 
 #[test]
@@ -22,7 +22,6 @@ fn get_and_set_branch_index() {
     tx.key_manager_set_active_index("another", 2).unwrap();
     tx.commit().unwrap();
 
-    let mut tx = db.create_read_tx().unwrap();
     let index = tx.key_manager_get_active_index("").unwrap();
     assert_eq!(index, 123);
     let index = tx.key_manager_get_active_index("another").unwrap();

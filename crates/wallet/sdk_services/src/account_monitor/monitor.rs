@@ -95,14 +95,14 @@ where
     }
 
     pub async fn run(mut self) -> Result<(), anyhow::Error> {
-        info!(target: LOG_TARGET, "👁️‍🗨️ Account monitor started");
+        info!(target: LOG_TARGET, "🏦 Account monitor started");
         let mut poll_interval = time::interval(self.periodic_scan_interval);
         poll_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         loop {
             tokio::select! {
                 _ = self.shutdown_signal.wait() => {
-                    info!(target: LOG_TARGET, "👁️‍🗨️ Account monitor shutting down");
+                    info!(target: LOG_TARGET, "🏦 Account monitor shutting down");
                     break Ok(());
                 }
 
@@ -125,7 +125,7 @@ where
     }
 
     async fn handle_request(&self, req: AccountMonitorRequest) {
-        debug!(target: LOG_TARGET, "👁️‍🗨️ Account monitor received request: {:?}", req);
+        debug!(target: LOG_TARGET, "🏦 Account monitor received request: {:?}", req);
         match req {
             AccountMonitorRequest::RefreshAccount {
                 account,
@@ -189,12 +189,12 @@ where
                 if is_updated {
                     info!(
                         target: LOG_TARGET,
-                        "👁️‍🗨️ Account {} has been updated", account
+                        "🏦 Account {} has been updated", account
                     );
                 } else {
                     info!(
                         target: LOG_TARGET,
-                        "👁️‍🗨️ Account {} is up to date", account
+                        "🏦 Account {} is up to date", account
                     );
                 }
             }
@@ -219,12 +219,12 @@ where
         if is_updated {
             info!(
                 target: LOG_TARGET,
-                "👁️‍🗨️ Account {} updated", account_address
+                "🏦 Account {} updated", account_address
             );
         } else {
             info!(
                 target: LOG_TARGET,
-                "👁️‍🗨️ Account {} is up to date", account_address
+                "🏦 Account {} is up to date", account_address
             );
         }
         Ok(is_updated)
@@ -238,7 +238,7 @@ where
 
         info!(
             target: LOG_TARGET,
-            "👁️‍🗨️ Requesting UTXO scan for account {} for {} stealth resource(s)",
+            "🏦 Requesting UTXO scan for account {} for {} stealth resource(s)",
             account_address,
             associated_resources.len()
         );

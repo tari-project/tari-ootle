@@ -503,11 +503,16 @@ fn extend_bufs_from_substate_update(
                     value: create.substate.value().clone(),
                 });
             },
-            Some(_) => {},
+            Some(_) => {
+                warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received unexpected substate value for created substate: {}", create.substate.substate_id());
+            },
             None => {
                 let id = create.substate.substate_id();
-                if id.is_template() || id.is_transaction_receipt() || id.is_utxo() {
+                if id.is_template() || id.is_transaction_receipt() {
                     warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received substate {id} update with no value");
+                }
+                if let Some(addr) = id.as_utxo_address() {
+                    debug!(target: LOG_TARGET, "🌍️ Received UTXO substate {addr} creation with no value. Ignoring as this means it is spent later.");
                 }
             },
         },

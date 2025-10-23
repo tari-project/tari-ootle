@@ -9,6 +9,7 @@ use tari_crypto::{
 };
 use tari_engine_types::{
     component::derive_component_address_from_public_key,
+    substate::SubstateDiff,
     FromByteType,
     ToByteType,
     Utxo,
@@ -32,7 +33,6 @@ use tari_template_lib::{
     prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     types::{Amount, EncryptedData},
 };
-use tari_transaction::TransactionId;
 
 use crate::{
     apis::{
@@ -53,7 +53,7 @@ use crate::{
         StealthOutputModel,
         WalletLockId,
     },
-    storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
+    storage::{CommitableStore, WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet::apis::stealth_outputs";
@@ -106,16 +106,6 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
 
             Ok((outputs, total_output_amount))
         })
-    }
-
-    pub fn locks_set_transaction_id(
-        &self,
-        lock_id: WalletLockId,
-        transaction_id: TransactionId,
-    ) -> Result<(), StealthOutputsApiError> {
-        self.store
-            .with_write_tx(|tx| tx.locks_link_transaction(lock_id, transaction_id))?;
-        Ok(())
     }
 
     /// Locks as many outputs required to reach at least the specified amount. If there are insufficient funds, all
@@ -195,29 +185,14 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
     }
 
     pub fn release_lock(&self, lock_id: WalletLockId) -> Result<(), StealthOutputsApiError> {
-        self.store.with_write_tx(|tx| {
-            tx.stealth_outputs_release_by_lock_id(lock_id)?;
-            tx.vaults_release_lock_revealed_funds(lock_id).optional()?;
-            tx.locks_delete(lock_id)
-        })?;
+        self.store.with_write_tx(|tx| tx.locks_release(lock_id))?;
         Ok(())
     }
 
-    pub fn finalize_lock(&self, lock_id: WalletLockId) -> Result<(), ConfidentialOutputsApiError> {
-        let mut tx = self.store.create_write_tx()?;
-        tx.stealth_outputs_finalize_by_lock_id(lock_id)?;
-        tx.locks_delete(lock_id)?;
-        tx.commit()?;
+    pub fn finalize_lock(&self, lock_id: WalletLockId, diff: &SubstateDiff) -> Result<(), ConfidentialOutputsApiError> {
+        self.store
+            .with_write_tx(|tx| tx.locks_unlock_finalized(lock_id, diff))?;
         Ok(())
-    }
-
-    pub fn finalize_outputs(&self, lock_id: WalletLockId) -> Result<(), StealthOutputsApiError> {
-        self.store.with_write_tx(|tx| {
-            tx.stealth_outputs_finalize_by_lock_id(lock_id)?;
-            tx.vaults_finalized_locked_revealed_funds(lock_id).optional()?;
-            tx.locks_delete(lock_id)?;
-            Ok(())
-        })
     }
 
     pub fn lock_revealed_funds<A: Into<Amount>>(
@@ -283,10 +258,11 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
     pub fn get_unspent_outputs_by_account(
         &self,
         account_address: &ComponentAddress,
+        exclude_locked: bool,
     ) -> Result<Vec<StealthOutputModel>, StealthOutputsApiError> {
         let balance = self
             .store
-            .with_read_tx(|tx| tx.stealth_outputs_get_unspent_by_account(account_address))?;
+            .with_read_tx(|tx| tx.stealth_outputs_get_unspent_by_account(account_address, exclude_locked))?;
         Ok(balance)
     }
 
@@ -314,13 +290,18 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
     pub fn upsert_utxo(&self, utxo: &StealthOutputModel) -> Result<(), StealthOutputsApiError> {
         self.store.with_write_tx(|tx| {
             // TODO(perf): consider a dedicated exists query
-            let exists = tx
+            let maybe_utxo = tx
                 .stealth_outputs_get_by_commitment(&utxo.resource_address, &utxo.commitment)
-                .optional()?
-                .is_some();
-            if exists {
+                .optional()?;
+            if let Some(prev_utxo) = maybe_utxo {
+                let new_status = match prev_utxo.status {
+                    OutputStatus::Unspent => Some(utxo.status),
+                    // If not unspent, don't allow status to be changed.
+                    // EDGE-CASE: scanning picks up a local UTXO that we know was spent
+                    _ => None,
+                };
                 let address = utxo.to_utxo_address();
-                tx.stealth_outputs_update(&address, Some(utxo.is_burnt), Some(utxo.status), Some(utxo.is_frozen))
+                tx.stealth_outputs_update(&address, Some(utxo.is_burnt), new_status, Some(utxo.is_frozen))
             } else {
                 tx.stealth_outputs_insert(utxo)
             }

@@ -7,7 +7,7 @@ use tari_crypto::commitment::HomomorphicCommitmentFactory;
 use tari_engine_types::{crypto::get_commitment_factory, ToByteType};
 use tari_ootle_wallet_sdk::{
     models::{ConfidentialOutputModel, KeyId, OutputStatus},
-    storage::{WalletStore, WalletStoreReader},
+    storage::{ReadableWalletStore, WalletStoreReader},
 };
 use tari_template_lib::types::EncryptedData;
 

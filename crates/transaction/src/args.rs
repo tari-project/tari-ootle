@@ -87,7 +87,7 @@ impl InstructionArg {
     }
 
     pub fn from_type<T: Serialize>(val: &T) -> Result<Self, tari_bor::BorError> {
-        Ok(Self::Literal(encode(val)?.into()))
+        Ok(Self::raw_literal_bytes(encode(val)?))
     }
 
     pub fn workspace(id: WorkspaceId, offset: Option<usize>) -> Self {

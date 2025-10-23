@@ -203,8 +203,14 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
       const resp = await transactionsWaitResult({ transaction_id: result.transaction_id, timeout_secs: null });
       const transactionResult = resp.result?.result;
 
-      if (!transactionResult || !("Accept" in transactionResult)) {
+      if (!transactionResult) {
         throw new Error("Fee estimation failed");
+      }
+      if ("Rejected" in transactionResult) {
+        throw new Error(`Transaction rejected: ${transactionResult.Rejected}`);
+      }
+      if ("AcceptFeeRejectRest" in transactionResult) {
+        throw new Error(`Transaction rejected: ${transactionResult.AcceptFeeRejectRest[1]}`);
       }
 
       let fee = resp.final_fee;

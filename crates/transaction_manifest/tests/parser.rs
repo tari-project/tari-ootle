@@ -20,11 +20,14 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashMap, fs};
+use std::{collections::HashMap, fs, str::FromStr};
 
+use tari_bor::cbor;
 use tari_engine_types::substate::SubstateId;
 use tari_template_lib::{
-    models::{ComponentAddress, ResourceAddress},
+    constants::XTR,
+    models::ComponentAddress,
+    prelude::RistrettoPublicKeyBytes,
     types::{ObjectKey, TemplateAddress},
 };
 use tari_transaction::{call_args, Instruction};
@@ -37,7 +40,6 @@ fn manifest_smoke_test() {
     let account_component = ComponentAddress::new([0u8; ObjectKey::LENGTH].into());
     let picture_seller_component = ComponentAddress::new([1u8; ObjectKey::LENGTH].into());
     let test_faucet_component = ComponentAddress::new([2u8; ObjectKey::LENGTH].into());
-    let xtr_resource = ResourceAddress::from([3u8; ObjectKey::LENGTH]);
     let picture_seller_template =
         TemplateAddress::from_hex("c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7").unwrap();
 
@@ -51,7 +53,6 @@ fn manifest_smoke_test() {
             "test_faucet".to_string(),
             SubstateId::Component(test_faucet_component).into(),
         ),
-        ("xtr_resource".to_string(), SubstateId::Resource(xtr_resource).into()),
     ]);
     let ManifestInstructions {
         instructions,
@@ -78,8 +79,21 @@ fn manifest_smoke_test() {
         },
         Instruction::CallMethod {
             call: account_component.into(),
+            method: "set_public_key".to_string(),
+            args: call_args![
+                RistrettoPublicKeyBytes::from_hex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+                    .unwrap(),
+                ComponentAddress::from_str(
+                    "component_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                )
+                .unwrap(),
+                cbor!({"some" => {"data" => [1, 2, 3]}}).unwrap()
+            ],
+        },
+        Instruction::CallMethod {
+            call: account_component.into(),
             method: "withdraw".to_string(),
-            args: call_args![xtr_resource, 1_000],
+            args: call_args![XTR, 1_000],
         },
         Instruction::PutLastInstructionOutputOnWorkspace { key: 2 },
         Instruction::CallMethod {

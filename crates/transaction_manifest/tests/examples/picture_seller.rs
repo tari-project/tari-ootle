@@ -20,9 +20,11 @@ fn main() {
     // initialize a user account with some faucet funds
     let funds = faucet.take_free_coins(1_000);
     account.deposit(funds);
-
-    // TODO: XTR builtin
-    let XTR = var!["xtr_resource"];
+    account.set_public_key(
+        PublicKey("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+        Address("component_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+        cbor!({"some": {"data": [1, 2, 3]}}),
+    );
 
     // buy a picture
     let bucket = account.withdraw(XTR, 1_000);

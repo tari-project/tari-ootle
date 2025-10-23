@@ -10,7 +10,7 @@ use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{serde_with, transaction_receipt::TransactionReceiptAddress};
 use tari_ootle_common_types::{SubstateAddress, ToSubstateAddress};
-use tari_template_lib::types::{from_hex, hex::write_hex_fmt, Hash, KeyParseError};
+use tari_template_lib::types::{from_hex_to_array, hex::write_hex_fmt, Hash, KeyParseError};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, Default, BorshSerialize)]
 #[serde(transparent)]
@@ -39,7 +39,7 @@ impl TransactionId {
     }
 
     pub fn from_hex(hex: &str) -> Result<Self, KeyParseError> {
-        let bytes = from_hex(hex)?;
+        let bytes = from_hex_to_array(hex)?;
         Ok(Self(bytes))
     }
 

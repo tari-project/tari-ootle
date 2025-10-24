@@ -154,11 +154,15 @@ export const useAccountsTransfer = () => {
           owner_account: account,
           input_selection: params.input_selection,
           resource_address: params.resource_address,
-          destination_address: params.destination_address,
+          transfers: [
+            {
+              destination_address: params.destination_address,
+              blinded_output_amount: params.output_to_revealed ? 0 : params.amount,
+              revealed_output_amount: params.output_to_revealed ? params.amount : 0,
+              output_memo: params.output_memo || null,
+            },
+          ],
           max_fee,
-          blinded_output_amount: params.output_to_revealed ? 0 : params.amount,
-          revealed_output_amount: params.output_to_revealed ? params.amount : 0,
-          output_memo: params.output_memo || null,
           dry_run: params.dry_run,
         };
         return accountsStealthTransfer(transferRequest);

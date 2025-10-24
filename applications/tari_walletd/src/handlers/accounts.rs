@@ -26,7 +26,7 @@ use tari_ootle_wallet_crypto::{
 use tari_ootle_wallet_sdk::{
     apis::{
         confidential_transfer::ConfidentialTransferParams,
-        stealth_transfer::StealthTransferParams,
+        stealth_transfer::{StealthTransferParams, TransferOutput},
         substate::ValidatorScanResult,
     },
     models::{KeyBranch, NewAccountData},
@@ -970,12 +970,18 @@ pub async fn handle_stealth_transfer(
 
     let params = StealthTransferParams {
         input_selection: req.input_selection,
-        destination_address: req.destination_address,
         resource_address: req.resource_address,
         max_fee: req.max_fee,
-        blinded_output_amount: req.blinded_output_amount,
-        revealed_output_amount: req.revealed_output_amount,
-        output_memo: req.output_memo,
+        outputs: req
+            .transfers
+            .into_iter()
+            .map(|transfer| TransferOutput {
+                address: transfer.destination_address,
+                blinded_amount: transfer.blinded_output_amount,
+                revealed_amount: transfer.revealed_output_amount,
+                memo: transfer.output_memo,
+            })
+            .collect(),
         is_dry_run: req.dry_run,
     };
     if let Err(err) = params.validate(network) {

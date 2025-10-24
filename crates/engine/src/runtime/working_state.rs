@@ -397,9 +397,10 @@ impl WorkingState {
     }
 
     pub(super) fn validate_finalized(&self) -> Result<(), RuntimeError> {
-        if !self.buckets.is_empty() {
+        let dangling_bucket_count = self.buckets.iter().filter(|(_, b)| !b.amount().is_zero()).count();
+        if dangling_bucket_count > 0 {
             return Err(TransactionCommitError::DanglingBuckets {
-                count: self.buckets.len(),
+                count: dangling_bucket_count,
             }
             .into());
         }

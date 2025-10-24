@@ -29,6 +29,7 @@ export type Instruction =
   | { ClaimValidatorFees: { address: string } }
   | "DropAllProofsInWorkspace"
   | { AssertBucketContains: { key: WorkspaceOffsetId; resource_address: ResourceAddress; min_amount: Amount } }
+  | { TakeFromBucket: { input_bucket: WorkspaceOffsetId; amount: Amount; output_bucket: number } }
   | { PublishTemplate: { binary: Array<number> } }
   | { AllocateAddress: { allocatable_type: AllocatableAddressType; workspace_id: number } }
   | {

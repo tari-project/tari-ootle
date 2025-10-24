@@ -256,6 +256,21 @@ impl TransactionBuilder {
         self.add_instruction(Instruction::PutLastInstructionOutputOnWorkspace { key })
     }
 
+    pub fn take_from_bucket<T: Into<BuilderWorkspaceKey>, A: Into<Amount>>(
+        mut self,
+        label: T,
+        amount: A,
+        output_label: T,
+    ) -> Self {
+        let key = self.get_workspace_offset_id_from_named_arg(label.into());
+        let output_key = self.workspace_ids.insert(output_label.into());
+        self.add_instruction(Instruction::TakeFromBucket {
+            input_bucket: key,
+            amount: amount.into(),
+            output_bucket: output_key,
+        })
+    }
+
     pub fn assert_bucket_contains<T: AsRef<str>, A: Into<Amount>>(
         self,
         label: T,

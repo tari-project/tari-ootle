@@ -41,7 +41,7 @@ use crate::{
         config::{ConfigApi, ConfigApiError},
         key_manager::{KeyManagerApi, KeyManagerApiError},
         stealth_crypto::{StealthCryptoApi, StealthCryptoApiError},
-        stealth_transfer::{OutputToCreate, UnblindedInputToSpend},
+        stealth_transfer::{StealthOutputToCreate, UnblindedInputToSpend},
     },
     models::{
         AccountAndViewKeys,
@@ -664,7 +664,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         params: TransferStatementParams<'_, I>,
     ) -> Result<StealthTransferStatement, StealthOutputsApiError>
     where
-        I: IntoIterator<Item = OutputToCreate<'a>>,
+        I: IntoIterator<Item = StealthOutputToCreate<'a>>,
     {
         let unblinded_inputs = self.resolve_output_masks_for_spending(
             params.spend_key_branch,
@@ -677,7 +677,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
             .into_iter()
             .map(|output| {
                 self.create_output_witness(
-                    output.owner_address,
+                    &output.owner_address,
                     output.amount,
                     params.resource_address,
                     params.resource_view_key.clone(),

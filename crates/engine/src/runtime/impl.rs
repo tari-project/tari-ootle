@@ -1950,7 +1950,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 self.tracker.write_with(|state| {
                     let bucket = state.get_bucket_mut(bucket_id)?;
                     let resource = bucket.take(amount)?;
-                    let bucket_id = state.id_provider()?.new_bucket_id();
+                    let bucket_id = state.new_bucket_id();
                     state.new_bucket(bucket_id, resource)?;
                     Ok(InvokeResult::encode(&bucket_id)?)
                 })
@@ -2244,7 +2244,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         debug!(target: LOG_TARGET, "Workspace invoke: {:?}", action,);
 
         match action {
-            // Basically names an output on the workspace so that you can refer to it as an
+            // Names an output on the workspace so that you can refer to it as an
             // Arg::Variable
             WorkspaceAction::PutLastInstructionOutput => {
                 let key = args.assert_one_arg()?;
@@ -2692,6 +2692,16 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
             Ok(())
         })
+    }
+
+    fn put_on_workspace(&self, id: WorkspaceId, value: IndexedValue) -> Result<(), RuntimeError> {
+        self.invoke_modules_on_runtime_call("put_on_workspace")?;
+
+        self.validate_return_value(&value)?;
+
+        self.tracker
+            .with_workspace_mut(|workspace| workspace.insert(id, value))?;
+        Ok(())
     }
 
     fn signature_invoke(&self, action: SignatureAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError> {

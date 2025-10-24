@@ -37,7 +37,7 @@ use tari_ootle_common_types::services::template_provider::TemplateProvider;
 use tari_template_abi::{FunctionDef, Type};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    args::{AllocateAddressResult, WorkspaceAction},
+    args::{AllocateAddressResult, BucketAction, BucketRef, WorkspaceAction},
     auth::{ComponentAccessRules, OwnerRule},
     invoke_args,
     models::{Bucket, NonFungibleAddress, StealthTransferStatement},
@@ -314,6 +314,24 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                     WorkspaceAction::AssertBucketContains,
                     invoke_args![key, resource_address, min_amount].into(),
                 )?;
+                Ok(InstructionResult::empty())
+            },
+            Instruction::TakeFromBucket {
+                input_bucket,
+                amount,
+                output_bucket,
+            } => {
+                let item = runtime
+                    .interface()
+                    .workspace_invoke(WorkspaceAction::Get, invoke_args![input_bucket].into())?;
+                let bucket = runtime.interface().bucket_invoke(
+                    BucketRef::Ref(item.decode()?),
+                    BucketAction::Take,
+                    invoke_args![amount].into(),
+                )?;
+                runtime
+                    .interface()
+                    .put_on_workspace(output_bucket, IndexedValue::from_value(bucket.into_value()?)?)?;
                 Ok(InstructionResult::empty())
             },
             Instruction::PublishTemplate { binary } => Self::publish_template(config, runtime, binary),

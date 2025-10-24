@@ -277,3 +277,55 @@ fn custom_access_rules() {
         vec![user2_account_proof],
     );
 }
+
+#[test]
+fn take_from_bucket() {
+    let mut test = TemplateTest::new(Vec::<&str>::new());
+
+    let faucet_template = test.get_template_address("TestFaucet");
+    let (alice, _proof, _alice_sk) = test.create_empty_account();
+    let (bob, _proof, _bob_sk) = test.create_empty_account();
+
+    let initial_supply = Amount::from(1_000_000_000_000u64);
+    test.execute_expect_success(
+        Transaction::builder()
+            .allocate_component_address("faucet")
+            .call_function(faucet_template, "mint_with_opts", args![
+                initial_supply,
+                "faucet".to_string(),
+                Workspace("faucet"),
+            ])
+            .call_method("faucet", "take_free_coins_custom", args![1000])
+            .put_last_instruction_output_on_workspace("free_coins")
+            .take_from_bucket("free_coins", 100, "foo_bucket")
+            // Take all to test what happens when free_coins is empty (should not fail due to dangling buckets)
+            .take_from_bucket("free_coins", 900, "bar_bucket")
+            .call_method(alice, "deposit", args![Workspace("foo_bucket")])
+            .call_method(bob, "deposit", args![Workspace("bar_bucket")])
+            .build_and_seal(test.secret_key()),
+        vec![test.owner_proof()],
+    );
+
+    let resources = test.read_only_state_store().get_all_resources().unwrap();
+    let faucet_resource = resources
+        .iter()
+        .find(|(_, r)| r.token_symbol() == Some("faucet"))
+        .map(|(addr, _)| *addr)
+        .unwrap();
+
+    let alice_acc = test.read_only_state_store().get_account(alice).unwrap();
+    let bob_acc = test.read_only_state_store().get_account(bob).unwrap();
+    let alice_balance = test
+        .read_only_state_store()
+        .get_vault(&alice_acc.get_vault_by_resource(&faucet_resource).unwrap().vault_id())
+        .unwrap()
+        .balance();
+    let bob_balance = test
+        .read_only_state_store()
+        .get_vault(&bob_acc.get_vault_by_resource(&faucet_resource).unwrap().vault_id())
+        .unwrap()
+        .balance();
+
+    assert_eq!(alice_balance, 100);
+    assert_eq!(bob_balance, 900);
+}

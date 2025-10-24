@@ -52,6 +52,7 @@ use tari_wallet_daemon_client::{
         ConfidentialTransferRequest,
         ListNftsRequest,
         MintFaucetNftRequest,
+        StealthTransfer,
         StealthTransferRequest,
         TransactionSubmitRequest,
         TransactionWaitResultRequest,
@@ -122,11 +123,13 @@ pub async fn transfer_stealth(
             owner_account: source_account_name,
             input_selection: ConfidentialTransferInputSelection::PreferRevealed,
             resource_address,
-            destination_address: dest_account.address,
+            transfers: vec![StealthTransfer {
+                destination_address: dest_account.address,
+                blinded_output_amount: amount,
+                revealed_output_amount: Default::default(),
+                output_memo: None,
+            }],
             max_fee: 2000,
-            blinded_output_amount: amount,
-            revealed_output_amount: Default::default(),
-            output_memo: None,
             dry_run: false,
         })
         .await

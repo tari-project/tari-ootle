@@ -233,6 +233,15 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                     min_amount: assert_contains.min_amount.unwrap_or_default().into(),
                 })
             },
+            Some(TakeFromBucket(take_from_bucket)) => Ok(Instruction::TakeFromBucket {
+                input_bucket: take_from_bucket
+                    .input_bucket
+                    .ok_or_else(|| anyhow!("take_from_bucket_input_bucket not provided"))?
+                    .try_into()?,
+                amount: take_from_bucket.amount.unwrap_or_default().into(),
+                output_bucket: u16::try_from(take_from_bucket.output_bucket)
+                    .context("take_from_bucket_output_bucket overflowed")?,
+            }),
             Some(PublishTemplate(publish_template)) => Ok(Instruction::PublishTemplate {
                 binary: publish_template.binary,
             }),
@@ -372,6 +381,20 @@ impl From<Instruction> for proto::transaction::Instruction {
                         bucket: Some(key.into()),
                         resource_address: resource_address.as_bytes().to_vec(),
                         min_amount: Some(min_amount.into()),
+                    },
+                )),
+            },
+
+            Instruction::TakeFromBucket {
+                input_bucket,
+                amount,
+                output_bucket,
+            } => proto::transaction::Instruction {
+                instruction: Some(proto::transaction::instruction::Instruction::TakeFromBucket(
+                    proto::transaction::TakeFromBucket {
+                        input_bucket: Some(input_bucket.into()),
+                        amount: Some(amount.into()),
+                        output_bucket: u32::from(output_bucket),
                     },
                 )),
             },

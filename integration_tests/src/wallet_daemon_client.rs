@@ -28,7 +28,7 @@ use tari_engine_types::substate::SubstateId;
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_ootle_wallet_sdk::{
-    apis::confidential_transfer::ConfidentialTransferInputSelection,
+    apis::{confidential_transfer::ConfidentialTransferInputSelection, stealth_transfer::BadgeUsage},
     models::{Account, AccountWithAddress, NonFungibleToken},
 };
 use tari_template_lib::{
@@ -123,6 +123,7 @@ pub async fn transfer_stealth(
             owner_account: source_account_name,
             input_selection: ConfidentialTransferInputSelection::PreferRevealed,
             resource_address,
+            badge_usage: BadgeUsage::None,
             transfers: vec![StealthTransfer {
                 destination_address: dest_account.address,
                 blinded_output_amount: amount,

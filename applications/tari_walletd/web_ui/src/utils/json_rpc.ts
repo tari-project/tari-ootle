@@ -107,6 +107,8 @@ import type {
   WebauthnStartRegisterResponse,
   WebRtcStartRequest,
   WebRtcStartResponse,
+  StealthUtxosDecryptValueRequest,
+  StealthUtxosDecryptValueResponse,
 } from "@tari-project/typescript-bindings";
 import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
 import useAuthStore from "@store/authStore";
@@ -307,6 +309,10 @@ export const accountsGetDefault = (request: AccountGetDefaultRequest): Promise<A
 export const confidentialViewVaultBalance = (
   request: ConfidentialViewVaultBalanceRequest,
 ): Promise<ConfidentialViewVaultBalanceResponse> => client().then((c) => c.viewVaultBalance(request));
+
+export const stealthDecryptUtxoBalance = (
+  request: StealthUtxosDecryptValueRequest,
+): Promise<StealthUtxosDecryptValueResponse> => client().then((c) => c.stealthUtxosDecryptValue(request));
 
 // nfts
 export const nftList = (request: ListNftsRequest): Promise<ListNftsResponse> =>

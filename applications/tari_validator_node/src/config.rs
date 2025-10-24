@@ -106,6 +106,8 @@ pub struct ValidatorNodeConfig {
     pub burnt_utxo_sidechain_id: Option<RistrettoPublicKey>,
     /// The path to store layer-one transactions.
     pub layer_one_transaction_path: PathBuf,
+    /// Consensus configuration
+    pub consensus: ConsensusConfig,
 }
 
 impl ValidatorNodeConfig {
@@ -159,6 +161,7 @@ impl Default for ValidatorNodeConfig {
             template_sidechain_id: None,
             burnt_utxo_sidechain_id: None,
             layer_one_transaction_path: PathBuf::from("data/layer_one_transactions"),
+            consensus: ConsensusConfig::default(),
         }
     }
 }
@@ -166,5 +169,22 @@ impl Default for ValidatorNodeConfig {
 impl SubConfigPath for ValidatorNodeConfig {
     fn main_key_prefix() -> &'static str {
         "validator_node"
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct ConsensusConfig {
+    /// Enable proposing evictions for inactive validators. If disabled, this validator will still vote on eviction
+    /// proposals from other validators, including voting in the affirmative if applicable, but will never propose
+    /// evictions itself.
+    pub enable_eviction_proposal: bool,
+}
+
+impl Default for ConsensusConfig {
+    fn default() -> Self {
+        Self {
+            enable_eviction_proposal: true,
+        }
     }
 }

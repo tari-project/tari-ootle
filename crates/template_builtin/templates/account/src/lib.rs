@@ -178,6 +178,10 @@ mod account_template {
             v.create_proof()
         }
 
+        pub fn create_proof_by_non_fungible(&mut self, nft: NonFungibleAddress) -> Proof {
+            self.create_proof_by_non_fungible_ids(*nft.resource_address(), vec![nft.id().clone()])
+        }
+
         pub fn create_proof_by_non_fungible_ids(
             &mut self,
             resource: ResourceAddress,

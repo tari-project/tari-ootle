@@ -525,6 +525,8 @@ where TConsensusSpec: ConsensusSpec
         );
 
         let evict_nodes = remaining_block_size
+            // Disable eviction proposals if not enabled in config
+            .filter(|_| self.config.enable_eviction_proposal)
             .map(|max| {
                 let num_evicted =
                     ValidatorConsensusStats::count_number_evicted_nodes(tx, start_of_chain_block.epoch())?;

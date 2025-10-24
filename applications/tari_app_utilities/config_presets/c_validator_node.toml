@@ -30,6 +30,9 @@
 
 # Set to true to enable auto registration for each epoch (default = true)
 #auto_register = true
+[validator_node.consensus]
+# Disable evictions for now
+enable_eviction_proposals = false
 
 #[validator_node.database]
 ## The type of database ("rocksdb" or "sqlite") to use (default = "sqlite")

@@ -44,12 +44,13 @@ use tari_consensus::{consensus_constants::ConsensusConstants, hotstuff::Hotstuff
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_template_manager::interface::TemplateManagerHandle;
 
-use crate::{consensus::spec::ValidatorNodeStateStore, p2p::NopLogger};
+use crate::{config::ConsensusConfig, consensus::spec::ValidatorNodeStateStore, p2p::NopLogger};
 
 pub type ConsensusTransactionValidator = BoxedValidator<ValidationContext, Transaction, TransactionValidationError>;
 
 pub async fn spawn(
     network: Network,
+    consensus_config: &ConsensusConfig,
     sidechain_id: Option<RistrettoPublicKeyBytes>,
     store: ValidatorNodeStateStore,
     local_addr: PeerAddress,
@@ -80,6 +81,7 @@ pub async fn spawn(
         // TODO: make these configurable (defaults should probably be longer than 1 hour)
         state_tree_cleanup_interval: Duration::from_secs(60 * 60),
         epoch_gc_interval: Duration::from_secs(60 * 60),
+        enable_eviction_proposal: consensus_config.enable_eviction_proposal,
     };
 
     let hotstuff_worker = HotstuffWorker::<TariConsensusSpec>::new(

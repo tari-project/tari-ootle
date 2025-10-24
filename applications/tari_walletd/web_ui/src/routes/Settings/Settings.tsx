@@ -29,6 +29,7 @@ import AccessTokens from "@routes/Wallet/Components/AccessTokens";
 import SettingsTabs from "@routes/Settings/Components/SettingsTabs";
 import GeneralSettings from "@routes/Settings/Components/GeneralSettings";
 import ViewVaultBalance from "@routes/Settings/Components/ViewVaultBalance";
+import DecryptUtxoBalance from "@routes/Settings/Components/DecryptUtxoBalance";
 
 export interface ISettingsMenu {
   label: string;
@@ -62,6 +63,11 @@ function SettingsPage() {
       label: "View Vault Balance",
       title: "View Vault Balance",
       content: <ViewVaultBalance />,
+    },
+    {
+      label: "Decrypt UTXO",
+      title: "Decrypt UTXO Balance",
+      content: <DecryptUtxoBalance />,
     },
   ];
 

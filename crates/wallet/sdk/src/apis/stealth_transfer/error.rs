@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_common_types::optional::IsNotFoundError;
+use tari_template_lib::models::ResourceAddress;
 
 use crate::{
     apis::{
@@ -29,6 +30,8 @@ pub enum StealthTransferApiError {
     KeyManagerApi(#[from] KeyManagerApiError),
     #[error("Insufficient funds")]
     InsufficientFunds,
+    #[error("Badge vault not found for resource {resource_address}")]
+    BadgeVaultNotFound { resource_address: ResourceAddress },
     #[error("Accounts API error: {0}")]
     Accounts(#[from] AccountsApiError),
     #[error("Invalid parameter `{param}`: {reason}")]

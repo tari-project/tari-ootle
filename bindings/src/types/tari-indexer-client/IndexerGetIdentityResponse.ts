@@ -4,5 +4,5 @@ import type { RistrettoPublicKeyBytes } from "../RistrettoPublicKeyBytes";
 export type IndexerGetIdentityResponse = {
   peer_id: string;
   public_key: RistrettoPublicKeyBytes;
-  public_addresses: Array<string>;
+  public_addresses: string[];
 };

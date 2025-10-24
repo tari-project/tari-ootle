@@ -27,8 +27,10 @@ import { useAccountsGetBalances, useAccountsTransfer } from "@api/hooks/useAccou
 import useAccountStore from "@store/accountStore";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
 import {
+  BadgeUsage,
   BalanceEntry,
   ConfidentialTransferInputSelection,
+  rejectReasonToString,
   ResourceAddress,
   ResourceType,
   substateIdToString,
@@ -195,7 +197,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         resourceType: props.resource_type,
         output_to_revealed: !transferFormState.outputToConfidential,
         input_selection: transferFormState.inputSelection as ConfidentialTransferInputSelection,
-        badge: transferFormState.badge,
+        badge_usage: transferFormState.badge ? { Resource: transferFormState.badge } : ("None" as BadgeUsage),
         output_memo: transferFormState.memo ? { Message: transferFormState.memo } : undefined,
       };
 
@@ -206,11 +208,11 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
       if (!transactionResult) {
         throw new Error("Fee estimation failed");
       }
-      if ("Rejected" in transactionResult) {
-        throw new Error(`Transaction rejected: ${transactionResult.Rejected}`);
+      if ("Reject" in transactionResult) {
+        throw new Error(`Transaction rejected: ${rejectReasonToString(transactionResult.Reject)}`);
       }
       if ("AcceptFeeRejectRest" in transactionResult) {
-        throw new Error(`Transaction rejected: ${transactionResult.AcceptFeeRejectRest[1]}`);
+        throw new Error(`Transaction rejected: ${rejectReasonToString(transactionResult.AcceptFeeRejectRest[1])}`);
       }
 
       let fee = resp.final_fee;
@@ -270,7 +272,8 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         resourceType: props.resource_type,
         output_to_revealed: !transferFormState.outputToConfidential,
         input_selection: transferFormState.inputSelection as ConfidentialTransferInputSelection,
-        badge: transferFormState.badge,
+        // TODO: support for other types of BadgeUsage
+        badge_usage: transferFormState.badge ? { Resource: transferFormState.badge } : ("None" as BadgeUsage),
         output_memo: transferFormState.memo ? { Message: transferFormState.memo } : undefined,
       };
 

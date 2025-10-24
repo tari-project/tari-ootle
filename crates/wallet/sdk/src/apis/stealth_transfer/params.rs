@@ -1,11 +1,15 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_bor::{Deserialize, Serialize};
 use tari_engine_types::{crypto::MAX_LAZY_BP_AGG_FACTORS, FromByteType};
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::Network;
 use tari_ootle_wallet_crypto::memo::Memo;
-use tari_template_lib::{models::ResourceAddress, prelude::Amount};
+use tari_template_lib::{
+    models::{NonFungibleAddress, ResourceAddress},
+    prelude::Amount,
+};
 
 use crate::apis::{
     confidential_transfer::ConfidentialTransferInputSelection,
@@ -17,6 +21,7 @@ pub struct StealthTransferParams {
     /// Strategy for input selection
     pub input_selection: ConfidentialTransferInputSelection,
     pub outputs: Vec<TransferOutput>,
+    pub badge_usage: BadgeUsage,
     /// Address of the resource to transfer
     pub resource_address: ResourceAddress,
     /// Fee to lock for the transaction
@@ -132,5 +137,34 @@ impl<'a> TryFrom<&'a TransferOutput> for StealthOutputToCreate<'a> {
             amount: value.blinded_amount,
             memo: value.memo.as_ref(),
         })
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub enum BadgeUsage {
+    /// Do not use a badge
+    #[default]
+    None,
+    /// Use a resource as a badge
+    Resource(ResourceAddress),
+    /// Use a specific NFT as a badge
+    NonFungible(NonFungibleAddress),
+    /// Use a specified amount of resource as a badge
+    AmountOfResource { resource: ResourceAddress, amount: Amount },
+}
+
+impl BadgeUsage {
+    pub fn resource_address(&self) -> Option<&ResourceAddress> {
+        match self {
+            BadgeUsage::None => None,
+            BadgeUsage::Resource(addr) => Some(addr),
+            BadgeUsage::NonFungible(nft_addr) => Some(nft_addr.resource_address()),
+            BadgeUsage::AmountOfResource { resource, .. } => Some(resource),
+        }
+    }
+
+    pub fn is_none(&self) -> bool {
+        matches!(self, BadgeUsage::None)
     }
 }

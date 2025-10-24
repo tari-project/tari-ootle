@@ -39,7 +39,7 @@ impl EntityId {
     }
 
     pub fn from_hex(s: &str) -> Result<Self, KeyParseError> {
-        from_hex(s).map(Self::from_array)
+        from_hex_to_array(s).map(Self::from_array)
     }
 
     pub fn write_hex_fmt<W: fmt::Write>(&self, writer: &mut W) -> fmt::Result {
@@ -163,7 +163,7 @@ impl ObjectKey {
     }
 
     pub fn from_hex(s: &str) -> Result<Self, KeyParseError> {
-        from_hex(s).map(Self::from_array)
+        from_hex_to_array(s).map(Self::from_array)
     }
 
     pub fn write_hex_fmt<W: fmt::Write>(&self, writer: &mut W) -> fmt::Result {
@@ -261,7 +261,7 @@ impl Display for KeyParseError {
     }
 }
 
-pub fn from_hex<const N: usize>(s: &str) -> Result<[u8; N], KeyParseError> {
+pub fn from_hex_to_array<const N: usize>(s: &str) -> Result<[u8; N], KeyParseError> {
     if s.len() != N * 2 {
         return Err(KeyParseError);
     }

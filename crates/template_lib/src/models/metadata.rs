@@ -64,14 +64,11 @@ impl FromStr for Metadata {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if !s.contains('=') {
-            return Err("Invalid metadata string, missing '='".to_string());
-        }
         let pairs = s.split(',').map(|pair| {
-            let mut split = pair.split('=');
-            let key = split.next().ok_or_else(|| "Missing key".to_string())?;
-            let value = split.next().ok_or_else(|| "Missing value".to_string())?;
-            Ok::<(String, String), String>((key.to_string(), value.to_string()))
+            let (key, value) = pair
+                .split_once('=')
+                .ok_or_else(|| "Invalid key=value pair".to_string())?;
+            Ok::<_, String>((key.trim().to_string(), value.trim().to_string()))
         });
         let mut map = BTreeMap::new();
         for pair in pairs {

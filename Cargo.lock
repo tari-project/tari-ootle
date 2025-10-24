@@ -12257,6 +12257,7 @@ name = "tari_transaction_manifest"
 version = "0.13.1"
 dependencies = [
  "proc-macro2",
+ "serde_json",
  "syn 2.0.103",
  "tari_bor",
  "tari_engine_types",

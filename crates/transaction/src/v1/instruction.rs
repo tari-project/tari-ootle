@@ -72,6 +72,11 @@ pub enum Instruction {
         resource_address: ResourceAddress,
         min_amount: Amount,
     },
+    TakeFromBucket {
+        input_bucket: WorkspaceOffsetId,
+        amount: Amount,
+        output_bucket: WorkspaceId,
+    },
     PublishTemplate {
         binary: Vec<u8>,
     },
@@ -179,6 +184,18 @@ impl Display for Instruction {
                     f,
                     "AssertBucketContains {{ key: {:?}, resource_address: {}, min_amount: {} }}",
                     key, resource_address, min_amount
+                )
+            },
+
+            Self::TakeFromBucket {
+                input_bucket,
+                amount,
+                output_bucket,
+            } => {
+                write!(
+                    f,
+                    "TakeFromBucket {{ input_bucket: {}, amount: {}, output_bucket: {} }}",
+                    input_bucket, amount, output_bucket
                 )
             },
             Self::PublishTemplate { .. } => {

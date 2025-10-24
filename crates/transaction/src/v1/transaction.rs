@@ -188,6 +188,7 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::ClaimValidatorFees { .. } => 1,
         Instruction::DropAllProofsInWorkspace => 1,
         Instruction::AssertBucketContains { .. } => 1,
+        Instruction::TakeFromBucket { .. } => 1,
         Instruction::PublishTemplate { binary } => binary.len() as u64 / BINARY_WEIGHT_DIVISOR,
         Instruction::AllocateAddress { .. } => 1,
         Instruction::StealthTransfer { statement, .. } => calc_stealth_statement_weight(statement),
@@ -197,7 +198,7 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
 
 fn calc_stealth_statement_weight(statement: &StealthTransferStatement) -> u64 {
     // TODO: weight inputs and outputs accordingly - currently outputs cost 2x inputs
-    statement.inputs_statement.inputs.len() as u64 + (statement.outputs_statement.outputs.len() as u64 * 2)
+    100 + statement.inputs_statement.inputs.len() as u64 + (statement.outputs_statement.outputs.len() as u64 * 2)
 }
 
 fn calc_args_weight(args: &[InstructionArg]) -> u64 {

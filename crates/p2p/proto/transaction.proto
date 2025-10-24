@@ -32,10 +32,11 @@ message Instruction {
     bool drop_all_proofs_in_workspace = 7;
     CreateAccount create_account = 8;
     AssertBucketContains assert_bucket_contains = 9;
-    PublishTemplate publish_template = 10;
-    AllocateAddress allocate_address = 11;
-    StealthTransfer stealth_transfer = 12;
-    PayFee pay_fee = 13;
+    TakeFromBucket take_from_bucket = 10;
+    PublishTemplate publish_template = 11;
+    AllocateAddress allocate_address = 12;
+    StealthTransfer stealth_transfer = 13;
+    PayFee pay_fee = 14;
   }
 }
 
@@ -59,6 +60,12 @@ message ClaimBurn {
   EncodedMerkleProof encoded_merkle_proof = 5;
   bytes encrypted_data = 6;
   AbridgedKernel kernel = 7;
+}
+
+message TakeFromBucket {
+  WorkspaceOffsetId input_bucket = 1;
+  tari.ootle.common.Amount amount = 2;
+  uint32 output_bucket = 3;
 }
 
 message AbridgedKernel {

@@ -51,6 +51,17 @@ impl<'a> ReadOnlyStateStore<'a> {
         Ok(substate.into_substate_value().into_resource().unwrap())
     }
 
+    pub fn get_all_resources(&self) -> Result<HashMap<ResourceAddress, Resource>, StateStoreError> {
+        let mut resources = HashMap::new();
+        self.with_substates(|id, substate| {
+            if let SubstateId::Resource(resource_address) = id {
+                let resource = substate.substate_value().as_resource().unwrap();
+                resources.insert(*resource_address, resource.clone());
+            }
+        })?;
+        Ok(resources)
+    }
+
     pub fn get_vault(&self, vault_id: &VaultId) -> Result<Vault, StateStoreError> {
         let substate = self.get_substate(&SubstateId::Vault(*vault_id))?;
         Ok(substate.into_substate_value().into_vault().unwrap())
@@ -77,8 +88,8 @@ impl<'a> ReadOnlyStateStore<'a> {
     }
 
     pub fn with_substates<F>(&self, mut f: F) -> Result<(), StateStoreError>
-    where F: FnMut(Substate) {
-        self.store.iter().for_each(|(_, substate)| f(substate.clone()));
+    where F: FnMut(&SubstateId, &Substate) {
+        self.store.iter().for_each(|(id, substate)| f(id, substate));
         Ok(())
     }
 }

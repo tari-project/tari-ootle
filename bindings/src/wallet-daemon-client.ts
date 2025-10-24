@@ -32,6 +32,7 @@ export * from "./types/wallet-daemon-client/MintFaucetNftRequest";
 export * from "./types/wallet-daemon-client/AuthLoginDenyRequest";
 export * from "./types/wallet-daemon-client/PublishTemplateRequest";
 export * from "./types/wallet-daemon-client/TransactionSubmitResponse";
+export * from "./types/wallet-daemon-client/StealthTransfer";
 export * from "./types/wallet-daemon-client/ProofsGenerateResponse";
 export * from "./types/wallet-daemon-client/TransactionSubmitManifestResponse";
 export * from "./types/wallet-daemon-client/ListNftsResponse";

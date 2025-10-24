@@ -76,8 +76,13 @@ impl ConfidentialResourceBuilder {
     }
 
     /// Sets the already allocated address for the resource
-    pub fn with_address_allocation(mut self, address: ResourceAddressAllocation) -> Self {
-        self.address_allocation = Some(address);
+    pub fn with_address_allocation(self, address: ResourceAddressAllocation) -> Self {
+        self.with_address_allocation_opt(Some(address))
+    }
+
+    /// Sets the already allocated address for the resource, optionally
+    pub fn with_address_allocation_opt(mut self, address: Option<ResourceAddressAllocation>) -> Self {
+        self.address_allocation = address;
         self
     }
 

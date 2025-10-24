@@ -1061,14 +1061,20 @@ pub struct StealthTransferRequest {
     pub owner_account: ComponentAddressOrName,
     pub input_selection: ConfidentialTransferInputSelection,
     pub resource_address: ResourceAddress,
-    pub destination_address: OotleAddress,
+    pub transfers: Vec<StealthTransfer>,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub max_fee: u64,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub struct StealthTransfer {
+    pub destination_address: OotleAddress,
     pub blinded_output_amount: Amount,
     pub revealed_output_amount: Amount,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_memo: Option<Memo>,
-    pub dry_run: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

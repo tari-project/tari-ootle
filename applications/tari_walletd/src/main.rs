@@ -139,6 +139,43 @@ async fn main() -> Result<(), anyhow::Error> {
 
             return Ok(());
         },
+        Some(Subcommand::NewViewableBalanceKey { key_index, output_path }) => {
+            let wallet_store = init_wallet_store(&config)?;
+            let mut sdk = initialize_wallet_sdk(&config, wallet_store)?;
+            sdk.initialize_cipher_seed(
+                cli.wallet_restore
+                    .seed_words
+                    .as_ref()
+                    .map(CipherSeedRestore::FromSeedWords)
+                    .unwrap_or_default(),
+            )?;
+            let km = sdk.key_manager_api();
+            let key = km.get_elgamal_encrypted_view_key(*key_index)?;
+            let public_key = key.to_public_key().to_byte_type();
+
+            let json = json!({
+                "viewable_balance_public_key": public_key,
+                "viewable_balance_private_key": hex::encode(key.key.as_bytes()),
+                "key_index": key_index,
+            });
+            match output_path {
+                Some(path) => {
+                    let mut file = fs::File::options()
+                        .create(true)
+                        .write(true)
+                        .truncate(true)
+                        .open(path)
+                        .context("failed to open file for writing")?;
+                    serde_json::to_writer_pretty(&mut file, &json).context("failed to encode key json to file")?;
+                    println!("Key written to {}", path.display());
+                },
+                None => {
+                    println!("{}", json);
+                },
+            }
+
+            return Ok(());
+        },
         Some(Subcommand::SeedWords) => {
             let wallet_store = init_wallet_store(&config)?;
             let mut sdk = initialize_wallet_sdk(&config, wallet_store)?;

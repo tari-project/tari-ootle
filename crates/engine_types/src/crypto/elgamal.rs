@@ -209,7 +209,6 @@ impl ElgamalVerifiableBalance {
         let mut results = vec![None; balances.len()];
 
         for v in value_range {
-            log::error!(target: "tari::ootle::wallet", "Brute forcing value: {}", v);
             let value = lookup_table.lookup(v)?.unwrap_or_else(|| {
                 // Fallback to slow lookup method if the lookup table does not contain a key for the value
                 let pk = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(v));

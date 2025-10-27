@@ -44,6 +44,8 @@ pub enum StealthTransferApiError {
     AmountOverflow { param: &'static str, details: String },
     #[error("Insufficient revealed funds: {details}")]
     InsufficientRevealedFunds { details: String },
+    #[error("Invariant violation: {details}")]
+    InvariantViolation { details: String },
 }
 
 impl IsNotFoundError for StealthTransferApiError {

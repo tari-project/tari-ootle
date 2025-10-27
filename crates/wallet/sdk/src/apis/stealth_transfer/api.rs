@@ -481,14 +481,13 @@ where
             let change_amount = inputs_to_spend
                 .total_amount()
                 .checked_sub_positive(params.total_output_amount())
-                .unwrap_or_else(|| {
-                    // This is a bug because the wallet chooses inputs based on the required outputs.
-                    error!(
-                        target: LOG_TARGET,
-                        "BUG: total_stealth_input_amount or params.total_amount() are negative after validation"
-                    );
-                    panic!("BUG: total_stealth_input_amount or params.total_amount() are negative after validation");
-                });
+                .ok_or_else(|| StealthTransferApiError::InvariantViolation {
+                    details: format!(
+                        "Total input amount {} is less than total output amount {}",
+                        inputs_to_spend.total_amount(),
+                        params.total_output_amount()
+                    ),
+                })?;
 
             let change_output = Some(StealthOutputToCreate {
                 owner_address,

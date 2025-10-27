@@ -57,7 +57,7 @@ impl ValidatorCommitteeRpcPool {
                 Err(err) => {
                     warn!(
                         target: LOG_TARGET,
-                        "Failed to create session for validator '{}': {}", member, err
+                        "Failed to create new session for validator '{}': {}", member, err
                     );
                     last_error = Some(err);
                     self.past_failed_nodes.push(member.address);

@@ -27,10 +27,7 @@ use libp2p::identity;
 use log::warn;
 use minotari_app_utilities::identity_management;
 use tari_base_node_client::grpc::GrpcBaseNodeClient;
-use tari_common::{
-    configuration::bootstrap::{grpc_default_port, ApplicationType},
-    exit_codes::{ExitCode, ExitError},
-};
+use tari_common::configuration::bootstrap::{grpc_default_port, ApplicationType};
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_engine::transaction::TransactionProcessorConfig;
@@ -38,7 +35,7 @@ use tari_engine_types::ToByteType;
 use tari_epoch_manager::service::{EpochManagerConfig, EpochManagerHandle};
 use tari_epoch_oracles::{
     base_layer::BaseLayerOracle,
-    configured::{ConfiguredEpochOracle, IntervalEpochTicker},
+    configured::{ConfiguredEpochOracle, RealTimeEpochTicker},
     hybrid::{watch_ticker, HybridEpochOracle},
     store::EpochOracleStore,
     EpochOracle,
@@ -91,12 +88,8 @@ pub async fn spawn_services(
     ensure_directories_exist(config)?;
 
     // Initialize networking
-    let identity = identity::Keypair::sr25519_from_bytes(keypair.secret_key().as_bytes().to_vec()).map_err(|e| {
-        ExitError::new(
-            ExitCode::ConfigError,
-            format!("Failed to create libp2p identity from secret bytes: {}", e),
-        )
-    })?;
+    let identity = identity::Keypair::sr25519_from_bytes(keypair.secret_key().as_bytes().to_vec())
+        .context("Failed to create libp2p identity from secret bytes")?;
     let seed_peers = config
         .peer_seeds
         .peer_seeds
@@ -219,8 +212,7 @@ pub async fn spawn_services(
     .spawn(shutdown.clone());
 
     let substate_cache_dir = config.common.base_path.join("substate_cache");
-    let substate_cache = SubstateFileCache::new(substate_cache_dir)
-        .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Substate cache error: {}", e)))?;
+    let substate_cache = SubstateFileCache::new(substate_cache_dir).context("Failed to create substate cache")?;
 
     let substate_scanner = SubstateScanner::new(
         epoch_manager.clone(),
@@ -279,14 +271,14 @@ fn ensure_directories_exist(config: &ApplicationConfig) -> io::Result<()> {
     Ok(())
 }
 
-fn save_identities(config: &ApplicationConfig, identity: &RistrettoKeypair) -> Result<(), ExitError> {
+fn save_identities(config: &ApplicationConfig, identity: &RistrettoKeypair) -> anyhow::Result<()> {
     identity_management::save_as_json(&config.indexer.identity_file, identity)
-        .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Failed to save node identity: {}", e)))?;
+        .context("Failed to save indexer identity")?;
 
     Ok(())
 }
 
-async fn create_base_layer_client(config: &ApplicationConfig) -> Result<GrpcBaseNodeClient, ExitError> {
+async fn create_base_layer_client(config: &ApplicationConfig) -> anyhow::Result<GrpcBaseNodeClient> {
     let url = config
         .epoch_oracle
         .base_layer
@@ -303,14 +295,14 @@ async fn create_base_layer_client(config: &ApplicationConfig) -> Result<GrpcBase
         });
     GrpcBaseNodeClient::connect(url)
         .await
-        .map_err(|err| ExitError::new(ExitCode::ConfigError, format!("Could not connect to base node {}", err)))
+        .context("Failed to create gRPC base node client")
 }
 
 async fn create_epoch_oracle<TStore: EpochOracleStore + Clone + Send + 'static>(
     config: &ApplicationConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
-) -> Result<EpochOracle<TStore>, ExitError> {
+) -> anyhow::Result<EpochOracle<TStore>> {
     match config.epoch_oracle.oracle_type {
         EpochOracleType::BaseLayer => {
             let oracle = create_base_layer_epoch_oracle(config, store, consensus_constants).await?;
@@ -331,7 +323,7 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + 'static>(
     config: &ApplicationConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
-) -> Result<BaseLayerOracle<TStore>, ExitError> {
+) -> anyhow::Result<BaseLayerOracle<TStore>> {
     let mut base_node_client = create_base_layer_client(config).await?;
     verify_correct_network(&mut base_node_client, config.network).await?;
     Ok(BaseLayerOracle::new(
@@ -353,16 +345,17 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + 'static>(
 async fn create_configured_epoch_oracle<TStore: EpochOracleStore + Send>(
     config: &ApplicationConfig,
     store: TStore,
-) -> Result<ConfiguredEpochOracle<TStore, IntervalEpochTicker>, ExitError> {
+) -> anyhow::Result<ConfiguredEpochOracle<TStore, RealTimeEpochTicker>> {
     let oracle_config = config.epoch_oracle.configured.load().await?;
-    Ok(ConfiguredEpochOracle::new(oracle_config, store))
+    let oracle = ConfiguredEpochOracle::create(oracle_config, store)?;
+    Ok(oracle)
 }
 
 async fn create_hybrid_epoch_oracle<TStore: EpochOracleStore + Clone + Send + 'static>(
     config: &ApplicationConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
-) -> Result<HybridEpochOracle<TStore>, ExitError> {
+) -> anyhow::Result<HybridEpochOracle<TStore>> {
     let base_layer_oracle = create_base_layer_epoch_oracle(config, store.clone(), consensus_constants).await?;
     let oracle_config = config.epoch_oracle.configured.load().await?;
     let (ticker, trigger) = watch_ticker();

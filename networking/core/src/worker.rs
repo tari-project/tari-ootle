@@ -406,11 +406,18 @@ where
             info!(target: LOG_TARGET, "🥾 BOOTSTRAP: dialing {} seed peers", self.seed_peers.len());
             for (peer, addr) in self.seed_peers.drain(..) {
                 let opts = match peer {
-                    Some(peer) => DialOpts::peer_id(peer)
-                        .addresses(vec![addr])
-                        .condition(PeerCondition::DisconnectedAndNotDialing)
-                        .extend_addresses_through_behaviour()
-                        .build(),
+                    Some(peer) => {
+                        self.swarm
+                            .behaviour_mut()
+                            .peer_store
+                            .store_mut()
+                            .add_address(&peer, &addr);
+                        DialOpts::peer_id(peer)
+                            .addresses(vec![addr])
+                            .condition(PeerCondition::DisconnectedAndNotDialing)
+                            .extend_addresses_through_behaviour()
+                            .build()
+                    },
                     None => DialOpts::unknown_peer_id().address(addr).build(),
                 };
 
@@ -428,6 +435,13 @@ where
         if self.active_connections.len() < self.relays.num_possible_relays() {
             info!(target: LOG_TARGET, "🥾 BOOTSTRAP: dialing {} known relay peers", self.relays.num_possible_relays());
             for (peer, addrs) in self.relays.possible_relays() {
+                for addr in addrs {
+                    self.swarm
+                        .behaviour_mut()
+                        .peer_store
+                        .store_mut()
+                        .add_address(peer, addr);
+                }
                 self.swarm
                     .dial(
                         DialOpts::peer_id(*peer)

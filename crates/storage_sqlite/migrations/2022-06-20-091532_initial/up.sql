@@ -38,6 +38,8 @@ create table validator_nodes
     power                bigint                            not null
 );
 
+CREATE INDEX validator_nodes_address_index ON validator_nodes (address);
+
 CREATE TABLE committees
 (
     id                INTEGER PRIMARY KEY autoincrement NOT NULL,

@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::borrow::Cow;
+use std::{borrow::Cow, env};
 
 use axum::{http::StatusCode, response::IntoResponse, Json};
 use log::*;
@@ -51,11 +51,20 @@ impl ErrorResponse {
     pub fn internal_error(msg: impl Into<Box<str>>) -> Self {
         let msg = msg.into();
         error!(target: LOG_TARGET, "Internal server error: {}", msg);
-        let msg = if cfg!(debug_assertions) || option_env!("API_DEBUG").is_some_and(|v| v != "0") {
+        let msg = if cfg!(debug_assertions) || env::var("API_DEBUG").ok().is_some_and(|v| v != "0") {
             msg
         } else {
             "Internal server error".into()
         };
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            error: msg,
+        }
+    }
+
+    pub fn general_error(msg: impl Into<Box<str>>) -> Self {
+        let msg = msg.into();
+        error!(target: LOG_TARGET, "General error: {}", msg);
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             error: msg,

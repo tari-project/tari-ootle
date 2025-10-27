@@ -736,7 +736,13 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .inner_join(committees::table.on(validator_nodes::id.eq(committees::validator_node_id)))
             .select(validator_nodes::all_columns)
             .filter(committees::epoch.eq(epoch.as_u64() as i64))
-            .filter(validator_nodes::address.ne_all(excluding.into_iter().map(|a| a.to_string())))
+            .filter(
+                validator_nodes::address.ne_all(
+                    excluding
+                        .iter()
+                        .map(|a| serialize_json(a).expect("serialize address to json")),
+                ),
+            )
             .order_by(sql_random())
             .into_boxed();
 
@@ -748,9 +754,14 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
 
         let vn = query
             .first::<DbValidatorNode>(tx.connection())
+            .optional()
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
                 operation: "get::validator_node",
+            })?
+            .ok_or(SqliteStorageError::NotFound {
+                item: "validator_node",
+                key: "random selection in validator_nodes_get_random_committee_member_from_shard_group".to_string(),
             })?;
 
         let vn = vn.try_into()?;

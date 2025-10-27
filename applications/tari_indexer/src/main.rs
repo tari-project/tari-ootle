@@ -23,10 +23,7 @@
 use std::{fs, panic, process};
 
 use log::*;
-use tari_common::{
-    exit_codes::{ExitCode, ExitError},
-    initialize_logging,
-};
+use tari_common::initialize_logging;
 use tari_indexer::{cli::Cli, config::ApplicationConfig, run_indexer};
 use tari_ootle_app_utilities::configuration::load_configuration;
 use tari_shutdown::Shutdown;
@@ -44,24 +41,16 @@ async fn main() {
     }));
 
     if let Err(err) = main_inner().await {
-        let exit_code = err.exit_code;
-        eprintln!("{:?}", err);
-        error!(
-            target: LOG_TARGET,
-            "Exiting with code ({}) {:?}: {}",
-            exit_code as i32,
-            exit_code,
-            err.details.unwrap_or_default()
-        );
-        process::exit(exit_code as i32);
+        eprintln!("CRASH: {:?}", err);
+        error!(target: LOG_TARGET, "CRASH: {:?}", err);
+        process::exit(1);
     }
 }
 
-async fn main_inner() -> Result<(), ExitError> {
+async fn main_inner() -> anyhow::Result<()> {
     let cli = Cli::init();
     let config_path = cli.common.config_path();
-    let cfg = load_configuration(config_path, true, &cli, cli.network_override())
-        .map_err(|e| ExitError::new(ExitCode::ConfigError, e))?;
+    let cfg = load_configuration(config_path, true, &cli, cli.network_override())?;
     let config = ApplicationConfig::load_from(&cfg)?;
     // Remove the file if it was left behind by a previous run
     let _file = fs::remove_file(config.common.base_path.join("pid"));

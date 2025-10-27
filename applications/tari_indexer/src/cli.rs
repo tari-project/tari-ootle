@@ -24,9 +24,15 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Parser;
 use minotari_app_utilities::common_cli_args::CommonCliArgs;
-use tari_common::configuration::{ConfigOverrideProvider, Network as L1Network};
+use tari_common::{
+    configuration::{ConfigOverrideProvider, Network as L1Network},
+    SubConfigPath,
+};
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_app_utilities::{configuration::convert_l1_network_to_network, p2p_config::ReachabilityMode};
+use tari_ootle_app_utilities::{
+    configuration::convert_l1_network_to_network,
+    p2p_config::{PeerSeedsConfig, ReachabilityMode},
+};
 use tari_ootle_common_types::Network;
 use url::Url;
 
@@ -91,7 +97,14 @@ impl ConfigOverrideProvider for Cli {
         }
 
         if !self.peer_seeds.is_empty() {
-            overrides.push(("p2p.seeds.peer_seeds".to_string(), self.peer_seeds.join(",")));
+            overrides.push((
+                format!("{}.peer_seeds", PeerSeedsConfig::main_key_prefix()),
+                self.peer_seeds.join(","),
+            ));
+            overrides.push((
+                format!("{}.{}.peer_seeds", network, PeerSeedsConfig::main_key_prefix()),
+                self.peer_seeds.join(","),
+            ));
         }
         if let Some(listener_port) = self.listener_port {
             overrides.push(("indexer.p2p.listener_port".to_string(), listener_port.to_string()));

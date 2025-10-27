@@ -3,7 +3,7 @@
 
 use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle};
 
-use crate::{configured::IntervalEpochTicker, store::EpochOracleStore};
+use crate::{configured::RealTimeEpochTicker, store::EpochOracleStore};
 
 #[cfg(feature = "base_layer")]
 pub mod base_layer;
@@ -15,7 +15,7 @@ pub mod store;
 pub enum EpochOracle<TStore> {
     #[cfg(feature = "base_layer")]
     BaseLayer(base_layer::BaseLayerOracle<TStore>),
-    Configured(configured::ConfiguredEpochOracle<TStore, IntervalEpochTicker>),
+    Configured(configured::ConfiguredEpochOracle<TStore, RealTimeEpochTicker>),
     #[cfg(feature = "base_layer")]
     Hybrid(hybrid::HybridEpochOracle<TStore>),
 }

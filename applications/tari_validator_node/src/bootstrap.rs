@@ -44,7 +44,7 @@ use tari_epoch_manager::{
 };
 use tari_epoch_oracles::{
     base_layer::BaseLayerOracle,
-    configured::{ConfiguredEpochOracle, IntervalEpochTicker},
+    configured::{ConfiguredEpochOracle, RealTimeEpochTicker},
     hybrid::{watch_ticker, HybridEpochOracle},
     store::EpochOracleStore,
     EpochOracle,
@@ -526,7 +526,7 @@ async fn create_epoch_oracle<TStore: EpochOracleStore + Send + Clone + 'static>(
     config: &ApplicationConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
-) -> Result<EpochOracle<TStore>, ExitError> {
+) -> anyhow::Result<EpochOracle<TStore>> {
     match config.epoch_oracle.oracle_type {
         EpochOracleType::BaseLayer => {
             let oracle = create_base_layer_epoch_oracle(config, store, consensus_constants).await?;
@@ -547,7 +547,7 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + 'static>(
     config: &ApplicationConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
-) -> Result<BaseLayerOracle<TStore>, ExitError> {
+) -> anyhow::Result<BaseLayerOracle<TStore>> {
     let mut base_node_client = create_base_layer_client(config.network, &config.epoch_oracle.base_layer).await?;
     verify_correct_network(&mut base_node_client, config.network).await?;
     Ok(BaseLayerOracle::new(
@@ -577,16 +577,17 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + 'static>(
 async fn create_configured_epoch_oracle<TStore: EpochOracleStore + Send>(
     config: &ApplicationConfig,
     store: TStore,
-) -> Result<ConfiguredEpochOracle<TStore, IntervalEpochTicker>, ExitError> {
+) -> anyhow::Result<ConfiguredEpochOracle<TStore, RealTimeEpochTicker>> {
     let oracle_config = config.epoch_oracle.configured.load().await?;
-    Ok(ConfiguredEpochOracle::new(oracle_config, store))
+    let oracle = ConfiguredEpochOracle::create(oracle_config, store)?;
+    Ok(oracle)
 }
 
 async fn create_hybrid_epoch_oracle<TStore: EpochOracleStore + Clone + Send + 'static>(
     config: &ApplicationConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
-) -> Result<HybridEpochOracle<TStore>, ExitError> {
+) -> anyhow::Result<HybridEpochOracle<TStore>> {
     let base_layer_oracle = create_base_layer_epoch_oracle(config, store.clone(), consensus_constants).await?;
     let oracle_config = config.epoch_oracle.configured.load().await?;
     let (ticker, trigger) = watch_ticker();

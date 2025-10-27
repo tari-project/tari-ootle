@@ -24,10 +24,7 @@ use std::{path::PathBuf, time::Duration};
 
 use multiaddr::multiaddr;
 use reqwest::Url;
-use tari_common::{
-    configuration::{CommonConfig, StringList},
-    exit_codes::ExitError,
-};
+use tari_common::configuration::{CommonConfig, StringList};
 use tari_indexer::{
     config::{ApplicationConfig, IndexerConfig},
     run_indexer,
@@ -58,7 +55,7 @@ pub struct IndexerProcess {
     pub graphql_port: u16,
     pub base_node_grpc_port: u16,
     pub web_ui_port: u16,
-    pub handle: task::JoinHandle<Result<(), ExitError>>,
+    pub handle: task::JoinHandle<anyhow::Result<()>>,
     pub temp_dir_path: String,
     pub shutdown: Shutdown,
     pub db_path: PathBuf,

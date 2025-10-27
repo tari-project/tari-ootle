@@ -42,6 +42,7 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
     handlers::templates::get_template_definition,
     handlers::templates::list_templates,
     handlers::utxos::fetch_utxos,
+    handlers::utxos::list_utxos,
     handlers::utxos::stream_utxo_updates,
     handlers::transaction_receipts::list_transaction_receipts,
     handlers::transaction_receipts::get_transaction_receipt
@@ -92,6 +93,7 @@ impl Server {
             )
             .route("/non-fungibles", get(handlers::nfts::get_non_fungibles)) // Placeholder for future non-fungible endpoints
             .nest("/utxos", Router::new()
+                .route("/", get(handlers::utxos::list_utxos))
                 .route("/fetch", post(handlers::utxos::fetch_utxos))
                 .route("/stream", post(handlers::utxos::stream_utxo_updates))
             )

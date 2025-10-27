@@ -285,6 +285,32 @@ impl From<RistrettoPublicKeyBytes> for KeyIdOrPublicKey {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub struct BranchAndKeyId {
+    pub branch: KeyBranch,
+    pub key_id: KeyId,
+}
+
+impl BranchAndKeyId {
+    pub fn new(branch: KeyBranch, key_id: KeyId) -> Self {
+        Self { branch, key_id }
+    }
+
+    pub fn for_account(key_id: KeyId) -> Self {
+        Self {
+            branch: KeyBranch::Account,
+            key_id,
+        }
+    }
+}
+
+impl Display for BranchAndKeyId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.branch.as_str(), self.key_id)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub enum KeyId {
     /// Derived from the seed key
     Derived { index: DerivedKeyIndex },

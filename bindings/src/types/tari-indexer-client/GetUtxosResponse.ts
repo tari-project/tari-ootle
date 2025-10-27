@@ -2,4 +2,4 @@
 import type { Utxo } from "../Utxo";
 import type { UtxoId } from "../UtxoId";
 
-export type GetUnspentUtxosResponse = { utxos: Array<[UtxoId, Utxo]> };
+export type GetUtxosResponse = { utxos: Array<[UtxoId, Utxo]> };

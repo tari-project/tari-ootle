@@ -94,7 +94,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
             .non_negative_checked()
             .ok_or_else(|| StealthOutputsApiError::InvalidParameter {
                 param: "amount",
-                reason: "Amount must be non-negative".to_string(),
+                reason: "lock_outputs_for_at_least_amount: Amount must be non-negative".to_string(),
             })?;
         self.store.with_write_tx(|tx| {
             let (outputs, total_output_amount) =
@@ -132,7 +132,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         if amount.is_negative() {
             return Err(StealthOutputsApiError::InvalidParameter {
                 param: "amount",
-                reason: "Amount cannot be negative".to_string(),
+                reason: "lock_outputs_internal: Amount cannot be negative".to_string(),
             });
         }
         let mut total_output_amount = Amount::zero();
@@ -179,6 +179,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         Ok(())
     }
 
+    // TODO: move into a lock api
     pub fn create_lock(&self) -> Result<WalletLockId, StealthOutputsApiError> {
         let lock_id = self.store.with_write_tx(|tx| tx.locks_create())?;
         Ok(lock_id)
@@ -607,7 +608,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         if !amount.is_positive() {
             return Err(StealthOutputsApiError::InvalidParameter {
                 param: "amount",
-                reason: format!("Amount must be positive, got {}", amount),
+                reason: format!("create_output_witness: Amount must be positive, got {}", amount),
             });
         }
 
@@ -702,7 +703,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         let statement = self.crypto_api.generate_transfer_statement(
             unblinded_inputs.iter().map(|i| &i.witness),
             params.input_revealed_amount,
-            &outputs,
+            outputs.iter(),
             params.output_revealed_amount,
             params.required_signer,
         )?;

@@ -806,8 +806,11 @@ impl TryFrom<proto::transaction::StealthTransferStatement> for tari_template_lib
                 .outputs_statement
                 .ok_or_else(|| anyhow!("output_statement not provided"))?
                 .try_into()?,
-            balance_proof: BalanceProofSignature::from_bytes(&value.balance_proof)
-                .map_err(|e| anyhow!("Invalid balance proof signature: {}", e))?,
+            balance_proof: Some(&value.balance_proof)
+                .filter(|b| !b.is_empty())
+                .map(|b| BalanceProofSignature::from_bytes(b))
+                .transpose()
+                .context("Invalid balance proof signature")?,
         })
     }
 }
@@ -817,7 +820,7 @@ impl From<tari_template_lib::models::StealthTransferStatement> for proto::transa
         Self {
             inputs_statement: Some(value.inputs_statement.into()),
             outputs_statement: Some(value.outputs_statement.into()),
-            balance_proof: value.balance_proof.to_bytes(),
+            balance_proof: value.balance_proof.as_ref().map(|b| b.to_bytes()).unwrap_or_default(),
         }
     }
 }

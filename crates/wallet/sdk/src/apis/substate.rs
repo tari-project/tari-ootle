@@ -72,6 +72,10 @@ where
         &self,
         ids: Vec<SubstateId>,
     ) -> Result<HashMap<SubstateId, Substate>, SubstateApiError> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
         self.network_interface
             .get_substates(ids)
             .await

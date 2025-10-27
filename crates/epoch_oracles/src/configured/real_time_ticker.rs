@@ -63,6 +63,7 @@ impl EpochTicker for RealTimeEpochTicker {
     fn poll_tick(&mut self, cx: &mut Context) -> Poll<Option<EpochTickerData>> {
         let calculated_epoch = self.calc_current_epoch();
 
+        // Emit quickly to the initial epoch
         if calculated_epoch < self.initial_epoch {
             let epoch = self.increment_epoch();
             let epoch_hash = calc_static_epoch_hash(epoch);
@@ -73,6 +74,7 @@ impl EpochTicker for RealTimeEpochTicker {
             }));
         }
 
+        // Emit quickly to catch up to the calculated epoch
         if calculated_epoch > self.epoch {
             let epoch = self.increment_epoch();
             let epoch_hash = calc_static_epoch_hash(epoch);
@@ -86,9 +88,10 @@ impl EpochTicker for RealTimeEpochTicker {
 
         if let Some(interval_mut) = self.interval.as_mut() {
             loop {
+                // Every tick, check if we need to emit a new epoch
                 ready!(interval_mut.poll_tick(cx));
 
-                if self.epoch.is_zero() || self.epoch <= calculated_epoch {
+                if self.epoch <= calculated_epoch {
                     let epoch = self.increment_epoch();
                     let epoch_hash = calc_static_epoch_hash(epoch);
                     return Poll::Ready(Some(EpochTickerData {
@@ -155,6 +158,21 @@ mod tests {
                     done_for_now: i >= 1000
                 }))
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn it_stays_on_the_current_epoch_of_base_time_in_future() {
+        let base_time = time::OffsetDateTime::now_utc() + time::Duration::seconds(1);
+        let mut ticker =
+            RealTimeEpochTicker::new(Epoch(0), base_time, Epoch(1)).with_epoch_time_secs(1.try_into().unwrap());
+
+        for i in 0..3 {
+            let res = timeout(Duration::from_secs(10), poll_fn(|cx| ticker.poll_tick(cx)))
+                .await
+                .expect("elapsed")
+                .unwrap();
+            assert_eq!(res.epoch, Epoch(i + 1));
         }
     }
 }

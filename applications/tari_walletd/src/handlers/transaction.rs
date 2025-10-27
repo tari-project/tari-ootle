@@ -11,7 +11,7 @@ use tari_engine_types::ToByteType;
 use tari_ootle_common_types::{optional::Optional, Epoch, Network};
 use tari_ootle_wallet_sdk::{
     apis::{config::ConfigKey, transaction::TransactionApiError},
-    models::KeyBranch,
+    models::{BranchAndKeyId, KeyBranch},
     network::WalletQueryErrorStatus,
 };
 use tari_ootle_wallet_sdk_services::{events::WalletEvent, transaction_service::TransactionServiceError};
@@ -78,6 +78,12 @@ pub async fn handle_submit_instruction(
         );
     }
     let fee_account = get_account(&req.fee_account, &sdk.accounts_api())?;
+    let owner_key_id = fee_account.owner_key_id().ok_or_else(|| {
+        invalid_params(
+            "fee_account",
+            Some("Fee account does not have an owner key set".to_string()),
+        )
+    })?;
 
     let transaction = builder
         .fee_transaction_pay_from_component(*fee_account.component_address(), req.max_fee)
@@ -87,10 +93,11 @@ pub async fn handle_submit_instruction(
 
     let request = TransactionSubmitRequest {
         transaction,
-        signing_key_id: fee_account.owner_key_id(),
+        seal_signer: BranchAndKeyId::for_account(owner_key_id),
+        other_signers: vec![],
         detect_inputs: req.override_inputs.unwrap_or_default(),
         detect_inputs_use_unversioned: true,
-        proof_ids: vec![],
+        lock_ids: vec![],
     };
     handle_submit(context, token, request).await
 }
@@ -103,10 +110,6 @@ pub async fn handle_submit(
     // TODO: fine-grained checks of individual addresses involved (resources, components, etc)
     context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
     let sdk = context.wallet_sdk();
-    let key_api = sdk.key_manager_api();
-    // Fetch the key to sign the transaction
-    let signing_key = key_api.get_key_or_active(KeyBranch::Account, req.signing_key_id)?;
-
     let detected_inputs = if req.detect_inputs {
         // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
         let substates = req.transaction.to_referenced_substates()?;
@@ -145,26 +148,27 @@ pub async fn handle_submit(
         req.detect_inputs_use_unversioned,
     );
 
-    let transaction = context
+    let mut builder = context
         .transaction_builder()
         .with_unsigned_transaction(req.transaction)
-        .with_inputs(detected_inputs)
-        .build();
-    let transaction = sdk
-        .local_signer_api()
-        .sign(KeyBranch::Account, signing_key.key_id, transaction)?;
+        .with_inputs(detected_inputs);
 
-    if log_enabled!(log::Level::Debug) {
-        for input in transaction.inputs() {
-            debug!(target: LOG_TARGET, "Input: {}", input)
-        }
+    let main_signer = sdk
+        .key_manager_api()
+        .get_public_key(req.seal_signer.branch, req.seal_signer.key_id)?;
+    let main_signer_pk = main_signer.public_key.to_byte_type();
+    let mut local_signer = sdk.local_signer_api();
+    for key in &req.other_signers {
+        builder = local_signer.sign_with_context(key.branch, key.key_id, &main_signer_pk, builder)?;
     }
 
+    let transaction = local_signer.sign(req.seal_signer.branch, req.seal_signer.key_id, builder.build())?;
+
     let tx_id = transaction.calculate_id();
-    for proof_id in req.proof_ids {
-        // update the proofs table with the corresponding transaction hash
-        sdk.confidential_outputs_api()
-            .locks_set_transaction_id(proof_id, tx_id)?;
+    for lock_id in req.lock_ids {
+        // update the locks with the corresponding transaction ID so that they can be finalized/released once the
+        // transaction resolves
+        sdk.transaction_api().locks_set_transaction_id(lock_id, tx_id)?;
     }
 
     info!(
@@ -215,7 +219,7 @@ pub async fn handle_submit_dry_run(
     let sdk = context.wallet_sdk();
     let key_api = sdk.key_manager_api();
     // Fetch the key to sign the transaction
-    let key = key_api.get_key_or_active(KeyBranch::Account, req.signing_key_id)?;
+    let key = key_api.get_public_key(req.seal_signer.branch, req.seal_signer.key_id)?;
 
     let detected_inputs = if req.detect_inputs {
         // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
@@ -249,10 +253,10 @@ pub async fn handle_submit_dry_run(
         .local_signer_api()
         .sign(KeyBranch::Account, key.key_id, transaction)?;
 
-    for proof_id in req.proof_ids {
+    for lock_id in req.lock_ids {
         // update the proofs table with the corresponding transaction hash
-        sdk.confidential_outputs_api()
-            .locks_set_transaction_id(proof_id, transaction.calculate_id())?;
+        sdk.transaction_api()
+            .locks_set_transaction_id(lock_id, transaction.calculate_id())?;
     }
 
     info!(
@@ -523,6 +527,12 @@ pub async fn handle_publish_template(
     let sdk = context.wallet_sdk();
 
     let fee_account = get_account_or_default(req.fee_account.as_ref(), &sdk.accounts_api())?;
+    let owner_key_id = fee_account.owner_key_id().ok_or_else(|| {
+        invalid_params(
+            "fee_account",
+            Some("Fee account does not have an owner key set".to_string()),
+        )
+    })?;
 
     // trying to optimize WASM binary
     let wasm_binary = match optimize_wasm_template(req.binary.as_slice()).await {
@@ -545,10 +555,11 @@ pub async fn handle_publish_template(
     if req.dry_run {
         let request = TransactionSubmitDryRunRequest {
             transaction,
-            signing_key_id: fee_account.owner_key_id(),
+            seal_signer: BranchAndKeyId::for_account(owner_key_id),
+            other_signers: vec![],
             detect_inputs: req.detect_inputs,
             detect_inputs_use_unversioned: true,
-            proof_ids: vec![],
+            lock_ids: vec![],
         };
         let resp = handle_submit_dry_run(context, token, request).await?;
         if let Some(reject) = resp.result.finalize.any_reject() {
@@ -566,10 +577,11 @@ pub async fn handle_publish_template(
     }
     let request = TransactionSubmitRequest {
         transaction,
-        signing_key_id: fee_account.owner_key_id(),
+        seal_signer: BranchAndKeyId::for_account(owner_key_id),
+        other_signers: vec![],
         detect_inputs: req.detect_inputs,
         detect_inputs_use_unversioned: true,
-        proof_ids: vec![],
+        lock_ids: vec![],
     };
     let resp = handle_submit(context, token, request).await?;
     Ok(PublishTemplateResponse {

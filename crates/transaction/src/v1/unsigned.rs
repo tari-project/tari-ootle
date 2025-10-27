@@ -10,9 +10,13 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::{Epoch, Signable, SubstateRequirement};
-use tari_template_lib::{models::ComponentAddress, prelude::RistrettoPublicKeyBytes};
+use tari_template_lib::{
+    constants::XTR,
+    models::{ComponentAddress, UtxoAddress},
+    prelude::RistrettoPublicKeyBytes,
+};
 
-use crate::{builder::TransactionBuilder, ComponentCall, Instruction, TransactionSignature};
+use crate::{builder::TransactionBuilder, ComponentCall, Instruction, ResourceAddressRef, TransactionSignature};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -133,6 +137,32 @@ impl UnsignedTransactionV1 {
                 },
                 Instruction::ClaimValidatorFees { address, .. } => {
                     substates.insert(SubstateId::ValidatorFeePool(*address));
+                },
+                Instruction::StealthTransfer {
+                    resource_address_ref: ResourceAddressRef::Address(addr),
+                    statement,
+                    ..
+                } => {
+                    substates.insert(SubstateId::Resource(*addr));
+                    substates.extend(
+                        statement
+                            .inputs_statement
+                            .inputs
+                            .iter()
+                            .map(|i| UtxoAddress::new(*addr, i.commitment.into()))
+                            .map(SubstateId::Utxo),
+                    );
+                },
+                Instruction::PayFee { statement, .. } => {
+                    substates.insert(SubstateId::Resource(XTR));
+                    substates.extend(
+                        statement
+                            .inputs_statement
+                            .inputs
+                            .iter()
+                            .map(|i| UtxoAddress::new(XTR, i.commitment.into()))
+                            .map(SubstateId::Utxo),
+                    );
                 },
                 _ => {},
             }

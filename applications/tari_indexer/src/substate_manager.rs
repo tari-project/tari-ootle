@@ -140,6 +140,18 @@ impl SubstateManager {
         Ok(utxos)
     }
 
+    pub fn list_utxos(
+        &self,
+        resource_address: &ResourceAddress,
+        from_id: Option<UtxoId>,
+        limit: u32,
+    ) -> Result<Vec<(UtxoId, Utxo)>, anyhow::Error> {
+        let utxos = self
+            .substate_store
+            .with_read_tx(|tx| tx.utxos_list(resource_address, from_id, limit))?;
+        Ok(utxos)
+    }
+
     pub async fn get_substate(
         &self,
         substate_id: &SubstateId,

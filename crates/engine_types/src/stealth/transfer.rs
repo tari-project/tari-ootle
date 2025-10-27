@@ -4,7 +4,7 @@
 use log::*;
 use tari_crypto::{
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey},
-    tari_utilities::{ByteArray, ByteArrayError},
+    tari_utilities::ByteArrayError,
 };
 use tari_template_lib::{
     models::{StealthInput, StealthTransferStatement},
@@ -37,10 +37,15 @@ pub fn validate_transfer_balance(
     basic_validations(transfer)?;
     let validated_outputs = stealth::validate_stealth_outputs_statement(&transfer.outputs_statement, view_key)?;
 
-    let balance_proof =
-        try_decode_to_signature(&transfer.balance_proof).ok_or_else(|| ResourceError::InvalidBalanceProof {
-            details: "Malformed balance proof".to_string(),
-        })?;
+    let balance_proof = transfer
+        .balance_proof
+        .as_ref()
+        .map(|s| {
+            try_decode_to_signature(s).ok_or_else(|| ResourceError::InvalidBalanceProof {
+                details: "Malformed balance proof".to_string(),
+            })
+        })
+        .transpose()?;
 
     // EDGE CASE: If there are no inputs and no outputs, the public excess will be 0.G
     if transfer.inputs_statement.inputs.is_empty() && validated_outputs.is_empty() {
@@ -51,12 +56,13 @@ pub fn validate_transfer_balance(
             });
         }
 
-        // In this case, the public excess is 0 (s = r + e.0 = r) which leaks the secret nonce. So instead, we enforce
-        // that a zero signature MUST be used for this case.
-        if balance_proof.get_signature().as_bytes() != RistrettoSecretKey::default().as_bytes() {
+        // In this case, the public excess is 0 (s = r + e.0 = r) which leaks the secret nonce. Probably fine, but
+        // instead, we enforce that a None signature MUST be used for this case.
+        if balance_proof.is_some() {
             return Err(ResourceError::InvalidBalanceProof {
-                details: "Balance proof signature verification failed for revealed amount. This typically indicates \
-                          that the transfer statement total input amount != total output amount."
+                details: "Balance proof signature verification failed for revealed amount. This indicates that the \
+                          transfer statement provided a balance proof when there are no stealth inputs or outputs, \
+                          None is required."
                     .to_string(),
             });
         }
@@ -66,6 +72,9 @@ pub fn validate_transfer_balance(
             revealed_output_amount: transfer.outputs_statement.revealed_output_amount,
         });
     }
+    let balance_proof = balance_proof.ok_or_else(|| ResourceError::InvalidBalanceProof {
+        details: "Balance proof must be provided when there are stealth inputs or outputs".to_string(),
+    })?;
 
     let agg_outputs = validated_outputs.iter().fold(RistrettoPublicKey::default(), |acc, o| {
         acc + o.output.commitment.as_public_key()
@@ -206,9 +215,12 @@ fn basic_validations(transfer: &StealthTransferStatement) -> Result<(), Resource
                 ),
             });
         }
-    } else if transfer.balance_proof.public_nonce().is_zero() || transfer.balance_proof.signature().is_zero() {
+    } else if transfer
+        .balance_proof
+        .is_none_or(|p| p.public_nonce().is_zero() || p.signature().is_zero())
+    {
         return Err(ResourceError::InvalidBalanceProof {
-            details: "Balance proof public nonce and signature cannot be zero".to_string(),
+            details: "Balance proof must be provided and public nonce and signature cannot be zero".to_string(),
         });
     } else {
         // Ok

@@ -29,7 +29,7 @@ import { SelectChangeEvent } from "@mui/material/Select/Select";
 import {
   BadgeUsage,
   BalanceEntry,
-  ConfidentialTransferInputSelection,
+  UtxoInputSelection,
   rejectReasonToString,
   ResourceAddress,
   ResourceType,
@@ -196,7 +196,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         destination_address: transferFormState.address,
         resourceType: props.resource_type,
         output_to_revealed: !transferFormState.outputToConfidential,
-        input_selection: transferFormState.inputSelection as ConfidentialTransferInputSelection,
+        input_selection: transferFormState.inputSelection as UtxoInputSelection,
         badge_usage: transferFormState.badge ? { Resource: transferFormState.badge } : ("None" as BadgeUsage),
         output_memo: transferFormState.memo ? { Message: transferFormState.memo } : undefined,
       };
@@ -271,7 +271,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         destination_address: transferFormState.address,
         resourceType: props.resource_type,
         output_to_revealed: !transferFormState.outputToConfidential,
-        input_selection: transferFormState.inputSelection as ConfidentialTransferInputSelection,
+        input_selection: transferFormState.inputSelection as UtxoInputSelection,
         // TODO: support for other types of BadgeUsage
         badge_usage: transferFormState.badge ? { Resource: transferFormState.badge } : ("None" as BadgeUsage),
         output_memo: transferFormState.memo ? { Message: transferFormState.memo } : undefined,

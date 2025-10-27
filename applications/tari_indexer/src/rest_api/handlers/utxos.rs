@@ -4,13 +4,20 @@
 use std::collections::HashSet;
 
 use axum::{
+    extract::Query,
     http::header::HeaderMap,
     response::{IntoResponse, Response},
     Extension,
     Json,
 };
 use log::*;
-use tari_indexer_client::types::{GetUnspentUtxosRequest, GetUnspentUtxosResponse, GetUtxoUpdatesRequest};
+use tari_indexer_client::types::{
+    GetUtxoUpdatesRequest,
+    GetUtxosRequest,
+    GetUtxosResponse,
+    ListUtxosRequest,
+    ListUtxosResponse,
+};
 use tari_ootle_common_types::NumPreshards;
 
 use crate::rest_api::{
@@ -92,8 +99,8 @@ pub async fn stream_utxo_updates(
 )]
 pub async fn fetch_utxos(
     Extension(context): Extension<HandlerContext>,
-    Json(req): Json<GetUnspentUtxosRequest>,
-) -> HandlerResult<Json<GetUnspentUtxosResponse>> {
+    Json(req): Json<GetUtxosRequest>,
+) -> HandlerResult<Json<GetUtxosResponse>> {
     if req.tag_and_nonce_pairs.len() > 1000 {
         return Err(ErrorResponse::bad_request("cannot query more than 1000 UTXOs"));
     }
@@ -102,5 +109,24 @@ pub async fn fetch_utxos(
         .get_unspent_utxos(&req.resource_address, &req.tag_and_nonce_pairs)
         .map_err(ErrorResponse::anyhow)?;
 
-    Ok(Json(GetUnspentUtxosResponse { utxos }))
+    Ok(Json(GetUtxosResponse { utxos }))
+}
+
+#[utoipa::path(get, path = "/utxos", description = "List full UTXO data")]
+pub async fn list_utxos(
+    Extension(context): Extension<HandlerContext>,
+    Query(req): Query<ListUtxosRequest>,
+) -> HandlerResult<Json<ListUtxosResponse>> {
+    if req.limit == 0 {
+        return Err(ErrorResponse::bad_request("limit must be greater than 0"));
+    }
+    if req.limit > 1000 {
+        return Err(ErrorResponse::bad_request("cannot query more than 1000 UTXOs"));
+    }
+    let utxos = context
+        .substate_manager()
+        .list_utxos(&req.resource_address, req.from_id, req.limit)
+        .map_err(ErrorResponse::anyhow)?;
+
+    Ok(Json(ListUtxosResponse { utxos }))
 }

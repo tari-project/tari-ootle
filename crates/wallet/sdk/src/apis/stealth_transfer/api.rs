@@ -39,7 +39,7 @@ use super::{
 use crate::{
     apis::{
         accounts::{derive_account_address_from_public_key, AccountsApi},
-        confidential_transfer::ConfidentialTransferInputSelection,
+        confidential_transfer::UtxoInputSelection,
         config::ConfigApi,
         key_manager::KeyManagerApi,
         stealth_outputs::{StealthOutputsApi, TransferStatementParams},
@@ -91,7 +91,7 @@ where
         owner_account_component_address: &ComponentAddress,
         resource_address: ResourceAddress,
         spend_amount: Amount,
-        input_selection: ConfidentialTransferInputSelection,
+        input_selection: UtxoInputSelection,
     ) -> Result<InputsToSpend, StealthTransferApiError> {
         if !spend_amount.is_positive() {
             return Err(StealthTransferApiError::InvalidParameter {
@@ -111,7 +111,7 @@ where
             .unwrap_or_else(Amount::zero);
 
         match input_selection {
-            ConfidentialTransferInputSelection::ConfidentialOnly => {
+            UtxoInputSelection::ConfidentialOnly => {
                 let (inputs, total_locked) = self.outputs_api.lock_outputs_for_at_least_amount(
                     owner_account_component_address,
                     &resource_address,
@@ -131,9 +131,13 @@ where
                     revealed: Amount::zero(),
                 })
             },
-            ConfidentialTransferInputSelection::RevealedOnly => {
+            UtxoInputSelection::RevealedOnly => {
                 if available_revealed_funds < spend_amount {
-                    return Err(StealthTransferApiError::InsufficientFunds);
+                    return Err(StealthTransferApiError::InsufficientFunds {
+                        details: "RevealedOnly: Not enough revealed funds to spend.".to_string(),
+                        available: available_revealed_funds,
+                        required: spend_amount,
+                    });
                 }
 
                 let src_vault =
@@ -161,7 +165,7 @@ where
                     revealed: spend_amount,
                 })
             },
-            ConfidentialTransferInputSelection::PreferRevealed => {
+            UtxoInputSelection::PreferRevealed => {
                 let revealed_to_spend = cmp::min(available_revealed_funds, spend_amount);
                 let utxo_amount_to_spend = spend_amount - revealed_to_spend;
                 if let Some(ref src_vault) = maybe_src_vault {
@@ -227,7 +231,7 @@ where
                     revealed: revealed_to_spend,
                 })
             },
-            ConfidentialTransferInputSelection::PreferConfidential => {
+            UtxoInputSelection::PreferConfidential => {
                 let lock_id = self.outputs_api.create_lock()?;
                 let (inputs, blinded_amount_locked) = self.outputs_api.lock_outputs_until_partial_amount(
                     owner_account_component_address,
@@ -241,7 +245,11 @@ where
                     .unwrap_or_else(Amount::zero);
 
                 if available_revealed_funds < revealed_to_spend {
-                    return Err(StealthTransferApiError::InsufficientFunds);
+                    return Err(StealthTransferApiError::InsufficientFunds {
+                        details: "PreferConfidential: Not enough revealed funds to spend.".to_string(),
+                        available: available_revealed_funds,
+                        required: revealed_to_spend,
+                    });
                 }
 
                 if revealed_to_spend.is_positive() {
@@ -273,7 +281,7 @@ where
         lock_id: WalletLockId,
         owner_account: &AccountWithAddress,
         max_fee: A,
-        input_selection: ConfidentialTransferInputSelection,
+        input_selection: UtxoInputSelection,
     ) -> Result<InputsToSpend, StealthTransferApiError> {
         self.lock_inputs_for_transfer(
             lock_id,
@@ -350,7 +358,7 @@ where
             // Lock up funds for fees and transfer
             let fee_inputs_to_spend = self.unlock_on_failure(
                 lock_id,
-                self.lock_fee_inputs(lock_id, &owner_account, params.max_fee, params.input_selection),
+                self.lock_fee_inputs(lock_id, &owner_account, params.max_fee, params.fee_input_selection),
             )?;
 
             let fee_stealth_change_amt = fee_inputs_to_spend

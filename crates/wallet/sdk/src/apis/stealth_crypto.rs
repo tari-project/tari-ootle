@@ -55,8 +55,8 @@ impl StealthCryptoApi {
     ) -> Result<StealthTransferStatement, StealthCryptoApiError>
     where
         A: Into<Amount>,
-        Inputs: IntoIterator<Item = &'a UnblindedStealthInputWitness>,
-        Outputs: IntoIterator<Item = &'a UnblindedStealthOutputWitness> + Clone,
+        Inputs: IntoIterator<Item = &'a UnblindedStealthInputWitness> + ExactSizeIterator,
+        Outputs: IntoIterator<Item = &'a UnblindedStealthOutputWitness> + ExactSizeIterator + Clone,
     {
         let stmt = stealth::create_transfer_statement(
             inputs,

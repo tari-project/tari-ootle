@@ -388,14 +388,28 @@ pub struct GetUtxoUpdatesResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
-pub struct GetUnspentUtxosRequest {
+pub struct GetUtxosRequest {
     pub tag_and_nonce_pairs: Vec<(UtxoTag, RistrettoPublicKeyBytes)>,
     pub resource_address: ResourceAddress,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
-pub struct GetUnspentUtxosResponse {
+pub struct GetUtxosResponse {
+    pub utxos: Vec<(UtxoId, Utxo)>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+pub struct ListUtxosRequest {
+    pub resource_address: ResourceAddress,
+    pub limit: u32,
+    pub from_id: Option<UtxoId>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+pub struct ListUtxosResponse {
     pub utxos: Vec<(UtxoId, Utxo)>,
 }
 

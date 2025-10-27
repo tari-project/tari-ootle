@@ -26,9 +26,9 @@ use crate::{
         GetTransactionReceiptResponse,
         GetTransactionResultRequest,
         GetTransactionResultResponse,
-        GetUnspentUtxosRequest,
-        GetUnspentUtxosResponse,
         GetUtxoUpdatesRequest,
+        GetUtxosRequest,
+        GetUtxosResponse,
         IndexerReadyResponse,
         ListRecentTransactionsRequest,
         ListRecentTransactionsResponse,
@@ -36,6 +36,8 @@ use crate::{
         ListSubstatesResponse,
         ListTransactionReceiptsRequest,
         ListTransactionReceiptsResponse,
+        ListUtxosRequest,
+        ListUtxosResponse,
         SubmitTransactionRequest,
         SubmitTransactionResponse,
     },
@@ -165,11 +167,12 @@ impl IndexerRestApiClient {
         Ok(stream)
     }
 
-    pub async fn get_unspent_utxos(
-        &mut self,
-        req: GetUnspentUtxosRequest,
-    ) -> Result<GetUnspentUtxosResponse, IndexerRestClientError> {
+    pub async fn get_utxos(&mut self, req: GetUtxosRequest) -> Result<GetUtxosResponse, IndexerRestClientError> {
         self.send_post("utxos/fetch", req).await
+    }
+
+    pub async fn list_utxos(&mut self, req: ListUtxosRequest) -> Result<ListUtxosResponse, IndexerRestClientError> {
+        self.send_get("utxos", req).await
     }
 
     pub async fn list_transaction_receipts(

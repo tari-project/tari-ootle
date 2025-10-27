@@ -82,6 +82,8 @@ use crate::{
         AccountsCreateOrGetResponse,
         AccountsCreateRequest,
         AccountsCreateResponse,
+        AccountsCreateStealthTransferStatementRequest,
+        AccountsCreateStealthTransferStatementResponse,
         AccountsGetBalancesRequest,
         AccountsGetBalancesResponse,
         AccountsListRequest,
@@ -159,6 +161,10 @@ impl WalletDaemonClient {
             request_id: 0,
             token,
         })
+    }
+
+    pub fn endpoint(&self) -> &Url {
+        &self.endpoint
     }
 
     pub fn set_auth_token(&mut self, token: EncodedJwtString) -> &mut Self {
@@ -352,6 +358,16 @@ impl WalletDaemonClient {
         self.send_request("accounts.stealth_transfer", req.borrow()).await
     }
 
+    pub async fn accounts_create_stealth_transfer_statement<
+        T: Borrow<AccountsCreateStealthTransferStatementRequest>,
+    >(
+        &mut self,
+        req: T,
+    ) -> Result<AccountsCreateStealthTransferStatementResponse, WalletDaemonClientError> {
+        self.send_request("accounts.create_stealth_transfer_statement", req.borrow())
+            .await
+    }
+
     pub async fn claim_burn<T: Borrow<ClaimBurnRequest>>(
         &mut self,
         req: T,
@@ -359,7 +375,7 @@ impl WalletDaemonClient {
         self.send_request("accounts.claim_burn", req.borrow()).await
     }
 
-    pub async fn create_transfer_proof<T: Borrow<ProofsGenerateRequest>>(
+    pub async fn confidential_create_transfer_proof<T: Borrow<ProofsGenerateRequest>>(
         &mut self,
         req: T,
     ) -> Result<ProofsGenerateResponse, WalletDaemonClientError> {

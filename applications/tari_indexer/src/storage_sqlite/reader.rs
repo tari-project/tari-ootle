@@ -414,7 +414,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             let tr = alias!(transaction_receipts as tr);
             let subquery = tr
                 .select(tr.field(transaction_receipts::id))
-                .filter(transaction_receipts::address.eq(last_id.to_string()))
+                .filter(tr.field(transaction_receipts::address).eq(last_id.to_string()))
                 .limit(1)
                 .single_value()
                 .assume_not_null();
@@ -558,6 +558,51 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         }
 
         Ok((max_state_version, updates))
+    }
+
+    fn utxos_list(
+        &mut self,
+        resource_address: &ResourceAddress,
+        from_id: Option<UtxoId>,
+        limit: u32,
+    ) -> Result<Vec<(UtxoId, Utxo)>, StorageError> {
+        const OPERATION: &str = "utxos_list";
+        use crate::storage_sqlite::schema::utxos;
+
+        let mut query = utxos::table
+            .filter(utxos::resource_address.eq(resource_address.to_string()))
+            .filter(utxos::is_spent.eq(false))
+            .into_boxed();
+
+        if let Some(from_id) = from_id {
+            let uxo = alias!(utxos as uxo);
+            let subquery = uxo
+                .select(uxo.field(utxos::id))
+                .filter(uxo.field(utxos::commitment).eq(from_id.to_commitment_hex_string()))
+                .limit(1)
+                .single_value()
+                .assume_not_null();
+            query = query.filter(utxos::id.gt(subquery));
+        }
+
+        let rows = query
+            .limit(i64::from(limit))
+            .order_by(utxos::id.asc())
+            .load_iter::<models::UtxoRecord, _>(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?;
+
+        rows.map(|res| {
+            res.map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })
+            .and_then(|row| {
+                let (address, utxo) = row.try_convert_to_utxo()?;
+                Ok((*address.id(), utxo))
+            })
+        })
+        .collect()
     }
 
     fn utxos_get_unspent_by_public_nonce_and_tag(

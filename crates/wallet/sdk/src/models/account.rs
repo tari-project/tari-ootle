@@ -68,6 +68,10 @@ pub struct AccountWithAddress {
 }
 
 impl AccountWithAddress {
+    pub fn new(account: Account, address: OotleAddress) -> Self {
+        Self { account, address }
+    }
+
     pub fn account(&self) -> &Account {
         &self.account
     }

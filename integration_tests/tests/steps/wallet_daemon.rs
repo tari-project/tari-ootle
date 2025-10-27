@@ -12,7 +12,7 @@ use integration_tests::{
 };
 use rand::{rngs::OsRng, Rng};
 use tari_engine_types::commit_result::FinalizeResult;
-use tari_ootle_wallet_sdk::models::KeyBranch;
+use tari_ootle_wallet_sdk::models::{BranchAndKeyId, KeyBranch};
 use tari_template_lib::{
     constants::XTR,
     types::{bytes::Bytes, crypto::PedersenCommitmentBytes, Amount},
@@ -127,10 +127,11 @@ async fn when_i_run_up_fees(world: &mut TariWorld, amount: u64, wallet_daemon_na
 
         let transaction_submit_req = TransactionSubmitRequest {
             transaction,
-            signing_key_id: account.owner_key_id(),
+            seal_signer: BranchAndKeyId::new(KeyBranch::Account, account.owner_key_id().expect("no owner key id")),
+            other_signers: vec![],
             detect_inputs: true,
             detect_inputs_use_unversioned: true,
-            proof_ids: vec![],
+            lock_ids: vec![],
         };
 
         let walletd = world.get_wallet_daemon(&wallet_daemon_name);

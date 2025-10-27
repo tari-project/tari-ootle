@@ -7,7 +7,6 @@ use tari_engine_types::{crypto::PrivateOutput, ConvertFromByteType, ToByteType};
 use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 use tari_ootle_wallet_crypto::{kdfs, MaskAndValue};
 use tari_template_lib::{models::VaultId, prelude::PedersenCommitmentBytes, types::Amount};
-use tari_transaction::TransactionId;
 
 use crate::{
     apis::{
@@ -320,16 +319,6 @@ where TStore: WalletStore
             status,
             lock_id: None,
         })
-    }
-
-    pub fn locks_set_transaction_id(
-        &self,
-        lock_id: WalletLockId,
-        transaction_id: TransactionId,
-    ) -> Result<(), ConfidentialOutputsApiError> {
-        self.store
-            .with_write_tx(|tx| tx.locks_link_transaction(lock_id, transaction_id))?;
-        Ok(())
     }
 }
 

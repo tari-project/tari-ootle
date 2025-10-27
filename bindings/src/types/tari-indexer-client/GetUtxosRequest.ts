@@ -3,7 +3,7 @@ import type { ResourceAddress } from "../ResourceAddress";
 import type { RistrettoPublicKeyBytes } from "../RistrettoPublicKeyBytes";
 import type { UtxoTag } from "../UtxoTag";
 
-export type GetUnspentUtxosRequest = {
+export type GetUtxosRequest = {
   tag_and_nonce_pairs: Array<[UtxoTag, RistrettoPublicKeyBytes]>;
   resource_address: ResourceAddress;
 };

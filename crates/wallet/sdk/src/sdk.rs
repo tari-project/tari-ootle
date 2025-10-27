@@ -252,6 +252,7 @@ where
             self.accounts_api(),
             self.confidential_outputs_api(),
             self.substate_api(),
+            self.transaction_api(),
             self.confidential_crypto_api(),
             self.config_api(),
         )

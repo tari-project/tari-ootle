@@ -215,9 +215,9 @@ fn generate_transfer_data_internal<I: IntoIterator<Item = A>, A: Into<Amount>>(
         .collect::<Vec<_>>();
 
     let transfer = stealth::create_transfer_statement(
-        &inputs,
+        inputs.iter(),
         revealed_input_amount.into(),
-        &outputs,
+        outputs.iter(),
         revealed_output_amount.into(),
         required_signer,
     )

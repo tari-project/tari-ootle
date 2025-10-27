@@ -25,9 +25,10 @@ use crate::{
         config::{ConfigApi, ConfigApiError},
         key_manager::{KeyManagerApi, KeyManagerApiError},
         substate::{SubstateApiError, SubstatesApi},
+        transaction::{TransactionApi, TransactionApiError},
     },
     models::{ConfidentialOutputModel, KeyBranch, OutputStatus, WalletLockId},
-    network::WalletNetworkInterface,
+    network::{StatusResponseError, WalletNetworkInterface},
     storage::{WalletStorageError, WalletStore},
 };
 
@@ -37,6 +38,7 @@ pub struct ConfidentialTransferApi<'a, TStore, TNetworkInterface> {
     key_manager_api: KeyManagerApi<'a, TStore>,
     accounts_api: AccountsApi<'a, TStore, TNetworkInterface>,
     confidential_outputs_api: ConfidentialOutputsApi<'a, TStore>,
+    transaction_api: TransactionApi<'a, TStore, TNetworkInterface>,
     substate_api: SubstatesApi<'a, TStore, TNetworkInterface>,
     crypto_api: ConfidentialCryptoApi,
     config_api: ConfigApi<'a, TStore>,
@@ -46,13 +48,14 @@ impl<'a, TStore, TNetworkInterface> ConfidentialTransferApi<'a, TStore, TNetwork
 where
     TStore: WalletStore,
     TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError,
+    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
 {
     pub fn new(
         key_manager_api: KeyManagerApi<'a, TStore>,
         accounts_api: AccountsApi<'a, TStore, TNetworkInterface>,
         confidential_outputs_api: ConfidentialOutputsApi<'a, TStore>,
         substate_api: SubstatesApi<'a, TStore, TNetworkInterface>,
+        transaction_api: TransactionApi<'a, TStore, TNetworkInterface>,
         crypto_api: ConfidentialCryptoApi,
         config_api: ConfigApi<'a, TStore>,
     ) -> Self {
@@ -61,6 +64,7 @@ where
             accounts_api,
             confidential_outputs_api,
             substate_api,
+            transaction_api,
             crypto_api,
             config_api,
         }
@@ -73,7 +77,7 @@ where
         from_account: ComponentAddress,
         resource_address: ResourceAddress,
         spend_amount: Amount,
-        input_selection: ConfidentialTransferInputSelection,
+        input_selection: UtxoInputSelection,
     ) -> Result<InputsToSpend, ConfidentialTransferApiError> {
         let src_vault = self
             .accounts_api
@@ -82,7 +86,7 @@ where
         let available_revealed_funds = src_vault.available_revealed_balance();
 
         match &input_selection {
-            ConfidentialTransferInputSelection::ConfidentialOnly => {
+            UtxoInputSelection::ConfidentialOnly => {
                 let (confidential_inputs, _) =
                     self.confidential_outputs_api
                         .lock_outputs_by_amount(lock_id, &src_vault.id, spend_amount)?;
@@ -103,7 +107,7 @@ where
                     revealed: Amount::zero(),
                 })
             },
-            ConfidentialTransferInputSelection::RevealedOnly => {
+            UtxoInputSelection::RevealedOnly => {
                 if available_revealed_funds < spend_amount {
                     return Err(ConfidentialTransferApiError::InsufficientFunds);
                 }
@@ -124,7 +128,7 @@ where
                     revealed: spend_amount,
                 })
             },
-            ConfidentialTransferInputSelection::PreferRevealed => {
+            UtxoInputSelection::PreferRevealed => {
                 let revealed_to_spend = cmp::min(src_vault.revealed_balance, spend_amount);
                 let confidential_to_spend = spend_amount - revealed_to_spend;
                 if confidential_to_spend.is_zero() {
@@ -179,7 +183,7 @@ where
                     revealed: revealed_to_spend,
                 })
             },
-            ConfidentialTransferInputSelection::PreferConfidential => {
+            UtxoInputSelection::PreferConfidential => {
                 let (confidential_inputs, amount_locked) = self
                     .confidential_outputs_api
                     .lock_outputs_until_partial_amount(lock_id, &src_vault.id, spend_amount)?;
@@ -416,7 +420,7 @@ where
             .build_and_seal(&account_key.secret);
 
         let tx_id = transaction.calculate_id();
-        self.confidential_outputs_api
+        self.transaction_api
             .locks_set_transaction_id(inputs_to_spend.lock_id, tx_id)?;
 
         Ok(TransferOutput {
@@ -478,7 +482,7 @@ pub struct ConfidentialTransferParams {
     /// Spend from this account
     pub from_account: ComponentAddress,
     /// Strategy for input selection
-    pub input_selection: ConfidentialTransferInputSelection,
+    pub input_selection: UtxoInputSelection,
     /// Amount to spend to destination
     pub amount: Amount,
     /// Destination address used to derive the destination account component
@@ -524,7 +528,7 @@ impl ConfidentialTransferParams {
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub enum ConfidentialTransferInputSelection {
+pub enum UtxoInputSelection {
     ConfidentialOnly,
     RevealedOnly,
     PreferRevealed,
@@ -572,6 +576,8 @@ pub enum ConfidentialTransferApiError {
     ConfigApi(#[from] ConfigApiError),
     #[error("Amount overflow for parameter `{param}`: {details}")]
     AmountOverflow { param: &'static str, details: String },
+    #[error("Transaction API error: {0}")]
+    TransactionApiError(#[from] TransactionApiError),
 }
 
 impl IsNotFoundError for ConfidentialTransferApiError {

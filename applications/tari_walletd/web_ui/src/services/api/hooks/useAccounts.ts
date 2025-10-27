@@ -41,6 +41,7 @@ import { ApiError } from "@api/helpers/types";
 import queryClient from "@api/queryClient";
 import {
   AccountOrKeyId,
+  BadgeUsage,
   ClaimBurnRequest,
   ComponentAddress,
   ComponentAddressOrName,
@@ -124,7 +125,7 @@ export interface TransferParams {
   resourceType: ResourceType;
   output_to_revealed: boolean;
   input_selection: ConfidentialTransferInputSelection;
-  badge: string | null;
+  badge_usage: BadgeUsage;
   dry_run: boolean;
   output_memo?: Memo;
 }
@@ -142,7 +143,11 @@ export const useAccountsTransfer = () => {
           resource_address: params.resource_address,
           destination_address: params.destination_address,
           max_fee,
-          proof_from_badge_resource: params.badge,
+          // TODO: we only support Resource badge usage for confidential transfers for now
+          proof_from_badge_resource:
+            typeof params.badge_usage === "object" && "Resource" in params.badge_usage
+              ? params.badge_usage.Resource
+              : null,
           input_selection: params.input_selection,
           output_to_revealed: params.output_to_revealed,
           output_memo: params.output_memo || null,
@@ -154,6 +159,7 @@ export const useAccountsTransfer = () => {
           owner_account: account,
           input_selection: params.input_selection,
           resource_address: params.resource_address,
+          badge_usage: params.badge_usage,
           transfers: [
             {
               destination_address: params.destination_address,
@@ -174,7 +180,11 @@ export const useAccountsTransfer = () => {
           resource_address: params.resource_address,
           destination_public_key: parsedAddress.accountPublicKey,
           max_fee,
-          proof_from_badge_resource: params.badge,
+          // TODO: we only support Resource badge usage for public fungible transfers for now
+          proof_from_badge_resource:
+            typeof params.badge_usage === "object" && "Resource" in params.badge_usage
+              ? params.badge_usage.Resource
+              : null,
           input_selection: params.input_selection,
           output_to_revealed: params.output_to_revealed,
           dry_run: params.dry_run,

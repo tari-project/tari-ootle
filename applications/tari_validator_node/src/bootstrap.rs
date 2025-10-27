@@ -329,6 +329,7 @@ pub async fn spawn_services(
     let signing_service = consensus::TariSignatureService::new(keypair.clone());
     let (consensus_join_handle, consensus_handle) = consensus::spawn(
         config.network,
+        &config.validator_node.consensus,
         sidechain_id,
         state_store.clone(),
         local_address,

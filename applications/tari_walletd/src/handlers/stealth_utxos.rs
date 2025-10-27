@@ -19,7 +19,7 @@ use tari_wallet_daemon_client::{
         UtxoInfo,
     },
 };
-use tokio::{task::block_in_place, time::Instant};
+use tokio::{task::spawn_blocking, time::Instant};
 
 use crate::handlers::{helpers::invalid_params, HandlerContext};
 
@@ -99,29 +99,37 @@ pub async fn handle_decrypt_value(
         .collect::<IndexMap<_, _>>();
 
     let timer = Instant::now();
-    let balances = match context.config().value_lookup_table_file.as_ref() {
+    let elgamal_proofs = proofs.values().copied().cloned().collect::<Vec<_>>();
+    let sdk = sdk.clone();
+    let balances = match context.config().value_lookup_table_file.clone() {
         Some(file) => {
-            let mut file = fs::File::open(file)
-                .map_err(|e| anyhow!("Unable to load value lookup file '{}': {e}", file.display()))?;
-            let mut lookup = IoReaderValueLookup::load(&mut file)?;
+            spawn_blocking(move || {
+                let mut file = fs::File::open(&file)
+                    .map_err(|e| anyhow!("Unable to load value lookup file '{}': {e}", file.display()))?;
+                let mut lookup = IoReaderValueLookup::load(&mut file)?;
 
-            block_in_place(|| {
-                sdk.viewable_balance_api().try_brute_force_commitment_balances(
+                let balance = sdk.viewable_balance_api().try_brute_force_commitment_balances(
                     &view_key.key,
-                    proofs.values().copied(), // Copying the reference, not the ElgamalVerifiableBalanceBytes
+                    elgamal_proofs.iter(),
                     value_range,
                     &mut lookup,
-                )
-            })?
+                )?;
+
+                anyhow::Ok(balance)
+            })
+            .await??
         },
-        None => block_in_place(|| {
-            sdk.viewable_balance_api().try_brute_force_commitment_balances(
-                &view_key.key,
-                proofs.values().copied(),
-                value_range,
-                &mut AlwaysMissLookupTable,
-            )
-        })?,
+        None => {
+            spawn_blocking(move || {
+                sdk.viewable_balance_api().try_brute_force_commitment_balances(
+                    &view_key.key,
+                    elgamal_proofs.iter(),
+                    value_range,
+                    &mut AlwaysMissLookupTable,
+                )
+            })
+            .await??
+        },
     };
 
     info!(target: LOG_TARGET, "Brute force balance lookup took {:.2?}", timer.elapsed());

@@ -972,6 +972,7 @@ pub async fn handle_stealth_transfer(
         input_selection: req.input_selection,
         resource_address: req.resource_address,
         max_fee: req.max_fee,
+        badge_usage: req.badge_usage,
         outputs: req
             .transfers
             .into_iter()

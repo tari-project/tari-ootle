@@ -248,7 +248,6 @@ export default function FormStep({
           }
           placeholder={isEstimatingFee ? "Estimating..." : "Auto-calculated"}
           onChange={onFormValueChange}
-          disabled={true}
           style={{ flexGrow: 1 }}
           InputProps={{
             endAdornment:

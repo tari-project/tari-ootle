@@ -138,6 +138,13 @@ pub enum Subcommand {
         #[clap(long, alias = "output", short = 'o')]
         output_path: Option<PathBuf>,
     },
+    #[clap(about = "Generate a key to use for resources with viewable balances")]
+    NewViewableBalanceKey {
+        #[clap(long, alias = "key")]
+        key_index: u64,
+        #[clap(long, alias = "output", short = 'o')]
+        output_path: Option<PathBuf>,
+    },
     #[clap(
         name = "seed-words",
         about = "Get current seed words of wallet (used for wallet retrieval)"

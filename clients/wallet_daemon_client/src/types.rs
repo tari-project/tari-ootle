@@ -39,7 +39,7 @@ use tari_ootle_common_types::{
     SubstateRequirement,
 };
 use tari_ootle_wallet_sdk::{
-    apis::confidential_transfer::ConfidentialTransferInputSelection,
+    apis::{confidential_transfer::ConfidentialTransferInputSelection, stealth_transfer::BadgeUsage},
     crypto::memo::Memo,
     models::{
         Account,
@@ -1061,6 +1061,8 @@ pub struct StealthTransferRequest {
     pub owner_account: ComponentAddressOrName,
     pub input_selection: ConfidentialTransferInputSelection,
     pub resource_address: ResourceAddress,
+    #[serde(default, skip_serializing_if = "BadgeUsage::is_none")]
+    pub badge_usage: BadgeUsage,
     pub transfers: Vec<StealthTransfer>,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub max_fee: u64,

@@ -1,0 +1,130 @@
+//   Copyright 2025 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+use std::{
+    num::NonZeroU64,
+    task::{ready, Context, Poll},
+    time::Duration,
+};
+
+use tari_common_types::types::FixedHash;
+use tari_ootle_common_types::Epoch;
+
+use crate::configured::{EpochTicker, EpochTickerData};
+
+#[derive(Debug)]
+pub struct RealTimeEpochTicker {
+    base_time: time::OffsetDateTime,
+    epoch_time_secs: NonZeroU64,
+    initial_epoch: Epoch,
+    interval: Option<tokio::time::Interval>,
+    epoch: Epoch,
+}
+
+impl RealTimeEpochTicker {
+    pub fn new(initial_epoch: Epoch, base_time: time::OffsetDateTime, start_epoch: Epoch) -> Self {
+        Self {
+            interval: Some({
+                let mut interval = tokio::time::interval(Duration::from_secs(1));
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Burst);
+                interval
+            }),
+            epoch_time_secs: NonZeroU64::new(120).expect("Non zero"),
+            initial_epoch,
+            base_time,
+            epoch: start_epoch,
+        }
+    }
+
+    pub fn disable_ticks(mut self) -> Self {
+        self.interval = None;
+        self
+    }
+
+    pub fn with_epoch_time_secs(mut self, epoch_time_secs: NonZeroU64) -> Self {
+        self.epoch_time_secs = epoch_time_secs;
+        self
+    }
+
+    fn calc_current_epoch(&self) -> Epoch {
+        let now = time::OffsetDateTime::now_utc();
+        let elapsed_secs = (now - self.base_time).whole_seconds().max(0) as u64 / self.epoch_time_secs.get();
+        Epoch(elapsed_secs)
+    }
+
+    fn increment_epoch(&mut self) -> Epoch {
+        let epoch = self.epoch;
+        self.epoch += Epoch(1);
+        epoch
+    }
+}
+
+impl EpochTicker for RealTimeEpochTicker {
+    fn poll_tick(&mut self, cx: &mut Context) -> Poll<Option<EpochTickerData>> {
+        let calculated_epoch = self.calc_current_epoch();
+
+        if calculated_epoch < self.initial_epoch {
+            let epoch = self.increment_epoch();
+            let epoch_hash = calc_static_epoch_hash(epoch);
+            return Poll::Ready(Some(EpochTickerData {
+                epoch,
+                epoch_hash,
+                done_for_now: false,
+            }));
+        }
+
+        if let Some(interval_mut) = self.interval.as_mut() {
+            loop {
+                ready!(interval_mut.poll_tick(cx));
+
+                if self.epoch.is_zero() || self.epoch <= calculated_epoch {
+                    let epoch = self.increment_epoch();
+                    let epoch_hash = calc_static_epoch_hash(epoch);
+                    return Poll::Ready(Some(EpochTickerData {
+                        epoch,
+                        epoch_hash,
+                        done_for_now: true,
+                    }));
+                }
+            }
+        }
+        // Ticks have been disabled, never return any new epochs
+        assert!(self.interval.is_none(), "If interval is Some, we should not reach here");
+        Poll::Pending
+    }
+}
+fn calc_static_epoch_hash(epoch: Epoch) -> FixedHash {
+    const U64_SIZE: usize = size_of::<u64>();
+    const HASH_SIZE: usize = FixedHash::byte_size();
+    let mut epoch_hash = [0u8; HASH_SIZE];
+    epoch_hash[HASH_SIZE - U64_SIZE..].copy_from_slice(&epoch.to_be_bytes());
+    epoch_hash.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{future::poll_fn, time::Duration};
+
+    use tokio::time::timeout;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn it_ticks_according_to_relative_time() {
+        let base_time = time::OffsetDateTime::now_utc();
+        let mut ticker =
+            RealTimeEpochTicker::new(Epoch(0), base_time, Epoch(0)).with_epoch_time_secs(1.try_into().unwrap());
+
+        for i in 0..5 {
+            let res = timeout(Duration::from_secs(10), poll_fn(|cx| ticker.poll_tick(cx))).await;
+            assert_eq!(
+                res,
+                Ok(Some(EpochTickerData {
+                    epoch: Epoch(i),
+                    epoch_hash: calc_static_epoch_hash(Epoch(i)),
+                    done_for_now: true
+                }))
+            );
+        }
+    }
+}

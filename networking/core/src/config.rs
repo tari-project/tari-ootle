@@ -29,7 +29,7 @@ impl Default for Config {
             ],
             reachability_mode: ReachabilityMode::default(),
             announce: false,
-            check_connections_interval: Duration::from_secs(2 * 60 * 60),
+            check_connections_interval: Duration::from_secs(2 * 60),
             known_local_public_address: vec![],
             rendezvous_namespace: "tari".to_string(),
             rendezvous_peer_limit: Some(1000),

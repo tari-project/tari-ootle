@@ -15,6 +15,8 @@ pub struct Config {
     #[serde(with = "serde_with::duration::optional_seconds")]
     pub epoch_time: Option<Duration>,
     pub initial_epoch: Epoch,
+    #[serde(with = "time::serde::iso8601")]
+    pub base_time: time::OffsetDateTime,
     #[serde(default)]
     pub validators: Vec<Validator>,
 }
@@ -24,6 +26,7 @@ impl Default for Config {
         Self {
             epoch_time: None,
             initial_epoch: Epoch(0),
+            base_time: time::OffsetDateTime::now_utc(),
             validators: vec![],
         }
     }

@@ -116,10 +116,12 @@ pub async fn add_connection(
                 .build(),
         )
         .await
-        .map_err(ErrorResponse::anyhow)?;
+        .map_err(|err| ErrorResponse::general_error(err.to_string()))?;
 
     if wait_for_dial {
-        dial_wait.await.map_err(ErrorResponse::anyhow)?;
+        dial_wait
+            .await
+            .map_err(|err| ErrorResponse::general_error(format!("Failed to dial peer {}: {}", peer_id, err)))?;
     }
 
     Ok(Json(AddPeerResponse {}))

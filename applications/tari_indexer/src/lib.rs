@@ -75,7 +75,7 @@ use crate::{
 const LOG_TARGET: &str = "tari::indexer::app";
 
 #[allow(clippy::too_many_lines)]
-pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: ShutdownSignal) -> Result<(), ExitError> {
+pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
     info!(target: LOG_TARGET, "Starting indexer node on network {}", config.network);
     let keypair = setup_keypair_prompt(&config.indexer.identity_file, true)?;
 

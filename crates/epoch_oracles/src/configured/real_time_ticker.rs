@@ -73,6 +73,17 @@ impl EpochTicker for RealTimeEpochTicker {
             }));
         }
 
+        if calculated_epoch > self.epoch {
+            let epoch = self.increment_epoch();
+            let epoch_hash = calc_static_epoch_hash(epoch);
+            return Poll::Ready(Some(EpochTickerData {
+                epoch,
+                epoch_hash,
+                // Catching up
+                done_for_now: false,
+            }));
+        }
+
         if let Some(interval_mut) = self.interval.as_mut() {
             loop {
                 ready!(interval_mut.poll_tick(cx));
@@ -123,6 +134,25 @@ mod tests {
                     epoch: Epoch(i),
                     epoch_hash: calc_static_epoch_hash(Epoch(i)),
                     done_for_now: true
+                }))
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn it_catches_up_to_current_epoch() {
+        let base_time = time::OffsetDateTime::now_utc() - time::Duration::seconds(1000);
+        let mut ticker =
+            RealTimeEpochTicker::new(Epoch(500), base_time, Epoch(5)).with_epoch_time_secs(1.try_into().unwrap());
+
+        for i in 5..1002 {
+            let res = timeout(Duration::from_secs(10), poll_fn(|cx| ticker.poll_tick(cx))).await;
+            assert_eq!(
+                res,
+                Ok(Some(EpochTickerData {
+                    epoch: Epoch(i),
+                    epoch_hash: calc_static_epoch_hash(Epoch(i)),
+                    done_for_now: i >= 1000
                 }))
             );
         }

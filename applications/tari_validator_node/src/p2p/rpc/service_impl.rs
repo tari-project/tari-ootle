@@ -340,7 +340,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             .await
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?
         {
-            return Err(RpcStatus::general("Node is still scanning the base layer"));
+            return Err(RpcStatus::general("Node is still catching up to the epoch"));
         }
         let current_epoch = self
             .epoch_manager

@@ -1066,6 +1066,7 @@ pub async fn handle_stealth_transfer(
     .await?
 }
 
+#[allow(clippy::too_many_lines)]
 pub async fn handle_create_stealth_transfer_statement(
     context: &HandlerContext,
     token: Option<&Bearer>,
@@ -1101,6 +1102,16 @@ pub async fn handle_create_stealth_transfer_statement(
         };
 
         let resource = sdk.substate_api().fetch_resource(req.resource_address).await?;
+
+        if !resource.resource_type().is_stealth() {
+            return Err(invalid_params(
+                "resource_address",
+                Some(format!(
+                    "Resource is not a stealth resource (type: {})",
+                    resource.resource_type()
+                )),
+            ));
+        }
 
         let amount_to_spend = req.total_output_amount();
 

@@ -572,6 +572,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         let mut query = utxos::table
             .filter(utxos::resource_address.eq(resource_address.to_string()))
             .filter(utxos::is_spent.eq(false))
+            .filter(utxos::is_burnt.eq(false))
             .into_boxed();
 
         if let Some(from_id) = from_id {

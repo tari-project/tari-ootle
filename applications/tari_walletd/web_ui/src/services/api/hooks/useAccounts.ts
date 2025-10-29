@@ -159,7 +159,7 @@ export const useAccountsTransfer = () => {
         let transferRequest = {
           owner_account: account,
           // For simplicity, we'll use prefer revealed for fees whenever a non-XTR stealth transfer is made
-          fee_input_selection: params.resource_address == XTR ? params.input_selection : "PreferRevealed",
+          fee_input_selection: params.resource_address === XTR ? params.input_selection : "PreferRevealed",
           input_selection: params.input_selection,
           resource_address: params.resource_address,
           badge_usage: params.badge_usage,

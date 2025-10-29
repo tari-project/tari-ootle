@@ -169,28 +169,6 @@ impl TrafficSim {
         Ok(())
     }
 
-    // pub async fn connect_to_wallets(&mut self, wallets: &[SwarmWallet]) -> anyhow::Result<()> {
-    //     for wallet in wallets {
-    //         let mut client = WalletDaemonClient::connect(&wallet.address, None)?;
-    //         let resp = client
-    //             .auth_request(AuthLoginRequest {
-    //                 permissions: vec!["Admin".to_string()],
-    //                 duration: Some(Duration::from_secs(3600)),
-    //                 webauthn_finish_auth_request: None,
-    //             })
-    //             .await?;
-    //         let resp = client
-    //             .auth_accept(AuthLoginAcceptRequest {
-    //                 auth_token: resp.auth_token,
-    //                 name: "sim".to_string(),
-    //             })
-    //             .await?;
-    //         client.set_auth_token(resp.permissions_token);
-    //         self.wallet_clients.push(client);
-    //     }
-    //     Ok(())
-    // }
-
     pub async fn send_random_transaction(
         &mut self,
         id: usize,
@@ -249,12 +227,9 @@ impl TrafficSim {
             "Tx {} --> {}: {}",
             sender_wallet.name,
             receiver_wallet.name,
-            // resp.status,
-            // resp.result.as_ref().and_then(|r| r.result.any_reject()).display(),
             resp.transaction_id,
         );
 
-        // Placeholder implementation - this will need to be updated based on actual API
         log::info!(
             "send transaction of {} from {} to {}",
             amount_to_send,

@@ -24,6 +24,7 @@ use crate::{
         confidential_outputs::{ConfidentialOutputsApi, ConfidentialOutputsApiError},
         config::{ConfigApi, ConfigApiError},
         key_manager::{KeyManagerApi, KeyManagerApiError},
+        locks::{LocksApi, LocksApiError},
         substate::{SubstateApiError, SubstatesApi},
         transaction::{TransactionApi, TransactionApiError},
     },
@@ -36,6 +37,7 @@ const LOG_TARGET: &str = "tari::ootle::wallet_sdk::apis::confidential_transfers"
 
 pub struct ConfidentialTransferApi<'a, TStore, TNetworkInterface> {
     key_manager_api: KeyManagerApi<'a, TStore>,
+    locks_api: LocksApi<'a, TStore>,
     accounts_api: AccountsApi<'a, TStore, TNetworkInterface>,
     confidential_outputs_api: ConfidentialOutputsApi<'a, TStore>,
     transaction_api: TransactionApi<'a, TStore, TNetworkInterface>,
@@ -53,6 +55,7 @@ where
     pub fn new(
         key_manager_api: KeyManagerApi<'a, TStore>,
         accounts_api: AccountsApi<'a, TStore, TNetworkInterface>,
+        locks_api: LocksApi<'a, TStore>,
         confidential_outputs_api: ConfidentialOutputsApi<'a, TStore>,
         substate_api: SubstatesApi<'a, TStore, TNetworkInterface>,
         transaction_api: TransactionApi<'a, TStore, TNetworkInterface>,
@@ -61,6 +64,7 @@ where
     ) -> Self {
         Self {
             key_manager_api,
+            locks_api,
             accounts_api,
             confidential_outputs_api,
             substate_api,
@@ -103,7 +107,6 @@ where
 
                 Ok(InputsToSpend {
                     confidential: confidential_inputs,
-                    lock_id,
                     revealed: Amount::zero(),
                 })
             },
@@ -112,8 +115,8 @@ where
                     return Err(ConfidentialTransferApiError::InsufficientFunds);
                 }
 
-                self.confidential_outputs_api
-                    .lock_vault_revealed_funds(lock_id, &src_vault.id, spend_amount)?;
+                self.locks_api
+                    .lock_funds_in_vault(lock_id, &src_vault.id, spend_amount)?;
 
                 info!(
                     target: LOG_TARGET,
@@ -124,7 +127,6 @@ where
 
                 Ok(InputsToSpend {
                     confidential: vec![],
-                    lock_id,
                     revealed: spend_amount,
                 })
             },
@@ -139,15 +141,11 @@ where
                         src_vault.id,
                     );
 
-                    self.confidential_outputs_api.lock_vault_revealed_funds(
-                        lock_id,
-                        &src_vault.id,
-                        revealed_to_spend,
-                    )?;
+                    self.locks_api
+                        .lock_funds_in_vault(lock_id, &src_vault.id, revealed_to_spend)?;
 
                     return Ok(InputsToSpend {
                         confidential: vec![],
-                        lock_id,
                         revealed: revealed_to_spend,
                     });
                 }
@@ -163,8 +161,8 @@ where
 
                 let total_confidential_spent = confidential_inputs.iter().map(|i| i.value).sum::<Amount>();
 
-                self.confidential_outputs_api
-                    .lock_vault_revealed_funds(lock_id, &src_vault.id, revealed_to_spend)?;
+                self.locks_api
+                    .lock_funds_in_vault(lock_id, &src_vault.id, revealed_to_spend)?;
 
                 info!(
                     target: LOG_TARGET,
@@ -179,7 +177,6 @@ where
 
                 Ok(InputsToSpend {
                     confidential: confidential_inputs,
-                    lock_id,
                     revealed: revealed_to_spend,
                 })
             },
@@ -196,8 +193,8 @@ where
                     return Err(ConfidentialTransferApiError::InsufficientFunds);
                 }
 
-                self.confidential_outputs_api
-                    .lock_vault_revealed_funds(lock_id, &src_vault.id, revealed_to_spend)?;
+                self.locks_api
+                    .lock_funds_in_vault(lock_id, &src_vault.id, revealed_to_spend)?;
 
                 let confidential_inputs = self
                     .confidential_outputs_api
@@ -205,7 +202,6 @@ where
 
                 Ok(InputsToSpend {
                     confidential: confidential_inputs,
-                    lock_id,
                     revealed: revealed_to_spend,
                 })
             },
@@ -282,9 +278,9 @@ where
         let account_public_key = PublicKey::from_secret_key(&account_key.secret);
 
         // Reserve and lock input funds
-        let lock_id = self.confidential_outputs_api.create_lock()?;
+        let lock = self.locks_api.create_lock()?;
         let inputs_to_spend = match self.resolved_inputs_for_transfer(
-            lock_id,
+            lock.id(),
             params.from_account,
             params.resource_address,
             params.amount,
@@ -363,7 +359,7 @@ where
                     public_asset_tag: None,
                     memo: None,
                     status: OutputStatus::LockedUnconfirmed,
-                    lock_id: Some(inputs_to_spend.lock_id),
+                    lock_id: Some(lock.id()),
                 })?;
             }
 
@@ -420,12 +416,13 @@ where
             .build_and_seal(&account_key.secret);
 
         let tx_id = transaction.calculate_id();
-        self.transaction_api
-            .locks_set_transaction_id(inputs_to_spend.lock_id, tx_id)?;
+        self.transaction_api.locks_set_transaction_id(lock.id(), tx_id)?;
+
+        let lock_id = lock.keep_locked();
 
         Ok(TransferOutput {
             transaction,
-            transaction_proof_id: inputs_to_spend.lock_id,
+            transaction_proof_id: lock_id,
         })
     }
 
@@ -538,7 +535,6 @@ pub enum UtxoInputSelection {
 #[derive(Debug)]
 pub struct InputsToSpend {
     pub confidential: Vec<MaskAndValue>,
-    pub lock_id: WalletLockId,
     pub revealed: Amount,
 }
 
@@ -578,6 +574,8 @@ pub enum ConfidentialTransferApiError {
     AmountOverflow { param: &'static str, details: String },
     #[error("Transaction API error: {0}")]
     TransactionApiError(#[from] TransactionApiError),
+    #[error("Lock error: {0}")]
+    LocksApiError(#[from] LocksApiError),
 }
 
 impl IsNotFoundError for ConfidentialTransferApiError {

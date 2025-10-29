@@ -7,7 +7,7 @@ use std::{
     ops::RangeInclusive,
 };
 
-use tari_engine_types::crypto::ValueLookupTable;
+use tari_engine_types::crypto::{AndThenLookup, MapErrLookup, ValueLookupTable};
 
 use crate::value_lookup::header::LookupHeader;
 
@@ -32,6 +32,15 @@ impl<'a, R: Read + Seek> IoReaderValueLookup<'a, R> {
             pos: 0,
             last_value: 0,
         })
+    }
+
+    pub fn with_fallback<T: ValueLookupTable + 'a>(self, fallback: T) -> impl ValueLookupTable<Error = io::Error> + 'a {
+        AndThenLookup::new(
+            self,
+            MapErrLookup::new(fallback, |err| {
+                io::Error::other(format!("Lookup fallback error: {err}"))
+            }),
+        )
     }
 
     fn seek_and_buffer_to_value(&mut self, value: u64) -> io::Result<()> {

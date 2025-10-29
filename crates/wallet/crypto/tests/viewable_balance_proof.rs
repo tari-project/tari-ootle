@@ -9,7 +9,7 @@ use tari_crypto::{
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey},
 };
 use tari_engine_types::crypto::validate_elgamal_verifiable_balance_proof;
-use tari_ootle_wallet_crypto::{confidential, AlwaysMissLookupTable, UnblindedOutputWitness};
+use tari_ootle_wallet_crypto::{confidential, GenerateValueLookup, UnblindedOutputWitness};
 use tari_template_lib::{
     template_dependencies::{decode_exact, encode_with_len},
     types::{Amount, EncryptedData},
@@ -81,7 +81,7 @@ fn it_generates_a_valid_proof() {
 
     let timer = Instant::now();
     let balance = proof
-        .brute_force_balance(&view_key_secret, 0..=1000, &mut AlwaysMissLookupTable)
+        .brute_force_balance(&view_key_secret, 0..=1000, &mut GenerateValueLookup)
         .unwrap();
     let brute_force_time = timer.elapsed();
     assert_eq!(balance, Some(123));

@@ -22,7 +22,7 @@
 
 import { ChangeEvent } from "react";
 import type { Amount, SubstateId, NonFungibleId } from "@tari-project/typescript-bindings";
-import { CURRENCY } from "@utils/constants";
+import { XTR_CURRENCY } from "@utils/constants";
 import useCurrencyStore from "@store/currencyStore";
 
 export const renderJson = (json: any) => {
@@ -256,31 +256,31 @@ export const formatCurrency = (amount: number | bigint | Amount): string => {
   const { currencySymbol } = useCurrencyStore.getState();
 
   if (typeof amount === "bigint") {
-    const divisor = BigInt(CURRENCY.DIVISOR);
+    const divisor = BigInt(XTR_CURRENCY.DIVISOR);
     const integerPart = amount / divisor;
     const remainder = amount % divisor;
 
-    const fractionalPart = remainder.toString().padStart(CURRENCY.DECIMALS, "0");
+    const fractionalPart = remainder.toString().padStart(XTR_CURRENCY.DECIMALS, "0");
 
     return `${Number(integerPart).toLocaleString("en-US")}.${fractionalPart} ${currencySymbol}`;
   } else if (typeof amount === "number") {
     if (isNaN(amount)) {
       return `0 ${currencySymbol}`;
     }
-    const convertedAmount = amount / CURRENCY.DIVISOR;
+    const convertedAmount = amount / XTR_CURRENCY.DIVISOR;
     return `${convertedAmount.toLocaleString("en-US", {
       minimumFractionDigits: 0,
-      maximumFractionDigits: CURRENCY.DECIMALS,
+      maximumFractionDigits: XTR_CURRENCY.DECIMALS,
     })} ${currencySymbol}`;
   } else if (typeof amount === "string") {
     // Handle Amount type
     try {
       const numericAmount = BigInt(amount);
-      const divisor = BigInt(CURRENCY.DIVISOR);
+      const divisor = BigInt(XTR_CURRENCY.DIVISOR);
       const integerPart = numericAmount / divisor;
       const remainder = numericAmount % divisor;
 
-      const fractionalPart = remainder.toString().padStart(CURRENCY.DECIMALS, "0");
+      const fractionalPart = remainder.toString().padStart(XTR_CURRENCY.DECIMALS, "0");
 
       return `${Number(integerPart).toLocaleString("en-US")}.${fractionalPart} ${currencySymbol}`;
     } catch (error) {
@@ -292,11 +292,11 @@ export const formatCurrency = (amount: number | bigint | Amount): string => {
     try {
       const stringValue = String(amount);
       const numericAmount = BigInt(stringValue);
-      const divisor = BigInt(CURRENCY.DIVISOR);
+      const divisor = BigInt(XTR_CURRENCY.DIVISOR);
       const integerPart = numericAmount / divisor;
       const remainder = numericAmount % divisor;
 
-      const fractionalPart = remainder.toString().padStart(CURRENCY.DECIMALS, "0");
+      const fractionalPart = remainder.toString().padStart(XTR_CURRENCY.DECIMALS, "0");
 
       return `${Number(integerPart).toLocaleString("en-US")}.${fractionalPart} ${currencySymbol}`;
     } catch (error) {

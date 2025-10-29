@@ -6,7 +6,7 @@ use std::{fmt::Display, str::FromStr, time::Duration};
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::ProposalCertificate;
-use tari_engine_types::commit_result::FinalizeResult;
+use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateDiff};
 use tari_transaction::{Transaction, TransactionId};
 use time::PrimitiveDateTime;
 
@@ -31,6 +31,26 @@ pub struct WalletTransaction {
     pub is_dry_run: bool,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub last_update_time: PrimitiveDateTime,
+}
+
+impl WalletTransaction {
+    pub fn is_accepted(&self) -> bool {
+        self.status.is_accepted()
+    }
+
+    pub fn finalized_diff(&self) -> Option<&SubstateDiff> {
+        self.finalize.as_ref().and_then(|f| f.result.any_accept())
+    }
+
+    pub fn failure_reason_as_string(&self) -> Option<String> {
+        if let Some(reason) = &self.invalid_reason {
+            return Some(reason.clone());
+        }
+        self.finalize
+            .as_ref()
+            .and_then(|finalize| finalize.any_reject())
+            .map(|reject| reject.to_string())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]

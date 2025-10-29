@@ -41,6 +41,7 @@ import FormStep, { FormError, SendMoneyFormState } from "../steps/FormStep";
 import ConfirmationStep from "../steps/ConfirmationStep";
 import ResultStep, { TransferResult } from "../steps/ResultStep";
 import PopupTitle from "@/components/PopupTitle";
+import { XTR_CURRENCY } from "@utils/constants";
 
 export interface SendMoneyDialogProps {
   open: boolean;
@@ -136,15 +137,20 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
       if (parts.length > 2) {
         processedValue = parts[0] + "." + parts.slice(1).join("");
       }
+    } else if (name === "fee" && value) {
+      // let parsed = parseInt(transferFormState.fee);
+      // if (!isNaN(parsed)) {
+      //   processedValue = parsed.toString(); // (parsed / XTR_CURRENCY.DIVISOR).toString();
+      // }
     }
 
     // Clear fee when amount or publicKey changes to trigger re-estimation
-    const shouldClearFee = (name === "amount" || name === "address") && transferFormState.fee;
+    // const shouldClearFee = (name === "amount" || name === "address") && transferFormState.fee;
 
     setTransferFormState({
       ...transferFormState,
       [name]: processedValue,
-      ...(shouldClearFee ? { fee: "" } : {}),
+      // ...(shouldClearFee ? { fee: "" } : {}),
     });
   }
 

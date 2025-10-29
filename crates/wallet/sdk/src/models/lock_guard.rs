@@ -8,31 +8,37 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::wallet::models::lock_guard";
 
-pub struct WalletLockDropGuard<TStore: WriteableWalletStore> {
+pub struct WalletLockDropGuard<'a, TStore: WriteableWalletStore> {
     lock_id: WalletLockId,
-    store: Option<TStore>,
+    store: Option<&'a TStore>,
 }
 
-impl<TStore> WalletLockDropGuard<TStore>
+impl<'a, TStore> WalletLockDropGuard<'a, TStore>
 where TStore: WriteableWalletStore
 {
-    pub fn new(lock_id: WalletLockId, store: TStore) -> Self {
+    pub fn new(lock_id: WalletLockId, store: &'a TStore) -> Self {
         Self {
             lock_id,
             store: Some(store),
         }
     }
 
-    pub fn lock_id(&self) -> &WalletLockId {
-        &self.lock_id
+    pub fn id(&self) -> WalletLockId {
+        self.lock_id
     }
 
-    pub fn disarm(mut self) {
+    pub fn keep_locked(mut self) -> WalletLockId {
         self.store = None;
+        self.lock_id
+    }
+
+    pub fn release(self) -> WalletLockId {
+        self.lock_id
+        // Drop will be called here, releasing the lock
     }
 }
 
-impl<TStore> Drop for WalletLockDropGuard<TStore>
+impl<TStore> Drop for WalletLockDropGuard<'_, TStore>
 where TStore: WriteableWalletStore
 {
     fn drop(&mut self) {

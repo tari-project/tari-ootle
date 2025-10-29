@@ -9,7 +9,6 @@ use tari_crypto::{
 };
 use tari_engine_types::{
     component::derive_component_address_from_public_key,
-    substate::SubstateDiff,
     FromByteType,
     ToByteType,
     Utxo,
@@ -29,7 +28,7 @@ use tari_ootle_wallet_crypto::{
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    models::{ComponentAddress, ResourceAddress, StealthTransferStatement, UtxoAddress, VaultId},
+    models::{ComponentAddress, ResourceAddress, StealthTransferStatement, UtxoAddress},
     prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     types::{Amount, EncryptedData},
 };
@@ -37,7 +36,6 @@ use tari_template_lib::{
 use crate::{
     apis::{
         accounts::AccountsApiError,
-        confidential_outputs::ConfidentialOutputsApiError,
         config::{ConfigApi, ConfigApiError},
         key_manager::{KeyManagerApi, KeyManagerApiError},
         stealth_crypto::{StealthCryptoApi, StealthCryptoApiError},
@@ -165,46 +163,6 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         let mut tx = self.store.create_write_tx()?;
         tx.stealth_outputs_insert(output)?;
         tx.commit()?;
-        Ok(())
-    }
-
-    pub fn lock_funds_in_vault<A: Into<Amount>>(
-        &self,
-        lock_id: WalletLockId,
-        vault_id: &VaultId,
-        amount_to_lock: A,
-    ) -> Result<(), StealthOutputsApiError> {
-        self.store
-            .with_write_tx(|tx| tx.vaults_lock_revealed_funds(lock_id, vault_id, amount_to_lock.into()))?;
-        Ok(())
-    }
-
-    // TODO: move into a lock api
-    pub fn create_lock(&self) -> Result<WalletLockId, StealthOutputsApiError> {
-        let lock_id = self.store.with_write_tx(|tx| tx.locks_create())?;
-        Ok(lock_id)
-    }
-
-    pub fn release_lock(&self, lock_id: WalletLockId) -> Result<(), StealthOutputsApiError> {
-        self.store.with_write_tx(|tx| tx.locks_release(lock_id))?;
-        Ok(())
-    }
-
-    pub fn finalize_lock(&self, lock_id: WalletLockId, diff: &SubstateDiff) -> Result<(), ConfidentialOutputsApiError> {
-        self.store
-            .with_write_tx(|tx| tx.locks_unlock_finalized(lock_id, diff))?;
-        Ok(())
-    }
-
-    pub fn lock_revealed_funds<A: Into<Amount>>(
-        &self,
-        lock_id: WalletLockId,
-        vault_id: &VaultId,
-        amount_to_lock: A,
-    ) -> Result<(), StealthOutputsApiError> {
-        self.store
-            .with_write_tx(|tx| tx.vaults_lock_revealed_funds(lock_id, vault_id, amount_to_lock.into()))?;
-
         Ok(())
     }
 

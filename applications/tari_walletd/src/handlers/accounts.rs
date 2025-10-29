@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashSet, iter};
+use std::{collections::HashSet, iter, time::Duration};
 
 use anyhow::{anyhow, Context};
 use axum_extra::headers::authorization::Bearer;
@@ -30,7 +30,7 @@ use tari_ootle_wallet_sdk::{
         stealth_transfer::{StealthTransferParams, TransferOutput},
         substate::ValidatorScanResult,
     },
-    models::{BranchAndKeyId, KeyBranch, KeyId, NewAccountData, WalletLockDropGuard},
+    models::{BranchAndKeyId, KeyBranch, KeyId, NewAccountData},
 };
 use tari_ootle_wallet_sdk_services::events::TransactionSubmittedEvent;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
@@ -1005,7 +1005,7 @@ pub async fn handle_stealth_transfer(
     // Spawn here is to prevent the async block from being aborted if the caller aborts the request early as this can
     // cause funds to remain locked indefinitely.
     task::spawn(async move {
-        let transfer = sdk.stealth_transfer_api().transfer(owner_account, params).await?;
+        let (lock, transfer) = sdk.stealth_transfer_api().transfer(owner_account, params).await?;
 
         let transaction = transfer.transaction.authorized_sealed_signer();
         let main_pk = transfer.main_signer.public_key().to_byte_type();
@@ -1031,13 +1031,7 @@ pub async fn handle_stealth_transfer(
         if req.dry_run {
             // Release the lock immediately as dry run does not submit the transaction
             // TODO: maybe transfer() should not lock the outputs if it's a dry run
-            if let Err(err) = sdk.stealth_outputs_api().release_lock(transfer.lock_id) {
-                error!(
-                    target: LOG_TARGET,
-                    "Failed to release locked outputs for dry run : {}",
-                    err
-                );
-            }
+            lock.release();
             let result = transaction_service.submit_dry_run_transaction(transaction).await;
             return match result {
                 Ok(res) => Ok(StealthTransferResponse {
@@ -1047,15 +1041,15 @@ pub async fn handle_stealth_transfer(
             };
         }
 
-        let tx_id = sdk
-            .stealth_transfer_api()
-            .unlock_on_failure(
-                transfer.lock_id,
-                transaction_service
-                    .submit_transaction_with_opts(transaction, None, Some(transfer.lock_id))
-                    .await,
-            )
+        let tx_id = transaction_service
+            .submit_transaction_with_opts(transaction, None, Some(lock.id()))
+            .await
             .context("Transaction failed to submit")?;
+
+        // Transaction submitted, we're home free, make sure to allow the lock to persist past this call.
+        // The wallet will monitor the transaction and release the lock when it's finalized.
+        lock.keep_locked();
+
         notifier.notify(TransactionSubmittedEvent {
             transaction_id: tx_id,
             new_account: None,
@@ -1089,8 +1083,7 @@ pub async fn handle_create_stealth_transfer_statement(
     }
 
     let mut required_signers = HashSet::new();
-    let lock_id = sdk.stealth_outputs_api().create_lock()?;
-    let lock_guard = WalletLockDropGuard::new(lock_id, sdk.store().clone());
+    let lock = sdk.locks_api().create_lock_with_timeout(Duration::from_secs(5 * 60))?;
     let mut statements = Vec::with_capacity(req.requests.len());
     for req in req.requests {
         let sender_account = get_account(&req.sender_account, &sdk.accounts_api())?;
@@ -1120,7 +1113,7 @@ pub async fn handle_create_stealth_transfer_statement(
             .as_selection()
             .map(|sel| {
                 sdk.stealth_transfer_api().lock_inputs_for_transfer(
-                    lock_id,
+                    lock.id(),
                     sender_account.component_address(),
                     req.resource_address,
                     amount_to_spend,
@@ -1181,7 +1174,7 @@ pub async fn handle_create_stealth_transfer_statement(
     }
 
     // Return without unlocking the outputs
-    lock_guard.disarm();
+    let lock_id = lock.keep_locked();
 
     Ok(AccountsCreateStealthTransferStatementResponse {
         statements,

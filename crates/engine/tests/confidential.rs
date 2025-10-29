@@ -30,7 +30,7 @@ use tari_template_test_tooling::{
             generate_withdraw_proof_with_inputs,
             generate_withdraw_proof_with_view_key,
         },
-        AlwaysMissLookupTable,
+        GenerateValueLookup,
     },
     TemplateTest,
 };
@@ -529,7 +529,7 @@ fn mint_with_view_key() {
         faucet_vault.get_confidential_commitments().unwrap(),
         &view_key_secret,
         0..=200,
-        &mut AlwaysMissLookupTable,
+        &mut GenerateValueLookup,
     )
     .unwrap();
     assert_eq!(total_balance, Some(223 - 55));
@@ -544,7 +544,7 @@ fn mint_with_view_key() {
         user_vault.get_confidential_commitments().unwrap(),
         &view_key_secret,
         0..=200,
-        &mut AlwaysMissLookupTable,
+        &mut GenerateValueLookup,
     )
     .unwrap();
     assert_eq!(total_balance, Some(55));

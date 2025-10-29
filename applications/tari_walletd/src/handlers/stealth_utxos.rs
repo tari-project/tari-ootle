@@ -7,7 +7,7 @@ use anyhow::anyhow;
 use axum_extra::headers::authorization::Bearer;
 use indexmap::IndexMap;
 use log::{info, warn};
-use tari_ootle_wallet_crypto::{AlwaysMissLookupTable, IoReaderValueLookup};
+use tari_ootle_wallet_crypto::{GenerateValueLookup, IoReaderValueLookup};
 use tari_template_lib::models::UtxoAddress;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
@@ -155,7 +155,7 @@ pub async fn handle_decrypt_value(
                     &view_key.key,
                     elgamal_proofs.iter(),
                     value_range,
-                    &mut AlwaysMissLookupTable,
+                    &mut GenerateValueLookup,
                 )?;
                 anyhow::Ok(balances)
             })

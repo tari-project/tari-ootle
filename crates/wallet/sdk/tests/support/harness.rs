@@ -13,7 +13,7 @@ use tari_engine_types::{
 use tari_ootle_common_types::{optional::Optional, shard::Shard, Network, StateVersion};
 use tari_ootle_wallet_sdk::{
     cipher_seed::CipherSeedRestore,
-    models::{ConfidentialOutputModel, KeyId, OutputStatus, UtxoUpdateSet, WalletLockId},
+    models::{ConfidentialOutputModel, KeyId, OutputStatus, UtxoUpdateSet, WalletLockDropGuard, WalletLockId},
     network::{SubstateQueryResult, TransactionQueryResult, UtxoUpdateStream, WalletNetworkInterface},
     storage::TagAndPublicNoncePair,
     WalletSdk,
@@ -115,8 +115,8 @@ impl Test {
         commitment
     }
 
-    pub fn new_lock(&self) -> WalletLockId {
-        self.sdk.confidential_outputs_api().create_lock().unwrap()
+    pub fn new_lock(&self) -> WalletLockDropGuard<'_, SqliteWalletStore> {
+        self.sdk.locks_api().create_lock().unwrap()
     }
 
     pub fn get_unspent_balance(&self) -> Amount {

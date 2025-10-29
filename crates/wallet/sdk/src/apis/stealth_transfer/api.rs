@@ -42,10 +42,19 @@ use crate::{
         confidential_transfer::UtxoInputSelection,
         config::ConfigApi,
         key_manager::KeyManagerApi,
+        locks::LocksApi,
         stealth_outputs::{StealthOutputsApi, TransferStatementParams},
         substate::{SubstatesApi, ValidatorScanResult},
     },
-    models::{AccountWithAddress, KeyBranch, KeyId, OutputStatus, StealthOutputModel, WalletLockId},
+    models::{
+        AccountWithAddress,
+        KeyBranch,
+        KeyId,
+        OutputStatus,
+        StealthOutputModel,
+        WalletLockDropGuard,
+        WalletLockId,
+    },
     network::WalletNetworkInterface,
     storage::WalletStore,
 };
@@ -55,6 +64,7 @@ const LOG_TARGET: &str = "tari::ootle::wallet_sdk::apis::stealth_transfers";
 pub struct StealthTransferApi<'a, TStore, TNetworkInterface> {
     accounts_api: AccountsApi<'a, TStore, TNetworkInterface>,
     outputs_api: StealthOutputsApi<'a, TStore>,
+    locks_api: LocksApi<'a, TStore>,
     substate_api: SubstatesApi<'a, TStore, TNetworkInterface>,
     key_manager_api: KeyManagerApi<'a, TStore>,
     config_api: ConfigApi<'a, TStore>,
@@ -70,6 +80,7 @@ where
     pub fn new(
         accounts_api: AccountsApi<'a, TStore, TNetworkInterface>,
         outputs_api: StealthOutputsApi<'a, TStore>,
+        locks_api: LocksApi<'a, TStore>,
         substate_api: SubstatesApi<'a, TStore, TNetworkInterface>,
         key_manager_api: KeyManagerApi<'a, TStore>,
         config_api: ConfigApi<'a, TStore>,
@@ -77,6 +88,7 @@ where
         Self {
             accounts_api,
             outputs_api,
+            locks_api,
             substate_api,
             key_manager_api,
             config_api,
@@ -150,7 +162,7 @@ where
                             ),
                         })?;
 
-                self.outputs_api
+                self.locks_api
                     .lock_funds_in_vault(lock_id, &src_vault.id, spend_amount)?;
 
                 info!(
@@ -178,7 +190,7 @@ where
                             src_vault.id
                         );
 
-                        self.outputs_api
+                        self.locks_api
                             .lock_funds_in_vault(lock_id, &src_vault.id, revealed_to_spend)?;
 
                         return Ok(InputsToSpend {
@@ -211,8 +223,8 @@ where
                     .expect("BUG: an unblinded input amount was negative");
 
                 if let Some(ref src_vault) = maybe_src_vault {
-                    self.outputs_api
-                        .lock_revealed_funds(lock_id, &src_vault.id, revealed_to_spend)?;
+                    self.locks_api
+                        .lock_funds_in_vault(lock_id, &src_vault.id, revealed_to_spend)?;
                 }
 
                 info!(
@@ -232,7 +244,6 @@ where
                 })
             },
             UtxoInputSelection::PreferConfidential => {
-                let lock_id = self.outputs_api.create_lock()?;
                 let (inputs, blinded_amount_locked) = self.outputs_api.lock_outputs_until_partial_amount(
                     owner_account_component_address,
                     &resource_address,
@@ -264,8 +275,8 @@ where
                                 ),
                             })?;
 
-                    self.outputs_api
-                        .lock_revealed_funds(lock_id, &vault.id, revealed_to_spend)?;
+                    self.locks_api
+                        .lock_funds_in_vault(lock_id, &vault.id, revealed_to_spend)?;
                 }
 
                 Ok(InputsToSpend {
@@ -297,7 +308,7 @@ where
         &self,
         owner_account: AccountWithAddress,
         params: StealthTransferParams,
-    ) -> Result<StealthTransferOutput, StealthTransferApiError> {
+    ) -> Result<(WalletLockDropGuard<'a, TStore>, StealthTransferOutput), StealthTransferApiError> {
         let network = self.config_api.get_network()?;
         params.validate(network)?;
 
@@ -353,13 +364,11 @@ where
         let _permit = self.semaphore.acquire().await.expect("semaphore is never closed");
 
         block_in_place(|| {
-            let lock_id = self.outputs_api.create_lock()?;
+            let lock = self.locks_api.create_lock()?;
 
             // Lock up funds for fees and transfer
-            let fee_inputs_to_spend = self.unlock_on_failure(
-                lock_id,
-                self.lock_fee_inputs(lock_id, &owner_account, params.max_fee, params.fee_input_selection),
-            )?;
+            let fee_inputs_to_spend =
+                self.lock_fee_inputs(lock.id(), &owner_account, params.max_fee, params.fee_input_selection)?;
 
             let fee_stealth_change_amt = fee_inputs_to_spend
                 .total_stealth_input_amount()
@@ -379,8 +388,7 @@ where
             let (signing_key_branch, signing_key_id) = if must_sign_with_account_key {
                 (KeyBranch::Account, owner_key_id)
             } else {
-                let next_index =
-                    self.unlock_on_failure(lock_id, self.key_manager_api.next_derived_key_index(KeyBranch::Nonce))?;
+                let next_index = self.key_manager_api.next_derived_key_index(KeyBranch::Nonce)?;
                 (KeyBranch::Nonce, KeyId::derived(next_index))
             };
             let required_signer = self
@@ -390,21 +398,18 @@ where
             let fee_signer = required_signer;
 
             // Generate fee transfer statement
-            let fee_transfer_statement = self.unlock_on_failure(
-                lock_id,
-                self.outputs_api.generate_transfer_statement(TransferStatementParams {
-                    spend_key_branch: KeyBranch::Account,
-                    spend_key_id: owner_key_id,
-                    view_only_key_id: owner_account.view_only_key_id(),
-                    resource_address: &params.resource_address,
-                    resource_view_key: None,
-                    inputs: &fee_inputs_to_spend.inputs,
-                    input_revealed_amount: fee_inputs_to_spend.revealed,
-                    outputs: fee_change_output,
-                    output_revealed_amount: Amount::from(params.max_fee),
-                    required_signer: required_signer_pk,
-                }),
-            )?;
+            let fee_transfer_statement = self.outputs_api.generate_transfer_statement(TransferStatementParams {
+                spend_key_branch: KeyBranch::Account,
+                spend_key_id: owner_key_id,
+                view_only_key_id: owner_account.view_only_key_id(),
+                resource_address: &params.resource_address,
+                resource_view_key: None,
+                inputs: &fee_inputs_to_spend.inputs,
+                input_revealed_amount: fee_inputs_to_spend.revealed,
+                outputs: fee_change_output,
+                output_revealed_amount: Amount::from(params.max_fee),
+                required_signer: required_signer_pk,
+            })?;
 
             // Add the unconfirmed fee change output to the wallet store
             if let Some(output) = fee_transfer_statement.outputs_statement.outputs.first() {
@@ -415,30 +420,24 @@ where
                     fee_stealth_change_amt,
                     owner_account.component_address()
                 );
-                self.unlock_on_failure(
-                    lock_id,
-                    self.add_unconfirmed_output_from_statement(
-                        lock_id,
-                        &owner_account,
-                        XTR,
-                        output,
-                        fee_stealth_change_amt,
-                        None,
-                    ),
+                self.add_unconfirmed_output_from_statement(
+                    lock.id(),
+                    &owner_account,
+                    XTR,
+                    output,
+                    fee_stealth_change_amt,
+                    None,
                 )?;
             }
 
             // NOTE: important to add this after we add the fee change, because this allows us to spend the fee change
             // UTXO (XTR case)
-            let inputs_to_spend = self.unlock_on_failure(
-                lock_id,
-                self.lock_inputs_for_transfer(
-                    lock_id,
-                    owner_account.account().component_address(),
-                    params.resource_address,
-                    params.total_output_amount(),
-                    params.input_selection,
-                ),
+            let inputs_to_spend = self.lock_inputs_for_transfer(
+                lock.id(),
+                owner_account.account().component_address(),
+                params.resource_address,
+                params.total_output_amount(),
+                params.input_selection,
             )?;
 
             // Signing key for main transfer intent
@@ -446,8 +445,7 @@ where
             let (signing_key_branch, signing_key_id) = if must_sign_with_account_key {
                 (KeyBranch::Account, owner_key_id)
             } else {
-                let next_index =
-                    self.unlock_on_failure(lock_id, self.key_manager_api.next_derived_key_index(KeyBranch::Nonce))?;
+                let next_index = self.key_manager_api.next_derived_key_index(KeyBranch::Nonce)?;
                 (KeyBranch::Nonce, KeyId::derived(next_index))
             };
             let main_signer = if signing_key_branch == fee_signer.branch && signing_key_id == fee_signer.key_id {
@@ -509,24 +507,21 @@ where
                 .map(TryInto::try_into)
                 .collect::<Result<Vec<StealthOutputToCreate>, StealthTransferApiError>>()?;
 
-            let transfer_statement = self.unlock_on_failure(
-                lock_id,
-                self.outputs_api.generate_transfer_statement(TransferStatementParams {
-                    spend_key_branch: KeyBranch::Account,
-                    spend_key_id: owner_key_id,
-                    view_only_key_id: owner_account.view_only_key_id(),
-                    resource_address: &params.resource_address,
-                    resource_view_key,
-                    inputs: &inputs_to_spend.inputs,
-                    input_revealed_amount: inputs_to_spend.revealed,
-                    outputs: outputs_to_create
-                        .into_iter()
-                        .chain(change_output)
-                        .filter(|o| o.amount.is_positive()),
-                    output_revealed_amount: params.total_revealed_output_amount(),
-                    required_signer: required_signer_pk,
-                }),
-            )?;
+            let transfer_statement = self.outputs_api.generate_transfer_statement(TransferStatementParams {
+                spend_key_branch: KeyBranch::Account,
+                spend_key_id: owner_key_id,
+                view_only_key_id: owner_account.view_only_key_id(),
+                resource_address: &params.resource_address,
+                resource_view_key,
+                inputs: &inputs_to_spend.inputs,
+                input_revealed_amount: inputs_to_spend.revealed,
+                outputs: outputs_to_create
+                    .into_iter()
+                    .chain(change_output)
+                    .filter(|o| o.amount.is_positive()),
+                output_revealed_amount: params.total_revealed_output_amount(),
+                required_signer: required_signer_pk,
+            })?;
 
             // Add the unconfirmed change output to the wallet store
             // NOTE: we can get the nth element because outputs are guaranteed to be in the order we pass them to
@@ -540,16 +535,13 @@ where
                     change_amount,
                     owner_account.component_address()
                     );
-                    self.unlock_on_failure(
-                        lock_id,
-                        self.add_unconfirmed_output_from_statement(
-                            lock_id,
-                            &owner_account,
-                            params.resource_address,
-                            output,
-                            change_amount,
-                            None,
-                        ),
+                    self.add_unconfirmed_output_from_statement(
+                        lock.id(),
+                        &owner_account,
+                        params.resource_address,
+                        output,
+                        change_amount,
+                        None,
                     )?;
                 }
             }
@@ -588,27 +580,23 @@ where
                 substate_inputs.push(SubstateRequirement::unversioned(badge_vault.id));
             }
 
-            let transaction = self.unlock_on_failure(
-                lock_id,
-                self.generate_transfer_transaction(
-                    network,
-                    &owner_account,
-                    params,
-                    substate_inputs,
-                    fee_transfer_statement,
-                    transfer_statement,
-                    &accounts_to_create,
-                ),
+            let transaction = self.generate_transfer_transaction(
+                network,
+                &owner_account,
+                params,
+                substate_inputs,
+                fee_transfer_statement,
+                transfer_statement,
+                &accounts_to_create,
             )?;
 
-            Ok(StealthTransferOutput {
+            Ok((lock, StealthTransferOutput {
                 transaction,
-                lock_id,
                 fee_inputs: fee_inputs_to_spend,
                 transfer_inputs: inputs_to_spend,
                 additional_signer: main_signer,
                 main_signer: fee_signer,
-            })
+            }))
         })
     }
 
@@ -697,18 +685,6 @@ where
                     // If the account does not exist, we need to create it
                     Ok(true)
                 }
-            },
-        }
-    }
-
-    pub fn unlock_on_failure<T, E>(&self, lock_id: WalletLockId, result: Result<T, E>) -> Result<T, E> {
-        match result {
-            Ok(value) => Ok(value),
-            Err(e) => {
-                if let Err(err) = self.outputs_api.release_lock(lock_id) {
-                    error!(target: LOG_TARGET, "Failed to release inputs lock after error: {}", err);
-                }
-                Err(e)
             },
         }
     }

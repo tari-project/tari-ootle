@@ -97,6 +97,7 @@ diesel::table! {
         id -> Integer,
         transaction_id -> Nullable<Text>,
         created_at -> Timestamp,
+        timeout_at -> Nullable<Timestamp>,
     }
 }
 

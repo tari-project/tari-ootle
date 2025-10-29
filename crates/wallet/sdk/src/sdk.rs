@@ -24,6 +24,7 @@ use crate::{
         confidential_transfer::ConfidentialTransferApi,
         config::{ConfigApi, ConfigApiError, ConfigKey},
         key_manager::{KeyManagerApi, KeyManagerApiError},
+        locks::LocksApi,
         non_fungible_tokens::NonFungibleTokensApi,
         password_manager::{PasswordManagerApi, PasswordManagerApiError},
         resources::ResourcesApi,
@@ -194,6 +195,10 @@ where
         &self.network_interface
     }
 
+    pub fn locks_api(&self) -> LocksApi<'_, TStore> {
+        LocksApi::new(&self.store)
+    }
+
     /// Returns the KeyManager API for the wallet.
     pub fn key_manager_api(&self) -> KeyManagerApi<'_, TStore> {
         let network = self.config.network;
@@ -250,6 +255,7 @@ where
         ConfidentialTransferApi::new(
             self.key_manager_api(),
             self.accounts_api(),
+            self.locks_api(),
             self.confidential_outputs_api(),
             self.substate_api(),
             self.transaction_api(),
@@ -266,6 +272,7 @@ where
         StealthTransferApi::new(
             self.accounts_api(),
             self.stealth_outputs_api(),
+            self.locks_api(),
             self.substate_api(),
             self.key_manager_api(),
             self.config_api(),

@@ -1,0 +1,70 @@
+//   Copyright 2025 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+use std::time::Duration;
+
+use tari_engine_types::substate::SubstateDiff;
+use tari_template_lib::{models::VaultId, prelude::Amount};
+
+use crate::{
+    models::{WalletLockDropGuard, WalletLockId},
+    storage::{WalletStorageError, WalletStore, WalletStoreWriter},
+};
+
+#[derive(Clone)]
+pub struct LocksApi<'a, TStore> {
+    store: &'a TStore,
+}
+
+impl<'a, TStore: WalletStore> LocksApi<'a, TStore> {
+    pub(crate) fn new(store: &'a TStore) -> Self {
+        Self { store }
+    }
+
+    pub fn create_lock(&self) -> Result<WalletLockDropGuard<'a, TStore>, LocksApiError> {
+        let lock_id = self.store.with_write_tx(|tx| tx.locks_create(None))?;
+        Ok(WalletLockDropGuard::new(lock_id, self.store))
+    }
+
+    pub fn create_lock_with_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<WalletLockDropGuard<'a, TStore>, LocksApiError> {
+        let lock_id = self.store.with_write_tx(|tx| tx.locks_create(Some(timeout)))?;
+        Ok(WalletLockDropGuard::new(lock_id, self.store))
+    }
+
+    pub fn release_lock(&self, lock_id: WalletLockId) -> Result<(), LocksApiError> {
+        self.store.with_write_tx(|tx| tx.locks_release(lock_id))?;
+        Ok(())
+    }
+
+    pub fn finalize_lock(&self, lock_id: WalletLockId, diff: &SubstateDiff) -> Result<(), LocksApiError> {
+        self.store
+            .with_write_tx(|tx| tx.locks_unlock_finalized(lock_id, diff))?;
+        Ok(())
+    }
+
+    pub fn lock_funds_in_vault<A: Into<Amount>>(
+        &self,
+        lock_id: WalletLockId,
+        vault_id: &VaultId,
+        amount_to_lock: A,
+    ) -> Result<(), LocksApiError> {
+        self.store
+            .with_write_tx(|tx| tx.vaults_lock_revealed_funds(lock_id, vault_id, amount_to_lock.into()))?;
+
+        Ok(())
+    }
+
+    pub fn clear_stale_locks(&self) -> Result<usize, LocksApiError> {
+        let num = self.store.with_write_tx(|tx| tx.locks_release_stale())?;
+        Ok(num)
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum LocksApiError {
+    #[error("Store error: {0}")]
+    StoreError(#[from] WalletStorageError),
+}

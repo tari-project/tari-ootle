@@ -355,9 +355,14 @@ impl Vault {
             .expect("GetResourceAddress returned invalid resource address")
     }
 
+    /// Returns the [ResourceManager] for the resource that this vault holds.
+    pub fn to_resource_manager(&self) -> ResourceManager {
+        ResourceManager::get(self.resource_address())
+    }
+
     /// Returns the the type of resource that this vault holds.
     pub fn resource_type(&self) -> ResourceType {
-        ResourceManager::get(self.resource_address()).resource_type()
+        self.to_resource_manager().resource_type()
     }
 
     /// Pay a transaction fee with revealed funds present in the vault.

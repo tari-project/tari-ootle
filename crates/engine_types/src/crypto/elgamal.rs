@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use borsh::BorshSerialize;
+use log::{info, warn};
 use tari_bor::{Deserialize, Serialize};
 use tari_common_types::types::PrivateKey;
 use tari_crypto::{
@@ -19,6 +20,8 @@ use crate::{
     ConvertFromByteType,
     ToByteType,
 };
+
+const LOG_TARGET: &str = "tari::ootle::engine_types::crypto::elgamal";
 
 pub fn validate_elgamal_verifiable_balance_proof(
     commitment: &PedersenCommitment,
@@ -207,9 +210,18 @@ impl ElgamalVerifiableBalance {
             .collect::<Vec<_>>();
 
         let mut results = vec![None; balances.len()];
+        let mut warning_logged = false;
 
         for v in value_range {
             let value = lookup_table.lookup(v)?.unwrap_or_else(|| {
+                if !warning_logged {
+                    warning_logged = true;
+                    warn!(
+                        target: LOG_TARGET,
+                        "Value lookup table missing entry for value {}, falling back to slow lookup method",
+                        v
+                    );
+                }
                 // Fallback to slow lookup method if the lookup table does not contain a key for the value
                 let pk = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(v));
                 copy_fixed(pk.as_bytes())
@@ -217,6 +229,7 @@ impl ElgamalVerifiableBalance {
 
             while let Some(pos) = balances.iter().position(|(_, balance)| value == balance.as_bytes()) {
                 let (order, _) = balances.swap_remove(pos);
+                info!(target: LOG_TARGET, "Found encrypted balance: {}", v);
                 results
                     .get_mut(order)
                     .expect("batched_brute_force: balances index greater than results")

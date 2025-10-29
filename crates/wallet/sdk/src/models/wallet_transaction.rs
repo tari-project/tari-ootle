@@ -48,6 +48,14 @@ pub enum TransactionStatus {
 }
 
 impl TransactionStatus {
+    pub fn is_any_accept(&self) -> bool {
+        matches!(self, TransactionStatus::Accepted | TransactionStatus::OnlyFeeAccepted)
+    }
+
+    pub fn is_accepted(&self) -> bool {
+        matches!(self, TransactionStatus::Accepted)
+    }
+
     pub fn as_key_str(&self) -> &'static str {
         match self {
             TransactionStatus::New => "New",

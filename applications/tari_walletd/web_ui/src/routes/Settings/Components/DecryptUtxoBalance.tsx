@@ -28,24 +28,24 @@ import Box from "@mui/material/Box";
 import { useTheme } from "@mui/material/styles";
 import { Divider } from "@mui/material";
 import { stealthDecryptUtxoBalance } from "../../../utils/json_rpc";
-import { StealthUtxosDecryptValueRequest } from "@tari-project/typescript-bindings";
+import { StealthUtxosDecryptValueRequest, StealthUtxosDecryptValueResponse } from "@tari-project/typescript-bindings";
 
 function DecryptUtxoBalanceForm() {
   const [formState, setFormState] = useState({
     resourceAddress: null,
     utxoId: null,
     minimumExpectedValue: null,
-    maximumExpectedValue: null,
+    maximumExpectedValue: 100000000,
     keyId: 0,
   });
-  const [balance, setBalance] = useState<any>(null);
+  const [balance, setBalance] = useState<StealthUtxosDecryptValueResponse>(null);
 
   const onViewBalanceClicked = async () => {
     const resp = await stealthDecryptUtxoBalance({
       resource_address: formState.resourceAddress!,
       ids: [formState.utxoId!],
       minimum_expected_value: formState.minimumExpectedValue ? BigInt(formState.minimumExpectedValue) : null,
-      maximum_expected_value: formState.maximumExpectedValue ? BigInt(formState.maximumExpectedValue) : null,
+      maximum_expected_value: BigInt(formState.maximumExpectedValue),
       view_key_id: BigInt(formState.keyId),
     } as StealthUtxosDecryptValueRequest);
 
@@ -54,11 +54,11 @@ function DecryptUtxoBalanceForm() {
 
   const balances =
     balance &&
-    Object.keys(balance?.balances).map((key) => {
+    Object.keys(balance?.values).map((key) => {
       return (
         <Box key={key}>
           <Typography>
-            {key}: {balance.balances[key] || "Failed not decrypt value"}
+            {key}: {balance.values[key]?.toString() || "Failed not decrypt value"}
           </Typography>
         </Box>
       );

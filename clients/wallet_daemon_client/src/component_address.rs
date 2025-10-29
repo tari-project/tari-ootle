@@ -65,3 +65,8 @@ impl From<String> for ComponentAddressOrName {
         Self::Name(name)
     }
 }
+impl From<&str> for ComponentAddressOrName {
+    fn from(name: &str) -> Self {
+        Self::Name(name.to_string())
+    }
+}

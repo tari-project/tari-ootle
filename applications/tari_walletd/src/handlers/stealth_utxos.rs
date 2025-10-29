@@ -6,7 +6,7 @@ use std::fs;
 use anyhow::anyhow;
 use axum_extra::headers::authorization::Bearer;
 use indexmap::IndexMap;
-use log::info;
+use log::{info, warn};
 use tari_ootle_wallet_crypto::{AlwaysMissLookupTable, IoReaderValueLookup};
 use tari_template_lib::models::UtxoAddress;
 use tari_wallet_daemon_client::{
@@ -19,11 +19,14 @@ use tari_wallet_daemon_client::{
         UtxoInfo,
     },
 };
-use tokio::{task::spawn_blocking, time::Instant};
+use tokio::{
+    task::{spawn_blocking, AbortHandle},
+    time::Instant,
+};
 
 use crate::handlers::{helpers::invalid_params, HandlerContext};
 
-const LOG_TARGET: &str = "tari::walletd::handlers::stealth_utxos";
+const LOG_TARGET: &str = "tari::ootle::walletd::handlers::stealth_utxos";
 
 pub async fn handle_list(
     context: &HandlerContext,
@@ -54,6 +57,7 @@ pub async fn handle_list(
     })
 }
 
+#[allow(clippy::too_many_lines)]
 pub async fn handle_decrypt_value(
     context: &HandlerContext,
     token: Option<&Bearer>,
@@ -61,6 +65,9 @@ pub async fn handle_decrypt_value(
 ) -> Result<StealthUtxosDecryptValueResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
+    if req.ids.is_empty() {
+        return Err(invalid_params("ids", Some("At least one UTXO ID must be provided")));
+    }
 
     if req.ids.len() > 10 {
         return Err(invalid_params(
@@ -81,7 +88,7 @@ pub async fn handle_decrypt_value(
     // Get view secret key
     let view_key = sdk.key_manager_api().get_elgamal_encrypted_view_key(req.view_key_id)?;
 
-    let value_range = req.minimum_expected_value.unwrap_or(0)..=req.maximum_expected_value.unwrap_or(10_000_000_000);
+    let value_range = req.minimum_expected_value.unwrap_or(0)..=req.maximum_expected_value;
 
     // NOTE: we iterate in a random order (HashMap) but collect into a deterministic order (IndexMap) so that the
     // results are always in the same order for the same input
@@ -101,40 +108,81 @@ pub async fn handle_decrypt_value(
     let timer = Instant::now();
     let elgamal_proofs = proofs.values().copied().cloned().collect::<Vec<_>>();
     let sdk = sdk.clone();
-    let balances = match context.config().value_lookup_table_file.clone() {
-        Some(file) => {
-            spawn_blocking(move || {
-                let mut file = fs::File::open(&file)
-                    .map_err(|e| anyhow!("Unable to load value lookup file '{}': {e}", file.display()))?;
-                let mut lookup = IoReaderValueLookup::load(&mut file)?;
+    let handle = match context.config().value_lookup_table_file.clone() {
+        Some(path) => spawn_blocking(move || {
+            let mut file = fs::File::open(&path)
+                .map_err(|e| anyhow!("Unable to load value lookup file '{}': {e}", path.display()))?;
+            let mut lookup = IoReaderValueLookup::load(&mut file)?;
+            info!(
+                target: LOG_TARGET,
+                "Using value lookup table from file '{}' ({}-{}) for brute force balance lookup",
+                path.display(),
+                lookup.range().start(),
+                lookup.range().end()
+            );
 
-                let balance = sdk.viewable_balance_api().try_brute_force_commitment_balances(
-                    &view_key.key,
-                    elgamal_proofs.iter(),
-                    value_range,
-                    &mut lookup,
-                )?;
+            let start = value_range.start();
+            let end = value_range.end();
+            if start < lookup.range().start() || end > lookup.range().end() {
+                warn!(
+                    target: LOG_TARGET,
+                    "The requested value range ({}-{}) is outside the loaded value lookup table range ({}-{}). \
+                     This query may take excessive amount of time.",
+                    start,
+                    end,
+                    lookup.range().start(),
+                    lookup.range().end()
+                );
+            }
 
-                anyhow::Ok(balance)
-            })
-            .await??
-        },
+            let balance = sdk.viewable_balance_api().try_brute_force_commitment_balances(
+                &view_key.key,
+                elgamal_proofs.iter(),
+                value_range,
+                &mut lookup,
+            )?;
+
+            anyhow::Ok(balance)
+        }),
         None => {
+            warn!(
+                target: LOG_TARGET,
+                "No value lookup table file configured. Generating a temporary lookup table that always misses. \
+                 This will make the brute force balance lookup very slow for high-value outputs."
+            );
             spawn_blocking(move || {
-                sdk.viewable_balance_api().try_brute_force_commitment_balances(
+                let balances = sdk.viewable_balance_api().try_brute_force_commitment_balances(
                     &view_key.key,
                     elgamal_proofs.iter(),
                     value_range,
                     &mut AlwaysMissLookupTable,
-                )
+                )?;
+                anyhow::Ok(balances)
             })
-            .await??
         },
     };
+    struct AbortOnDropGuard {
+        handle: AbortHandle,
+    }
+
+    impl Drop for AbortOnDropGuard {
+        fn drop(&mut self) {
+            if !self.handle.is_finished() {
+                info!(target: LOG_TARGET, "Aborting brute force balance lookup task");
+                self.handle.abort();
+            }
+        }
+    }
+
+    // If this request is abandoned, abort the blocking task
+    let _drop_guard = AbortOnDropGuard {
+        handle: handle.abort_handle(),
+    };
+    let balances = handle.await??;
 
     info!(target: LOG_TARGET, "Brute force balance lookup took {:.2?}", timer.elapsed());
 
     Ok(StealthUtxosDecryptValueResponse {
-        balances: proofs.into_keys().zip(balances).collect(),
+        values: proofs.into_keys().zip(balances).collect(),
     })
 }

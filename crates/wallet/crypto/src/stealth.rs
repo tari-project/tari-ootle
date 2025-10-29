@@ -34,8 +34,8 @@ pub fn create_transfer_statement<'a, Inputs, Outputs>(
     required_signer: RistrettoPublicKeyBytes,
 ) -> Result<StealthTransferStatement, WalletCryptoError>
 where
-    Inputs: IntoIterator<Item = &'a UnblindedStealthInputWitness>,
-    Outputs: IntoIterator<Item = &'a UnblindedStealthOutputWitness> + Clone,
+    Inputs: IntoIterator<Item = &'a UnblindedStealthInputWitness> + ExactSizeIterator,
+    Outputs: IntoIterator<Item = &'a UnblindedStealthOutputWitness> + ExactSizeIterator + Clone,
 {
     if revealed_input_amount.is_negative() {
         return Err(WalletCryptoError::InvalidArgument {
@@ -50,17 +50,14 @@ where
         });
     }
 
-    let mut input_iter = inputs.into_iter();
-    let num_inputs_estimate = {
-        let (lower, upper) = input_iter.size_hint();
-        upper.unwrap_or(lower)
-    };
+    let num_inputs = inputs.len();
+    let num_outputs = output_statements.len();
 
     let outputs_statement = create_outputs_statement(output_statements.clone(), revealed_output_amount)?;
     let outputs_statement_hash = messages::stealth_statement_metadata64(&outputs_statement);
 
-    let (inputs_to_spend, agg_input_mask) = input_iter.try_fold(
-        (Vec::with_capacity(num_inputs_estimate), RistrettoSecretKey::default()),
+    let (inputs_to_spend, agg_input_mask) = inputs.into_iter().try_fold(
+        (Vec::with_capacity(num_inputs), RistrettoSecretKey::default()),
         |(mut inputs, agg_input), input| {
             let commitment =
                 input
@@ -97,12 +94,16 @@ where
         required_signer,
     };
 
-    let balance_proof = generate_stealth_balance_proof_signature(
-        &agg_input_mask,
-        &agg_output_mask,
-        &inputs_statement,
-        &outputs_statement,
-    );
+    let balance_proof = if num_outputs == 0 && num_inputs == 0 {
+        None
+    } else {
+        Some(generate_stealth_balance_proof_signature(
+            &agg_input_mask,
+            &agg_output_mask,
+            &inputs_statement,
+            &outputs_statement,
+        ))
+    };
 
     Ok(StealthTransferStatement {
         inputs_statement: StealthInputsStatement {

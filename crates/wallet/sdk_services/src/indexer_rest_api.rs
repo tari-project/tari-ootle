@@ -20,8 +20,8 @@ use tari_indexer_client::{
     types::{
         GetSubstatesRequest,
         GetTransactionResultRequest,
-        GetUnspentUtxosRequest,
         GetUtxoUpdatesRequest,
+        GetUtxosRequest,
         IndexerTransactionFinalizedResult,
         SubmitTransactionRequest,
     },
@@ -255,7 +255,7 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
         // TODO: Given the potential size of substates protobuf, json + hex encoding may be too inefficient. Consider
         // supporting the application/x-protobuf content type in the indexer REST API.
         let resp = client
-            .get_unspent_utxos(GetUnspentUtxosRequest {
+            .get_utxos(GetUtxosRequest {
                 resource_address,
                 tag_and_nonce_pairs,
             })

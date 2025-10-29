@@ -39,11 +39,15 @@ use tari_ootle_common_types::{
     SubstateRequirement,
 };
 use tari_ootle_wallet_sdk::{
-    apis::{confidential_transfer::ConfidentialTransferInputSelection, stealth_transfer::BadgeUsage},
+    apis::{
+        confidential_transfer::UtxoInputSelection,
+        stealth_transfer::{BadgeUsage, TransferOutput},
+    },
     crypto::memo::Memo,
     models::{
         Account,
         AuthoredTemplateModel,
+        BranchAndKeyId,
         DerivedKeyIndex,
         KeyBranch,
         KeyId,
@@ -56,7 +60,15 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_template_abi::{FunctionDef, TemplateDef};
 use tari_template_lib::{
-    models::{ConfidentialOutputStatement, NonFungibleId, ResourceAddress, UtxoAddress, UtxoId, VaultId},
+    models::{
+        ConfidentialOutputStatement,
+        NonFungibleId,
+        ResourceAddress,
+        StealthTransferStatement,
+        UtxoAddress,
+        UtxoId,
+        VaultId,
+    },
     prelude::{ComponentAddress, ConfidentialWithdrawProof, ResourceType, RistrettoPublicKeyBytes},
     types::{crypto::PedersenCommitmentBytes, Amount, EncryptedData, TemplateAddress},
 };
@@ -103,21 +115,21 @@ pub struct CallInstructionRequest {
     pub max_epoch: Option<u64>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransactionSubmitRequest {
     pub transaction: UnsignedTransaction,
-    pub signing_key_id: Option<KeyId>,
+    pub seal_signer: BranchAndKeyId,
+    pub other_signers: Vec<BranchAndKeyId>,
     /// Attempt to infer inputs and their dependencies from instructions. If false, the provided transaction must
     /// contain the required inputs.
     pub detect_inputs: bool,
     /// If true(default), detected inputs will omit versions allowing consensus to resolve input substates.
-    /// If false, the wallet will try determine versioned for the inputs. These may be outdated if the substate has
+    /// If false, the wallet will try to determine versions for the inputs. These may be outdated if the substate has
     /// changed since detection.
     #[serde(default = "return_true")]
     pub detect_inputs_use_unversioned: bool,
-    #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
-    pub proof_ids: Vec<WalletLockId>,
+    pub lock_ids: Vec<WalletLockId>,
 }
 
 const fn return_true() -> bool {
@@ -130,16 +142,7 @@ pub struct TransactionSubmitResponse {
     pub transaction_id: TransactionId,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
-pub struct TransactionSubmitDryRunRequest {
-    pub transaction: UnsignedTransaction,
-    pub signing_key_id: Option<KeyId>,
-    pub detect_inputs: bool,
-    pub detect_inputs_use_unversioned: bool,
-    #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
-    pub proof_ids: Vec<WalletLockId>,
-}
+pub type TransactionSubmitDryRunRequest = TransactionSubmitRequest;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
@@ -541,7 +544,7 @@ pub struct ConfidentialTransferRequest {
     #[serde(deserialize_with = "opt_string_or_struct")]
     pub account: Option<ComponentAddressOrName>,
     pub amount: Amount,
-    pub input_selection: ConfidentialTransferInputSelection,
+    pub input_selection: UtxoInputSelection,
     pub resource_address: ResourceAddress,
     pub destination_address: OotleAddress,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
@@ -1057,9 +1060,62 @@ pub struct TransferNftResponse {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub struct AccountsCreateStealthTransferStatementRequest {
+    pub requests: Vec<TransferStatementRequest>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub struct TransferStatementRequest {
+    pub sender_account: ComponentAddressOrName,
+    pub resource_address: ResourceAddress,
+    pub input_selection: InputSelection,
+    pub outputs: Vec<TransferOutput>,
+}
+
+impl TransferStatementRequest {
+    pub fn total_output_amount(&self) -> Amount {
+        self.outputs.iter().map(|o| o.blinded_amount + o.revealed_amount).sum()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub enum InputSelection {
+    FromBucket { revealed_amount: Amount },
+    Selection(UtxoInputSelection),
+}
+
+impl InputSelection {
+    pub fn as_selection(&self) -> Option<UtxoInputSelection> {
+        match self {
+            InputSelection::FromBucket { .. } => None,
+            InputSelection::Selection(s) => Some(*s),
+        }
+    }
+
+    pub fn as_from_bucket(&self) -> Option<Amount> {
+        match self {
+            InputSelection::FromBucket { revealed_amount } => Some(*revealed_amount),
+            InputSelection::Selection(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+pub struct AccountsCreateStealthTransferStatementResponse {
+    pub statements: Vec<StealthTransferStatement>,
+    pub lock_id: WalletLockId,
+    pub signing_keys: Vec<BranchAndKeyId>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct StealthTransferRequest {
     pub owner_account: ComponentAddressOrName,
-    pub input_selection: ConfidentialTransferInputSelection,
+    pub fee_input_selection: UtxoInputSelection,
+    pub input_selection: UtxoInputSelection,
     pub resource_address: ResourceAddress,
     #[serde(default, skip_serializing_if = "BadgeUsage::is_none")]
     pub badge_usage: BadgeUsage,
@@ -1129,11 +1185,11 @@ pub struct StealthUtxosDecryptValueRequest {
     pub ids: Vec<UtxoId>,
     pub view_key_id: u64,
     pub minimum_expected_value: Option<u64>,
-    pub maximum_expected_value: Option<u64>,
+    pub maximum_expected_value: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct StealthUtxosDecryptValueResponse {
-    pub balances: HashMap<UtxoId, Option<u64>>,
+    pub values: HashMap<UtxoId, Option<u64>>,
 }

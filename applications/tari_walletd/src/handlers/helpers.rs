@@ -147,7 +147,9 @@ where
 {
     let result;
     if let Some(a) = account {
-        result = get_account(a, accounts_api)?;
+        result = get_account(a, accounts_api)
+            .optional()?
+            .ok_or_else(|| not_found(format!("Account '{a}' not found.",)))?;
     } else {
         result = accounts_api
             .get_default()

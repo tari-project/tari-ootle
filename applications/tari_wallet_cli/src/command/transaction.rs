@@ -41,7 +41,11 @@ use tari_engine_types::{
 };
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{Epoch, SubstateAddress, SubstateRequirement};
-use tari_ootle_wallet_sdk::{apis::confidential_transfer::ConfidentialTransferInputSelection, crypto::memo::Memo};
+use tari_ootle_wallet_sdk::{
+    apis::confidential_transfer::UtxoInputSelection,
+    crypto::memo::Memo,
+    models::BranchAndKeyId,
+};
 use tari_template_lib::{
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
     models::{BucketId, NonFungibleAddress, NonFungibleId},
@@ -246,6 +250,10 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
         fee_account = client.accounts_get_default().await?.account;
     }
 
+    let owner_key_id = fee_account
+        .owner_key_id
+        .ok_or_else(|| anyhow!("Fee account does not have an owner key ID"))?;
+
     let SettingsGetResponse { network, .. } = client.get_settings().await?;
 
     let mut builder = Transaction::builder()
@@ -275,20 +283,22 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
         let resp = client
             .submit_transaction_dry_run(TransactionSubmitDryRunRequest {
                 transaction,
-                signing_key_id: None,
+                seal_signer: BranchAndKeyId::for_account(owner_key_id),
+                other_signers: vec![],
                 detect_inputs: common.detect_inputs.unwrap_or(true),
                 detect_inputs_use_unversioned: true,
-                proof_ids: vec![],
+                lock_ids: vec![],
             })
             .await?;
         wait_transaction_result(resp.transaction_id, client).await?;
     } else {
         let request = TransactionSubmitRequest {
             transaction,
-            signing_key_id: None,
+            seal_signer: BranchAndKeyId::for_account(owner_key_id),
+            other_signers: vec![],
             detect_inputs: common.detect_inputs.unwrap_or(true),
             detect_inputs_use_unversioned: true,
-            proof_ids: vec![],
+            lock_ids: vec![],
         };
         let resp = client.submit_transaction(&request).await?;
         wait_transaction_result(resp.transaction_id, client).await?;
@@ -311,6 +321,10 @@ async fn handle_submit_manifest(
     } else {
         fee_account = client.accounts_get_default().await?.account;
     }
+
+    let owner_key_id = fee_account
+        .owner_key_id
+        .ok_or_else(|| anyhow!("Fee account does not have an owner key ID"))?;
 
     let SettingsGetResponse { network, .. } = client.get_settings().await?;
 
@@ -338,20 +352,22 @@ async fn handle_submit_manifest(
         let resp = client
             .submit_transaction_dry_run(TransactionSubmitDryRunRequest {
                 transaction,
-                signing_key_id: fee_account.owner_key_id,
+                seal_signer: BranchAndKeyId::for_account(owner_key_id),
+                other_signers: vec![],
                 detect_inputs: common.detect_inputs.unwrap_or(true),
                 detect_inputs_use_unversioned: true,
-                proof_ids: vec![],
+                lock_ids: vec![],
             })
             .await?;
         summarize(&resp.result.finalize, timer.elapsed());
     } else {
         let request = TransactionSubmitRequest {
             transaction,
-            signing_key_id: fee_account.owner_key_id,
+            seal_signer: BranchAndKeyId::for_account(owner_key_id),
+            other_signers: vec![],
             detect_inputs: common.detect_inputs.unwrap_or(true),
             detect_inputs_use_unversioned: true,
-            proof_ids: vec![],
+            lock_ids: vec![],
         };
 
         let resp = client.submit_transaction(&request).await?;
@@ -426,7 +442,7 @@ pub async fn handle_confidential_transfer(
     let resp = client
         .accounts_confidential_transfer(ConfidentialTransferRequest {
             account: source_account,
-            input_selection: ConfidentialTransferInputSelection::PreferConfidential,
+            input_selection: UtxoInputSelection::PreferConfidential,
             amount: amount.into(),
             resource_address: resource_address.unwrap_or(STEALTH_TARI_RESOURCE_ADDRESS),
             destination_address,

@@ -30,6 +30,17 @@ pub struct StealthOutputsStatement {
     pub agg_range_proof: RangeProofBytes,
 }
 
+impl StealthOutputsStatement {
+    /// Create a new output statement with no stealth outputs, only a revealed amount.
+    pub fn new_revealed_only(amount: Amount) -> Self {
+        Self {
+            outputs: vec![],
+            revealed_output_amount: amount,
+            agg_range_proof: RangeProofBytes::empty(),
+        }
+    }
+}
+
 /// A statement for stealth outputs. A statement must contain confidential outputs
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -81,12 +92,24 @@ pub struct StealthTransferStatement {
     pub inputs_statement: StealthInputsStatement,
     pub outputs_statement: StealthOutputsStatement,
     /// Balance proof that proves that no coins were created or destroyed during the transfer (assuming the range proof
-    /// is valid).
-    #[cfg_attr(feature = "ts", ts(type = "{public_nonce: string, signature: string}"))]
-    pub balance_proof: BalanceProofSignature,
+    /// is valid). This may be None, if and only if, the transfer is revealed-only (i.e. no stealth inputs or outputs).
+    #[cfg_attr(feature = "ts", ts(type = "{public_nonce: string, signature: string} | null"))]
+    pub balance_proof: Option<BalanceProofSignature>,
 }
 
 impl StealthTransferStatement {
+    pub fn revealed_only(
+        input_amount: Amount,
+        output_amount: Amount,
+        required_signer: RistrettoPublicKeyBytes,
+    ) -> Self {
+        Self {
+            inputs_statement: StealthInputsStatement::new_revealed_only(input_amount, required_signer),
+            outputs_statement: StealthOutputsStatement::new_revealed_only(output_amount),
+            balance_proof: None,
+        }
+    }
+
     pub fn revealed_input_amount(&self) -> Amount {
         self.inputs_statement.revealed_amount
     }

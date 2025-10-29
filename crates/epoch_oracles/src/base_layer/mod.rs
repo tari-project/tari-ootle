@@ -156,7 +156,7 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                     target: LOG_TARGET,
                     "⚠️ Base layer reorg detected. Rescanning from genesis."
                 );
-                // TODO: we need to figure out where the fork happened, and delete data after the fork.
+                // TODO: we need to figure out where the fork happened, and delete data after the fork if able.
                 self.last_scanned_hash = None;
                 self.last_scanned_validator_node_mr = None;
                 self.last_scanned_height = 0;

@@ -24,18 +24,17 @@ mod template {
             &self,
             amount: Amount,
             output: StealthOutputsStatement,
-            balance_proof: BalanceProofSignature,
-            required_signer: RistrettoPublicKeyBytes,
+            balance_proof: Option<BalanceProofSignature>,
         ) -> Option<Bucket> {
+            let signer = CallerContext::transaction_signer_public_key();
             let revealed_bucket = self.vault.withdraw(amount);
             let transfer = StealthTransferStatement {
-                inputs_statement: StealthInputsStatement::new_revealed_only(amount, required_signer),
+                inputs_statement: StealthInputsStatement::new_revealed_only(amount, signer),
                 outputs_statement: output,
                 balance_proof,
             };
 
             debug!("Withdrawing {} coins from faucet into confidential output", amount);
-            let signer = CallerContext::transaction_signer_public_key();
             emit_event("take", [
                 ("amount", amount.to_string()),
                 ("confidential", "true".to_string()),

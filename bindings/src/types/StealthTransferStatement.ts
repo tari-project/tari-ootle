@@ -7,7 +7,7 @@ export type StealthTransferStatement = {
   outputs_statement: StealthOutputsStatement;
   /**
    * Balance proof that proves that no coins were created or destroyed during the transfer (assuming the range proof
-   * is valid).
+   * is valid). This may be None, if and only if, the transfer is revealed-only (i.e. no stealth inputs or outputs).
    */
-  balance_proof: { public_nonce: string; signature: string };
+  balance_proof: { public_nonce: string; signature: string } | null;
 };

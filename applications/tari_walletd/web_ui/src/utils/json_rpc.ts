@@ -109,6 +109,7 @@ import type {
   WebRtcStartResponse,
   StealthUtxosDecryptValueRequest,
   StealthUtxosDecryptValueResponse,
+  TransactionSubmitDryRunResponse,
 } from "@tari-project/typescript-bindings";
 import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
 import useAuthStore from "@store/authStore";
@@ -252,7 +253,7 @@ export const keysSetActive = (request: KeysSetActiveRequest): Promise<KeysSetAct
 
 export const transactionsSubmit = (request: TransactionSubmitRequest): Promise<TransactionSubmitResponse> =>
   client().then((c) => c.submitTransaction(request));
-export const submitTransactionDryRun = (request: TransactionSubmitRequest): Promise<TransactionSubmitResponse> =>
+export const submitTransactionDryRun = (request: TransactionSubmitRequest): Promise<TransactionSubmitDryRunResponse> =>
   client().then((c) => c.submitTransactionDryRun(request));
 export const transactionsGet = (request: TransactionGetRequest): Promise<TransactionGetResponse> =>
   client().then((c) => c.transactionsGet(request));

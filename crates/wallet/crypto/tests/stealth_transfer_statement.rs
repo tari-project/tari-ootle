@@ -1,6 +1,8 @@
 //    Copyright 2024 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
+use std::iter;
+
 use chacha20poly1305::aead::OsRng;
 use tari_crypto::{
     keys::{PublicKey, SecretKey},
@@ -44,9 +46,9 @@ mod stealth_tests {
     #[test]
     fn it_errors_for_noop_transfer() {
         let statement = create_transfer_statement(
-            &[],
+            iter::empty(),
             Amount::zero(),
-            &[],
+            iter::empty(),
             Amount::zero(),
             RistrettoPublicKeyBytes::zero(),
         )
@@ -63,9 +65,9 @@ mod stealth_tests {
         let revealed_output_amount = Amount::from(0);
 
         let statement = create_transfer_statement(
-            &inputs,
+            inputs.iter(),
             revealed_input_amount,
-            &output_statements,
+            output_statements.iter(),
             revealed_output_amount,
             RistrettoPublicKeyBytes::zero(),
         )
@@ -83,9 +85,9 @@ mod stealth_tests {
         let revealed_output_amount = Amount::from(6000 + 6000 - 100 - 200 - 300);
 
         let statement = create_transfer_statement(
-            &inputs,
+            inputs.iter(),
             revealed_input_amount,
-            &output_statements,
+            output_statements.iter(),
             revealed_output_amount,
             RistrettoPublicKeyBytes::zero(),
         )
@@ -99,9 +101,9 @@ mod stealth_tests {
         let revealed_input_amount = Amount::from(6000);
         let revealed_output_amount = Amount::from(6000);
         let statement = create_transfer_statement(
-            &[],
+            iter::empty(),
             revealed_input_amount,
-            &[],
+            iter::empty(),
             revealed_output_amount,
             RistrettoPublicKeyBytes::zero(),
         )
@@ -111,9 +113,9 @@ mod stealth_tests {
         let revealed_input_amount = Amount::from(6000);
         let revealed_output_amount = Amount::from(5999);
         let statement = create_transfer_statement(
-            &[],
+            iter::empty(),
             revealed_input_amount,
-            &[],
+            iter::empty(),
             revealed_output_amount,
             RistrettoPublicKeyBytes::zero(),
         )
@@ -131,9 +133,9 @@ mod stealth_tests {
         let revealed_output_amount = Amount::from(6000 + 6000 - 100 - 200 - 300);
 
         let mut statement = create_transfer_statement(
-            &inputs,
+            inputs.iter(),
             revealed_input_amount,
-            &output_statements,
+            output_statements.iter(),
             revealed_output_amount,
             required_signer,
         )
@@ -153,14 +155,15 @@ mod stealth_tests {
             .map(|stmt| &stmt.mask_and_value.mask)
             .fold(RistrettoSecretKey::default(), |agg, mask| agg + mask);
 
-        statement.outputs_statement = create_outputs_statement(&output_statements, revealed_output_amount).unwrap();
+        statement.outputs_statement =
+            create_outputs_statement(output_statements.iter(), revealed_output_amount).unwrap();
 
-        statement.balance_proof = generate_stealth_balance_proof_signature(
+        statement.balance_proof = Some(generate_stealth_balance_proof_signature(
             &agg_input_mask,
             &agg_output_mask,
             &statement.inputs_statement,
             &statement.outputs_statement,
-        );
+        ));
 
         // This passes because we recreated the balance proof correctly
         stealth::validate_transfer_balance(&statement, None).unwrap();

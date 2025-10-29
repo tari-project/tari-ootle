@@ -33,10 +33,10 @@ impl LookupHeader {
         }
         let mut u64_buf = [0u8; 8];
         u64_buf.copy_from_slice(body.get(..8).expect("slice length checked before"));
-        let min = u64::from_le_bytes(u64_buf);
+        let min = u64::from_be_bytes(u64_buf);
         let mut u64_buf = [0u8; 8];
         u64_buf.copy_from_slice(body.get(8..16).expect("slice length checked before"));
-        let max = u64::from_le_bytes(u64_buf);
+        let max = u64::from_be_bytes(u64_buf);
         Ok(Self { min, max })
     }
 

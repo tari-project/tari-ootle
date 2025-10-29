@@ -13,7 +13,7 @@ import {
 } from "@mui/material";
 import { useState } from "react";
 import { useStealthUtxosList } from "@/services/api/hooks/useAccounts";
-import { Account, OutputStatus, ResourceAddress, XTR } from "@tari-project/typescript-bindings";
+import { Account, OutputStatus, XTR } from "@tari-project/typescript-bindings";
 import FetchStatusCheck from "@/components/FetchStatusCheck";
 import { DataTableCell } from "@components/StyledComponents";
 import StatusChip from "./components/StatusChip";
@@ -29,7 +29,6 @@ import {
 import CopyToClipboard from "@components/CopyToClipboard";
 import PlaceHolder from "./components/PlaceHolder";
 import SortableHeader from "./components/SortableHeader";
-import useCurrencyStore from "@store/currencyStore";
 import { useParams } from "react-router-dom";
 import { Memo } from "@components/Memo";
 
@@ -43,6 +42,7 @@ function StealthUtxoList({ account }: { account: Account }) {
 
   const resourceBalance = balancesData?.balances?.find((balance) => balance.resource_address === resourceAddress);
   const currencySymbol = resourceBalance ? resourceBalance.token_symbol || "" : "";
+  const divisibility = resourceBalance ? resourceBalance.divisibility : 6;
 
   const getStatusDisplayName = (status: OutputStatus | "all") => {
     switch (status) {
@@ -104,7 +104,7 @@ function StealthUtxoList({ account }: { account: Account }) {
                         <CopyToClipboard copy={utxo.address.id} />
                       </DataTableCell>
                       <DataTableCell>
-                        {bigintToDecimalString(utxo.value, 6)} {currencySymbol}
+                        {bigintToDecimalString(utxo.value, divisibility)} {currencySymbol}
                       </DataTableCell>
                       <DataTableCell>
                         <StatusChip status={utxo.status} />

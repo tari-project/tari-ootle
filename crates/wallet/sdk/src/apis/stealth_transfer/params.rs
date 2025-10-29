@@ -12,14 +12,16 @@ use tari_template_lib::{
 };
 
 use crate::apis::{
-    confidential_transfer::ConfidentialTransferInputSelection,
+    confidential_transfer::UtxoInputSelection,
     stealth_transfer::{StealthOutputToCreate, StealthTransferApiError},
 };
 
 #[derive(Debug)]
 pub struct StealthTransferParams {
     /// Strategy for input selection
-    pub input_selection: ConfidentialTransferInputSelection,
+    pub fee_input_selection: UtxoInputSelection,
+    /// Strategy for input selection
+    pub input_selection: UtxoInputSelection,
     pub outputs: Vec<TransferOutput>,
     pub badge_usage: BadgeUsage,
     /// Address of the resource to transfer
@@ -104,7 +106,8 @@ impl StealthTransferParams {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransferOutput {
     /// Destination address used to derive the UTXO encryption keys, owner signature and the account in which to
     /// deposit revealed funds

@@ -1,9 +1,9 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{array, collections::HashSet};
+use std::{collections::HashSet, iter};
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use axum_extra::headers::authorization::Bearer;
 use indexmap::IndexMap;
 use log::*;
@@ -26,10 +26,11 @@ use tari_ootle_wallet_crypto::{
 use tari_ootle_wallet_sdk::{
     apis::{
         confidential_transfer::ConfidentialTransferParams,
+        stealth_outputs::TransferStatementParams,
         stealth_transfer::{StealthTransferParams, TransferOutput},
         substate::ValidatorScanResult,
     },
-    models::{KeyBranch, NewAccountData},
+    models::{BranchAndKeyId, KeyBranch, KeyId, NewAccountData, WalletLockDropGuard},
 };
 use tari_ootle_wallet_sdk_services::events::TransactionSubmittedEvent;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
@@ -56,6 +57,8 @@ use tari_wallet_daemon_client::{
         AccountsCreateOrGetResponse,
         AccountsCreateRequest,
         AccountsCreateResponse,
+        AccountsCreateStealthTransferStatementRequest,
+        AccountsCreateStealthTransferStatementResponse,
         AccountsGetBalancesRequest,
         AccountsGetBalancesResponse,
         AccountsListRequest,
@@ -361,7 +364,14 @@ pub async fn handle_get(
 ) -> Result<AccountGetResponse, anyhow::Error> {
     context.check_auth(token, &[JrpcPermission::AccountInfo])?;
     let sdk = context.wallet_sdk();
-    let account = get_account(&req.name_or_address, &sdk.accounts_api())?;
+    let account = get_account(&req.name_or_address, &sdk.accounts_api())
+        .optional()?
+        .ok_or_else(|| {
+            not_found(format!(
+                "Account with name or address '{}' not found",
+                req.name_or_address
+            ))
+        })?;
     Ok(AccountGetResponse {
         account: account.account,
         address: account.address,
@@ -538,9 +548,9 @@ pub async fn handle_claim_burn(
     let public_signer_key = sdk.key_manager_api().next_public_key(KeyBranch::Nonce)?;
 
     let pay_fee_and_mint_output = sdk.stealth_crypto_api().generate_transfer_statement(
-        array::from_ref(&input),
+        iter::once(&input),
         0,
-        array::from_ref(&output_statement),
+        iter::once(&output_statement),
         max_fee,
         public_signer_key.public_key.to_byte_type(),
     )?;
@@ -969,6 +979,7 @@ pub async fn handle_stealth_transfer(
     };
 
     let params = StealthTransferParams {
+        fee_input_selection: req.fee_input_selection,
         input_selection: req.input_selection,
         resource_address: req.resource_address,
         max_fee: req.max_fee,
@@ -1054,6 +1065,131 @@ pub async fn handle_stealth_transfer(
     })
     .await?
 }
+
+#[allow(clippy::too_many_lines)]
+pub async fn handle_create_stealth_transfer_statement(
+    context: &HandlerContext,
+    token: Option<&Bearer>,
+    req: AccountsCreateStealthTransferStatementRequest,
+) -> Result<AccountsCreateStealthTransferStatementResponse, anyhow::Error> {
+    context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
+    let sdk = context.wallet_sdk().clone();
+    if req.requests.is_empty() {
+        return Err(invalid_params(
+            "requests",
+            Some("at least one transfer request must be provided"),
+        ));
+    }
+
+    if req.requests.len() > 16 {
+        return Err(invalid_params(
+            "requests",
+            Some("a maximum of 16 transfer requests can be processed at once"),
+        ));
+    }
+
+    let mut required_signers = HashSet::new();
+    let lock_id = sdk.stealth_outputs_api().create_lock()?;
+    let lock_guard = WalletLockDropGuard::new(lock_id, sdk.store().clone());
+    let mut statements = Vec::with_capacity(req.requests.len());
+    for req in req.requests {
+        let sender_account = get_account(&req.sender_account, &sdk.accounts_api())?;
+        let Some(sender_key_id) = sender_account.owner_key_id() else {
+            return Err(invalid_params(
+                "owner_account",
+                Some("cannot transfer from an account without an owner key"),
+            ));
+        };
+
+        let resource = sdk.substate_api().fetch_resource(req.resource_address).await?;
+
+        if !resource.resource_type().is_stealth() {
+            return Err(invalid_params(
+                "resource_address",
+                Some(format!(
+                    "Resource is not a stealth resource (type: {})",
+                    resource.resource_type()
+                )),
+            ));
+        }
+
+        let amount_to_spend = req.total_output_amount();
+
+        let inputs = req
+            .input_selection
+            .as_selection()
+            .map(|sel| {
+                sdk.stealth_transfer_api().lock_inputs_for_transfer(
+                    lock_id,
+                    sender_account.component_address(),
+                    req.resource_address,
+                    amount_to_spend,
+                    sel,
+                )
+            })
+            .transpose()?;
+
+        let must_sign_with_account_key = inputs.as_ref().is_some_and(|i| i.revealed.is_positive());
+        let (signing_key_branch, signing_key_id) = if must_sign_with_account_key {
+            (KeyBranch::Account, sender_key_id)
+        } else {
+            let next_index = sdk.key_manager_api().next_derived_key_index(KeyBranch::Nonce)?;
+            (KeyBranch::Nonce, KeyId::derived(next_index))
+        };
+
+        let required_signer = sdk
+            .key_manager_api()
+            .get_public_key(signing_key_branch, signing_key_id)?;
+        let required_signer = required_signer.public_key.to_byte_type();
+
+        let outputs = req
+            .outputs
+            .iter()
+            .filter(|o| o.blinded_amount.is_positive())
+            .map(TryInto::try_into)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let statement = sdk
+            .stealth_outputs_api()
+            .generate_transfer_statement(TransferStatementParams {
+                spend_key_branch: KeyBranch::Account,
+                spend_key_id: sender_key_id,
+                view_only_key_id: sender_account.view_only_key_id(),
+                resource_address: &req.resource_address,
+                resource_view_key: resource
+                    .to_view_key_public_key()
+                    .map_err(|e| anyhow!("Failed to decode resource public view key: {e}"))?,
+                inputs: inputs.as_ref().map(|i| i.inputs.as_slice()).unwrap_or(&[]),
+                input_revealed_amount: req
+                    .input_selection
+                    .as_from_bucket()
+                    .unwrap_or(Amount::zero())
+                    .checked_add_positive(inputs.as_ref().map(|i| i.revealed).unwrap_or(Amount::zero()))
+                    .ok_or_else(|| {
+                        invalid_params(
+                            "input_revealed_amount",
+                            Some("input revealed amount overflowed or was negative"),
+                        )
+                    })?,
+                outputs,
+                output_revealed_amount: req.outputs.iter().map(|o| o.revealed_amount).sum(),
+                required_signer,
+            })?;
+
+        required_signers.insert(BranchAndKeyId::new(signing_key_branch, signing_key_id));
+        statements.push(statement);
+    }
+
+    // Return without unlocking the outputs
+    lock_guard.disarm();
+
+    Ok(AccountsCreateStealthTransferStatementResponse {
+        statements,
+        lock_id,
+        signing_keys: required_signers.into_iter().collect(),
+    })
+}
+
 pub async fn handle_associate_stealth_resource(
     context: &HandlerContext,
     token: Option<&Bearer>,

@@ -28,8 +28,8 @@ use tari_engine_types::substate::SubstateId;
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_ootle_wallet_sdk::{
-    apis::{confidential_transfer::ConfidentialTransferInputSelection, stealth_transfer::BadgeUsage},
-    models::{Account, AccountWithAddress, NonFungibleToken},
+    apis::{confidential_transfer::UtxoInputSelection, stealth_transfer::BadgeUsage},
+    models::{Account, AccountWithAddress, BranchAndKeyId, KeyBranch, NonFungibleToken},
 };
 use tari_template_lib::{
     prelude::{ResourceAddress, RistrettoPublicKeyBytes},
@@ -121,7 +121,8 @@ pub async fn transfer_stealth(
     let resp = client
         .accounts_stealth_transfer(StealthTransferRequest {
             owner_account: source_account_name,
-            input_selection: ConfidentialTransferInputSelection::PreferRevealed,
+            fee_input_selection: UtxoInputSelection::PreferRevealed,
+            input_selection: UtxoInputSelection::PreferRevealed,
             resource_address,
             badge_usage: BadgeUsage::None,
             transfers: vec![StealthTransfer {
@@ -437,6 +438,7 @@ pub async fn submit_manifest_with_signing_keys(
 
     let account_name = ComponentAddressOrName::Name(account_signing_key);
     let AccountGetResponse { account, .. } = client.accounts_get(account_name).await.unwrap();
+    let owner_key_id = account.owner_key_id.expect("Account has no owner key id for signing");
 
     let instructions = parse_manifest(&manifest_content, globals, HashMap::new()).unwrap();
 
@@ -450,10 +452,11 @@ pub async fn submit_manifest_with_signing_keys(
 
     let transaction_submit_req = TransactionSubmitRequest {
         transaction,
-        signing_key_id: account.owner_key_id,
+        seal_signer: BranchAndKeyId::for_account(owner_key_id),
+        other_signers: vec![],
         detect_inputs: true,
         detect_inputs_use_unversioned: true,
-        proof_ids: vec![],
+        lock_ids: vec![],
     };
 
     let resp = client.submit_transaction(transaction_submit_req).await.unwrap();
@@ -525,6 +528,8 @@ pub async fn submit_manifest(
 
     let AccountGetResponse { account, .. } = client.accounts_get_default().await.unwrap();
 
+    let owner_key_id = account.owner_key_id.expect("Account has no owner key id for signing");
+
     let transaction = transaction_builder()
         .fee_transaction_pay_from_component(account.component_address, 5000)
         .with_instructions(instructions.instructions)
@@ -535,10 +540,11 @@ pub async fn submit_manifest(
 
     let transaction_submit_req = TransactionSubmitRequest {
         transaction,
-        signing_key_id: account.owner_key_id,
+        seal_signer: BranchAndKeyId::for_account(owner_key_id),
+        other_signers: vec![],
         detect_inputs: true,
         detect_inputs_use_unversioned: true,
-        proof_ids: vec![],
+        lock_ids: vec![],
     };
 
     let resp = client.submit_transaction(transaction_submit_req).await.unwrap();
@@ -641,6 +647,8 @@ pub async fn create_component(
         .await
         .unwrap();
 
+    let owner_key_id = account.owner_key_id.expect("Account has no owner key id for signing");
+
     let transaction = transaction_builder()
         .fee_transaction_pay_from_component(account.component_address, 5000)
         .call_function(template_address, &function_call, args)
@@ -650,10 +658,11 @@ pub async fn create_component(
 
     let transaction_submit_req = TransactionSubmitRequest {
         transaction,
-        signing_key_id: account.owner_key_id,
+        seal_signer: BranchAndKeyId::for_account(owner_key_id),
+        other_signers: vec![],
         detect_inputs: true,
         detect_inputs_use_unversioned: true,
-        proof_ids: vec![],
+        lock_ids: vec![],
     };
 
     let resp = client.submit_transaction(transaction_submit_req).await.unwrap();
@@ -888,7 +897,7 @@ pub async fn confidential_transfer(
         proof_from_badge_resource: None,
         memo: None,
         dry_run: false,
-        input_selection: ConfidentialTransferInputSelection::PreferRevealed,
+        input_selection: UtxoInputSelection::PreferRevealed,
         output_to_revealed: false,
     };
 
@@ -940,10 +949,11 @@ async fn submit_unsigned_tx_and_wait_for_response(
     );
     let submit_req = TransactionSubmitRequest {
         transaction,
-        signing_key_id: account.owner_key_id,
+        seal_signer: BranchAndKeyId::new(KeyBranch::Account, account.owner_key_id.expect("no owner_key_id")),
+        other_signers: vec![],
         detect_inputs: true,
         detect_inputs_use_unversioned: use_unversioned_inputs,
-        proof_ids: vec![],
+        lock_ids: vec![],
     };
 
     let submit_resp = client.submit_transaction(submit_req).await?;

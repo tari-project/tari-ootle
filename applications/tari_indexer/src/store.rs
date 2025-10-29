@@ -150,6 +150,13 @@ pub trait IndexerStoreReadTransaction {
         limit: u32,
     ) -> Result<(StateVersion, Vec<WalletUtxoUpdate>), StorageError>;
 
+    fn utxos_list(
+        &mut self,
+        resource_address: &ResourceAddress,
+        from_id: Option<UtxoId>,
+        limit: u32,
+    ) -> Result<Vec<(UtxoId, Utxo)>, StorageError>;
+
     fn utxos_get_unspent_by_public_nonce_and_tag(
         &mut self,
         resource_address: &ResourceAddress,

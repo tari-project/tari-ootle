@@ -77,7 +77,6 @@ import type {
   TransactionGetResponse,
   TransactionGetResultRequest,
   TransactionGetResultResponse,
-  TransactionSubmitDryRunRequest,
   TransactionSubmitDryRunResponse,
   TransactionSubmitManifestRequest,
   TransactionSubmitManifestResponse,
@@ -226,7 +225,7 @@ export class WalletDaemonClient {
     return this.__invokeRpc("transactions.submit", params);
   }
 
-  public submitTransactionDryRun(params: TransactionSubmitDryRunRequest): Promise<TransactionSubmitDryRunResponse> {
+  public submitTransactionDryRun(params: TransactionSubmitRequest): Promise<TransactionSubmitDryRunResponse> {
     return this.__invokeRpc("transactions.submit_dry_run", params);
   }
 

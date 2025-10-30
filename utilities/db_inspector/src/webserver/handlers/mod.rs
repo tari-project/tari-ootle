@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 pub mod block_diff;
+pub mod block_diff_substate_id_index;
 pub mod blocks;
 pub mod bookkeeping;
 pub mod column_families;

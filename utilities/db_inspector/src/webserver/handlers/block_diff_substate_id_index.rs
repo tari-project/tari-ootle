@@ -23,25 +23,25 @@ pub async fn list(
     Path(db_name): Path<String>,
     Query(req): Query<TableRequest>,
 ) -> Result<Json<TableResponse>, WebError> {
-    const OPERATION: &str = "list_block_diff";
+    const OPERATION: &str = "list_block_diff_substate_id_index";
     let db = context.open_db(&db_name)?;
     let mut table = TableResponse::new([
-        Column::new("block_id", "Block Id"),
-        Column::new("shard", "Shard"),
         Column::new("substate_id", "Substate ID"),
+        Column::new("block_id", "Block Id"),
         Column::new("version", "Version"),
-        Column::new("substate", "Substate"),
+        Column::new("is_up", "Up"),
+        Column::new("seq", "Sequence"),
     ]);
     let tx = db.read_only_context();
 
-    let cf = tx.cf(cfs::block_diff::BlockDiffCf)?;
+    let cf = tx.cf(cfs::block_diff::SubstateIdIndex)?;
     let ordering = if req.asc {
         Ordering::Ascending
     } else {
         Ordering::Descending
     };
-    type Key = <cfs::block_diff::BlockDiffCf as Cf>::Key;
-    type Value = <cfs::block_diff::BlockDiffCf as Cf>::Value;
+    type Key = <cfs::block_diff::SubstateIdIndex as Cf>::Key;
+    type Value = <cfs::block_diff::SubstateIdIndex as Cf>::Value;
     let iter: Box<dyn Iterator<Item = Result<(Key, Value), RocksDbStorageError>>> =
         if let Some(prefix_hex) = req.query.as_ref() {
             let key_prefix = decode_hex_prefix(prefix_hex)?;
@@ -53,15 +53,15 @@ pub async fn list(
     let page_size = req.limit.unwrap_or(1_000);
     let skip = req.page.unwrap_or(0) * page_size;
     for result in iter.skip(skip).take(page_size) {
-        let (id, data) = result?;
+        let (id, _) = result?;
         let encoded_key = cf.encode_key(&id);
         table.add_row(json!({
             "id": hex::encode(encoded_key),
-            "block_id": id.block_id,
             "substate_id": id.substate_id,
+            "block_id": id.block_id,
             "version": id.version,
-            "shard": data.shard(),
-            "substate": data.substate(),
+            "is_up": id.is_up,
+            "seq": id.sequence,
         }));
     }
     let total = cf.count(OPERATION)?;

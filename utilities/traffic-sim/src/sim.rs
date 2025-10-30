@@ -11,16 +11,22 @@ use rand::Rng;
 use reqwest::Client;
 use serde_json::json;
 use tari_indexer_client::types::ListUtxosRequest;
-use tari_ootle_common_types::{displayable::Displayable, optional::Optional, Network};
+use tari_ootle_common_types::{
+    displayable::Displayable,
+    engine_types::published_template::PublishedTemplateAddress,
+    optional::Optional,
+    Network,
+};
 use tari_ootle_wallet_sdk::{
     apis::{confidential_transfer::UtxoInputSelection, stealth_transfer::TransferOutput},
     crypto::memo::Memo,
-    models::{AccountWithAddress, BranchAndKeyId},
+    models::{AccountWithAddress, BranchAndKeyId, KeyBranch},
 };
 use tari_template_lib::{
     constants::XTR,
+    metadata,
     models::{ComponentAddress, ResourceAddress, UtxoId},
-    types::Amount,
+    types::{amount, Amount},
 };
 use tari_transaction::{args, Transaction};
 use tari_wallet_daemon_client::{
@@ -43,6 +49,8 @@ use tari_wallet_daemon_client::{
     WalletDaemonClient,
 };
 use tokio::time::sleep;
+
+use crate::coin::Coin;
 
 pub struct Wallet {
     pub name: String,
@@ -241,6 +249,129 @@ impl TrafficSim {
     }
 
     #[allow(clippy::too_many_lines)]
+    pub async fn setup_stablecoin<P: AsRef<Path>>(
+        &mut self,
+        stablecoin_template: PublishedTemplateAddress,
+        output_path: P,
+    ) -> anyhow::Result<()> {
+        let mut exchange_wallet = self.connect_exchange_wallet().await?;
+        let stablecoin_template = stablecoin_template.as_template_address();
+        let account = match exchange_wallet.client.accounts_get_default().await.optional()? {
+            Some(account) => AccountWithAddress::new(account.account, account.address),
+            None => {
+                let resp = exchange_wallet
+                    .client
+                    .create_account(AccountsCreateRequest {
+                        account_name: Some("sim-admin".to_string()),
+                        is_default: Some(true),
+                        key_index: None,
+                    })
+                    .await?;
+
+                exchange_wallet
+                    .client
+                    .create_free_test_coins(AccountsCreateFreeTestCoinsRequest {
+                        account: resp.account.component_address.into(),
+                        amount: 1_000_000_000.into(),
+                        max_fee: None,
+                    })
+                    .await?;
+                AccountWithAddress::new(resp.account, resp.address)
+            },
+        };
+
+        let view_key = exchange_wallet
+            .client
+            .create_specific_key(KeyBranch::ElgamalEncryptionViewKey, 0)
+            .await?;
+
+        let transaction = Transaction::builder()
+            .for_network(exchange_wallet.network.as_byte())
+            .fee_transaction_pay_from_component(*account.component_address(), 2000)
+            .call_function(stablecoin_template, "instantiate", args![
+                amount!["10000000000000000000000000000"],
+                "SSC",
+                metadata!(
+                    "provider_name" => "Simcoin",
+                    "description" => "A stablecoin for simulation purposes",
+                    "url" => "https://doesntexist.com",
+                ),
+                8,
+                view_key.public_key,
+                false
+            ])
+            .put_last_instruction_output_on_workspace("admin_badge")
+            .call_method(*account.component_address(), "deposit", args![Workspace("admin_badge")])
+            .build_unsigned_transaction();
+
+        let resp = exchange_wallet
+            .client
+            .submit_transaction(TransactionSubmitRequest {
+                transaction,
+                seal_signer: BranchAndKeyId::for_account(
+                    account
+                        .account
+                        .owner_key_id
+                        .ok_or_else(|| anyhow::anyhow!("Exchange account has no owner key ID"))?,
+                ),
+                other_signers: vec![],
+                detect_inputs: true,
+                detect_inputs_use_unversioned: true,
+                lock_ids: vec![],
+            })
+            .await?;
+
+        let resp = exchange_wallet
+            .client
+            .wait_transaction_result(TransactionWaitResultRequest {
+                transaction_id: resp.transaction_id,
+                timeout_secs: Some(60),
+            })
+            .await?;
+
+        if !resp.status.is_accepted() {
+            return Err(anyhow::anyhow!(
+                "Stablecoin instantiation transaction failed: {} {}",
+                resp.status,
+                resp.result.as_ref().and_then(|r| r.result.any_reject()).display()
+            ));
+        }
+        let finalize = resp.result.as_ref().unwrap();
+
+        let stable_coin = finalize
+            .get_components_by_template(&stablecoin_template)
+            .pop()
+            .ok_or_else(|| anyhow::anyhow!("Failed to find stablecoin component in transaction finalize output"))?;
+
+        let (resource_address, _) = finalize
+            .created_resources()
+            .find(|(_, res)| res.resource_type().is_stealth())
+            .ok_or_else(|| anyhow::anyhow!("Failed to find stablecoin resource in transaction finalize output"))?;
+
+        let (admin_badge, _) = finalize
+            .created_resources()
+            .find(|(_, res)| res.resource_type().is_non_fungible() && res.metadata().contains_key("admin_badge"))
+            .ok_or_else(|| anyhow::anyhow!("Failed to find stablecoin resource in transaction finalize output"))?;
+
+        let coin = Coin {
+            template_address: stablecoin_template,
+            component_address: stable_coin,
+            resource_address,
+            admin_badge,
+        };
+
+        let json = serde_json::to_string_pretty(&coin)?;
+
+        log::info!("Stablecoin instantiated successfully");
+        log::info!("writing to {}", output_path.as_ref().display());
+        log::info!("{}", json);
+
+        std::fs::write(output_path, json)?;
+
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_lines)]
     pub async fn setup_wallet_funds(
         &mut self,
         faucet_component: ComponentAddress,
@@ -258,7 +389,7 @@ impl TrafficSim {
         for (wallet, account) in self.wallet_and_account_iter() {
             let mut client = wallet.client.clone();
 
-            let fund_amount = 10_000_000_000u64;
+            let fund_amount = 100_000_000_000u64; // 1000 coins
 
             client
                 .associate_stealth_resource(AccountsAssociateStealthResourceRequest {
@@ -559,7 +690,7 @@ impl TrafficSim {
                     value
                         .map(Amount::from)
                         .map(|a| a.to_decimal_string(divisibility.into()))
-                        .display(),
+                        .unwrap_or_else(|| "<Out of range>".to_string()),
                     value.map(|_| token_symbol.as_str()).unwrap_or_default()
                 );
 

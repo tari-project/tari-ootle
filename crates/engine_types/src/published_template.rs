@@ -10,7 +10,7 @@ use std::{
 use tari_bor::{BorTag, Deserialize, Serialize};
 use tari_template_lib::{
     models::{address_prefixes, BinaryTag},
-    types::{crypto::RistrettoPublicKeyBytes, Hash, KeyParseError, ObjectKey},
+    types::{crypto::RistrettoPublicKeyBytes, Hash, KeyParseError, ObjectKey, TemplateAddress},
 };
 
 use crate::hashing::{hasher32, EngineHashDomainLabel};
@@ -58,6 +58,10 @@ impl PublishedTemplateAddress {
 
     pub fn as_hash(&self) -> Hash {
         Hash::from_array(self.as_object_key().into_array())
+    }
+
+    pub fn as_template_address(&self) -> TemplateAddress {
+        self.as_hash()
     }
 }
 

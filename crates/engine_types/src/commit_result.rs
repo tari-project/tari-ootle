@@ -26,13 +26,17 @@ use std::{
 };
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use tari_template_lib::types::Hash;
+use tari_template_lib::{
+    models::{ComponentAddress, ResourceAddress},
+    types::{Hash, TemplateAddress},
+};
 
 use crate::{
     events::Event,
     fees::FeeReceipt,
     instruction_result::InstructionResult,
     logs::LogEntry,
+    resource::Resource,
     substate::SubstateDiff,
     transaction_receipt::TransactionReceipt,
 };
@@ -226,6 +230,34 @@ impl FinalizeResult {
             diff.up_iter()
                 .find_map(|(_, s)| s.substate_value().as_transaction_receipt())
         })
+    }
+
+    pub fn get_components_by_template(&self, template_address: &TemplateAddress) -> Vec<ComponentAddress> {
+        let mut components = Vec::new();
+        if let Some(diff) = self.any_accept() {
+            for (id, substate) in diff.up_iter() {
+                if let Some(component) = substate.substate_value().as_component() {
+                    if component.template_address == *template_address {
+                        components.push(
+                            id.as_component_address()
+                                .expect("Substate value is a component but address is not a component address"),
+                        );
+                    }
+                }
+            }
+        }
+        components
+    }
+
+    pub fn created_resources(&self) -> impl Iterator<Item = (ResourceAddress, &Resource)> + '_ {
+        self.any_accept()
+            .into_iter()
+            .flat_map(|diff| diff.up_iter())
+            .filter_map(|(id, s)| {
+                s.substate_value()
+                    .as_resource()
+                    .and_then(|r| id.as_resource_address().map(|a| (a, r)))
+            })
     }
 }
 

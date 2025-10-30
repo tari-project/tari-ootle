@@ -75,14 +75,14 @@ impl EpochTicker for RealTimeEpochTicker {
         }
 
         // Emit quickly to catch up to the calculated epoch
-        if calculated_epoch > self.epoch {
+        if calculated_epoch >= self.epoch {
             let epoch = self.increment_epoch();
             let epoch_hash = calc_static_epoch_hash(epoch);
             return Poll::Ready(Some(EpochTickerData {
                 epoch,
                 epoch_hash,
                 // Catching up
-                done_for_now: false,
+                done_for_now: calculated_epoch == epoch,
             }));
         }
 
@@ -91,13 +91,14 @@ impl EpochTicker for RealTimeEpochTicker {
                 // Every tick, check if we need to emit a new epoch
                 ready!(interval_mut.poll_tick(cx));
 
-                if self.epoch <= calculated_epoch {
+                if calculated_epoch >= self.epoch {
                     let epoch = self.increment_epoch();
                     let epoch_hash = calc_static_epoch_hash(epoch);
                     return Poll::Ready(Some(EpochTickerData {
                         epoch,
                         epoch_hash,
-                        done_for_now: true,
+                        // Catching up
+                        done_for_now: calculated_epoch == epoch,
                     }));
                 }
             }
@@ -158,6 +159,25 @@ mod tests {
                     done_for_now: i >= 1000
                 }))
             );
+        }
+    }
+
+    mod config_test {
+        use super::*;
+        use crate::configured::Config;
+
+        #[tokio::test]
+        #[ignore = "Not for testing, use to simulate the result of a real config file."]
+        async fn check_config_file() {
+            let mut file = std::fs::File::open("../../data/ec.json").unwrap();
+            let config = serde_json::from_reader::<_, Config>(&mut file).unwrap();
+            let mut ticker = RealTimeEpochTicker::new(config.initial_epoch, config.base_time, Epoch(1965))
+                .with_epoch_time_secs((config.epoch_time.unwrap().as_secs() / 4).try_into().unwrap());
+
+            loop {
+                let res = poll_fn(|cx| ticker.poll_tick(cx)).await;
+                eprintln!("res: {:?}", res);
+            }
         }
     }
 

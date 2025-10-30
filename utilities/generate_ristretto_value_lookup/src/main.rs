@@ -15,7 +15,7 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     tari_utilities::ByteArray,
 };
-use tari_ootle_wallet_crypto::ValueLookupTable;
+use tari_ootle_wallet_crypto::{LookupHeader, ValueLookupTable};
 
 use crate::cli::Cli;
 mod cli;
@@ -32,8 +32,28 @@ async fn main() -> io::Result<()> {
             dest_file.display()
         );
         let timer = Instant::now();
+        let metadata = fs::metadata(&dest_file)?;
         let mut file = fs::File::open(&dest_file)?;
         let mut lookup = tari_ootle_wallet_crypto::IoReaderValueLookup::load(&mut file)?;
+
+        let expected_size = (lookup.range().end() - lookup.range().start() + 1) * 32 + LookupHeader::SIZE as u64;
+        if metadata.len() != expected_size {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "File size mismatch. Expected {} bytes but found {} bytes.",
+                    expected_size,
+                    metadata.len()
+                ),
+            ));
+        }
+
+        println!(
+            "✅ File size OK - header range {} to {}.",
+            lookup.range().start(),
+            lookup.range().end()
+        );
+
         for v in lookup.range() {
             let pk_bytes = lookup.lookup(v)?.ok_or_else(|| {
                 io::Error::new(
@@ -57,7 +77,7 @@ async fn main() -> io::Result<()> {
         return Ok(());
     }
 
-    let file_size = (cli.max - cli.min + 1) * 32 + 20;
+    let file_size = (cli.max - cli.min + 1) * 32 + LookupHeader::SIZE as u64;
     println!(
         "Generating Ristretto value lookup table from {} to {} and writing to {} ({}).",
         cli.min,

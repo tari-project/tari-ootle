@@ -39,7 +39,7 @@ impl WalletTransaction {
     }
 
     pub fn finalized_diff(&self) -> Option<&SubstateDiff> {
-        self.finalize.as_ref().and_then(|f| f.result.any_accept())
+        self.finalize.as_ref().and_then(|f| f.any_accept())
     }
 
     pub fn failure_reason_as_string(&self) -> Option<String> {

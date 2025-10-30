@@ -7,6 +7,7 @@ use anyhow::anyhow;
 use axum_extra::headers::authorization::Bearer;
 use indexmap::IndexMap;
 use log::{info, warn};
+use tari_engine_types::crypto::ValueLookupTable;
 use tari_ootle_wallet_crypto::{GenerateValueLookup, IoReaderValueLookup};
 use tari_template_lib::models::UtxoAddress;
 use tari_wallet_daemon_client::{
@@ -112,7 +113,8 @@ pub async fn handle_decrypt_value(
         Some(path) => spawn_blocking(move || {
             let mut file = fs::File::open(&path)
                 .map_err(|e| anyhow!("Unable to load value lookup file '{}': {e}", path.display()))?;
-            let mut lookup = IoReaderValueLookup::load(&mut file)?;
+            let lookup = IoReaderValueLookup::load(&mut file)?;
+
             info!(
                 target: LOG_TARGET,
                 "Using value lookup table from file '{}' ({}-{}) for brute force balance lookup",
@@ -135,6 +137,15 @@ pub async fn handle_decrypt_value(
                 );
             }
 
+            let mut is_logged = false;
+            let mut lookup = lookup.with_fallback(move |v| {
+                if !is_logged {
+                    is_logged = true;
+                    warn!("Using value lookup fallback. This will likely result in very slow lookups.");
+                }
+                GenerateValueLookup.lookup(v)
+            });
+
             let balance = sdk.viewable_balance_api().try_brute_force_commitment_balances(
                 &view_key.key,
                 elgamal_proofs.iter(),
@@ -147,8 +158,8 @@ pub async fn handle_decrypt_value(
         None => {
             warn!(
                 target: LOG_TARGET,
-                "No value lookup table file configured. Generating a temporary lookup table that always misses. \
-                 This will make the brute force balance lookup very slow for high-value outputs."
+                "No value lookup table file configured. Using a generated value lookup fallback. \
+                 Brute-force may still be slow for very high-value outputs."
             );
             spawn_blocking(move || {
                 let balances = sdk.viewable_balance_api().try_brute_force_commitment_balances(

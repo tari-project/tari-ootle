@@ -223,16 +223,26 @@ pub async fn handle_finalize_transfer(
                 Some("No such transaction in wallet to finalize proof for"),
             )
         })?;
+    let lock_id = sdk
+        .locks_api()
+        .get_lock_by_transaction_id(req.transaction_id)
+        .optional()?;
+    if lock_id != Some(req.lock_id) {
+        return Err(invalid_params(
+            "lock_id",
+            Some("Lock not associated with this transaction"),
+        ));
+    }
 
     match transaction.finalized_diff() {
         Some(diff) => {
             info!(
                 target: LOG_TARGET,
                 "Finalizing locked proof {} for transaction {}",
-                req.proof_id,
+                req.lock_id,
                 req.transaction_id
             );
-            sdk.locks_api().finalize_lock(req.proof_id, diff)?;
+            sdk.locks_api().finalize_lock(req.lock_id, diff)?;
         },
         None => {
             return Err(invalid_params(

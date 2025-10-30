@@ -19,6 +19,8 @@ impl ValueLookupTable for GenerateValueLookup {
 
     fn lookup(&mut self, value: u64) -> Result<Option<[u8; 32]>, Self::Error> {
         let pk = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(value));
-        Ok(copy_fixed_checked(pk.as_bytes()).expect("Ristretto public key is always 32 bytes"))
+        Ok(Some(
+            copy_fixed_checked(pk.as_bytes()).expect("Ristretto public key is always 32 bytes"),
+        ))
     }
 }

@@ -4,11 +4,13 @@
 use std::time::Duration;
 
 use tari_engine_types::substate::SubstateDiff;
+use tari_ootle_common_types::optional::IsNotFoundError;
 use tari_template_lib::{models::VaultId, prelude::Amount};
+use tari_transaction::TransactionId;
 
 use crate::{
     models::{WalletLockDropGuard, WalletLockId},
-    storage::{WalletStorageError, WalletStore, WalletStoreWriter},
+    storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
 #[derive(Clone)]
@@ -61,10 +63,23 @@ impl<'a, TStore: WalletStore> LocksApi<'a, TStore> {
         let num = self.store.with_write_tx(|tx| tx.locks_release_stale())?;
         Ok(num)
     }
+
+    pub fn get_lock_by_transaction_id(&self, transaction_id: TransactionId) -> Result<WalletLockId, LocksApiError> {
+        let lock_id = self
+            .store
+            .with_read_tx(|tx| tx.locks_get_by_transaction_id(transaction_id))?;
+        Ok(lock_id)
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum LocksApiError {
     #[error("Store error: {0}")]
     StoreError(#[from] WalletStorageError),
+}
+
+impl IsNotFoundError for LocksApiError {
+    fn is_not_found_error(&self) -> bool {
+        matches!(self, LocksApiError::StoreError(e) if e.is_not_found_error())
+    }
 }

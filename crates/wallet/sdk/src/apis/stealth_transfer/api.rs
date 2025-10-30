@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{cmp, collections::HashSet};
+use std::{cmp, collections::HashSet, time::Duration};
 
 use log::*;
 use tari_crypto::ristretto::RistrettoPublicKey;
@@ -364,7 +364,8 @@ where
         let _permit = self.semaphore.acquire().await.expect("semaphore is never closed");
 
         block_in_place(|| {
-            let lock = self.locks_api.create_lock()?;
+            // Create a lock with a timeout, the lock timeout will be removed if the lock is assigned a transaction
+            let lock = self.locks_api.create_lock_with_timeout(Duration::from_secs(5 * 60))?;
 
             // Lock up funds for fees and transfer
             let fee_inputs_to_spend =

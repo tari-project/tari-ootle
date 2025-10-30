@@ -15,7 +15,7 @@ use tari_ootle_common_types::{displayable::Displayable, optional::Optional, Netw
 use tari_ootle_wallet_sdk::{
     apis::{confidential_transfer::UtxoInputSelection, stealth_transfer::TransferOutput},
     crypto::memo::Memo,
-    models::{AccountWithAddress, BranchAndKeyId, KeyBranch},
+    models::{AccountWithAddress, BranchAndKeyId},
 };
 use tari_template_lib::{
     constants::XTR,
@@ -349,7 +349,7 @@ impl TrafficSim {
                 .client
                 .submit_transaction(TransactionSubmitRequest {
                     transaction,
-                    seal_signer: BranchAndKeyId::new(KeyBranch::Account, exchange_account_key_id),
+                    seal_signer: BranchAndKeyId::for_account(exchange_account_key_id),
                     other_signers: transfer_resp.signing_keys,
                     detect_inputs: true,
                     detect_inputs_use_unversioned: true,
@@ -416,8 +416,8 @@ impl TrafficSim {
                 .await
             {
                 Ok(_) => {
-                    let delay = rand::thread_rng().gen_range(1..=5);
-                    sleep(Duration::from_secs(delay)).await;
+                    // let delay = rand::thread_rng().gen_range(1..=5);
+                    // sleep(Duration::from_secs(delay)).await;
                 },
                 Err(e) => {
                     log::info!("Transaction failed: {:?}", e);

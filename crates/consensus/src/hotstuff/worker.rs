@@ -822,13 +822,15 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             let (high_qc, high_tc, parent) = self.state_store.with_read_tx(|tx| {
                 let high_qc = HighPc::get(tx, epoch_state.epoch())?;
                 let high_qc = ProposalCertificate::get(tx, high_qc.epoch(), high_qc.id())?;
-                let high_tc = HighTc::get(tx, epoch_state.epoch())?;
-                let high_tc = TimeoutCertificate::get(tx, high_tc.epoch(), high_tc.id())?;
+                let high_tc = HighTc::get(tx, epoch_state.epoch()).optional()?;
+                let high_tc = high_tc
+                    .map(|tc| TimeoutCertificate::get(tx, tc.epoch(), tc.id()))
+                    .transpose()?;
                 let block = Block::get(tx, highest_block.block_id())?;
                 Ok::<_, HotStuffError>((high_qc, high_tc, block))
             })?;
 
-            propose_high_tc = Some(high_tc);
+            propose_high_tc = high_tc;
 
             info!(
                 target: LOG_TARGET,
@@ -855,10 +857,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             // If this is a timeout (without dummies because the highest block is the parent), we need to propose with
             // the highest timeout certificate
             let high_tc = self.state_store.with_read_tx(|tx| {
-                let high_tc = HighTc::get(tx, epoch_state.epoch())?;
-                TimeoutCertificate::get(tx, high_tc.epoch(), high_tc.id())
+                let high_tc = HighTc::get(tx, epoch_state.epoch()).optional()?;
+                high_tc
+                    .map(|tc| TimeoutCertificate::get(tx, tc.epoch(), tc.id()))
+                    .transpose()
             })?;
-            propose_high_tc = Some(high_tc);
+            propose_high_tc = high_tc;
         } else {
             // Nothing to do
         }

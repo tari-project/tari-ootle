@@ -1,14 +1,16 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+mod coin;
 mod sim;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use log::LevelFilter;
-use tari_template_lib::models::{ComponentAddress, ResourceAddress, UtxoId};
+use tari_ootle_common_types::engine_types::published_template::PublishedTemplateAddress;
+use tari_template_lib::models::{ResourceAddress, UtxoId};
 
 use crate::sim::TrafficSim;
 
@@ -50,18 +52,26 @@ enum Commands {
         #[arg(long, default_value_t = 200000000, help = "Maximum transaction value")]
         max_value: u64,
 
-        #[arg(short = 'r', long, help = "Resource address to use for transactions")]
-        resource_address: ResourceAddress,
+        #[arg(short = 'r', long, help = "Resource address to use for transactions (optional)")]
+        resource_address: Option<ResourceAddress>,
+
+        #[arg(
+            short = 'c',
+            long,
+            help = "Path to coin file. If not provided, resource_address must be set"
+        )]
+        coin_file: Option<PathBuf>,
+    },
+    Init {
+        #[arg(short = 't', long, help = "Stable coin template address")]
+        template_address: PublishedTemplateAddress,
+
+        #[arg(short = 'o', long, help = "Coin file output path")]
+        coin_file: PathBuf,
     },
     Setup {
-        #[arg(short = 'b', long, help = "Admin badge resource address")]
-        admin_badge_resource: ResourceAddress,
-
-        #[arg(short = 'c', long, help = "Faucet component address")]
-        faucet_component: ComponentAddress,
-
-        #[arg(short = 'r', long, help = "Resource address of the resource to transfer")]
-        resource_address: ResourceAddress,
+        #[arg(short = 'c', long, help = "Path to coin file")]
+        coin_file: PathBuf,
     },
     ListWallets,
     DecryptUtxos {
@@ -94,23 +104,36 @@ async fn main() -> Result<()> {
             min_value,
             max_value,
             resource_address,
+            coin_file,
         } => {
             if min_value >= max_value {
                 return Err(anyhow::anyhow!("min-value must be less than max-value"));
             }
+            let coin = coin_file.as_ref().map(read_coin_file).transpose()?;
 
             let mut sim = TrafficSim::new(cli.swarm_url, cli.exchange_wallet_url);
+            let resource_address = coin
+                .as_ref()
+                .map(|c| c.resource_address)
+                .or(resource_address)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Either resource_address or coin_file must be provided to run the simulation")
+                })?;
             sim.run_simulation(resource_address, min_value, max_value).await?;
         },
-        Commands::Setup {
-            admin_badge_resource,
-            faucet_component,
-            resource_address,
+        Commands::Init {
+            template_address,
+            coin_file,
         } => {
+            let mut sim = TrafficSim::new(cli.swarm_url, cli.exchange_wallet_url);
+            sim.setup_stablecoin(template_address, coin_file).await?;
+        },
+        Commands::Setup { coin_file } => {
+            let coin = read_coin_file(coin_file)?;
             let mut sim = TrafficSim::new(cli.swarm_url, cli.exchange_wallet_url);
             sim.connect_to_wallets().await?;
             sim.setup_accounts().await?;
-            sim.setup_wallet_funds(faucet_component, resource_address, admin_badge_resource)
+            sim.setup_wallet_funds(coin.component_address, coin.resource_address, coin.admin_badge)
                 .await?;
         },
         Commands::ListWallets => {
@@ -154,4 +177,10 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn read_coin_file<P: AsRef<Path>>(path: P) -> Result<coin::Coin> {
+    let file = std::fs::File::open(path).context("Failed to open coin file")?;
+    let coin = serde_json::from_reader(file).context("Failed to parse coin file")?;
+    Ok(coin)
 }

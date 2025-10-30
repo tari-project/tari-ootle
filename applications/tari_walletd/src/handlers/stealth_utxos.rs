@@ -141,7 +141,7 @@ pub async fn handle_decrypt_value(
             let mut lookup = lookup.with_fallback(move |v| {
                 if !is_logged {
                     is_logged = true;
-                    warn!("Using value lookup fallback. This will likely result in very slow lookups.");
+                    warn!(target: LOG_TARGET, "Using value lookup fallback. This will likely result in very slow lookups.");
                 }
                 GenerateValueLookup.lookup(v)
             });

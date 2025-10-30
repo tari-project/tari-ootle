@@ -120,7 +120,7 @@ where
 
         let exec = TransactionExecution::new(exec_output.result, resolved_inputs, resulting_outputs);
 
-        info!(target: LOG_TARGET, "Transaction {} executed. {}", id, exec.result().finalize.result);
+        info!(target: LOG_TARGET, "Transaction {} executed in {:.2?}. {}", id, exec.result().execution_time, exec.result().finalize.result);
         Ok(exec)
     }
 }

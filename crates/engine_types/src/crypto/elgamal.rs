@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use borsh::BorshSerialize;
-use log::{info, warn};
+use log::info;
 use tari_bor::{Deserialize, Serialize};
 use tari_common_types::types::PrivateKey;
 use tari_crypto::{
@@ -210,22 +210,12 @@ impl ElgamalVerifiableBalance {
             .collect::<Vec<_>>();
 
         let mut results = vec![None; balances.len()];
-        let mut warning_logged = false;
 
         for v in value_range {
-            let value = lookup_table.lookup(v)?.unwrap_or_else(|| {
-                if !warning_logged {
-                    warning_logged = true;
-                    warn!(
-                        target: LOG_TARGET,
-                        "Value lookup table missing entry for value {}, falling back to slow lookup method",
-                        v
-                    );
-                }
-                // Fallback to slow lookup method if the lookup table does not contain a key for the value
-                let pk = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(v));
-                copy_fixed(pk.as_bytes())
-            });
+            let Some(value) = lookup_table.lookup(v)? else {
+                log::debug!(target: LOG_TARGET, "Value {} not found in lookup table", v);
+                break;
+            };
 
             while let Some(pos) = balances.iter().position(|(_, balance)| value == balance.as_bytes()) {
                 let (order, _) = balances.swap_remove(pos);
@@ -269,12 +259,6 @@ impl ToByteType for ElgamalVerifiableBalance {
     }
 }
 
-fn copy_fixed(src: &[u8]) -> [u8; 32] {
-    let mut buf = [0u8; 32];
-    buf.copy_from_slice(src);
-    buf
-}
-
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;
@@ -284,6 +268,12 @@ mod tests {
 
     use super::*;
 
+    fn copy_fixed(src: &[u8]) -> [u8; 32] {
+        let mut buf = [0u8; 32];
+        buf.copy_from_slice(src);
+        buf
+    }
+
     #[derive(Default)]
     pub struct TestLookupTable;
 
@@ -291,7 +281,6 @@ mod tests {
         type Error = Infallible;
 
         fn lookup(&mut self, value: u64) -> Result<Option<[u8; 32]>, Self::Error> {
-            // This would be a sequential lookup in a real implementation
             Ok(Some(copy_fixed(
                 RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(value)).as_bytes(),
             )))

@@ -49,6 +49,8 @@ pub struct Cli {
     pub json_rpc_address: Option<SocketAddr>,
     #[clap(long, env = "TARI_WALLET_WEB_UI_JSON_RPC_PUBLIC_URL")]
     pub web_ui_public_json_rpc_url: Option<String>,
+    #[clap(short = 'w', long, env = "TARI_WALLET_WEB_UI_JSON_RPC_PUBLIC_URL")]
+    pub web_ui_listen_addr: Option<SocketAddr>,
     #[clap(long, env = "SIGNALING_SERVER_ADDRESS")]
     pub signaling_server_address: Option<SocketAddr>,
     #[clap(long, short = 'i', alias = "indexer-url")]
@@ -118,7 +120,12 @@ impl ConfigOverrideProvider for Cli {
                 file.display().to_string(),
             ));
         }
-
+        if let Some(ref listen_addr) = self.web_ui_listen_addr {
+            overrides.push((
+                "ootle_wallet_daemon.web_ui_address".to_string(),
+                listen_addr.to_string(),
+            ));
+        }
         overrides
     }
 }

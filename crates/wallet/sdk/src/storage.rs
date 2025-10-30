@@ -4,6 +4,7 @@
 use std::{
     collections::{HashMap, HashSet},
     ops::{Deref, DerefMut},
+    time::Duration,
 };
 
 use tari_engine_types::{
@@ -466,7 +467,7 @@ pub trait WalletStoreWriter: CommitableStore {
     ) -> Result<(), WalletStorageError>;
 
     // Locks
-    fn locks_create(&mut self) -> Result<WalletLockId, WalletStorageError>;
+    fn locks_create(&mut self, timeout: Option<Duration>) -> Result<WalletLockId, WalletStorageError>;
 
     fn locks_delete(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
     fn locks_link_transaction(
@@ -474,6 +475,8 @@ pub trait WalletStoreWriter: CommitableStore {
         lock_id: WalletLockId,
         transaction_id: TransactionId,
     ) -> Result<(), WalletStorageError>;
+
+    fn locks_release_stale(&mut self) -> Result<usize, WalletStorageError>;
 
     /// Release the lock including all outputs and vaults that were locked. Release is used when a transaction is
     /// aborted.

@@ -35,7 +35,7 @@ webauthn-rs = { workspace = true }
 keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 passwords = "3.1.16"
 zeroize = { workspace = true, features = ["serde", "simd"] }
-tokio = { workspace = true, default-features = false, features = ["sync"] }
+tokio = { workspace = true, default-features = false, features = ["sync", "rt-multi-thread"] }
 
 [dev-dependencies]
 tari_ootle_wallet_storage_sqlite = { workspace = true }

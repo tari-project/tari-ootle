@@ -9,11 +9,10 @@ use tari_template_lib::{
 };
 use tari_transaction::UnsignedTransaction;
 
-use crate::models::{InputSpendData, WalletLockId, WalletPublicKey};
+use crate::models::{InputSpendData, WalletPublicKey};
 
 pub struct StealthTransferOutput {
     pub transaction: UnsignedTransaction,
-    pub lock_id: WalletLockId,
     pub fee_inputs: InputsToSpend,
     pub transfer_inputs: InputsToSpend,
     pub additional_signer: Option<WalletPublicKey>,

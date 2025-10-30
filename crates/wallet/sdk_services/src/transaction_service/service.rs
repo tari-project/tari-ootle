@@ -197,9 +197,30 @@ where
             if let Err(err) = Self::check_pending_transactions(&wallet_sdk, &notify).await {
                 error!(target: LOG_TARGET, "Error checking pending transactions: {}", err);
             }
+            if let Err(err) = Self::clear_stale_locks(&wallet_sdk) {
+                error!(target: LOG_TARGET, "Error clearing stale locks: {}", err);
+            }
 
             drop(permit);
         });
+        Ok(())
+    }
+
+    fn clear_stale_locks(wallet_sdk: &WalletSdk<TStore, TNetworkInterface>) -> Result<(), TransactionServiceError> {
+        let transaction_api = wallet_sdk.locks_api();
+        let num_cleared = transaction_api.clear_stale_locks()?;
+        if num_cleared > 0 {
+            info!(
+                target: LOG_TARGET,
+                "Cleared {} stale wallet lock(s)",
+                num_cleared
+            );
+        } else {
+            debug!(
+                target: LOG_TARGET,
+                "No stale wallet locks to clear",
+            );
+        }
         Ok(())
     }
 

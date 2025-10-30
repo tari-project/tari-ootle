@@ -511,8 +511,8 @@ pub struct ProofsGenerateResponse {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ProofsFinalizeRequest {
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub proof_id: WalletLockId,
+    pub lock_id: WalletLockId,
+    pub transaction_id: TransactionId,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

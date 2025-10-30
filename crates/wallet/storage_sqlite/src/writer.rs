@@ -7,6 +7,7 @@ use std::{
     ops::{Add, Deref, DerefMut, Sub},
     str::FromStr,
     sync::MutexGuard,
+    time::Duration,
 };
 
 use diesel::{
@@ -1345,14 +1346,22 @@ impl WalletStoreWriter for WriteTransaction<'_> {
     }
 
     // locks
-    fn locks_create(&mut self) -> Result<WalletLockId, WalletStorageError> {
+    fn locks_create(&mut self, timeout: Option<Duration>) -> Result<WalletLockId, WalletStorageError> {
         const OPERATION: &str = "locks_create";
         use crate::schema::locks;
 
-        diesel::insert_into(locks::table)
-            .default_values()
-            .execute(self.connection())
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        if let Some(timeout) = timeout {
+            let timeout_seconds = i32::try_from(timeout.as_secs()).unwrap_or(i32::MAX);
+            diesel::insert_into(locks::table)
+                .values(locks::timeout_at.eq(dsl::sql(&format!("datetime('now', '+{} seconds')", timeout_seconds))))
+                .execute(self.connection())
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        } else {
+            diesel::insert_into(locks::table)
+                .default_values()
+                .execute(self.connection())
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        }
         // TODO: See if we can upgrade libSQLite 0.35
         let lock_id = locks::table
             .select(locks::id)
@@ -1383,11 +1392,32 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         use crate::schema::locks;
 
         diesel::update(locks::table.filter(locks::id.eq(lock_id)))
-            .set(locks::transaction_id.eq(serialize_hex(transaction_id)))
+            .set((
+                locks::transaction_id.eq(serialize_hex(transaction_id)),
+                locks::timeout_at.eq(None::<PrimitiveDateTime>),
+            ))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
         Ok(())
+    }
+
+    fn locks_release_stale(&mut self) -> Result<usize, WalletStorageError> {
+        const OPERATION: &str = "locks_release_stale";
+        use crate::schema::locks;
+
+        let stale_locks = locks::table
+            .select(locks::id)
+            .filter(locks::timeout_at.is_not_null())
+            .filter(locks::timeout_at.le(dsl::now))
+            .get_results::<i32>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        let num_stale = stale_locks.len();
+        for lock_id in stale_locks {
+            self.locks_release(lock_id)?;
+        }
+
+        Ok(num_stale)
     }
 
     fn locks_unlock_finalized(&mut self, lock_id: WalletLockId, diff: &SubstateDiff) -> Result<(), WalletStorageError> {

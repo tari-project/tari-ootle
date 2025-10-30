@@ -21,6 +21,7 @@ use tari_template_abi::rust::{fmt, str::FromStr};
 pub enum ResourceType {
     /// Fungible tokens do not have individual identity, making them interchangeable.
     /// Examples include monetary units, liquidity pool tokens, or tokenized shares.
+    // TODO: rename to PublicFungible
     Fungible,
     /// A resource (i.e., collection) of non-fungible tokens.
     /// Each NFT is uniquely identifiable within the parent resource and indivisible.
@@ -35,7 +36,7 @@ pub enum ResourceType {
 
 impl ResourceType {
     /// Returns `true` if the resource type is fungible, otherwise `false`.
-    pub fn is_fungible(&self) -> bool {
+    pub fn is_public_fungible(&self) -> bool {
         matches!(self, Self::Fungible)
     }
 

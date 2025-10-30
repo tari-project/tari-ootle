@@ -7,6 +7,7 @@ pub mod confidential_outputs;
 pub mod confidential_transfer;
 pub mod config;
 pub mod key_manager;
+pub mod locks;
 pub mod non_fungible_tokens;
 pub mod password_manager;
 pub mod resources;

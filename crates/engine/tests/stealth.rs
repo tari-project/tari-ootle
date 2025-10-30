@@ -27,7 +27,7 @@ use tari_template_test_tooling::{
         assert_error::assert_reject_reason,
         stealth,
         stealth::StealthUnblindedTransferData,
-        AlwaysMissLookupTable,
+        GenerateValueLookup,
     },
     wallet_crypto::MaskAndValue,
     TemplateTest,
@@ -487,7 +487,7 @@ fn mint_with_view_key() {
         .collect();
 
     let total_balance =
-        try_brute_force_stealth_balance(&utxos, &view_key_secret, 0..=200, &mut AlwaysMissLookupTable).unwrap();
+        try_brute_force_stealth_balance(&utxos, &view_key_secret, 0..=200, &mut GenerateValueLookup).unwrap();
     assert_eq!(total_balance, Some(1000));
 }
 

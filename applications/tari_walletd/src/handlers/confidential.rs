@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::fs;
+use std::{fs, time::Duration};
 
 use anyhow::anyhow;
 use axum_extra::headers::authorization::Bearer;
@@ -10,8 +10,12 @@ use log::*;
 use rand::rngs::OsRng;
 use serde_json::json;
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey as _, ristretto::RistrettoPublicKey};
-use tari_engine_types::{crypto::get_commitment_factory, ToByteType};
-use tari_ootle_wallet_crypto::{AlwaysMissLookupTable, IoReaderValueLookup, UnblindedOutputWitness};
+use tari_engine_types::{
+    crypto::{get_commitment_factory, ValueLookupTable},
+    ToByteType,
+};
+use tari_ootle_common_types::{displayable::Displayable, optional::Optional};
+use tari_ootle_wallet_crypto::{GenerateValueLookup, IoReaderValueLookup, UnblindedOutputWitness};
 use tari_ootle_wallet_sdk::models::{ConfidentialOutputModel, KeyBranch, OutputStatus};
 use tari_template_lib::types::Amount;
 use tari_wallet_daemon_client::{
@@ -23,6 +27,8 @@ use tari_wallet_daemon_client::{
         ConfidentialViewVaultBalanceResponse,
         ProofsCancelRequest,
         ProofsCancelResponse,
+        ProofsFinalizeRequest,
+        ProofsFinalizeResponse,
         ProofsGenerateRequest,
         ProofsGenerateResponse,
     },
@@ -59,7 +65,7 @@ pub async fn handle_create_transfer_proof(
     let vault = sdk
         .accounts_api()
         .get_vault_by_resource(account.component_address(), &req.resource_address)?;
-    let lock_id = sdk.confidential_outputs_api().create_lock()?;
+    let lock = sdk.locks_api().create_lock_with_timeout(Duration::from_secs(5 * 60))?;
 
     let amount_to_transfer = req.amount.checked_add_positive(req.reveal_amount).ok_or_else(|| {
         invalid_request(format!(
@@ -70,13 +76,13 @@ pub async fn handle_create_transfer_proof(
     // Lock inputs we're going to spend
     let (inputs, total_input_value) =
         sdk.confidential_outputs_api()
-            .lock_outputs_by_amount(lock_id, &vault.id, amount_to_transfer)?;
+            .lock_outputs_by_amount(lock.id(), &vault.id, amount_to_transfer)?;
 
     info!(
         target: LOG_TARGET,
         "Locked {} inputs for proof {} worth {} µT",
         inputs.len(),
-        lock_id,
+        lock.id(),
         total_input_value
     );
 
@@ -165,7 +171,7 @@ pub async fn handle_create_transfer_proof(
             memo: None,
             public_asset_tag: None,
             status: OutputStatus::LockedUnconfirmed,
-            lock_id: Some(lock_id),
+            lock_id: Some(lock.id()),
         })?;
 
         Some(UnblindedOutputWitness {
@@ -192,6 +198,8 @@ pub async fn handle_create_transfer_proof(
         Amount::zero(),
     )?;
 
+    let lock_id = lock.keep_locked();
+
     Ok(ProofsGenerateResponse {
         proof_id: lock_id,
         proof,
@@ -201,15 +209,54 @@ pub async fn handle_create_transfer_proof(
 pub async fn handle_finalize_transfer(
     context: &HandlerContext,
     token: Option<&Bearer>,
-    req: ProofsCancelRequest,
-) -> Result<ProofsCancelResponse, anyhow::Error> {
+    req: ProofsFinalizeRequest,
+) -> Result<ProofsFinalizeResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
+    let transaction = sdk
+        .transaction_api()
+        .get(req.transaction_id)
+        .optional()?
+        .ok_or_else(|| {
+            invalid_params(
+                "transaction_id",
+                Some("No such transaction in wallet to finalize proof for"),
+            )
+        })?;
+    let lock_id = sdk
+        .locks_api()
+        .get_lock_by_transaction_id(req.transaction_id)
+        .optional()?;
+    if lock_id != Some(req.lock_id) {
+        return Err(invalid_params(
+            "lock_id",
+            Some("Lock not associated with this transaction"),
+        ));
+    }
 
-    sdk.confidential_outputs_api()
-        .finalize_locked_revealed_funds(req.proof_id)?;
-    sdk.confidential_outputs_api().finalize_outputs_for_lock(req.proof_id)?;
-    Ok(ProofsCancelResponse {})
+    match transaction.finalized_diff() {
+        Some(diff) => {
+            info!(
+                target: LOG_TARGET,
+                "Finalizing locked proof {} for transaction {}",
+                req.lock_id,
+                req.transaction_id
+            );
+            sdk.locks_api().finalize_lock(req.lock_id, diff)?;
+        },
+        None => {
+            return Err(invalid_params(
+                "transaction_id",
+                Some(format!(
+                    "Transaction is not finalized (status = {}, reason = {})",
+                    transaction.status,
+                    transaction.failure_reason_as_string().display()
+                )),
+            ));
+        },
+    }
+
+    Ok(ProofsFinalizeResponse {})
 }
 
 pub async fn handle_cancel_transfer(
@@ -219,8 +266,7 @@ pub async fn handle_cancel_transfer(
 ) -> Result<ProofsCancelResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
-    sdk.confidential_outputs_api().release_revealed_funds(req.proof_id)?;
-    sdk.confidential_outputs_api().release_locked_outputs(req.proof_id)?;
+    sdk.locks_api().release_lock(req.proof_id)?;
     Ok(ProofsCancelResponse {})
 }
 
@@ -296,7 +342,14 @@ pub async fn handle_view_vault_balance(
         Some(file) => {
             let mut file = fs::File::open(file)
                 .map_err(|e| anyhow!("Unable to load value lookup file '{}': {e}", file.display()))?;
-            let mut lookup = IoReaderValueLookup::load(&mut file)?;
+            let mut is_logged = false;
+            let mut lookup = IoReaderValueLookup::load(&mut file)?.with_fallback(move |v| {
+                if !is_logged {
+                    is_logged = true;
+                    warn!("Using value lookup fallback. This will likely result in very slow lookups.");
+                }
+                GenerateValueLookup.lookup(v)
+            });
 
             block_in_place(|| {
                 sdk.viewable_balance_api().try_brute_force_commitment_balances(
@@ -307,14 +360,20 @@ pub async fn handle_view_vault_balance(
                 )
             })?
         },
-        None => block_in_place(|| {
-            sdk.viewable_balance_api().try_brute_force_commitment_balances(
-                &view_key.key,
-                commitments.values().filter_map(|o| o.viewable_balance.as_ref()),
-                value_range,
-                &mut AlwaysMissLookupTable,
-            )
-        })?,
+        None => {
+            warn!(
+                target: LOG_TARGET,
+                "No value lookup table configured. This will likely result in very slow lookups."
+            );
+            block_in_place(|| {
+                sdk.viewable_balance_api().try_brute_force_commitment_balances(
+                    &view_key.key,
+                    commitments.values().filter_map(|o| o.viewable_balance.as_ref()),
+                    value_range,
+                    &mut GenerateValueLookup,
+                )
+            })?
+        },
     };
 
     info!(target: LOG_TARGET, "Brute force balance lookup took {:.2?}", timer.elapsed());

@@ -32,7 +32,7 @@ import { Divider, InputLabel, Stack, InputAdornment, Typography } from "@mui/mat
 import { SelectChangeEvent } from "@mui/material/Select/Select";
 import { ResourceType, ResourceAddress, validateOotleAddress } from "@tari-project/typescript-bindings";
 import { formatDisplayCurrency } from "@utils/helpers";
-import { CURRENCY } from "@utils/constants";
+import { XTR_CURRENCY } from "@utils/constants";
 
 export interface SendMoneyFormState {
   address: string;
@@ -239,19 +239,15 @@ export default function FormStep({
         <TextField
           name="fee"
           label="Fee"
-          value={
-            isEstimatingFee
-              ? "Estimating..."
-              : transferFormState.fee
-                ? (parseInt(transferFormState.fee) / CURRENCY.DIVISOR).toString()
-                : ""
-          }
+          value={transferFormState.fee}
           placeholder={isEstimatingFee ? "Estimating..." : "Auto-calculated"}
           onChange={onFormValueChange}
           style={{ flexGrow: 1 }}
           InputProps={{
             endAdornment:
-              !isEstimatingFee && token_symbol ? <InputAdornment position="end">{token_symbol}</InputAdornment> : null,
+              !isEstimatingFee && token_symbol ? (
+                <InputAdornment position="end">µ{XTR_CURRENCY.SYMBOL}</InputAdornment>
+              ) : null,
           }}
         />
 

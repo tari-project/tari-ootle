@@ -93,7 +93,6 @@ pub struct StealthTransferStatement {
     pub outputs_statement: StealthOutputsStatement,
     /// Balance proof that proves that no coins were created or destroyed during the transfer (assuming the range proof
     /// is valid). This may be None, if and only if, the transfer is revealed-only (i.e. no stealth inputs or outputs).
-    #[cfg_attr(feature = "ts", ts(type = "{public_nonce: string, signature: string} | null"))]
     pub balance_proof: Option<BalanceProofSignature>,
 }
 

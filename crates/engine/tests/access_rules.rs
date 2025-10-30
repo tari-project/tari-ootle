@@ -581,7 +581,7 @@ mod resource_access_rules {
             .unwrap()
             .up_iter()
             .filter_map(|(addr, s)| s.substate_value().as_resource().map(|r| (addr, r)))
-            .filter(|(_, r)| r.resource_type().is_fungible())
+            .filter(|(_, r)| r.resource_type().is_public_fungible())
             .map(|(addr, _)| addr.as_resource_address().unwrap())
             .next()
             .unwrap();
@@ -867,7 +867,7 @@ mod resource_access_rules {
             .unwrap()
             .up_iter()
             .filter_map(|(addr, s)| s.substate_value().as_resource().map(|r| (addr, r)))
-            .filter(|(_, r)| r.resource_type().is_fungible())
+            .filter(|(_, r)| r.resource_type().is_public_fungible())
             .map(|(addr, _)| addr.as_resource_address().unwrap())
             .next()
             .unwrap();

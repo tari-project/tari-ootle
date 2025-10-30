@@ -9,6 +9,7 @@ use crate::{
         accounts::AccountsApiError,
         config::ConfigApiError,
         key_manager::KeyManagerApiError,
+        locks::LocksApiError,
         stealth_crypto::StealthCryptoApiError,
         stealth_outputs::StealthOutputsApiError,
         substate::SubstateApiError,
@@ -50,6 +51,8 @@ pub enum StealthTransferApiError {
     InsufficientRevealedFunds { details: String },
     #[error("Invariant violation: {details}")]
     InvariantViolation { details: String },
+    #[error("Locks API error: {0}")]
+    LocksApiError(#[from] LocksApiError),
 }
 
 impl IsNotFoundError for StealthTransferApiError {

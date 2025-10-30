@@ -27,7 +27,7 @@ import Button from "@mui/material/Button";
 import Box from "@mui/material/Box";
 import { useTheme } from "@mui/material/styles";
 import { Divider } from "@mui/material";
-import { stealthDecryptUtxoBalance } from "../../../utils/json_rpc";
+import { stealthDecryptUtxoBalance } from "@utils/json_rpc";
 import { StealthUtxosDecryptValueRequest, StealthUtxosDecryptValueResponse } from "@tari-project/typescript-bindings";
 
 function DecryptUtxoBalanceForm() {
@@ -38,7 +38,7 @@ function DecryptUtxoBalanceForm() {
     maximumExpectedValue: 100000000,
     keyId: 0,
   });
-  const [balance, setBalance] = useState<StealthUtxosDecryptValueResponse>(null);
+  const [balance, setBalance] = useState<StealthUtxosDecryptValueResponse | null>(null);
 
   const onViewBalanceClicked = async () => {
     const resp = await stealthDecryptUtxoBalance({

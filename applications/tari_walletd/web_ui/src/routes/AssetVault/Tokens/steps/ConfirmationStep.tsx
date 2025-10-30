@@ -93,7 +93,7 @@ export default function ConfirmationStep({
             <Typography variant="subtitle2" color="text.secondary">
               Send Confidential Outputs:
             </Typography>
-            <Typography variant="body1">{transferFormState.outputToConfidential ? "Yes" : "No"}</Typography>
+            <Typography variant="body1">{transferFormState.outputToRevealed ? "Yes" : "No"}</Typography>
           </Box>
         )}
 

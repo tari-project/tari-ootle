@@ -55,7 +55,7 @@ export interface SendMoneyDialogProps {
 export function SendMoneyDialog(props: SendMoneyDialogProps) {
   const INITIAL_VALUES: SendMoneyFormState = {
     address: "",
-    outputToConfidential: false,
+    outputToRevealed: false,
     inputSelection: "PreferRevealed",
     amount: "",
     fee: "",
@@ -201,7 +201,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         resource_address: props.resource_address || XTR,
         destination_address: transferFormState.address,
         resourceType: props.resource_type,
-        output_to_revealed: !transferFormState.outputToConfidential,
+        output_to_revealed: transferFormState.outputToRevealed,
         input_selection: transferFormState.inputSelection as UtxoInputSelection,
         badge_usage: transferFormState.badge ? { Resource: transferFormState.badge } : ("None" as BadgeUsage),
         output_memo: transferFormState.memo ? { Message: transferFormState.memo } : undefined,
@@ -276,7 +276,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         resource_address: props.resource_address!,
         destination_address: transferFormState.address,
         resourceType: props.resource_type,
-        output_to_revealed: !transferFormState.outputToConfidential,
+        output_to_revealed: transferFormState.outputToRevealed,
         input_selection: transferFormState.inputSelection as UtxoInputSelection,
         // TODO: support for other types of BadgeUsage
         badge_usage: transferFormState.badge ? { Resource: transferFormState.badge } : ("None" as BadgeUsage),

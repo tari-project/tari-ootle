@@ -36,7 +36,7 @@ import { XTR_CURRENCY } from "@utils/constants";
 
 export interface SendMoneyFormState {
   address: string;
-  outputToConfidential: boolean;
+  outputToRevealed: boolean;
   inputSelection: string;
   amount: string;
   fee: string;
@@ -175,15 +175,21 @@ export default function FormStep({
             <FormControlLabel
               control={
                 <CheckBox
-                  name="outputToConfidential"
-                  checked={transferFormState.outputToConfidential}
+                  name="outputToRevealed"
+                  checked={transferFormState.outputToRevealed}
                   onChange={onCheckboxFormValueChange}
                   disabled={disabled}
                 />
               }
-              label="Send Confidential Outputs"
+              label="Send Revealed Funds"
             />
-            {transferFormState.outputToConfidential ? (
+            {transferFormState.outputToRevealed && (
+              <Typography color="warning.main">
+                ⚠️ Warning: Revealed funds are visible on the blockchain and can be viewed by anyone.
+              </Typography>
+            )}
+
+            {transferFormState.outputToRevealed ? null : (
               <TextField
                 name="memo"
                 label="Memo message (optional, max 253 characters)"
@@ -193,7 +199,7 @@ export default function FormStep({
                 style={{ flexGrow: 1 }}
                 disabled={disabled}
               />
-            ) : null}
+            )}
             <InputLabel id="select-input-selection">Input Selection</InputLabel>
             <Select
               name="inputSelection"

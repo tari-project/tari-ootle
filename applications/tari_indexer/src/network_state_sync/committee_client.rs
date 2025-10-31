@@ -46,11 +46,19 @@ impl ValidatorCommitteeRpcPool {
                 .epoch_manager
                 .get_random_committee_member(epoch, Some(self.shard_group), self.past_failed_nodes.clone())
                 .await
-                .optional()?
-                .ok_or_else(|| ValidatorCommitteeClientError::AllValidatorsFailed {
+                .optional()?;
+
+            let Some(member) = member else {
+                // All validators have been attempted and failed - no real choice but to clear the past failed nodes and
+                // try again if this is called again
+                self.past_failed_nodes.clear();
+                // Clamp max mem usage to 7300 bytes (Multihash size x 100) - this is likely to always be a no-op
+                self.past_failed_nodes.shrink_to(100);
+                return Err(ValidatorCommitteeClientError::AllValidatorsFailed {
                     committee_size: self.past_failed_nodes.len(),
                     last_error: last_error.as_ref().map(|e| e.to_string()),
-                })?;
+                });
+            };
             let result = self.session_for_peer(member.address).await;
             match result {
                 Ok(session) => return Ok(session),

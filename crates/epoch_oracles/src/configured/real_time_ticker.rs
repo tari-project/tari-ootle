@@ -97,7 +97,7 @@ impl EpochTicker for RealTimeEpochTicker {
                     return Poll::Ready(Some(EpochTickerData {
                         epoch,
                         epoch_hash,
-                        // Catching up
+                        // Catching up if calculated_epoch > self.epoch
                         done_for_now: calculated_epoch == epoch,
                     }));
                 }
@@ -171,8 +171,8 @@ mod tests {
         async fn check_config_file() {
             let mut file = std::fs::File::open("../../data/ec.json").unwrap();
             let config = serde_json::from_reader::<_, Config>(&mut file).unwrap();
-            let mut ticker = RealTimeEpochTicker::new(config.initial_epoch, config.base_time, Epoch(1965))
-                .with_epoch_time_secs((config.epoch_time.unwrap().as_secs() / 4).try_into().unwrap());
+            let mut ticker = RealTimeEpochTicker::new(config.initial_epoch, config.base_time, Epoch(128))
+                .with_epoch_time_secs(config.epoch_time.unwrap().as_secs().try_into().unwrap());
             let current = ticker.calc_current_epoch();
             eprintln!("current: {:?}", current);
 

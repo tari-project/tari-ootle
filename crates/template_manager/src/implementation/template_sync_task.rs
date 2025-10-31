@@ -192,6 +192,10 @@ where
                 .await
                 .optional()?
             else {
+                // No more committee members to try - no real choice but to clear the failed list and try again if this
+                // is re-attempted
+                self.recently_failed_clients.clear();
+                self.recently_failed_clients.shrink_to(100);
                 return Err(TemplateSyncError::NoMoreSyncValidators);
             };
 

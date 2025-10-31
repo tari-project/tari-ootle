@@ -45,7 +45,7 @@ pub struct OnMessageValidate<TConsensusSpec: ConsensusSpec> {
     leader_strategy: TConsensusSpec::LeaderStrategy,
     vote_signing_service: TConsensusSpec::SignerService,
     outbound_messaging: TConsensusSpec::OutboundMessaging,
-    tx_events: broadcast::Sender<HotstuffEvent>,
+    tx_events: broadcast::WeakSender<HotstuffEvent>,
     /// Keep track of max 32 in-flight requests
     active_missing_transaction_requests: SimpleFixedArray<u32, 32>,
     current_request_id: u32,
@@ -60,7 +60,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         leader_strategy: TConsensusSpec::LeaderStrategy,
         vote_signing_service: TConsensusSpec::SignerService,
         outbound_messaging: TConsensusSpec::OutboundMessaging,
-        tx_events: broadcast::Sender<HotstuffEvent>,
+        tx_events: broadcast::WeakSender<HotstuffEvent>,
     ) -> Self {
         Self {
             config,
@@ -204,7 +204,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                 {
                     info!(target: LOG_TARGET, "♻️ all transactions for local block {unparked_block} are ready for consensus");
 
-                    let _ignore = self.tx_events.send(HotstuffEvent::ParkedBlockReady {
+                    self.publish_event(HotstuffEvent::ParkedBlockReady {
                         block: unparked_block.as_leaf(),
                     });
 
@@ -270,7 +270,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             });
         }
 
-        let _ignore = self.tx_events.send(HotstuffEvent::ProposedBlockParked {
+        self.publish_event(HotstuffEvent::ProposedBlockParked {
             block: proposal.block.as_leaf(),
             num_missing_txs: missing_tx_ids.len(),
             // TODO: remove
@@ -439,6 +439,12 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         let missing = TransactionRecord::get_missing(tx, all_involved_transactions)?;
 
         Ok(missing)
+    }
+
+    fn publish_event(&self, event: HotstuffEvent) {
+        if let Some(sender) = self.tx_events.upgrade() {
+            let _ignore = sender.send(event);
+        }
     }
 }
 

@@ -421,32 +421,15 @@ impl<TStore> Services<TStore> {
         let (res, _, _) = future::select_all(fused).await;
         res.unwrap_or_else(|e| Err(anyhow!("Task panicked: {}", e)))
     }
+
+    pub async fn join_all(self) -> Result<(), anyhow::Error> {
+        let results = future::try_join_all(self.handles).await?;
+        for res in results {
+            res?;
+        }
+        Ok(())
+    }
 }
-// pub struct Services {
-//     pub keypair: RistrettoKeypair,
-//     pub networking: NetworkingHandle<TariMessagingSpec>,
-//     pub mempool: MempoolHandle,
-//     pub epoch_manager: EpochManagerHandle<PeerAddress>,
-//     pub template_manager: TemplateManagerHandle,
-//     pub consensus_handle: ConsensusHandle,
-//     // pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
-//     pub dry_run_transaction_processor: DryRunTransactionProcessor,
-//     // pub validator_node_client_factory: TariValidatorNodeRpcClientFactory,
-//     // pub consensus_gossip_service: ConsensusGossipHandle,
-//     pub state_store: SqliteStateStore<PeerAddress>,
-//     pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
-//
-//     pub handles: Vec<JoinHandle<Result<(), anyhow::Error>>>,
-// }
-//
-// impl Services {
-//     pub async fn on_any_exit(&mut self) -> Result<(), anyhow::Error> {
-//         // JoinHandler panics if polled again after reading the Result, we fuse the future to prevent this.
-//         let fused = self.handles.iter_mut().map(|h| h.fuse());
-//         let (res, _, _) = future::select_all(fused).await;
-//         res.unwrap_or_else(|e| Err(anyhow!("Task panicked: {}", e)))
-//     }
-// }
 
 async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
     config: &ApplicationConfig,

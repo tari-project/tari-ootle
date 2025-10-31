@@ -71,7 +71,7 @@ pub struct OnReadyToVoteOnLocalBlock<TConsensusSpec: ConsensusSpec> {
     local_validator_pk: RistrettoPublicKey,
     config: HotstuffConfig,
     transaction_pool: TransactionPool<TConsensusSpec::StateStore>,
-    tx_events: broadcast::Sender<HotstuffEvent>,
+    tx_events: broadcast::WeakSender<HotstuffEvent>,
     transaction_manager: ConsensusTransactionManager<TConsensusSpec::TransactionExecutor, TConsensusSpec::StateStore>,
 }
 
@@ -82,7 +82,7 @@ where TConsensusSpec: ConsensusSpec
         local_validator_pk: RistrettoPublicKey,
         config: HotstuffConfig,
         transaction_pool: TransactionPool<TConsensusSpec::StateStore>,
-        tx_events: broadcast::Sender<HotstuffEvent>,
+        tx_events: broadcast::WeakSender<HotstuffEvent>,
         transaction_manager: ConsensusTransactionManager<
             TConsensusSpec::TransactionExecutor,
             TConsensusSpec::StateStore,
@@ -1533,7 +1533,9 @@ where TConsensusSpec: ConsensusSpec
     }
 
     fn publish_event(&self, event: HotstuffEvent) {
-        let _ignore = self.tx_events.send(event);
+        if let Some(sender) = self.tx_events.upgrade() {
+            let _ignore = sender.send(event);
+        }
     }
 
     fn finalize_block(

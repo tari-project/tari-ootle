@@ -25,11 +25,14 @@
 
 use bytes::Bytes;
 use futures::{future::BoxFuture, stream::FuturesUnordered};
+use log::info;
 use tari_common_types::types::FixedHash;
 use tari_ootle_storage::global::DbTemplateType;
 use tari_template_lib::types::TemplateAddress;
 use tokio::{sync::mpsc, task};
 use tokio_stream::StreamExt;
+
+const LOG_TARGET: &str = "tari::ootle::template_manager::downloader";
 
 pub struct DownloadRequest {
     pub address: TemplateAddress,
@@ -68,7 +71,10 @@ impl TemplateDownloadWorker {
                         Some(req)  => {
                             self.pending_downloads.push(Box::pin(download(req)));
                         },
-                        None => break,
+                        None => {
+                            info!(target: LOG_TARGET, "💤 Download queue closed, shutting down downloader");
+                            break
+                        },
                     }
                 },
                 Some(result) = self.pending_downloads.next() => {

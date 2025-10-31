@@ -75,7 +75,7 @@ pub struct OnReceiveLocalProposalHandler<TConsensusSpec: ConsensusSpec> {
     outbound_messaging: TConsensusSpec::OutboundMessaging,
     signing_service: TConsensusSpec::SignerService,
     on_receive_foreign_proposal: OnReceiveForeignProposalHandler<TConsensusSpec>,
-    tx_events: broadcast::Sender<HotstuffEvent>,
+    tx_events: broadcast::WeakSender<HotstuffEvent>,
     hooks: TConsensusSpec::Hooks,
 }
 
@@ -89,7 +89,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         outbound_messaging: TConsensusSpec::OutboundMessaging,
         signing_service: TConsensusSpec::SignerService,
         transaction_pool: TransactionPool<TConsensusSpec::StateStore>,
-        tx_events: broadcast::Sender<HotstuffEvent>,
+        tx_events: broadcast::WeakSender<HotstuffEvent>,
         transaction_manager: ConsensusTransactionManager<
             TConsensusSpec::TransactionExecutor,
             TConsensusSpec::StateStore,
@@ -540,7 +540,9 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
     }
 
     fn publish_event(&self, event: HotstuffEvent) {
-        let _ignore = self.tx_events.send(event);
+        if let Some(sender) = self.tx_events.upgrade() {
+            let _ignore = sender.send(event);
+        }
     }
 
     async fn send_vote_to_leader(

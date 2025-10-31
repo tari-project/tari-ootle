@@ -134,6 +134,7 @@ where
             state = self.transition(state, next_event);
             let _ignore = context.tx_current_state.send((&state).into());
             if state.is_shutdown() {
+                info!(target: LOG_TARGET, "💤 Consensus state machine shutting down");
                 break;
             }
         }
@@ -143,6 +144,7 @@ where
     where Fut: Future<Output = Result<ConsensusStateEvent, HotStuffError>> {
         let mut shutdown_signal = self.shutdown_signal.clone();
         let result = tokio::select! {
+            biased;
             _ = shutdown_signal.wait() => Ok(ConsensusStateEvent::Shutdown),
             ret = fut => ret,
         };

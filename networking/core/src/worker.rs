@@ -197,6 +197,7 @@ where
                 },
 
                 _ = self.shutdown_signal.wait() => {
+                    info!(target: LOG_TARGET, "💤 Networking service shutting down");
                     break;
                 }
             }

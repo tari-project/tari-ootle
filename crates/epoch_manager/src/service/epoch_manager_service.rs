@@ -84,7 +84,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
         let (tx_request, rx_request) = mpsc::channel(10);
         let (events, _) = broadcast::channel(100);
         let current_epoch = Arc::new(AtomicU64::new(0));
-        let epoch_manager_handle = EpochManagerHandle::new(tx_request, events.clone(), current_epoch.clone());
+        let epoch_manager_handle = EpochManagerHandle::new(tx_request, events.downgrade(), current_epoch.clone());
 
         let task_handle = tokio::spawn(async move {
             Self {
@@ -149,6 +149,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                 }
             }
         }
+
         Ok(())
     }
 

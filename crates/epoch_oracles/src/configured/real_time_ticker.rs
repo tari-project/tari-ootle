@@ -173,6 +173,8 @@ mod tests {
             let config = serde_json::from_reader::<_, Config>(&mut file).unwrap();
             let mut ticker = RealTimeEpochTicker::new(config.initial_epoch, config.base_time, Epoch(1965))
                 .with_epoch_time_secs((config.epoch_time.unwrap().as_secs() / 4).try_into().unwrap());
+            let current = ticker.calc_current_epoch();
+            eprintln!("current: {:?}", current);
 
             loop {
                 let res = poll_fn(|cx| ticker.poll_tick(cx)).await;

@@ -51,11 +51,12 @@ impl ValidatorCommitteeRpcPool {
             let Some(member) = member else {
                 // All validators have been attempted and failed - no real choice but to clear the past failed nodes and
                 // try again if this is called again
+                let committee_size = self.past_failed_nodes.len();
                 self.past_failed_nodes.clear();
                 // Clamp max mem usage to 7300 bytes (Multihash size x 100) - this is likely to always be a no-op
                 self.past_failed_nodes.shrink_to(100);
                 return Err(ValidatorCommitteeClientError::AllValidatorsFailed {
-                    committee_size: self.past_failed_nodes.len(),
+                    committee_size,
                     last_error: last_error.as_ref().map(|e| e.to_string()),
                 });
             };

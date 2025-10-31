@@ -144,6 +144,6 @@ where
             worker = worker.with_metrics(registry_mut);
         }
         let handle = tokio::spawn(worker.run());
-        Ok((NetworkingHandle::new(local_peer_id, tx, tx_events), handle))
+        Ok((NetworkingHandle::new(local_peer_id, tx, tx_events.downgrade()), handle))
     }
 }

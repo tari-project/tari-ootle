@@ -58,6 +58,8 @@ where TSpec: ConsensusSpec
 
         loop {
             tokio::select! {
+                biased;
+
                 event = epoch_events.recv() => {
                     match event {
                         Ok(event) => {
@@ -69,12 +71,13 @@ where TSpec: ConsensusSpec
                             debug!(target: LOG_TARGET, "Idle state lagged behind by {n} epoch manager events");
                         },
                         Err(broadcast::error::RecvError::Closed) => {
+                            debug!(target: LOG_TARGET, "Epoch manager event stream closed");
                             break;
                         },
                     }
                 },
                 // Ignore hotstuff messages while idle
-                _ = context.hotstuff.discard_messages() => { }
+                _ = context.hotstuff.discard_messages() => { },
             }
         }
 

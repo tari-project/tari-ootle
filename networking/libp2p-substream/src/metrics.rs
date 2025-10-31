@@ -97,6 +97,7 @@ impl libp2p::metrics::Recorder<Event> for Metrics {
                 error,
             } => {
                 self.inbound_failure_count.inc();
+                self.error_count.inc();
                 tracing::error!(error = ?error, "Inbound substream failure for peer {peer_id} (ID = {stream_id})");
             },
             Event::OutboundFailure {
@@ -106,11 +107,8 @@ impl libp2p::metrics::Recorder<Event> for Metrics {
                 error,
             } => {
                 self.outbound_failure_count.inc();
-                tracing::error!(error = ?error, "Outbound substream failure ({stream_id}) peer {peer_id} on protocol {protocol}");
-            },
-            Event::Error(error) => {
                 self.error_count.inc();
-                tracing::error!(error = ?error, "Error in substream event");
+                tracing::error!(error = ?error, "Outbound substream failure ({stream_id}) peer {peer_id} on protocol {protocol}");
             },
         }
     }

@@ -114,7 +114,7 @@ pub async fn spawn(
 
     let consensus_handle = ConsensusHandle::new(
         rx_current_state,
-        EventSubscription::new(tx_hotstuff_events),
+        EventSubscription::new(tx_hotstuff_events.downgrade()),
         current_view,
         tx_new_transaction,
     );

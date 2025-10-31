@@ -197,6 +197,7 @@ where
                 },
 
                 _ = self.shutdown_signal.wait() => {
+                    info!(target: LOG_TARGET, "💤 Networking service shutting down");
                     break;
                 }
             }
@@ -1033,6 +1034,9 @@ where
                 error,
             } => {
                 debug!(target: LOG_TARGET, "Inbound substream failed from peer {peer_id} with stream id {stream_id}: {error}");
+                if let Some(waiting_reply) = self.pending_substream_requests.remove(&stream_id) {
+                    let _ignore = waiting_reply.send(Err(NetworkingError::FailedToOpenSubstream(error)));
+                }
             },
             OutboundFailure {
                 error,
@@ -1045,7 +1049,6 @@ where
                     let _ignore = waiting_reply.send(Err(NetworkingError::FailedToOpenSubstream(error)));
                 }
             },
-            Error(_) => {},
         }
     }
 

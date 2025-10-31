@@ -28,15 +28,16 @@ use tokio::sync::broadcast;
 /// We hold a sender because if we held a receiver then the broadcast buffer would always fill up because the receiver
 /// isn't reading off of it.
 #[derive(Debug)]
-pub struct EventSubscription<T>(broadcast::Sender<T>);
+pub struct EventSubscription<T>(broadcast::WeakSender<T>);
 
 impl<T> EventSubscription<T> {
-    pub fn new(sender: broadcast::Sender<T>) -> Self {
+    pub fn new(sender: broadcast::WeakSender<T>) -> Self {
         Self(sender)
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<T> {
-        self.0.subscribe()
+        let sender = self.0.upgrade().unwrap_or_else(|| broadcast::Sender::new(1));
+        sender.subscribe()
     }
 }
 

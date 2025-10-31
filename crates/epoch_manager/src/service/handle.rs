@@ -31,13 +31,13 @@ use crate::{
 pub struct EpochManagerHandle<TAddr> {
     tx_request: mpsc::Sender<EpochManagerRequest<TAddr>>,
     current_epoch: Arc<AtomicU64>,
-    events: broadcast::Sender<EpochManagerEvent>,
+    events: broadcast::WeakSender<EpochManagerEvent>,
 }
 
 impl<TAddr: NodeAddressable> EpochManagerHandle<TAddr> {
     pub fn new(
         tx_request: mpsc::Sender<EpochManagerRequest<TAddr>>,
-        events: broadcast::Sender<EpochManagerEvent>,
+        events: broadcast::WeakSender<EpochManagerEvent>,
         current_epoch: Arc<AtomicU64>,
     ) -> Self {
         Self {
@@ -129,7 +129,12 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
     type Addr = TAddr;
 
     fn subscribe(&self) -> broadcast::Receiver<EpochManagerEvent> {
-        self.events.subscribe()
+        let sender = self.events.upgrade().unwrap_or_else(|| {
+            // Should the sender be closed (upgrade() returns None), create a "dummy" channel that will
+            // immediately close. This is more in-line with what you would expect from the api.
+            broadcast::Sender::new(1)
+        });
+        sender.subscribe()
     }
 
     async fn wait_for_initial_scanning_to_complete(&self) -> Result<(), EpochManagerError> {

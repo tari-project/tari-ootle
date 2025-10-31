@@ -31,7 +31,7 @@ use tari_ootle_common_types::{optional::Optional, PeerAddress, ShardGroup};
 use tari_ootle_p2p::{NewTransactionMessage, TariMessage, TariMessagingSpec};
 use tari_ootle_storage::{consensus_models::TransactionRecord, StateStore, StateStoreReadTransaction};
 use tari_transaction::{Transaction, TransactionId};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 #[cfg(feature = "metrics")]
 use super::metrics::PrometheusMempoolMetrics;
@@ -96,24 +96,51 @@ where
 
         loop {
             tokio::select! {
-                Some(req) = self.mempool_requests.recv() => self.handle_request(req).await,
-                Some(result) = self.gossip.next_message() => {
-                    if let Err(e) = self.handle_new_transaction_from_remote(result).await {
-                        warn!(target: LOG_TARGET, "Mempool rejected transaction: {}", e);
+                req = self.mempool_requests.recv() => {
+                    match req {
+                        Some(req) => self.handle_request(req).await,
+                        None => {
+                            info!(target: LOG_TARGET, "Mempool request channel closed, shutting down");
+                            break;
+                        }
                     }
+                },
+                result = self.gossip.next_message() => {
+                    match result {
+                        Some(msg) => {
+                            if let Err(e) = self.handle_new_transaction_from_remote(msg).await {
+                                warn!(target: LOG_TARGET, "Mempool rejected transaction: {}", e);
+                            }
+                        }
+                        None => {
+                            info!(target: LOG_TARGET, "Gossip channel closed, shutting down mempool service");
+                            break;
+                        }
+                    };
                 }
-                Ok(HotstuffEvent::EpochChanged { epoch, registered_shard_group}) = consensus_events.recv() => {
-                    if let Some(shard_group) = registered_shard_group {
-                        info!(target: LOG_TARGET, "Mempool service subscribing transaction messages for {shard_group} in {epoch}");
-                        self.gossip.subscribe(shard_group).await?;
-                    } else {
-                        info!(target: LOG_TARGET, "Not registered for epoch {epoch}, unsubscribing from gossip if necessary");
-                        self.gossip.unsubscribe().await?;
+                event = consensus_events.recv() => {
+                    match event {
+                        Ok(HotstuffEvent::EpochChanged { epoch, registered_shard_group})  => {
+                            if let Some(shard_group) = registered_shard_group {
+                                info!(target: LOG_TARGET, "Mempool service subscribing transaction messages for {shard_group} in {epoch}");
+                                self.gossip.subscribe(shard_group).await?;
+                            } else {
+                                info!(target: LOG_TARGET, "Not registered for epoch {epoch}, unsubscribing from gossip if necessary");
+                                self.gossip.unsubscribe().await?;
+                            }
+                        },
+                        Ok(_) => {},
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            warn!(target: LOG_TARGET, "Missed {} consensus events", n);
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            info!(target: LOG_TARGET, "Consensus event channel closed, shutting down mempool service");
+                            break;
+                        }
                     }
                 },
 
                 else => {
-                    info!(target: LOG_TARGET, "Mempool service shutting down");
                     break;
                 }
             }
@@ -121,6 +148,7 @@ where
 
         self.gossip.unsubscribe().await?;
 
+        info!(target: LOG_TARGET, "💤 Mempool service shutting down");
         Ok(())
     }
 

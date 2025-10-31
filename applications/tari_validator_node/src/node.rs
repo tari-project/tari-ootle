@@ -20,6 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::process;
+
 use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
@@ -50,9 +52,6 @@ impl ValidatorNode {
         //     error!(target: LOG_TARGET, "Failed to dial local shard peers: {}", err);
         // }
 
-        // let sigint = tokio::signal::ctrl_c();
-        // let mut sigterm = signal(SignalKind::terminate())?;
-
         loop {
             let metrics = tokio::runtime::Handle::current().metrics();
             info!(
@@ -66,12 +65,8 @@ impl ValidatorNode {
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {
                     info!(target: LOG_TARGET, "💤 Received SIGINT");
-                    // Second SIGINT forces shutdown
-                    if shutdown.is_triggered() {
-                        warn!(target: LOG_TARGET, "💤 Shutdown NOW");
-                        break;
-                    }
                     shutdown.trigger();
+                    break;
                 },
 
                 Ok(event) = hotstuff_events.recv() => if let Err(err) = self.handle_hotstuff_event(event).await {
@@ -85,11 +80,10 @@ impl ValidatorNode {
                 result = self.services.on_any_exit() => {
                     match result {
                         Ok(_) => {
-                            if shutdown.is_triggered() {
-                                info!(target: LOG_TARGET, "🏁 All services have exited cleanly");
-                            } else {
+                            if !shutdown.is_triggered() {
                                 warn!(target: LOG_TARGET, "❓️ A service has exited unexpectedly. Shutting down...");
                             }
+                            shutdown.trigger();
                             break;
                         },
                         Err(err) => {
@@ -98,7 +92,20 @@ impl ValidatorNode {
                         }
                     }
                 }
+            }
+        }
 
+        info!(target: LOG_TARGET, "💤 Waiting for all services to shut down... ctrl+c to force shutdown");
+
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                // Second SIGINT forces shutdown
+                warn!(target: LOG_TARGET, "💤 Shutdown NOW");
+                process::exit(1);
+            },
+            res = self.services.join_all() => {
+                res?;
+                info!(target: LOG_TARGET, "🏁 All services have exited cleanly");
             }
         }
 

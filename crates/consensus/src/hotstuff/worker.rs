@@ -144,7 +144,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             local_validator_addr: local_validator_addr.clone(),
 
             config: config.clone(),
-            tx_events: tx_events.clone(),
             rx_new_transactions,
             rx_missing_transactions,
 
@@ -157,7 +156,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 leader_strategy.clone(),
                 signing_service.clone(),
                 outbound_messaging.clone(),
-                tx_events.clone(),
+                tx_events.downgrade(),
             ),
 
             on_next_sync_view: OnNextSyncViewHandler::new(
@@ -174,7 +173,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 outbound_messaging.clone(),
                 signing_service.clone(),
                 transaction_pool.clone(),
-                tx_events,
+                tx_events.downgrade(),
                 transaction_manager.clone(),
                 config.clone(),
                 hooks.clone(),
@@ -230,6 +229,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             pacemaker: pacemaker.clone_handle(),
             pacemaker_worker: Some(pacemaker),
             hooks,
+            tx_events,
             shutdown,
         }
     }
@@ -621,6 +621,10 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             error!(target: LOG_TARGET, "Error while stopping pacemaker: {}", e);
         }
         self.on_inbound_message.clear_buffer();
+    }
+
+    pub fn shutdown_signal(&self) -> &ShutdownSignal {
+        &self.shutdown
     }
 
     /// Read and discard messages. This should be used only when consensus is inactive.

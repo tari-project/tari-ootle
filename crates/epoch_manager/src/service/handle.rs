@@ -72,6 +72,10 @@ impl<TAddr: NodeAddressable> EpochManagerHandle<TAddr> {
         Epoch(self.current_epoch.load(std::sync::atomic::Ordering::SeqCst))
     }
 
+    pub fn is_closed(&self) -> bool {
+        self.tx_request.is_closed()
+    }
+
     pub async fn get_network_description(&self) -> Result<NetworkDescription, EpochManagerError> {
         let (tx, rx) = oneshot::channel();
         self.tx_request

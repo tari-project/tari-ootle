@@ -22,9 +22,17 @@
 
 use std::{future::IntoFuture, net::SocketAddr, sync::Arc};
 
-use axum::{extract::Extension, routing::post, Router};
+use axum::{
+    extract::Extension,
+    response::IntoResponse,
+    routing::{get, post},
+    Json,
+    Router,
+};
 use axum_jrpc::{error::JsonRpcErrorReason, JrpcResult, JsonRpcAnswer, JsonRpcExtractor};
 use log::*;
+use serde_json::json;
+use tari_consensus::hotstuff::ConsensusCurrentState;
 use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
 use tower_http::cors::CorsLayer;
 
@@ -39,7 +47,8 @@ pub async fn spawn_json_rpc(
 ) -> Result<SocketAddr, anyhow::Error> {
     let router = Router::new()
         .route("/", post(handler))
-        .route("/json_rpc", post(handler));
+        .route("/json_rpc", post(handler))
+        .route("/health", get(health_check));
     #[cfg(feature = "metrics")]
     let router = router.route(
         "/_metrics",
@@ -114,4 +123,29 @@ async fn handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: Js
         }
     }
     result
+}
+
+async fn health_check(Extension(handlers): Extension<Arc<JsonRpcHandlers>>) -> impl IntoResponse {
+    let is_net_ok = handlers.networking_is_active();
+    let status = handlers.consensus_status();
+    let is_ok = is_net_ok &&
+        matches!(
+            status,
+            ConsensusCurrentState::Idle |
+                ConsensusCurrentState::Running |
+                ConsensusCurrentState::Syncing |
+                ConsensusCurrentState::CheckSync
+        );
+
+    let body = json!({
+        "status": if is_ok { "ok" } else { "error" },
+        "networking_ok": is_net_ok,
+        "consensus_status": status,
+    });
+
+    if is_ok {
+        (axum::http::StatusCode::OK, Json(body)).into_response()
+    } else {
+        (axum::http::StatusCode::SERVICE_UNAVAILABLE, Json(body)).into_response()
+    }
 }

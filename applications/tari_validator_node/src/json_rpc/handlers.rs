@@ -31,6 +31,7 @@ use log::*;
 use serde_json::{self as json, json};
 use tari_base_node_client::types::BaseLayerValidatorNode;
 use tari_common_types::types::CompressedPublicKey;
+use tari_consensus::hotstuff::ConsensusCurrentState;
 use tari_consensus_types::{Decision, LeafBlock};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_engine_types::{ConvertFromByteType, ToByteType};
@@ -153,6 +154,14 @@ impl JsonRpcHandlers {
 
     pub fn sidechain_id(&self) -> Option<&RistrettoPublicKey> {
         self.config.validator_node.validator_node_sidechain_id.as_ref()
+    }
+
+    pub fn networking_is_active(&self) -> bool {
+        !self.networking.is_closed()
+    }
+
+    pub fn consensus_status(&self) -> ConsensusCurrentState {
+        self.consensus.get_current_state()
     }
 }
 

@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 mod coin;
+mod config;
 mod sim;
 
 use std::path::{Path, PathBuf};
@@ -12,27 +13,18 @@ use log::LevelFilter;
 use tari_ootle_common_types::engine_types::published_template::PublishedTemplateAddress;
 use tari_template_lib::models::{ResourceAddress, UtxoId};
 
-use crate::sim::TrafficSim;
+use crate::{
+    coin::Coin,
+    config::{Config, WalletConfig},
+    sim::TrafficSim,
+};
 
 #[derive(Parser)]
 #[command(name = "traffic-sim")]
 #[command(about = "A CLI tool for simulating traffic between wallets in a swarm")]
 struct Cli {
-    #[arg(
-        long,
-        default_value = "http://localhost:8080/json_rpc",
-        help = "URL of the swarm API"
-    )]
-    swarm_url: String,
-
-    #[arg(
-        short = 'x',
-        long,
-        default_value = "http://localhost:9000/json_rpc",
-        help = "URL of the exchange wallet API"
-    )]
-    exchange_wallet_url: String,
-
+    #[arg(short = 'c', long, default_value = "./config.json", help = "URL of the swarm API")]
+    config: PathBuf,
     #[command(subcommand)]
     command: Commands,
 }
@@ -92,8 +84,28 @@ enum Commands {
         #[arg(long, alias = "csv", help = "Path to output CSV file with results")]
         csv_output: Option<PathBuf>,
     },
+    #[command(alias = "swarm-config")]
+    GenerateConfigFromSwarm {
+        #[arg(
+            long,
+            default_value = "http://localhost:8080/json_rpc",
+            help = "URL of the swarm API"
+        )]
+        swarm_url: String,
+
+        #[arg(
+            short = 'x',
+            long,
+            default_value = "http://localhost:9000/json_rpc",
+            help = "URL of the exchange wallet API"
+        )]
+        exchange_wallet_url: String,
+        #[arg(short = 'o', long, help = "Output path for the generated config file")]
+        output: PathBuf,
+    },
 }
 
+#[allow(clippy::too_many_lines)]
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::builder().filter_level(LevelFilter::Info).init();
@@ -109,9 +121,10 @@ async fn main() -> Result<()> {
             if min_value >= max_value {
                 return Err(anyhow::anyhow!("min-value must be less than max-value"));
             }
-            let coin = coin_file.as_ref().map(read_coin_file).transpose()?;
+            let config = read_json_file::<Config, _>(cli.config)?;
+            let coin = coin_file.as_ref().map(read_json_file::<Coin, _>).transpose()?;
 
-            let mut sim = TrafficSim::new(cli.swarm_url, cli.exchange_wallet_url);
+            let mut sim = TrafficSim::new(config);
             let resource_address = coin
                 .as_ref()
                 .map(|c| c.resource_address)
@@ -125,19 +138,23 @@ async fn main() -> Result<()> {
             template_address,
             coin_file,
         } => {
-            let mut sim = TrafficSim::new(cli.swarm_url, cli.exchange_wallet_url);
+            let config = read_json_file::<Config, _>(cli.config)?;
+            let mut sim = TrafficSim::new(config);
             sim.setup_stablecoin(template_address, coin_file).await?;
         },
         Commands::Setup { coin_file } => {
-            let coin = read_coin_file(coin_file)?;
-            let mut sim = TrafficSim::new(cli.swarm_url, cli.exchange_wallet_url);
+            let config = read_json_file::<Config, _>(cli.config)?;
+            let coin = read_json_file::<Coin, _>(coin_file)?;
+
+            let mut sim = TrafficSim::new(config);
             sim.connect_to_wallets().await?;
             sim.setup_accounts().await?;
             sim.setup_wallet_funds(coin.component_address, coin.resource_address, coin.admin_badge)
                 .await?;
         },
         Commands::ListWallets => {
-            let mut sim = TrafficSim::new(cli.swarm_url, cli.exchange_wallet_url);
+            let config = read_json_file::<Config, _>(cli.config)?;
+            let mut sim = TrafficSim::new(config);
             sim.connect_to_wallets().await?;
             if sim.wallets().is_empty() {
                 println!("No wallets found in swarm");
@@ -157,7 +174,8 @@ async fn main() -> Result<()> {
             specific_id,
             csv_output,
         } => {
-            let mut sim = TrafficSim::new(cli.swarm_url, cli.exchange_wallet_url);
+            let config = read_json_file::<Config, _>(cli.config)?;
+            let mut sim = TrafficSim::new(config);
             sim.decrypt_utxos(
                 min_value,
                 max_value,
@@ -174,13 +192,34 @@ async fn main() -> Result<()> {
             )
             .await?;
         },
+        Commands::GenerateConfigFromSwarm {
+            swarm_url,
+            exchange_wallet_url,
+            output,
+        } => {
+            let wallets = TrafficSim::get_wallets_from_swarm(&swarm_url).await?;
+            let config = Config {
+                exchange_wallet_url,
+                wallets: wallets
+                    .iter()
+                    .map(|w| WalletConfig {
+                        name: w.name.clone(),
+                        url: w.client.endpoint().clone(),
+                    })
+                    .collect(),
+            };
+
+            let file = std::fs::File::create(&output).context("Failed to create config file")?;
+            serde_json::to_writer_pretty(file, &config).context("Failed to write config file")?;
+            println!("Config file written to {}", output.display());
+        },
     }
 
     Ok(())
 }
 
-fn read_coin_file<P: AsRef<Path>>(path: P) -> Result<coin::Coin> {
-    let file = std::fs::File::open(path).context("Failed to open coin file")?;
-    let coin = serde_json::from_reader(file).context("Failed to parse coin file")?;
-    Ok(coin)
+fn read_json_file<T: serde::de::DeserializeOwned, P: AsRef<Path>>(path: P) -> Result<T> {
+    let file = std::fs::File::open(path).context("Failed to open JSON file")?;
+    let data = serde_json::from_reader(file).context("Failed to parse json file")?;
+    Ok(data)
 }

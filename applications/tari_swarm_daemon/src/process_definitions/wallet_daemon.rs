@@ -11,6 +11,7 @@ use crate::process_definitions::{ProcessContext, ProcessDefinition};
 
 pub const WALLET_DAEMON_AUTH_SETTINGS_KEY: &str = "wallet_daemon_auth";
 pub const WALLET_DAEMON_SEED_WORDS_SETTINGS_KEY: &str = "wallet_daemon_seed_words";
+pub const WALLET_DAEMON_INDEXER_URL_SETTINGS_KEY: &str = "indexer_url";
 pub const OVERRIDE_KEYRING_PASSWORD_SETTINGS_KEY: &str = "override_keyring_password";
 const ARGS_SETTINGS_KEY: &str = "args";
 const WALLET_DAEMON_AUTH_DEFAULT: &str = "none";
@@ -36,18 +37,24 @@ impl ProcessDefinition for WalletDaemon {
         let json_rpc_address = format!("{listen_ip}:{jrpc_port}");
         let web_ui_address = format!("{listen_ip}:{web_ui_port}");
 
-        let indexer = context
-            .indexers()
-            .next()
-            .ok_or_else(|| anyhow!("Indexer should be started before wallet daemon"))?;
-        let indexer_url = format!(
-            "http://127.0.0.1:{}",
-            indexer
-                .instance()
-                .allocated_ports()
-                .get("api")
-                .ok_or_else(|| anyhow!("Indexer api port not found"))?
-        );
+        let indexer_url = context
+            .get_setting(WALLET_DAEMON_INDEXER_URL_SETTINGS_KEY)
+            .map(|s| s.to_string())
+            .map(anyhow::Ok)
+            .unwrap_or_else(|| {
+                let indexer = context
+                    .indexers()
+                    .next()
+                    .ok_or_else(|| anyhow!("Indexer should be started before wallet daemon"))?;
+                Ok(format!(
+                    "http://127.0.0.1:{}",
+                    indexer
+                        .instance()
+                        .allocated_ports()
+                        .get("api")
+                        .ok_or_else(|| anyhow!("Indexer api port not found"))?
+                ))
+            })?;
 
         let auth = context
             .get_setting(WALLET_DAEMON_AUTH_SETTINGS_KEY)

@@ -136,8 +136,22 @@ impl ProcessManager {
 
     async fn register_nodes_and_templates_as_required(
         &mut self,
-        layer_one_transaction_service: &mut LayerOneTransactionService,
+        layer_one_transaction_service: Option<&mut LayerOneTransactionService>,
     ) -> anyhow::Result<()> {
+        if self.skip_registration {
+            return Ok(());
+        }
+
+        let layer_one_transaction_service = match layer_one_transaction_service {
+            Some(service) => service,
+            None => {
+                return Err(anyhow!(
+                    "No MinotariConsoleWallet available. Please start a wallet before registering validator nodes and \
+                     templates or use --skip-registration flag to skip this.",
+                ))
+            },
+        };
+
         // Add the watchers
         for vn in self.instance_manager.validator_nodes() {
             let l1_tx_path = vn.layer_one_transaction_path();
@@ -145,9 +159,6 @@ impl ProcessManager {
             layer_one_transaction_service.add_watch(l1_tx_path);
         }
 
-        if self.skip_registration {
-            return Ok(());
-        }
         let mut templates_to_register = vec![];
         if !self.disable_template_auto_register {
             let registered_templates = self.registered_templates().await?;
@@ -349,8 +360,6 @@ impl ProcessManager {
             }
         }
 
-        let mut layer_one_transaction_service = self.create_layer_one_transaction_service().await?;
-
         if self.enable_manual_connect {
             {
                 info!("Connecting all validator nodes manually");
@@ -367,8 +376,10 @@ impl ProcessManager {
             }
         }
 
+        let mut layer_one_transaction_service = self.create_layer_one_transaction_service().await?;
+
         {
-            let fut = pin!(self.register_nodes_and_templates_as_required(&mut layer_one_transaction_service));
+            let fut = pin!(self.register_nodes_and_templates_as_required(layer_one_transaction_service.as_mut()));
             match shutdown_signal.clone().select(fut).await {
                 Either::Left(_) => {
                     info!("Shutting down process manager");
@@ -388,13 +399,13 @@ impl ProcessManager {
         loop {
             tokio::select! {
                 Some(req) = self.rx_request.recv() => {
-                    if let Err(err) = self.handle_request(req, &mut layer_one_transaction_service).await {
+                    if let Err(err) = self.handle_request(req, layer_one_transaction_service.as_mut()).await {
                         log::error!("Error handling request: {:?}", err);
                     }
                 },
 
                 _ = interval.tick() => {
-                    if let Err(err) = self.on_tick(&mut layer_one_transaction_service).await {
+                    if let Err(err) = self.on_tick(layer_one_transaction_service.as_mut()).await {
                         log::error!("(on_tick) Error: {:?}", err);
                     }
                 },
@@ -409,8 +420,16 @@ impl ProcessManager {
         Ok(())
     }
 
-    async fn on_tick(&mut self, layer_one_transaction_service: &mut LayerOneTransactionService) -> anyhow::Result<()> {
+    async fn on_tick(
+        &mut self,
+        layer_one_transaction_service: Option<&mut LayerOneTransactionService>,
+    ) -> anyhow::Result<()> {
         self.clear_terminated_instances()?;
+
+        let Some(layer_one_transaction_service) = layer_one_transaction_service else {
+            debug!("🫙 No MinotariConsoleWallet available. Skipping layer one transaction processing");
+            return Ok(());
+        };
 
         // Check for layer one transactions
         let processed = layer_one_transaction_service.process_any().await?;
@@ -428,22 +447,22 @@ impl ProcessManager {
         Ok(())
     }
 
-    async fn create_layer_one_transaction_service(&self) -> anyhow::Result<LayerOneTransactionService> {
-        let wallet = self
-            .instance_manager
-            .minotari_wallets()
-            .next()
-            .ok_or_else(|| anyhow!("No MinoTariConsoleWallet instances found"))?;
+    async fn create_layer_one_transaction_service(&self) -> anyhow::Result<Option<LayerOneTransactionService>> {
+        let wallet = self.instance_manager.minotari_wallets().next();
+        let Some(wallet) = wallet else {
+            return Ok(None);
+        };
+
         let client = wallet.connect_client().await?;
         let service = LayerOneTransactionService::init(client)?;
-        Ok(service)
+        Ok(Some(service))
     }
 
     #[allow(clippy::too_many_lines)]
     async fn handle_request(
         &mut self,
         req: ProcessManagerRequest,
-        layer_one_transaction_service: &mut LayerOneTransactionService,
+        layer_one_transaction_service: Option<&mut LayerOneTransactionService>,
     ) -> anyhow::Result<()> {
         use ProcessManagerRequest::*;
         match req {
@@ -542,6 +561,18 @@ impl ProcessManager {
                 }
             },
             RegisterValidatorNode { instance_id, reply } => {
+                let Some(layer_one_transaction_service) = layer_one_transaction_service else {
+                    if reply
+                        .send(Err(anyhow!(
+                            "No MinotariConsoleWallet available. Please start a wallet before registering validator \
+                             nodes",
+                        )))
+                        .is_err()
+                    {
+                        log::warn!("Request cancelled before response could be sent")
+                    }
+                    return Ok(());
+                };
                 let result = self
                     .register_validator_node(instance_id, layer_one_transaction_service)
                     .await;

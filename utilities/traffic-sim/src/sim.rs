@@ -50,7 +50,7 @@ use tari_wallet_daemon_client::{
 };
 use tokio::time::sleep;
 
-use crate::coin::Coin;
+use crate::{coin::Coin, config::Config};
 
 pub struct Wallet {
     pub name: String,
@@ -85,17 +85,15 @@ impl Wallet {
 }
 
 pub struct TrafficSim {
-    swarm_url: String,
-    exchange_wallet_url: String,
+    config: Config,
     wallets: Vec<Wallet>,
     accounts: Vec<AccountWithAddress>,
 }
 
 impl TrafficSim {
-    pub fn new(swarm_url: String, exchange_wallet_url: String) -> Self {
+    pub fn new(config: Config) -> Self {
         Self {
-            swarm_url,
-            exchange_wallet_url,
+            config,
             wallets: Vec::new(),
             accounts: Vec::new(),
         }
@@ -106,7 +104,7 @@ impl TrafficSim {
     }
 
     pub async fn connect_exchange_wallet(&self) -> anyhow::Result<Wallet> {
-        Wallet::connect("Exchange".to_string(), &self.exchange_wallet_url).await
+        Wallet::connect("Exchange".to_string(), &self.config.exchange_wallet_url).await
     }
 
     pub async fn connect_indexer_client(
@@ -123,6 +121,14 @@ impl TrafficSim {
     }
 
     pub async fn connect_to_wallets(&mut self) -> anyhow::Result<()> {
+        for wallet in &self.config.wallets {
+            let wallet = Wallet::connect(wallet.name.clone(), wallet.url.as_str()).await?;
+            self.wallets.push(wallet);
+        }
+        Ok(())
+    }
+
+    pub async fn get_wallets_from_swarm(swarm_url: &str) -> anyhow::Result<Vec<Wallet>> {
         #[derive(Debug, Clone, serde::Deserialize)]
         pub struct InstanceInfo {
             #[allow(dead_code)]
@@ -144,7 +150,7 @@ impl TrafficSim {
         }
 
         let response = Client::new()
-            .post(&self.swarm_url)
+            .post(swarm_url)
             .json(&json!({
                 "jsonrpc": "2.0",
                 "method": "list_instances",
@@ -169,12 +175,13 @@ impl TrafficSim {
             Some((instance.name, format!("http://localhost:{}/json_rpc", rpc_port)))
         });
 
+        let mut wallets = vec![];
         for (name, addr) in addrs {
             let wallet = Wallet::connect(name, &addr).await?;
-            self.wallets.push(wallet);
+            wallets.push(wallet);
         }
 
-        Ok(())
+        Ok(wallets)
     }
 
     pub async fn send_random_transaction(
@@ -523,7 +530,6 @@ impl TrafficSim {
         min_value: u64,
         max_value: u64,
     ) -> anyhow::Result<()> {
-        log::info!("Fetching wallets from swarm at: {}", self.swarm_url);
         self.connect_to_wallets().await?;
         self.setup_accounts().await?;
 

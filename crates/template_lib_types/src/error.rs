@@ -11,6 +11,10 @@ pub struct InvalidByteLengthError {
 }
 
 impl InvalidByteLengthError {
+    pub fn new(size: usize, expected: usize) -> Self {
+        Self { size, expected }
+    }
+
     pub fn actual_size(&self) -> usize {
         self.size
     }

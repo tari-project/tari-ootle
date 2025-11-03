@@ -25,6 +25,7 @@
     "@tari-project/wallet_jrpc_client": "workspace:*",
     "@walletconnect/core": "^2.21.8",
     "@walletconnect/utils": "^2.21.8",
+    "react-qr-code": "^2.0.18",
     "buffer": "^6.0.3",
     "cbor2": "^2.0.1",
     "file-saver": "^2.0.5",

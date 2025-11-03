@@ -978,22 +978,52 @@ pub async fn handle_stealth_transfer(
         ));
     };
 
+    let outputs = req
+        .transfers
+        .into_iter()
+        .map(|transfer| match transfer.destination_address.pay_ref() {
+            Some(pay_ref) => {
+                let memo = transfer.output_memo.unwrap_or_else(|| Memo::new_message("").unwrap());
+                if memo.as_pay_ref().is_some() {
+                    warn!(
+                        target: LOG_TARGET,
+                        "❗️ Overwriting existing pay ref in memo for transfer to address {}",
+                        transfer.destination_address
+                    );
+                }
+
+                // Try to add the pay ref to the memo
+                let memo_bytes = memo
+                    .as_memo_message()
+                    .map(|s| s.as_bytes())
+                    .or_else(|| memo.as_memo_bytes())
+                    .ok_or_else(|| invalid_params("pay ref", Some("can only include pay ref in message memo")))?;
+                let memo = Memo::new_pay_ref_and_bytes_truncate(pay_ref, memo_bytes)
+                    .expect("payref + truncated message fits in memo");
+
+                Ok(TransferOutput {
+                    address: transfer.destination_address,
+                    blinded_amount: transfer.blinded_output_amount,
+                    revealed_amount: transfer.revealed_output_amount,
+                    memo: Some(memo),
+                })
+            },
+            None => Ok(TransferOutput {
+                address: transfer.destination_address,
+                blinded_amount: transfer.blinded_output_amount,
+                revealed_amount: transfer.revealed_output_amount,
+                memo: transfer.output_memo,
+            }),
+        })
+        .collect::<anyhow::Result<_>>()?;
+
     let params = StealthTransferParams {
         fee_input_selection: req.fee_input_selection,
         input_selection: req.input_selection,
         resource_address: req.resource_address,
         max_fee: req.max_fee,
         badge_usage: req.badge_usage,
-        outputs: req
-            .transfers
-            .into_iter()
-            .map(|transfer| TransferOutput {
-                address: transfer.destination_address,
-                blinded_amount: transfer.blinded_output_amount,
-                revealed_amount: transfer.revealed_output_amount,
-                memo: transfer.output_memo,
-            })
-            .collect(),
+        outputs,
         is_dry_run: req.dry_run,
     };
     if let Err(err) = params.validate(network) {

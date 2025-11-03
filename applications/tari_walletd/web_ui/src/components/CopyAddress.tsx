@@ -20,13 +20,13 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { SubstateId, shortenString } from "@tari-project/typescript-bindings";
+import { shortenString } from "@tari-project/typescript-bindings";
 import { isSubstateIdString, shortenSubstateId, substateIdToString } from "@utils/helpers";
 import CopyToClipboard from "@components/CopyToClipboard";
 
 interface Props {
   address: string;
-  display?: SubstateId | string;
+  display?: string;
 }
 
 export default function CopyAddress({ address, display }: Props) {

@@ -16,4 +16,13 @@ fn memo_is_compatible_with_bl_memo_field() {
         memo,
         Memo::new_bytes(memo_bytes[1..=Memo::MAX_BYTES_LENGTH].to_vec()).unwrap()
     );
+
+    let u256 = 100_000u64.into();
+    let memo_field = MemoField::new_u256(u256);
+    let memo_bytes = memo_field.to_bytes();
+
+    let memo = Memo::decode_from(&mut memo_bytes.as_slice()).unwrap();
+    let mut buf = [0u8; 32];
+    u256.to_little_endian(buf.as_mut());
+    assert_eq!(memo, Memo::new_u256(buf));
 }

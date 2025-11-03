@@ -205,7 +205,7 @@ impl Resource {
     }
 
     pub fn token_symbol(&self) -> Option<&str> {
-        self.metadata.get(TOKEN_SYMBOL).map(|s| s.as_str())
+        self.metadata.get(TOKEN_SYMBOL)
     }
 
     pub fn divisibility(&self) -> u8 {

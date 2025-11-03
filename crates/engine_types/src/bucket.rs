@@ -48,6 +48,10 @@ impl Bucket {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.resource_container.is_empty()
+    }
+
     pub fn amount(&self) -> Amount {
         self.resource_container.amount()
     }

@@ -229,8 +229,8 @@ pub enum ResourceAction {
     UpdateNonFungibleData,
     /// Get the total supply of a resource
     GetTotalSupply,
-    /// Get the [ResourceType] of a resource
-    GetResourceType,
+    /// Get the [ResourceInfo] of a resource
+    GetResourceInfo,
     /// Gets a non-fungible resource by its ID
     GetNonFungible,
     /// Update the access rules of a resource
@@ -483,6 +483,7 @@ pub enum BucketAction {
     GetNonFungibleIds,
     GetNonFungibles,
     CountConfidentialCommitments,
+    DropEmpty,
 }
 
 /// A bucket burn operation argument

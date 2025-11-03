@@ -169,6 +169,18 @@ impl Bucket {
         resp.decode().expect("Bucket join returned invalid result")
     }
 
+    /// Drops the bucket if it is empty. Panics if the bucket is not empty.
+    /// This must be called if all funds have been taken out of the bucket to prevent a dangling bucket error.
+    pub fn drop_empty(self) {
+        let resp: InvokeResult = call_engine(EngineOp::BucketInvoke, &BucketInvokeArg {
+            bucket_ref: BucketRef::Ref(self.id),
+            action: BucketAction::DropEmpty,
+            args: invoke_args![],
+        });
+
+        resp.decode().expect("Bucket DropEmpty returned invalid result")
+    }
+
     /// Returns the amount of tokens held in this bucket.
     ///
     /// Note that if the resource is confidential, only the revealed amount is returned.

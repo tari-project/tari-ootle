@@ -4,7 +4,7 @@
 use bnum::BUint;
 use newtype_ops::newtype_ops;
 use serde::ser::Error;
-use tari_template_abi::rust::{cmp, fmt, fmt::Debug, iter::Sum, ops::Neg, str::FromStr, write};
+use tari_template_abi::rust::{cmp, fmt, fmt::Debug, iter::Sum, str::FromStr, write};
 
 use crate::{impl_from, partial_eq_impl, partial_ord_impl};
 
@@ -294,6 +294,16 @@ impl Amount {
         }
     }
 
+    /// Returns the amount raised to the power of `exp`.
+    pub fn pow(&self, exp: u32) -> Self {
+        Self::new(self.into_inner_value().pow(exp))
+    }
+
+    /// Returns the amount raised to the power of `exp`, returning `None` if the result overflows.
+    pub fn pow_checked(&self, exp: u32) -> Option<Self> {
+        self.into_inner_value().checked_pow(exp).map(Self::new)
+    }
+
     /// Parses a string as an `Amount` in the specified radix.
     ///
     /// This function works in constant context, allowing it to be used to define constants.
@@ -381,8 +391,8 @@ impl Default for Amount {
     }
 }
 
-newtype_ops! { [Amount] {add sub mul div} {:=} Self Self }
-newtype_ops! { [Amount] {add sub mul div} {:=} &Self &Self }
+newtype_ops! { [Amount] {add sub mul div rem neg} {:=} Self Self }
+newtype_ops! { [Amount] {add sub mul div rem neg} {:=} &Self &Self }
 
 impl_from!(Amount, u8);
 impl_from!(Amount, i8);
@@ -397,20 +407,6 @@ impl_from!(Amount, i128);
 impl_from!(Amount, usize);
 impl_from!(Amount, isize);
 
-// impl From<Amount> for Amount {
-//     fn from(value: Amount) -> Self {
-//         Self::new(value.as_signed_value().into())
-//     }
-// }
-//
-// impl TryFrom<Amount> for Amount {
-//     type Error = bnum::errors::TryFromIntError;
-//
-//     fn try_from(value: Amount) -> Result<Self, Self::Error> {
-//         Ok(Amount::new(value.into_inner_value().try_into()?))
-//     }
-// }
-
 impl TryFrom<Amount> for usize {
     type Error = bnum::errors::TryFromIntError;
 
@@ -418,36 +414,6 @@ impl TryFrom<Amount> for usize {
         value.into_inner_value().try_into()
     }
 }
-
-impl Neg for Amount {
-    type Output = Self;
-
-    fn neg(self) -> Self::Output {
-        Self::new(-self.inner_value())
-    }
-}
-
-// impl PartialEq<Amount> for Amount {
-//     fn eq(&self, other: &Amount) -> bool {
-//         self.into_inner_value()
-//             .try_into()
-//             .ok()
-//             .map(|n: i64| n == other.as_signed_value())
-//             .unwrap_or(false)
-//     }
-// }
-//
-// impl PartialOrd<Amount> for Amount {
-//     fn partial_cmp(&self, other: &Amount) -> Option<cmp::Ordering> {
-//         if self.is_negative() {
-//             return Some(cmp::Ordering::Less);
-//         }
-//         match self.into_inner_value().try_into().map(Amount::new) {
-//             Ok(value) => Some(value.cmp(other)),
-//             Err(_) => Some(cmp::Ordering::Greater),
-//         }
-//     }
-// }
 
 impl PartialOrd<usize> for Amount {
     fn partial_cmp(&self, other: &usize) -> Option<cmp::Ordering> {

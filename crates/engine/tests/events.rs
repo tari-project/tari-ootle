@@ -115,8 +115,8 @@ fn builtin_vault_events() {
         *event.payload().get("resource_address").unwrap(),
         faucet_resource.to_string()
     );
-    assert_eq!(*event.payload().get("resource_type").unwrap(), "Fungible");
-    assert_eq!(*event.payload().get("amount").unwrap(), amount.to_string());
+    assert_eq!(event.payload().get("resource_type").unwrap(), "Fungible");
+    assert_eq!(event.payload().get("amount").unwrap(), amount.to_string());
 
     // a standard event for the deposit must have been emmitted
     let event = result
@@ -128,9 +128,9 @@ fn builtin_vault_events() {
     assert_eq!(event.template_address(), ACCOUNT_TEMPLATE_ADDRESS);
     // assert_eq!(event.component_address().unwrap(), receiver_address);
     assert_eq!(
-        *event.payload().get("resource_address").unwrap(),
+        event.payload().get("resource_address").unwrap(),
         faucet_resource.to_string()
     );
-    assert_eq!(*event.payload().get("resource_type").unwrap(), "Fungible");
-    assert_eq!(*event.payload().get("amount").unwrap(), amount.to_string());
+    assert_eq!(event.payload().get("resource_type").unwrap(), "Fungible");
+    assert_eq!(event.payload().get("amount").unwrap(), amount.to_string());
 }

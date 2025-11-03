@@ -117,6 +117,7 @@ use tari_template_lib::{
         engine_args::{SignatureAction, SignatureVerifyArg},
         Amount,
         EntityId,
+        ResourceInfo,
         TemplateAddress,
     },
 };
@@ -862,7 +863,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     Ok(InvokeResult::encode(&total_supply)?)
                 })
             },
-            ResourceAction::GetResourceType => {
+            ResourceAction::GetResourceInfo => {
                 let resource_address =
                     resource_ref
                         .as_resource_address()
@@ -877,8 +878,12 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let locked = state.read_lock_substate(&SubstateId::Resource(resource_address))?;
                     let resource = state.get_resource(&locked)?;
                     let resource_type = resource.resource_type();
+                    let divisibility = resource.divisibility();
                     state.unlock_substate(locked)?;
-                    Ok(InvokeResult::encode(&resource_type)?)
+                    Ok(InvokeResult::encode(&ResourceInfo {
+                        resource_type,
+                        divisibility,
+                    })?)
                 })
             },
             ResourceAction::Mint => {
@@ -1375,7 +1380,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let resource_type = state.get_resource(&resource_lock)?.resource_type();
                     let vault_id = state.id_provider()?.new_vault_id()?;
                     let resource = match resource_type {
-                        ResourceType::Fungible => ResourceContainer::fungible(*resource_address, Amount::zero()),
+                        ResourceType::Fungible => ResourceContainer::public_fungible(*resource_address, Amount::zero()),
                         ResourceType::NonFungible => {
                             ResourceContainer::non_fungible(*resource_address, Default::default())
                         },
@@ -2123,6 +2128,25 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 self.tracker.write_with(|state| {
                     let bucket = state.get_bucket(bucket_id)?;
                     Ok(InvokeResult::encode(&bucket.number_of_confidential_commitments())?)
+                })
+            },
+            BucketAction::DropEmpty => {
+                let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "bucket_ref",
+                    reason: "DropEmpty bucket action requires a bucket id".to_string(),
+                })?;
+                args.assert_no_args("Bucket::DropEmpty")?;
+
+                self.tracker.write_with(|state| {
+                    let bucket = state.take_bucket(bucket_id)?;
+                    if !bucket.is_empty() {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "bucket_ref",
+                            reason: "Cannot drop a non-empty bucket".to_string(),
+                        });
+                    }
+                    // Drop
+                    Ok(InvokeResult::unit())
                 })
             },
         }

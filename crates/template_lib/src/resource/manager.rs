@@ -43,7 +43,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 use tari_bor::to_value;
 use tari_template_abi::{call_engine, rust::collections::BTreeMap, EngineOp};
-use tari_template_lib_types::crypto::StealthValueProof;
+use tari_template_lib_types::{crypto::StealthValueProof, ResourceInfo};
 
 use crate::{
     args::{
@@ -110,20 +110,38 @@ impl ResourceManager {
         self.resource_address
     }
 
-    /// A public function that returns the resource type of the resource being managed.
+    /// Returns the resource type of the resource being managed.
+    /// NOTE: this calls `resource_info()` internally, prefer using that if you need the divisibility as well.
     ///
     /// # Panics
     ///
-    /// If the resource type is not recognized on a resource or if the resource address is not set via
-    /// `ResourceManager`.
+    /// If the resource address does not exist in the runtime context.
     pub fn resource_type(&self) -> ResourceType {
+        self.resource_info().resource_type
+    }
+
+    /// Returns the divisibility of the resource being managed.
+    /// NOTE: this calls `resource_info()` internally, prefer using that if you need the resource type as well.
+    ///
+    /// # Panics
+    ///
+    /// If the resource address does not exist in the runtime context.
+    pub fn divisibility(&self) -> u8 {
+        self.resource_info().divisibility
+    }
+
+    /// Returns the resource info of the resource being managed.
+    ///
+    /// # Panics
+    ///
+    /// If the resource address does not exist in the runtime context.
+    pub fn resource_info(&self) -> ResourceInfo {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
             resource_ref: self.resource_address.into(),
-            action: ResourceAction::GetResourceType,
+            action: ResourceAction::GetResourceInfo,
             args: invoke_args![],
         });
-        resp.decode()
-            .expect("Resource GetResourceType returned invalid resource type")
+        resp.decode::<ResourceInfo>().expect("Failed to decode ResourceInfo")
     }
 
     /// Creates a new resource on the Tari network.

@@ -113,7 +113,7 @@ impl Event {
     }
 
     pub fn get_payload(&self, key: &str) -> Option<&str> {
-        self.payload.get(key).map(|s| s.as_str())
+        self.payload.get(key)
     }
 
     pub fn payload(&self) -> &Metadata {

@@ -52,7 +52,7 @@ pub enum ResourceContainer {
 }
 
 impl ResourceContainer {
-    pub fn fungible<T: Into<Amount>>(address: ResourceAddress, amount: T) -> Self {
+    pub fn public_fungible<T: Into<Amount>>(address: ResourceAddress, amount: T) -> Self {
         let amount = amount.into();
         assert!(amount.is_non_negative(), "amount must be non-negative");
         Self::Fungible {
@@ -302,7 +302,7 @@ impl ResourceContainer {
                     });
                 }
                 *amount -= withdraw_amt;
-                Ok(Self::fungible(*self.resource_address(), withdraw_amt))
+                Ok(Self::public_fungible(*self.resource_address(), withdraw_amt))
             },
             Self::NonFungible { token_ids, .. } => {
                 if withdraw_amt > token_ids.len() {
@@ -565,7 +565,7 @@ impl ResourceContainer {
                 // Sets to zero and returns the amount
                 let newly_locked_amount = mem::take(amount);
                 *locked_amount += newly_locked_amount;
-                Ok(Self::fungible(resource_address, newly_locked_amount))
+                Ok(Self::public_fungible(resource_address, newly_locked_amount))
             },
             Self::NonFungible {
                 token_ids,
@@ -619,7 +619,7 @@ impl ResourceContainer {
                 // Sets to zero and returns the amount
                 let newly_locked_amount = mem::take(revealed_amount);
                 *locked_amount += newly_locked_amount;
-                Ok(Self::fungible(resource_address, newly_locked_amount))
+                Ok(Self::public_fungible(resource_address, newly_locked_amount))
             },
         }
     }
@@ -794,7 +794,7 @@ impl ResourceContainer {
                 }
                 *available_amount -= amount;
                 *locked_amount += amount;
-                Ok(Self::fungible(*self.resource_address(), amount))
+                Ok(Self::public_fungible(*self.resource_address(), amount))
             },
             Self::NonFungible {
                 token_ids,
@@ -861,6 +861,10 @@ impl ResourceContainer {
                 Ok(Self::stealth(*self.resource_address(), amount))
             },
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.amount().is_zero() && self.number_of_confidential_commitments() == 0
     }
 }
 

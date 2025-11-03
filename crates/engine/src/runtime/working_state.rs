@@ -397,10 +397,9 @@ impl WorkingState {
     }
 
     pub(super) fn validate_finalized(&self) -> Result<(), RuntimeError> {
-        let dangling_bucket_count = self.buckets.iter().filter(|(_, b)| !b.amount().is_zero()).count();
-        if dangling_bucket_count > 0 {
+        if !self.buckets.is_empty() {
             return Err(TransactionCommitError::DanglingBuckets {
-                count: dangling_bucket_count,
+                count: self.buckets.len(),
             }
             .into());
         }
@@ -593,7 +592,7 @@ impl WorkingState {
                     "Minting {} fungible tokens on resource: {}", amount, resource_address
                 );
 
-                ResourceContainer::fungible(resource_address, amount)
+                ResourceContainer::public_fungible(resource_address, amount)
             },
             MintArg::NonFungible { tokens } => {
                 debug!(

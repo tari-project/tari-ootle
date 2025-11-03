@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use tari_ootle_wallet_sdk::{
     models::{AccountUpdate, KeyId},
-    storage::{CommitableStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
+    storage::{CommittableStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_lib::{models::ComponentAddress, prelude::RistrettoPublicKeyBytes};

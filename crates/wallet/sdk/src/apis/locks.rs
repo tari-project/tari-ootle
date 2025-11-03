@@ -10,7 +10,7 @@ use tari_transaction::TransactionId;
 
 use crate::{
     models::{WalletLockDropGuard, WalletLockId},
-    storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
+    storage::{ReadableWalletStore, WalletStorageError, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
 
 #[derive(Clone)]
@@ -18,11 +18,13 @@ pub struct LocksApi<'a, TStore> {
     store: &'a TStore,
 }
 
-impl<'a, TStore: WalletStore> LocksApi<'a, TStore> {
+impl<'a, TStore> LocksApi<'a, TStore> {
     pub(crate) fn new(store: &'a TStore) -> Self {
         Self { store }
     }
+}
 
+impl<'a, TStore: WriteableWalletStore> LocksApi<'a, TStore> {
     pub fn create_lock(&self) -> Result<WalletLockDropGuard<'a, TStore>, LocksApiError> {
         let lock_id = self.store.with_write_tx(|tx| tx.locks_create(None))?;
         Ok(WalletLockDropGuard::new(lock_id, self.store))
@@ -63,7 +65,9 @@ impl<'a, TStore: WalletStore> LocksApi<'a, TStore> {
         let num = self.store.with_write_tx(|tx| tx.locks_release_stale())?;
         Ok(num)
     }
+}
 
+impl<TStore: ReadableWalletStore> LocksApi<'_, TStore> {
     pub fn get_lock_by_transaction_id(&self, transaction_id: TransactionId) -> Result<WalletLockId, LocksApiError> {
         let lock_id = self
             .store

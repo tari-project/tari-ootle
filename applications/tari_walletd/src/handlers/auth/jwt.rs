@@ -8,7 +8,7 @@ use jsonwebtoken::{errors, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use tari_crypto::tari_utilities::SafePassword;
 use tari_ootle_wallet_sdk::storage::{
-    CommitableStore,
+    CommittableStore,
     WalletStorageError,
     WalletStore,
     WalletStoreReader,

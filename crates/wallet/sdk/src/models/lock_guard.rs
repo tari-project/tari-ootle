@@ -3,7 +3,7 @@
 
 use crate::{
     models::WalletLockId,
-    storage::{CommitableStore, WalletStoreWriter, WriteableWalletStore},
+    storage::{CommittableStore, WalletStoreWriter, WriteableWalletStore},
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet::models::lock_guard";

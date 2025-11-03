@@ -15,7 +15,7 @@ use crate::{
         key_manager::{KeyManagerApi, KeyManagerApiError},
     },
     models::{Account, ConfidentialOutputModel, OutputStatus, WalletLockId, WalletSecretKey},
-    storage::{CommitableStore, WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
+    storage::{CommittableStore, WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_sdk::apis::confidential_outputs";

@@ -46,7 +46,7 @@ use tari_ootle_wallet_sdk::{
         WalletLockId,
         WalletTransactionUpdate,
     },
-    storage::{CommitableStore, WalletStorageError, WalletStoreReader, WalletStoreWriter},
+    storage::{CommittableStore, WalletStorageError, WalletStoreReader, WalletStoreWriter},
 };
 use tari_template_lib::{
     models::{ComponentAddress, NonFungibleId, ResourceAddress, UtxoAddress, UtxoId, VaultId},
@@ -232,7 +232,7 @@ impl<'a> WriteTransaction<'a> {
     }
 }
 
-impl CommitableStore for WriteTransaction<'_> {
+impl CommittableStore for WriteTransaction<'_> {
     fn commit(&mut self) -> Result<(), WalletStorageError> {
         self.transaction.commit_internal()?;
         Ok(())

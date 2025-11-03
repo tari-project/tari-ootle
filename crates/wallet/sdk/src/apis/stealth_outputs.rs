@@ -51,7 +51,7 @@ use crate::{
         StealthOutputModel,
         WalletLockId,
     },
-    storage::{CommitableStore, WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
+    storage::{CommittableStore, WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet::apis::stealth_outputs";

@@ -184,6 +184,10 @@ impl<TMsg: MessageSpec> NetworkingHandle<TMsg> {
         }
     }
 
+    pub fn is_closed(&self) -> bool {
+        self.tx_request.is_closed()
+    }
+
     pub fn subscribe_events(&self) -> broadcast::Receiver<NetworkingEvent> {
         self.tx_events
             .upgrade()

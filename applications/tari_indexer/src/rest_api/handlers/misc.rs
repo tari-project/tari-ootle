@@ -1,7 +1,12 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use axum::{response::Response, Extension, Json};
+use axum::{
+    response::{IntoResponse, Response},
+    Extension,
+    Json,
+};
+use serde_json::json;
 use tari_epoch_manager::EpochManagerReader;
 use tari_epoch_oracles::store::StoreKey;
 use tari_indexer_client::{
@@ -81,4 +86,47 @@ pub async fn get_epoch_manager_stats(
         current_block_hash: current_epoch_hash,
     };
     Ok(Json(response))
+}
+
+#[utoipa::path(get, path = "/health", description = "Health check")]
+pub async fn health(Extension(context): Extension<HandlerContext>) -> impl IntoResponse {
+    let current_epoch = context.epoch_manager().get_current_epoch();
+    let epoch_manager_ok = !context.epoch_manager().is_closed();
+    let network_ok = !context.networking().is_closed();
+    let db_ok = context
+        .global_db()
+        .with_read_tx(|tx| tx.execute_sql("SELECT 1"))
+        .is_ok();
+    let status = if epoch_manager_ok && network_ok && db_ok {
+        "ok"
+    } else {
+        "error"
+    };
+
+    let is_ok = epoch_manager_ok && network_ok && db_ok;
+
+    let body = json!({
+        "status": status,
+        "current_epoch": current_epoch.as_u64(),
+        "epoch_manager_ok": epoch_manager_ok,
+        "network_ok": network_ok,
+        "db_ok": db_ok,
+    });
+
+    if is_ok {
+        (axum::http::StatusCode::OK, Json(body)).into_response()
+    } else {
+        (axum::http::StatusCode::SERVICE_UNAVAILABLE, Json(body)).into_response()
+    }
+}
+
+#[utoipa::path(get, path = "/ready", description = "Indexer readiness check")]
+pub async fn ready(Extension(context): Extension<HandlerContext>) -> HandlerResult<Json<serde_json::Value>> {
+    match context.epoch_manager().is_initial_scanning_complete().await {
+        Ok(true) => Ok(Json(json!({}))),
+        Ok(false) => Err(ErrorResponse::service_unavailable(
+            "Indexer is still scanning".to_string(),
+        )),
+        Err(e) => Err(ErrorResponse::anyhow(e)),
+    }
 }

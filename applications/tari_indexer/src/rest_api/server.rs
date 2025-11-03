@@ -60,6 +60,8 @@ impl Server {
         let context = HandlerContext::from_services(services);
 
         let router = Router::new()
+            .route("/health", get(handlers::misc::health))
+            .route("/ready", get(handlers::misc::ready))
             .route("/identity", get(handlers::misc::get_identity))
             .route("/wait-until-ready", get(handlers::misc::wait_until_ready))
             .route("/epoch-manager/stats", get(handlers::misc::get_epoch_manager_stats))

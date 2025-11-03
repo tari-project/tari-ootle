@@ -34,7 +34,7 @@ use crate::{
         WalletPublicKey,
         WalletSecretKey,
     },
-    storage::{CommitableStore, WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
+    storage::{CommittableStore, WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
 pub type WalletKeyManager = TariKeyManager<Blake2b<U64>>;

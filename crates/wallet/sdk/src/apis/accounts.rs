@@ -39,7 +39,7 @@ use crate::{
         WalletOotleAddressWithKeyIds,
     },
     network::WalletNetworkInterface,
-    storage::{CommitableStore, WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
+    storage::{CommittableStore, WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
 pub struct AccountsApi<'a, TStore, TNetworkInterface> {
@@ -165,8 +165,7 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
     }
 
     pub fn count(&self) -> Result<u64, AccountsApiError> {
-        let mut tx = self.store.create_read_tx()?;
-        let count = tx.accounts_count()?;
+        let count = self.store.with_read_tx(|tx| tx.accounts_count())?;
         Ok(count)
     }
 

@@ -5,7 +5,7 @@ use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_ootle_common_types::optional::Optional;
 use tari_ootle_wallet_sdk::{
     models::TransactionStatus,
-    storage::{CommitableStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
+    storage::{CommittableStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_transaction::{args, Transaction, TransactionId};

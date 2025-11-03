@@ -4,7 +4,7 @@
 use std::time::{Duration, Instant};
 
 use tari_ootle_wallet_sdk::storage::{
-    CommitableStore,
+    CommittableStore,
     WalletStorageError,
     WalletStore,
     WalletStoreReader,

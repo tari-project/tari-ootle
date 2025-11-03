@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_common_types::optional::Optional;
-use tari_ootle_wallet_sdk::storage::{CommitableStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore};
+use tari_ootle_wallet_sdk::storage::{CommittableStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore};
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 
 #[test]

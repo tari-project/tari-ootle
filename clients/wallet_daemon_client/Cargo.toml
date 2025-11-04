@@ -27,4 +27,4 @@ webauthn-rs-proto = { workspace = true }
 zeroize = { workspace = true, features = ["serde", "simd"] }
 
 [features]
-ts = ["ts-rs"]
+ts = ["ts-rs", "tari_ootle_wallet_sdk/ts", "tari_ootle_common_types/ts", "tari_ootle_address/ts"]

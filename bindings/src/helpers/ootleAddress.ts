@@ -5,12 +5,15 @@ import { OotleAddress } from "../types/OotleAddress";
 import { Network } from "../types/Network";
 import { bech32m, Decoded } from "bech32";
 
-const MAX_LENGTH_LIMIT = 118;
+const PAY_REF_MAX_LENGTH = 64;
+
+const MAX_LENGTH_LIMIT = 118 + PAY_REF_MAX_LENGTH;
 
 export type DecodedOotleAddress = {
   network: Network;
   accountPublicKey: string;
   viewOnlyKey: string;
+  payRef: string | Uint8Array | null;
 };
 
 export enum NetworkHrp {
@@ -35,12 +38,23 @@ export function decodeOotleAddress(address: OotleAddress): DecodedOotleAddress {
   const { prefix, words }: Decoded = bech32m.decode(address, MAX_LENGTH_LIMIT);
   const data = bech32m.fromWords(words);
 
-  if (data.length != 64) {
+  if (data.length < 64) {
     throw new Error(`Invalid Ootle address length: ${data.length}, expected 64`);
   }
 
   const accountPublicKey = buf2hex(data.slice(0, 32));
   const viewOnlyKey = buf2hex(data.slice(32, 64));
+  const payRefBytes = new Uint8Array(data.slice(64));
+
+  // If the payRefSlice is utf-8 decodable, use it as payRef, otherwise null
+  let payRef: string | Uint8Array | null = null;
+  if (payRefBytes.length > 0) {
+    try {
+      payRef = new TextDecoder().decode(payRefBytes);
+    } catch (e) {
+      payRef = payRefBytes;
+    }
+  }
 
   let network: Network;
   switch (prefix) {
@@ -71,6 +85,7 @@ export function decodeOotleAddress(address: OotleAddress): DecodedOotleAddress {
     network,
     accountPublicKey,
     viewOnlyKey,
+    payRef,
   };
 }
 
@@ -105,10 +120,16 @@ export function encodeOotleAddress(decoded: DecodedOotleAddress): OotleAddress {
 
   const accountPubKeyBytes = hex2buf(decoded.accountPublicKey);
   const viewOnlyKeyBytes = hex2buf(decoded.viewOnlyKey);
+  const payRefBytes = decoded.payRef
+    ? typeof decoded.payRef === "string"
+      ? new TextEncoder().encode(decoded.payRef)
+      : decoded.payRef
+    : new Uint8Array();
 
-  const addressBytes = new Uint8Array(accountPubKeyBytes.length + viewOnlyKeyBytes.length);
+  const addressBytes = new Uint8Array(accountPubKeyBytes.length + viewOnlyKeyBytes.length + payRefBytes.length);
   addressBytes.set(accountPubKeyBytes, 0);
   addressBytes.set(viewOnlyKeyBytes, accountPubKeyBytes.length);
+  addressBytes.set(payRefBytes, accountPubKeyBytes.length + viewOnlyKeyBytes.length);
   const words = bech32m.toWords(addressBytes);
   return bech32m.encode(networkHrp, words, MAX_LENGTH_LIMIT) as OotleAddress;
 }
@@ -119,7 +140,7 @@ function buf2hex(buffer: number[]) {
   return buffer.map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 
-function hex2buf(string: string): Uint8Array<ArrayBufferLike> {
+function hex2buf(string: string): Uint8Array {
   // Check if Uint8Array.fromHex is available (most modern browsers)
   const fromHex = (Uint8Array as any).fromHex;
   if (typeof fromHex === "function") {

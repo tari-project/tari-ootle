@@ -23,63 +23,72 @@
 import { Chip, Avatar } from "@mui/material";
 import { IoCheckmarkOutline, IoDiamondOutline, IoReload, IoHourglassOutline, IoCloseOutline } from "react-icons/io5";
 import { useTheme } from "@mui/material/styles";
-import type { TransactionStatus } from "@tari-project/typescript-bindings";
+
+export const StatusChipIcons = {
+  Checkmark: "Checkmark",
+  DiamondOutline: "DiamondOutline",
+  Reload: "Reload",
+  HourglassOutline: "HourglassOutline",
+  CloseOutline: "CloseOutline",
+} as const;
+
+export type StatusChipIcon = (typeof StatusChipIcons)[keyof typeof StatusChipIcons];
+
+export const StatusChipColors = {
+  Green: "#5F9C91",
+  Yellow: "#ECA86A",
+  Blue: "#318EFA",
+  Purple: "#9D5CF9",
+  Red: "#DB7E7E",
+  Orange: "#FFA500",
+} as const;
+
+export type StatusChipColor = (typeof StatusChipColors)[keyof typeof StatusChipColors];
 
 interface StatusChipProps {
-  status: TransactionStatus;
-  showTitle?: boolean;
+  icon?: StatusChipIcon;
+  children?: React.ReactNode;
+  title?: string;
+  color?: StatusChipColor;
 }
 
-const colorList: Record<string, string> = {
-  Accepted: "#5F9C91",
-  Pending: "#ECA86A",
-  DryRun: "#318EFA",
-  New: "#9D5CF9",
-  Rejected: "#DB7E7E",
-  InvalidTransaction: "#DB7E7E",
-  OnlyFeeAccepted: "#FFA500",
-};
-
-export default function StatusChip({ status, showTitle = true }: StatusChipProps) {
+export default function StatusChip({ icon, title, color = StatusChipColors.Green, children }: StatusChipProps) {
   const theme = useTheme();
 
-  const iconList: Record<string, JSX.Element> = {
-    Accepted: <IoCheckmarkOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
-    Pending: <IoHourglassOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
-    DryRun: <IoReload style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
-    New: <IoDiamondOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
-    Rejected: <IoCloseOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
-    InvalidTransaction: <IoCloseOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
-    OnlyFeeAccepted: (
-      <>
-        <IoCheckmarkOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />
-        <IoCloseOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />
-      </>
-    ),
-  };
-
-  let bgColor = colorList[status];
-  let background = null;
-
-  if (status === "OnlyFeeAccepted") {
-    const leftColor = colorList["Accepted"];
-    const rightColor = colorList["Rejected"];
-    background = `linear-gradient(to right, ${leftColor} 50%, ${colorList["Rejected"]} 50%)`;
+  let iconJsx;
+  if (icon) {
+    switch (icon) {
+      case StatusChipIcons.Checkmark:
+        iconJsx = <IoCheckmarkOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />;
+        break;
+      case StatusChipIcons.DiamondOutline:
+        iconJsx = <IoDiamondOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />;
+        break;
+      case StatusChipIcons.Reload:
+        iconJsx = <IoReload style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />;
+        break;
+      case StatusChipIcons.HourglassOutline:
+        iconJsx = <IoHourglassOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />;
+        break;
+      case StatusChipIcons.CloseOutline:
+        iconJsx = <IoCloseOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />;
+        break;
+    }
   }
 
-  if (!showTitle) {
-    let leftColor = colorList["Accepted"];
-    let rightColor = colorList["Rejected"];
+  let background = null;
 
-    return <Avatar sx={{ bgcolor: bgColor, height: 22, width: 22 }}>{iconList[status]}</Avatar>;
-  } else {
+  if (children) {
     return (
       <Chip
-        avatar={<Avatar sx={{ bgcolor: bgColor, background: background }}>{iconList[status]}</Avatar>}
-        label={status}
-        style={{ color: colorList[status], borderColor: colorList[status] }}
+        avatar={iconJsx ? <Avatar sx={{ bgcolor: color, background: background }}>{iconJsx}</Avatar> : undefined}
+        label={children}
+        style={{ color: color, borderColor: color }}
         variant="outlined"
+        title={title}
       />
     );
+  } else {
+    return <Avatar sx={{ bgcolor: color, height: 22, width: 22 }}>{iconJsx}</Avatar>;
   }
 }

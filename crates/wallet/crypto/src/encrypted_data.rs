@@ -216,7 +216,7 @@ fn decrypt_inner(
     let memo = if skip_memo || memo_bytes.is_empty() {
         None
     } else {
-        // Note any remaining bytes after memo decodes are discarded
+        // Note any remaining bytes after memo decoding are discarded
         let memo = Memo::decode_from(&mut memo_bytes).map_err(|e| WalletCryptoError::FailedDecryptData {
             details: format!("Failed to decode memo: {}", e),
         })?;

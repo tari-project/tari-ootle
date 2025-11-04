@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { DecodedOotleAddress, encodeOotleAddress, decodeOotleAddress } from "../src";
 
 describe("OotleAddress de/encoding", () => {
-  function makePayload() {
+  function makeDecodedAddress() {
     return {
       network: "igor",
       accountPublicKey: "a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0",
@@ -14,7 +14,7 @@ describe("OotleAddress de/encoding", () => {
   }
 
   it("encodes and decodes a valid address", () => {
-    const sample = makePayload();
+    const sample = makeDecodedAddress();
 
     const address = encodeOotleAddress(sample);
 
@@ -28,22 +28,43 @@ describe("OotleAddress de/encoding", () => {
     expect(parsed.accountPublicKey).toEqual(sample.accountPublicKey);
   });
 
+  it("encodes and decodes address with payRef", () => {
+    const sample = makeDecodedAddress();
+    const payRefString = "Invoice #12345";
+    const check = encodeOotleAddress(sample);
+    sample.payRef = payRefString;
+
+    const address = encodeOotleAddress(sample);
+
+    expect(address).not.toEqual(check);
+
+    let parsed: DecodedOotleAddress;
+    expect(() => {
+      parsed = decodeOotleAddress(address);
+    }).not.toThrow();
+
+    expect(parsed.network).toEqual(sample.network);
+    expect(parsed.viewOnlyKey).toEqual(sample.viewOnlyKey);
+    expect(parsed.accountPublicKey).toEqual(sample.accountPublicKey);
+    expect(parsed.payRef).toEqual(payRefString);
+  });
+
   it("throws on invalid address", () => {
     expect(() => decodeOotleAddress("invalidAddress")).toThrow();
   });
 
   it("throws on invalid public key hex length", () => {
-    let sample1 = makePayload();
+    let sample1 = makeDecodedAddress();
     sample1.accountPublicKey += "deadbeaf";
     expect(() => encodeOotleAddress(sample1)).toThrow();
 
-    let sample2 = makePayload();
+    let sample2 = makeDecodedAddress();
     sample2.accountPublicKey = sample2.accountPublicKey.slice(1);
     expect(() => encodeOotleAddress(sample2)).toThrow();
   });
 
   it("throws if address is tampered", () => {
-    const sample = makePayload();
+    const sample = makeDecodedAddress();
     const address = encodeOotleAddress(sample);
     // Tamper with the address by changing a character
     const tamperedAddress = address.slice(0, -1) + (address.slice(-1) === "a" ? "b" : "a");
@@ -61,7 +82,7 @@ describe("OotleAddress de/encoding", () => {
   });
 
   it("throws on unsupported network prefix", () => {
-    const sample = makePayload();
+    const sample = makeDecodedAddress();
     // Temporarily change network to an unsupported one
     (sample as any).network = "unsupportednet";
     expect(() => encodeOotleAddress(sample)).toThrow();

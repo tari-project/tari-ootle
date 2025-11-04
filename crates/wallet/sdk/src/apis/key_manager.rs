@@ -203,6 +203,7 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
                 network: self.network,
                 view_only_key: RistrettoPublicKey::from_secret_key(&view_only_key.key),
                 account_key: RistrettoPublicKey::from_secret_key(&key.key),
+                pay_ref: None,
             },
             view_only_key_id: key.as_key_id(),
             owner_key_id: key.as_key_id(),

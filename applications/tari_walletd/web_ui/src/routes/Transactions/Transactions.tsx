@@ -37,7 +37,7 @@ import { useTheme } from "@mui/material/styles";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import FetchStatusCheck from "@components/FetchStatusCheck";
-import StatusChip from "@components/StatusChip";
+import TransactionsStatusChip from "@components/TransactionsStatusChip";
 import { DataTableCell } from "@components/StyledComponents";
 import { useGetAllTransactions } from "@api/hooks/useTransactions";
 import { emptyRows, handleChangePage, handleChangeRowsPerPage, formatCurrency } from "@utils/helpers";
@@ -100,7 +100,7 @@ export default function Transactions({ account }: { account: Account }) {
                         </Stack>
                       </DataTableCell>
                       <DataTableCell>
-                        <StatusChip status={status} showTitle />
+                        <TransactionsStatusChip status={status} showTitle />
                       </DataTableCell>
                       <DataTableCell>
                         {fee_receipt?.total_fees_paid ? formatCurrency(fee_receipt.total_fees_paid) : "--"}

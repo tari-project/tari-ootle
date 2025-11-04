@@ -48,7 +48,7 @@ import Inputs from "./Inputs";
 import Signers from "./Signers";
 import ExecutionResults from "./ExecutionResults";
 import FeeReceipt from "./FeeReceipt";
-import StatusChip from "@components/StatusChip";
+import TransactionsStatusChip from "@components/TransactionsStatusChip";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import Loading from "@components/Loading";
@@ -176,7 +176,7 @@ export default function TransactionDetails() {
                   <TableRow>
                     <TableCell>Status</TableCell>
                     <DataTableCell>
-                      <StatusChip status={data.status} />
+                      <TransactionsStatusChip status={data.status} />
                     </DataTableCell>
                   </TableRow>
                   <TableRow>

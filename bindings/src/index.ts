@@ -81,6 +81,7 @@ export * from "./types/OotleAddress";
 export * from "./types/Ordering";
 export * from "./types/OutputStatus";
 export * from "./types/OwnerRule";
+export * from "./types/PayRef";
 export * from "./types/PedersenCommitmentBytes";
 export * from "./types/PeerAddress";
 export * from "./types/PrivateOutput";

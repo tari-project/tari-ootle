@@ -20,11 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{
-    net::SocketAddr,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use config::Config;
 use serde::{Deserialize, Serialize};
@@ -55,15 +51,34 @@ pub struct ApplicationConfig {
 
 impl ApplicationConfig {
     pub fn load_from(cfg: &Config) -> Result<Self, ConfigurationError> {
-        let mut config = Self {
+        let config = Self {
             common: CommonConfig::load_from(cfg)?,
             indexer: IndexerConfig::load_from(cfg)?,
             peer_seeds: PeerSeedsConfig::load_from(cfg)?,
             epoch_oracle: EpochOracleConfig::load_from(cfg)?,
             network: cfg.get("network")?,
         };
-        config.indexer.set_base_path(config.common.base_path());
         Ok(config)
+    }
+
+    pub fn to_identity_file_path(&self) -> PathBuf {
+        if self.indexer.identity_file.is_absolute() {
+            return self.indexer.identity_file.clone();
+        }
+
+        self.common.base_path.join(&self.indexer.identity_file)
+    }
+
+    pub fn to_data_dir(&self) -> PathBuf {
+        if self.indexer.data_dir.is_absolute() {
+            return self.indexer.data_dir.clone();
+        }
+
+        self.common.base_path.join(&self.indexer.data_dir)
+    }
+
+    pub fn state_db_path(&self) -> PathBuf {
+        self.to_data_dir().join("state.db")
     }
 }
 
@@ -74,8 +89,6 @@ pub struct IndexerConfig {
     override_from: Option<String>,
     /// A path to the file that stores your node identity and secret key
     pub identity_file: PathBuf,
-    /// A path to the file that stores the tor hidden service private key, if using the tor transport
-    pub tor_identity_file: PathBuf,
     /// The relative path to store persistent data
     pub data_dir: PathBuf,
     /// The p2p configuration settings
@@ -109,30 +122,11 @@ pub struct IndexerConfig {
     pub event_filters: Vec<EventFilter>,
 }
 
-impl IndexerConfig {
-    pub fn state_db_path(&self) -> PathBuf {
-        self.data_dir.join("state.db")
-    }
-
-    pub fn set_base_path<P: AsRef<Path>>(&mut self, base_path: P) {
-        if !self.identity_file.is_absolute() {
-            self.identity_file = base_path.as_ref().join(&self.identity_file);
-        }
-        if !self.tor_identity_file.is_absolute() {
-            self.tor_identity_file = base_path.as_ref().join(&self.tor_identity_file);
-        }
-        if !self.data_dir.is_absolute() {
-            self.data_dir = base_path.as_ref().join(&self.data_dir);
-        }
-    }
-}
-
 impl Default for IndexerConfig {
     fn default() -> Self {
         Self {
             override_from: None,
             identity_file: PathBuf::from("indexer_id.json"),
-            tor_identity_file: PathBuf::from("indexer_tor_id.json"),
             data_dir: PathBuf::from("data/indexer"),
             p2p: P2pConfig::default(),
             api_listen_address: Some("127.0.0.1:18300".parse().unwrap()),

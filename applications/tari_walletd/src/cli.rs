@@ -92,37 +92,37 @@ impl ConfigOverrideProvider for Cli {
         overrides.push(("ootle_wallet_daemon.override_from".to_string(), network.to_string()));
         if let Some(json_rpc_address) = self.json_rpc_address {
             overrides.push((
-                "ootle_wallet_daemon.json_rpc_address".to_string(),
+                format!("{}.ootle_wallet_daemon.json_rpc_address", network),
                 json_rpc_address.to_string(),
             ));
         }
         if let Some(ref json_rpc_url) = self.web_ui_public_json_rpc_url {
             overrides.push((
-                "ootle_wallet_daemon.web_ui_public_json_rpc_url".to_string(),
+                format!("{}.ootle_wallet_daemon.web_ui_public_json_rpc_url", network),
                 json_rpc_url.to_string(),
             ));
         }
         if let Some(ref signaling_server_address) = self.signaling_server_address {
             overrides.push((
-                "ootle_wallet_daemon.signaling_server_address".to_string(),
+                format!("{}.ootle_wallet_daemon.signaling_server_address", network),
                 signaling_server_address.to_string(),
             ));
         }
         if let Some(ref indexer_api_url) = self.indexer_api_url {
             overrides.push((
-                "ootle_wallet_daemon.indexer_api_url".to_string(),
+                format!("{}.ootle_wallet_daemon.indexer_api_url", network),
                 indexer_api_url.to_string(),
             ));
         }
         if let Some(ref file) = self.value_lookup_table_file {
             overrides.push((
-                "ootle_wallet_daemon.value_lookup_table_file".to_string(),
+                format!("{}.ootle_wallet_daemon.value_lookup_table_file", network),
                 file.display().to_string(),
             ));
         }
         if let Some(ref listen_addr) = self.web_ui_listen_addr {
             overrides.push((
-                "ootle_wallet_daemon.web_ui_address".to_string(),
+                format!("{}.ootle_wallet_daemon.web_ui_address", network),
                 listen_addr.to_string(),
             ));
         }

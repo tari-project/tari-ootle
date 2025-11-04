@@ -115,10 +115,8 @@ function PayRefDialog(props: PayRefDialogProps) {
 
   const handleOnChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const decoded = decodeOotleAddress(address);
-    console.log("Decoded address:", decoded);
     decoded.payRef = event.target.value;
     const addr = encodeOotleAddress(decoded);
-    console.log("Encoded address with payRef:", addr, addr == address);
     setCurrentAddress(addr);
   };
 

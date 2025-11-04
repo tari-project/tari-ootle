@@ -153,7 +153,7 @@ pub async fn spawn_services(
         .spawn(shutdown.clone())?;
 
     // Connect to substate db
-    let store = SqliteIndexerStore::try_create(config.indexer.state_db_path())?;
+    let store = SqliteIndexerStore::try_create(config.state_db_path())?;
     check_store(config, &store)?;
 
     // Epoch event oracle
@@ -211,7 +211,7 @@ pub async fn spawn_services(
     )
     .spawn(shutdown.clone());
 
-    let substate_cache_dir = config.common.base_path.join("substate_cache");
+    let substate_cache_dir = config.to_data_dir().join("substate_cache");
     let substate_cache = SubstateFileCache::new(substate_cache_dir).context("Failed to create substate cache")?;
 
     let substate_scanner = SubstateScanner::new(
@@ -267,12 +267,12 @@ pub struct Services {
 }
 
 fn ensure_directories_exist(config: &ApplicationConfig) -> io::Result<()> {
-    fs::create_dir_all(&config.indexer.data_dir)?;
+    fs::create_dir_all(config.to_data_dir())?;
     Ok(())
 }
 
 fn save_identities(config: &ApplicationConfig, identity: &RistrettoKeypair) -> anyhow::Result<()> {
-    identity_management::save_as_json(&config.indexer.identity_file, identity)
+    identity_management::save_as_json(config.to_identity_file_path(), identity)
         .context("Failed to save indexer identity")?;
 
     Ok(())

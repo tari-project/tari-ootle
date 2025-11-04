@@ -63,10 +63,6 @@ async fn main() -> Result<(), anyhow::Error> {
     if let Some(password) = cli.override_keyring_password.take() {
         config.ootle_wallet_daemon.override_keyring_password = Some(password);
     }
-    if let Some(ref url) = cli.indexer_api_url {
-        // TODO: not sure why the normal load_configuration override doesnt work
-        config.ootle_wallet_daemon.indexer_api_url = url.clone();
-    }
 
     match &cli.command {
         Some(Subcommand::Run) | None => run(cli, config).await?,

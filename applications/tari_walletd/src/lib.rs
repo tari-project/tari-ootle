@@ -176,7 +176,7 @@ pub async fn run_tari_ootle_walletd(
 }
 
 pub fn init_wallet_store(config: &ApplicationConfig) -> anyhow::Result<SqliteWalletStore> {
-    let store = SqliteWalletStore::try_open(config.common.base_path.join("data/wallet.sqlite"))?;
+    let store = SqliteWalletStore::try_open(config.to_data_dir().join("wallet.sqlite"))?;
     store.run_migrations()?;
     Ok(store)
 }

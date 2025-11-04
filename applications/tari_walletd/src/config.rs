@@ -43,6 +43,10 @@ impl ApplicationConfig {
         };
         Ok(config)
     }
+
+    pub fn to_data_dir(&self) -> PathBuf {
+        self.common.base_path.join("data")
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

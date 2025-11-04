@@ -15,13 +15,13 @@ use futures::{future, future::BoxFuture, FutureExt};
 pub use session_store::*;
 use tari_ootle_common_types::optional::IsNotFoundError;
 use tari_ootle_wallet_sdk::{
+    models::WalletEvent,
     network::{StatusResponseError, WalletNetworkInterface},
     storage::WalletStore,
     WalletSdk,
 };
 use tari_ootle_wallet_sdk_services::{
     account_monitor::{AccountMonitor, AccountMonitorHandle},
-    events::WalletEvent,
     notify::Notify,
     transaction_service::{TransactionService, TransactionServiceHandle},
     utxo_scanner::{StealthUtxoScannerWorker, UtxoRecovery},
@@ -54,7 +54,7 @@ where
     let utxo_recovery_join_handle = {
         let sdk = wallet_sdk.clone();
         let notify_sub = utxo_scanner_handle.subscribe_notifications();
-        tokio::spawn(UtxoRecovery::new(sdk).run(notify_sub))
+        tokio::spawn(UtxoRecovery::new(sdk).with_notify(notify.clone()).run(notify_sub))
     };
 
     let (account_monitor, account_monitor_handle) =

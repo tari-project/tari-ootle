@@ -23,6 +23,7 @@ use crate::{
         confidential_outputs::ConfidentialOutputsApi,
         confidential_transfer::ConfidentialTransferApi,
         config::{ConfigApi, ConfigApiError, ConfigKey},
+        events::EventsApi,
         key_manager::{KeyManagerApi, KeyManagerApiError},
         locks::LocksApi,
         non_fungible_tokens::NonFungibleTokensApi,
@@ -158,6 +159,10 @@ where
 
     pub fn locks_api(&self) -> LocksApi<'_, TStore> {
         LocksApi::new(&self.store)
+    }
+
+    pub fn event_api(&self) -> EventsApi<'_, TStore> {
+        EventsApi::new(&self.store)
     }
 
     /// Returns the KeyManager API for the wallet.

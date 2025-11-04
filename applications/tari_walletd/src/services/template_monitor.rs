@@ -10,11 +10,12 @@ use tari_ootle_common_types::{
     substate_type::SubstateType,
 };
 use tari_ootle_wallet_sdk::{
+    models::WalletEvent,
     network::{StatusResponseError, WalletNetworkInterface},
     storage::WalletStore,
     WalletSdk,
 };
-use tari_ootle_wallet_sdk_services::{events::WalletEvent, notify::Notify};
+use tari_ootle_wallet_sdk_services::notify::Notify;
 use tari_shutdown::ShutdownSignal;
 use tari_template_abi::TemplateDef;
 use tari_template_lib::types::TemplateAddress;

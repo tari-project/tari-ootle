@@ -14,7 +14,7 @@ use tari_engine_types::{
 use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 use tari_ootle_wallet_sdk::{
     apis::substate::ValidatorScanResult,
-    models::{AccountUpdate, NewAccountData, NonFungibleToken},
+    models::{AccountChangedEvent, AccountCreatedEvent, AccountUpdate, NewAccountData, NonFungibleToken, WalletEvent},
     network::{StatusResponseError, WalletNetworkInterface},
     storage::WalletStore,
     WalletSdk,
@@ -27,11 +27,7 @@ use tari_template_lib::{
 };
 use tari_transaction::TransactionId;
 
-use crate::{
-    account_monitor::monitor::AccountMonitorError,
-    events::{AccountChangedEvent, AccountCreatedEvent, WalletEvent},
-    notify::Notify,
-};
+use crate::{account_monitor::monitor::AccountMonitorError, notify::Notify};
 
 const LOG_TARGET: &str = "tari::ootle::wallet_services::account_monitor";
 
@@ -149,7 +145,10 @@ where
                     .await?;
             }
 
-            self.notify.notify(AccountChangedEvent { account_address });
+            self.notify.notify(AccountChangedEvent {
+                account_address,
+                version: account_substate_id.version(),
+            });
         }
 
         Ok(is_updated)
@@ -465,6 +464,7 @@ where
                         Ok(value) => Some((
                             a.as_component_address().expect("BUG: substate id is a component"),
                             value,
+                            s.version(),
                         )),
                         Err(e) => {
                             error!(
@@ -478,7 +478,7 @@ where
 
         let mut updated_accounts = HashSet::new();
         // Find and process all new/existing vaults
-        for (account_address, value) in accounts {
+        for (account_address, value, account_version) in accounts {
             // If we know about this account, mark it as on-chain (if it isn't already)
             if self.mark_account_as_on_chain(&account_address).optional()?.is_none() {
                 continue;
@@ -514,7 +514,7 @@ where
             }
 
             if has_changed {
-                updated_accounts.insert(account_address);
+                updated_accounts.insert((account_address, account_version));
             }
         }
 
@@ -547,14 +547,21 @@ where
             });
 
             // Check if this vault is associated with an account
-            if accounts_api.get_account_by_address(&account_addr).optional()?.is_none() {
+            if !accounts_api.exists_by_address(&account_addr)? {
                 info!(
                     target: LOG_TARGET,
                     "🏦 Vault {} not in any known account",
                     vault_addr,
                 );
                 continue;
-            }
+            };
+
+            // Version unchanged
+            let account_version = substate_api
+                .get_substate(&account_addr.into())
+                .optional()?
+                .map(|s| s.substate_id.version())
+                .unwrap_or(0);
 
             self.add_vault_to_account_if_not_exist(&account_addr, vault_id, vault)
                 .await?;
@@ -577,7 +584,7 @@ where
 
             // Update the vault balance / confidential outputs
             self.refresh_vault(account_addr, vault_id, vault, updated_nfts).await?;
-            updated_accounts.insert(account_addr);
+            updated_accounts.insert((account_addr, account_version));
         }
 
         // Update UTXOs
@@ -612,8 +619,11 @@ where
                 updated_accounts.len(),
                 tx_id
             );
-            for account_address in updated_accounts {
-                self.notify.notify(AccountChangedEvent { account_address });
+            for (account_address, version) in updated_accounts {
+                self.notify.notify(AccountChangedEvent {
+                    account_address,
+                    version,
+                });
             }
         }
 

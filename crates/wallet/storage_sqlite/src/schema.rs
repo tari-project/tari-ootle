@@ -96,8 +96,8 @@ diesel::table! {
     locks (id) {
         id -> Integer,
         transaction_id -> Nullable<Text>,
-        created_at -> Timestamp,
         timeout_at -> Nullable<Timestamp>,
+        created_at -> Timestamp,
     }
 }
 
@@ -243,6 +243,16 @@ diesel::table! {
 }
 
 diesel::table! {
+    wallet_events (id) {
+        id -> Nullable<Integer>,
+        account_id -> Nullable<Integer>,
+        event_type -> Text,
+        event_data -> Text,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     webauthn_registration_passkeys (id) {
         id -> Integer,
         registration_id -> Integer,
@@ -271,6 +281,7 @@ diesel::joinable!(utxo_process_queue -> accounts (account_id));
 diesel::joinable!(vault_locks -> locks (lock_id));
 diesel::joinable!(vault_locks -> vaults (vault_id));
 diesel::joinable!(vaults -> accounts (account_id));
+diesel::joinable!(wallet_events -> accounts (account_id));
 diesel::joinable!(webauthn_registration_passkeys -> webauthn_registrations (registration_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
@@ -291,6 +302,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     utxo_process_queue,
     vault_locks,
     vaults,
+    wallet_events,
     webauthn_registration_passkeys,
     webauthn_registrations,
 );

@@ -36,7 +36,10 @@ impl<T: ReadableWalletStore> ReadableWalletStore for &T {
 }
 
 pub trait WriteableWalletStore: ReadableWalletStore {
-    type WriteTransaction<'a>: WalletStoreWriter + Deref<Target = Self::ReadTransaction<'a>> + DerefMut
+    type WriteTransaction<'a>: WalletStoreWriter
+        + WalletEventStoreWriter
+        + Deref<Target = Self::ReadTransaction<'a>>
+        + DerefMut
     where Self: 'a;
 
     fn create_write_tx(&self) -> Result<Self::WriteTransaction<'_>, WalletStorageError>;

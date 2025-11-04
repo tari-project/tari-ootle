@@ -7,7 +7,15 @@ use log::*;
 use tari_engine_types::commit_result::ExecuteResult;
 use tari_ootle_common_types::optional::IsNotFoundError;
 use tari_ootle_wallet_sdk::{
-    models::{NewAccountData, TransactionStatus, WalletLockId},
+    models::{
+        NewAccountData,
+        TransactionFinalizedEvent,
+        TransactionInvalidEvent,
+        TransactionStatus,
+        TransactionSubmittedEvent,
+        WalletEvent,
+        WalletLockId,
+    },
     network::{StatusResponseError, WalletNetworkInterface},
     storage::WalletStore,
     WalletSdk,
@@ -24,10 +32,7 @@ use super::{
     error::TransactionServiceError,
     handle::{TransactionServiceHandle, TransactionServiceRequest},
 };
-use crate::{
-    events::{TransactionFinalizedEvent, TransactionInvalidEvent, TransactionSubmittedEvent, WalletEvent},
-    notify::Notify,
-};
+use crate::notify::Notify;
 
 const LOG_TARGET: &str = "tari::ootle::wallet_services::transaction_service";
 

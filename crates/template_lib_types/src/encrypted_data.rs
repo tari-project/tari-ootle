@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::max_bytes::MaxBytes;
 
+/// The maximum size of EncryptedData including the maximum memo size (335 bytes)
 const MAX_SIZE: usize = EncryptedData::ENCRYPTED_DATA_SIZE_WITHOUT_MEMO + EncryptedData::MAX_MEMO_SIZE;
 
 /// Used by the receiver to determine the value and mask of the commitment. Used in stealth and confidential transfers,

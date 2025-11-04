@@ -30,6 +30,7 @@ use crate::{
         SubstateModel,
         UtxoUnspent,
         VaultModel,
+        WalletEvent,
         WalletLockId,
         WalletTransactionUpdate,
     },
@@ -215,4 +216,8 @@ pub trait WalletStoreWriter: CommittableStore {
         tag: UtxoTag,
         public_nonce: RistrettoPublicKeyBytes,
     ) -> Result<(), WalletStorageError>;
+}
+
+pub trait WalletEventStoreWriter {
+    fn append_wallet_event(&mut self, event: &WalletEvent) -> Result<(), WalletStorageError>;
 }

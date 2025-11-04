@@ -43,10 +43,11 @@ use tari_ootle_wallet_sdk::{
         TransactionStatus,
         UtxoUnspent,
         VaultModel,
+        WalletEvent,
         WalletLockId,
         WalletTransactionUpdate,
     },
-    storage::{CommittableStore, WalletStorageError, WalletStoreReader, WalletStoreWriter},
+    storage::{CommittableStore, WalletEventStoreWriter, WalletStorageError, WalletStoreReader, WalletStoreWriter},
 };
 use tari_template_lib::{
     models::{ComponentAddress, NonFungibleId, ResourceAddress, UtxoAddress, UtxoId, VaultId},
@@ -1661,6 +1662,54 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 ),
             });
         }
+
+        Ok(())
+    }
+}
+
+impl WalletEventStoreWriter for WriteTransaction<'_> {
+    fn append_wallet_event(&mut self, event: &WalletEvent) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "append_wallet_event";
+        use crate::schema::{accounts, wallet_events};
+
+        let (maybe_account, payload) = match event {
+            WalletEvent::TransactionSubmitted(payload) => (
+                payload.new_account.as_ref().map(|a| a.address),
+                serialize_json(payload)?,
+            ),
+            WalletEvent::TransactionFinalized(payload) => (None, serialize_json(payload)?),
+            WalletEvent::TransactionInvalid(payload) => (None, serialize_json(payload)?),
+            WalletEvent::AccountCreatedOnChain(payload) => {
+                (Some(payload.account.component_address), serialize_json(payload)?)
+            },
+            WalletEvent::AccountChangedOnChain(payload) => (Some(payload.account_address), serialize_json(payload)?),
+            WalletEvent::AuthLoginRequest(payload) => (None, serialize_json(payload)?),
+            WalletEvent::UtxoRecoveryStarted(payload) => (None, serialize_json(payload)?),
+            WalletEvent::UtxoRecovered(payload) => (Some(payload.account_address), serialize_json(payload)?),
+            WalletEvent::UtxoRecoveryCompleted(payload) => (None, serialize_json(payload)?),
+            WalletEvent::UtxoSpent(payload) => (Some(payload.account_address), serialize_json(payload)?),
+        };
+
+        let maybe_account = maybe_account.map(|addr| addr.to_string());
+
+        let account_id = match maybe_account {
+            Some(addr) => accounts::table
+                .select(accounts::id)
+                .filter(accounts::address.eq(addr))
+                .first::<i32>(self.connection())
+                .optional()
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?,
+            None => None,
+        };
+
+        diesel::insert_into(wallet_events::table)
+            .values((
+                wallet_events::account_id.eq(account_id),
+                wallet_events::event_type.eq(event.as_event_type().to_string()),
+                wallet_events::event_data.eq(payload),
+            ))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
         Ok(())
     }

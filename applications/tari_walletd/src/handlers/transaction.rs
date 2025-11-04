@@ -11,10 +11,10 @@ use tari_engine_types::ToByteType;
 use tari_ootle_common_types::{optional::Optional, Epoch, Network};
 use tari_ootle_wallet_sdk::{
     apis::{config::ConfigKey, transaction::TransactionApiError},
-    models::{BranchAndKeyId, KeyBranch},
+    models::{BranchAndKeyId, KeyBranch, WalletEvent},
     network::WalletQueryErrorStatus,
 };
-use tari_ootle_wallet_sdk_services::{events::WalletEvent, transaction_service::TransactionServiceError};
+use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceError;
 use tari_transaction::{args, Transaction};
 use tari_transaction_manifest::parse_manifest;
 use tari_wallet_daemon_client::{

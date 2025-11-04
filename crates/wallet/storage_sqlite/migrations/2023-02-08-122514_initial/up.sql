@@ -180,6 +180,7 @@ CREATE TABLE locks
 (
     id             INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
     transaction_id TEXT     NULL,
+    timeout_at     DATETIME NULL,
     created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -298,3 +299,16 @@ CREATE TABLE utxo_process_queue
 
 CREATE UNIQUE INDEX utxo_process_queue_account_resource_tag_nonce_uniq
     ON utxo_process_queue (account_id, resource_address, utxo_tag, public_nonce);
+
+CREATE TABLE wallet_events
+(
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER  NULL,
+    event_type TEXT     NOT NULL,
+    event_data TEXT     NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE NO ACTION
+);
+
+CREATE INDEX idx_wallet_events_account_id ON wallet_events (account_id) where account_id IS NOT NULL;
+CREATE INDEX idx_wallet_events_event_type ON wallet_events (event_type);

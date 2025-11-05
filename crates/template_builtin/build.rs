@@ -10,7 +10,12 @@ use std::{
     process::Command,
 };
 
-const TEMPLATE_BUILTINS: &[&str] = &["templates/account", "templates/nft_faucet", "templates/faucet"];
+const TEMPLATE_BUILTINS: &[&str] = &[
+    "templates/account",
+    "templates/nft_faucet",
+    "templates/faucet",
+    "templates/liquidity_pool",
+];
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Rebuild templates if abi or lib changes (only if they exist in the build context)

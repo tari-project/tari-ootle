@@ -113,6 +113,10 @@ mod account_template {
         }
 
         pub fn deposit(&mut self, bucket: Bucket) {
+            // Ignore empty buckets
+            if bucket.is_empty() {
+                return;
+            }
             // An event is emitted by the vault.deposit method
             let resource_address = bucket.resource_address();
             let vault_mut = self

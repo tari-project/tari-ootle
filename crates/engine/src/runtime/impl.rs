@@ -923,7 +923,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                     let payload = Metadata::from_iter([
                         ("resource_type", resource.resource_type().to_string()),
-                        ("amount", resource.amount().to_string()),
+                        ("amount", resource.unlocked_amount().to_string()),
                     ]);
                     self.emit_std_event("resource", "mint", resource_address, payload, state_mut)?;
 
@@ -1463,7 +1463,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let payload = Metadata::from_iter([
                         ("resource_address", bucket.resource_address().to_string()),
                         ("resource_type", bucket.resource_type().to_string()),
-                        ("amount", bucket.amount().to_string()),
+                        ("amount", bucket.unlocked_amount().to_string()),
                     ]);
 
                     self.emit_std_event("vault", "deposit", vault_id, payload, state_mut)?;
@@ -1696,7 +1696,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                             container.deposit(revealed)?;
                         }
                     }
-                    if container.amount().is_zero() {
+                    if container.unlocked_amount().is_zero() {
                         return Err(RuntimeError::InvalidArgument {
                             argument: "TakeFeesArg",
                             reason: "Fee payment has zero value".to_string(),
@@ -1707,7 +1707,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         "vault",
                         "pay_fee",
                         vault_id,
-                        Metadata::from_iter([("amount", container.amount().to_string())]),
+                        Metadata::from_iter([("amount", container.unlocked_amount().to_string())]),
                         state_mut,
                     )?;
 
@@ -1942,7 +1942,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 args.assert_no_args("Bucket::GetAmount")?;
                 self.tracker.read_with(|state| {
                     let bucket = state.get_bucket(bucket_id)?;
-                    Ok(InvokeResult::encode(&bucket.amount())?)
+                    Ok(InvokeResult::encode(&bucket.balance())?)
                 })
             },
             BucketAction::Take => {
@@ -2033,7 +2033,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                 self.tracker.write_with(|state| {
                     let bucket = state.take_bucket(bucket_id)?;
-                    let burnt_amount = bucket.amount();
+                    let burnt_amount = bucket.unlocked_amount();
                     state.burn_bucket(bucket)?;
 
                     let resource_mut = state.get_resource_mut(&resource_lock)?;
@@ -2344,10 +2344,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     }
 
                     // validate the bucket amount
-                    if bucket.amount() < min_amount {
+                    if bucket.unlocked_amount() < min_amount {
                         return Err(RuntimeError::AssertError(AssertError::InvalidAmount {
                             expected: min_amount,
-                            got: bucket.amount(),
+                            got: bucket.unlocked_amount(),
                         }));
                     }
 

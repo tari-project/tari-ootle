@@ -149,7 +149,7 @@ impl Amount {
     }
 
     /// Returns the product of two amounts, returning `None` if the result overflows.
-    pub const fn checked_mul(&self, other: &Self) -> Option<Self> {
+    pub const fn checked_mul(&self, other: Self) -> Option<Self> {
         match self.into_inner_value().checked_mul(other.into_inner_value()) {
             Some(value) => Some(Self::new(value)),
             None => None,
@@ -276,6 +276,20 @@ impl Amount {
         *self.inner_value().to_bits().digits()
     }
 
+    #[cfg(feature = "extra-arith")]
+    pub fn checked_sqrt(&self) -> Option<Self> {
+        use num_integer::Roots;
+        if self.is_negative() {
+            return None;
+        }
+        if self.is_zero() {
+            return Some(Self::zero());
+        }
+        let inner = self.into_inner_value();
+        let sqrt_inner = inner.sqrt();
+        Some(Self::new(sqrt_inner))
+    }
+
     /// If the amount is negative (< 0), returns `None`, otherwise returns `Some(self)`.
     pub fn non_negative_checked(self) -> Option<Self> {
         if self.is_negative() {
@@ -300,7 +314,7 @@ impl Amount {
     }
 
     /// Returns the amount raised to the power of `exp`, returning `None` if the result overflows.
-    pub fn pow_checked(&self, exp: u32) -> Option<Self> {
+    pub fn checked_pow(&self, exp: u32) -> Option<Self> {
         self.into_inner_value().checked_pow(exp).map(Self::new)
     }
 
@@ -495,10 +509,16 @@ mod tests {
         assert_eq!(c, Amount::from(10));
         let d = a.checked_sub(b).unwrap();
         assert_eq!(d, Amount::from(-2));
-        let e = a.checked_mul(&b).unwrap();
+        let e = a.checked_mul(b).unwrap();
         assert_eq!(e, Amount::from(24));
         let f = b.checked_div(a).unwrap();
         assert_eq!(f, Amount::from(1));
+        let g = Amount::from(7);
+        let h = g.checked_div_ceil(Amount::from(2)).unwrap();
+        assert_eq!(h, 4);
+        let i = Amount::from(8);
+        let j = i.checked_pow(3).unwrap();
+        assert_eq!(j, Amount::from(512));
 
         // Test overflow
         let max = Amount::MAX;
@@ -506,12 +526,25 @@ mod tests {
         assert!(overflow_add.is_none(), "Overflow should return None");
         let overflow_sub = Amount::MIN.checked_sub(Amount::from(1));
         assert!(overflow_sub.is_none(), "Underflow should return None");
-        let overflow_mul = max.checked_mul(&Amount::from(2));
+        let overflow_mul = max.checked_mul(Amount::from(2));
         assert!(overflow_mul.is_none(), "Overflow should return None");
         let overflow_div = Amount::from(1).checked_div(Amount::zero());
         assert!(overflow_div.is_none(), "Division by zero should return None");
         let overflow_div_ceil = Amount::from(1).checked_div_ceil(Amount::zero());
         assert!(overflow_div_ceil.is_none(), "Division by zero should return None");
+        let overflow_pow = max.checked_pow(10);
+        assert!(overflow_pow.is_none(), "Overflow should return None");
+    }
+
+    #[test]
+    #[cfg(feature = "extra-arith")]
+    fn extra_arithmetic() {
+        let k = Amount::from(27);
+        let l = k.checked_sqrt().unwrap();
+        assert_eq!(l, Amount::from(5));
+
+        let negative_sqrt = Amount::from(-4).checked_sqrt();
+        assert!(negative_sqrt.is_none(), "Square root of negative should return None");
     }
 
     #[test]

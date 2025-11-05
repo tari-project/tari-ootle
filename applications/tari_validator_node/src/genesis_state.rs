@@ -38,7 +38,7 @@ use tari_template_lib::{
         XTR_FAUCET_VAULT_ADDRESS,
     },
     models::Metadata,
-    prelude::{ResourceManager, ResourceType},
+    prelude::ResourceType,
     resource::TOKEN_SYMBOL,
     rule,
     types::EntityId,
@@ -123,6 +123,15 @@ where
     TTx::Target: StateStoreReadTransaction,
     TTx::Addr: NodeAddressable + Serialize,
 {
+    let value = Vault::new(ResourceContainer::Stealth {
+        address: STEALTH_TARI_RESOURCE_ADDRESS,
+        // just under 18.5 trillion tXTR
+        revealed_amount: u64::MAX.into(),
+        locked_amount: Default::default(),
+    });
+
+    create_substate(tx, num_preshards, XTR_FAUCET_VAULT_ADDRESS, value)?;
+
     let value = ComponentHeader {
         template_address: tari_template_builtin::XTR_FAUCET_TEMPLATE_ADDRESS,
         module_name: "XtrFaucet".to_string(),
@@ -133,21 +142,12 @@ where
         body: ComponentBody {
             state: cbor!({
                 "vault" => XTR_FAUCET_VAULT_ADDRESS,
-                "resource_manager" => ResourceManager::get(STEALTH_TARI_RESOURCE_ADDRESS)
             })
             .unwrap(),
         },
     };
     create_substate(tx, num_preshards, XTR_FAUCET_COMPONENT_ADDRESS, value)?;
 
-    let value = Vault::new(ResourceContainer::Stealth {
-        address: STEALTH_TARI_RESOURCE_ADDRESS,
-        // just under 18.5 trillion tXTR
-        revealed_amount: u64::MAX.into(),
-        locked_amount: Default::default(),
-    });
-
-    create_substate(tx, num_preshards, XTR_FAUCET_VAULT_ADDRESS, value)?;
     Ok(())
 }
 

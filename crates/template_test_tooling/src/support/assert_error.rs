@@ -6,6 +6,7 @@ use std::{borrow::Borrow, fmt::Display};
 use tari_engine::runtime::{ActionIdent, RuntimeError};
 use tari_engine_types::{commit_result::RejectReason, resource_container::ResourceError};
 
+#[track_caller]
 pub fn assert_reject_reason<B: Borrow<RejectReason>, E: Display>(reason: B, error: E) {
     let s = reason.borrow().to_string();
     // TODO: Would be great if we could enumerate specific reasons from within the engine rather than simply
@@ -15,14 +16,14 @@ pub fn assert_reject_reason<B: Borrow<RejectReason>, E: Display>(reason: B, erro
     }
 }
 
-#[allow(dead_code)]
+#[track_caller]
 pub fn assert_access_denied_for_action<B: Borrow<RejectReason>, A: Into<ActionIdent>>(reason: B, action_ident: A) {
     assert_reject_reason(reason, RuntimeError::AccessDenied {
         action_ident: action_ident.into(),
     })
 }
 
-#[allow(dead_code)]
+#[track_caller]
 pub fn assert_insufficient_funds_for_action<B: Borrow<RejectReason>>(reason: B) {
     assert_reject_reason(
         reason,

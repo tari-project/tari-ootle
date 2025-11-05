@@ -9,7 +9,6 @@ mod template {
 
     pub struct XtrFaucet {
         vault: Vault,
-        resource_manager: ResourceManager,
     }
 
     impl XtrFaucet {
@@ -41,7 +40,8 @@ mod template {
                 ("signer", signer.to_string()),
             ]);
 
-            self.resource_manager
+            self.vault
+                .to_resource_manager()
                 .stealth_transfer_with_opt_input_bucket(transfer, Some(revealed_bucket))
         }
     }

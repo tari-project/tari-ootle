@@ -6,13 +6,12 @@ use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_engine::state_store::{StateStoreError, StateWriter};
 use tari_engine_types::{
     component::{ComponentBody, ComponentHeader},
-    id_provider::{IdProvider, ObjectIds},
     resource::Resource,
     resource_container::ResourceContainer,
     substate::{Substate, SubstateId},
     vault::Vault,
 };
-use tari_template_builtin::NFT_FAUCET_TEMPLATE_ADDRESS;
+use tari_template_builtin::{NFT_FAUCET_TEMPLATE_ADDRESS, XTR_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     auth::{ComponentAccessRules, OwnerRule, ResourceAccessRules},
     constants::{
@@ -20,16 +19,17 @@ use tari_template_lib::{
         NFT_FAUCET_RESOURCE_ADDRESS,
         PUBLIC_IDENTITY_RESOURCE_ADDRESS,
         STEALTH_TARI_RESOURCE_ADDRESS,
+        XTR_FAUCET_VAULT_ADDRESS,
     },
     metadata,
     models::Metadata,
-    prelude::{ResourceType, RistrettoPublicKeyBytes, TemplateAddress},
+    prelude::{ResourceType, RistrettoPublicKeyBytes},
     resource::TOKEN_SYMBOL,
     rule,
-    types::{Amount, EntityId, Hash},
+    types::{Amount, EntityId},
 };
 
-use crate::{template_test::test_nft_faucet_component, test_faucet_component};
+use crate::{template_test::test_nft_faucet_component, xtr_faucet_component};
 
 pub fn add_tari_resources<T: StateWriter>(state_db: &mut T) -> Result<(), StateStoreError> {
     let id = SubstateId::Resource(PUBLIC_IDENTITY_RESOURCE_ADDRESS);
@@ -82,32 +82,28 @@ pub fn add_tari_resources<T: StateWriter>(state_db: &mut T) -> Result<(), StateS
 pub fn initialize_builtin_faucet_state<TStore: StateWriter>(
     store: &mut TStore,
     signer_public_key: &RistrettoPublicKey,
-    test_faucet_template_address: TemplateAddress,
 ) {
-    let initial_supply = Amount::from(1_000_000);
+    let initial_supply = Amount::MAX;
     let entity_id = EntityId::default();
-    let object_ids = ObjectIds::new(10);
-    let id_provider = IdProvider::new(entity_id, Hash::default(), &object_ids);
-    let vault_id = id_provider.new_vault_id().unwrap();
     let vault = Vault::new(ResourceContainer::stealth(
         STEALTH_TARI_RESOURCE_ADDRESS,
         initial_supply,
     ));
     store
-        .set_state(SubstateId::Vault(vault_id), Substate::new(0, vault))
+        .set_state(SubstateId::Vault(XTR_FAUCET_VAULT_ADDRESS), Substate::new(0, vault))
         .unwrap();
 
     // This must mirror the test faucet component
     let state = cbor!({
-        "vault" => tari_template_lib::models::Vault::for_test(vault_id),
+        "vault" => tari_template_lib::models::Vault::for_test(XTR_FAUCET_VAULT_ADDRESS),
     })
     .unwrap();
     store
         .set_state(
-            SubstateId::Component(test_faucet_component()),
+            SubstateId::Component(xtr_faucet_component()),
             Substate::new(0, ComponentHeader {
-                template_address: test_faucet_template_address,
-                module_name: "TestFaucet".to_string(),
+                template_address: XTR_FAUCET_TEMPLATE_ADDRESS,
+                module_name: "XtrFaucet".to_string(),
                 owner_key: Some(RistrettoPublicKeyBytes::from_bytes(signer_public_key.as_bytes()).unwrap()),
                 owner_rule: OwnerRule::None,
                 access_rules: ComponentAccessRules::allow_all(),

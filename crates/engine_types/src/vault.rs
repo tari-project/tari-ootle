@@ -103,7 +103,7 @@ impl Vault {
     }
 
     pub fn balance(&self) -> Amount {
-        self.resource_container.amount()
+        self.resource_container.unlocked_amount()
     }
 
     pub fn locked_balance(&self) -> Amount {

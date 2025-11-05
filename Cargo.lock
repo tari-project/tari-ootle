@@ -1154,6 +1154,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "119771309b95163ec7aaf79810da82f7cd0599c19722d48b9c03894dca833966"
 dependencies = [
  "borsh",
+ "num-integer",
+ "num-traits",
 ]
 
 [[package]]
@@ -12128,6 +12130,7 @@ dependencies = [
  "bnum",
  "borsh",
  "newtype-ops",
+ "num-integer",
  "serde",
  "serde_json",
  "tari_bor",

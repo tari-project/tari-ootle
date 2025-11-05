@@ -131,7 +131,11 @@ impl ResourceContainer {
         })
     }
 
-    pub fn amount(&self) -> Amount {
+    pub fn balance(&self) -> Amount {
+        self.unlocked_amount() + self.locked_amount()
+    }
+
+    pub fn unlocked_amount(&self) -> Amount {
         match self {
             Self::Fungible { amount, .. } => *amount,
             Self::NonFungible { token_ids, .. } => Amount::new(token_ids.len().into()),
@@ -286,9 +290,9 @@ impl ResourceContainer {
     }
 
     pub fn withdraw(&mut self, withdraw_amt: Amount) -> Result<Self, ResourceError> {
-        if !withdraw_amt.is_positive() {
+        if !withdraw_amt.is_non_negative() {
             return Err(ResourceError::InvariantError(format!(
-                "Amount must be positive (greater than 0). Got :{withdraw_amt}"
+                "Amount must be non-negative (>= 0). Got :{withdraw_amt}"
             )));
         }
         match self {
@@ -355,7 +359,9 @@ impl ResourceContainer {
 
     pub fn withdraw_all(&mut self) -> Result<Self, ResourceError> {
         match self {
-            Self::Fungible { .. } | Self::NonFungible { .. } | Self::Stealth { .. } => self.withdraw(self.amount()),
+            Self::Fungible { .. } | Self::NonFungible { .. } | Self::Stealth { .. } => {
+                self.withdraw(self.unlocked_amount())
+            },
             Self::Confidential {
                 commitments,
                 revealed_amount,
@@ -644,18 +650,18 @@ impl ResourceContainer {
             Self::Fungible {
                 amount, locked_amount, ..
             } => {
-                if *locked_amount < container.amount() {
+                if *locked_amount < container.unlocked_amount() {
                     return Err(ResourceError::InsufficientBalance {
                         details: format!(
                             "unlock: resource container did not contain enough locked funds. Required: {}, Available: \
                              {}",
-                            container.amount(),
+                            container.unlocked_amount(),
                             locked_amount
                         ),
                     });
                 }
-                *amount += container.amount();
-                *locked_amount -= container.amount();
+                *amount += container.unlocked_amount();
+                *locked_amount -= container.unlocked_amount();
             },
             Self::NonFungible {
                 token_ids,
@@ -699,11 +705,11 @@ impl ResourceContainer {
                     });
                 }
 
-                if *locked_revealed_amount < container.amount() {
+                if *locked_revealed_amount < container.unlocked_amount() {
                     return Err(ResourceError::InvariantError(format!(
                         "unlock: resource container did not contain enough locked revealed amount. Required: {}, \
                          Available: {}",
-                        container.amount(),
+                        container.unlocked_amount(),
                         locked_revealed_amount
                     )));
                 }
@@ -720,26 +726,26 @@ impl ResourceContainer {
                         ));
                     }
                 }
-                *revealed_amount += container.amount();
-                *locked_revealed_amount -= container.amount();
+                *revealed_amount += container.unlocked_amount();
+                *locked_revealed_amount -= container.unlocked_amount();
             },
             Self::Stealth {
                 revealed_amount,
                 locked_amount,
                 ..
             } => {
-                if *locked_amount < container.amount() {
+                if *locked_amount < container.unlocked_amount() {
                     return Err(ResourceError::InsufficientBalance {
                         details: format!(
                             "unlock: resource container did not contain enough locked funds. Required: {}, Available: \
                              {}",
-                            container.amount(),
+                            container.unlocked_amount(),
                             locked_amount
                         ),
                     });
                 }
-                *revealed_amount += container.amount();
-                *locked_amount -= container.amount();
+                *revealed_amount += container.unlocked_amount();
+                *locked_amount -= container.unlocked_amount();
             },
         }
 
@@ -864,7 +870,9 @@ impl ResourceContainer {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.amount().is_zero() && self.number_of_confidential_commitments() == 0
+        self.locked_amount().is_zero() &&
+            self.unlocked_amount().is_zero() &&
+            self.number_of_confidential_commitments() == 0
     }
 }
 

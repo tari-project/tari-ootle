@@ -12,7 +12,10 @@ use tari_engine_types::{
     vault::Vault,
     Utxo,
 };
-use tari_template_lib::models::{Account, ComponentAddress, ResourceAddress, UtxoAddress, VaultId};
+use tari_template_lib::{
+    models::{Account, ComponentAddress, ResourceAddress, UtxoAddress, VaultId},
+    types::TemplateAddress,
+};
 
 pub struct ReadOnlyStateStore<'a> {
     store: &'a MemoryStateStore,
@@ -25,6 +28,23 @@ impl<'a> ReadOnlyStateStore<'a> {
     pub fn get_component(&self, component_address: ComponentAddress) -> Result<ComponentHeader, StateStoreError> {
         let substate = self.get_substate(&SubstateId::Component(component_address))?;
         Ok(substate.into_substate_value().into_component().unwrap())
+    }
+
+    pub fn get_components_by_template_address(
+        &self,
+        template_address: TemplateAddress,
+    ) -> Result<Vec<(ComponentAddress, ComponentHeader)>, StateStoreError> {
+        let mut components = Vec::new();
+        self.with_substates(|id, substate| {
+            if let SubstateId::Component(component_address) = id {
+                if let Some(component) = substate.substate_value().as_component() {
+                    if component.template_address == template_address {
+                        components.push((*component_address, component.clone()));
+                    }
+                }
+            }
+        })?;
+        Ok(components)
     }
 
     pub fn get_account(&self, account_address: ComponentAddress) -> Result<Account, StateStoreError> {

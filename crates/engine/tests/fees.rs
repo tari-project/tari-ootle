@@ -5,7 +5,7 @@ use std::iter;
 
 use tari_engine_types::commit_result::RejectReason;
 use tari_template_lib::{constants::STEALTH_TARI_RESOURCE_ADDRESS, models::ComponentAddress, types::Amount};
-use tari_template_test_tooling::{support::assert_error::assert_reject_reason, test_faucet_component, TemplateTest};
+use tari_template_test_tooling::{support::assert_error::assert_reject_reason, xtr_faucet_component, TemplateTest};
 use tari_transaction::{args, call_args, Transaction};
 
 #[test]
@@ -71,12 +71,13 @@ fn deposit_from_faucet_then_pay() {
     let (account, owner_token, private_key) = test.create_empty_account();
 
     test.enable_fees();
+
     let result = test.execute_expect_success(
         Transaction::builder()
             .with_fee_instructions_builder(|builder| {
                 builder
                     // Faucet deposits free coins into the account
-                    .call_method(test_faucet_component(), "take_free_coins", args![])
+                    .call_method(xtr_faucet_component(), "take", args![100000])
                     .put_last_instruction_output_on_workspace("bucket")
                     .call_method(account, "deposit", args![Workspace("bucket")])
                     .call_method(account, "pay_fee", args![1000])
@@ -90,10 +91,7 @@ fn deposit_from_faucet_then_pay() {
 
     let payment = result.finalize.fee_receipt;
     let new_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
-    assert_eq!(
-        new_balance,
-        payment.total_allocated_fee_payments() - payment.total_fees_charged()
-    );
+    assert_eq!(new_balance, 100000 - payment.total_fees_paid());
 }
 
 #[test]
@@ -118,7 +116,7 @@ fn another_account_pays_partially_for_fees() {
             .fee_transaction_pay_from_component(account_fee, Amount::from(200))
             // Account pays the rest
             .fee_transaction_pay_from_component(account_fee2, Amount::from(1000))
-            .call_method(test_faucet_component(), "take_free_coins", args![])
+            .call_method(xtr_faucet_component(), "take", args![1000])
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(account, "deposit", args![Workspace("bucket")])
             // NOTE: the test harness provides the virtual proofs as provided, so the transaction signer does not matter

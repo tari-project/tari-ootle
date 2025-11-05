@@ -181,7 +181,13 @@ impl Bucket {
         resp.decode().expect("Bucket DropEmpty returned invalid result")
     }
 
+    /// Returns true if the bucket is empty (i.e. contains zero tokens), otherwise false.
+    pub fn is_empty(&self) -> bool {
+        self.amount().is_zero()
+    }
+
     /// Returns the amount of tokens held in this bucket.
+    /// This includes any funds that are locked by a proof.
     ///
     /// Note that if the resource is confidential, only the revealed amount is returned.
     pub fn amount(&self) -> Amount {

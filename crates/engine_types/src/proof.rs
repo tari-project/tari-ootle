@@ -82,7 +82,7 @@ impl LockedResource {
     }
 
     pub fn amount(&self) -> Amount {
-        self.locked.amount()
+        self.locked.unlocked_amount()
     }
 
     pub fn resource_address(&self) -> &ResourceAddress {

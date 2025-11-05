@@ -34,4 +34,9 @@ impl Account {
     pub fn get_vault_by_resource(&self, resource_address: &ResourceAddress) -> Option<&Vault> {
         self.vaults.get(resource_address)
     }
+
+    /// Returns an iterator over all resource addresses in the account.
+    pub fn all_resources_iter(&self) -> impl Iterator<Item = &ResourceAddress> {
+        self.vaults.keys()
+    }
 }

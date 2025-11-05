@@ -54,12 +54,12 @@ use crate::{
 pub type MainFunction = TypedFunction<(WasmPtr<u8>, u32), WasmPtr<u8>>;
 #[derive(Debug, Clone)]
 pub struct WasmModule {
-    code: Vec<u8>,
+    code: Box<[u8]>,
 }
 
 impl WasmModule {
-    pub fn from_code(code: Vec<u8>) -> Self {
-        Self { code }
+    pub fn from_code(code: impl Into<Box<[u8]>>) -> Self {
+        Self { code: code.into() }
     }
 
     pub fn load_template_from_code(code: &[u8]) -> Result<LoadedTemplate, TemplateLoaderError> {
@@ -103,7 +103,7 @@ impl WasmModule {
         &self.code
     }
 
-    pub fn into_code(self) -> Vec<u8> {
+    pub fn into_code(self) -> Box<[u8]> {
         self.code
     }
 

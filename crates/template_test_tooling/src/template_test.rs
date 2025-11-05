@@ -27,6 +27,7 @@ use tari_engine::{
 };
 use tari_engine_types::{
     commit_result::{ExecuteResult, RejectReason},
+    indexed_value::IndexedWellKnownTypes,
     substate::{SubstateDiff, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
     ToByteType,
@@ -37,10 +38,10 @@ use tari_ootle_common_types::{
     Network,
     SubstateRequirement,
 };
-use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, XTR_FAUCET_TEMPLATE_ADDRESS};
+use tari_template_builtin::all_builtin_templates;
 use tari_template_lib::{
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS},
-    models::{ComponentAddress, NonFungibleAddress},
+    models::{ComponentAddress, NonFungibleAddress, ResourceAddress},
     prelude::RistrettoPublicKeyBytes,
     types::{Amount, TemplateAddress},
 };
@@ -67,7 +68,7 @@ use crate::{
     Package,
 };
 
-pub const fn test_faucet_component() -> ComponentAddress {
+pub const fn xtr_faucet_component() -> ComponentAddress {
     XTR_FAUCET_COMPONENT_ADDRESS
 }
 
@@ -91,6 +92,9 @@ pub struct TemplateTest {
 }
 
 impl TemplateTest {
+    /// The initial balance of a funded account created by `create_funded_account`.
+    pub const FUNDED_ACCOUNT_INITIAL_BALANCE: u64 = 1_000_000_000;
+
     pub fn new<I: IntoIterator<Item = P>, P: Clone + AsRef<Path>>(template_paths: I) -> Self {
         Self::new_internal(template_paths, None::<(String, String)>)
     }
@@ -119,11 +123,11 @@ impl TemplateTest {
         let mut builder = Package::builder();
 
         // Add builtin templates
-        builder.add_builtin_template(&ACCOUNT_TEMPLATE_ADDRESS);
-        builder.add_builtin_template(&NFT_FAUCET_TEMPLATE_ADDRESS);
-        builder.add_builtin_template(&XTR_FAUCET_TEMPLATE_ADDRESS);
+        for (addr, code) in all_builtin_templates() {
+            builder.add_template_from_code(addr, code);
+        }
 
-        // Add the faucet template for fungible tokens
+        // Add the faucet template for non-XTR fungible tokens
         builder.add_template(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/faucet"));
 
         // Add all of the templates specified in the argument
@@ -183,9 +187,8 @@ impl TemplateTest {
     }
 
     pub fn bootstrap_state(&mut self) {
-        let template_addr = self.get_template_address("TestFaucet");
         add_tari_resources(&mut self.state_store).unwrap();
-        initialize_builtin_faucet_state(&mut self.state_store, &self.public_key, template_addr);
+        initialize_builtin_faucet_state(&mut self.state_store, &self.public_key);
         initialize_builtin_nft_faucet_state(&mut self.state_store)
     }
 
@@ -434,13 +437,16 @@ impl TemplateTest {
         self.create_funded_account()
     }
 
+    #[track_caller]
     pub fn create_funded_account(&mut self) -> (ComponentAddress, NonFungibleAddress, RistrettoSecretKey) {
         let (owner_proof, public_key, secret_key) = self.create_owner_proof();
         let old_fail_fees = self.enable_fees;
         self.enable_fees = false;
         let result = self.execute_expect_success(
             Transaction::builder()
-                .call_method(test_faucet_component(), "take_free_coins", args![])
+                .call_method(xtr_faucet_component(), "take", args![
+                    Self::FUNDED_ACCOUNT_INITIAL_BALANCE
+                ])
                 .put_last_instruction_output_on_workspace("bucket")
                 .create_account_with_bucket(public_key.to_byte_type(), "bucket")
                 .build_and_seal(&secret_key),
@@ -473,7 +479,7 @@ impl TemplateTest {
         self.enable_fees = false;
         let result = self.execute_expect_success(
             Transaction::builder()
-                .call_method(test_faucet_component(), "take_free_coins_custom", args![amount.into()])
+                .call_method(xtr_faucet_component(), "take", args![amount.into()])
                 .put_last_instruction_output_on_workspace("bucket")
                 .create_account_with_bucket(public_key.to_byte_type(), "bucket")
                 .build_and_seal(&secret_key),
@@ -490,6 +496,47 @@ impl TemplateTest {
 
         self.enable_fees = old_fail_fees;
         (component, owner_proof, secret_key, public_key)
+    }
+
+    #[track_caller]
+    pub fn create_test_faucet_component<A: Into<Amount>>(
+        &mut self,
+        initial_supply: A,
+    ) -> (ComponentAddress, ResourceAddress) {
+        let template_addr = self.get_template_address("TestFaucet");
+        let result = self.execute_expect_success(
+            Transaction::builder()
+                .call_function(template_addr, "mint", args![initial_supply.into()])
+                .build_and_seal(&self.secret_key),
+            vec![],
+        );
+
+        let (addr, component) = result
+            .expect_success()
+            .up_iter()
+            .filter_map(|(id, substate)| {
+                id.as_component_address().and_then(|addr| {
+                    let component = substate.substate_value().as_component()?;
+                    if component.template_address == template_addr {
+                        Some((addr, component.clone()))
+                    } else {
+                        None
+                    }
+                })
+            })
+            .next()
+            .expect("No component address found in faucet creation result");
+
+        let indexed = IndexedWellKnownTypes::from_value(component.state()).unwrap();
+        let vault_id = indexed
+            .vault_ids()
+            .first()
+            .expect("No vault id found in faucet component state");
+        let vault = self
+            .read_only_state_store()
+            .get_vault(vault_id)
+            .expect("No vault id found in faucet component state");
+        (addr, *vault.resource_address())
     }
 
     fn next_key_seed(&mut self) -> u8 {

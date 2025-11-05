@@ -787,7 +787,7 @@ mod resource_access_rules {
                 )
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
-                // Deposit before dropping the proof
+                // Deposit before dropping the proof - this step should error
                 .call_method(user_account, "deposit", args![Workspace("badges")])
                 .drop_all_proofs_in_workspace()
                 .build_and_seal(&owner_key),

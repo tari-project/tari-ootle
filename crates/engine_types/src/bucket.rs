@@ -52,8 +52,13 @@ impl Bucket {
         self.resource_container.is_empty()
     }
 
-    pub fn amount(&self) -> Amount {
-        self.resource_container.amount()
+    pub fn unlocked_amount(&self) -> Amount {
+        self.resource_container.unlocked_amount()
+    }
+
+    /// Get the total balance of the bucket, including both locked and unlocked amounts.
+    pub fn balance(&self) -> Amount {
+        self.resource_container.balance()
     }
 
     pub fn number_of_confidential_commitments(&self) -> usize {

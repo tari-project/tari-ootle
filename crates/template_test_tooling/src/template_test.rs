@@ -317,6 +317,7 @@ impl TemplateTest {
             .unwrap_or_else(|| panic!("No template with name {}", name))
     }
 
+    #[track_caller]
     pub fn create_account<T>(
         &mut self,
         owner_public_key: RistrettoPublicKeyBytes,
@@ -341,6 +342,7 @@ impl TemplateTest {
             .unwrap()
     }
 
+    #[track_caller]
     pub fn call_function<T>(
         &mut self,
         template_name: &str,
@@ -370,6 +372,7 @@ impl TemplateTest {
             .unwrap()
     }
 
+    #[track_caller]
     pub fn call_method<T>(
         &mut self,
         component_address: ComponentAddress,
@@ -420,6 +423,7 @@ impl TemplateTest {
         self.public_key.to_byte_type()
     }
 
+    #[track_caller]
     pub fn create_empty_account(&mut self) -> (ComponentAddress, NonFungibleAddress, RistrettoSecretKey) {
         let (owner_proof, public_key, secret_key) = self.create_owner_proof();
         let old_fail_fees = self.enable_fees;
@@ -465,6 +469,7 @@ impl TemplateTest {
         (component, owner_proof, secret_key)
     }
 
+    #[track_caller]
     pub fn create_custom_funded_account<A: Into<Amount>>(
         &mut self,
         amount: A,
@@ -545,12 +550,14 @@ impl TemplateTest {
         seed
     }
 
+    #[track_caller]
     pub fn create_owner_proof(&mut self) -> (NonFungibleAddress, RistrettoPublicKey, RistrettoSecretKey) {
         let (secret_key, public_key) = create_key_pair_from_seed(self.next_key_seed());
         let owner_token = NonFungibleAddress::from_public_key(public_key.to_byte_type());
         (owner_token, public_key, secret_key)
     }
 
+    #[track_caller]
     pub fn try_execute_instructions(
         &mut self,
         fee_instructions: Vec<Instruction>,
@@ -565,6 +572,7 @@ impl TemplateTest {
         self.try_execute(transaction, proofs)
     }
 
+    #[track_caller]
     pub fn try_execute(
         &mut self,
         transaction: Transaction,
@@ -630,6 +638,7 @@ impl TemplateTest {
         Ok(result)
     }
 
+    #[track_caller]
     pub fn execute_and_commit_on_success(
         &mut self,
         transaction: Transaction,
@@ -687,6 +696,7 @@ impl TemplateTest {
         result.expect_failure().clone()
     }
 
+    #[track_caller]
     pub fn execute_and_commit(
         &mut self,
         instructions: Vec<Instruction>,
@@ -695,6 +705,7 @@ impl TemplateTest {
         self.execute_and_commit_with_fees(vec![], instructions, proofs)
     }
 
+    #[track_caller]
     pub fn execute_and_commit_with_fees(
         &mut self,
         fee_instructions: Vec<Instruction>,
@@ -719,6 +730,7 @@ impl TemplateTest {
         Ok(result)
     }
 
+    #[track_caller]
     pub fn execute_and_commit_manifest<'a, I: IntoIterator<Item = (&'a str, ManifestValue)>>(
         &mut self,
         manifest: &str,

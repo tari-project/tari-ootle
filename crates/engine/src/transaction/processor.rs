@@ -37,7 +37,7 @@ use tari_ootle_common_types::services::template_provider::TemplateProvider;
 use tari_template_abi::{FunctionDef, Type};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    args::{AllocateAddressResult, BucketAction, BucketRef, WorkspaceAction},
+    args::{AllocateAddressResult, BucketAction, BucketGetAmountArg, BucketRef, WorkspaceAction},
     auth::{ComponentAccessRules, OwnerRule},
     invoke_args,
     models::{Bucket, NonFungibleAddress, StealthTransferStatement},
@@ -332,7 +332,11 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                         .bucket_invoke(bucket_ref, BucketAction::Take, invoke_args![amount].into())?;
                 let prev_bucket_val = runtime
                     .interface()
-                    .bucket_invoke(bucket_ref, BucketAction::GetAmount, invoke_args![].into())?
+                    .bucket_invoke(
+                        bucket_ref,
+                        BucketAction::GetAmount,
+                        invoke_args![BucketGetAmountArg::Everything].into(),
+                    )?
                     .decode::<Amount>()?;
                 if prev_bucket_val.is_zero() {
                     // Drop the bucket to prevent a dangling (empty) bucket

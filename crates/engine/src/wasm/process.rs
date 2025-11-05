@@ -276,12 +276,12 @@ impl WasmProcess {
     pub fn validate_template_tari_version(template_def: &TemplateDef) -> Result<(), WasmExecutionError> {
         let template_tari_version = template_def.tari_version();
 
-        if are_versions_compatible(template_tari_version, version::MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION)? {
-            log::debug!(target: LOG_TARGET, "The Tari version in the template WASM (\"{}\") is compatible with the one used in the engine", template_tari_version);
+        if are_versions_compatible(template_tari_version, version::MINIMUM_SUPPORTED_WASM_ABI_VERSION)? {
+            log::debug!(target: LOG_TARGET, "The WASM ABI version (\"{}\") is compatible with the one used in the engine", template_tari_version);
         } else {
-            log::error!(target: LOG_TARGET, "The Tari version in the template WASM (\"{}\") is incompatible with the one used in the engine (\"{}\")", template_tari_version, version::MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION);
+            log::error!(target: LOG_TARGET, "The WASM ABI version (\"{}\") is incompatible with the one used in the engine (\"{}\")", template_tari_version, version::MINIMUM_SUPPORTED_WASM_ABI_VERSION);
             return Err(WasmExecutionError::TemplateVersionMismatch {
-                engine_version: version::MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION.to_owned(),
+                engine_version: version::MINIMUM_SUPPORTED_WASM_ABI_VERSION.to_owned(),
                 template_version: template_tari_version.to_owned(),
             });
         }

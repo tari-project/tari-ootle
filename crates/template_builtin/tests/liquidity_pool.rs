@@ -1,9 +1,8 @@
-//   Copyright 2023 The Tari Project
+//   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
-use tari_template_builtin::LIQUIDITY_POOL_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     auth::{AccessRule, OwnerRule},
     constants::XTR,
@@ -14,8 +13,11 @@ use tari_transaction::{args, Transaction};
 
 #[test]
 fn initial_contribution_and_redeem() {
-    // setup the test
-    let mut test = TemplateTest::new::<_, &str>([]);
+    // TODO: once builtin, we can remove this code
+    let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("templates")
+        .join("liquidity_pool");
+    let mut test = TemplateTest::new([crate_dir]);
 
     // create a user account
     let (account_address, owner_token, owner_secret) = test.create_empty_account();
@@ -23,12 +25,14 @@ fn initial_contribution_and_redeem() {
     // Create another resource
     let (faucet_component, faucet_resx) = test.create_test_faucet_component(100000);
 
+    let template_addr = test.get_template_address("TwoResourceLiquidityPool");
+
     // Fund
     test.execute_expect_success(
         Transaction::builder()
             // Create the liquidity pool
             .allocate_component_address("pool")
-            .call_function(LIQUIDITY_POOL_TEMPLATE_ADDRESS, "instantiate", args![
+            .call_function(template_addr, "instantiate", args![
                 OwnerRule::default(),
                 AccessRule::AllowAll,
                 XTR,
@@ -74,7 +78,7 @@ fn initial_contribution_and_redeem() {
 
     // Redeem some liquidity
     let (pool_component, _) = store
-        .get_components_by_template_address(LIQUIDITY_POOL_TEMPLATE_ADDRESS)
+        .get_components_by_template_address(template_addr)
         .unwrap()
         .pop()
         .unwrap();

@@ -492,6 +492,15 @@ pub struct BucketBurnArg {
     pub bucket_id: BucketId,
 }
 
+/// BucketAction::GetAmount argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum BucketGetAmountArg {
+    AmountOnly,
+    LockedOnly,
+    AmountAndLocked,
+    Everything,
+}
+
 // -------------------------------- Workspace -------------------------------- //
 
 /// The possible actions that can be performed on workspace variables

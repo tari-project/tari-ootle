@@ -131,10 +131,6 @@ impl ResourceContainer {
         })
     }
 
-    pub fn balance(&self) -> Amount {
-        self.unlocked_amount() + self.locked_amount()
-    }
-
     pub fn unlocked_amount(&self) -> Amount {
         match self {
             Self::Fungible { amount, .. } => *amount,

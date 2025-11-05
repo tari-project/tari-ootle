@@ -115,6 +115,7 @@ mod account_template {
         pub fn deposit(&mut self, bucket: Bucket) {
             // Ignore empty buckets
             if bucket.is_empty() {
+                bucket.drop_empty();
                 return;
             }
             // An event is emitted by the vault.deposit method

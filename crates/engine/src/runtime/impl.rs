@@ -55,6 +55,7 @@ use tari_template_lib::{
         AddressAllocationInvokeArg,
         AllocateAddressResult,
         BucketAction,
+        BucketGetAmountArg,
         BucketRef,
         BuiltinTemplateAction,
         BurnStealthUtxoArg,
@@ -1939,10 +1940,39 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     reason: "GetAmount bucket action requires a bucket id".to_string(),
                 })?;
 
-                args.assert_no_args("Bucket::GetAmount")?;
+                let arg: BucketGetAmountArg = args.assert_one_arg()?;
                 self.tracker.read_with(|state| {
                     let bucket = state.get_bucket(bucket_id)?;
-                    Ok(InvokeResult::encode(&bucket.balance())?)
+                    match arg {
+                        BucketGetAmountArg::AmountOnly => Ok(InvokeResult::encode(&bucket.unlocked_amount())?),
+                        BucketGetAmountArg::LockedOnly => Ok(InvokeResult::encode(&bucket.locked_amount())?),
+                        BucketGetAmountArg::AmountAndLocked => {
+                            let amount = bucket
+                                .unlocked_amount()
+                                .checked_add(bucket.locked_amount())
+                                .ok_or_else(|| RuntimeError::InvariantError {
+                                    function: "BucketAction::GetAmount",
+                                    details: "Total amount overflowed".to_string(),
+                                })?;
+                            Ok(InvokeResult::encode(&amount)?)
+                        },
+                        BucketGetAmountArg::Everything => {
+                            let amount = bucket
+                                .unlocked_amount()
+                                .checked_add(bucket.locked_amount())
+                                .and_then(|a| {
+                                    a.checked_add(Amount::new(bucket.number_of_confidential_commitments().into()))
+                                })
+                                .and_then(|a| {
+                                    a.checked_add(Amount::new(bucket.number_of_confidential_commitments().into()))
+                                })
+                                .ok_or_else(|| RuntimeError::InvariantError {
+                                    function: "BucketAction::GetAmount",
+                                    details: "Total amount overflowed".to_string(),
+                                })?;
+                            Ok(InvokeResult::encode(&amount)?)
+                        },
+                    }
                 })
             },
             BucketAction::Take => {

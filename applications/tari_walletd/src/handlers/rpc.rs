@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use axum_extra::headers::authorization::Bearer;
-use tari_ootle_wallet_sdk_services::events::AuthLoginRequestEvent;
+use tari_ootle_wallet_sdk::models::AuthLoginRequestEvent;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{

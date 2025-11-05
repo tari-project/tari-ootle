@@ -10,7 +10,13 @@ use tari_ootle_common_types::{
     Network,
 };
 use tari_ootle_wallet_sdk::{
-    models::AccountAndViewKeys,
+    models::{
+        AccountAndViewKeys,
+        UtxoRecoveredEvent,
+        UtxoRecoveryCompletedEvent,
+        UtxoRecoveryStartedEvent,
+        WalletEvent,
+    },
     network::{StatusResponseError, WalletNetworkInterface},
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
     WalletSdk,
@@ -18,11 +24,7 @@ use tari_ootle_wallet_sdk::{
 use tari_template_lib::models::{ComponentAddress, ResourceAddress, UtxoAddress, UtxoId};
 use tokio::sync::watch;
 
-use crate::{
-    events::{UtxoRecoveredEvent, UtxoRecoveryCompletedEvent, UtxoRecoveryStartedEvent, WalletEvent},
-    notify::Notify,
-    utxo_scanner::StealthScannerApiError,
-};
+use crate::{notify::Notify, utxo_scanner::StealthScannerApiError};
 
 const LOG_TARGET: &str = "tari::ootle::wallet_services::utxo_recovery";
 
@@ -102,18 +104,6 @@ where
 
             if batch.is_empty() {
                 debug!(target: LOG_TARGET, "✅ No more UTXOs to process");
-
-                if self.round_id == 0 {
-                    self.notify(UtxoRecoveryStartedEvent {
-                        round_id: self.round_id,
-                    });
-                    self.notify(UtxoRecoveryCompletedEvent {
-                        round_id: self.round_id,
-                        num_recovered,
-                    });
-
-                    self.round_id += 1;
-                }
                 return Ok(());
             }
 

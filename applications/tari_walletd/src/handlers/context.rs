@@ -2,9 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use axum_extra::headers::authorization::Bearer;
+use tari_ootle_wallet_sdk::models::WalletEvent;
 use tari_ootle_wallet_sdk_services::{
     account_monitor::AccountMonitorHandle,
-    events::WalletEvent,
     notify::Notify,
     transaction_service::TransactionServiceHandle,
 };

@@ -10,12 +10,11 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_wallet_sdk::{
     apis::accounts::{AccountsApi, AccountsApiError},
-    models::{AccountWithAddress, DerivedKeyIndex},
+    models::{AccountWithAddress, DerivedKeyIndex, TransactionFinalizedEvent, WalletEvent},
     network::{StatusResponseError, WalletNetworkInterface},
     storage::WalletStore,
     WalletSdk,
 };
-use tari_ootle_wallet_sdk_services::events::{TransactionFinalizedEvent, WalletEvent};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::models::ComponentAddress;
 use tari_transaction::TransactionId;

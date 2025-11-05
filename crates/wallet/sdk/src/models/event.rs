@@ -1,10 +1,13 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::fmt::Display;
+
 use tari_engine_types::commit_result::FinalizeResult;
-use tari_ootle_wallet_sdk::models::{Account, NewAccountData, TransactionStatus};
 use tari_template_lib::{models::UtxoAddress, prelude::ComponentAddress};
 use tari_transaction::TransactionId;
+
+use crate::models::{Account, NewAccountData, TransactionStatus};
 
 #[derive(Debug, Clone)]
 pub enum WalletEvent {
@@ -13,11 +16,17 @@ pub enum WalletEvent {
     TransactionInvalid(TransactionInvalidEvent),
     AccountCreatedOnChain(AccountCreatedEvent),
     AccountChangedOnChain(AccountChangedEvent),
-    AuthLoginRequest(#[allow(dead_code)] AuthLoginRequestEvent),
+    AuthLoginRequest(AuthLoginRequestEvent),
     UtxoRecoveryStarted(UtxoRecoveryStartedEvent),
     UtxoRecovered(UtxoRecoveredEvent),
     UtxoRecoveryCompleted(UtxoRecoveryCompletedEvent),
     UtxoSpent(UtxoSpentEvent),
+}
+
+impl WalletEvent {
+    pub fn as_event_type(&self) -> WalletEventType {
+        self.into()
+    }
 }
 
 impl From<TransactionSubmittedEvent> for WalletEvent {
@@ -80,14 +89,20 @@ impl From<UtxoSpentEvent> for WalletEvent {
     }
 }
 
-#[derive(Debug, Clone)]
+impl Display for WalletEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        WalletEventType::from(self).fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct TransactionSubmittedEvent {
     pub transaction_id: TransactionId,
     /// Set to Some if this transaction results in a new account
     pub new_account: Option<NewAccountData>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct TransactionFinalizedEvent {
     pub transaction_id: TransactionId,
     pub finalize: FinalizeResult,
@@ -95,18 +110,19 @@ pub struct TransactionFinalizedEvent {
     pub status: TransactionStatus,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct AccountCreatedEvent {
     pub account: Account,
     pub _created_by_tx: TransactionId,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct AccountChangedEvent {
     pub account_address: ComponentAddress,
+    pub version: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct TransactionInvalidEvent {
     pub transaction_id: TransactionId,
     pub status: TransactionStatus,
@@ -114,27 +130,77 @@ pub struct TransactionInvalidEvent {
     pub final_fee: Option<u64>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct AuthLoginRequestEvent;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct UtxoRecoveredEvent {
     pub address: UtxoAddress,
     pub account_address: ComponentAddress,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct UtxoRecoveryStartedEvent {
     pub round_id: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct UtxoRecoveryCompletedEvent {
     pub round_id: usize,
     pub num_recovered: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct UtxoSpentEvent {
+    pub account_address: ComponentAddress,
     pub address: UtxoAddress,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum WalletEventType {
+    TransactionSubmitted,
+    TransactionFinalized,
+    TransactionInvalid,
+    AccountCreatedOnChain,
+    AccountChangedOnChain,
+    AuthLoginRequest,
+    UtxoRecoveryStarted,
+    UtxoRecovered,
+    UtxoRecoveryCompleted,
+    UtxoSpent,
+}
+
+impl Display for WalletEventType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            WalletEventType::TransactionSubmitted => "TransactionSubmitted",
+            WalletEventType::TransactionFinalized => "TransactionFinalized",
+            WalletEventType::TransactionInvalid => "TransactionInvalid",
+            WalletEventType::AccountCreatedOnChain => "AccountCreatedOnChain",
+            WalletEventType::AccountChangedOnChain => "AccountChangedOnChain",
+            WalletEventType::AuthLoginRequest => "AuthLoginRequest",
+            WalletEventType::UtxoRecoveryStarted => "UtxoRecoveryStarted",
+            WalletEventType::UtxoRecovered => "UtxoRecovered",
+            WalletEventType::UtxoRecoveryCompleted => "UtxoRecoveryCompleted",
+            WalletEventType::UtxoSpent => "UtxoSpent",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+impl From<&WalletEvent> for WalletEventType {
+    fn from(event: &WalletEvent) -> Self {
+        match event {
+            WalletEvent::TransactionSubmitted(_) => Self::TransactionSubmitted,
+            WalletEvent::TransactionFinalized(_) => Self::TransactionFinalized,
+            WalletEvent::TransactionInvalid(_) => Self::TransactionInvalid,
+            WalletEvent::AccountCreatedOnChain(_) => Self::AccountCreatedOnChain,
+            WalletEvent::AccountChangedOnChain(_) => Self::AccountChangedOnChain,
+            WalletEvent::AuthLoginRequest(_) => Self::AuthLoginRequest,
+            WalletEvent::UtxoRecoveryStarted(_) => Self::UtxoRecoveryStarted,
+            WalletEvent::UtxoRecovered(_) => Self::UtxoRecovered,
+            WalletEvent::UtxoRecoveryCompleted(_) => Self::UtxoRecoveryCompleted,
+            WalletEvent::UtxoSpent(_) => Self::UtxoSpent,
+        }
+    }
 }

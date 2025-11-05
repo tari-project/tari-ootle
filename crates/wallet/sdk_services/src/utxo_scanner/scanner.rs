@@ -3,7 +3,7 @@
 
 use tari_ootle_common_types::optional::IsNotFoundError;
 use tari_ootle_wallet_sdk::{
-    models::AccountWithAddress,
+    models::{AccountWithAddress, WalletEvent},
     network::{StatusResponseError, WalletNetworkInterface},
     storage::WalletStore,
     WalletSdk,
@@ -11,7 +11,6 @@ use tari_ootle_wallet_sdk::{
 use tari_template_lib::models::ResourceAddress;
 
 use crate::{
-    events::WalletEvent,
     notify::Notify,
     utxo_scanner::{StealthScannerApiError, UtxoScanRoundStats, UtxoScannerRound},
 };

@@ -15,18 +15,23 @@ use tari_ootle_common_types::{
     StateVersion,
 };
 use tari_ootle_wallet_sdk::{
-    models::{AccountWithAddress, StartOfShard, UtxoSpent, UtxoUnspent, WalletSecretKey, WalletUtxoUpdate},
+    models::{
+        AccountWithAddress,
+        StartOfShard,
+        UtxoSpent,
+        UtxoSpentEvent,
+        UtxoUnspent,
+        WalletEvent,
+        WalletSecretKey,
+        WalletUtxoUpdate,
+    },
     network::{StatusResponseError, UtxoUpdateStream, WalletNetworkInterface},
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
     WalletSdk,
 };
 use tari_template_lib::models::{ComponentAddress, ResourceAddress, UtxoAddress};
 
-use crate::{
-    events::{UtxoSpentEvent, WalletEvent},
-    notify::Notify,
-    utxo_scanner::StealthScannerApiError,
-};
+use crate::{notify::Notify, utxo_scanner::StealthScannerApiError};
 
 const LOG_TARGET: &str = "tari::ootle::wallet_services::scanner_round";
 // TODO: either fetch num preshards from the network or we should hardcode it to a single value for all apps
@@ -233,6 +238,7 @@ where
             for spent in self.utxos_to_spend.drain(..) {
                 if Self::spend(tx, self.resource_address, &spent)? {
                     self.notify.notify(UtxoSpentEvent {
+                        account_address: *self.account.component_address(),
                         address: UtxoAddress::new(*self.resource_address, spent.id),
                     });
                     num_spent += 1;

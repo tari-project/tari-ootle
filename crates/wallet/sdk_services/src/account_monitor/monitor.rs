@@ -16,7 +16,7 @@ use tari_ootle_wallet_sdk::{
         substate::SubstateApiError,
         transaction::TransactionApiError,
     },
-    models::NewAccountData,
+    models::{NewAccountData, WalletEvent},
     network::{StatusResponseError, WalletNetworkInterface},
     storage::WalletStore,
     WalletSdk,
@@ -35,7 +35,6 @@ use crate::{
         handle::{AccountMonitorHandle, AccountMonitorRequest},
         scanner::AccountScanner,
     },
-    events::WalletEvent,
     notify::Notify,
     utxo_scanner::UtxoScannerHandle,
 };
@@ -249,6 +248,10 @@ where
     }
 
     async fn on_event(&mut self, event: WalletEvent) -> Result<(), AccountMonitorError> {
+        debug!(target: LOG_TARGET, "🏦 Account monitor received event: {}", event);
+        if let Err(err) = self.wallet_sdk.event_api().log_event(&event) {
+            warn!(target: LOG_TARGET, "Failed to store wallet event: {}", err);
+        }
         match event {
             WalletEvent::TransactionSubmitted(event) => {
                 if let Some(account) = event.new_account {

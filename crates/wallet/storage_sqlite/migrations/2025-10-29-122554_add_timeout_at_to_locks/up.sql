@@ -1,2 +1,0 @@
-ALTER TABLE locks
-    ADD COLUMN timeout_at DATETIME NULL;

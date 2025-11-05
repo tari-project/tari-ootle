@@ -1,7 +1,11 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::ops::{Deref, DerefMut};
+use std::{
+    fmt,
+    fmt::Display,
+    ops::{Deref, DerefMut},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MaxString<const N: usize> {
@@ -58,6 +62,12 @@ impl<'de, const N: usize> serde::Deserialize<'de> for MaxString<N> {
         let len = s.len();
         MaxString::new_checked(s)
             .ok_or_else(|| serde::de::Error::custom(format!("string length exceeds maximum of {}: got {}", N, len)))
+    }
+}
+
+impl<const N: usize> Display for MaxString<N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.s.as_ref().fmt(f)
     }
 }
 

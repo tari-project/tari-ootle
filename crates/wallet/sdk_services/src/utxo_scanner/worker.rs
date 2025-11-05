@@ -12,6 +12,7 @@ use futures_bounded::PushError;
 use log::{info, warn};
 use tari_ootle_common_types::optional::IsNotFoundError;
 use tari_ootle_wallet_sdk::{
+    models::WalletEvent,
     network::{StatusResponseError, WalletNetworkInterface},
     storage::WalletStore,
     WalletSdk,
@@ -22,7 +23,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::{events::WalletEvent, notify::Notify, utxo_scanner::UtxoScanner};
+use crate::{notify::Notify, utxo_scanner::UtxoScanner};
 
 const LOG_TARGET: &str = "tari::ootle::wallet_services::stealth_utxo_scanner";
 

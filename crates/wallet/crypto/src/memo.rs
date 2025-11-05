@@ -1,9 +1,9 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{cmp, io};
+use std::{cmp, fmt::Display, io};
 
-use tari_template_lib::types::{MaxBytes, MaxString};
+use tari_template_lib::types::{hex::write_hex_fmt, MaxBytes, MaxString};
 
 /// These are selected to be out of range of the Minotari memo field tags
 /// See:
@@ -116,6 +116,20 @@ impl Memo {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Attempt to interpret the memo as a UTF-8 string, regardless of its variant.
+    /// Returns `None` if the memo cannot be represented as a UTF-8 string.
+    pub fn as_utf8_str(&self) -> Option<&str> {
+        match self {
+            Self::Message(s) => Some(s),
+            Self::Bytes(b) => str::from_utf8(b.as_ref()).ok(),
+            Self::PayRefAndBytes(body) => {
+                let (_, msg_bytes) = split_len_prefixed(body)?;
+                str::from_utf8(msg_bytes).ok()
+            },
+            Self::U256(_) => None,
+        }
     }
 
     pub fn as_memo_message(&self) -> Option<&str> {
@@ -236,6 +250,36 @@ impl Memo {
                     .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid MessageAndPayRef encoding"))?;
                 let bytes = MaxBytes::new_checked(buf).expect("length checked (buf.len() <= MAX_BYTES_LENGTH)");
                 Ok(Self::PayRefAndBytes(bytes))
+            },
+        }
+    }
+}
+
+impl Display for Memo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::U256(b) => {
+                write!(f, "U256(")?;
+                write_hex_fmt(f, b)?;
+                write!(f, ")")
+            },
+            Self::Message(s) => write!(f, "Message({})", s),
+            Self::Bytes(b) => {
+                write!(f, "Bytes(")?;
+                write_hex_fmt(f, b)?;
+                write!(f, ")")
+            },
+            Self::PayRefAndBytes(b) => {
+                let Some((pay_ref, msg_bytes)) = split_len_prefixed(b) else {
+                    return write!(f, "PayRefAndBytes(<invalid encoding>)");
+                };
+                write!(
+                    f,
+                    "PayRefAndBytes(pay_ref: {}, bytes: ",
+                    std::str::from_utf8(pay_ref).unwrap_or("<not utf-8>"),
+                )?;
+                write_hex_fmt(f, msg_bytes)?;
+                write!(f, ")")
             },
         }
     }

@@ -2,6 +2,15 @@
 
 The Tari Indexer is a service that indexes and tracks substates, transactions, and events on the Tari DAN (Digital Assets Network). It provides REST and GraphQL APIs for querying blockchain data and includes a web-based user interface for exploring the network.
 
+## Documentation
+
+Comprehensive documentation is available in the [`docs/`](docs/) directory:
+
+- **[Overview](docs/overview.md)**: What the indexer is and why you need it
+- **[Architecture](docs/architecture.md)**: High-level system design and component breakdown  
+- **[Deployment Guide](docs/deployment.md)**: Should you run your own indexer? Deployment options and requirements
+- **[Configuration](docs/configuration.md)**: Complete configuration reference and examples
+
 ## Overview
 
 The indexer continuously scans the DAN layer for new blocks, transactions, and substates, storing this information in a local SQLite database. It provides multiple interfaces for accessing this data:

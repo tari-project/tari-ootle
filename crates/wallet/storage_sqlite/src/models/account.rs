@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use diesel::{Identifiable, Queryable};
+use tari_ootle_common_types::Epoch;
 use tari_ootle_wallet_sdk::storage::WalletStorageError;
 use time::PrimitiveDateTime;
 
@@ -19,6 +20,7 @@ pub struct Account {
     pub owner_public_key: String,
     pub view_only_key_id: String,
     pub owner_key_id: Option<String>,
+    pub birthday_epoch: i64,
     pub is_default: bool,
     pub is_confirmed_on_chain: bool,
     pub _stealth_resource_address: String,
@@ -38,6 +40,7 @@ impl Account {
             owner_key_id: self.owner_key_id.as_ref().map(deserialize_json).transpose()?,
             view_only_key_id: deserialize_json(&self.view_only_key_id)?,
             owner_public_key: deserialize_hex_try_from(&self.owner_public_key)?,
+            birthday_epoch: Epoch(self.birthday_epoch as u64),
             is_confirmed_on_chain: self.is_confirmed_on_chain,
             is_default: self.is_default,
         })

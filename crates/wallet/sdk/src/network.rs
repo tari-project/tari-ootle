@@ -11,7 +11,7 @@ use tari_engine_types::{
     substate::{Substate, SubstateId, SubstateValue},
     Utxo,
 };
-use tari_ootle_common_types::{shard::Shard, StateVersion};
+use tari_ootle_common_types::{shard::Shard, Epoch, StateVersion};
 use tari_template_abi::TemplateDef;
 use tari_template_lib::{
     models::{ResourceAddress, UtxoId},
@@ -63,6 +63,7 @@ pub trait WalletNetworkInterface {
 
     fn stream_stealth_utxo_updates(
         &self,
+        from_epoch: Epoch,
         resource_address: ResourceAddress,
         shard_state_versions: Vec<(Shard, StateVersion)>,
         unspent_only: bool,

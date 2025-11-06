@@ -80,6 +80,10 @@ impl ApplicationConfig {
     pub fn state_db_path(&self) -> PathBuf {
         self.to_data_dir().join("state.db")
     }
+
+    pub fn global_db_path(&self) -> PathBuf {
+        self.to_data_dir().join("global_storage.sqlite")
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

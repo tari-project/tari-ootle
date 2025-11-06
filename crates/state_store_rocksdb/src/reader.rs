@@ -71,9 +71,9 @@ use tari_ootle_storage::{
         PendingShardStateTreeDiff,
         StateVersionTransitions,
         SubstateChange,
-        SubstateCreatedProof,
+        SubstateCreate,
         SubstateData,
-        SubstateDestroyedProof,
+        SubstateDestroy,
         SubstateLock,
         SubstatePledges,
         SubstateRecord,
@@ -1619,8 +1619,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let mut updates = Vec::with_capacity(data.transitions.len());
         // multi_get returns the substates in the same order as queried, so ordered by transitions
-        for (data, substate) in data.transitions.iter().zip(substates) {
-            let update = match data.transition {
+        for (rec, substate) in data.transitions.iter().zip(substates) {
+            let update = match rec.transition {
                 StateTransitionType::Up => {
                     let value = value_filter
                         .contains_substate(&substate.substate_id)
@@ -1630,7 +1630,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                             || SubstateValueOrHash::Hash(substate.state_hash),
                             |v| SubstateValueOrHash::Value(Box::new(v)),
                         );
-                    SubstateUpdateProof::Create(SubstateCreatedProof {
+                    SubstateUpdateProof::Create(SubstateCreate {
                         substate: SubstateData {
                             substate_id: substate.substate_id,
                             version: substate.version,
@@ -1638,7 +1638,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                         },
                     })
                 },
-                StateTransitionType::Down => SubstateUpdateProof::Destroy(SubstateDestroyedProof {
+                StateTransitionType::Down => SubstateUpdateProof::Destroy(SubstateDestroy {
                     substate_id: substate.substate_id,
                     version: substate.version,
                 }),

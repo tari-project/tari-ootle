@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use tari_bor::{Deserialize, Serialize};
-use tari_ootle_common_types::{shard::Shard, StateVersion};
+use tari_ootle_common_types::{shard::Shard, Epoch, StateVersion};
 use tari_template_lib::{
     models::UtxoId,
     types::crypto::{RistrettoPublicKeyBytes, UtxoTag},
@@ -41,6 +41,7 @@ pub struct UtxoUpdateSet {
 pub struct UtxoStateUpdateSet {
     pub updates: Vec<WalletUtxoUpdate>,
     pub max_state_version: StateVersion,
+    pub max_epoch: Epoch,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

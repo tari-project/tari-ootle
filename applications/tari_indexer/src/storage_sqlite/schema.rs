@@ -108,6 +108,7 @@ diesel::table! {
         state_version -> BigInt,
         output -> Nullable<Binary>,
         utxo_tag -> Integer,
+        epoch -> BigInt,
         is_spent -> Bool,
         is_burnt -> Bool,
         is_frozen -> Bool,

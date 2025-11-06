@@ -33,10 +33,11 @@ use std::{fs, panic, pin, process};
 
 use log::*;
 use tari_common_types::seeds::seed_words::SeedWords;
-use tari_ootle_common_types::{optional::Optional, NumPreshards};
+use tari_ootle_common_types::{optional::Optional, Network, NumPreshards};
 use tari_ootle_wallet_sdk::{
     apis::config::{ConfigApi, ConfigKey},
     cipher_seed::CipherSeedRestore,
+    models::EpochBirthday,
     WalletSdk as Sdk,
     WalletSdkConfig,
 };
@@ -92,10 +93,12 @@ pub async fn run_tari_ootle_walletd(
 
     // trigger account scanning if needed
     if needs_seed_recovery {
+        let cipher_seed_birthday = wallet_sdk.key_manager_api().get_cipher_seed_birthday_epoch()?;
         let scanner = AccountRecoveryService::new(
             wallet_sdk.clone(),
             services.account_monitor_handle.clone(),
             config.ootle_wallet_daemon.recovery_abandon_count,
+            cipher_seed_birthday,
         );
         let shutdown_signal = shutdown_signal.clone();
         tokio::spawn(async move {
@@ -193,6 +196,19 @@ pub fn initialize_wallet_sdk(config: &ApplicationConfig, store: SqliteWalletStor
         config.ootle_wallet_daemon.indexer_api_url.clone()
     };
     let indexer = IndexerRestApiNetworkInterface::new(indexer_endpoint);
-    let sdk = WalletSdk::initialize(store, indexer, sdk_config)?;
+    let birthday = get_epoch_birthday(sdk_config.network);
+    let sdk = WalletSdk::initialize(store, indexer, sdk_config, birthday)?;
     Ok(sdk)
+}
+
+const fn get_epoch_birthday(network: Network) -> EpochBirthday {
+    // TODO: set the zero epoch time for each network according to actual zero epoch time
+    match network {
+        Network::MainNet => EpochBirthday::far_future(),
+        Network::StageNet => EpochBirthday::far_future(),
+        Network::NextNet => EpochBirthday::far_future(),
+        Network::LocalNet => EpochBirthday::far_future(),
+        Network::Igor => EpochBirthday::far_future(),
+        Network::Esmeralda => EpochBirthday::far_future(),
+    }
 }

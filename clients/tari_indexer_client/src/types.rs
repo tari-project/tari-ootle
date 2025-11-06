@@ -373,6 +373,8 @@ pub struct IndexerReadyResponse {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 pub struct GetUtxoUpdatesRequest {
+    #[serde(default)]
+    pub from_epoch: Epoch,
     pub shard_state_versions: Vec<(Shard, StateVersion)>,
     pub resource_address: ResourceAddress,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

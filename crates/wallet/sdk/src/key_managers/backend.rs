@@ -19,7 +19,12 @@ pub trait KeyManagerBackend<M> {
 pub trait WalletKeyStore<K> {
     type Error;
 
+    /// Derive a secret key from the cipher seed for the given branch and key index.
     fn derive_secret(&self, branch: &str, key_index: DerivedKeyIndex) -> Result<RistrettoSecretKey, Self::Error>;
 
+    /// Retrieve an imported secret key by its key identifier.
     fn get_imported_secret(&self, key: K) -> Result<RistrettoSecretKey, Self::Error>;
+
+    /// Retrieve the cipher seed birthday if it exists. If this is not supported, it is correct to return Ok(None).
+    fn cipher_seed_birthday(&self) -> Result<Option<u16>, Self::Error>;
 }

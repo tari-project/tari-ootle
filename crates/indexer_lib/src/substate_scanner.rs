@@ -121,6 +121,11 @@ where
             .committee_provider
             .get_committee_for_substate(epoch, substate_req.or_zero_version().to_substate_address())
             .await?;
+        if committee.is_empty() {
+            return Err(IndexerError::NoCommitteeMembers {
+                details: format!("No committee found for substate {} at epoch {}", substate_req, epoch),
+            });
+        }
 
         committee.shuffle();
 

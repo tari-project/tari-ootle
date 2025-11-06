@@ -18,7 +18,7 @@ use tari_ootle_storage::{
     Ordering,
     StorageError,
 };
-use tari_ootle_wallet_sdk::models::WalletUtxoUpdate;
+use tari_ootle_wallet_sdk::models::UtxoStateUpdateSet;
 use tari_template_lib::{
     models::{ResourceAddress, UtxoId},
     prelude::RistrettoPublicKeyBytes,
@@ -138,17 +138,15 @@ pub trait IndexerStoreReadTransaction {
     ) -> Result<StateVersion, StorageError>;
 
     /// Get UTXO updates for a given resource address and shard, starting from a specific state version.
-    ///
-    /// Returns a tuple containing the maximum returned state version, and a vector of UTXO
-    /// updates.
     fn utxos_get_updates(
         &mut self,
         resource_address: ResourceAddress,
+        from_epoch: Epoch,
         shard: Shard,
         from_state_version: StateVersion,
         unspents_only: bool,
         limit: u32,
-    ) -> Result<(StateVersion, Vec<WalletUtxoUpdate>), StorageError>;
+    ) -> Result<UtxoStateUpdateSet, StorageError>;
 
     fn utxos_list(
         &mut self,
@@ -176,6 +174,7 @@ pub trait IndexerStoreWriteTransaction {
     ) -> Result<(), StorageError>;
     fn batch_insert_utxo_updates<I: IntoIterator<Item = UtxoUpdateRecord>>(
         &mut self,
+        epoch: Epoch,
         updates: I,
     ) -> Result<(), StorageError>;
     fn upsert_substate(&mut self, substate: &SubstateData) -> Result<(), StorageError>;

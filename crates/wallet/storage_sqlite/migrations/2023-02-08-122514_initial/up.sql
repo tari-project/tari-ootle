@@ -87,6 +87,7 @@ CREATE TABLE accounts
     owner_public_key      TEXT     NOT NULL,
     view_only_key_id      TEXT     NOT NULL,
     owner_key_id          TEXT     NULL,
+    birthday_epoch        BIGINT   NOT NULL,
     is_default            BOOLEAN  NOT NULL DEFAULT 0,
     is_confirmed_on_chain BOOLEAN  NOT NULL,
     stealth_resources     TEXT     NOT NULL DEFAULT '[]',

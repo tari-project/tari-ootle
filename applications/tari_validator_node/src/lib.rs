@@ -92,7 +92,7 @@ pub async fn run_validator_node(
 ) -> Result<(), anyhow::Error> {
     info!(target: LOG_TARGET, "Starting validator node on network {}", config.network);
 
-    let db_factory = SqliteDbFactory::new(config.validator_node.data_dir.clone());
+    let db_factory = SqliteDbFactory::new(config.validator_node.get_global_db_path());
     db_factory
         .migrate()
         .map_err(|e| ExitError::new(ExitCode::DatabaseError, e))?;

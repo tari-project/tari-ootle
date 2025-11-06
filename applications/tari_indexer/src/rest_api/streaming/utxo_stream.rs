@@ -12,7 +12,7 @@ use futures::Stream;
 use log::*;
 use tari_indexer_client::{protobuf, types::GetUtxoUpdatesRequest};
 use tari_ootle_common_types::{shard::Shard, StateVersion};
-use tari_ootle_wallet_sdk::models::WalletUtxoUpdate;
+use tari_ootle_wallet_sdk::models::{UtxoStateUpdateSet, WalletUtxoUpdate};
 
 use crate::{
     rest_api::{encoder::Encoder, error::ErrorResponse, streaming::encoding::MimeTypeEncoder},
@@ -98,8 +98,13 @@ impl UtxoUpdateStream {
     }
 
     pub fn next_batch(&mut self, shard: Shard, state_version: StateVersion) -> anyhow::Result<bool> {
-        let (updates_state_version, updates) = self.substate_manager.get_utxo_updates(
+        let UtxoStateUpdateSet {
+            updates,
+            max_state_version,
+            max_epoch,
+        } = self.substate_manager.get_utxo_updates(
             self.request.resource_address,
+            self.request.from_epoch,
             shard,
             state_version,
             self.request.unspent_only,
@@ -113,16 +118,13 @@ impl UtxoUpdateStream {
         }
         debug!(
             target: LOG_TARGET,
-            "Received {} updates for shard {}, max_state_version {} -> {}",
+            "Received {} updates for shard {shard}, max_epoch = {max_epoch}, max_state_version {max_state_version} -> {high_watermark_state_version}",
             updates.len(),
-            shard,
-            updates_state_version,
-            high_watermark_state_version
         );
         self.pending_updates = Some(PendingUpdates {
             sos_emitted: false,
             shard,
-            updates_state_version,
+            updates_state_version: max_state_version,
             high_watermark_state_version,
             updates,
             index: 0,

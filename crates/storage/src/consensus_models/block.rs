@@ -53,7 +53,7 @@ use super::{
     ForeignProposalAtom,
     ForeignProposalRecord,
     PendingShardStateTreeDiff,
-    SubstateDestroyedProof,
+    SubstateDestroy,
     SubstateRecord,
     TransactionAtom,
     ValidatorStatsUpdate,
@@ -63,7 +63,7 @@ use crate::{
         block_header::BlockHeader,
         substate_update_batch::SubstateUpdateBatch,
         Command,
-        SubstateCreatedProof,
+        SubstateCreate,
         SubstateUpdateProof,
         TransactionRecord,
     },
@@ -797,18 +797,18 @@ impl Block {
                     // TODO: This is currently not used - if we need this in future, we can include the state hash en
                     //       lieu of the actual state which does not exist
                     // if substate.created_by_transaction == transaction.id
-                    // {     updates.push(SubstateUpdate::Create(SubstateCreatedProof {
+                    // {     updates.push(SubstateUpdate::Create(SubstateCreate {
                     //         // created_qc: substate.get_created_quorum_certificate(tx)?,
                     //         substate: substate.try_into()?,
                     //     }));
                     // } else {
-                    updates.push(SubstateUpdateProof::Destroy(SubstateDestroyedProof {
+                    updates.push(SubstateUpdateProof::Destroy(SubstateDestroy {
                         substate_id: substate.substate_id.clone(),
                         version: substate.version,
                         // justify: ProposalCertificate::get(tx, &destroyed.justify)?,
                     }));
                 } else {
-                    updates.push(SubstateUpdateProof::Create(SubstateCreatedProof {
+                    updates.push(SubstateUpdateProof::Create(SubstateCreate {
                         // created_qc: substate.get_created_quorum_certificate(tx)?,
                         substate: substate.into(),
                     }));
@@ -822,7 +822,7 @@ impl Block {
     pub fn get_transaction_receipts<TTx: StateStoreReadTransaction>(
         &self,
         tx: &TTx,
-    ) -> Result<Vec<SubstateCreatedProof>, StorageError> {
+    ) -> Result<Vec<SubstateCreate>, StorageError> {
         let committed = self
             .commands()
             .iter()
@@ -838,7 +838,7 @@ impl Block {
         let receipts = receipts
             .into_iter()
             .map(|receipt| {
-                Ok::<_, StorageError>(SubstateCreatedProof {
+                Ok::<_, StorageError>(SubstateCreate {
                     substate: receipt.into(),
                 })
             })

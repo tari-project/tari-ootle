@@ -26,7 +26,7 @@ use tari_engine_types::{
     resource::Resource,
     substate::{SubstateDiff, SubstateId},
 };
-use tari_ootle_common_types::{optional::Optional, shard::Shard, StateVersion, VersionedSubstateIdRef};
+use tari_ootle_common_types::{optional::Optional, shard::Shard, Epoch, StateVersion, VersionedSubstateIdRef};
 use tari_ootle_wallet_sdk::{
     models::{
         AccountUpdate,
@@ -661,6 +661,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         owner_key_id: Option<KeyId>,
         owner_public_key: &RistrettoPublicKeyBytes,
         associated_stealth_resources: &HashSet<ResourceAddress>,
+        birthday_epoch: Epoch,
         is_confirmed_on_chain: bool,
         is_default: bool,
     ) -> Result<(), WalletStorageError> {
@@ -681,6 +682,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 accounts::owner_key_id.eq(owner_key_id.as_ref().map(serialize_json).transpose()?),
                 accounts::owner_public_key.eq(serialize_hex(owner_public_key)),
                 accounts::stealth_resources.eq(serialize_json(&associated_stealth_resources)?),
+                accounts::birthday_epoch.eq(birthday_epoch.as_u64() as i64),
                 accounts::is_confirmed_on_chain.eq(is_confirmed_on_chain),
                 accounts::is_default.eq(is_default),
             ))

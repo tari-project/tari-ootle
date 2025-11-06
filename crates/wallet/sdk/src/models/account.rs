@@ -5,6 +5,7 @@ use std::fmt::{Display, Formatter};
 
 use tari_bor::{Deserialize, Serialize};
 use tari_ootle_address::OotleAddress;
+use tari_ootle_common_types::Epoch;
 use tari_template_lib::{models::ComponentAddress, prelude::RistrettoPublicKeyBytes};
 
 use crate::models::KeyId;
@@ -17,6 +18,7 @@ pub struct Account {
     pub view_only_key_id: KeyId,
     pub owner_key_id: Option<KeyId>,
     pub owner_public_key: RistrettoPublicKeyBytes,
+    pub birthday_epoch: Epoch,
     pub is_confirmed_on_chain: bool,
     pub is_default: bool,
 }
@@ -36,6 +38,10 @@ impl Account {
 
     pub fn owner_public_key(&self) -> &RistrettoPublicKeyBytes {
         &self.owner_public_key
+    }
+
+    pub fn birthday_epoch(&self) -> Epoch {
+        self.birthday_epoch
     }
 
     pub fn name(&self) -> Option<&String> {
@@ -70,6 +76,11 @@ pub struct AccountWithAddress {
 impl AccountWithAddress {
     pub fn new(account: Account, address: OotleAddress) -> Self {
         Self { account, address }
+    }
+
+    pub fn birthday_epoch(&self) -> Epoch {
+        // TODO
+        Epoch(0)
     }
 
     pub fn account(&self) -> &Account {

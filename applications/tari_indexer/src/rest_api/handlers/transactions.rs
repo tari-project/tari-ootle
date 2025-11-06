@@ -68,13 +68,17 @@ pub async fn submit_transaction(
         .submit_transaction(transaction)
         .await
         .map_err(|e| match e {
-            TransactionManagerError::NetworkClientError(NetworkClientError::AllValidatorsFailed { .. }) => {
+            TransactionManagerError::NetworkClientError(NetworkClientError::AllValidatorsFailed { .. }) |
+            TransactionManagerError::NetworkClientError(NetworkClientError::NoCommitteeMembers) => {
                 ErrorResponse::service_unavailable(format!("All validators failed: {}", e))
             },
             TransactionManagerError::InvalidTransaction {
                 transaction_id,
                 details,
             } => ErrorResponse::bad_request(format!("Transaction {} is invalid: {}", transaction_id, details)),
+            TransactionManagerError::NetworkClientError(NetworkClientError::NoInputsProvided) => {
+                ErrorResponse::bad_request("Transaction has no inputs".to_string())
+            },
             e => ErrorResponse::anyhow(e),
         })?;
 

@@ -67,6 +67,16 @@ pub async fn get_substate(
     Path(substate_id): Path<SubstateId>,
     Query(req): Query<GetSubstateRequest>,
 ) -> HandlerResult<Json<GetSubstateResponse>> {
+    if !context
+        .epoch_manager()
+        .is_initial_scanning_complete()
+        .await
+        .map_err(ErrorResponse::anyhow)?
+    {
+        return Err(ErrorResponse::service_unavailable(
+            "Indexer is still syncing. Please try again later.",
+        ));
+    }
     let maybe_substate = context
         .substate_manager()
         .get_substate(&substate_id, req.version)

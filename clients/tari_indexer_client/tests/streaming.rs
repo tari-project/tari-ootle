@@ -3,7 +3,7 @@
 
 use futures::TryStreamExt;
 use tari_indexer_client::{rest_api_client::IndexerRestApiClient, types::GetUtxoUpdatesRequest};
-use tari_ootle_common_types::{NumPreshards, StateVersion};
+use tari_ootle_common_types::{Epoch, NumPreshards, StateVersion};
 
 #[tokio::test]
 #[ignore = "Requires a running indexer listening on a specific port"]
@@ -11,6 +11,7 @@ async fn dev_test() {
     let mut client = IndexerRestApiClient::connect("http://localhost:12017").unwrap();
     let mut stream = client
         .stream_utxo_updates_protobuf(GetUtxoUpdatesRequest {
+            from_epoch: Epoch::zero(),
             shard_state_versions: NumPreshards::current()
                 .all_shards_iter()
                 .map(|shard| (shard, StateVersion::zero()))

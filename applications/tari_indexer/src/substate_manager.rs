@@ -34,11 +34,12 @@ use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_ootle_common_types::{
     shard::Shard,
     substate_type::SubstateType,
+    Epoch,
     PeerAddress,
     StateVersion,
     VersionedSubstateIdRef,
 };
-use tari_ootle_wallet_sdk::models::WalletUtxoUpdate;
+use tari_ootle_wallet_sdk::models::UtxoStateUpdateSet;
 use tari_template_lib::{
     models::{ResourceAddress, UtxoId},
     types::{
@@ -107,13 +108,21 @@ impl SubstateManager {
     pub fn get_utxo_updates(
         &self,
         resource_address: ResourceAddress,
+        from_epoch: Epoch,
         shard: Shard,
         from_state_version: StateVersion,
         unspent_only: bool,
         limit: u32,
-    ) -> Result<(StateVersion, Vec<WalletUtxoUpdate>), anyhow::Error> {
+    ) -> Result<UtxoStateUpdateSet, anyhow::Error> {
         let updates = self.substate_store.with_read_tx(|tx| {
-            tx.utxos_get_updates(resource_address, shard, from_state_version, unspent_only, limit)
+            tx.utxos_get_updates(
+                resource_address,
+                from_epoch,
+                shard,
+                from_state_version,
+                unspent_only,
+                limit,
+            )
         })?;
         Ok(updates)
     }

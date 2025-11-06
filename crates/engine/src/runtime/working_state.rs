@@ -397,10 +397,9 @@ impl WorkingState {
     }
 
     pub(super) fn validate_finalized(&self) -> Result<(), RuntimeError> {
-        let dangling_bucket_count = self.buckets.iter().filter(|(_, b)| !b.amount().is_zero()).count();
-        if dangling_bucket_count > 0 {
+        if self.buckets.iter().any(|(_, b)| !b.is_empty()) {
             return Err(TransactionCommitError::DanglingBuckets {
-                count: dangling_bucket_count,
+                count: self.buckets.len(),
             }
             .into());
         }
@@ -494,7 +493,7 @@ impl WorkingState {
     }
 
     pub fn burn_bucket(&mut self, bucket: Bucket) -> Result<(), RuntimeError> {
-        if bucket.amount().is_zero() {
+        if bucket.unlocked_amount().is_zero() {
             return Ok(());
         }
         let resource_address = *bucket.resource_address();
@@ -593,7 +592,7 @@ impl WorkingState {
                     "Minting {} fungible tokens on resource: {}", amount, resource_address
                 );
 
-                ResourceContainer::fungible(resource_address, amount)
+                ResourceContainer::public_fungible(resource_address, amount)
             },
             MintArg::NonFungible { tokens } => {
                 debug!(
@@ -654,13 +653,13 @@ impl WorkingState {
         if is_total_supply_tracking_enabled {
             let resource_mut = self.get_resource_mut(locked_resource)?;
             // Increase the total supply of the resource
-            if !resource_mut.increase_total_supply(resource_container.amount()) {
+            if !resource_mut.increase_total_supply(resource_container.unlocked_amount()) {
                 return Err(RuntimeError::ResourceSupplyWouldOverflow {
                     resource_address,
                     current_supply: resource_mut
                         .total_supply()
                         .expect("Resource supply tracking is enabled"),
-                    amount: resource_container.amount(),
+                    amount: resource_container.unlocked_amount(),
                 });
             }
         }
@@ -1334,15 +1333,18 @@ impl WorkingState {
         // First collect fees that cannot be refunded (we have to take all fees even if they exceed the required amount)
         for resx in self.fee_state.non_refundable_fee_payments_mut_iter() {
             // PANIC: this is checked by FeeState
-            let paid_amount = resx.amount().to_u64_checked().expect("invalid fee entry in fee state");
+            let paid_amount = resx
+                .unlocked_amount()
+                .to_u64_checked()
+                .expect("invalid fee entry in fee state");
 
             debug!(
                 target: LOG_TARGET,
-                "Collecting {} of non-refundable fees", resx.amount()
+                "Collecting {} of non-refundable fees", resx.unlocked_amount()
             );
 
             // If there is no refund vault, we must take the entire amount to avoid destroying funds
-            fee_resource.deposit(resx.withdraw(resx.amount())?)?;
+            fee_resource.deposit(resx.withdraw(resx.unlocked_amount())?)?;
             if remaining_fees < paid_amount {
                 total_fee_overcharge += paid_amount - remaining_fees;
             }
@@ -1358,11 +1360,14 @@ impl WorkingState {
 
                 debug!(
                     target: LOG_TARGET,
-                    "Collecting {} of refundable fees", resx.amount()
+                    "Collecting {} of refundable fees", resx.unlocked_amount()
                 );
 
                 // PANIC: this is checked by FeeState
-                let paid_amount = resx.amount().to_u64_checked().expect("invalid fee entry in fee state");
+                let paid_amount = resx
+                    .unlocked_amount()
+                    .to_u64_checked()
+                    .expect("invalid fee entry in fee state");
 
                 // Withdraw only what is needed
                 let amount_to_withdraw = cmp::min(paid_amount, remaining_fees);
@@ -1373,14 +1378,14 @@ impl WorkingState {
 
         // Refund the remaining refundable payments if any
         for (mut resx, refund_vault) in self.fee_state.drain_refundable_fee_payments() {
-            if resx.amount().is_zero() {
-                debug_assert!(!resx.amount().is_negative());
+            if resx.unlocked_amount().is_zero() {
+                debug_assert!(!resx.unlocked_amount().is_negative());
                 continue;
             }
 
             debug!(
                 target: LOG_TARGET,
-                "Refunding {} of fees to vault {}", resx.amount(), refund_vault
+                "Refunding {} of fees to vault {}", resx.unlocked_amount(), refund_vault
             );
             let vault_mut = substates_to_persist
                 .get_mut(&SubstateId::Vault(refund_vault))
@@ -1391,7 +1396,7 @@ impl WorkingState {
         }
 
         let total_fees_paid = fee_resource
-            .amount()
+            .unlocked_amount()
             .to_u64_checked()
             .expect("FeeState guarantees that the total fee payments fit in an u64");
 
@@ -1520,13 +1525,13 @@ impl WorkingState {
 
         match revealed_funds_bucket {
             Some(ref bucket) => {
-                if bucket.amount() != statement.inputs_statement.revealed_amount {
+                if bucket.unlocked_amount() != statement.inputs_statement.revealed_amount {
                     return Err(RuntimeError::InvalidArgument {
                         argument: "revealed_funds_bucket",
                         reason: format!(
                             "Revealed funds bucket amount ({}) does not match the statement's revealed input amount \
                              ({})",
-                            bucket.amount(),
+                            bucket.unlocked_amount(),
                             statement.inputs_statement.revealed_amount
                         ),
                     });

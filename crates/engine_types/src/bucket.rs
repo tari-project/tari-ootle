@@ -48,8 +48,12 @@ impl Bucket {
         }
     }
 
-    pub fn amount(&self) -> Amount {
-        self.resource_container.amount()
+    pub fn is_empty(&self) -> bool {
+        self.resource_container.is_empty()
+    }
+
+    pub fn unlocked_amount(&self) -> Amount {
+        self.resource_container.unlocked_amount()
     }
 
     pub fn number_of_confidential_commitments(&self) -> usize {

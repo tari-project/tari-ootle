@@ -37,12 +37,12 @@ use tari_ootle_common_types::services::template_provider::TemplateProvider;
 use tari_template_abi::{FunctionDef, Type};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    args::{AllocateAddressResult, BucketAction, BucketRef, WorkspaceAction},
+    args::{AllocateAddressResult, BucketAction, BucketGetAmountArg, BucketRef, WorkspaceAction},
     auth::{ComponentAccessRules, OwnerRule},
     invoke_args,
     models::{Bucket, NonFungibleAddress, StealthTransferStatement},
     prelude::STEALTH_TARI_RESOURCE_ADDRESS,
-    types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
+    types::{crypto::RistrettoPublicKeyBytes, Amount, TemplateAddress},
 };
 use tari_transaction::{
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
@@ -324,11 +324,27 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 let item = runtime
                     .interface()
                     .workspace_invoke(WorkspaceAction::Get, invoke_args![input_bucket].into())?;
-                let bucket = runtime.interface().bucket_invoke(
-                    BucketRef::Ref(item.decode()?),
-                    BucketAction::Take,
-                    invoke_args![amount].into(),
-                )?;
+
+                let bucket_ref = BucketRef::Ref(item.decode()?);
+                let bucket =
+                    runtime
+                        .interface()
+                        .bucket_invoke(bucket_ref, BucketAction::Take, invoke_args![amount].into())?;
+                let prev_bucket_val = runtime
+                    .interface()
+                    .bucket_invoke(
+                        bucket_ref,
+                        BucketAction::GetAmount,
+                        invoke_args![BucketGetAmountArg::Everything].into(),
+                    )?
+                    .decode::<Amount>()?;
+                if prev_bucket_val.is_zero() {
+                    // Drop the bucket to prevent a dangling (empty) bucket
+                    runtime
+                        .interface()
+                        .bucket_invoke(bucket_ref, BucketAction::DropEmpty, invoke_args![].into())?;
+                }
+
                 runtime
                     .interface()
                     .put_on_workspace(output_bucket, IndexedValue::from_value(bucket.into_value()?)?)?;

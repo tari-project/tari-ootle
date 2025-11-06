@@ -227,7 +227,7 @@ fn it_allows_method_to_function_calls() {
 fn it_fails_on_invalid_calls() {
     let mut test = setup();
     let components = initialize_composability(&mut test);
-    let (_, _, private_key) = test.template_test.create_funded_account();
+    let (_, _, private_key) = test.template_test.create_empty_account();
 
     // the "invalid_state_call" method tries to call a non-existent method in the inner state component
     let result = test
@@ -315,7 +315,7 @@ fn it_allows_multiple_recursion_levels() {
 #[test]
 fn it_fails_when_surpassing_recursion_limit() {
     let mut test = setup();
-    let (_, _, private_key) = test.template_test.create_funded_account();
+    let (_, _, private_key) = test.template_test.create_empty_account();
     let max_call_depth = MAX_CALL_DEPTH;
 
     // innermost composability component

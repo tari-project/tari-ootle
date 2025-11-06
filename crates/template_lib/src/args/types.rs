@@ -229,8 +229,8 @@ pub enum ResourceAction {
     UpdateNonFungibleData,
     /// Get the total supply of a resource
     GetTotalSupply,
-    /// Get the [ResourceType] of a resource
-    GetResourceType,
+    /// Get the [ResourceInfo] of a resource
+    GetResourceInfo,
     /// Gets a non-fungible resource by its ID
     GetNonFungible,
     /// Update the access rules of a resource
@@ -483,12 +483,22 @@ pub enum BucketAction {
     GetNonFungibleIds,
     GetNonFungibles,
     CountConfidentialCommitments,
+    DropEmpty,
 }
 
 /// A bucket burn operation argument
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BucketBurnArg {
     pub bucket_id: BucketId,
+}
+
+/// BucketAction::GetAmount argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum BucketGetAmountArg {
+    AmountOnly,
+    LockedOnly,
+    AmountAndLocked,
+    Everything,
 }
 
 // -------------------------------- Workspace -------------------------------- //

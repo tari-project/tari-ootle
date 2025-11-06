@@ -38,9 +38,9 @@ impl FeeState {
             });
         }
 
-        let Some(amount) = resource_container.amount().to_u64_checked() else {
+        let Some(amount) = resource_container.unlocked_amount().to_u64_checked() else {
             return Err(RuntimeError::InvalidAmount {
-                amount: resource_container.amount(),
+                amount: resource_container.unlocked_amount(),
                 reason: "Payed an invalid amount. Amount must be positive and not overflow".to_string(),
             });
         };
@@ -48,7 +48,7 @@ impl FeeState {
             Some(new_total) => self.running_total = new_total,
             None => {
                 return Err(RuntimeError::InvalidAmount {
-                    amount: resource_container.amount(),
+                    amount: resource_container.unlocked_amount(),
                     reason: "Payed an invalid amount. Amount overflowed".to_string(),
                 });
             },

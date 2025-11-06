@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_abi::rust::{fmt, str::FromStr};
+use tari_template_abi::rust::fmt;
 
 /// Represents every possible type of resource in the Tari network.
 ///
@@ -21,7 +21,6 @@ use tari_template_abi::rust::{fmt, str::FromStr};
 pub enum ResourceType {
     /// Fungible tokens do not have individual identity, making them interchangeable.
     /// Examples include monetary units, liquidity pool tokens, or tokenized shares.
-    // TODO: rename to PublicFungible
     Fungible,
     /// A resource (i.e., collection) of non-fungible tokens.
     /// Each NFT is uniquely identifiable within the parent resource and indivisible.
@@ -62,28 +61,42 @@ impl fmt::Display for ResourceType {
     }
 }
 
-impl FromStr for ResourceType {
-    type Err = ParseResourceTypeError;
+#[cfg(feature = "std")]
+mod parsing {
+    use std::str::FromStr;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "Fungible" => Ok(ResourceType::Fungible),
-            "NonFungible" | "nft" => Ok(ResourceType::NonFungible),
-            "Confidential" => Ok(ResourceType::Confidential),
-            "Stealth" => Ok(ResourceType::Stealth),
-            _ => Err(ParseResourceTypeError(s.to_string())),
+    use super::*;
+
+    impl FromStr for ResourceType {
+        type Err = ParseResourceTypeError;
+
+        fn from_str(s: &str) -> Result<Self, Self::Err> {
+            match s {
+                "Fungible" => Ok(ResourceType::Fungible),
+                "NonFungible" | "nft" => Ok(ResourceType::NonFungible),
+                "Confidential" => Ok(ResourceType::Confidential),
+                "Stealth" => Ok(ResourceType::Stealth),
+                _ => Err(ParseResourceTypeError(s.to_string())),
+            }
         }
     }
-}
 
-#[derive(Debug)]
-pub struct ParseResourceTypeError(String);
+    #[derive(Debug)]
+    pub struct ParseResourceTypeError(String);
 
-impl fmt::Display for ParseResourceTypeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Invalid Resource Type string: '{}'", self.0)
+    impl fmt::Display for ParseResourceTypeError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "Invalid Resource Type string: '{}'", self.0)
+        }
     }
-}
 
+    impl std::error::Error for ParseResourceTypeError {}
+}
 #[cfg(feature = "std")]
-impl std::error::Error for ParseResourceTypeError {}
+pub use parsing::ParseResourceTypeError;
+
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub struct ResourceInfo {
+    pub resource_type: ResourceType,
+    pub divisibility: u8,
+}

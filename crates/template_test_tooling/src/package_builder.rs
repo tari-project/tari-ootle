@@ -63,10 +63,9 @@ impl PackageBuilder {
         }
     }
 
-    pub fn add_template<P>(&mut self, path: P) -> &mut Self
+    pub fn add_template<P>(&mut self, path: P) -> TemplateAddress
     where P: AsRef<Path> {
-        self.add_template_opts(path, &[], None::<(String, String)>);
-        self
+        self.add_template_opts(path, &[], None::<(String, String)>)
     }
 
     pub fn add_template_with_envs<P, TEnvs, K, V>(&mut self, path: P, envs: TEnvs) -> &mut Self
@@ -99,12 +98,14 @@ impl PackageBuilder {
         self
     }
 
-    pub fn add_builtin_template(&mut self, address: &TemplateAddress) -> &mut Self {
-        let wasm = get_template_builtin(address);
-        let template = WasmModule::from_code(wasm.to_vec()).load_template().unwrap();
-        self.add_loaded_template(*address, template);
+    pub fn add_builtin_template(&mut self, address: TemplateAddress) -> &mut Self {
+        let wasm = get_template_builtin(&address);
+        self.add_template_from_code(address, wasm)
+    }
 
-        self
+    pub fn add_template_from_code(&mut self, address: TemplateAddress, wasm: impl Into<Box<[u8]>>) -> &mut Self {
+        let template = WasmModule::from_code(wasm).load_template().unwrap();
+        self.add_loaded_template(address, template)
     }
 
     pub fn build(&mut self) -> Package {

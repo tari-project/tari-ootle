@@ -4,7 +4,7 @@
 use bnum::BUint;
 use newtype_ops::newtype_ops;
 use serde::ser::Error;
-use tari_template_abi::rust::{cmp, fmt, fmt::Debug, iter::Sum, ops::Neg, str::FromStr, write};
+use tari_template_abi::rust::{cmp, fmt, fmt::Debug, iter::Sum, str::FromStr, write};
 
 use crate::{impl_from, partial_eq_impl, partial_ord_impl};
 
@@ -149,7 +149,7 @@ impl Amount {
     }
 
     /// Returns the product of two amounts, returning `None` if the result overflows.
-    pub const fn checked_mul(&self, other: &Self) -> Option<Self> {
+    pub const fn checked_mul(&self, other: Self) -> Option<Self> {
         match self.into_inner_value().checked_mul(other.into_inner_value()) {
             Some(value) => Some(Self::new(value)),
             None => None,
@@ -276,6 +276,20 @@ impl Amount {
         *self.inner_value().to_bits().digits()
     }
 
+    #[cfg(feature = "extra-arith")]
+    pub fn checked_sqrt(&self) -> Option<Self> {
+        use num_integer::Roots;
+        if self.is_negative() {
+            return None;
+        }
+        if self.is_zero() {
+            return Some(Self::zero());
+        }
+        let inner = self.into_inner_value();
+        let sqrt_inner = inner.sqrt();
+        Some(Self::new(sqrt_inner))
+    }
+
     /// If the amount is negative (< 0), returns `None`, otherwise returns `Some(self)`.
     pub fn non_negative_checked(self) -> Option<Self> {
         if self.is_negative() {
@@ -292,6 +306,16 @@ impl Amount {
         } else {
             Some(self)
         }
+    }
+
+    /// Returns the amount raised to the power of `exp`.
+    pub fn pow(&self, exp: u32) -> Self {
+        Self::new(self.into_inner_value().pow(exp))
+    }
+
+    /// Returns the amount raised to the power of `exp`, returning `None` if the result overflows.
+    pub fn checked_pow(&self, exp: u32) -> Option<Self> {
+        self.into_inner_value().checked_pow(exp).map(Self::new)
     }
 
     /// Parses a string as an `Amount` in the specified radix.
@@ -381,8 +405,8 @@ impl Default for Amount {
     }
 }
 
-newtype_ops! { [Amount] {add sub mul div} {:=} Self Self }
-newtype_ops! { [Amount] {add sub mul div} {:=} &Self &Self }
+newtype_ops! { [Amount] {add sub mul div rem neg} {:=} Self Self }
+newtype_ops! { [Amount] {add sub mul div rem neg} {:=} &Self &Self }
 
 impl_from!(Amount, u8);
 impl_from!(Amount, i8);
@@ -397,20 +421,6 @@ impl_from!(Amount, i128);
 impl_from!(Amount, usize);
 impl_from!(Amount, isize);
 
-// impl From<Amount> for Amount {
-//     fn from(value: Amount) -> Self {
-//         Self::new(value.as_signed_value().into())
-//     }
-// }
-//
-// impl TryFrom<Amount> for Amount {
-//     type Error = bnum::errors::TryFromIntError;
-//
-//     fn try_from(value: Amount) -> Result<Self, Self::Error> {
-//         Ok(Amount::new(value.into_inner_value().try_into()?))
-//     }
-// }
-
 impl TryFrom<Amount> for usize {
     type Error = bnum::errors::TryFromIntError;
 
@@ -418,36 +428,6 @@ impl TryFrom<Amount> for usize {
         value.into_inner_value().try_into()
     }
 }
-
-impl Neg for Amount {
-    type Output = Self;
-
-    fn neg(self) -> Self::Output {
-        Self::new(-self.inner_value())
-    }
-}
-
-// impl PartialEq<Amount> for Amount {
-//     fn eq(&self, other: &Amount) -> bool {
-//         self.into_inner_value()
-//             .try_into()
-//             .ok()
-//             .map(|n: i64| n == other.as_signed_value())
-//             .unwrap_or(false)
-//     }
-// }
-//
-// impl PartialOrd<Amount> for Amount {
-//     fn partial_cmp(&self, other: &Amount) -> Option<cmp::Ordering> {
-//         if self.is_negative() {
-//             return Some(cmp::Ordering::Less);
-//         }
-//         match self.into_inner_value().try_into().map(Amount::new) {
-//             Ok(value) => Some(value.cmp(other)),
-//             Err(_) => Some(cmp::Ordering::Greater),
-//         }
-//     }
-// }
 
 impl PartialOrd<usize> for Amount {
     fn partial_cmp(&self, other: &usize) -> Option<cmp::Ordering> {
@@ -529,10 +509,16 @@ mod tests {
         assert_eq!(c, Amount::from(10));
         let d = a.checked_sub(b).unwrap();
         assert_eq!(d, Amount::from(-2));
-        let e = a.checked_mul(&b).unwrap();
+        let e = a.checked_mul(b).unwrap();
         assert_eq!(e, Amount::from(24));
         let f = b.checked_div(a).unwrap();
         assert_eq!(f, Amount::from(1));
+        let g = Amount::from(7);
+        let h = g.checked_div_ceil(Amount::from(2)).unwrap();
+        assert_eq!(h, 4);
+        let i = Amount::from(8);
+        let j = i.checked_pow(3).unwrap();
+        assert_eq!(j, Amount::from(512));
 
         // Test overflow
         let max = Amount::MAX;
@@ -540,12 +526,25 @@ mod tests {
         assert!(overflow_add.is_none(), "Overflow should return None");
         let overflow_sub = Amount::MIN.checked_sub(Amount::from(1));
         assert!(overflow_sub.is_none(), "Underflow should return None");
-        let overflow_mul = max.checked_mul(&Amount::from(2));
+        let overflow_mul = max.checked_mul(Amount::from(2));
         assert!(overflow_mul.is_none(), "Overflow should return None");
         let overflow_div = Amount::from(1).checked_div(Amount::zero());
         assert!(overflow_div.is_none(), "Division by zero should return None");
         let overflow_div_ceil = Amount::from(1).checked_div_ceil(Amount::zero());
         assert!(overflow_div_ceil.is_none(), "Division by zero should return None");
+        let overflow_pow = max.checked_pow(10);
+        assert!(overflow_pow.is_none(), "Overflow should return None");
+    }
+
+    #[test]
+    #[cfg(feature = "extra-arith")]
+    fn extra_arithmetic() {
+        let k = Amount::from(27);
+        let l = k.checked_sqrt().unwrap();
+        assert_eq!(l, Amount::from(5));
+
+        let negative_sqrt = Amount::from(-4).checked_sqrt();
+        assert!(negative_sqrt.is_none(), "Square root of negative should return None");
     }
 
     #[test]

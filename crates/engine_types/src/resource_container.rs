@@ -52,7 +52,7 @@ pub enum ResourceContainer {
 }
 
 impl ResourceContainer {
-    pub fn fungible<T: Into<Amount>>(address: ResourceAddress, amount: T) -> Self {
+    pub fn public_fungible<T: Into<Amount>>(address: ResourceAddress, amount: T) -> Self {
         let amount = amount.into();
         assert!(amount.is_non_negative(), "amount must be non-negative");
         Self::Fungible {
@@ -131,7 +131,7 @@ impl ResourceContainer {
         })
     }
 
-    pub fn amount(&self) -> Amount {
+    pub fn unlocked_amount(&self) -> Amount {
         match self {
             Self::Fungible { amount, .. } => *amount,
             Self::NonFungible { token_ids, .. } => Amount::new(token_ids.len().into()),
@@ -286,9 +286,9 @@ impl ResourceContainer {
     }
 
     pub fn withdraw(&mut self, withdraw_amt: Amount) -> Result<Self, ResourceError> {
-        if !withdraw_amt.is_positive() {
+        if !withdraw_amt.is_non_negative() {
             return Err(ResourceError::InvariantError(format!(
-                "Amount must be positive (greater than 0). Got :{withdraw_amt}"
+                "Amount must be non-negative (>= 0). Got :{withdraw_amt}"
             )));
         }
         match self {
@@ -302,7 +302,7 @@ impl ResourceContainer {
                     });
                 }
                 *amount -= withdraw_amt;
-                Ok(Self::fungible(*self.resource_address(), withdraw_amt))
+                Ok(Self::public_fungible(*self.resource_address(), withdraw_amt))
             },
             Self::NonFungible { token_ids, .. } => {
                 if withdraw_amt > token_ids.len() {
@@ -355,7 +355,9 @@ impl ResourceContainer {
 
     pub fn withdraw_all(&mut self) -> Result<Self, ResourceError> {
         match self {
-            Self::Fungible { .. } | Self::NonFungible { .. } | Self::Stealth { .. } => self.withdraw(self.amount()),
+            Self::Fungible { .. } | Self::NonFungible { .. } | Self::Stealth { .. } => {
+                self.withdraw(self.unlocked_amount())
+            },
             Self::Confidential {
                 commitments,
                 revealed_amount,
@@ -565,7 +567,7 @@ impl ResourceContainer {
                 // Sets to zero and returns the amount
                 let newly_locked_amount = mem::take(amount);
                 *locked_amount += newly_locked_amount;
-                Ok(Self::fungible(resource_address, newly_locked_amount))
+                Ok(Self::public_fungible(resource_address, newly_locked_amount))
             },
             Self::NonFungible {
                 token_ids,
@@ -619,7 +621,7 @@ impl ResourceContainer {
                 // Sets to zero and returns the amount
                 let newly_locked_amount = mem::take(revealed_amount);
                 *locked_amount += newly_locked_amount;
-                Ok(Self::fungible(resource_address, newly_locked_amount))
+                Ok(Self::public_fungible(resource_address, newly_locked_amount))
             },
         }
     }
@@ -644,18 +646,18 @@ impl ResourceContainer {
             Self::Fungible {
                 amount, locked_amount, ..
             } => {
-                if *locked_amount < container.amount() {
+                if *locked_amount < container.unlocked_amount() {
                     return Err(ResourceError::InsufficientBalance {
                         details: format!(
                             "unlock: resource container did not contain enough locked funds. Required: {}, Available: \
                              {}",
-                            container.amount(),
+                            container.unlocked_amount(),
                             locked_amount
                         ),
                     });
                 }
-                *amount += container.amount();
-                *locked_amount -= container.amount();
+                *amount += container.unlocked_amount();
+                *locked_amount -= container.unlocked_amount();
             },
             Self::NonFungible {
                 token_ids,
@@ -699,11 +701,11 @@ impl ResourceContainer {
                     });
                 }
 
-                if *locked_revealed_amount < container.amount() {
+                if *locked_revealed_amount < container.unlocked_amount() {
                     return Err(ResourceError::InvariantError(format!(
                         "unlock: resource container did not contain enough locked revealed amount. Required: {}, \
                          Available: {}",
-                        container.amount(),
+                        container.unlocked_amount(),
                         locked_revealed_amount
                     )));
                 }
@@ -720,26 +722,26 @@ impl ResourceContainer {
                         ));
                     }
                 }
-                *revealed_amount += container.amount();
-                *locked_revealed_amount -= container.amount();
+                *revealed_amount += container.unlocked_amount();
+                *locked_revealed_amount -= container.unlocked_amount();
             },
             Self::Stealth {
                 revealed_amount,
                 locked_amount,
                 ..
             } => {
-                if *locked_amount < container.amount() {
+                if *locked_amount < container.unlocked_amount() {
                     return Err(ResourceError::InsufficientBalance {
                         details: format!(
                             "unlock: resource container did not contain enough locked funds. Required: {}, Available: \
                              {}",
-                            container.amount(),
+                            container.unlocked_amount(),
                             locked_amount
                         ),
                     });
                 }
-                *revealed_amount += container.amount();
-                *locked_amount -= container.amount();
+                *revealed_amount += container.unlocked_amount();
+                *locked_amount -= container.unlocked_amount();
             },
         }
 
@@ -794,7 +796,7 @@ impl ResourceContainer {
                 }
                 *available_amount -= amount;
                 *locked_amount += amount;
-                Ok(Self::fungible(*self.resource_address(), amount))
+                Ok(Self::public_fungible(*self.resource_address(), amount))
             },
             Self::NonFungible {
                 token_ids,
@@ -861,6 +863,12 @@ impl ResourceContainer {
                 Ok(Self::stealth(*self.resource_address(), amount))
             },
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.locked_amount().is_zero() &&
+            self.unlocked_amount().is_zero() &&
+            self.number_of_confidential_commitments() == 0
     }
 }
 

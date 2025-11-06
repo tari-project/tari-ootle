@@ -55,6 +55,7 @@ use tari_template_lib::{
         AddressAllocationInvokeArg,
         AllocateAddressResult,
         BucketAction,
+        BucketGetAmountArg,
         BucketRef,
         BuiltinTemplateAction,
         BurnStealthUtxoArg,
@@ -117,6 +118,7 @@ use tari_template_lib::{
         engine_args::{SignatureAction, SignatureVerifyArg},
         Amount,
         EntityId,
+        ResourceInfo,
         TemplateAddress,
     },
 };
@@ -862,7 +864,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     Ok(InvokeResult::encode(&total_supply)?)
                 })
             },
-            ResourceAction::GetResourceType => {
+            ResourceAction::GetResourceInfo => {
                 let resource_address =
                     resource_ref
                         .as_resource_address()
@@ -877,8 +879,12 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let locked = state.read_lock_substate(&SubstateId::Resource(resource_address))?;
                     let resource = state.get_resource(&locked)?;
                     let resource_type = resource.resource_type();
+                    let divisibility = resource.divisibility();
                     state.unlock_substate(locked)?;
-                    Ok(InvokeResult::encode(&resource_type)?)
+                    Ok(InvokeResult::encode(&ResourceInfo {
+                        resource_type,
+                        divisibility,
+                    })?)
                 })
             },
             ResourceAction::Mint => {
@@ -918,7 +924,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                     let payload = Metadata::from_iter([
                         ("resource_type", resource.resource_type().to_string()),
-                        ("amount", resource.amount().to_string()),
+                        ("amount", resource.unlocked_amount().to_string()),
                     ]);
                     self.emit_std_event("resource", "mint", resource_address, payload, state_mut)?;
 
@@ -1375,7 +1381,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let resource_type = state.get_resource(&resource_lock)?.resource_type();
                     let vault_id = state.id_provider()?.new_vault_id()?;
                     let resource = match resource_type {
-                        ResourceType::Fungible => ResourceContainer::fungible(*resource_address, Amount::zero()),
+                        ResourceType::Fungible => ResourceContainer::public_fungible(*resource_address, Amount::zero()),
                         ResourceType::NonFungible => {
                             ResourceContainer::non_fungible(*resource_address, Default::default())
                         },
@@ -1458,7 +1464,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let payload = Metadata::from_iter([
                         ("resource_address", bucket.resource_address().to_string()),
                         ("resource_type", bucket.resource_type().to_string()),
-                        ("amount", bucket.amount().to_string()),
+                        ("amount", bucket.unlocked_amount().to_string()),
                     ]);
 
                     self.emit_std_event("vault", "deposit", vault_id, payload, state_mut)?;
@@ -1691,7 +1697,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                             container.deposit(revealed)?;
                         }
                     }
-                    if container.amount().is_zero() {
+                    if container.unlocked_amount().is_zero() {
                         return Err(RuntimeError::InvalidArgument {
                             argument: "TakeFeesArg",
                             reason: "Fee payment has zero value".to_string(),
@@ -1702,7 +1708,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         "vault",
                         "pay_fee",
                         vault_id,
-                        Metadata::from_iter([("amount", container.amount().to_string())]),
+                        Metadata::from_iter([("amount", container.unlocked_amount().to_string())]),
                         state_mut,
                     )?;
 
@@ -1934,10 +1940,36 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     reason: "GetAmount bucket action requires a bucket id".to_string(),
                 })?;
 
-                args.assert_no_args("Bucket::GetAmount")?;
+                let arg: BucketGetAmountArg = args.assert_one_arg()?;
                 self.tracker.read_with(|state| {
                     let bucket = state.get_bucket(bucket_id)?;
-                    Ok(InvokeResult::encode(&bucket.amount())?)
+                    match arg {
+                        BucketGetAmountArg::AmountOnly => Ok(InvokeResult::encode(&bucket.unlocked_amount())?),
+                        BucketGetAmountArg::LockedOnly => Ok(InvokeResult::encode(&bucket.locked_amount())?),
+                        BucketGetAmountArg::AmountAndLocked => {
+                            let amount = bucket
+                                .unlocked_amount()
+                                .checked_add(bucket.locked_amount())
+                                .ok_or_else(|| RuntimeError::InvariantError {
+                                    function: "BucketAction::GetAmount",
+                                    details: "Total amount overflowed".to_string(),
+                                })?;
+                            Ok(InvokeResult::encode(&amount)?)
+                        },
+                        BucketGetAmountArg::Everything => {
+                            let amount = bucket
+                                .unlocked_amount()
+                                .checked_add(bucket.locked_amount())
+                                .and_then(|a| {
+                                    a.checked_add(Amount::new(bucket.number_of_confidential_commitments().into()))
+                                })
+                                .ok_or_else(|| RuntimeError::InvariantError {
+                                    function: "BucketAction::GetAmount",
+                                    details: "Total amount overflowed".to_string(),
+                                })?;
+                            Ok(InvokeResult::encode(&amount)?)
+                        },
+                    }
                 })
             },
             BucketAction::Take => {
@@ -2028,7 +2060,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                 self.tracker.write_with(|state| {
                     let bucket = state.take_bucket(bucket_id)?;
-                    let burnt_amount = bucket.amount();
+                    let burnt_amount = bucket.unlocked_amount();
                     state.burn_bucket(bucket)?;
 
                     let resource_mut = state.get_resource_mut(&resource_lock)?;
@@ -2123,6 +2155,25 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 self.tracker.write_with(|state| {
                     let bucket = state.get_bucket(bucket_id)?;
                     Ok(InvokeResult::encode(&bucket.number_of_confidential_commitments())?)
+                })
+            },
+            BucketAction::DropEmpty => {
+                let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
+                    argument: "bucket_ref",
+                    reason: "DropEmpty bucket action requires a bucket id".to_string(),
+                })?;
+                args.assert_no_args("Bucket::DropEmpty")?;
+
+                self.tracker.write_with(|state| {
+                    let bucket = state.take_bucket(bucket_id)?;
+                    if !bucket.is_empty() {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "bucket_ref",
+                            reason: "Cannot drop a non-empty bucket".to_string(),
+                        });
+                    }
+                    // Drop
+                    Ok(InvokeResult::unit())
                 })
             },
         }
@@ -2320,10 +2371,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     }
 
                     // validate the bucket amount
-                    if bucket.amount() < min_amount {
+                    if bucket.unlocked_amount() < min_amount {
                         return Err(RuntimeError::AssertError(AssertError::InvalidAmount {
                             expected: min_amount,
-                            got: bucket.amount(),
+                            got: bucket.unlocked_amount(),
                         }));
                     }
 

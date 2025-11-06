@@ -13,7 +13,7 @@ use tari_template_lib::{
 };
 use tari_template_test_tooling::{
     support::assert_error::{assert_access_denied_for_action, assert_reject_reason},
-    test_faucet_component,
+    xtr_faucet_component,
     TemplateTest,
 };
 use tari_transaction::{args, call_args, Instruction, Transaction};
@@ -22,27 +22,7 @@ use tari_transaction::{args, call_args, Instruction, Transaction};
 fn basic_faucet_transfer() {
     let mut template_test = TemplateTest::new(Vec::<&str>::new());
 
-    let faucet_template = template_test.get_template_address("TestFaucet");
-
-    let initial_supply = Amount::from(1_000_000_000_000u64);
-    let result = template_test
-        .execute_and_commit(
-            vec![Instruction::CallFunction {
-                address: faucet_template,
-                function: "mint".to_string(),
-                args: call_args![initial_supply],
-            }],
-            vec![template_test.owner_proof()],
-        )
-        .unwrap();
-    let faucet_component: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
-    let faucet_resource = result
-        .finalize
-        .result
-        .expect("Faucet mint failed")
-        .up_iter()
-        .find_map(|(address, _)| address.as_resource_address())
-        .unwrap();
+    let (faucet_component, faucet_resource) = template_test.create_test_faucet_component(1_000_000_000_000u64);
 
     // Create sender and receiver accounts
     let (sender_address, sender_proof, _) = template_test.create_funded_account();
@@ -249,7 +229,7 @@ fn custom_access_rules() {
 
     let result = template_test.execute_expect_success(
         Transaction::builder()
-            .call_method(test_faucet_component(), "take_free_coins", args![])
+            .call_method(xtr_faucet_component(), "take", args![1000])
             .put_last_instruction_output_on_workspace("bucket")
             // Create component with the same ID
             .create_account_with_custom_rules(

@@ -59,12 +59,14 @@ impl ExecuteResult {
     }
 
     /// Returns the ExecuteResult if successful, or panic if the transaction was not successful.
+    #[track_caller]
     pub fn unwrap_success(self) -> Self {
         self.expect_success();
         self
     }
 
     /// Returns the SubstateDiff if the transaction was successful, or panic if the transaction was not successful.
+    #[track_caller]
     pub fn expect_success(&self) -> &SubstateDiff {
         let diff = self.expect_finalization_success();
 
@@ -76,6 +78,7 @@ impl ExecuteResult {
     }
 
     /// Returns the RejectReason if the transaction failed, or panic if the transaction was successful.
+    #[track_caller]
     pub fn expect_failure(&self) -> &RejectReason {
         if let Some(reason) = self.finalize.result.any_reject() {
             reason
@@ -84,6 +87,7 @@ impl ExecuteResult {
         }
     }
 
+    #[track_caller]
     pub fn expect_finalization_failure(&self) -> &RejectReason {
         match self.finalize.result {
             TransactionResult::Accept(_) => panic!("Expected transaction to fail but it succeeded"),
@@ -92,6 +96,7 @@ impl ExecuteResult {
         }
     }
 
+    #[track_caller]
     pub fn expect_fee_accept_transaction_reject(&self) -> (&SubstateDiff, &RejectReason) {
         match self.finalize.result {
             TransactionResult::AcceptFeeRejectRest(ref diff, ref reason) => (diff, reason),
@@ -102,6 +107,7 @@ impl ExecuteResult {
         }
     }
 
+    #[track_caller]
     pub fn expect_transaction_failure(&self) -> &RejectReason {
         if let Some(reason) = self.finalize.any_reject() {
             reason
@@ -110,6 +116,7 @@ impl ExecuteResult {
         }
     }
 
+    #[track_caller]
     pub fn expect_finalization_success(&self) -> &SubstateDiff {
         match self.finalize.result {
             TransactionResult::Accept(ref diff) => diff,
@@ -118,12 +125,14 @@ impl ExecuteResult {
         }
     }
 
+    #[track_caller]
     pub fn expect_fees_paid_in_full(&self) -> &FeeReceipt {
         let receipt = &self.finalize.fee_receipt;
         assert!(receipt.is_paid_in_full(), "Fees not paid in full");
         receipt
     }
 
+    #[track_caller]
     pub fn expect_return<T: DeserializeOwned>(&self, index: usize) -> T {
         self.finalize
             .execution_results

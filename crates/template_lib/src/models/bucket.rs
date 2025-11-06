@@ -34,7 +34,7 @@ use super::{
     StealthTransferStatement,
 };
 use crate::{
-    args::{BucketAction, BucketInvokeArg, BucketRef, InvokeResult},
+    args::{BucketAction, BucketGetAmountArg, BucketInvokeArg, BucketRef, InvokeResult},
     resource::ResourceManager,
     types::{Amount, ResourceType},
 };
@@ -169,14 +169,58 @@ impl Bucket {
         resp.decode().expect("Bucket join returned invalid result")
     }
 
+    /// Drops the bucket if it is empty. Panics if the bucket is not empty.
+    /// This must be called if all funds have been taken out of the bucket to prevent a dangling bucket error.
+    pub fn drop_empty(self) {
+        let resp: InvokeResult = call_engine(EngineOp::BucketInvoke, &BucketInvokeArg {
+            bucket_ref: BucketRef::Ref(self.id),
+            action: BucketAction::DropEmpty,
+            args: invoke_args![],
+        });
+
+        resp.decode().expect("Bucket DropEmpty returned invalid result")
+    }
+
+    /// Returns true if the bucket is empty (i.e. contains zero tokens), otherwise false.
+    pub fn is_empty(&self) -> bool {
+        let resp: InvokeResult = call_engine(EngineOp::BucketInvoke, &BucketInvokeArg {
+            bucket_ref: BucketRef::Ref(self.id),
+            action: BucketAction::GetAmount,
+            args: invoke_args![BucketGetAmountArg::Everything],
+        });
+
+        let amount: Amount = resp.decode().expect("Bucket GetAmount returned invalid amount");
+        amount.is_zero()
+    }
+
     /// Returns the amount of tokens held in this bucket.
+    ///
+    /// Fungible: Returns the number of fungible tokens in the bucket excluding locked amounts.
+    /// Non-Fungible: Returns the number of NFT tokens for non-fungible resources.
+    /// Confidential: Returns the number of revealed tokens in the bucket excluding locked amounts and confidential
+    /// commitments. Stealth: Returns the number of revealed tokens in the bucket excluding locked amounts. Stealth
+    /// UTXOs are not able to be contained in buckets, and so are not counted.
+    ///
     ///
     /// Note that if the resource is confidential, only the revealed amount is returned.
     pub fn amount(&self) -> Amount {
         let resp: InvokeResult = call_engine(EngineOp::BucketInvoke, &BucketInvokeArg {
             bucket_ref: BucketRef::Ref(self.id),
             action: BucketAction::GetAmount,
-            args: invoke_args![],
+            args: invoke_args![BucketGetAmountArg::AmountOnly],
+        });
+
+        resp.decode().expect("Bucket GetAmount returned invalid amount")
+    }
+
+    /// Returns the amount of tokens held in this bucket excluding unlocked amounts.
+    ///
+    /// Note that if the resource is confidential, only the revealed amount is returned.
+    pub fn locked_amount(&self) -> Amount {
+        let resp: InvokeResult = call_engine(EngineOp::BucketInvoke, &BucketInvokeArg {
+            bucket_ref: BucketRef::Ref(self.id),
+            action: BucketAction::GetAmount,
+            args: invoke_args![BucketGetAmountArg::LockedOnly],
         });
 
         resp.decode().expect("Bucket GetAmount returned invalid amount")

@@ -34,8 +34,9 @@ use tari_engine_types::{
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
+    constants::XTR,
     models::{ComponentAddress, NonFungible, NonFungibleAddress, ResourceAddress},
-    types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
+    types::{crypto::RistrettoPublicKeyBytes, Amount, TemplateAddress},
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 use tari_transaction::{args, call_args, Transaction};
@@ -152,7 +153,7 @@ fn test_buggy_template() {
     // Uncomment the following lines to print the ABI bytes
     // let bytes = tari_bor::encode_with_len(&tari_template_abi::TemplateDef::V1(tari_template_abi::TemplateDefV1 {
     //     template_name: "Buggy".to_string(),
-    //     tari_version: tari_template_abi::version::MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION,
+    //     tari_version: tari_template_abi::version::MINIMUM_SUPPORTED_WASM_ABI_VERSION.to_string(),
     //     functions: vec![],
     // }));
     // println!("pub static _ABI_TEMPLATE_DEF: [u8; {}] = [", bytes.len());
@@ -1024,11 +1025,6 @@ mod emoji_id {
 }
 
 mod tickets {
-    use tari_template_lib::{
-        constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS},
-        types::Amount,
-    };
-
     use super::*;
 
     #[test]
@@ -1062,16 +1058,6 @@ mod tickets {
         // at the beginning we have the initial supply of tickets
         let total_supply: Amount = test.call_method(ticket_seller, "total_supply", args![], vec![]);
         assert_eq!(total_supply, initial_supply);
-
-        // get some funds into the account
-        test.execute_expect_success(
-            Transaction::builder()
-                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take_free_coins", args![])
-                .put_last_instruction_output_on_workspace("coins")
-                .call_method(account_address, "deposit", args![Workspace("coins")])
-                .build_and_seal(&secret),
-            vec![],
-        );
 
         // buy a ticket
         test.execute_expect_success(

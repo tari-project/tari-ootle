@@ -62,15 +62,61 @@ The indexer uses configuration files and environment variables. Key configuratio
 
 ### Command Line Options
 
-- `-r, --api-listen-address <ADDR>`: Bind address for REST API server
-- `-g, --node-grpc <URL>`: Minotari node gRPC URL for epoch oracle
-- `-s, --peer-seeds <SEEDS>`: P2P peer seeds (space-separated)
-- `--listener-port <PORT>`: P2P listening port
-- `-i, --scanning-interval <SECONDS>`: Block scanning interval
-- `--web-ui-public-api-url <URL>`: Public API URL for web UI
-- `--web-ui-public-graphql-url <URL>`: Public GraphQL URL for web UI
-- `--reachability <MODE>`: P2P reachability mode (reachable/unreachable)
+The following options are available (use `tari_indexer --help` for the most up-to-date list):
+
+#### Core Options
+- `-h, --help`: Print help information
+- `-V, --version`: Print version information
+
+#### Configuration
+- `-c, --config <CONFIG>`: Path to configuration file (default: `config/config.toml`)
+- `-b, --base-path <BASE_PATH>`: Directory to store files [env: `TARI_BASE_DIR`] (default: `~/.tari`)
+- `--network <NETWORK>`: Override network configuration [env: `TARI_NETWORK`]
+- `-p <CONFIG_PROPERTY_OVERRIDES>`: Override config properties using fully qualified keys
+
+#### Logging
+- `-l, --log-config <LOG_CONFIG>`: Path to log configuration file
+- `--log-path <LOG_PATH>`: Directory for log storage
+
+#### API Server
+- `-r, --api-listen-address <API_LISTEN_ADDRESS>`: Bind address for REST API server
+- `--web-ui-public-api-url <WEB_UI_PUBLIC_API_URL>`: Public API URL for web UI [env: `TARI_INDEXER_WEB_UI_PUBLIC_API_URL`]
+- `--web-ui-public-graphql-url <WEB_UI_PUBLIC_GRAPHQL_URL>`: Public GraphQL URL for web UI [env: `TARI_INDEXER_WEB_UI_PUBLIC_GRAPHQL_URL`]
+
+#### Blockchain Scanning
+- `-a, --address <ADDRESS>...`: Substate addresses to track (can be specified multiple times)
+- `-i, --scanning-interval <SCANNING_INTERVAL>`: Block scanning interval in seconds
+
+#### P2P Networking
+- `-s, --peer-seeds <PEER_SEEDS>`: P2P peer seeds (can be specified multiple times)
+- `--listener-port <LISTENER_PORT>`: Port to listen on for P2P connections
+- `--reachability <REACHABILITY>`: P2P reachability mode (reachable/unreachable)
 - `--disable-mdns`: Disable mDNS peer discovery
+
+#### Epoch Oracle
+- `-g, --epoch-oracle-minotari-node-grpc-url <URL>`: Minotari node gRPC URL [env: `TARI_INDEXER_MINOTARI_NODE_GRPC_URL`]
+- `--epoch-oracle-config <EPOCH_ORACLE_CONFIG>`: Path to epoch oracle configuration file
+
+### Example Usage
+
+```bash
+# Run with custom API address and peer seeds
+./target/release/tari_indexer \
+    --api-listen-address 0.0.0.0:8080 \
+    --peer-seeds "peer1::address1" \
+    --peer-seeds "peer2::address2" \
+    --scanning-interval 10
+
+# Run with environment variables
+TARI_INDEXER_WEB_UI_PUBLIC_API_URL=http://localhost:8080 \
+TARI_INDEXER_MINOTARI_NODE_GRPC_URL=http://localhost:18142 \
+./target/release/tari_indexer
+
+# Run with custom configuration
+./target/release/tari_indexer \
+    --config /path/to/custom/config.toml \
+    --base-path /custom/data/directory
+```
 
 ## APIs
 

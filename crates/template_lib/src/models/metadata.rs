@@ -46,8 +46,17 @@ impl Metadata {
         self
     }
 
-    pub fn get(&self, key: &str) -> Option<&String> {
-        self.0.get(key)
+    pub fn get(&self, key: &str) -> Option<&str> {
+        self.0.get(key).map(|s| s.as_str())
+    }
+
+    pub fn get_or_insert<K: Into<String>, V: Into<String>>(&mut self, key: K, default: V) -> &str {
+        let key = key.into();
+        self.0.entry(key).or_insert_with(|| default.into())
+    }
+
+    pub fn remove(&mut self, key: &str) -> Option<String> {
+        self.0.remove(key)
     }
 
     pub fn contains_key(&self, key: &str) -> bool {
@@ -170,12 +179,9 @@ mod tests {
             "index" => i.to_string()
         );
 
-        assert_eq!(metadata.get("name"), Some(&"My NFT".to_string()));
-        assert_eq!(metadata.get("description"), Some(&"This is my first NFT".to_string()));
-        assert_eq!(
-            metadata.get("image"),
-            Some(&"https://example.com/my-nft.png".to_string())
-        );
-        assert_eq!(metadata.get("index"), Some(&"123".to_string()));
+        assert_eq!(metadata.get("name"), Some("My NFT"));
+        assert_eq!(metadata.get("description"), Some("This is my first NFT"));
+        assert_eq!(metadata.get("image"), Some("https://example.com/my-nft.png"));
+        assert_eq!(metadata.get("index"), Some("123"));
     }
 }

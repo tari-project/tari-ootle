@@ -17,7 +17,7 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use crate::{
     bootstrap::Services,
-    rest_api::{context::HandlerContext, handlers},
+    rest_api::{context::HandlerContext, handlers, metrics},
 };
 
 const LOG_TARGET: &str = "tari::ootle::indexer::rest_api::server";
@@ -49,10 +49,24 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
 ))]
 pub struct ApiDoc;
 
-pub struct Server;
+pub struct Server {
+    #[cfg(feature = "metrics")]
+    registry: prometheus_client::registry::Registry,
+}
 
 impl Server {
+    #[cfg(not(feature = "metrics"))]
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    #[cfg(feature = "metrics")]
+    pub fn new(registry: prometheus_client::registry::Registry) -> Self {
+        Self { registry }
+    }
+
     pub async fn spawn(
+        self,
         preferred_addr: SocketAddr,
         services: &Services,
         shutdown: ShutdownSignal,
@@ -112,6 +126,8 @@ impl Server {
             .layer(RequestBodyLimitLayer::new(REQUEST_BODY_LIMIT))
             .merge(SwaggerUi::new("/swagger-ui").url("/openapi.json", ApiDoc::openapi()))
             .layer(Extension(context));
+        #[cfg(feature = "metrics")]
+        let router = router.route("/_metrics", get(metrics::MetricsHandler::new(self.registry)));
 
         let listener = try_bind_with_fallback(preferred_addr).await?;
 

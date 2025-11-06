@@ -11275,6 +11275,7 @@ dependencies = [
  "mediatype",
  "mime_guess",
  "minotari_app_utilities",
+ "prometheus-client",
  "prost 0.14.1",
  "serde",
  "serde_json",

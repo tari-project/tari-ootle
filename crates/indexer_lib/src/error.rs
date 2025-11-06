@@ -26,4 +26,6 @@ pub enum IndexerError {
     FailedToParseTransactionHash(String),
     #[error("Substate cache operation failed: {0}")]
     SubstateCacheError(#[from] SubstateCacheError),
+    #[error("No committee members available: {details}")]
+    NoCommitteeMembers { details: String },
 }

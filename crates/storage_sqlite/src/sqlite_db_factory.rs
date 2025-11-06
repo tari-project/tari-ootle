@@ -20,7 +20,11 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{fs::create_dir_all, marker::PhantomData, path::PathBuf};
+use std::{
+    fs::create_dir_all,
+    marker::PhantomData,
+    path::{Path, PathBuf},
+};
 
 use diesel::{sql_query, Connection, RunQueryDsl, SqliteConnection};
 use tari_ootle_common_types::NodeAddressable;
@@ -35,23 +39,26 @@ const _LOG_TARGET: &str = "tari::ootle::sqlite_storage";
 
 #[derive(Debug, Clone)]
 pub struct SqliteDbFactory<TAddr> {
-    data_dir: PathBuf,
-    _addr: std::marker::PhantomData<TAddr>,
+    db_path: PathBuf,
+    _addr: PhantomData<TAddr>,
 }
 
 impl<TAddr> SqliteDbFactory<TAddr> {
-    pub fn new(data_dir: PathBuf) -> Self {
+    pub fn new<P: AsRef<Path>>(db_path: P) -> Self {
         Self {
-            data_dir,
+            db_path: db_path.as_ref().to_path_buf(),
             _addr: PhantomData,
         }
     }
 
     fn connect(&self) -> Result<SqliteConnection, StorageError> {
-        let database_url = self.data_dir.join("global_storage.sqlite");
-        create_dir_all(database_url.parent().unwrap()).map_err(|_| StorageError::FileSystemPathDoesNotExist)?;
-        let database_url = database_url.to_str().expect("database_url utf-8 error").to_string();
-        let connection = SqliteConnection::establish(&database_url).map_err(SqliteStorageError::from)?;
+        if let Some(parent) = self.db_path.parent() {
+            create_dir_all(parent).map_err(|e| StorageError::General {
+                details: format!("Failed to create parent directory for database file: {}", e),
+            })?;
+        }
+        let database_url = self.db_path.to_str().expect("database_url utf-8 error");
+        let connection = SqliteConnection::establish(database_url).map_err(SqliteStorageError::from)?;
         Ok(connection)
     }
 }

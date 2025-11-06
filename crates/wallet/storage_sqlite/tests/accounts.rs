@@ -3,6 +3,7 @@
 
 use std::str::FromStr;
 
+use tari_ootle_common_types::Epoch;
 use tari_ootle_wallet_sdk::{
     models::{AccountUpdate, KeyId},
     storage::{CommittableStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
@@ -25,6 +26,7 @@ fn update_account() {
         Some(KeyId::derived(0)),
         &RistrettoPublicKeyBytes::default(),
         &Default::default(),
+        Epoch::zero(),
         false,
         false,
     )

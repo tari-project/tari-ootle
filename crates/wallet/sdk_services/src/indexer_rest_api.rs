@@ -31,6 +31,7 @@ use tari_ootle_common_types::{
     displayable::Displayable,
     optional::IsNotFoundError,
     shard::Shard,
+    Epoch,
     StateVersion,
 };
 use tari_ootle_wallet_sdk::{
@@ -177,6 +178,7 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
 
     async fn stream_stealth_utxo_updates(
         &self,
+        from_epoch: Epoch,
         resource_address: ResourceAddress,
         shard_state_versions: Vec<(Shard, StateVersion)>,
         unspent_only: bool,
@@ -184,6 +186,7 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
         let mut client = self.get_client()?;
         let stream = client
             .stream_utxo_updates_protobuf(GetUtxoUpdatesRequest {
+                from_epoch,
                 shard_state_versions,
                 resource_address,
                 unspent_only,

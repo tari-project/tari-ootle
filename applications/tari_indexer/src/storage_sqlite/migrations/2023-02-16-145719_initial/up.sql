@@ -136,12 +136,13 @@ create table utxos
     state_version    bigint    not NULL,
     output           blob      NULL,
     utxo_tag         int       not NULL,
+    epoch            bigint    not NULL,
     is_spent         boolean   not NULL,
     is_burnt         boolean   not NULL,
     is_frozen        boolean   not NULL,
     created_at       timestamp not null default current_timestamp
 );
 
-CREATE INDEX utxos_resource_state_version_shard_idx ON utxos (resource_address, state_version, shard);
+CREATE INDEX utxos_resource_state_version_shard_epoch_idx ON utxos (resource_address, state_version, shard, epoch);
 CREATE UNIQUE INDEX utxos_resource_public_nonce_utxo_tag_uniq_partial ON utxos (resource_address, public_nonce, utxo_tag) WHERE is_spent = false;
 

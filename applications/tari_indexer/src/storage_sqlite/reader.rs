@@ -35,7 +35,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_storage::{time::PrimitiveDateTime, Ordering, StorageError};
 use tari_ootle_storage_sqlite::SqliteTransaction;
-use tari_ootle_wallet_sdk::models::WalletUtxoUpdate;
+use tari_ootle_wallet_sdk::models::UtxoStateUpdateSet;
 use tari_template_lib::{
     models::{ResourceAddress, UtxoId},
     prelude::{RistrettoPublicKeyBytes, TemplateAddress},
@@ -519,17 +519,19 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
     fn utxos_get_updates(
         &mut self,
         resource_address: ResourceAddress,
+        from_epoch: Epoch,
         shard: Shard,
         from_state_version: StateVersion,
         unspent_only: bool,
         limit: u32,
-    ) -> Result<(StateVersion, Vec<WalletUtxoUpdate>), StorageError> {
+    ) -> Result<UtxoStateUpdateSet, StorageError> {
         const OPERATION: &str = "get_utxo_updates";
         use crate::storage_sqlite::schema::utxos;
 
         let mut query = utxos::table
             .filter(utxos::resource_address.eq(resource_address.to_string()))
             .filter(utxos::state_version.gt(from_state_version.as_u64() as i64))
+            .filter(utxos::epoch.ge(from_epoch.as_u64() as i64))
             .filter(utxos::shard.eq(shard.as_u32() as i32))
             .limit(i64::from(limit))
             .order_by(utxos::state_version.asc())
@@ -548,16 +550,23 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
 
         let mut updates = Vec::new();
         let mut max_state_version = StateVersion::zero();
+        let mut max_epoch = Epoch::zero();
         for row in rows {
             let row = row.map_err(|e| StorageError::QueryError {
                 reason: format!("{OPERATION}: {}", e),
             })?;
+            let epoch = Epoch(row.epoch as u64);
             let (state_version, update) = row.try_convert_to_update()?;
             max_state_version = max_state_version.max(state_version);
+            max_epoch = max_epoch.max(epoch);
             updates.push(update);
         }
 
-        Ok((max_state_version, updates))
+        Ok(UtxoStateUpdateSet {
+            updates,
+            max_state_version,
+            max_epoch,
+        })
     }
 
     fn utxos_list(

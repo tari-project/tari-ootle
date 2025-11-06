@@ -79,7 +79,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
     info!(target: LOG_TARGET, "Starting indexer node on network {}", config.network);
     let keypair = setup_keypair_prompt(config.to_identity_file_path(), true)?;
 
-    let db_factory = SqliteDbFactory::new(config.indexer.data_dir.clone());
+    let db_factory = SqliteDbFactory::new(config.global_db_path());
     db_factory
         .migrate()
         .map_err(|e| ExitError::new(ExitCode::DatabaseError, e))?;

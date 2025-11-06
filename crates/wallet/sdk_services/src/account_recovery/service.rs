@@ -10,6 +10,7 @@ use tari_ootle_common_types::{
     displayable::Displayable,
     optional::{IsNotFoundError, Optional},
     substate_type::SubstateType,
+    Epoch,
 };
 use tari_ootle_wallet_sdk::{
     apis::config::ConfigKey,
@@ -30,6 +31,7 @@ pub struct AccountRecoveryService<TStore, TNetworkInterface> {
     wallet_sdk: WalletSdk<TStore, TNetworkInterface>,
     account_monitor_handle: AccountMonitorHandle,
     abandon_after_not_found: usize,
+    cipher_seed_birthday_epoch: Epoch,
 }
 
 impl<TStore, TNetworkInterface> AccountRecoveryService<TStore, TNetworkInterface>
@@ -42,11 +44,13 @@ where
         wallet_sdk: WalletSdk<TStore, TNetworkInterface>,
         account_monitor_handle: AccountMonitorHandle,
         abandon_after_not_found: usize,
+        cipher_seed_birthday_epoch: Epoch,
     ) -> Self {
         Self {
             wallet_sdk,
             account_monitor_handle,
             abandon_after_not_found,
+            cipher_seed_birthday_epoch,
         }
     }
 
@@ -156,6 +160,10 @@ where
             .optional()
             .map_err(|e| AccountRecoveryError::NetworkInterfaceError { details: e.to_string() })?;
 
+        // We use the cipher seed birthday as the account birthday since that is simpler than attempting to fetch the
+        // creation epoch for each account.
+        let birthday_epoch = self.cipher_seed_birthday_epoch;
+
         match result {
             None => {
                 info!(target: LOG_TARGET, "🔑 Account {} not found on chain. It may have stealth UTXOs owned by its key", account_addr);
@@ -167,6 +175,7 @@ where
                     &account_addr,
                     key.as_key_id(),
                     key.as_key_id(),
+                    birthday_epoch,
                     false,
                     // if this is the first account, set it as the default
                     key.key_index == 0,
@@ -218,6 +227,7 @@ where
                     &account_addr,
                     KeyId::derived(key.key_index),
                     KeyId::derived(key.key_index),
+                    birthday_epoch,
                     true,
                     // if this is the first account, set it as the default
                     key.key_index == 0,

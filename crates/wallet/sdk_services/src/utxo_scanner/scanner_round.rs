@@ -123,6 +123,7 @@ where
             .sdk
             .get_network_interface()
             .stream_stealth_utxo_updates(
+                self.account.birthday_epoch(),
                 *self.resource_address,
                 // NOTE that this will request shards in a random order (HashMap). This is good to avoid always
                 // starting with the same shard.

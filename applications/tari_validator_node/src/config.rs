@@ -131,6 +131,10 @@ impl ValidatorNodeConfig {
         //     self.database.sqlite.path = self.data_dir.as_ref().join(&self.database.sqlite.path);
         // }
     }
+
+    pub fn get_global_db_path(&self) -> PathBuf {
+        self.data_dir.join("global_storage.sqlite")
+    }
 }
 
 impl Default for ValidatorNodeConfig {

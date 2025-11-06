@@ -113,7 +113,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
     }
 
     pub async fn run(&mut self) -> Result<(), EpochManagerError> {
-        info!(target: LOG_TARGET, "Starting epoch manager");
+        info!(target: LOG_TARGET, "🚀 Starting epoch manager");
         // first, load initial state
         self.inner.load_initial_state()?;
 

@@ -8,6 +8,7 @@ diesel::table! {
         owner_public_key -> Text,
         view_only_key_id -> Text,
         owner_key_id -> Nullable<Text>,
+        birthday_epoch -> BigInt,
         is_default -> Bool,
         is_confirmed_on_chain -> Bool,
         stealth_resources -> Text,

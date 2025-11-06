@@ -3,6 +3,7 @@
 
 use blake2::Blake2b;
 use digest::{consts::U64, crypto_common::rand_core::OsRng};
+use tari_common_types::seeds::cipher_seed;
 use tari_crypto::{
     keys::{PublicKey as _, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
@@ -11,6 +12,7 @@ use tari_crypto::{
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
+    Epoch,
     Network,
 };
 use tari_ootle_wallet_crypto::encryption::encrypt_with_password;
@@ -24,6 +26,7 @@ use crate::{
         DerivedKeyIndex,
         DerivedKeyPair,
         DerivedWalletKey,
+        EpochBirthday,
         ImportedKeyId,
         ImportedWalletKey,
         KeyBranch,
@@ -45,6 +48,7 @@ pub struct KeyManagerApi<'a, TStore> {
     store: &'a TStore,
     key_store: LocalKeyStore<'a, TStore>,
     password_manager: PasswordManagerApi<'a, TStore>,
+    epoch_birthday: EpochBirthday,
 }
 
 impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
@@ -53,12 +57,14 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         store: &'a TStore,
         key_store: LocalKeyStore<'a, TStore>,
         password_manager: PasswordManagerApi<'a, TStore>,
+        epoch_birthday: EpochBirthday,
     ) -> Self {
         Self {
             network,
             store,
             key_store,
             password_manager,
+            epoch_birthday,
         }
     }
 
@@ -322,6 +328,21 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
                 Ok(key.into())
             },
         }
+    }
+
+    pub fn get_cipher_seed_birthday_epoch(&self) -> Result<Epoch, KeyManagerApiError> {
+        let birthday = self
+            .key_store
+            .cipher_seed_birthday()
+            .map_err(|e| KeyManagerApiError::KeyStoreError { source: e.into() })?;
+        let Some(birthday) = birthday else {
+            return Ok(Epoch::zero());
+        };
+
+        let birthday = u64::from(birthday) * cipher_seed::SECONDS_PER_DAY;
+        let epoch = self.epoch_birthday.calculate_epoch_rel_minotari(birthday);
+
+        Ok(epoch)
     }
 }
 

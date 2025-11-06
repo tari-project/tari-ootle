@@ -11,6 +11,7 @@ use tari_common_types::seeds::{
 use tari_crypto::tari_utilities::SafePassword;
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
+    Epoch,
     Network,
     NetworkParseError,
 };
@@ -41,6 +42,7 @@ use crate::{
     cipher_seed::{CipherSeedRestore, WalletCipherSeed},
     key_managers::local::LocalKeyManager,
     local_key_store::LocalKeyStore,
+    models::EpochBirthday,
     network::{StatusResponseError, WalletNetworkInterface},
     storage::{WalletStorageError, WalletStore},
 };
@@ -62,6 +64,7 @@ pub struct WalletSdk<TStore, TNetworkInterface> {
     network_interface: TNetworkInterface,
     config: WalletSdkConfig,
     loaded_cipher_seed: WalletCipherSeed,
+    epoch_birthday: EpochBirthday,
 }
 
 impl<TStore, TNetworkInterface> WalletSdk<TStore, TNetworkInterface>
@@ -74,6 +77,7 @@ where
         store: TStore,
         indexer: TNetworkInterface,
         config: WalletSdkConfig,
+        epoch_birthday: EpochBirthday,
     ) -> Result<WalletSdk<TStore, TNetworkInterface>, WalletSdkError> {
         // initialize network
         if let Some(network) = Self::get_store_network(&store)? {
@@ -94,6 +98,7 @@ where
             network_interface: indexer,
             config,
             loaded_cipher_seed: WalletCipherSeed::None,
+            epoch_birthday,
         })
     }
 
@@ -173,6 +178,7 @@ where
             &self.store,
             LocalKeyStore::new(&self.loaded_cipher_seed, self.password_manager_api(), &self.store),
             self.password_manager_api(),
+            self.epoch_birthday,
         )
     }
 
@@ -202,6 +208,7 @@ where
             &self.store,
             self.substate_api(),
             self.key_manager_api(),
+            self.epoch_birthday,
         )
     }
 
@@ -264,6 +271,10 @@ where
 
     pub fn viewable_balance_api(&self) -> ViewableBalanceApi {
         ViewableBalanceApi
+    }
+
+    pub fn calculate_birthday_epoch(&self) -> Epoch {
+        self.epoch_birthday.calculate_current_epoch()
     }
 
     /// Tries to get encrypted cipher seed from DB and decrypts it using OS keyring if possible.

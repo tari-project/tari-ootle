@@ -271,19 +271,17 @@ impl SubstateRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SubstateCreatedProof {
+pub struct SubstateCreate {
     pub substate: SubstateData,
-    // TODO: proof that data was created
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SubstateDestroyedProof {
+pub struct SubstateDestroy {
     pub substate_id: SubstateId,
     pub version: u32,
-    // TODO: proof that data was destroyed
 }
 
-impl SubstateDestroyedProof {
+impl SubstateDestroy {
     pub fn to_versioned_substate_id(&self) -> VersionedSubstateId {
         VersionedSubstateId::new(self.substate_id.clone(), self.version)
     }
@@ -292,7 +290,6 @@ impl SubstateDestroyedProof {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SubstateCreated {
-    // TODO: consider removing this field, it's not used
     pub at_epoch: Epoch,
     // Note: This field not strictly necessary, since the shard can be derived from (SubstateId, Version) and
     // NumPreshards. But the cost is negligible, and it makes the metadata more self-contained.
@@ -395,8 +392,8 @@ impl From<SubstateRecord> for SubstateData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SubstateUpdateProof {
-    Create(SubstateCreatedProof),
-    Destroy(SubstateDestroyedProof),
+    Create(SubstateCreate),
+    Destroy(SubstateDestroy),
 }
 
 impl SubstateUpdateProof {
@@ -426,7 +423,7 @@ impl SubstateUpdateProof {
         VersionedSubstateId::new(self.substate_id().clone(), self.version())
     }
 
-    pub fn as_create(&self) -> Option<&SubstateCreatedProof> {
+    pub fn as_create(&self) -> Option<&SubstateCreate> {
         match self {
             Self::Create(create) => Some(create),
             _ => None,
@@ -449,8 +446,8 @@ impl SubstateUpdateProof {
     }
 }
 
-impl From<SubstateCreatedProof> for SubstateUpdateProof {
-    fn from(value: SubstateCreatedProof) -> Self {
+impl From<SubstateCreate> for SubstateUpdateProof {
+    fn from(value: SubstateCreate) -> Self {
         Self::Create(value)
     }
 }

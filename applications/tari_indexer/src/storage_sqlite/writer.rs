@@ -116,6 +116,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
 
     fn batch_insert_utxo_updates<I: IntoIterator<Item = UtxoUpdateRecord>>(
         &mut self,
+        epoch: Epoch,
         updates: I,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "batch_insert_utxo_updates";
@@ -136,6 +137,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                         resource_address,
                         state_version: unspent.state_version.as_u64() as i64,
                         utxo_tag: unspent.utxo_output.tag.value() as i32,
+                        epoch: epoch.as_u64() as i64,
                         is_spent: false,
                         is_burnt: false,
                         is_frozen: unspent.is_frozen,
@@ -150,6 +152,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                     let resource_address = spent.address.resource_address().to_string();
                     let commitment = spent.address.id().to_commitment_hex_string();
                     let update = UtxoRecordUpdate {
+                        epoch: Some(epoch.as_u64() as i64),
                         version: Some(spent.version as i32),
                         // Prune the UTXO data for spent outputs
                         output: Some(None),

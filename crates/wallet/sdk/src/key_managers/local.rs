@@ -59,7 +59,7 @@ pub enum LocalKeyManagerError<TKeyStoreErr> {
     PasswordManagerApiError(#[from] PasswordManagerApiError),
     #[error("Key manager is in read only mode")]
     ReadOnlyMode,
-    #[error("Cipher error: {0}")]
+    #[error("Key store error: {0}")]
     KeyStoreError(TKeyStoreErr),
 }
 

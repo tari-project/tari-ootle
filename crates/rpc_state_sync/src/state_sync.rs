@@ -28,7 +28,7 @@ use tari_ootle_storage::{
     consensus_models::{
         BookkeepingModel,
         EpochCheckpoint,
-        SubstateCreatedProof,
+        SubstateCreate,
         SubstateRecord,
         SubstateTransition,
         SubstateUpdateBatch,
@@ -659,7 +659,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
 fn extract_template_change(
     // Extra data required by the template db - necessary?
     epoch: Epoch,
-    create: &SubstateCreatedProof,
+    create: &SubstateCreate,
 ) -> Result<Option<TemplateChange>, RpcStateSyncError> {
     let Some(template_address) = create.substate.substate_id.as_template() else {
         return Ok(None);

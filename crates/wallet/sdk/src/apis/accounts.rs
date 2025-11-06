@@ -13,6 +13,7 @@ use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
     substate_type::SubstateType,
+    Epoch,
     Network,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
@@ -32,6 +33,7 @@ use crate::{
         Account,
         AccountUpdate,
         AccountWithAddress,
+        EpochBirthday,
         KeyId,
         KeyIdOrPublicKey,
         VaultBalance,
@@ -47,6 +49,7 @@ pub struct AccountsApi<'a, TStore, TNetworkInterface> {
     store: &'a TStore,
     substates_api: SubstatesApi<'a, TStore, TNetworkInterface>,
     key_manager_api: KeyManagerApi<'a, TStore>,
+    epoch_birthday: EpochBirthday,
 }
 
 pub fn derive_account_address_from_public_key(public_key: &RistrettoPublicKeyBytes) -> ComponentAddress {
@@ -59,12 +62,14 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
         store: &'a TStore,
         substates_api: SubstatesApi<'a, TStore, TNetworkInterface>,
         key_manager_api: KeyManagerApi<'a, TStore>,
+        epoch_birthday: EpochBirthday,
     ) -> Self {
         Self {
             network,
             store,
             substates_api,
             key_manager_api,
+            epoch_birthday,
         }
     }
 
@@ -81,11 +86,14 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
         let account_public_key = account_address.address.account_key().to_byte_type();
         let account_component_address = derive_account_address_from_public_key(&account_public_key);
 
+        let birthday_epoch = self.epoch_birthday.calculate_current_epoch();
+
         self.add_account(
             account_name,
             &account_component_address,
             account_address.view_only_key_id,
             account_address.owner_key_id,
+            birthday_epoch,
             false,
             is_default,
         )?;
@@ -97,6 +105,7 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
                 view_only_key_id: account_address.view_only_key_id,
                 owner_key_id: Some(account_address.owner_key_id),
                 owner_public_key: account_public_key,
+                birthday_epoch,
                 is_confirmed_on_chain: false,
                 is_default,
             },
@@ -110,6 +119,7 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
         account_address: &ComponentAddress,
         view_only_key_id: KeyId,
         owner_key: K,
+        birthday_epoch: Epoch,
         is_confirmed_on_chain: bool,
         is_default: bool,
     ) -> Result<(), AccountsApiError> {
@@ -141,6 +151,7 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
                 owner_key_id,
                 &owner_pk,
                 &associated_stealth_resources,
+                birthday_epoch,
                 is_confirmed_on_chain,
                 is_default,
             )?;

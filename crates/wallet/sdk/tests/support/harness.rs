@@ -10,10 +10,18 @@ use tari_engine_types::{
     ToByteType,
     Utxo,
 };
-use tari_ootle_common_types::{optional::Optional, shard::Shard, Network, StateVersion};
+use tari_ootle_common_types::{optional::Optional, shard::Shard, Epoch, Network, StateVersion};
 use tari_ootle_wallet_sdk::{
     cipher_seed::CipherSeedRestore,
-    models::{ConfidentialOutputModel, KeyId, OutputStatus, UtxoUpdateSet, WalletLockDropGuard, WalletLockId},
+    models::{
+        ConfidentialOutputModel,
+        EpochBirthday,
+        KeyId,
+        OutputStatus,
+        UtxoUpdateSet,
+        WalletLockDropGuard,
+        WalletLockId,
+    },
     network::{SubstateQueryResult, TransactionQueryResult, UtxoUpdateStream, WalletNetworkInterface},
     storage::TagAndPublicNoncePair,
     WalletSdk,
@@ -41,10 +49,15 @@ impl Test {
         let store = SqliteWalletStore::try_open(temp.path().join("data/wallet.sqlite")).unwrap();
         store.run_migrations().unwrap();
 
-        let mut sdk = WalletSdk::initialize(store.clone(), PanicNetworkInterface, WalletSdkConfig {
-            network: Network::LocalNet,
-            override_keyring_password: Some(SafePassword::from_str("SuuuCh Sekret W0W").unwrap()),
-        })
+        let mut sdk = WalletSdk::initialize(
+            store.clone(),
+            PanicNetworkInterface,
+            WalletSdkConfig {
+                network: Network::LocalNet,
+                override_keyring_password: Some(SafePassword::from_str("SuuuCh Sekret W0W").unwrap()),
+            },
+            EpochBirthday::new(1200.try_into().unwrap(), u64::MAX),
+        )
         .unwrap();
         sdk.initialize_cipher_seed(CipherSeedRestore::CreateNewIfRequired)
             .unwrap();
@@ -55,6 +68,7 @@ impl Test {
                 &Test::test_account_address(),
                 KeyId::derived(0),
                 KeyId::derived(0),
+                Epoch::zero(),
                 true,
                 true,
             )
@@ -185,6 +199,7 @@ impl WalletNetworkInterface for PanicNetworkInterface {
 
     async fn stream_stealth_utxo_updates(
         &self,
+        _from_epoch: Epoch,
         _resource_address: ResourceAddress,
         _shard_state_versions: Vec<(Shard, StateVersion)>,
         _unspent_only: bool,

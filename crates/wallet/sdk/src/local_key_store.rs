@@ -68,6 +68,11 @@ impl<TStore: WalletStore> WalletKeyStore<ImportedKeyId> for LocalKeyStore<'_, TS
         })?;
         Ok(secret)
     }
+
+    fn cipher_seed_birthday(&self) -> Result<Option<u16>, Self::Error> {
+        let seed = self.get_cipher_seed()?;
+        Ok(Some(seed.birthday()))
+    }
 }
 
 #[derive(thiserror::Error, Debug)]

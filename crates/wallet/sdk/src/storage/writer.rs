@@ -7,7 +7,7 @@ use tari_engine_types::{
     resource::Resource,
     substate::{SubstateDiff, SubstateId},
 };
-use tari_ootle_common_types::{shard::Shard, StateVersion, VersionedSubstateIdRef};
+use tari_ootle_common_types::{shard::Shard, Epoch, StateVersion, VersionedSubstateIdRef};
 use tari_template_lib::{
     models::{ComponentAddress, NonFungibleId, ResourceAddress, UtxoAddress, UtxoId, VaultId},
     prelude::{crypto::UtxoTag, Amount, RistrettoPublicKeyBytes, TemplateAddress},
@@ -98,6 +98,7 @@ pub trait WalletStoreWriter: CommittableStore {
         owner_key_id: Option<KeyId>,
         owner_public_key: &RistrettoPublicKeyBytes,
         associated_stealth_resources: &HashSet<ResourceAddress>,
+        birthday_epoch: Epoch,
         is_confirmed_on_chain: bool,
         is_default: bool,
     ) -> Result<(), WalletStorageError>;

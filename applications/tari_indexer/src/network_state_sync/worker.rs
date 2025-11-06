@@ -412,7 +412,7 @@ impl NetworkWideStateSync {
                 // TODO: this is not currently used. Consider removing. 
                 tx.batch_insert_substate_transitions(shard, state_version, update_buf.drain(..))?;
                 debug!(target: LOG_TARGET, "✅ Committing {} UTXOs for shard {shard} (epoch: {msg_epoch})", utxos_buf.len());
-                tx.batch_insert_utxo_updates(utxos_buf.drain(..))?;
+                tx.batch_insert_utxo_updates(msg_epoch, utxos_buf.drain(..))?;
                 // TODO: there are many ways to do this. This is probably not the best way. But this allows wallet to query for validator fee pool values since
                 // block sync does not sync validator fee pools (due to block diffs being removed on block commit).
                 for substate_data in validator_fee_pools_buf.drain(..) {

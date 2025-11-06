@@ -52,8 +52,11 @@ impl<TAddr> SqliteDbFactory<TAddr> {
     }
 
     fn connect(&self) -> Result<SqliteConnection, StorageError> {
-        create_dir_all(self.db_path.parent().expect("failed to get parent dir"))
-            .map_err(|_| StorageError::FileSystemPathDoesNotExist)?;
+        if let Some(parent) = self.db_path.parent() {
+            create_dir_all(parent).map_err(|e| StorageError::General {
+                details: format!("Failed to create parent directory for database file: {}", e),
+            })?;
+        }
         let database_url = self.db_path.to_str().expect("database_url utf-8 error");
         let connection = SqliteConnection::establish(database_url).map_err(SqliteStorageError::from)?;
         Ok(connection)

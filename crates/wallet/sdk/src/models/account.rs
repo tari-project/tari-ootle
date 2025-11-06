@@ -79,8 +79,7 @@ impl AccountWithAddress {
     }
 
     pub fn birthday_epoch(&self) -> Epoch {
-        // TODO
-        Epoch(0)
+        self.account.birthday_epoch()
     }
 
     pub fn account(&self) -> &Account {

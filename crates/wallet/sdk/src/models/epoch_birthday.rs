@@ -70,7 +70,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn it_always_calcuates_zero_if_zero_epoch_time_is_in_the_future() {
+    fn it_always_calculates_zero_if_zero_epoch_time_is_in_the_future() {
         let birthday = EpochBirthday::far_future();
         let epoch = birthday.calculate_current_epoch();
         assert_eq!(epoch, Epoch::zero());

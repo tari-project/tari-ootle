@@ -62,7 +62,7 @@ impl fmt::Display for WorkspaceOffsetId {
 pub enum InstructionArg {
     /// The argument is in the transaction execution's workspace, which means it is the result of a previous
     /// instruction
-    Workspace(#[cfg_attr(feature = "ts", ts(type = "number"))] WorkspaceOffsetId),
+    Workspace(WorkspaceOffsetId),
     /// The argument is a value specified in the transaction
     Literal(
         #[serde(

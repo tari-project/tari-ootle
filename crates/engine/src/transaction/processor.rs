@@ -294,7 +294,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 Ok(InstructionResult::empty())
             },
             Instruction::EmitLog { level, message } => {
-                runtime.interface().emit_log(level, message)?;
+                runtime.interface().emit_log(level, message.into_string())?;
                 Ok(InstructionResult::empty())
             },
             Instruction::ClaimBurn { claim, output_data } => {

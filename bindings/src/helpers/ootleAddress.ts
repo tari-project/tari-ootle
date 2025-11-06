@@ -17,12 +17,12 @@ export type DecodedOotleAddress = {
 };
 
 export enum NetworkHrp {
-  MainNet = "xtr_",
-  StageNet = "xtr_stg_",
-  NextNet = "xtr_nxt_",
-  LocalNet = "xtr_loc_",
-  Igor = "xtr_igr_",
-  Esmeralda = "xtr_esm_",
+  MainNet = "otl_",
+  StageNet = "otl_stg_",
+  NextNet = "otl_nxt_",
+  LocalNet = "otl_loc_",
+  Igor = "otl_igr_",
+  Esmeralda = "otl_esm_",
 }
 
 export function decodeOotleAddressOrNull(address: OotleAddress): DecodedOotleAddress | null {

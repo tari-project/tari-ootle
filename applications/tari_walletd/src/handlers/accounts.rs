@@ -82,7 +82,6 @@ use tokio::task;
 use super::context::HandlerContext;
 use crate::{
     handlers::helpers::{
-        application_error,
         general_error,
         get_account,
         get_account_by_key_index,
@@ -95,7 +94,6 @@ use crate::{
         wait_for_result,
         wait_for_result_and_account,
     },
-    jrpc_server::ApplicationErrorCode,
     DEFAULT_FEE,
 };
 
@@ -295,10 +293,8 @@ pub async fn handle_get_balances(
         let confidential_balance = if vault.resource_type.is_stealth() {
             let stealth_balance = stealth_outputs
                 .iter()
-                .filter(|o| {
-                    o.owner_account == *account.component_address() && o.resource_address == vault.resource_address
-                })
-                .map(|o| o.value)
+                .filter(|o| o.resource_address == vault.resource_address)
+                .map(|o| Amount::from(o.value))
                 .sum::<Amount>();
 
             if stealth_balance.is_positive() {
@@ -328,8 +324,8 @@ pub async fn handle_get_balances(
         // NOTE: indexemap used to ensure a consistent order (HashMap causes UI to randomly switch positions for multiple stealth resources)
         .fold(IndexMap::new(), |mut acc, o| {
             acc.entry(o.resource_address)
-                .and_modify(|v| *v += o.value)
-                .or_insert(o.value);
+                .and_modify(|v| *v += Amount::from(o.value))
+                .or_insert(Amount::from(o.value));
             acc
         });
 
@@ -479,21 +475,12 @@ pub async fn handle_claim_burn(
 
     let final_amount = decrypted
         .value()
-        .checked_sub_positive(max_fee.into())
+        .checked_sub(max_fee)
         .ok_or_else(|| invalid_params("max_fee", Some("more fees paid than claimed amount")))?;
 
-    if final_amount.is_zero() {
+    if final_amount == 0 {
         return Err(invalid_params("max_fee", Some("fee equals or exceeds claimed amount")));
     }
-
-    let final_amount_u64 = final_amount.to_u64_checked().ok_or_else(|| {
-        // NOTE: this can never be anywhere close to this large because this would be more than the total supply of XTM
-        // for thousands of years
-        application_error(
-            ApplicationErrorCode::NotImplemented,
-            format!("Amount to spend {final_amount} is too large and not currently supported"),
-        )
-    })?;
 
     let (nonce, output_public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
     let account_owner = sdk.key_manager_api().get_account_owner_key(account_owner_key_id)?;
@@ -505,7 +492,7 @@ pub async fn handle_claim_burn(
     // u64::MAX. Apart from it being insane/basically impossible to have that much XTR in a single UTXO, the L1 emission
     // will reach this much in many thousands of years.
     let encrypted_data = sdk.stealth_crypto_api().encrypt_value_and_mask(
-        final_amount_u64,
+        final_amount,
         &mask.key,
         &view_only_public_key,
         &nonce,
@@ -1167,7 +1154,7 @@ pub async fn handle_create_stealth_transfer_statement(
         let outputs = req
             .outputs
             .iter()
-            .filter(|o| o.blinded_amount.is_positive())
+            .filter(|o| o.blinded_amount > 0)
             .map(TryInto::try_into)
             .collect::<Result<Vec<_>, _>>()?;
 

@@ -68,7 +68,7 @@ fn setup(
 
 #[test]
 fn mint_initial_commitment() {
-    let (confidential_proof, _mask, _change) = generate_confidential_output_statement(Amount::from(100), None);
+    let (confidential_proof, _mask, _change) = generate_confidential_output_statement(100, None);
     let (test, _faucet, faucet_resx) = setup(confidential_proof, None);
 
     let resource = test
@@ -359,10 +359,7 @@ fn multi_commitment_join() {
     let withdraw_proof1 = generate_withdraw_proof(&faucet_mask, 1000, Some(99_000), 0);
     let withdraw_proof2 = generate_withdraw_proof(withdraw_proof1.change_mask.as_ref().unwrap(), 1000, Some(98_000), 0);
     let join_proof = generate_withdraw_proof_with_inputs(
-        &[
-            (withdraw_proof1.output_mask, 1000.into()),
-            (withdraw_proof2.output_mask, 1000.into()),
-        ],
+        &[(withdraw_proof1.output_mask, 1000), (withdraw_proof2.output_mask, 1000)],
         0,
         2000,
         None,

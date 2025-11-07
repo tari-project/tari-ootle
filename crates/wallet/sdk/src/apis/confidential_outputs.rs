@@ -253,7 +253,7 @@ where TStore: WalletStore
                     commitment,
                     e
                 );
-                (Amount::zero(), None, OutputStatus::Invalid)
+                (0, None, OutputStatus::Invalid)
             },
         };
 
@@ -261,7 +261,7 @@ where TStore: WalletStore
             account_address: account.component_address,
             vault_id,
             commitment,
-            value,
+            value: value.into(),
             sender_public_nonce: Some(output_stealth_public_nonce.to_byte_type()),
             view_only_key_id: key.key_id,
             owner_key_id: account.owner_key_id,

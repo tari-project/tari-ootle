@@ -27,10 +27,7 @@ pub fn generate_extended_bullet_proof<'a, I: IntoIterator<Item = &'a UnblindedOu
                 RistrettoExtendedMask::assign(ExtensionDegree::DefaultPedersen, vec![stmt.mask.clone()]).unwrap();
             RistrettoExtendedWitness {
                 mask: extended_mask,
-                value: stmt
-                    .amount
-                    .to_u64_checked()
-                    .expect("BUG: Invalid output statement amount provided to generate_extended_bullet_proof"),
+                value: stmt.amount,
                 minimum_value_promise: stmt.minimum_value_promise,
             }
         })

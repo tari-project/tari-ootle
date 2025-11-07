@@ -41,7 +41,7 @@ impl StealthTransferParams {
             });
         }
 
-        let blinded_count = self.outputs.iter().filter(|o| o.blinded_amount.is_positive()).count();
+        let blinded_count = self.outputs.iter().filter(|o| o.blinded_amount > 0).count();
         if blinded_count > MAX_LAZY_BP_AGG_FACTORS {
             return Err(StealthTransferApiError::InvalidParameter {
                 param: "outputs",
@@ -53,13 +53,6 @@ impl StealthTransferParams {
         }
 
         for output in &self.outputs {
-            if output.blinded_amount.is_negative() {
-                return Err(StealthTransferApiError::InvalidParameter {
-                    param: "blinded_output_amount",
-                    reason: "Blinded output amount must be non-negative".to_string(),
-                });
-            }
-
             if output.revealed_amount.is_negative() {
                 return Err(StealthTransferApiError::InvalidParameter {
                     param: "revealed_output_amount",
@@ -67,7 +60,7 @@ impl StealthTransferParams {
                 });
             }
 
-            if output.blinded_amount.is_zero() && output.revealed_amount.is_zero() {
+            if output.blinded_amount == 0 && output.revealed_amount.is_zero() {
                 return Err(StealthTransferApiError::InvalidParameter {
                     param: "blinded_output_amount and revealed_output_amount",
                     reason: "At least one of the amounts must be greater than zero".to_string(),
@@ -115,14 +108,14 @@ pub struct TransferOutput {
     /// Amount to spend to a revealed output
     pub revealed_amount: Amount,
     /// Amount to spend to a blinded output
-    pub blinded_amount: Amount,
+    pub blinded_amount: u64,
     /// Optional memo to include a memo in the output. This memo is encrypted and can only be read by the recipient.
     pub memo: Option<Memo>,
 }
 
 impl TransferOutput {
     pub fn total_output_amount(&self) -> Amount {
-        self.revealed_amount + self.blinded_amount
+        self.revealed_amount + Amount::from(self.blinded_amount)
     }
 }
 

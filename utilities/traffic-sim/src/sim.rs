@@ -229,7 +229,7 @@ impl TrafficSim {
                 badge_usage: Default::default(),
                 transfers: vec![StealthTransfer {
                     destination_address: receiver_address.address().clone(),
-                    blinded_output_amount: amount_to_send.into(),
+                    blinded_output_amount: amount_to_send,
                     revealed_output_amount: Default::default(),
                     output_memo: Some(Memo::new_message(format!("Transfer {id}: {amount_to_send}")).unwrap()),
                 }],
@@ -457,7 +457,7 @@ impl TrafficSim {
                         outputs: vec![TransferOutput {
                             address: account.address().clone(),
                             revealed_amount: Amount::zero(),
-                            blinded_amount: fund_amount.into(),
+                            blinded_amount: fund_amount,
                             memo: Some(Memo::new_message(format!("Initial Funding: {fund_amount}")).unwrap()),
                         }],
                     }],

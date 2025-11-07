@@ -436,7 +436,7 @@ async fn when_i_create_transfer_proof_via_wallet_daemon(
         world,
         source_account_name,
         dest_account_name,
-        amount.into(),
+        amount,
         wallet_daemon_name,
         outputs_name,
         // TODO: support for custom stealth resources
@@ -461,7 +461,7 @@ async fn when_stealth_transfer_via_wallet_daemon(
         world,
         account_name,
         destination_acc_name,
-        amount.into(),
+        amount,
         wallet_daemon_name,
         outputs_name,
         XTR,

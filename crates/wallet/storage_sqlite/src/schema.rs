@@ -153,7 +153,7 @@ diesel::table! {
         owner_account_id -> Integer,
         resource_address -> Text,
         commitment -> Text,
-        value -> Text,
+        value -> BigInt,
         sender_public_nonce -> Text,
         status -> Text,
         locked_at -> Nullable<Timestamp>,

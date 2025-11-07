@@ -23,6 +23,7 @@ use crate::{
         OutputStatus,
         ResourceModel,
         StealthBalance,
+        StealthOutputInfo,
         StealthOutputModel,
         SubstateModel,
         TransactionStatus,
@@ -128,8 +129,16 @@ pub trait WalletStoreReader {
     fn stealth_outputs_get_unspent_by_account(
         &mut self,
         account_addr: &ComponentAddress,
+        resource_address: Option<&ResourceAddress>,
         exclude_locked: bool,
-    ) -> Result<Vec<StealthOutputModel>, WalletStorageError>;
+    ) -> Result<Vec<StealthOutputInfo>, WalletStorageError>;
+
+    fn stealth_outputs_get_unspent_for_spending(
+        &mut self,
+        account_addr: &ComponentAddress,
+        resource_address: &ResourceAddress,
+        lock_id: WalletLockId,
+    ) -> Result<Vec<StealthOutputInfo>, WalletStorageError>;
 
     fn stealth_outputs_get_locked_by_lock_id(
         &mut self,

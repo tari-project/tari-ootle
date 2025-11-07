@@ -17,7 +17,7 @@ import type {
   AccountSetDefaultRequest,
   AccountSetDefaultResponse,
   AccountsGetBalancesRequest,
-  AccountsGetBalancesResponse, AccountsGetPayRefAddressRequest, AccountsGetPayRefAddressResponse,
+  AccountsGetBalancesResponse,
   AccountsListRequest,
   AccountsListResponse,
   AccountsRenameRequest,
@@ -175,10 +175,6 @@ export class WalletDaemonClient {
 
   public accountsCreate(params: AccountsCreateRequest): Promise<AccountsCreateResponse> {
     return this.__invokeRpc("accounts.create", params);
-  }
-
-  public accountsGetPayRefAddress(params: AccountsGetPayRefAddressRequest): Promise<AccountsGetPayRefAddressResponse> {
-    return this.__invokeRpc("accounts.get_pay_ref_address", params);
   }
 
   public accountsRename(params: AccountsRenameRequest): Promise<AccountsRenameResponse> {

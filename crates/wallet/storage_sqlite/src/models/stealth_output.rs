@@ -2,11 +2,13 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use diesel::dsl;
-use tari_ootle_wallet_sdk::{models::StealthOutputModel, storage::WalletStorageError};
+use tari_ootle_wallet_sdk::{
+    models::{StealthOutputInfo, StealthOutputModel},
+    storage::WalletStorageError,
+};
 use tari_template_lib::{
     models::ComponentAddress,
     types::{
-        amount,
         crypto::{RistrettoPublicKeyBytes, UtxoTag},
         EncryptedData,
     },
@@ -25,7 +27,7 @@ pub struct StealthOutput {
     pub owner_account_id: i32,
     pub resource_address: String,
     pub commitment: String,
-    pub value: String,
+    pub value: i64,
     pub sender_public_nonce: String,
     pub status: String,
     pub locked_at: Option<PrimitiveDateTime>,
@@ -60,7 +62,7 @@ impl StealthOutput {
                 item: "output commitment",
                 details: "Corrupt db: invalid hex representation".to_string(),
             })?,
-            value: amount![&self.value],
+            value: self.value as u64,
             sender_public_nonce: RistrettoPublicKeyBytes::from_hex(&self.sender_public_nonce).map_err(|_| {
                 WalletStorageError::DecodingError {
                     operation: "try_into_output",
@@ -92,6 +94,44 @@ impl StealthOutput {
             is_frozen: self.is_frozen,
             is_on_chain: self.is_on_chain,
             lock_id: self.locked_by_proof,
+        })
+    }
+}
+
+impl TryFrom<StealthOutput> for StealthOutputInfo {
+    type Error = WalletStorageError;
+
+    fn try_from(value: StealthOutput) -> Result<Self, Self::Error> {
+        Ok(StealthOutputInfo {
+            resource_address: value
+                .resource_address
+                .parse()
+                .map_err(|_| WalletStorageError::DecodingError {
+                    operation: "try_into_output_info",
+                    item: "output info",
+                    details: format!("Corrupt db: invalid resource address '{}'", value.resource_address),
+                })?,
+            public_nonce: RistrettoPublicKeyBytes::from_hex(&value.sender_public_nonce).map_err(|_| {
+                WalletStorageError::DecodingError {
+                    operation: "try_into_output_info",
+                    item: "output info public nonce",
+                    details: "Corrupt db: invalid hex representation".to_string(),
+                }
+            })?,
+            encrypted_data: EncryptedData::try_from(value.encrypted_data).map_err(|len| {
+                WalletStorageError::DecodingError {
+                    operation: "try_into_output_info",
+                    item: "output info encrypted data",
+                    details: format!("Corrupt db: invalid encrypted data length {len}"),
+                }
+            })?,
+            commitment: deserialize_hex_try_from(&value.commitment).map_err(|_| WalletStorageError::DecodingError {
+                operation: "try_into_output_info",
+                item: "output info commitment",
+                details: "Corrupt db: invalid hex representation".to_string(),
+            })?,
+            value: value.value as u64,
+            is_on_chain: value.is_on_chain,
         })
     }
 }

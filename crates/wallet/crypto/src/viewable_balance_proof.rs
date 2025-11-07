@@ -8,12 +8,12 @@ use tari_crypto::{
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
 use tari_engine_types::{
-    crypto::{convert_amount_to_secret, get_commitment_factory, messages},
+    crypto::{get_commitment_factory, messages},
     ToByteType,
 };
 use tari_template_lib::{
     models::{ViewableBalanceProof, ViewableBalanceProofChallengeFields},
-    prelude::{Amount, Scalar32Bytes},
+    prelude::Scalar32Bytes,
 };
 use tari_utilities::ByteArray;
 
@@ -21,14 +21,13 @@ use crate::ConfidentialProofError;
 
 pub fn create_viewable_balance_proof(
     mask: &RistrettoSecretKey,
-    output_amount: Amount,
+    output_amount: u64,
     commitment: &PedersenCommitment,
     view_key: &RistrettoPublicKey,
 ) -> Result<ViewableBalanceProof, ConfidentialProofError> {
     let (elgamal_secret_nonce, elgamal_public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
     let r = &elgamal_secret_nonce;
-    let output_amount_as_secret =
-        convert_amount_to_secret(&output_amount).ok_or(ConfidentialProofError::NegativeAmount)?;
+    let output_amount_as_secret = RistrettoSecretKey::from(output_amount);
 
     // E = v.G + rP
     let elgamal_encrypted = RistrettoPublicKey::from_secret_key(&output_amount_as_secret) + r * view_key;

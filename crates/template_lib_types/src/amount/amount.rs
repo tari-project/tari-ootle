@@ -117,26 +117,28 @@ impl Amount {
         }
     }
 
-    pub fn sum_from_positive<I: Iterator<Item = Self>>(iter: I) -> Option<Self> {
+    pub fn sum_from_positive<A: Into<Self>, I: Iterator<Item = A>>(iter: I) -> Option<Self> {
         let mut sum = Self::zero();
         for amount in iter {
-            sum = sum.checked_add_positive(amount)?;
+            sum = sum.checked_add_positive(amount.into())?;
         }
         Some(sum)
     }
 
-    /// Returns the difference of two amounts, saturating at `0` if the result is negative.
+    /// Returns the difference of two amounts, saturating at `Amount::MIN` if the result underflows.
+    /// If negative results are not desired, use `saturating_sub_positive`.
     pub const fn saturating_sub(&self, other: Self) -> Self {
         Self::new(self.into_inner_value().saturating_sub(other.into_inner_value()))
     }
 
-    /// Returns the difference of two amounts, returning `None` if the result is negative.
-    pub fn saturating_sub_positive(&self, other: Self) -> Option<Self> {
+    /// Returns the difference of two amounts, returning 0 if the result would be negative.
+    /// Input numbers may be negative.
+    pub fn saturating_sub_positive(&self, other: Self) -> Self {
         if *self < other {
-            return None;
+            return Self::zero();
         }
 
-        Some(Self::new(self.inner_value() - other.inner_value()))
+        Self::new(self.inner_value().saturating_sub(other.into_inner_value()))
     }
 
     /// Returns the difference of two amounts, returning `None` if the result is negative or if either amount is
@@ -145,7 +147,11 @@ impl Amount {
         if self.is_negative() || other.is_negative() {
             return None;
         }
-        self.saturating_sub_positive(other)
+        if *self < other {
+            return None;
+        }
+
+        self.checked_sub(other)
     }
 
     /// Returns the product of two amounts, returning `None` if the result overflows.
@@ -157,7 +163,7 @@ impl Amount {
     }
 
     /// Returns the product of two amounts, saturating at `i64::MAX` if the result exceeds it.
-    pub const fn saturating_mul(&self, other: &Self) -> Self {
+    pub const fn saturating_mul(&self, other: Self) -> Self {
         Self::new(self.into_inner_value().saturating_mul(other.into_inner_value()))
     }
 
@@ -509,6 +515,8 @@ mod tests {
         assert_eq!(c, Amount::from(10));
         let d = a.checked_sub(b).unwrap();
         assert_eq!(d, Amount::from(-2));
+        let d = a.checked_sub_positive(b);
+        assert!(d.is_none());
         let e = a.checked_mul(b).unwrap();
         assert_eq!(e, Amount::from(24));
         let f = b.checked_div(a).unwrap();
@@ -534,6 +542,43 @@ mod tests {
         assert!(overflow_div_ceil.is_none(), "Division by zero should return None");
         let overflow_pow = max.checked_pow(10);
         assert!(overflow_pow.is_none(), "Overflow should return None");
+    }
+
+    #[test]
+    fn saturating_arithmetic() {
+        let a = Amount::from(4);
+        let b = Amount::from(6);
+        let c = a.saturating_add(Amount::MAX);
+        assert_eq!(c, Amount::MAX);
+        let d = a.saturating_sub_positive(b);
+        assert_eq!(d, Amount::ZERO);
+        let d = a.saturating_sub_positive(Amount::from(-100));
+        assert_eq!(d, 104);
+        let e = a.saturating_mul(Amount::MAX);
+        assert_eq!(e, Amount::MAX);
+        let f = b.saturating_div(&a);
+        assert_eq!(f, Amount::from(1));
+
+        // Test saturating overflow
+        let max = Amount::MAX;
+        let overflow_add = max.saturating_add(Amount::from(1));
+        assert_eq!(
+            overflow_add,
+            Amount::MAX,
+            "Saturating add should return MAX on overflow"
+        );
+        let overflow_sub = Amount::MIN.saturating_sub(Amount::from(1));
+        assert_eq!(
+            overflow_sub,
+            Amount::MIN,
+            "Saturating sub should return MIN on underflow"
+        );
+        let overflow_mul = max.saturating_mul(Amount::from(2));
+        assert_eq!(
+            overflow_mul,
+            Amount::MAX,
+            "Saturating mul should return MAX on overflow"
+        );
     }
 
     #[test]

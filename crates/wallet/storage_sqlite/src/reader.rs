@@ -39,6 +39,7 @@ use tari_ootle_wallet_sdk::{
         OutputStatus,
         ResourceModel,
         StealthBalance,
+        StealthOutputInfo,
         StealthOutputModel,
         SubstateModel,
         TransactionStatus,
@@ -919,8 +920,9 @@ impl WalletStoreReader for ReadTransaction<'_> {
     fn stealth_outputs_get_unspent_by_account(
         &mut self,
         account_addr: &ComponentAddress,
+        resource_address: Option<&ResourceAddress>,
         exclude_locked: bool,
-    ) -> Result<Vec<StealthOutputModel>, WalletStorageError> {
+    ) -> Result<Vec<StealthOutputInfo>, WalletStorageError> {
         const OPERATION: &str = "stealth_outputs_get_all_by_account";
         use crate::schema::{accounts, stealth_outputs};
 
@@ -936,6 +938,10 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .filter(stealth_outputs::status.eq(OutputStatus::Unspent.as_key_str()))
             .into_boxed();
 
+        if let Some(resource_address) = resource_address {
+            query = query.filter(stealth_outputs::resource_address.eq(resource_address.to_string()));
+        }
+
         if exclude_locked {
             query = query.filter(stealth_outputs::lock_id.is_null());
         }
@@ -946,7 +952,44 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
         rows.map(|row| {
             row.map_err(|e| WalletStorageError::general(OPERATION, e))
-                .and_then(|row| row.try_convert(*account_addr))
+                .and_then(|row| row.try_into())
+        })
+        .collect()
+    }
+
+    fn stealth_outputs_get_unspent_for_spending(
+        &mut self,
+        account_addr: &ComponentAddress,
+        resource_address: &ResourceAddress,
+        lock_id: WalletLockId,
+    ) -> Result<Vec<StealthOutputInfo>, WalletStorageError> {
+        const OPERATION: &str = "stealth_outputs_get_unspent_for_spending";
+        use crate::schema::{accounts, stealth_outputs};
+
+        let rows = stealth_outputs::table
+            .filter(stealth_outputs::resource_address.eq(resource_address.to_string()))
+            .filter(
+                stealth_outputs::owner_account_id.eq(accounts::table
+                    .select(accounts::id)
+                    .filter(accounts::address.eq(account_addr.to_string()))
+                    .limit(1)
+                    .single_value()
+                    .assume_not_null()),
+            )
+            .filter(
+                stealth_outputs::status
+                    .eq(OutputStatus::Unspent.as_key_str())
+                    // Also include outputs created within the transaction
+                    .or(stealth_outputs::status
+                        .eq(OutputStatus::LockedUnconfirmed.as_key_str())
+                        .and(stealth_outputs::lock_id.eq(lock_id))),
+            )
+            .load_iter::<models::StealthOutput, _>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        rows.map(|row| {
+            row.map_err(|e| WalletStorageError::general(OPERATION, e))
+                .and_then(|row| row.try_into())
         })
         .collect()
     }

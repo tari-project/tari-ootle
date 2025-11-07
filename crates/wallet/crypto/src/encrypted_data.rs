@@ -37,13 +37,7 @@ pub fn unblind_output(
     let encryption_key = kdfs::encrypted_data_dh_kdf_aead(claim_secret, reciprocal_public_key);
 
     let decrypted = decrypt_data(&encryption_key, output_commitment, output_encrypted_value, skip_memo)?;
-    let commitment = decrypted.to_commitment().ok_or_else(|| WalletCryptoError::Invariant {
-        // Currently impossible
-        details: format!(
-            "Failed to create commitment from decrypted data (value {} exceeds u64::MAX)",
-            decrypted.mask_and_value.value
-        ),
-    })?;
+    let commitment = decrypted.to_commitment();
     if output_commitment.as_bytes() == commitment.as_bytes() {
         Ok(decrypted)
     } else {
@@ -70,10 +64,7 @@ pub fn decrypt_data(
 ) -> Result<DecryptedData, WalletCryptoError> {
     let (value, mask, memo) = decrypt_inner(encryption_key, commitment, encrypted_data, skip_memo)?;
     Ok(DecryptedData {
-        mask_and_value: MaskAndValue {
-            value: value.into(),
-            mask,
-        },
+        mask_and_value: MaskAndValue { value, mask },
         memo,
     })
 }

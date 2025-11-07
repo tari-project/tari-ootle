@@ -24,8 +24,5 @@ ts-rs = { workspace = true, optional = true }
 hex = { workspace = true }
 thiserror = { workspace = true }
 
-[dev-dependencies]
-tari_bor = { workspace = true }
-
 [features]
-ts = ["ts-rs"]
+ts = ["ts-rs", "tari_engine_types/ts", "tari_ootle_common_types/ts", "tari_template_lib/ts", "tari_bor/ts"]

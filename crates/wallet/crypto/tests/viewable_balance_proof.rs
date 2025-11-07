@@ -16,7 +16,7 @@ use tari_template_lib::{
 };
 use tari_utilities::ByteArray;
 
-fn create_output_statement(value: Amount, view_key: &RistrettoPublicKey) -> UnblindedOutputWitness {
+fn create_output_statement(value: u64, view_key: &RistrettoPublicKey) -> UnblindedOutputWitness {
     let mask = RistrettoSecretKey::random(&mut OsRng);
     UnblindedOutputWitness {
         amount: value,
@@ -44,7 +44,7 @@ fn it_allows_no_balance_proof_for_no_view_key() {
 #[test]
 fn it_errors_no_balance_proof_with_view_key() {
     let (_, view_key) = keypair_from_seed(1);
-    let output_statement = create_output_statement(123.into(), &view_key);
+    let output_statement = create_output_statement(123, &view_key);
 
     let proof =
         confidential::create_output_statement(Some(&output_statement), Amount::zero(), None, Amount::zero()).unwrap();
@@ -63,7 +63,7 @@ fn it_errors_with_balance_proof_and_no_view_key() {
 #[test]
 fn it_generates_a_valid_proof() {
     let (view_key_secret, view_key) = keypair_from_seed(1);
-    let output_statement = create_output_statement(123.into(), &view_key);
+    let output_statement = create_output_statement(123, &view_key);
 
     let timer = Instant::now();
     let proof =
@@ -94,8 +94,8 @@ fn it_generates_a_valid_proof() {
 #[test]
 fn serialize_deserialize() {
     let (_view_key_secret, view_key) = keypair_from_seed(1);
-    let output_statement = create_output_statement(123.into(), &view_key);
-    let change_statement = create_output_statement(123.into(), &view_key);
+    let output_statement = create_output_statement(123, &view_key);
+    let change_statement = create_output_statement(123, &view_key);
 
     let proof = confidential::create_withdraw_proof(
         &[],

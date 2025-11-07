@@ -285,5 +285,4 @@ pub enum ApplicationErrorCode {
     InvalidRequest = 400,
     TransactionRejected = 1000,
     GeneralError = 500,
-    NotImplemented = 501,
 }

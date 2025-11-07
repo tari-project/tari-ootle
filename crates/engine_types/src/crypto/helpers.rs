@@ -70,6 +70,11 @@ pub fn commit_amount_checked(mask: &RistrettoSecretKey, amount: Amount) -> Optio
     Some(get_commitment_factory().commit(mask, &v))
 }
 
+/// Creates a Pedersen commitment to the given u64 amount using the provided mask.
+pub fn commit_u64_amount(mask: &RistrettoSecretKey, amount: u64) -> PedersenCommitment {
+    get_commitment_factory().commit_value(mask, amount)
+}
+
 /// Converts a `Amount` to a `RistrettoSecretKey`.
 ///
 /// # Returns

@@ -6,7 +6,7 @@ import type { RistrettoPublicKeyBytes } from "../RistrettoPublicKeyBytes";
 import type { ComponentAddressOrName } from "./ComponentAddressOrName";
 
 export type ProofsGenerateRequest = {
-  amount: Amount;
+  confidential_amount: bigint;
   reveal_amount: Amount;
   account: ComponentAddressOrName | null;
   resource_address: ResourceAddress;

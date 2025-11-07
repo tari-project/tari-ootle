@@ -15,9 +15,11 @@ use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
+#[cfg(feature = "metrics")]
+use crate::rest_api::metrics;
 use crate::{
     bootstrap::Services,
-    rest_api::{context::HandlerContext, handlers, metrics},
+    rest_api::{context::HandlerContext, handlers},
 };
 
 const LOG_TARGET: &str = "tari::ootle::indexer::rest_api::server";

@@ -98,6 +98,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         keypair.clone(),
         global_db,
         consensus_constants.clone(),
+        #[cfg(feature = "metrics")]
         &mut registry,
     )
     .await?;

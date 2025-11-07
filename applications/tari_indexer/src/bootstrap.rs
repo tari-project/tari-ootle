@@ -104,6 +104,8 @@ pub async fn spawn_services(
             (peer_id, p.into_address())
         })
         .collect();
+
+    #[allow(unused_mut)]
     let mut network_builder = tari_networking::Builder::<TariMessagingSpec>::new(identity)
         .with_messaging_mode(MessagingMode::Disabled)
         .with_config(tari_networking::Config {

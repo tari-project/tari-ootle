@@ -140,7 +140,9 @@ impl ManifestInstructionGenerator {
             },
             ManifestIntent::Log(log) => Ok(vec![Instruction::EmitLog {
                 level: log.level,
-                message: log.message,
+                message: log.message.try_into().map_err(|e| ManifestError::InvalidInstruction {
+                    reason: format!("Log message is too long: {}", e),
+                })?,
             }]),
             ManifestIntent::DropAllProofs => Ok(vec![Instruction::DropAllProofsInWorkspace]),
         }

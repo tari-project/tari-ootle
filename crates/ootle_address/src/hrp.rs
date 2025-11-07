@@ -4,12 +4,12 @@
 use bech32::Hrp;
 use tari_ootle_common_types::Network;
 
-pub(crate) const HRP_MAINNET: Hrp = Hrp::parse_unchecked("xtr_");
-pub(crate) const HRP_LOCALNET: Hrp = Hrp::parse_unchecked("xtr_loc_");
-pub(crate) const HRP_ESME: Hrp = Hrp::parse_unchecked("xtr_esm_");
-pub(crate) const HRP_IGOR: Hrp = Hrp::parse_unchecked("xtr_igr_");
-pub(crate) const HRP_NEXTNET: Hrp = Hrp::parse_unchecked("xtr_nxt_");
-pub(crate) const HRP_STAGENET: Hrp = Hrp::parse_unchecked("xtr_stg_");
+pub(crate) const HRP_MAINNET: Hrp = Hrp::parse_unchecked("otl_");
+pub(crate) const HRP_LOCALNET: Hrp = Hrp::parse_unchecked("otl_loc_");
+pub(crate) const HRP_ESME: Hrp = Hrp::parse_unchecked("otl_esm_");
+pub(crate) const HRP_IGOR: Hrp = Hrp::parse_unchecked("otl_igr_");
+pub(crate) const HRP_NEXTNET: Hrp = Hrp::parse_unchecked("otl_nxt_");
+pub(crate) const HRP_STAGENET: Hrp = Hrp::parse_unchecked("otl_stg_");
 
 pub fn hrp_from_network(network: Network) -> Hrp {
     match network {

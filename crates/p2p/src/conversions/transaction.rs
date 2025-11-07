@@ -163,9 +163,12 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
             Some(PutLastInstructionOutputOnWorkspace(id)) => Ok(Instruction::PutLastInstructionOutputOnWorkspace {
                 key: u16::try_from(id).context("workspace_put_key overflowed")?,
             }),
-            Some(EmitLog(emit_lgo)) => Ok(Instruction::EmitLog {
-                level: emit_lgo.log_level.parse()?,
-                message: emit_lgo.log_message,
+            Some(EmitLog(emit_log)) => Ok(Instruction::EmitLog {
+                level: emit_log.log_level.parse()?,
+                message: emit_log
+                    .log_message
+                    .try_into()
+                    .map_err(|e| anyhow!("emit_log_message: {}", e))?,
             }),
             Some(ClaimBurn(claim_burn)) => Ok(Instruction::ClaimBurn {
                 claim: Box::new(MinotariBurnClaimProof {
@@ -342,7 +345,7 @@ impl From<Instruction> for proto::transaction::Instruction {
                 instruction: Some(proto::transaction::instruction::Instruction::EmitLog(
                     proto::transaction::EmitLog {
                         log_level: level.to_string(),
-                        log_message: message,
+                        log_message: message.into_string(),
                     },
                 )),
             },

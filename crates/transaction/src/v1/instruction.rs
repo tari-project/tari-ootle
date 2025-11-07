@@ -6,6 +6,7 @@ use std::fmt::{Display, Formatter};
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{
     confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
+    limits,
     ValidatorFeePoolAddress,
 };
 use tari_template_lib::{
@@ -13,7 +14,7 @@ use tari_template_lib::{
     auth::OwnerRule,
     models::{ResourceAddress, StealthTransferStatement},
     prelude::{AccessRules, Amount},
-    types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
+    types::{crypto::RistrettoPublicKeyBytes, MaxString, TemplateAddress},
 };
 
 use crate::{
@@ -27,14 +28,12 @@ use crate::{
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Instruction {
     CreateAccount {
-        #[cfg_attr(feature = "ts", ts(type = "string"))]
         owner_public_key: RistrettoPublicKeyBytes,
         owner_rule: Option<OwnerRule>,
         access_rules: Option<AccessRules>,
         workspace_id: Option<WorkspaceOffsetId>,
     },
     CallFunction {
-        #[cfg_attr(feature = "ts", ts(type = "string"))]
         address: TemplateAddress,
         function: String,
         #[serde(deserialize_with = "crate::special_json_arg_syntax::json_deserialize")]
@@ -56,14 +55,14 @@ pub enum Instruction {
     },
     EmitLog {
         level: LogLevel,
-        message: String,
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        message: MaxString<{ limits::ENGINE_LIMITS.max_log_size_bytes }>,
     },
     ClaimBurn {
         claim: Box<MinotariBurnClaimProof>,
         output_data: ClaimBurnOutputData,
     },
     ClaimValidatorFees {
-        #[cfg_attr(feature = "ts", ts(type = "string"))]
         address: ValidatorFeePoolAddress,
     },
     DropAllProofsInWorkspace,

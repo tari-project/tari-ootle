@@ -153,8 +153,8 @@ export default function FormStep({
           error={transferFormState.targetAccountAddress !== "" && !isAddressValid}
           helperText={
             transferFormState.targetAccountAddress !== "" && !isAddressValid
-              ? "Invalid address format. Expected format: xtr_loc_..."
-              : "Enter the recipient's address (e.g., xtr_loc_1enpsfkx...)"
+              ? "Invalid address format. Expected format: otl_loc_..."
+              : "Enter the recipient's address (e.g., otl_loc_1enpsfkx...)"
           }
         />
 

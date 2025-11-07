@@ -4,29 +4,32 @@ import type { Amount } from "./Amount";
 import type { ClaimBurnOutputData } from "./ClaimBurnOutputData";
 import type { ComponentAccessRules } from "./ComponentAccessRules";
 import type { ComponentCall } from "./ComponentCall";
+import type { Hash } from "./Hash";
 import type { LogLevel } from "./LogLevel";
 import type { MinotariBurnClaimProof } from "./MinotariBurnClaimProof";
 import type { OwnerRule } from "./OwnerRule";
 import type { ResourceAddress } from "./ResourceAddress";
 import type { ResourceAddressRef } from "./ResourceAddressRef";
+import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
 import type { StealthTransferStatement } from "./StealthTransferStatement";
+import type { ValidatorFeePoolAddress } from "./ValidatorFeePoolAddress";
 import type { WorkspaceOffsetId } from "./WorkspaceOffsetId";
 
 export type Instruction =
   | {
       CreateAccount: {
-        owner_public_key: string;
+        owner_public_key: RistrettoPublicKeyBytes;
         owner_rule: OwnerRule | null;
         access_rules: ComponentAccessRules | null;
         workspace_id: WorkspaceOffsetId | null;
       };
     }
-  | { CallFunction: { address: string; function: string; args: Array<any> } }
+  | { CallFunction: { address: Hash; function: string; args: Array<any> } }
   | { CallMethod: { call: ComponentCall; method: string; args: Array<any> } }
   | { PutLastInstructionOutputOnWorkspace: { key: number } }
   | { EmitLog: { level: LogLevel; message: string } }
   | { ClaimBurn: { claim: MinotariBurnClaimProof; output_data: ClaimBurnOutputData } }
-  | { ClaimValidatorFees: { address: string } }
+  | { ClaimValidatorFees: { address: ValidatorFeePoolAddress } }
   | "DropAllProofsInWorkspace"
   | { AssertBucketContains: { key: WorkspaceOffsetId; resource_address: ResourceAddress; min_amount: Amount } }
   | { TakeFromBucket: { input_bucket: WorkspaceOffsetId; amount: Amount; output_bucket: number } }

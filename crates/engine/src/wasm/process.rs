@@ -320,7 +320,25 @@ impl Invokable<Store> for WasmProcess {
                 if let Some(err) = self.env.take_last_engine_error() {
                     return Err(WasmExecutionError::RuntimeError(err));
                 }
-                if let Some(message) = self.env.take_last_panic_message() {
+                if let Some(mut message) = self.env.take_last_panic_message() {
+                    if message.len() > limits::ENGINE_LIMITS.max_panic_message_size {
+                        let limit = limits::ENGINE_LIMITS.max_panic_message_size;
+                        let mut end = limit;
+                        // Ensure we truncate at a char boundary (to avoid a panic when calling truncate)
+                        while end > 0 && !message.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        message.truncate(end);
+                        error!(target: LOG_TARGET, "Panic message size limit exceeded: for panic {}", message);
+                        return Err(WasmExecutionError::Panic {
+                            message: format!(
+                                "Panic message size limit of {} bytes exceeded",
+                                limits::ENGINE_LIMITS.max_panic_message_size
+                            ),
+                            runtime_error: err,
+                        });
+                    }
+
                     return Err(WasmExecutionError::Panic {
                         message,
                         runtime_error: err,

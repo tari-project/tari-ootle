@@ -26,7 +26,7 @@ import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
 import useAccountStore from "@store/accountStore";
-import type {
+import {
   Account,
   ComponentAddressOrName,
   ResourceAddress,
@@ -367,21 +367,6 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       });
     }
   };
-
-  // Handle target account changes for auto fee estimation
-  useEffect(() => {
-    const targetAccount = transferFormState.targetAccountAddress;
-    if (targetAccount.trim() && targetAccount.startsWith("xtr_")) {
-      // Small delay to let state update, then estimate fee
-      const timeoutId = setTimeout(() => {
-        estimateFeeWithTargetAccount(targetAccount).catch(() => {
-          // Fee estimation failed, but don't block the user
-        });
-      }, 500);
-
-      return () => clearTimeout(timeoutId);
-    }
-  }, [transferFormState.targetAccountAddress]);
 
   useEffect(() => {
     if (loadedNfts !== undefined) {

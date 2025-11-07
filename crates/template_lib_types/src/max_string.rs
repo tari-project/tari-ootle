@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
+use tari_template_abi::rust::{
     fmt,
     fmt::Display,
     ops::{Deref, DerefMut},
@@ -65,9 +65,52 @@ impl<'de, const N: usize> serde::Deserialize<'de> for MaxString<N> {
     }
 }
 
+impl<const N: usize> TryFrom<String> for MaxString<N> {
+    type Error = MaxStringError<N>;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        MaxString::new_checked(value).ok_or(MaxStringError)
+    }
+}
+
 impl<const N: usize> Display for MaxString<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.s.as_ref().fmt(f)
+    }
+}
+
+pub struct MaxStringError<const N: usize>;
+
+impl<const N: usize> Display for MaxStringError<N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "string length exceeds maximum of {}", N)
+    }
+}
+
+#[cfg(feature = "borsh")]
+mod borsh_impl {
+    use borsh::io::{Error, ErrorKind, Read, Result, Write};
+
+    use super::*;
+
+    impl<const N: usize> borsh::BorshSerialize for MaxString<N> {
+        fn serialize<W: Write>(&self, writer: &mut W) -> Result<()> {
+            self.s.serialize(writer)
+        }
+    }
+
+    impl<const N: usize> borsh::BorshDeserialize for MaxString<N> {
+        fn deserialize_reader<R: Read>(reader: &mut R) -> Result<Self> {
+            let s = Box::<str>::deserialize_reader(reader)?;
+            if s.len() <= N {
+                Ok(Self { s })
+            } else {
+                Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("string length exceeds maximum of {}: got {}", N, s.len()),
+                ))
+            }
+        }
     }
 }
 

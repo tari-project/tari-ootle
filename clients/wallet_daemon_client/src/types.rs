@@ -490,7 +490,7 @@ pub struct AccountsTransferResponse {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ProofsGenerateRequest {
-    pub confidential_amount: u64,
+    pub confidential_amount: Amount,
     pub reveal_amount: Amount,
     #[serde(deserialize_with = "opt_string_or_struct")]
     pub account: Option<ComponentAddressOrName>,

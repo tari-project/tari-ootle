@@ -165,21 +165,20 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                 let mut total_output_amount = Amount::zero();
                 let mut outputs = Vec::new();
                 while total_output_amount < amount {
+                    if outputs.len() >= INPUT_LIMIT {
+                        warn!(
+                            target: LOG_TARGET,
+                            "Reached maximum input limit of {} when locking outputs.",
+                            INPUT_LIMIT
+                        );
+                        break;
+                    }
                     let output = tx
                         .stealth_outputs_lock_smallest_amount(account_address, resource_address, locked_by_id)
                         .optional()?;
                     match output {
                         Some(output) => {
                             total_output_amount += Amount::from(output.value);
-                            if outputs.len() >= INPUT_LIMIT {
-                                warn!(
-                                    target: LOG_TARGET,
-                                    "Reached maximum input limit of {} when locking outputs.",
-                                    INPUT_LIMIT
-                                );
-                                break;
-                            }
-
                             outputs.push(output);
                         },
                         None => {

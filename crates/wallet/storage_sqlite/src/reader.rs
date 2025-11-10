@@ -984,6 +984,9 @@ impl WalletStoreReader for ReadTransaction<'_> {
                         .eq(OutputStatus::LockedUnconfirmed.as_key_str())
                         .and(stealth_outputs::lock_id.eq(lock_id))),
             )
+            .filter(stealth_outputs::owner_key_id.is_not_null())
+            .filter(stealth_outputs::is_burnt.eq(false))
+            .filter(stealth_outputs::is_frozen.eq(false))
             .load_iter::<models::StealthOutput, _>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 

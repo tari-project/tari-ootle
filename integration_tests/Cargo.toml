@@ -43,12 +43,12 @@ tari_transaction_manifest = { workspace = true }
 tari_ootle_wallet_sdk = { workspace = true }
 
 # Minotari
-minotari_console_wallet = { git = "https://github.com/tari-project/tari.git", tag = "v5.2.0-pre.2" }
-minotari_node = { git = "https://github.com/tari-project/tari.git", tag = "v5.2.0-pre.2" }
-minotari_wallet = { git = "https://github.com/tari-project/tari.git", tag = "v5.2.0-pre.2" }
-tari_comms = { git = "https://github.com/tari-project/tari.git", tag = "v5.2.0-pre.2" }
-tari_comms_dht = { git = "https://github.com/tari-project/tari.git", tag = "v5.2.0-pre.2" }
-tari_p2p = { git = "https://github.com/tari-project/tari.git", tag = "v5.2.0-pre.2" }
+minotari_console_wallet = { git = "https://github.com/tari-project/tari.git", branch = "development" }
+minotari_node = { git = "https://github.com/tari-project/tari.git", branch = "development" }
+minotari_wallet = { git = "https://github.com/tari-project/tari.git", branch = "development" }
+tari_comms = { git = "https://github.com/tari-project/tari.git", branch = "development" }
+tari_comms_dht = { git = "https://github.com/tari-project/tari.git", branch = "development" }
+tari_p2p = { git = "https://github.com/tari-project/tari.git", branch = "development" }
 
 anyhow = { workspace = true }
 config = { workspace = true }

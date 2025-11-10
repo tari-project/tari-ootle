@@ -27,6 +27,7 @@ use tari_ootle_storage::{
 };
 use tari_rpc_framework::__macro_reexports::future::Either;
 use tari_shutdown::ShutdownSignal;
+use tari_template_lib::prelude::Amount;
 use tari_template_manager::interface::{TemplateChange, TemplateManagerHandle};
 use tokio::time;
 
@@ -179,6 +180,7 @@ impl NetworkWideStateSync {
             })?;
         let committee_pools = sync_plan_mut.committee_pools().clone();
 
+        let mut xtr_exhausted = Amount::zero();
         for (shard_group, mut pool) in committee_pools {
             let from_epoch = sync_plan_mut
                 .sync_progress()
@@ -268,9 +270,17 @@ impl NetworkWideStateSync {
 
                 self.stats.increment_checkpoints();
                 sync_plan_mut.add_checkpoint_sync_progress(shard_group, checkpoint.epoch());
+                xtr_exhausted += Amount::from(checkpoint.header().accumulated_data().total_exhaust_burn);
                 self.store.with_write_tx(|tx| {
                     tx.insert_or_ignore_epoch_checkpoint(&checkpoint)?;
-                    tx.key_value_set(Key::SyncProgress, sync_plan_mut.sync_progress())
+                    tx.key_value_set(Key::SyncProgress, sync_plan_mut.sync_progress())?;
+
+                    let exhausted = tx
+                        .key_value_get_value::<_, Amount>(Key::XtrAccumulatedExhaustBurn)
+                        .optional()?;
+
+                    let new_exhausted = exhausted.unwrap_or_else(Amount::zero) + xtr_exhausted;
+                    tx.key_value_set(Key::XtrAccumulatedExhaustBurn, new_exhausted)
                 })?;
             }
         }
@@ -354,12 +364,14 @@ impl NetworkWideStateSync {
                 value_filters: (SubstateValueFilterFlags::UTXO |
                     SubstateValueFilterFlags::TEMPLATE |
                     SubstateValueFilterFlags::VALIDATOR_FEE_POOL |
+                    SubstateValueFilterFlags::CLAIMED_OUTPUT_TOMBSTONE |
                     SubstateValueFilterFlags::TRANSACTION_RECEIPT)
                     .bits(),
             })
             .await?;
 
         let mut is_first_iter = true;
+        let mut xtr_claimed = Amount::zero();
         while let Some(result) = stream.next().await {
             // Allocations are unavoidable for templates (since the call to the template manager requires owned data due
             // to async service call). This is completely fine as published templates are expected to be
@@ -396,6 +408,7 @@ impl NetworkWideStateSync {
                     utxos_buf,
                     transactions_buf,
                     validator_fee_pools_buf,
+                    &mut xtr_claimed,
                 )?;
             }
             if msg.has_more {
@@ -425,7 +438,10 @@ impl NetworkWideStateSync {
 
                 // All done - write the sync progress
                 sync_plan_mut.add_state_sync_progress(shard, state_version, msg_epoch);
-                tx.key_value_set(Key::SyncProgress, sync_plan_mut.sync_progress())
+                tx.key_value_set(Key::SyncProgress, sync_plan_mut.sync_progress())?;
+                let claimed = tx.key_value_get_value(Key::XtrAccumulatedClaimed).optional()?;
+                let new_claimed = claimed.unwrap_or_else(Amount::zero) + xtr_claimed;
+                tx.key_value_set(Key::XtrAccumulatedClaimed, new_claimed)
             })?;
 
             if !templates_buf.is_empty() {
@@ -458,6 +474,7 @@ fn extend_bufs_from_substate_update(
     utxos_buf: &mut Vec<UtxoUpdateRecord>,
     transactions_buf: &mut Vec<(TransactionReceiptAddress, TransactionReceipt)>,
     validator_fee_pools_buf: &mut Vec<SubstateData>,
+    xtr_claimed_mut: &mut Amount,
 ) -> Result<(), NetworkStateSyncError> {
     match &update {
         SubstateUpdateProof::Create(create) => match create.substate.value().value() {
@@ -502,6 +519,9 @@ fn extend_bufs_from_substate_update(
                     version: create.substate.version,
                     value: create.substate.value().clone(),
                 });
+            },
+            Some(SubstateValue::ClaimedOutputTombstone(claim)) => {
+                *xtr_claimed_mut += Amount::from(claim.value);
             },
             Some(_) => {
                 warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received unexpected substate value for created substate: {}", create.substate.substate_id());

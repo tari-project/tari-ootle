@@ -396,7 +396,7 @@ async fn when_transfer_via_wallet_daemon(
     wallet_daemon_name: String,
     outputs_name: String,
 ) {
-    let amount = Amount::new(amount.into());
+    let amount = Amount::new(amount);
 
     let resource_address = world
         .get_output_fq(&resource_name)

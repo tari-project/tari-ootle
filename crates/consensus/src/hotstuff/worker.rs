@@ -853,6 +853,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 &self.leader_strategy,
                 epoch_state.local_committee(),
                 parent.timestamp(),
+                *parent.header().accumulated_data(),
                 *parent.epoch_hash(),
             ) {
                 dummy_block = Some(dummy);

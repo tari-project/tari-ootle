@@ -12,7 +12,15 @@ use tari_engine_types::{
     Utxo,
 };
 use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate, TransactionEntry};
-use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, ShardGroup, StateVersion};
+use tari_ootle_common_types::{
+    displayable::Displayable,
+    optional::Optional,
+    shard::Shard,
+    substate_type::SubstateType,
+    Epoch,
+    ShardGroup,
+    StateVersion,
+};
 use tari_ootle_storage::{
     consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof},
     Ordering,
@@ -22,13 +30,13 @@ use tari_ootle_wallet_sdk::models::UtxoStateUpdateSet;
 use tari_template_lib::{
     models::{ResourceAddress, UtxoId},
     prelude::RistrettoPublicKeyBytes,
-    types::{crypto::UtxoTag, TemplateAddress},
+    types::{crypto::UtxoTag, Amount, TemplateAddress},
 };
 use tari_transaction::{Transaction, TransactionId};
 
 use crate::{
     network_state_sync::EventFilter,
-    storage_sqlite::models::{KeyValue, NewScannedBlockId, SubstateRecord, UtxoUpdateRecord},
+    storage_sqlite::models::{Key, KeyValue, NewScannedBlockId, SubstateRecord, UtxoUpdateRecord},
     substate_manager::SubstateResponse,
 };
 
@@ -213,5 +221,26 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
         address: &TransactionReceiptAddress,
     ) -> Result<TransactionReceipt, StorageError> {
         self.inner.with_read_tx(|tx| tx.get_transaction_receipt(address))
+    }
+
+    pub fn get_xtr_total_supply(&self) -> Result<Amount, StorageError> {
+        self.inner.with_read_tx(|tx| {
+            let claimed = tx
+                .key_value_get_value::<_, Amount>(Key::XtrAccumulatedClaimed)
+                .optional()?;
+            let burned = tx
+                .key_value_get_value::<_, Amount>(Key::XtrAccumulatedExhaustBurn)
+                .optional()?;
+            claimed
+                .unwrap_or_default()
+                .checked_sub(burned.unwrap_or_default())
+                .ok_or_else(|| StorageError::DataInconsistency {
+                    details: format!(
+                        "XTR total supply underflow: claimed {} < burned {}",
+                        claimed.display(),
+                        burned.display()
+                    ),
+                })
+        })
     }
 }

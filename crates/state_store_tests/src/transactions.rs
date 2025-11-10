@@ -4,13 +4,13 @@
 use std::time::Duration;
 
 use tari_common_types::types::{FixedHash, PrivateKey};
-use tari_consensus_types::{Decision, QcId};
+use tari_consensus_types::{Decision, QcId, ShardGroupAccumulatedData};
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, TransactionResult},
     fees::{FeeBreakdown, FeeReceipt},
     substate::SubstateDiff,
 };
-use tari_ootle_common_types::{Epoch, ExtraData, NodeHeight, SubstateRequirement};
+use tari_ootle_common_types::{Epoch, ExtraData, Network, NodeHeight, SubstateRequirement};
 use tari_ootle_storage::{
     consensus_models::{
         Block,
@@ -36,8 +36,6 @@ use crate::{
 };
 
 mod confirm_all_transitions {
-    use tari_ootle_common_types::Network;
-
     use super::*;
 
     #[test]
@@ -79,6 +77,7 @@ mod confirm_all_transitions {
             SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
             FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
             ExtraData::default(),
         )
         .unwrap();

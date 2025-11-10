@@ -2,31 +2,31 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_common_types::types::FixedHash;
+use tari_consensus_types::{QcId, ShardGroupAccumulatedData};
 use tari_ootle_common_types::{
     optional::Optional,
     Epoch,
     ExtraData,
     ExtraFieldKey,
+    Network,
     NodeHeight,
     NumPreshards,
     ShardGroup,
 };
 use tari_ootle_storage::{
-    consensus_models::{Block, Command},
+    consensus_models::{Block, BookkeepingModel, Command},
     Ordering,
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
 };
+use tari_template_lib::prelude::SchnorrSignatureBytes;
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::helpers::{create_rocksdb, create_tx_atom};
+use crate::helpers::{commit_chain, create_chain, create_rocksdb, create_tx_atom};
 
 mod basic_block_operations {
-    use tari_consensus_types::QcId;
-
     use super::*;
-    use crate::helpers::{commit_chain, create_chain};
 
     #[test]
     fn basic_block_operations_rocksdb() {
@@ -84,10 +84,6 @@ mod basic_block_operations {
 }
 
 mod block_parent_operations {
-    use tari_consensus_types::QcId;
-    use tari_ootle_common_types::Network;
-    use tari_template_lib::prelude::SchnorrSignatureBytes;
-
     use super::*;
 
     #[test]
@@ -125,6 +121,7 @@ mod block_parent_operations {
             SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
             FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
             ExtraData::default(),
         )
         .unwrap();
@@ -147,6 +144,7 @@ mod block_parent_operations {
             SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
             FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
             ExtraData::default(),
         )
         .unwrap();
@@ -211,10 +209,6 @@ mod block_parent_operations {
 }
 
 mod block_query_operations {
-    use tari_consensus_types::QcId;
-    use tari_ootle_common_types::Network;
-    use tari_ootle_storage::consensus_models::BookkeepingModel;
-    use tari_template_lib::prelude::SchnorrSignatureBytes;
 
     use super::*;
 
@@ -256,6 +250,7 @@ mod block_query_operations {
             SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
             FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
             ExtraData::default(),
         )
         .unwrap();
@@ -282,6 +277,7 @@ mod block_query_operations {
             SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
             FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
             ExtraData::default(),
         )
         .unwrap();
@@ -314,6 +310,7 @@ mod block_query_operations {
             SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
             FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
             block3_data.clone(),
         )
         .unwrap();

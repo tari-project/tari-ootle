@@ -4,6 +4,7 @@
 pub mod misc;
 pub mod network;
 pub mod nfts;
+pub mod resources;
 pub mod substates;
 pub mod templates;
 pub mod transaction_receipts;

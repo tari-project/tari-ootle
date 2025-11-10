@@ -26,13 +26,13 @@ impl Amount {
     pub const BITS: usize = I192::BITS as usize;
     pub const BYTE_SIZE: usize = I192::BYTES as usize;
     /// The maximum value that an `Amount` can hold.
-    pub const MAX: Self = Self::new(I192::MAX);
+    pub const MAX: Self = Self(I192::MAX);
     /// The minimum value that an `Amount` can hold.
-    pub const MIN: Self = Self::new(I192::MIN);
+    pub const MIN: Self = Self(I192::MIN);
     /// The number of u64 digits used to represent a Amount i.e. 3
     pub const NUM_DIGITS: usize = Self::BITS / u64::BITS as usize;
     /// The value of one, represented as an `Amount`.
-    pub const ONE: Self = Self::new(I192::ONE);
+    pub const ONE: Self = Self(I192::ONE);
     /// The value of one hundred, represented as an `Amount`.
     pub const ONE_HUNDRED: Self = Self::from_le_digits([100, 0, 0]);
     /// The value of one thousand, represented as an `Amount`.
@@ -40,7 +40,7 @@ impl Amount {
     /// The value of ten, represented as an `Amount`.
     pub const TEN: Self = Self::from_le_digits([10, 0, 0]);
     /// The value of zero, represented as an `Amount`.
-    pub const ZERO: Self = Self::new(I192::ZERO);
+    pub const ZERO: Self = Self(I192::ZERO);
     /// The number of u64 digits used to represent a Amount i.e. 3
     /// This is internal but needs to be public for macros
     pub const _U64_BYTES: usize = (u64::BITS / 8) as usize;
@@ -48,9 +48,9 @@ impl Amount {
     /// This is internal but needs to be public for macros
     pub const _U64_BYTE_SHIFT: usize = Self::_U64_BYTES.trailing_zeros() as usize;
 
-    /// Creates a new `Amount` from an `i64` value.
-    pub const fn new(amount: I192) -> Self {
-        Self(amount)
+    /// Creates a new `Amount` from an integer value.
+    pub fn new<T: Into<I192>>(amount: T) -> Self {
+        Self(amount.into())
     }
 
     /// A value of zero.
@@ -78,6 +78,14 @@ impl Amount {
         self.inner_value().is_negative()
     }
 
+    pub const fn from_u64(value: u64) -> Self {
+        type U192 = bnum::BUint<3>;
+        let be_bytes = value.to_be_bytes();
+        let bits = U192::from_be_slice(&be_bytes).expect("infallible");
+        let n = I192::from_bits(bits);
+        Self(n)
+    }
+
     /// Returns the inner value of this amount as an `I192`.
     const fn inner_value(&self) -> &I192 {
         &self.0
@@ -89,9 +97,9 @@ impl Amount {
 
     /// Returns the value of this amount + other. Returns `None` if the result underflows or overflows.
     pub const fn checked_add(&self, other: Self) -> Option<Self> {
-        // match is to allow const function
+        // match is because const map operations are not yet stable
         match self.inner_value().checked_add(other.into_inner_value()) {
-            Some(value) => Some(Self::new(value)),
+            Some(value) => Some(Self(value)),
             None => None,
         }
     }
@@ -106,13 +114,13 @@ impl Amount {
 
     /// Returns the sum of two amounts, saturating at `i64::MAX` if the result exceeds it.
     pub const fn saturating_add(&self, other: Self) -> Self {
-        Self::new(self.into_inner_value().saturating_add(other.into_inner_value()))
+        Self(self.into_inner_value().saturating_add(other.into_inner_value()))
     }
 
     /// Returns the difference of two amounts, saturating at `0` if the result is negative.
     pub const fn checked_sub(&self, other: Self) -> Option<Self> {
         match self.into_inner_value().checked_sub(other.into_inner_value()) {
-            Some(value) => Some(Self::new(value)),
+            Some(value) => Some(Self(value)),
             None => None,
         }
     }
@@ -128,7 +136,7 @@ impl Amount {
     /// Returns the difference of two amounts, saturating at `Amount::MIN` if the result underflows.
     /// If negative results are not desired, use `saturating_sub_positive`.
     pub const fn saturating_sub(&self, other: Self) -> Self {
-        Self::new(self.into_inner_value().saturating_sub(other.into_inner_value()))
+        Self(self.into_inner_value().saturating_sub(other.into_inner_value()))
     }
 
     /// Returns the difference of two amounts, returning 0 if the result would be negative.
@@ -138,7 +146,7 @@ impl Amount {
             return Self::zero();
         }
 
-        Self::new(self.inner_value().saturating_sub(other.into_inner_value()))
+        Self(self.inner_value().saturating_sub(other.into_inner_value()))
     }
 
     /// Returns the difference of two amounts, returning `None` if the result is negative or if either amount is
@@ -157,20 +165,20 @@ impl Amount {
     /// Returns the product of two amounts, returning `None` if the result overflows.
     pub const fn checked_mul(&self, other: Self) -> Option<Self> {
         match self.into_inner_value().checked_mul(other.into_inner_value()) {
-            Some(value) => Some(Self::new(value)),
+            Some(value) => Some(Self(value)),
             None => None,
         }
     }
 
     /// Returns the product of two amounts, saturating at `i64::MAX` if the result exceeds it.
     pub const fn saturating_mul(&self, other: Self) -> Self {
-        Self::new(self.into_inner_value().saturating_mul(other.into_inner_value()))
+        Self(self.into_inner_value().saturating_mul(other.into_inner_value()))
     }
 
     /// Returns the quotient of two amounts, returning `None` if the divisor is zero or if the result overflows.
     pub const fn checked_div(&self, other: Self) -> Option<Self> {
         match self.into_inner_value().checked_div(other.into_inner_value()) {
-            Some(value) => Some(Self::new(value)),
+            Some(value) => Some(Self(value)),
             None => None,
         }
     }
@@ -194,10 +202,10 @@ impl Amount {
 
         // If the remainder is zero or the result is negative, we round down
         if rem.is_zero() || div.is_negative() {
-            Some(Self::new(div))
+            Some(Self(div))
         } else {
             // Otherwise, we round up
-            Some(Self::new(div.add(I192::ONE)))
+            Some(Self(div.add(I192::ONE)))
         }
     }
 
@@ -211,7 +219,7 @@ impl Amount {
 
     /// Returns the quotient of two amounts, saturating at `i64::MAX` if the result exceeds it.
     pub const fn saturating_div(&self, other: &Self) -> Self {
-        Self::new(self.into_inner_value().saturating_div(other.into_inner_value()))
+        Self(self.into_inner_value().saturating_div(other.into_inner_value()))
     }
 
     /// Returns the value as an u64 if possible, otherwise returns None.
@@ -271,11 +279,11 @@ impl Amount {
 
     pub const fn from_le_digits(digits: [u64; Self::NUM_DIGITS]) -> Self {
         let out = I192::from_bits(BUint::<3>::from_digits(digits));
-        Self::new(out)
+        Self(out)
     }
 
     pub fn from_le_slice(bytes: &[u8]) -> Option<Self> {
-        I192::from_le_slice(bytes).map(Self::new)
+        I192::from_le_slice(bytes).map(Self)
     }
 
     pub fn to_le_digits(&self) -> [u64; Self::NUM_DIGITS] {
@@ -293,7 +301,7 @@ impl Amount {
         }
         let inner = self.into_inner_value();
         let sqrt_inner = inner.sqrt();
-        Some(Self::new(sqrt_inner))
+        Some(Self(sqrt_inner))
     }
 
     /// If the amount is negative (< 0), returns `None`, otherwise returns `Some(self)`.
@@ -315,13 +323,16 @@ impl Amount {
     }
 
     /// Returns the amount raised to the power of `exp`.
-    pub fn pow(&self, exp: u32) -> Self {
-        Self::new(self.into_inner_value().pow(exp))
+    pub const fn pow(&self, exp: u32) -> Self {
+        Self(self.into_inner_value().pow(exp))
     }
 
     /// Returns the amount raised to the power of `exp`, returning `None` if the result overflows.
-    pub fn checked_pow(&self, exp: u32) -> Option<Self> {
-        self.into_inner_value().checked_pow(exp).map(Self::new)
+    pub const fn checked_pow(&self, exp: u32) -> Option<Self> {
+        match self.into_inner_value().checked_pow(exp) {
+            Some(value) => Some(Self(value)),
+            None => None,
+        }
     }
 
     /// Parses a string as an `Amount` in the specified radix.
@@ -329,7 +340,7 @@ impl Amount {
     /// This function works in constant context, allowing it to be used to define constants.
     pub const fn try_from_str_radix(s: &str, radix: u32) -> Option<Self> {
         match I192::from_str_radix(s, radix) {
-            Ok(value) => Some(Self::new(value)),
+            Ok(value) => Some(Self(value)),
             Err(_) => None,
         }
     }
@@ -401,7 +412,7 @@ impl FromStr for Amount {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let value = I192::from_str_radix(s, 10)?;
-        Ok(Self::new(value))
+        Ok(Self(value))
     }
 }
 
@@ -483,7 +494,7 @@ mod borsh_impl {
 
 impl Sum for Amount {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        Self::new(iter.map(|a| a.into_inner_value()).sum())
+        Self(iter.map(|a| a.into_inner_value()).sum())
     }
 }
 
@@ -542,6 +553,14 @@ mod tests {
         assert!(overflow_div_ceil.is_none(), "Division by zero should return None");
         let overflow_pow = max.checked_pow(10);
         assert!(overflow_pow.is_none(), "Overflow should return None");
+    }
+
+    #[test]
+    fn to_and_from_u64() {
+        let a = Amount::from_u64(1234567890);
+        assert_eq!(a, 1234567890);
+        let a = Amount::from_u64(u64::MAX);
+        assert_eq!(a, u64::MAX);
     }
 
     #[test]

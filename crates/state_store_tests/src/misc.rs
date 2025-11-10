@@ -188,6 +188,7 @@ fn miscellaneous_operations(db: impl StateStore) {
             state_merkle_root: Default::default(),
             command_merkle_root: Default::default(),
             signature: Default::default(),
+            accumulated_data: Default::default(),
             metadata_hash: Default::default(),
         },
         proof_elements: vec![],

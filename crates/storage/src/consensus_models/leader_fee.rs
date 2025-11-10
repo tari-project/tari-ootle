@@ -15,7 +15,7 @@ pub struct LeaderFee {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub fee: u64,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub global_exhaust_burn: u64,
+    pub exhaust_burn: u64,
 }
 
 impl LeaderFee {
@@ -23,14 +23,14 @@ impl LeaderFee {
         self.fee
     }
 
-    pub fn global_exhaust_burn(&self) -> u64 {
-        self.global_exhaust_burn
+    pub fn exhaust_burn(&self) -> u64 {
+        self.exhaust_burn
     }
 }
 
 impl Display for LeaderFee {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Leader fee: {}, Burnt: {}", self.fee, self.global_exhaust_burn)
+        write!(f, "Leader fee: {}, Burnt: {}", self.fee, self.exhaust_burn)
     }
 }
 
@@ -64,7 +64,7 @@ pub fn calculate_leader_fee(transaction_fee: u64, num_involved_shards: NonZeroU6
 
     LeaderFee {
         fee: leader_fee,
-        global_exhaust_burn: actual_burn,
+        exhaust_burn: actual_burn,
     }
 }
 
@@ -113,7 +113,7 @@ mod tests {
             let num_involved_shards = NonZeroU64::new(num_involved_shards).unwrap();
             let leader_fee = calculate_leader_fee(transaction_fee as u64, num_involved_shards, exhaust_divisor as u64);
             assert_eq!(
-                leader_fee.fee * num_involved_shards.get() + leader_fee.global_exhaust_burn,
+                leader_fee.fee * num_involved_shards.get() + leader_fee.exhaust_burn,
                 transaction_fee as u64,
                 "In/deflation! transaction_fee: {transaction_fee}, num_involved_shards: {num_involved_shards}, \
                  exhaust_divisor: {exhaust_divisor}",
@@ -127,7 +127,7 @@ mod tests {
                 exhaust_divisor
             );
             assert_eq!(
-                leader_fee.global_exhaust_burn(),
+                leader_fee.exhaust_burn(),
                 expected_burn as u64,
                 "Failed for transaction_fee: {}, num_involved_shards: {}, exhaust_divisor: {}",
                 transaction_fee,

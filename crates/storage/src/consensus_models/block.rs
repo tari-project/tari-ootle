@@ -22,6 +22,7 @@ use tari_consensus_types::{
     LockedBlock,
     ProposalCertificate,
     QcId,
+    ShardGroupAccumulatedData,
     TimeoutCertificate,
 };
 use tari_engine_types::transaction_receipt::TransactionReceiptAddress;
@@ -128,6 +129,7 @@ impl Block {
         signature: SchnorrSignatureBytes,
         timestamp: u64,
         epoch_hash: FixedHash,
+        accumulated_data: ShardGroupAccumulatedData,
         extra_data: ExtraData,
     ) -> Result<Self, BlockError> {
         let header = BlockHeader::create(
@@ -144,6 +146,7 @@ impl Block {
             signature,
             timestamp,
             epoch_hash,
+            accumulated_data,
             extra_data,
         )?;
         Ok(Self::new(header, justify, commands, high_tc))
@@ -193,6 +196,8 @@ impl Block {
             shard_group,
             state_merkle_root,
             epoch_hash,
+            // Each genesis block starts with zero accumulated data
+            ShardGroupAccumulatedData::default(),
             extra_data,
         );
         Self::new(header, justify, BTreeSet::new(), None)

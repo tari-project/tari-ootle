@@ -12,6 +12,7 @@ use tari_engine_types::{
     substate::{SubstateId, SubstateValue},
     vault::Vault,
 };
+use tari_ootle_app_utilities::shared_consts::TXTR_FAUCET_INITIAL_SUPPLY;
 use tari_ootle_common_types::{
     Epoch,
     Network,
@@ -81,8 +82,7 @@ where
     );
     create_substate(tx, num_preshards, PUBLIC_IDENTITY_RESOURCE_ADDRESS, value)?;
 
-    let is_testnet = !matches!(network, Network::MainNet);
-    let symbol = if is_testnet { "tXTR" } else { "XTR" };
+    let symbol = if network.is_testnet() { "tXTR" } else { "XTR" };
     let xtr_resource = Resource::new(
         ResourceType::Stealth,
         None,
@@ -105,7 +105,7 @@ where
         false,
     );
 
-    if is_testnet {
+    if network.is_testnet() {
         // Create tXTR faucet
         create_xtr_faucet(tx, num_preshards)?;
         // Create NFT faucet
@@ -125,8 +125,7 @@ where
 {
     let value = Vault::new(ResourceContainer::Stealth {
         address: STEALTH_TARI_RESOURCE_ADDRESS,
-        // just under 18.5 trillion tXTR
-        revealed_amount: u64::MAX.into(),
+        revealed_amount: TXTR_FAUCET_INITIAL_SUPPLY,
         locked_amount: Default::default(),
     });
 

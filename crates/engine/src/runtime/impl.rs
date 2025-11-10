@@ -1960,9 +1960,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                             let amount = bucket
                                 .unlocked_amount()
                                 .checked_add(bucket.locked_amount())
-                                .and_then(|a| {
-                                    a.checked_add(Amount::new(bucket.number_of_confidential_commitments().into()))
-                                })
+                                .and_then(|a| a.checked_add(Amount::new(bucket.number_of_confidential_commitments())))
                                 .ok_or_else(|| RuntimeError::InvariantError {
                                     function: "BucketAction::GetAmount",
                                     details: "Total amount overflowed".to_string(),

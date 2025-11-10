@@ -134,7 +134,7 @@ impl ResourceContainer {
     pub fn unlocked_amount(&self) -> Amount {
         match self {
             Self::Fungible { amount, .. } => *amount,
-            Self::NonFungible { token_ids, .. } => Amount::new(token_ids.len().into()),
+            Self::NonFungible { token_ids, .. } => Amount::new(token_ids.len()),
             Self::Confidential { revealed_amount, .. } => *revealed_amount,
             Self::Stealth { revealed_amount, .. } => *revealed_amount,
         }
@@ -154,7 +154,7 @@ impl ResourceContainer {
     pub fn locked_amount(&self) -> Amount {
         match self {
             Self::Fungible { locked_amount, .. } => *locked_amount,
-            Self::NonFungible { locked_token_ids, .. } => Amount::new(locked_token_ids.len().into()),
+            Self::NonFungible { locked_token_ids, .. } => Amount::new(locked_token_ids.len()),
             Self::Confidential {
                 locked_revealed_amount, ..
             } => *locked_revealed_amount,

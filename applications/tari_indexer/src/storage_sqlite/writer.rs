@@ -67,6 +67,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         const OPERATION: &str = "key_value_set";
         use crate::storage_sqlite::schema::key_values;
         let json = serialize_json(&value)?;
+        debug!(target: LOG_TARGET, "key_value_set called {} {}", key.as_ref(), json);
 
         diesel::insert_into(key_values::table)
             .values((key_values::key.eq(key.as_ref()), key_values::value.eq(&json)))

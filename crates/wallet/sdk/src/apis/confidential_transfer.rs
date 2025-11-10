@@ -159,7 +159,10 @@ where
                     .confidential_outputs_api
                     .resolve_output_masks(confidential_inputs)?;
 
-                let total_confidential_spent = confidential_inputs.iter().map(|i| i.value).sum::<Amount>();
+                let total_confidential_spent = confidential_inputs
+                    .iter()
+                    .map(|i| Amount::from(i.value))
+                    .sum::<Amount>();
 
                 self.locks_api
                     .lock_funds_in_vault(lock_id, &src_vault.id, revealed_to_spend)?;
@@ -185,9 +188,7 @@ where
                     .confidential_outputs_api
                     .lock_outputs_until_partial_amount(lock_id, &src_vault.id, spend_amount)?;
 
-                let revealed_to_spend = spend_amount
-                    .saturating_sub_positive(amount_locked)
-                    .unwrap_or_else(Amount::zero);
+                let revealed_to_spend = spend_amount.saturating_sub_positive(amount_locked);
 
                 if src_vault.revealed_balance < revealed_to_spend {
                     return Err(ConfidentialTransferApiError::InsufficientFunds);
@@ -343,15 +344,12 @@ where
 
             let change_value = statement.amount;
 
-            if change_value.is_positive() {
+            if change_value > 0 {
                 self.confidential_outputs_api.add_output(ConfidentialOutputModel {
                     account_address: *account.component_address(),
                     vault_id: src_vault.id,
-                    commitment: statement
-                        .to_commitment()
-                        .expect("BUG: to_commitment negative amount")
-                        .to_byte_type(),
-                    value: change_value,
+                    commitment: statement.to_commitment().to_byte_type(),
+                    value: change_value.into(),
                     sender_public_nonce: Some(statement.sender_public_nonce.to_byte_type()),
                     view_only_key_id: account_key.key_id,
                     owner_key_id: Some(account_key.key_id),
@@ -441,9 +439,7 @@ where
         }
 
         let mask = self.key_manager_api.next_key(KeyBranch::ConfidentialMask)?;
-
-        let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
-        let encrypted_data = self.crypto_api.encrypt_value_and_mask(
+        let amount =
             confidential_amount
                 .to_u64_checked()
                 .ok_or_else(|| ConfidentialTransferApiError::AmountOverflow {
@@ -451,15 +447,15 @@ where
                     details: "Confidential amount exceeds u64. This is currently a limitation due to the format of \
                               EncryptedData"
                         .to_string(),
-                })?,
-            &mask.key,
-            dest_public_key,
-            &nonce,
-            memo,
-        )?;
+                })?;
+
+        let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
+        let encrypted_data =
+            self.crypto_api
+                .encrypt_value_and_mask(amount, &mask.key, dest_public_key, &nonce, memo)?;
 
         Ok(UnblindedOutputWitness {
-            amount: confidential_amount,
+            amount,
             mask: mask.key,
             sender_public_nonce: public_nonce,
             encrypted_data,
@@ -544,7 +540,7 @@ impl InputsToSpend {
     }
 
     pub fn total_confidential_amount(&self) -> Amount {
-        self.confidential.iter().map(|o| o.value).sum()
+        self.confidential.iter().map(|o| Amount::from(o.value)).sum()
     }
 }
 

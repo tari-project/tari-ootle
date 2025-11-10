@@ -47,7 +47,7 @@ pub async fn handle_list(
             .into_iter()
             .map(|o| UtxoInfo {
                 address: o.to_utxo_address(),
-                value: o.value,
+                value: o.value.into(),
                 status: o.status,
                 memo: o.memo,
                 is_burnt: o.is_burnt,

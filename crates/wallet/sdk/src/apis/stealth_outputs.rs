@@ -1,6 +1,8 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::collections::HashMap;
+
 use digest::crypto_common::rand_core::OsRng;
 use log::*;
 use tari_crypto::{
@@ -9,6 +11,7 @@ use tari_crypto::{
 };
 use tari_engine_types::{
     component::derive_component_address_from_public_key,
+    limits,
     FromByteType,
     ToByteType,
     Utxo,
@@ -42,12 +45,15 @@ use crate::{
         stealth_transfer::{StealthOutputToCreate, UnblindedInputToSpend},
     },
     models::{
+        input_selection,
+        input_selection::{branch_and_bound::KeyedInput, InputSelectionAlgorithm},
         AccountAndViewKeys,
         InputSpendData,
         KeyBranch,
         KeyId,
         OutputStatus,
         StealthBalance,
+        StealthOutputInfo,
         StealthOutputModel,
         WalletLockId,
     },
@@ -86,7 +92,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         resource_address: &ResourceAddress,
         lock_id: WalletLockId,
         amount: A,
-    ) -> Result<(Vec<StealthOutputModel>, Amount), StealthOutputsApiError> {
+    ) -> Result<(Vec<InputSpendData>, Amount), StealthOutputsApiError> {
         let amount = amount
             .into()
             .non_negative_checked()
@@ -94,14 +100,23 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                 param: "amount",
                 reason: "lock_outputs_for_at_least_amount: Amount must be non-negative".to_string(),
             })?;
+        if amount.is_zero() {
+            return Ok((Vec::new(), Amount::zero()));
+        }
+
         self.store.with_write_tx(|tx| {
-            let (outputs, total_output_amount) =
-                self.lock_outputs_internal(tx, account_address, resource_address, amount, lock_id)?;
+            let (outputs, total_output_amount) = self.lock_outputs_internal(
+                tx,
+                account_address,
+                resource_address,
+                amount,
+                lock_id,
+                InputSelectionAlgorithm::BranchAndBound,
+            )?;
 
             if total_output_amount < amount {
                 return Err(StealthOutputsApiError::InsufficientFunds);
             }
-
             Ok((outputs, total_output_amount))
         })
     }
@@ -114,49 +129,113 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         resource_address: &ResourceAddress,
         amount: Amount,
         locked_by_id: WalletLockId,
-    ) -> Result<(Vec<StealthOutputModel>, Amount), StealthOutputsApiError> {
-        self.store
-            .with_write_tx(|tx| self.lock_outputs_internal(tx, account_address, resource_address, amount, locked_by_id))
+    ) -> Result<(Vec<InputSpendData>, Amount), StealthOutputsApiError> {
+        self.store.with_write_tx(|tx| {
+            self.lock_outputs_internal(
+                tx,
+                account_address,
+                resource_address,
+                amount,
+                locked_by_id,
+                InputSelectionAlgorithm::SmallestFirst,
+            )
+        })
     }
 
-    fn lock_outputs_internal<TTx: WalletStoreWriter>(
+    fn lock_outputs_internal(
         &self,
-        tx: &mut TTx,
+        tx: &mut TStore::WriteTransaction<'_>,
         account_address: &ComponentAddress,
         resource_address: &ResourceAddress,
         amount: Amount,
         locked_by_id: WalletLockId,
-    ) -> Result<(Vec<StealthOutputModel>, Amount), StealthOutputsApiError> {
+        selection_algo: InputSelectionAlgorithm,
+    ) -> Result<(Vec<InputSpendData>, Amount), StealthOutputsApiError> {
         if amount.is_negative() {
             return Err(StealthOutputsApiError::InvalidParameter {
                 param: "amount",
                 reason: "lock_outputs_internal: Amount cannot be negative".to_string(),
             });
         }
-        let mut total_output_amount = Amount::zero();
-        let mut outputs = Vec::new();
-        while total_output_amount < amount {
-            let output = tx
-                .stealth_outputs_lock_smallest_amount(account_address, resource_address, locked_by_id)
-                .optional()?;
-            match output {
-                Some(output) => {
-                    total_output_amount += output.value;
-                    outputs.push(output);
-                },
-                None => {
-                    debug!(
-                        target: LOG_TARGET,
-                        "No more outputs available to lock. Total locked amount: {}, required amount: {}",
-                        total_output_amount,
-                        amount
-                    );
-                    break;
-                },
-            }
-        }
 
-        Ok((outputs, total_output_amount))
+        const INPUT_LIMIT: usize = limits::STEALTH_LIMITS.max_inputs;
+
+        match selection_algo {
+            InputSelectionAlgorithm::SmallestFirst => {
+                let mut total_output_amount = Amount::zero();
+                let mut outputs = Vec::new();
+                while total_output_amount < amount {
+                    if outputs.len() >= INPUT_LIMIT {
+                        warn!(
+                            target: LOG_TARGET,
+                            "Reached maximum input limit of {} when locking outputs.",
+                            INPUT_LIMIT
+                        );
+                        break;
+                    }
+                    let output = tx
+                        .stealth_outputs_lock_smallest_amount(account_address, resource_address, locked_by_id)
+                        .optional()?;
+                    match output {
+                        Some(output) => {
+                            total_output_amount += Amount::from(output.value);
+                            outputs.push(output);
+                        },
+                        None => {
+                            debug!(
+                                target: LOG_TARGET,
+                                "No more outputs available to lock. Total locked amount: {}, required amount: {}",
+                                total_output_amount,
+                                amount
+                            );
+                            break;
+                        },
+                    }
+                }
+
+                let outputs = outputs.into_iter().map(|i| i.into_spend_data()).collect();
+                Ok((outputs, total_output_amount))
+            },
+            InputSelectionAlgorithm::BranchAndBound => {
+                let unspent =
+                    tx.stealth_outputs_get_unspent_for_spending(account_address, resource_address, locked_by_id)?;
+
+                let mut unspent = unspent
+                    .into_iter()
+                    .map(|o| (o.commitment, InputSpendData::from(o)))
+                    .collect::<HashMap<_, _>>();
+
+                let inputs = unspent
+                    .values()
+                    .map(|o| KeyedInput::new(o.commitment, o.value))
+                    .collect::<Vec<_>>();
+
+                // TODO: note that the behaviour of this implementation does not allow for partial selection, needed by
+                // UtxoInputSelection::PreferConfidential. For now, we prevent running into this by only
+                // using SmallestFirst.
+                let result = input_selection::branch_and_bound::select(&inputs, amount, INPUT_LIMIT).ok_or(
+                    StealthOutputsApiError::InputSelectionFailed {
+                        details: "Failed to select inputs using branch and bound algorithm".to_string(),
+                    },
+                )?;
+
+                let outputs = result
+                    .selected_keys()
+                    .iter()
+                    .take(INPUT_LIMIT)
+                    .map(|selected| {
+                        unspent
+                            .remove(*selected)
+                            .expect("selected an output not in the input key set")
+                    })
+                    .collect::<Vec<_>>();
+
+                // Lock the selected outputs
+                tx.stealth_outputs_lock_many(resource_address, result.selected_keys(), locked_by_id)?;
+
+                Ok((outputs, result.total_value()))
+            },
+        }
     }
 
     pub fn add_output(&self, output: &StealthOutputModel) -> Result<(), StealthOutputsApiError> {
@@ -195,7 +274,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
                 KeyBranch::ViewOnlyKey,
                 view_only_key_id,
                 &nonce,
-                // We dont need to decrypt the memo to spend the output
+                // We don't need to decrypt the memo to spend the output
                 true,
             )?;
 
@@ -218,10 +297,10 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         &self,
         account_address: &ComponentAddress,
         exclude_locked: bool,
-    ) -> Result<Vec<StealthOutputModel>, StealthOutputsApiError> {
+    ) -> Result<Vec<StealthOutputInfo>, StealthOutputsApiError> {
         let balance = self
             .store
-            .with_read_tx(|tx| tx.stealth_outputs_get_unspent_by_account(account_address, exclude_locked))?;
+            .with_read_tx(|tx| tx.stealth_outputs_get_unspent_by_account(account_address, None, exclude_locked))?;
         Ok(balance)
     }
 
@@ -558,30 +637,16 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
     pub fn create_output_witness(
         &self,
         destination: &RistrettoOotleAddress,
-        amount: Amount,
+        amount: u64,
         resource_address: &ResourceAddress,
         resource_view_key: Option<RistrettoPublicKey>,
         memo: Option<&Memo>,
     ) -> Result<UnblindedStealthOutputWitness, StealthOutputsApiError> {
-        if !amount.is_positive() {
-            return Err(StealthOutputsApiError::InvalidParameter {
-                param: "amount",
-                reason: format!("create_output_witness: Amount must be positive, got {}", amount),
-            });
-        }
-
         let mask = self.key_manager_api.next_key(KeyBranch::StealthMask)?;
 
         let (nonce_secret, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
         let encrypted_data = self.crypto_api.encrypt_value_and_mask(
-            amount
-                .to_u64_checked()
-                .ok_or_else(|| StealthOutputsApiError::InvalidParameter {
-                    param: "amount",
-                    reason: "Stealth amount exceeds u64::MAX. This is currently a limitation due to the format of \
-                             EncryptedData"
-                        .to_string(),
-                })?,
+            amount,
             &mask.key,
             destination.view_only_key(),
             &nonce_secret,
@@ -645,9 +710,9 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let total_input_amount =
-            unblinded_inputs.iter().map(|i| i.value()).sum::<Amount>() + params.input_revealed_amount;
+            unblinded_inputs.iter().map(|i| Amount::from(i.value())).sum::<Amount>() + params.input_revealed_amount;
         let total_output_amount =
-            outputs.iter().map(|o| o.witness.amount).sum::<Amount>() + params.output_revealed_amount;
+            outputs.iter().map(|o| Amount::from(o.witness.amount)).sum::<Amount>() + params.output_revealed_amount;
         if total_input_amount != total_output_amount {
             return Err(StealthOutputsApiError::InvalidParameter {
                 param: "inputs/outputs",
@@ -725,6 +790,8 @@ pub enum StealthOutputsApiError {
     Crypto(#[from] StealthCryptoApiError),
     #[error("Insufficient funds")]
     InsufficientFunds,
+    #[error("Input selection error: {details}")]
+    InputSelectionFailed { details: String },
     #[error("Key manager error: {0}")]
     KeyManager(#[from] KeyManagerApiError),
     #[error("Accounts API error: {0}")]

@@ -196,7 +196,7 @@ mod stealth_tests {
             .map(|&(seed, amount)| {
                 let (mask, public_key) = create_key_pair_from_seed(seed);
                 UnblindedStealthInputWitness {
-                    mask_and_value: MaskAndValue::new(Amount::from(amount), mask.clone()),
+                    mask_and_value: MaskAndValue::new(amount, mask.clone()),
                     owner_secret: mask,
                     public_nonce: public_key,
                 }
@@ -204,17 +204,12 @@ mod stealth_tests {
             .collect()
     }
 
-    fn make_output_statements<A: Into<Amount> + Copy>(amounts: &[A]) -> Vec<UnblindedStealthOutputWitness> {
+    fn make_output_statements(amounts: &[u64]) -> Vec<UnblindedStealthOutputWitness> {
         amounts
             .iter()
+            .filter(|amount| **amount > 0)
             .map(|&amount| {
-                let amount = amount.into();
-                // If the amount is zero, we omit the output UTXO, therefore, the mask is zero
-                let output_mask = if amount.is_zero() {
-                    Default::default()
-                } else {
-                    RistrettoSecretKey::random(&mut OsRng)
-                };
+                let output_mask = RistrettoSecretKey::random(&mut OsRng);
                 // For testing purposes, we use the mask as the owner key
                 let output_owner_public_key = RistrettoPublicKey::from_secret_key(&output_mask);
                 let statement = UnblindedOutputWitness {

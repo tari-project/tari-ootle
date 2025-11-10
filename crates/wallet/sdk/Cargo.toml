@@ -42,4 +42,14 @@ tari_ootle_wallet_storage_sqlite = { workspace = true }
 tempfile = { workspace = true }
 
 [features]
-ts = ["ts-rs", "tari_ootle_address/ts"]
+ts = [
+    "ts-rs",
+    "tari_ootle_address/ts",
+    "tari_bor/ts",
+    "tari_engine_types/ts",
+    "tari_template_abi/ts",
+    "tari_template_lib/ts",
+    "tari_transaction/ts",
+    "tari_ootle_wallet_crypto/ts",
+    "tari_consensus_types/ts"
+]

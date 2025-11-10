@@ -5,7 +5,7 @@ import type { OotleAddress } from "../OotleAddress";
 
 export type StealthTransfer = {
   destination_address: OotleAddress;
-  blinded_output_amount: Amount;
+  blinded_output_amount: bigint;
   revealed_output_amount: Amount;
   output_memo?: Memo | null;
 };

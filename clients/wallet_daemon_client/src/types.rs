@@ -490,7 +490,7 @@ pub struct AccountsTransferResponse {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ProofsGenerateRequest {
-    pub amount: Amount,
+    pub confidential_amount: Amount,
     pub reveal_amount: Amount,
     #[serde(deserialize_with = "opt_string_or_struct")]
     pub account: Option<ComponentAddressOrName>,
@@ -529,7 +529,7 @@ pub struct ProofsCancelRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct ConfidentialCreateOutputProofRequest {
-    pub amount: Amount,
+    pub amount: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1075,7 +1075,10 @@ pub struct TransferStatementRequest {
 
 impl TransferStatementRequest {
     pub fn total_output_amount(&self) -> Amount {
-        self.outputs.iter().map(|o| o.blinded_amount + o.revealed_amount).sum()
+        self.outputs
+            .iter()
+            .map(|o| Amount::from(o.blinded_amount) + o.revealed_amount)
+            .sum()
     }
 }
 
@@ -1129,7 +1132,7 @@ pub struct StealthTransferRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct StealthTransfer {
     pub destination_address: OotleAddress,
-    pub blinded_output_amount: Amount,
+    pub blinded_output_amount: u64,
     pub revealed_output_amount: Amount,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_memo: Option<Memo>,

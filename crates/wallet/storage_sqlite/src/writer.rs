@@ -26,7 +26,14 @@ use tari_engine_types::{
     resource::Resource,
     substate::{SubstateDiff, SubstateId},
 };
-use tari_ootle_common_types::{optional::Optional, shard::Shard, Epoch, StateVersion, VersionedSubstateIdRef};
+use tari_ootle_common_types::{
+    displayable::Displayable,
+    optional::Optional,
+    shard::Shard,
+    Epoch,
+    StateVersion,
+    VersionedSubstateIdRef,
+};
 use tari_ootle_wallet_sdk::{
     models::{
         AccountUpdate,
@@ -1249,6 +1256,43 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(output)
     }
 
+    fn stealth_outputs_lock_many(
+        &mut self,
+        resource_address: &ResourceAddress,
+        utxos: &[&PedersenCommitmentBytes],
+        lock_id: WalletLockId,
+    ) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "stealth_outputs_lock_many";
+        use crate::schema::stealth_outputs;
+
+        let num_rows = diesel::update(stealth_outputs::table)
+            .set((
+                stealth_outputs::status.eq(OutputStatus::LockedForSpend.as_key_str()),
+                stealth_outputs::lock_id.eq(lock_id),
+                stealth_outputs::locked_at.eq(dsl::now),
+            ))
+            .filter(stealth_outputs::resource_address.eq(resource_address.to_string()))
+            .filter(stealth_outputs::commitment.eq_any(utxos.iter().map(|id| serialize_hex(id.as_ref()))))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        if num_rows != utxos.len() {
+            return Err(WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "stealth_output".to_string(),
+                key: format!(
+                    "{}/{} found: resource_address={}, utxos={}",
+                    num_rows,
+                    utxos.len(),
+                    resource_address,
+                    utxos.display()
+                ),
+            });
+        }
+
+        Ok(())
+    }
+
     fn stealth_outputs_insert(&mut self, output: &StealthOutputModel) -> Result<(), WalletStorageError> {
         const OPERATION: &str = "stealth_outputs_insert";
         use crate::schema::{accounts, stealth_outputs};
@@ -1263,7 +1307,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                     .assume_not_null()),
                 stealth_outputs::resource_address.eq(output.resource_address.to_string()),
                 stealth_outputs::commitment.eq(output.commitment.to_hex()),
-                stealth_outputs::value.eq(output.value.to_string()),
+                stealth_outputs::value.eq(output.value as i64),
                 stealth_outputs::sender_public_nonce.eq(serialize_hex(output.sender_public_nonce)),
                 stealth_outputs::view_only_key_id.eq(serialize_json(&output.view_only_key_id)?),
                 stealth_outputs::owner_key_id.eq(output.owner_key_id.as_ref().map(serialize_json).transpose()?),

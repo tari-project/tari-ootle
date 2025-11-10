@@ -25,7 +25,7 @@ pub struct UnblindedInputToSpend {
 }
 
 impl UnblindedInputToSpend {
-    pub fn value(&self) -> Amount {
+    pub fn value(&self) -> u64 {
         self.witness.mask_and_value.value
     }
 }
@@ -33,7 +33,7 @@ impl UnblindedInputToSpend {
 #[derive(Debug, Clone)]
 pub struct StealthOutputToCreate<'a> {
     pub owner_address: RistrettoOotleAddress,
-    pub amount: Amount,
+    pub amount: u64,
     pub memo: Option<&'a Memo>,
 }
 
@@ -53,7 +53,7 @@ impl InputsToSpend {
     }
 
     pub fn total_stealth_input_amount(&self) -> Amount {
-        self.inputs.iter().map(|i| i.value).sum()
+        self.inputs.iter().map(|i| Amount::from(i.value)).sum()
     }
 }
 

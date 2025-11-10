@@ -51,10 +51,10 @@ pub async fn handle_create_transfer_proof(
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
 
-    if req.amount.is_negative() || req.reveal_amount.is_negative() {
+    if req.reveal_amount.is_negative() {
         return Err(invalid_request(format!(
-            "Amount to send must be positive. Amount = {}, Revealed = {}",
-            req.amount, req.reveal_amount
+            "Amount to send must be positive. Revealed amount was {}",
+            req.reveal_amount
         )));
     }
 
@@ -67,10 +67,10 @@ pub async fn handle_create_transfer_proof(
         .get_vault_by_resource(account.component_address(), &req.resource_address)?;
     let lock = sdk.locks_api().create_lock_with_timeout(Duration::from_secs(5 * 60))?;
 
-    let amount_to_transfer = req.amount.checked_add_positive(req.reveal_amount).ok_or_else(|| {
+    let amount_to_transfer = req.confidential_amount.checked_add(req.reveal_amount).ok_or_else(|| {
         invalid_request(format!(
             "Amount to send must be greater than or equal to the amount to reveal. Amount = {}, Revealed = {}",
-            req.amount, req.reveal_amount
+            req.confidential_amount, req.reveal_amount
         ))
     })?;
     // Lock inputs we're going to spend
@@ -93,15 +93,15 @@ pub async fn handle_create_transfer_proof(
     let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask)?;
     let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
 
-    let amount_u64 = req.amount.to_u64_checked().ok_or_else(|| {
+    let confidential_amount = req.confidential_amount.to_u64_checked().ok_or_else(|| {
         invalid_request(format!(
-            "Amount to send must be a non-negative integer that does not exceed u64::MAX. Amount = {}",
-            req.amount
+            "Confidential amount exceeds the maximum value supported in a single UTXO. Amount: {}",
+            req.confidential_amount
         ))
     })?;
 
     let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
-        amount_u64,
+        confidential_amount,
         &output_mask.key,
         &public_nonce,
         &account_key.secret,
@@ -117,33 +117,29 @@ pub async fn handle_create_transfer_proof(
         )
     })?;
 
-    let output_statement = UnblindedOutputWitness {
-        amount: req.amount,
-        mask: output_mask.key,
-        sender_public_nonce: public_nonce,
-        minimum_value_promise: 0,
-        encrypted_data,
-        resource_view_key: resource_view_key.clone(),
-    };
-
-    let spend_amount = req.amount.checked_sub_positive(req.reveal_amount).ok_or_else(|| {
-        invalid_request(format!(
-            "Amount to send must be greater than or equal to the amount to reveal. Amount = {}, Revealed = {}",
-            req.amount, req.reveal_amount
-        ))
-    })?;
-    let change_amount = total_input_value.checked_sub_positive(spend_amount).ok_or_else(|| {
-        invalid_request(format!(
-            "Insufficient funds to send {}. Total input value = {}",
-            req.amount, total_input_value
-        ))
-    })?;
+    let change_amount = total_input_value
+        .checked_sub_positive(req.confidential_amount)
+        .ok_or_else(|| {
+            invalid_request(format!(
+                "Insufficient funds to send {}. Total input value = {}",
+                req.confidential_amount, total_input_value
+            ))
+        })?;
     let change_amount_u64 = change_amount.to_u64_checked().ok_or_else(|| {
         invalid_request(format!(
             "Change value exceeds the maximum value supported in a single UTXO. Change: {}. Total input value = {}",
             change_amount, total_input_value
         ))
     })?;
+
+    let output_statement = UnblindedOutputWitness {
+        amount: confidential_amount,
+        mask: output_mask.key,
+        sender_public_nonce: public_nonce,
+        minimum_value_promise: 0,
+        encrypted_data,
+        resource_view_key: resource_view_key.clone(),
+    };
 
     let maybe_change_statement = if change_amount_u64 > 0 {
         let change_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask)?;
@@ -175,7 +171,7 @@ pub async fn handle_create_transfer_proof(
         })?;
 
         Some(UnblindedOutputWitness {
-            amount: change_amount,
+            amount: change_amount_u64,
             mask: change_mask.key,
             sender_public_nonce: public_nonce,
             encrypted_data,
@@ -192,7 +188,7 @@ pub async fn handle_create_transfer_proof(
         &inputs,
         // TODO: support for using revealed funds as input for proof generation
         Amount::zero(),
-        Some(&output_statement).filter(|o| !o.amount.is_zero()),
+        Some(&output_statement).filter(|o| o.amount > 0),
         req.reveal_amount,
         maybe_change_statement.as_ref(),
         Amount::zero(),
@@ -278,17 +274,10 @@ pub async fn handle_create_output_proof(
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
 
-    let Some(amount) = req.amount.to_u64_checked() else {
-        return Err(invalid_params(
-            "amount",
-            Some("must be positive and less than u64::MAX"),
-        ));
-    };
-
     let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask)?;
     let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
     let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
-        amount,
+        req.amount,
         &output_mask.key,
         &public_nonce,
         &output_mask.key,

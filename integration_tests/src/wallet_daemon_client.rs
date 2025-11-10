@@ -103,7 +103,7 @@ pub async fn transfer_stealth(
     world: &mut TariWorld,
     source_account_name: String,
     dest_account_name: String,
-    amount: Amount,
+    amount: u64,
     wallet_daemon_name: String,
     outputs_name: String,
     resource_address: ResourceAddress,

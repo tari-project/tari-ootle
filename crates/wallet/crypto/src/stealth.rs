@@ -59,14 +59,7 @@ where
     let (inputs_to_spend, agg_input_mask) = inputs.into_iter().try_fold(
         (Vec::with_capacity(num_inputs), RistrettoSecretKey::default()),
         |(mut inputs, agg_input), input| {
-            let commitment =
-                input
-                    .mask_and_value
-                    .to_commitment()
-                    .ok_or_else(|| WalletCryptoError::InvalidArgument {
-                        name: "input value",
-                        details: format!("Input value {} must be non-negative", input.mask_and_value.value),
-                    })?;
+            let commitment = input.mask_and_value.to_commitment();
 
             let signature = generate_stealth_owner_proof_signature(
                 &input.owner_secret,
@@ -125,10 +118,7 @@ pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a UnblindedSt
         .into_iter()
         .map(|output_stmt| {
             let unblinded_stmt = &output_stmt.witness;
-            let commitment = output_stmt
-                .witness
-                .to_commitment()
-                .ok_or(ConfidentialProofError::NegativeAmount)?;
+            let commitment = output_stmt.witness.to_commitment();
             let output = UnspentOutput {
                 commitment: commitment.to_byte_type(),
                 sender_public_nonce: unblinded_stmt.sender_public_nonce.to_byte_type(),
@@ -174,7 +164,7 @@ mod tests {
     use super::*;
     use crate::UnblindedOutputWitness;
 
-    fn create_valid_proof(amount: Amount, minimum_value_promise: u64) -> StealthOutputsStatement {
+    fn create_valid_proof(amount: u64, minimum_value_promise: u64) -> StealthOutputsStatement {
         let mask = RistrettoSecretKey::random(&mut OsRng);
         create_outputs_statement(
             &[UnblindedStealthOutputWitness {
@@ -196,13 +186,13 @@ mod tests {
 
     #[test]
     fn it_is_valid_if_proof_is_valid() {
-        let proof = create_valid_proof(100.into(), 0);
+        let proof = create_valid_proof(100, 0);
         validate_stealth_outputs_statement(&proof, None).unwrap();
     }
 
     #[test]
     fn it_is_invalid_if_minimum_value_changed() {
-        let mut proof = create_valid_proof(100.into(), 100);
+        let mut proof = create_valid_proof(100, 100);
         proof.outputs[0].output.minimum_value_promise = 99;
         validate_stealth_outputs_statement(&proof, None).unwrap_err();
         proof.outputs[0].output.minimum_value_promise = 1000;

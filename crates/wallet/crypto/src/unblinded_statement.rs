@@ -2,14 +2,14 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey};
-use tari_engine_types::crypto::commit_amount_checked;
-use tari_template_lib::types::{crypto::UtxoTag, Amount, EncryptedData};
+use tari_engine_types::crypto::commit_u64_amount;
+use tari_template_lib::types::{crypto::UtxoTag, EncryptedData};
 
 use crate::memo::Memo;
 
 #[derive(Debug, Clone)]
 pub struct UnblindedOutputWitness {
-    pub amount: Amount,
+    pub amount: u64,
     pub mask: RistrettoSecretKey,
     pub sender_public_nonce: RistrettoPublicKey,
     pub minimum_value_promise: u64,
@@ -18,8 +18,8 @@ pub struct UnblindedOutputWitness {
 }
 
 impl UnblindedOutputWitness {
-    pub fn to_commitment(&self) -> Option<PedersenCommitment> {
-        commit_amount_checked(&self.mask, self.amount)
+    pub fn to_commitment(&self) -> PedersenCommitment {
+        commit_u64_amount(&self.mask, self.amount)
     }
 }
 
@@ -32,17 +32,17 @@ pub struct UnblindedStealthOutputWitness {
 
 #[derive(Debug, Clone)]
 pub struct MaskAndValue {
-    pub value: Amount,
+    pub value: u64,
     pub mask: RistrettoSecretKey,
 }
 
 impl MaskAndValue {
-    pub fn new(value: Amount, mask: RistrettoSecretKey) -> Self {
+    pub fn new(value: u64, mask: RistrettoSecretKey) -> Self {
         Self { value, mask }
     }
 
-    pub fn to_commitment(&self) -> Option<PedersenCommitment> {
-        commit_amount_checked(&self.mask, self.value)
+    pub fn to_commitment(&self) -> PedersenCommitment {
+        commit_u64_amount(&self.mask, self.value)
     }
 }
 
@@ -57,7 +57,7 @@ impl DecryptedData {
         self.mask_and_value
     }
 
-    pub fn value(&self) -> Amount {
+    pub fn value(&self) -> u64 {
         self.mask_and_value.value
     }
 
@@ -69,7 +69,7 @@ impl DecryptedData {
         self.memo.as_ref()
     }
 
-    pub fn to_commitment(&self) -> Option<PedersenCommitment> {
+    pub fn to_commitment(&self) -> PedersenCommitment {
         self.mask_and_value.to_commitment()
     }
 }

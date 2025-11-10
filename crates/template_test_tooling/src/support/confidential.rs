@@ -14,24 +14,24 @@ use tari_template_lib::{
     types::{Amount, EncryptedData},
 };
 
-pub fn generate_confidential_output_statement<A: Into<Amount>>(
-    output_amount: A,
-    change: Option<A>,
+pub fn generate_confidential_output_statement(
+    output_amount: u64,
+    change: Option<u64>,
 ) -> (ConfidentialOutputStatement, PrivateKey, Option<PrivateKey>) {
-    generate_confidential_proof_internal(output_amount.into(), change.map(Into::into), None)
+    generate_confidential_proof_internal(output_amount, change, None)
 }
 
-pub fn generate_confidential_proof_with_view_key<A: Into<Amount>>(
-    output_amount: A,
-    change: Option<A>,
+pub fn generate_confidential_proof_with_view_key(
+    output_amount: u64,
+    change: Option<u64>,
     view_key: &RistrettoPublicKey,
 ) -> (ConfidentialOutputStatement, PrivateKey, Option<PrivateKey>) {
-    generate_confidential_proof_internal(output_amount.into(), change.map(Into::into), Some(view_key.clone()))
+    generate_confidential_proof_internal(output_amount, change, Some(view_key.clone()))
 }
 
 fn generate_confidential_proof_internal(
-    output_amount: Amount,
-    change: Option<Amount>,
+    output_amount: u64,
+    change: Option<u64>,
     view_key: Option<RistrettoPublicKey>,
 ) -> (ConfidentialOutputStatement, PrivateKey, Option<PrivateKey>) {
     let mask = PrivateKey::random(&mut OsRng);
@@ -78,15 +78,18 @@ impl ConfidentialWithdrawProofOutput {
 
 pub fn generate_withdraw_proof<A: Into<Amount>>(
     input_mask: &PrivateKey,
-    output_amount: A,
-    change_amount: Option<A>,
+    output_amount: u64,
+    change_amount: Option<u64>,
     revealed_amount: A,
 ) -> ConfidentialWithdrawProofOutput {
-    let output_amount = output_amount.into();
-    let change_amount = change_amount.map(|a| a.into());
     let revealed_amount = revealed_amount.into();
 
-    let total_amount = output_amount + change_amount.unwrap_or_else(Amount::zero) + revealed_amount;
+    let total_amount = output_amount +
+        change_amount.unwrap_or(0) +
+        revealed_amount.to_u64_checked().expect(
+            "Revealed amount is too large to fit in u64 when generating withdraw proof. This is due to a current \
+             limitation of the test tooling.",
+        );
 
     generate_withdraw_proof_internal(
         &[(input_mask.clone(), total_amount)],
@@ -99,17 +102,17 @@ pub fn generate_withdraw_proof<A: Into<Amount>>(
 }
 
 pub fn generate_withdraw_proof_with_inputs<A: Into<Amount>>(
-    inputs: &[(PrivateKey, Amount)],
+    inputs: &[(PrivateKey, u64)],
     input_revealed_amount: A,
-    output_amount: A,
-    change_amount: Option<A>,
+    output_amount: u64,
+    change_amount: Option<u64>,
     revealed_output_amount: A,
 ) -> ConfidentialWithdrawProofOutput {
     generate_withdraw_proof_internal(
         inputs,
         input_revealed_amount.into(),
-        output_amount.into(),
-        change_amount.map(Into::into),
+        output_amount,
+        change_amount,
         revealed_output_amount.into(),
         None,
     )
@@ -117,32 +120,32 @@ pub fn generate_withdraw_proof_with_inputs<A: Into<Amount>>(
 
 pub fn generate_withdraw_proof_with_view_key<A: Into<Amount>>(
     input_mask: &PrivateKey,
-    input_value: A,
-    output_amount: A,
-    change_amount: Option<A>,
+    input_value: u64,
+    output_amount: u64,
+    change_amount: Option<u64>,
     revealed_amount: A,
     view_key: &RistrettoPublicKey,
 ) -> ConfidentialWithdrawProofOutput {
     generate_withdraw_proof_internal(
-        &[(input_mask.clone(), input_value.into())],
+        &[(input_mask.clone(), input_value)],
         Amount::zero(),
-        output_amount.into(),
-        change_amount.map(Into::into),
+        output_amount,
+        change_amount,
         revealed_amount.into(),
         Some(view_key.clone()),
     )
 }
 
 fn generate_withdraw_proof_internal(
-    inputs: &[(PrivateKey, Amount)],
+    inputs: &[(PrivateKey, u64)],
     input_revealed_amount: Amount,
-    output_amount: Amount,
-    change_amount: Option<Amount>,
+    output_amount: u64,
+    change_amount: Option<u64>,
     revealed_output_amount: Amount,
     view_key: Option<RistrettoPublicKey>,
 ) -> ConfidentialWithdrawProofOutput {
     // If the amount is zero, we omit the output UTXO, therefore the mask is zero
-    let output_mask = if output_amount.is_zero() {
+    let output_mask = if output_amount == 0 {
         Default::default()
     } else {
         PrivateKey::random(&mut OsRng)

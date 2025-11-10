@@ -27,25 +27,26 @@ use tari_template_lib::{
     },
 };
 
-pub fn generate_stealth_output_statement<I: IntoIterator<Item = A>, A: Into<Amount>>(
+pub fn generate_stealth_output_statement<I: IntoIterator<Item = u64>, A: Into<Amount>>(
     output_amounts: I,
     revealed_output_amount: A,
 ) -> (StealthOutputsStatement, Vec<RistrettoSecretKey>) {
     generate_stealth_statement_internal(
-        &output_amounts.into_iter().map(Into::into).collect::<Vec<_>>(),
+        &output_amounts.into_iter().collect::<Vec<_>>(),
         revealed_output_amount.into(),
         None,
     )
 }
 
-pub fn generate_mint_statement<I: IntoIterator<Item = A>, A: Into<Amount> + Copy>(
+pub fn generate_mint_statement<I: IntoIterator<Item = u64>, A: Into<Amount> + Copy>(
     stealth_output_amounts: I,
     revealed_output_amount: A,
     view_key: Option<&RistrettoPublicKey>,
     required_signer: RistrettoPublicKeyBytes,
 ) -> StealthUnblindedTransferData {
-    let stealth_output_amounts = stealth_output_amounts.into_iter().map(Into::into).collect::<Vec<_>>();
-    let total_revealed_inputs = stealth_output_amounts.iter().copied().sum::<Amount>() + revealed_output_amount.into();
+    let stealth_output_amounts = stealth_output_amounts.into_iter().collect::<Vec<_>>();
+    let total_revealed_inputs =
+        stealth_output_amounts.iter().copied().map(Amount::from).sum::<Amount>() + revealed_output_amount.into();
     match view_key {
         Some(view_key) => generate_transfer_data_with_view_key(
             &[],
@@ -66,20 +67,20 @@ pub fn generate_mint_statement<I: IntoIterator<Item = A>, A: Into<Amount> + Copy
     }
 }
 
-pub fn generate_stealth_statement_with_view_key<I: IntoIterator<Item = A>, A: Into<Amount>>(
+pub fn generate_stealth_statement_with_view_key<I: IntoIterator<Item = u64>>(
     output_amounts: I,
     revealed_output_amount: Amount,
     view_key: &RistrettoPublicKey,
 ) -> (StealthOutputsStatement, Vec<RistrettoSecretKey>) {
     generate_stealth_statement_internal(
-        &output_amounts.into_iter().map(Into::into).collect::<Vec<_>>(),
+        &output_amounts.into_iter().collect::<Vec<_>>(),
         revealed_output_amount,
         Some(view_key.clone()),
     )
 }
 
 fn generate_stealth_statement_internal(
-    output_amounts: &[Amount],
+    output_amounts: &[u64],
     revealed_output_amount: Amount,
     view_key: Option<RistrettoPublicKey>,
 ) -> (StealthOutputsStatement, Vec<RistrettoSecretKey>) {
@@ -121,7 +122,7 @@ pub fn generate_transfer_data<O, A>(
     required_signer: RistrettoPublicKeyBytes,
 ) -> StealthUnblindedTransferData
 where
-    O: IntoIterator<Item = A>,
+    O: IntoIterator<Item = u64>,
     A: Into<Amount>,
 {
     generate_transfer_data_internal(
@@ -134,7 +135,7 @@ where
     )
 }
 
-pub fn generate_transfer_data_with_view_key<I: IntoIterator<Item = A>, A: Into<Amount>>(
+pub fn generate_transfer_data_with_view_key<I: IntoIterator<Item = u64>, A: Into<Amount>>(
     inputs: &[MaskAndValue],
     revealed_input_amount: A,
     output_amounts: I,
@@ -163,7 +164,7 @@ pub fn test_sender_public_nonce() -> RistrettoPublicKey {
     test_sender_nonce_keypair().1
 }
 
-fn generate_transfer_data_internal<I: IntoIterator<Item = A>, A: Into<Amount>>(
+fn generate_transfer_data_internal<I: IntoIterator<Item = u64>, A: Into<Amount>>(
     inputs: &[MaskAndValue],
     revealed_input_amount: A,
     output_amounts: I,
@@ -173,14 +174,9 @@ fn generate_transfer_data_internal<I: IntoIterator<Item = A>, A: Into<Amount>>(
 ) -> StealthUnblindedTransferData {
     let outputs = output_amounts
         .into_iter()
-        .map(|a| {
-            // If the amount is zero, we omit the output UTXO, therefore, the mask is zero
-            let amount = a.into();
-            let output_mask = if amount.is_zero() {
-                Default::default()
-            } else {
-                RistrettoSecretKey::random(&mut OsRng)
-            };
+        .filter(|&a| a > 0)
+        .map(|amount| {
+            let output_mask = RistrettoSecretKey::random(&mut OsRng);
             // For testing purposes, we use the mask as the owner key
             let output_owner_public_key = RistrettoPublicKey::from_secret_key(&output_mask);
             let statement = UnblindedOutputWitness {

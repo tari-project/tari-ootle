@@ -15,7 +15,7 @@ pub struct StealthOutputModel {
     pub owner_account: ComponentAddress,
     pub resource_address: ResourceAddress,
     pub commitment: PedersenCommitmentBytes,
-    pub value: Amount,
+    pub value: u64,
     pub sender_public_nonce: RistrettoPublicKeyBytes,
     /// Note: this field is more for debugging. We use the account key index for all outputs belonging to an account
     pub view_only_key_id: KeyId,
@@ -49,12 +49,34 @@ impl StealthOutputModel {
 }
 
 #[derive(Debug, Clone)]
+pub struct StealthOutputInfo {
+    pub resource_address: ResourceAddress,
+    pub commitment: PedersenCommitmentBytes,
+    pub public_nonce: RistrettoPublicKeyBytes,
+    pub encrypted_data: EncryptedData,
+    pub value: u64,
+    pub is_on_chain: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct InputSpendData {
     pub commitment: PedersenCommitmentBytes,
     pub public_nonce: RistrettoPublicKeyBytes,
     pub encrypted_data: EncryptedData,
-    pub value: Amount,
+    pub value: u64,
     pub is_on_chain: bool,
+}
+
+impl From<StealthOutputInfo> for InputSpendData {
+    fn from(info: StealthOutputInfo) -> Self {
+        Self {
+            commitment: info.commitment,
+            public_nonce: info.public_nonce,
+            encrypted_data: info.encrypted_data,
+            value: info.value,
+            is_on_chain: info.is_on_chain,
+        }
+    }
 }
 
 pub struct StealthBalance {

@@ -35,7 +35,7 @@ pub enum ProofsSubcommand {
 
 #[derive(Debug, Args, Clone)]
 pub struct GenerateArgs {
-    pub amount: i64,
+    pub amount: u64,
     #[clap(short = 'o', long)]
     pub output_type: OutputType,
 }
@@ -66,9 +66,7 @@ impl ProofsSubcommand {
         match self {
             Generate(args) => {
                 let resp = client
-                    .create_confidential_output_proof(ConfidentialCreateOutputProofRequest {
-                        amount: args.amount.into(),
-                    })
+                    .create_confidential_output_proof(ConfidentialCreateOutputProofRequest { amount: args.amount })
                     .await?;
 
                 match args.output_type {

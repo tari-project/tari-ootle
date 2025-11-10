@@ -139,7 +139,7 @@ where
                 );
 
                 Ok(InputsToSpend {
-                    inputs: inputs.into_iter().map(|i| i.into_spend_data()).collect(),
+                    inputs,
                     revealed: Amount::zero(),
                 })
             },
@@ -218,9 +218,7 @@ where
                     utxo_amount_to_spend,
                 )?;
 
-                let total_confidential_spent = Amount::sum_from_positive(inputs.iter().map(|i| i.value))
-                    // The wallet has somehow stored a negative amount, which should not happen.
-                    .expect("BUG: an unblinded input amount was negative");
+                let total_confidential_spent = inputs.iter().map(|i| Amount::from(i.value)).sum::<Amount>();
 
                 if let Some(ref src_vault) = maybe_src_vault {
                     self.locks_api
@@ -239,7 +237,7 @@ where
                 );
 
                 Ok(InputsToSpend {
-                    inputs: inputs.into_iter().map(|i| i.into_spend_data()).collect(),
+                    inputs,
                     revealed: revealed_to_spend,
                 })
             },
@@ -251,9 +249,7 @@ where
                     lock_id,
                 )?;
 
-                let revealed_to_spend = spend_amount
-                    .saturating_sub_positive(blinded_amount_locked)
-                    .unwrap_or_else(Amount::zero);
+                let revealed_to_spend = spend_amount.saturating_sub_positive(blinded_amount_locked);
 
                 if available_revealed_funds < revealed_to_spend {
                     return Err(StealthTransferApiError::InsufficientFunds {
@@ -280,7 +276,7 @@ where
                 }
 
                 Ok(InputsToSpend {
-                    inputs: inputs.into_iter().map(|i| i.into_spend_data()).collect(),
+                    inputs,
                     revealed: revealed_to_spend,
                 })
             },
@@ -371,9 +367,25 @@ where
             let fee_inputs_to_spend =
                 self.lock_fee_inputs(lock.id(), &owner_account, params.max_fee, params.fee_input_selection)?;
 
+            debug!(
+                target: LOG_TARGET,
+                "🔒️ Locked {} fee inputs for fee spending worth {} (max fee {})",
+                fee_inputs_to_spend.inputs.len(),
+                fee_inputs_to_spend.total_stealth_input_amount(),
+                params.max_fee,
+            );
+
             let fee_stealth_change_amt = fee_inputs_to_spend
                 .total_stealth_input_amount()
-                .saturating_sub(params.max_fee.into());
+                .saturating_sub_positive(params.max_fee.into())
+                .to_u64_checked()
+                .ok_or_else(|| {
+                    StealthTransferApiError::InvariantViolation {
+                        // Technically, you could create multiple outputs, but for simplicity and because this is
+                        // extremely unlikely to be needed, we only create one here
+                        details: "Fee change amount exceeds u64".to_string(),
+                    }
+                })?;
 
             // Generate fee change outputs if required
             let fee_change_output = Some(StealthOutputToCreate {
@@ -381,7 +393,7 @@ where
                 amount: fee_stealth_change_amt,
                 memo: None,
             })
-            .filter(|o| o.amount.is_positive());
+            .filter(|o| o.amount > 0);
 
             // Figure out which signing key to use - if there are no revealed funds, which necessitate using an account
             // withdraw auth signature, then we can use a nonce key.
@@ -498,7 +510,13 @@ where
 
             let change_output = Some(StealthOutputToCreate {
                 owner_address,
-                amount: change_amount,
+                amount: change_amount
+                    .to_u64_checked()
+                    .ok_or_else(|| StealthTransferApiError::InvariantViolation {
+                        // Technically, you could create multiple outputs, but for simplicity and because this is
+                        // extremely unlikely to be needed, we only create one here
+                        details: "Change amount exceeds u64".to_string(),
+                    })?,
                 memo: None,
             });
 
@@ -519,7 +537,7 @@ where
                 outputs: outputs_to_create
                     .into_iter()
                     .chain(change_output)
-                    .filter(|o| o.amount.is_positive()),
+                    .filter(|o| o.amount > 0),
                 output_revealed_amount: params.total_revealed_output_amount(),
                 required_signer: required_signer_pk,
             })?;
@@ -541,7 +559,11 @@ where
                         &owner_account,
                         params.resource_address,
                         output,
-                        change_amount,
+                        change_amount
+                            .to_u64_checked()
+                            .ok_or_else(|| StealthTransferApiError::InvariantViolation {
+                                details: "Change amount exceeds u64".to_string(),
+                            })?,
                         None,
                     )?;
                 }
@@ -837,7 +859,7 @@ where
         account: &AccountWithAddress,
         resource_address: ResourceAddress,
         output: &StealthUnspentOutput,
-        value: Amount,
+        value: u64,
         memo: Option<Memo>,
     ) -> Result<(), StealthTransferApiError> {
         self.outputs_api.add_output(&StealthOutputModel {

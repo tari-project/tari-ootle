@@ -10,7 +10,7 @@ use tari_engine_types::{
 use tari_ootle_common_types::{shard::Shard, Epoch, StateVersion, VersionedSubstateIdRef};
 use tari_template_lib::{
     models::{ComponentAddress, NonFungibleId, ResourceAddress, UtxoAddress, UtxoId, VaultId},
-    prelude::{crypto::UtxoTag, Amount, RistrettoPublicKeyBytes, TemplateAddress},
+    prelude::{crypto::UtxoTag, Amount, PedersenCommitmentBytes, RistrettoPublicKeyBytes, TemplateAddress},
 };
 use tari_transaction::{Transaction, TransactionId};
 use webauthn_rs::prelude::Passkey;
@@ -152,6 +152,13 @@ pub trait WalletStoreWriter: CommittableStore {
         resource_address: &ResourceAddress,
         lock_id: WalletLockId,
     ) -> Result<StealthOutputModel, WalletStorageError>;
+
+    fn stealth_outputs_lock_many(
+        &mut self,
+        resource_address: &ResourceAddress,
+        utxos: &[&PedersenCommitmentBytes],
+        lock_id: WalletLockId,
+    ) -> Result<(), WalletStorageError>;
     fn stealth_outputs_insert(&mut self, output: &StealthOutputModel) -> Result<(), WalletStorageError>;
     fn stealth_outputs_mark_as_spent(
         &mut self,

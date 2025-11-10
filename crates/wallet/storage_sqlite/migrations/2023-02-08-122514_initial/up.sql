@@ -250,7 +250,7 @@ CREATE TABLE stealth_outputs
     owner_account_id      INTEGER  NOT NULL REFERENCES accounts (id),
     resource_address      TEXT     NOT NULL,
     commitment            TEXT     NOT NULL,
-    value                 TEXT     NOT NULL,
+    value                 BIGINT   NOT NULL,
     sender_public_nonce   TEXT     NOT NULL,
     -- Status can be "Unspent", "Spent", "Locked", "LockedUnconfirmed", "Invalid"
     status                TEXT     NOT NULL,

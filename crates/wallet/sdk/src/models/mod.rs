@@ -7,6 +7,7 @@ mod confidential_output;
 mod config;
 mod epoch_birthday;
 mod event;
+pub mod input_selection;
 mod key;
 mod lock_guard;
 mod non_fungible_tokens;

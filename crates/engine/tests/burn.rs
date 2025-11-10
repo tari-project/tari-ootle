@@ -10,7 +10,7 @@ fn it_burns_all_resource_types() {
     let mut test = TemplateTest::new(["tests/templates/burn"]);
     let recall_template = test.get_template_address("Burn");
 
-    let (mut initial_supply, _mask, _) = generate_confidential_output_statement(Amount::from(1000), None);
+    let (mut initial_supply, _mask, _) = generate_confidential_output_statement(1000, None);
     initial_supply.output_revealed_amount = Amount::from(1000);
 
     let result = test.execute_expect_success(

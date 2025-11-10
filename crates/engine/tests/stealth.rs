@@ -100,7 +100,7 @@ fn basic_transfer() {
     let transfer = stealth::generate_transfer_data(
         &[MaskAndValue {
             mask: mint.output_masks[0].clone(),
-            value: 100.into(),
+            value: 100,
         }],
         0,
         Some(100),
@@ -138,7 +138,7 @@ fn programmatic_transfer() {
     let transfer = stealth::generate_transfer_data(
         &[MaskAndValue {
             mask: mint.output_masks[0].clone(),
-            value: 100.into(),
+            value: 100,
         }],
         0,
         Some(75),
@@ -174,7 +174,7 @@ fn transfer_with_revealed_outputs() {
     let transfer = stealth::generate_transfer_data(
         &[MaskAndValue {
             mask: mint.output_masks[1].clone(),
-            value: 1000.into(),
+            value: 1000,
         }],
         0,
         [100, 200],
@@ -216,11 +216,11 @@ fn transfer_revealed_between_accounts() {
         &[
             MaskAndValue {
                 mask: mint.output_masks[2].clone(),
-                value: 10000.into(),
+                value: 10000,
             },
             MaskAndValue {
                 mask: mint.output_masks[1].clone(),
-                value: 1000.into(),
+                value: 1000,
             },
         ],
         0,
@@ -270,7 +270,7 @@ fn transfer_invalid_balance_in_statement() {
     let transfer_from_faucet = stealth::generate_transfer_data(
         &[MaskAndValue {
             mask: mint.output_masks[0].clone(),
-            value: 100.into(),
+            value: 100,
         }],
         0,
         [99],
@@ -302,7 +302,7 @@ fn transfer_invalid_ownership_proof() {
     let mut transfer_from_faucet = stealth::generate_transfer_data(
         &[MaskAndValue {
             mask: mint.output_masks[0].clone(),
-            value: 100.into(),
+            value: 100,
         }],
         0,
         [99],
@@ -340,7 +340,7 @@ fn transfer_invalid_range_proof_in_statement() {
     let mut transfer_from_faucet = stealth::generate_transfer_data(
         &[MaskAndValue {
             mask: mint.output_masks[0].clone(),
-            value: 100.into(),
+            value: 100,
         }],
         0,
         [99],
@@ -389,11 +389,11 @@ fn many_outputs_in_one_transfer() {
     let transfer_from_faucet = stealth::generate_transfer_data(
         &[MaskAndValue {
             mask: mint.output_masks[0].clone(),
-            value: 1000.into(),
+            value: 1000,
         }],
         0,
         iter::repeat_n(
-            1000 / limits::STEALTH_LIMITS.max_outputs,
+            u64::try_from(1000 / limits::STEALTH_LIMITS.max_outputs).unwrap(),
             limits::STEALTH_LIMITS.max_outputs,
         ),
         0,
@@ -458,7 +458,7 @@ fn mint_with_view_key() {
     let withdraw_proof = stealth::generate_transfer_data_with_view_key(
         &[MaskAndValue {
             mask: mint.output_masks[0].clone(),
-            value: 1000.into(),
+            value: 1000,
         }],
         0,
         [100, 200, 200, 200, 200, 100],
@@ -502,11 +502,11 @@ fn freeze_then_attempt_spend() {
         &[
             MaskAndValue {
                 mask: mint.output_masks[0].clone(),
-                value: 100.into(),
+                value: 100,
             },
             MaskAndValue {
                 mask: mint.output_masks[1].clone(),
-                value: 1000.into(),
+                value: 1000,
             },
         ],
         0,
@@ -577,11 +577,11 @@ fn burn_then_attempt_spend() {
         &[
             MaskAndValue {
                 mask: mint.output_masks[0].clone(),
-                value: outputs[0].into(),
+                value: outputs[0],
             },
             MaskAndValue {
                 mask: mint.output_masks[1].clone(),
-                value: outputs[1].into(),
+                value: outputs[1],
             },
         ],
         0,
@@ -643,11 +643,11 @@ fn transfer_fails_if_tx_signed_by_wrong_signer() {
         &[
             MaskAndValue {
                 mask: mint.output_masks[2].clone(),
-                value: 10000.into(),
+                value: 10000,
             },
             MaskAndValue {
                 mask: mint.output_masks[1].clone(),
-                value: 1000.into(),
+                value: 1000,
             },
         ],
         0,

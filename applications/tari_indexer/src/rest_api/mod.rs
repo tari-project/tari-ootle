@@ -6,6 +6,8 @@ mod context;
 mod encoder;
 mod error;
 mod handlers;
+#[cfg(feature = "metrics")]
+mod metrics;
 mod server;
 mod streaming;
 

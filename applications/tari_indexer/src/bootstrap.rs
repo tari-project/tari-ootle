@@ -84,6 +84,7 @@ pub async fn spawn_services(
     keypair: RistrettoKeypair,
     global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     consensus_constants: ConsensusConstants,
+    #[cfg(feature = "metrics")] metrics_registry: &mut prometheus_client::registry::Registry,
 ) -> Result<Services, anyhow::Error> {
     ensure_directories_exist(config)?;
 
@@ -103,7 +104,9 @@ pub async fn spawn_services(
             (peer_id, p.into_address())
         })
         .collect();
-    let (networking, _) = tari_networking::Builder::<TariMessagingSpec>::new(identity)
+
+    #[allow(unused_mut)]
+    let mut network_builder = tari_networking::Builder::<TariMessagingSpec>::new(identity)
         .with_messaging_mode(MessagingMode::Disabled)
         .with_config(tari_networking::Config {
             // TODO: configurable
@@ -149,8 +152,12 @@ pub async fn spawn_services(
                 },
                 None => builder,
             }
-        })
-        .spawn(shutdown.clone())?;
+        });
+    #[cfg(feature = "metrics")]
+    {
+        network_builder = network_builder.with_metrics_registry(metrics_registry);
+    }
+    let (networking, _) = network_builder.spawn(shutdown.clone())?;
 
     // Connect to substate db
     let store = SqliteIndexerStore::try_create(config.state_db_path())?;

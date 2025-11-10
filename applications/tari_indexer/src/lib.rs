@@ -51,6 +51,7 @@ use network_state_sync::BlockScanner;
 use serde::Serialize;
 use tari_common::exit_codes::{ExitCode, ExitError};
 use tari_consensus::consensus_constants::ConsensusConstants;
+use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_epoch_manager::{
     traits::{EpochManagerSpec, LayerOneTransactionSubmitter},
     EpochManagerEvent,
@@ -87,6 +88,9 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         .get_or_create_global_db()
         .map_err(|e| ExitError::new(ExitCode::DatabaseError, e))?;
 
+    #[cfg(feature = "metrics")]
+    let mut registry = create_metrics_registry(keypair.public_key());
+
     let consensus_constants = ConsensusConstants::from(config.network);
     let services = spawn_services(
         &config,
@@ -94,6 +98,8 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         keypair.clone(),
         global_db,
         consensus_constants.clone(),
+        #[cfg(feature = "metrics")]
+        &mut registry,
     )
     .await?;
 
@@ -112,7 +118,12 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
     // Run the REST API
     let listen_addr = config.indexer.api_listen_address;
     if let Some(listen_addr) = listen_addr {
-        let listen_address = rest_api::Server::spawn(listen_addr, &services, shutdown_signal.clone())
+        #[cfg(not(feature = "metrics"))]
+        let server = rest_api::Server::new();
+        #[cfg(feature = "metrics")]
+        let server = rest_api::Server::new(registry);
+        let listen_address = server
+            .spawn(listen_addr, &services, shutdown_signal.clone())
             .await
             .map_err(|e| ExitError::new(ExitCode::ConfigError, e))?;
         debug!(target: LOG_TARGET, "API address {}", listen_address);
@@ -233,4 +244,16 @@ impl LayerOneTransactionSubmitter for Noop {
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send {
         future::ready(Ok(()))
     }
+}
+
+#[cfg(feature = "metrics")]
+fn create_metrics_registry(public_key: &RistrettoPublicKey) -> prometheus_client::registry::Registry {
+    use std::borrow::Cow;
+    prometheus_client::registry::Registry::with_labels(
+        [
+            (Cow::Borrowed("app"), Cow::Borrowed("OotleIndexer")),
+            (Cow::Borrowed("public_key"), Cow::Owned(public_key.to_string())),
+        ]
+        .into_iter(),
+    )
 }

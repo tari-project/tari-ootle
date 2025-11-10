@@ -79,6 +79,7 @@ tokio = { workspace = true, features = [
 tower-http = { workspace = true, features = ["default", "cors", "limit"] }
 url = { workspace = true, features = ["serde"] }
 cacache = { version = "13.1.0", default-features = false, features = ["mmap", "tokio-runtime"] }
+prometheus-client = { workspace = true, optional = true }
 prost = { workspace = true }
 utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true, features = ["axum"] }
@@ -90,5 +91,6 @@ ignored = [
 ]
 
 [features]
-default = ["web_ui"]
+default = ["web_ui", "metrics"]
 web_ui = ["include_dir"]
+metrics = ["prometheus-client", "tari_networking/metrics"]

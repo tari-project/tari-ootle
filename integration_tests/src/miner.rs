@@ -91,12 +91,13 @@ async fn create_base_node_client(world: &TariWorld, miner_name: &String) -> Base
     BaseNodeClient::connect(base_node_grpc_url).await.unwrap()
 }
 
-async fn mine_block(world: &TariWorld, payment_address: &TariAddress, base_client: &mut BaseNodeClient) {
+async fn mine_block(world: &mut TariWorld, payment_address: &TariAddress, base_client: &mut BaseNodeClient) {
+    let key_id = world.script_key_id().await;
     let (block_template, _) = create_block_template_with_coinbase(
         base_client,
         0,
-        &world.key_manager,
-        &world.script_key_id().await,
+        &mut world.key_manager,
+        &key_id,
         payment_address,
         false,
         &world.consensus_manager,
@@ -122,7 +123,7 @@ async fn mine_block_without_wallet_with_template(base_client: &mut BaseNodeClien
 async fn create_block_template_with_coinbase(
     base_client: &mut BaseNodeClient,
     weight: u64,
-    key_manager: &MemoryDbKeyManager,
+    key_manager: &mut MemoryDbKeyManager,
     script_key_id: &TariKeyId,
     wallet_payment_address: &TariAddress,
     stealth_payment: bool,

@@ -1359,8 +1359,9 @@ async fn multishard_publish_template() {
     let inputs = test.create_substates_on_vns(TestVnDestination::All, 1);
     let (sk, pk) = create_key_pair();
     let wasm = load_binary_fixture("state.wasm");
+    let expected_binary_hash = hash_template_code(&wasm);
     let tx = Transaction::builder()
-        .publish_template(wasm.clone())
+        .publish_template(wasm.try_into().unwrap())
         .with_inputs(inputs.iter().cloned().map(Into::into))
         .build_and_seal(&sk);
     let tx = TransactionRecord::new(tx);
@@ -1368,8 +1369,7 @@ async fn multishard_publish_template() {
     test.send_transaction_to_destination(TestVnDestination::All, tx.clone())
         .await;
 
-    let binary_hash = hash_template_code(&wasm);
-    let template_id = PublishedTemplateAddress::from_author_and_binary_hash(&pk.to_byte_type(), &binary_hash);
+    let template_id = PublishedTemplateAddress::from_author_and_binary_hash(&pk.to_byte_type(), &expected_binary_hash);
     test.add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
         transaction: tx.transaction().clone(),
         decision: Decision::Commit,
@@ -1412,7 +1412,7 @@ async fn multishard_publish_template() {
             .into_template()
             .expect("Expected template substate")
             .binary_hash;
-        assert_eq!(binary_hash, hash_template_code(&wasm), "Template binary does not match");
+        assert_eq!(binary_hash, expected_binary_hash, "Template binary does not match");
     }
 
     test.assert_clean_shutdown().await;

@@ -23,17 +23,14 @@
 use std::{collections::HashMap, sync::Arc};
 
 use log::{debug, info};
-use tari_engine::{state_store::new_memory_store, traits::ClaimProofVerifier, transaction::TransactionProcessorConfig};
+use tari_engine::{fees::FeeTable, state_store::new_memory_store, traits::ClaimProofVerifier};
 use tari_engine_types::{
     commit_result::ExecuteResult,
     substate::{Substate, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
-use tari_ootle_app_utilities::{
-    fee_tables::get_fee_table_by_network,
-    transaction_executor::{TariTransactionProcessor, TransactionExecutor as _},
-};
+use tari_ootle_app_utilities::transaction_executor::{TariTransactionProcessor, TransactionExecutor as _};
 use tari_ootle_common_types::{Epoch, PeerAddress, SubstateRequirement};
 use tari_template_manager::implementation::TemplateManager;
 use tari_transaction::Transaction;
@@ -51,27 +48,24 @@ const LOG_TARGET: &str = "tari::indexer::dry_run_transaction_processor";
 
 #[derive(Clone)]
 pub struct DryRunTransactionProcessor {
-    config: TransactionProcessorConfig,
+    processor: TariTransactionProcessor<TemplateManager<PeerAddress>>,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     client_provider: TariValidatorNodeRpcClientFactory,
-    template_manager: TemplateManager<PeerAddress>,
-    claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
 }
 
 impl DryRunTransactionProcessor {
     pub fn new(
-        config: TransactionProcessorConfig,
+        fee_table: FeeTable,
         epoch_manager: EpochManagerHandle<PeerAddress>,
         client_provider: TariValidatorNodeRpcClientFactory,
         template_manager: TemplateManager<PeerAddress>,
         claim_burn_proof_verifier: impl ClaimProofVerifier + Send + Sync + 'static,
     ) -> Self {
+        let processor = TariTransactionProcessor::new(template_manager, fee_table, Arc::new(claim_burn_proof_verifier));
         Self {
-            config,
+            processor,
             epoch_manager,
             client_provider,
-            template_manager,
-            claim_burn_proof_verifier: Arc::new(claim_burn_proof_verifier),
         }
     }
 
@@ -88,15 +82,6 @@ impl DryRunTransactionProcessor {
         let epoch = self.epoch_manager.current_epoch().await?;
         let found_substates = self.fetch_input_substates(&transaction, epoch).await?;
 
-        let fee_table = get_fee_table_by_network(self.config.network);
-
-        let payload_processor = TariTransactionProcessor::new(
-            self.config.clone(),
-            self.template_manager.clone(),
-            fee_table.clone(),
-            self.claim_burn_proof_verifier.clone(),
-        );
-
         let virtual_substates = self.get_virtual_substates(&transaction, epoch).await?;
 
         let mut state_store = new_memory_store();
@@ -104,7 +89,8 @@ impl DryRunTransactionProcessor {
 
         // execute the payload in the WASM engine and return the result
         let exec_output = task::block_in_place(|| {
-            payload_processor.execute(&transaction, state_store.into_read_only(), virtual_substates)
+            self.processor
+                .execute(&transaction, state_store.into_read_only(), virtual_substates)
         })?;
 
         Ok(exec_output.result)

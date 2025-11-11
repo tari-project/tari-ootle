@@ -37,6 +37,7 @@ use crate::{
     ComponentCall,
     Instruction,
     ResourceAddressRef,
+    TemplateBlob,
     Transaction,
     TransactionSignature,
     UnsealedTransactionV1,
@@ -286,7 +287,7 @@ impl TransactionBuilder {
     }
 
     /// Publishing a WASM template.
-    pub fn publish_template(self, binary: Vec<u8>) -> Self {
+    pub fn publish_template(self, binary: TemplateBlob) -> Self {
         self.add_instruction(Instruction::PublishTemplate { binary })
     }
 

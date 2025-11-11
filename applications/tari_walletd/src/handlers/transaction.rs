@@ -546,6 +546,10 @@ pub async fn handle_publish_template(
         },
     };
 
+    let wasm_binary = wasm_binary
+        .try_into()
+        .map_err(|_| invalid_params("binary", Some("WASM binary too large".to_string())))?;
+
     let transaction = context
         .transaction_builder()
         .fee_transaction_pay_from_component(*fee_account.component_address(), req.max_fee)

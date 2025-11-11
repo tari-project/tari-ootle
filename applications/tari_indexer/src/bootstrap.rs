@@ -30,7 +30,6 @@ use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common::configuration::bootstrap::{grpc_default_port, ApplicationType};
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_crypto::tari_utilities::ByteArray;
-use tari_engine::transaction::TransactionProcessorConfig;
 use tari_engine_types::ToByteType;
 use tari_epoch_manager::service::{EpochManagerConfig, EpochManagerHandle};
 use tari_epoch_oracles::{
@@ -47,6 +46,7 @@ use tari_ootle_app_utilities::{
     common::verify_correct_network,
     configuration::convert_network_to_l1_network,
     epoch_oracle_config::EpochOracleType,
+    fee_tables::get_fee_table_by_network,
     keypair::RistrettoKeypair,
     seed_peer::SeedPeer,
     shared_consts::TXTR_FAUCET_INITIAL_SUPPLY,
@@ -237,9 +237,9 @@ pub async fn spawn_services(
     let transaction_manager = TransactionManager::new(network_client.clone(), store.clone());
 
     // dry run
+    let fee_table = get_fee_table_by_network(config.network);
     let dry_run_transaction_processor = DryRunTransactionProcessor::new(
-        TransactionProcessorConfig::new(config.network)
-            .with_template_binary_max_size_bytes(consensus_constants.template_binary_max_size_bytes),
+        fee_table.clone(),
         epoch_manager.clone(),
         validator_node_client_factory.clone(),
         template_manager.clone(),

@@ -39,6 +39,10 @@ impl<const N: usize> MaxBytes<N> {
     pub fn empty() -> Self {
         Self { bytes: Box::new([]) }
     }
+
+    pub fn as_slice(&self) -> &[u8] {
+        &self.bytes
+    }
 }
 
 impl<const N: usize> AsRef<[u8]> for MaxBytes<N> {
@@ -64,6 +68,14 @@ impl<const N: usize> TryFrom<Vec<u8>> for MaxBytes<N> {
     type Error = ();
 
     fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        Self::new_checked(value).ok_or(())
+    }
+}
+
+impl<const N: usize> TryFrom<Box<[u8]>> for MaxBytes<N> {
+    type Error = ();
+
+    fn try_from(value: Box<[u8]>) -> Result<Self, Self::Error> {
         Self::new_checked(value).ok_or(())
     }
 }

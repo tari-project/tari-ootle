@@ -45,8 +45,6 @@ pub struct ConsensusConstants {
     /// The value that fees are divided by to determine the amount of fees to burn. 0 means no fees are burned.
     pub fee_exhaust_divisor: u64,
     pub epochs_per_era: Epoch,
-    /// Maximum size in bytes for a template WASM binary.
-    pub template_binary_max_size_bytes: usize,
 }
 
 impl ConsensusConstants {
@@ -64,7 +62,6 @@ impl ConsensusConstants {
             max_number_commands_in_block: 500,
             fee_exhaust_divisor: 20, // 5%
             epochs_per_era: Epoch(10),
-            template_binary_max_size_bytes: 1000 * 1000 * 5, // 5 MB
         }
     }
 }

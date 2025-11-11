@@ -8,6 +8,8 @@ import type {
   GetNetworkSyncStateResponse, GetNonFungiblesRequest, GetNonFungiblesResponse,
   GetRecentTransactionsRequest,
   GetRecentTransactionsResponse,
+  GetResourceResponse,
+  ResourceAddress,
   GetSubstatesRequest,
   GetSubstatesResponse, GetTransactionReceiptResponse,
   IndexerAddPeerRequest,
@@ -126,5 +128,9 @@ export class IndexerClient {
 
   public templatesListAuthored(params: TemplatesListAuthoredRequest): Promise<TemplatesListAuthoredResponse> {
     return this.transport.sendPost(`templates`, params);
+  }
+
+  public resourcesGet(address: ResourceAddress): Promise<GetResourceResponse> {
+    return this.transport.sendGet(`resources/${encodeURIComponent(address)}`, {});
   }
 }

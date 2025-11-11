@@ -3,7 +3,11 @@
 
 use reqwest::{header, header::HeaderMap, IntoUrl, Url};
 use serde::{de::DeserializeOwned, Serialize};
-use tari_engine_types::{substate::SubstateId, transaction_receipt::TransactionReceiptAddress};
+use tari_engine_types::{
+    substate::SubstateId,
+    template_lib_models::ResourceAddress,
+    transaction_receipt::TransactionReceiptAddress,
+};
 
 use crate::{
     error::IndexerRestClientError,
@@ -17,6 +21,7 @@ use crate::{
         GetNetworkSyncStateResponse,
         GetNonFungiblesRequest,
         GetNonFungiblesResponse,
+        GetResourceResponse,
         GetSubstateRequest,
         GetSubstateResponse,
         GetSubstatesRequest,
@@ -195,6 +200,10 @@ impl IndexerRestApiClient {
 
     pub async fn wait_until_ready(&mut self) -> Result<IndexerReadyResponse, IndexerRestClientError> {
         self.send_get("wait-until-ready", ()).await
+    }
+
+    pub async fn get_resource(&mut self, addr: ResourceAddress) -> Result<GetResourceResponse, IndexerRestClientError> {
+        self.send_get(format!("resources/{addr}"), ()).await
     }
 
     async fn send_get<P: Into<String>, T: Serialize, R: DeserializeOwned>(

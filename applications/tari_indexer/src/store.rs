@@ -243,7 +243,7 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
             let claimed = tx
                 .key_value_get_value::<_, Amount>(Key::XtrAccumulatedClaimed)
                 .optional()?;
-            let burned = tx
+            let burnt = tx
                 .key_value_get_value::<_, Amount>(Key::XtrAccumulatedExhaustBurn)
                 .optional()?;
 
@@ -252,16 +252,16 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
                 .values()
                 .map(|header| header.accumulated_data().total_exhaust_burn)
                 .fold(Amount::zero(), |acc, x| acc.saturating_add(x.into())) +
-                burned.unwrap_or_default();
+                burnt.unwrap_or_default();
 
             claimed
                 .unwrap_or_default()
                 .checked_sub(total_exhaust)
                 .ok_or_else(|| StorageError::DataInconsistency {
                     details: format!(
-                        "XTR total supply underflow: claimed {} < burned {}",
+                        "XTR total supply underflow: claimed {} < total exhaust {}",
                         claimed.display(),
-                        burned.display()
+                        total_exhaust
                     ),
                 })
         })

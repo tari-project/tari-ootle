@@ -1,7 +1,10 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::ops::{Deref, DerefMut};
+use std::{
+    collections::HashMap,
+    ops::{Deref, DerefMut},
+};
 
 use serde::{de::DeserializeOwned, Serialize};
 use tari_consensus_types::BlockId;
@@ -22,7 +25,7 @@ use tari_ootle_common_types::{
     StateVersion,
 };
 use tari_ootle_storage::{
-    consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof},
+    consensus_models::{Block, BlockHeader, EpochCheckpoint, SubstateData, SubstateUpdateProof},
     Ordering,
     StorageError,
 };
@@ -139,6 +142,11 @@ pub trait IndexerStoreReadTransaction {
     fn key_value_get_value<K: AsRef<str>, T: DeserializeOwned>(&mut self, key: K) -> Result<T, StorageError>;
     fn key_value_get_raw<K: AsRef<str>>(&mut self, key: K) -> Result<KeyValue<String>, StorageError>;
 
+    // -------------------------------- Epoch Checkpoints -------------------------------- //
+    fn epoch_checkpoint_exists(&mut self, shard_group: ShardGroup, epoch: Epoch) -> Result<bool, StorageError>;
+
+    // -------------------------------- UTXOs -------------------------------- //
+
     fn utxos_get_max_state_version(
         &mut self,
         resource_address: ResourceAddress,
@@ -168,6 +176,9 @@ pub trait IndexerStoreReadTransaction {
         resource_address: &ResourceAddress,
         public_nonce_and_tag: &[(UtxoTag, RistrettoPublicKeyBytes)],
     ) -> Result<Vec<(UtxoId, Utxo)>, StorageError>;
+
+    // -------------------------------- Blocks -------------------------------- //
+    fn get_tip_blocks(&mut self, epoch: Epoch) -> Result<HashMap<ShardGroup, BlockHeader>, StorageError>;
 }
 
 pub trait IndexerStoreWriteTransaction {
@@ -195,6 +206,10 @@ pub trait IndexerStoreWriteTransaction {
     fn delete_scanned_epochs_older_than(&mut self, epoch: Epoch) -> Result<(), StorageError>;
     fn insert_or_ignore_transaction(&mut self, transaction: &Transaction) -> Result<(), StorageError>;
     fn insert_or_ignore_epoch_checkpoint(&mut self, epoch_checkpoint: &EpochCheckpoint) -> Result<(), StorageError>;
+
+    // -------------------------------- Blocks -------------------------------- //
+    fn insert_block_or_ignore(&mut self, block: &Block) -> Result<(), StorageError>;
+    fn delete_blocks_by_epoch(&mut self, epoch: Epoch) -> Result<(), StorageError>;
 }
 
 pub struct ReadOnlyStore<T: IndexerStoreReader> {
@@ -223,7 +238,7 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
         self.inner.with_read_tx(|tx| tx.get_transaction_receipt(address))
     }
 
-    pub fn get_xtr_total_supply(&self) -> Result<Amount, StorageError> {
+    pub fn get_xtr_total_supply(&self, epoch: Epoch) -> Result<Amount, StorageError> {
         self.inner.with_read_tx(|tx| {
             let claimed = tx
                 .key_value_get_value::<_, Amount>(Key::XtrAccumulatedClaimed)
@@ -231,9 +246,17 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
             let burned = tx
                 .key_value_get_value::<_, Amount>(Key::XtrAccumulatedExhaustBurn)
                 .optional()?;
+
+            let tips = tx.get_tip_blocks(epoch)?;
+            let total_exhaust = tips
+                .values()
+                .map(|header| header.accumulated_data().total_exhaust_burn)
+                .fold(Amount::zero(), |acc, x| acc.saturating_add(x.into())) +
+                burned.unwrap_or_default();
+
             claimed
                 .unwrap_or_default()
-                .checked_sub(burned.unwrap_or_default())
+                .checked_sub(total_exhaust)
                 .ok_or_else(|| StorageError::DataInconsistency {
                     details: format!(
                         "XTR total supply underflow: claimed {} < burned {}",

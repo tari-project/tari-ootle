@@ -34,7 +34,6 @@ pub mod graphql;
 mod http_ui;
 mod rest_api;
 
-mod block_data;
 mod event_manager;
 mod network_client;
 mod network_state_sync;
@@ -71,6 +70,7 @@ use crate::{
     config::ApplicationConfig,
     event_manager::EventManager,
     graphql::server::run_graphql,
+    store::{IndexerStore, IndexerStoreWriteTransaction},
 };
 
 const LOG_TARGET: &str = "tari::indexer::app";
@@ -219,6 +219,12 @@ async fn handle_epoch_manager_event(services: &Services, event: EpochManagerEven
         .networking
         .set_want_peers(all_vns.into_iter().map(|vn| vn.address.as_peer_id()))
         .await?;
+
+    if let Some(two_epoch_ago) = epoch.checked_sub(2u64) {
+        services
+            .store
+            .with_write_tx(|tx| tx.delete_blocks_by_epoch(two_epoch_ago))?;
+    }
 
     Ok(())
 }

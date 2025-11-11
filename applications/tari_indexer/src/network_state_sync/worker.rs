@@ -180,7 +180,6 @@ impl NetworkWideStateSync {
             })?;
         let committee_pools = sync_plan_mut.committee_pools().clone();
 
-        let mut xtr_exhausted = Amount::zero();
         for (shard_group, mut pool) in committee_pools {
             let from_epoch = sync_plan_mut
                 .sync_progress()
@@ -270,17 +269,19 @@ impl NetworkWideStateSync {
 
                 self.stats.increment_checkpoints();
                 sync_plan_mut.add_checkpoint_sync_progress(shard_group, checkpoint.epoch());
-                xtr_exhausted += Amount::from(checkpoint.header().accumulated_data().total_exhaust_burn);
+                let xtr_exhausted = Amount::from(checkpoint.header().accumulated_data().total_exhaust_burn);
                 self.store.with_write_tx(|tx| {
-                    tx.insert_or_ignore_epoch_checkpoint(&checkpoint)?;
-                    tx.key_value_set(Key::SyncProgress, sync_plan_mut.sync_progress())?;
+                    if !tx.epoch_checkpoint_exists(shard_group, checkpoint.epoch())? {
+                        tx.insert_or_ignore_epoch_checkpoint(&checkpoint)?;
 
-                    let exhausted = tx
-                        .key_value_get_value::<_, Amount>(Key::XtrAccumulatedExhaustBurn)
-                        .optional()?;
+                        let exhausted = tx
+                            .key_value_get_value::<_, Amount>(Key::XtrAccumulatedExhaustBurn)
+                            .optional()?;
 
-                    let new_exhausted = exhausted.unwrap_or_else(Amount::zero) + xtr_exhausted;
-                    tx.key_value_set(Key::XtrAccumulatedExhaustBurn, new_exhausted)
+                        let new_exhausted = exhausted.unwrap_or_else(Amount::zero) + xtr_exhausted;
+                        tx.key_value_set(Key::XtrAccumulatedExhaustBurn, new_exhausted)?;
+                    }
+                    tx.key_value_set(Key::SyncProgress, sync_plan_mut.sync_progress())
                 })?;
             }
         }

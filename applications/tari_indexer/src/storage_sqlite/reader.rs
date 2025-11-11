@@ -1,10 +1,11 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{fmt::Write, str::FromStr};
+use std::{collections::HashMap, fmt::Write, str::FromStr};
 
 use diesel::{
     dsl,
+    sql_query,
     sql_types,
     BoolExpressionMethods,
     ExpressionMethods,
@@ -33,7 +34,7 @@ use tari_ootle_common_types::{
     ShardGroup,
     StateVersion,
 };
-use tari_ootle_storage::{time::PrimitiveDateTime, Ordering, StorageError};
+use tari_ootle_storage::{consensus_models::BlockHeader, time::PrimitiveDateTime, Ordering, StorageError};
 use tari_ootle_storage_sqlite::SqliteTransaction;
 use tari_ootle_wallet_sdk::models::UtxoStateUpdateSet;
 use tari_template_lib::{
@@ -495,6 +496,21 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         Ok(key_value.into())
     }
 
+    fn epoch_checkpoint_exists(&mut self, shard_group: ShardGroup, epoch: Epoch) -> Result<bool, StorageError> {
+        const OPERATION: &str = "epoch_checkpoint_exists";
+        use crate::storage_sqlite::schema::epoch_checkpoints;
+        let count: i64 = epoch_checkpoints::table
+            .filter(epoch_checkpoints::shard_group.eq(shard_group.to_parsable_string()))
+            .filter(epoch_checkpoints::epoch.eq(epoch.as_u64() as i64))
+            .limit(1)
+            .count()
+            .get_result(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?;
+        Ok(count > 0)
+    }
+
     fn utxos_get_max_state_version(
         &mut self,
         resource_address: ResourceAddress,
@@ -662,5 +678,45 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         }
 
         Ok(utxos)
+    }
+
+    fn get_tip_blocks(&mut self, epoch: Epoch) -> Result<HashMap<ShardGroup, BlockHeader>, StorageError> {
+        const OPERATION: &str = "get_tip_blocks";
+        use crate::storage_sqlite::schema::blocks;
+
+        #[derive(QueryableByName)]
+        #[diesel(table_name = blocks)]
+        struct QueryResult {
+            header: String,
+        }
+
+        let rows = sql_query(
+            r#"
+            SELECT b.header
+            FROM blocks b
+            JOIN (
+                SELECT shard_group, MAX(height) AS max_height
+                FROM blocks
+                WHERE epoch = ?
+                GROUP BY shard_group
+            ) t ON b.shard_group = t.shard_group AND b.height = t.max_height
+            WHERE b.epoch = ?"#,
+        )
+        .bind::<sql_types::BigInt, _>(epoch.as_u64() as i64)
+        .bind::<sql_types::BigInt, _>(epoch.as_u64() as i64)
+        .load_iter::<QueryResult, _>(self.connection())
+        .map_err(|e| StorageError::QueryError {
+            reason: format!("{OPERATION}: {}", e),
+        })?;
+
+        let mut tip_blocks = HashMap::new();
+        for row in rows {
+            let result = row.map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?;
+            let header: BlockHeader = deserialize_json(&result.header)?;
+            tip_blocks.insert(header.shard_group(), header);
+        }
+        Ok(tip_blocks)
     }
 }

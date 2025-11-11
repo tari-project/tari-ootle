@@ -1,6 +1,18 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    blocks (id) {
+        id -> Integer,
+        shard_group -> Text,
+        epoch -> BigInt,
+        height -> BigInt,
+        block_id -> Text,
+        header -> Text,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     epoch_checkpoints (id) {
         id -> Integer,
         epoch -> BigInt,
@@ -117,6 +129,7 @@ diesel::table! {
 }
 
 diesel::allow_tables_to_appear_in_same_query!(
+    blocks,
     epoch_checkpoints,
     events,
     key_values,

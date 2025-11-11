@@ -30,6 +30,7 @@ use tari_engine_types::{
     entity_id_provider::EntityIdProvider,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     instruction_result::InstructionResult,
+    limits,
     lock::LockFlag,
     virtual_substate::VirtualSubstates,
 };
@@ -449,6 +450,15 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
 
     /// Load, validate template binary and adds it to TemplateProvider.
     fn publish_template(runtime: &Runtime, binary: TemplateBlob) -> Result<InstructionResult, TransactionError> {
+        if binary.len() > limits::ENGINE_LIMITS.max_template_binary_size_bytes {
+            // Technically, not possible, but this check is kept in to make a test pass, and potentially for additional
+            // safety.
+            return Err(TransactionError::WasmBinaryTooBig {
+                size: binary.len(),
+                max: limits::ENGINE_LIMITS.max_template_binary_size_bytes,
+            });
+        }
+
         // validate binary
         WasmModule::load_template_from_code(&binary)?;
         // creating new substate

@@ -4,15 +4,16 @@
 use std::iter;
 
 use rand::random;
-use tari_engine::wasm::compile::compile_template;
+use tari_engine::{transaction::TransactionError, wasm::compile::compile_template};
 use tari_engine_types::{
     commit_result::{RejectReason, TransactionResult},
     hashing::{hash_template_code, hasher32, EngineHashDomainLabel},
+    limits,
     published_template::PublishedTemplateAddress,
     substate::{SubstateId, SubstateValue},
 };
-use tari_template_test_tooling::TemplateTest;
-use tari_transaction::Transaction;
+use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
+use tari_transaction::{TemplateBlob, Transaction};
 
 #[test]
 fn publish_template_success() {
@@ -78,27 +79,21 @@ fn publish_template_invalid_binary() {
 fn publish_template_too_big_binary() {
     let mut test = TemplateTest::new(Vec::<String>::new());
     let (account_address, owner_proof, account_key, _) = test.create_custom_funded_account(250_000);
-    let random_wasm_binary = generate_random_binary(6 * 1000 * 1000); // 6 MB
+    let random_wasm_binary = generate_random_binary(limits::ENGINE_LIMITS.max_template_binary_size_bytes + 1);
     let wasm_binary_size = random_wasm_binary.len();
-    let result = test.execute_expect_failure(
+    let reason = test.execute_expect_failure(
         Transaction::builder()
             .fee_transaction_pay_from_component(account_address, 200_000)
-            .publish_template(random_wasm_binary.try_into().unwrap())
+            // SAFETY: We are intentionally publishing an oversized binary to test size limits.
+            .publish_template(unsafe { TemplateBlob::new_unchecked(random_wasm_binary) })
             .build_and_seal(&account_key),
         vec![owner_proof],
     );
 
-    assert!(matches!(result, RejectReason::ExecutionFailure(_)));
-
-    if let RejectReason::ExecutionFailure(error) = result {
-        assert_eq!(
-            error,
-            format!(
-                "WASM binary too big! {} bytes are greater than allowed maximum 5000000 bytes.",
-                wasm_binary_size
-            )
-        );
-    }
+    assert_reject_reason(reason, TransactionError::WasmBinaryTooBig {
+        size: wasm_binary_size,
+        max: limits::ENGINE_LIMITS.max_template_binary_size_bytes,
+    });
 }
 
 fn generate_random_binary(size_in_bytes: usize) -> Vec<u8> {

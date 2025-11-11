@@ -45,6 +45,8 @@ pub enum TransactionError {
     InvariantError { details: String },
     #[error("Load template error: {0}")]
     LoadTemplate(#[from] TemplateLoaderError),
+    #[error("WASM binary too big! {size} bytes are greater than allowed maximum {max} bytes.")]
+    WasmBinaryTooBig { size: usize, max: usize },
     #[error("Template provider error: {0}")]
     TemplateProvider(String),
     #[error("Converting to hash error: {0}")]

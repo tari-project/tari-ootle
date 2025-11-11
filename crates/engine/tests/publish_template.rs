@@ -30,7 +30,7 @@ fn publish_template_success() {
     let result = test.execute_expect_success(
         Transaction::builder()
             .fee_transaction_pay_from_component(account_address, 200_000)
-            .publish_template(template.code().to_vec())
+            .publish_template(template.into_code().try_into().unwrap())
             .build_and_seal(&account_key),
         vec![owner_proof],
     );
@@ -62,7 +62,7 @@ fn publish_template_invalid_binary() {
     let result = test.execute_expect_failure(
         Transaction::builder()
             .fee_transaction_pay_from_component(account_address, 200_000)
-            .publish_template(vec![1, 2, 3])
+            .publish_template(vec![1, 2, 3].try_into().unwrap())
             .build_and_seal(&account_key),
         vec![owner_proof],
     );
@@ -83,7 +83,7 @@ fn publish_template_too_big_binary() {
     let result = test.execute_expect_failure(
         Transaction::builder()
             .fee_transaction_pay_from_component(account_address, 200_000)
-            .publish_template(random_wasm_binary)
+            .publish_template(random_wasm_binary.try_into().unwrap())
             .build_and_seal(&account_key),
         vec![owner_proof],
     );

@@ -399,8 +399,7 @@ where
                     }
 
                     self.manager.add_pending_template(
-                        // Once we download the template we'll extract the name. This saves us from having to store the
-                        // name in the substate
+                        // Once we download the template we'll extract the name.
                         "<unknown>".to_string(),
                         template_address.as_hash(),
                         author_public_key,

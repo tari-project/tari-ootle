@@ -301,7 +301,6 @@ mod tests {
     use tari_crypto::{
         keys::{PublicKey as _, SecretKey},
         ristretto::{RistrettoPublicKey, RistrettoSecretKey},
-        tari_utilities::ByteArray,
     };
     use tari_engine_types::ToByteType;
     use tari_ootle_common_types::crypto::create_key_pair;
@@ -329,7 +328,7 @@ mod tests {
                 ComponentAddress::from_array([1; 32])
             ])
             .put_last_instruction_output_on_workspace("workspace")
-            .publish_template(b"template".to_vec())
+            .publish_template(b"template".to_vec().try_into().unwrap())
             .add_input(SubstateRequirement::versioned(
                 SubstateId::Component(ComponentAddress::from_array([1; 32])),
                 1,

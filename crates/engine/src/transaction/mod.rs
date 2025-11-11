@@ -23,9 +23,6 @@
 mod error;
 pub use error::TransactionError;
 
-mod config;
-pub use config::*;
-
 mod processor;
 
 pub use processor::*;

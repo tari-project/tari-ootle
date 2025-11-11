@@ -52,6 +52,7 @@ use tari_transaction::{
     ComponentCall,
     Instruction,
     ResourceAddressRef,
+    TemplateBlob,
 };
 
 use crate::{
@@ -69,7 +70,7 @@ use crate::{
     state_store::memory::ReadOnlyMemoryStateStore,
     template::LoadedTemplate,
     traits::{ClaimProofVerifier, Invokable},
-    transaction::{TransactionError, TransactionProcessorConfig},
+    transaction::TransactionError,
     wasm::{WasmModule, WasmProcess},
 };
 
@@ -78,7 +79,6 @@ pub const MAX_CALL_DEPTH: usize = 10;
 const ACCOUNT_CONSTRUCTOR_FUNCTION: &str = "create";
 
 pub struct TransactionProcessor<TTemplateProvider> {
-    config: TransactionProcessorConfig,
     template_provider: Arc<TTemplateProvider>,
     state_db: ReadOnlyMemoryStateStore,
     auth_params: AuthParams,
@@ -89,7 +89,6 @@ pub struct TransactionProcessor<TTemplateProvider> {
 
 impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> TransactionProcessor<TTemplateProvider> {
     pub fn new(
-        config: TransactionProcessorConfig,
         template_provider: Arc<TTemplateProvider>,
         state_db: ReadOnlyMemoryStateStore,
         auth_params: AuthParams,
@@ -98,7 +97,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
     ) -> Self {
         Self {
-            config,
             template_provider,
             state_db,
             auth_params,
@@ -114,7 +112,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         let timer = Instant::now();
         let entity_id_provider = EntityIdProvider::new(id.as_hash(), 1000);
         let Self {
-            config,
             template_provider,
             state_db,
             auth_params,
@@ -169,7 +166,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
 
         let instructions = executable.into_instructions();
 
-        let fee_exec_results = Self::process_instructions(&config, &template_provider, &runtime, instructions.fee);
+        let fee_exec_results = Self::process_instructions(&template_provider, &runtime, instructions.fee);
 
         let fee_exec_result = match fee_exec_results {
             Ok(execution_results) => {
@@ -196,7 +193,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             },
         };
 
-        let instruction_result = Self::process_instructions(&config, &*template_provider, &runtime, instructions.main);
+        let instruction_result = Self::process_instructions(&*template_provider, &runtime, instructions.main);
 
         match instruction_result {
             Ok(execution_results) => {
@@ -236,14 +233,13 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
     }
 
     fn process_instructions(
-        config: &TransactionProcessorConfig,
         template_provider: &TTemplateProvider,
         runtime: &Runtime,
         instructions: Vec<Instruction>,
     ) -> Result<Vec<InstructionResult>, TransactionError> {
         let result: Result<_, _> = instructions
             .into_iter()
-            .map(|instruction| Self::process_instruction(config, template_provider, runtime, instruction))
+            .map(|instruction| Self::process_instruction(template_provider, runtime, instruction))
             .collect();
 
         // check that the finalized state is valid
@@ -255,7 +251,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
     }
 
     fn process_instruction(
-        config: &TransactionProcessorConfig,
         template_provider: &TTemplateProvider,
         runtime: &Runtime,
         instruction: Instruction,
@@ -350,7 +345,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                     .put_on_workspace(output_bucket, IndexedValue::from_value(bucket.into_value()?)?)?;
                 Ok(InstructionResult::empty())
             },
-            Instruction::PublishTemplate { binary } => Self::publish_template(config, runtime, binary),
+            Instruction::PublishTemplate { binary } => Self::publish_template(runtime, binary),
             Instruction::AllocateAddress {
                 allocatable_type: substate_type,
                 workspace_id,
@@ -453,22 +448,11 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
     }
 
     /// Load, validate template binary and adds it to TemplateProvider.
-    fn publish_template(
-        config: &TransactionProcessorConfig,
-        runtime: &Runtime,
-        binary: Vec<u8>,
-    ) -> Result<InstructionResult, TransactionError> {
-        if binary.len() > config.template_binary_max_size_bytes {
-            return Err(TransactionError::WasmBinaryTooBig(
-                binary.len(),
-                config.template_binary_max_size_bytes,
-            ));
-        }
-
+    fn publish_template(runtime: &Runtime, binary: TemplateBlob) -> Result<InstructionResult, TransactionError> {
         // validate binary
         WasmModule::load_template_from_code(&binary)?;
         // creating new substate
-        runtime.interface().publish_template(binary)?;
+        runtime.interface().publish_template(binary.into_vec())?;
 
         Ok(InstructionResult::empty())
     }

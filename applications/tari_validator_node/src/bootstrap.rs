@@ -36,7 +36,6 @@ use tari_consensus::consensus_constants::ConsensusConstants;
 #[cfg(not(feature = "metrics"))]
 use tari_consensus::traits::hooks::NoopHooks;
 use tari_crypto::tari_utilities::ByteArray;
-use tari_engine::transaction::TransactionProcessorConfig;
 use tari_engine_types::ToByteType;
 use tari_epoch_manager::{
     service::{EpochManagerConfig, EpochManagerHandle},
@@ -301,8 +300,6 @@ pub async fn spawn_services(
     // Transaction executor
     let fee_table = get_fee_table_by_network(config.network);
     let payload_processor = TariTransactionProcessor::new(
-        TransactionProcessorConfig::new(config.network)
-            .with_template_binary_max_size_bytes(consensus_constants.template_binary_max_size_bytes),
         template_manager.clone(),
         fee_table.clone(),
         Arc::new(TariClaimBurnProofVerifier::new(config.network, global_db.clone())),

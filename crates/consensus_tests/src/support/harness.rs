@@ -649,7 +649,6 @@ impl TestBuilder {
                     max_number_commands_in_block: 500,
                     fee_exhaust_divisor: 20,
                     epochs_per_era: Epoch(10),
-                    template_binary_max_size_bytes: 1000 * 1000 * 5,
                 },
                 state_tree_cleanup_interval: Duration::from_secs(60),
                 epoch_gc_interval: Duration::from_secs(60),

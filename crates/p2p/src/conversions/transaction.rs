@@ -246,7 +246,10 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                     .context("take_from_bucket_output_bucket overflowed")?,
             }),
             Some(PublishTemplate(publish_template)) => Ok(Instruction::PublishTemplate {
-                binary: publish_template.binary,
+                binary: publish_template
+                    .binary
+                    .try_into()
+                    .map_err(|_| anyhow!("publish_template_binary: binary size too large"))?,
             }),
             Some(AllocateAddress(allocate_addr)) => {
                 let address_type = allocate_addr.address_type();
@@ -403,7 +406,9 @@ impl From<Instruction> for proto::transaction::Instruction {
             },
             Instruction::PublishTemplate { binary } => proto::transaction::Instruction {
                 instruction: Some(proto::transaction::instruction::Instruction::PublishTemplate(
-                    proto::transaction::PublishTemplate { binary },
+                    proto::transaction::PublishTemplate {
+                        binary: binary.into_vec(),
+                    },
                 )),
             },
             Instruction::AllocateAddress {

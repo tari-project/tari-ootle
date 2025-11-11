@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use tari_engine_types::{
     confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
     limits,
+    serde_with,
     ValidatorFeePoolAddress,
 };
 use tari_template_lib::{
@@ -14,7 +15,7 @@ use tari_template_lib::{
     auth::OwnerRule,
     models::{ResourceAddress, StealthTransferStatement},
     prelude::{AccessRules, Amount},
-    types::{crypto::RistrettoPublicKeyBytes, MaxString, TemplateAddress},
+    types::{crypto::RistrettoPublicKeyBytes, MaxBytes, MaxString, TemplateAddress},
 };
 
 use crate::{
@@ -23,6 +24,8 @@ use crate::{
     ComponentCall,
     ResourceAddressRef,
 };
+
+pub type TemplateBlob = MaxBytes<{ limits::ENGINE_LIMITS.max_template_binary_size_bytes }>;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -77,7 +80,9 @@ pub enum Instruction {
         output_bucket: WorkspaceId,
     },
     PublishTemplate {
-        binary: Vec<u8>,
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        #[serde(with = "serde_with::base64")]
+        binary: TemplateBlob,
     },
     AllocateAddress {
         allocatable_type: AllocatableAddressType,
@@ -262,7 +267,9 @@ mod tests {
         let decoded: Instruction = serde_json::from_str(&json).unwrap();
         assert_eq!(instruction, decoded);
 
-        let instruction = Instruction::PublishTemplate { binary: vec![1, 2, 3] };
+        let instruction = Instruction::PublishTemplate {
+            binary: vec![1, 2, 3].try_into().unwrap(),
+        };
         let json = serde_json::to_string(&instruction).unwrap();
         let decoded: Instruction = serde_json::from_str(&json).unwrap();
         assert_eq!(instruction, decoded);

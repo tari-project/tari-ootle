@@ -28,6 +28,7 @@ pub struct EngineLimits {
     pub max_log_size_bytes: usize,
     pub max_events: usize,
     pub max_panic_message_size: usize,
+    pub max_template_binary_size_bytes: usize,
 }
 
 pub const ENGINE_LIMITS: EngineLimits = EngineLimits {
@@ -38,7 +39,8 @@ pub const ENGINE_LIMITS: EngineLimits = EngineLimits {
     max_logs: 256,
     max_log_size_bytes: 32 * 1024, // 32 KiB
     max_events: 256,
-    max_panic_message_size: 32 * 1024, // 32 KiB
+    max_panic_message_size: 32 * 1024,               // 32 KiB
+    max_template_binary_size_bytes: 2 * 1024 * 1024, // 2 MiB
 };
 
 pub const MAX_DIVISIBILITY: u8 = 18;

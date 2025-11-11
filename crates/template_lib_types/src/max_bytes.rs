@@ -32,6 +32,16 @@ impl<const N: usize> MaxBytes<N> {
         }
     }
 
+    /// Constructs a new `MaxBytes<N>` without checking the length of the input.
+    /// This is the only way to break the invariant guarantees of `MaxBytes<N>`.
+    /// NOTE: this exists for testing purposes and should not be used in general.
+    ///
+    /// # Safety
+    /// The caller must ensure that the length of `bytes` is less than or equal to `N`.
+    pub unsafe fn new_unchecked(bytes: impl Into<Box<[u8]>>) -> Self {
+        Self { bytes: bytes.into() }
+    }
+
     pub fn into_vec(self) -> Vec<u8> {
         self.bytes.into_vec()
     }

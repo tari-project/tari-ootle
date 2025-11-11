@@ -11,7 +11,7 @@ use tari_ootle_storage::consensus_models::{Block, SubstateUpdateProof};
 use tari_validator_node_rpc::client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory};
 
 use crate::{
-    block_data::BlockData,
+    network_state_sync::block_data::BlockData,
     storage_sqlite::{models::NewScannedBlockId, SqliteIndexerStore},
     store::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreReader, IndexerStoreWriteTransaction},
 };
@@ -97,10 +97,9 @@ impl BlockScanner {
 
             count += new_blocks.len();
             for block_data in new_blocks {
-                // TODO: store blocks
                 // TODO: remove substates (I think). These can be requested lazily and cached (LRU) as needed to allow
-                // TODO: an committed transaction should queue a shard state sync in the affected shards
-                // an upper bound on substates stored in the indexer.
+                //       an upper bound on substates stored in the indexer.
+                // TODO: perhaps a committed transaction should queue a shard state sync in the affected shards
                 info!(
                     target: LOG_TARGET,
                     "Storing {} substate update(s) for block {} (epoch={}, height={})",
@@ -109,7 +108,7 @@ impl BlockScanner {
                     block_data.block.epoch(),
                     block_data.block.height()
                 );
-                self.store_substates_in_db(&block_data.diff)?;
+                self.store_block_data(&block_data)?;
             }
         }
 
@@ -122,10 +121,12 @@ impl BlockScanner {
             .map_err(|e| e.into())
     }
 
-    fn store_substates_in_db(&self, updates: &[SubstateUpdateProof]) -> Result<(), anyhow::Error> {
+    fn store_block_data(&self, block_data: &BlockData) -> Result<(), anyhow::Error> {
         let mut tx = self.substate_store.create_write_tx()?;
+        tx.insert_block_or_ignore(&block_data.block)?;
+
         // store/update up substates if any
-        for update in updates {
+        for update in &block_data.diff {
             match update {
                 SubstateUpdateProof::Create(create) => {
                     if create.substate.value.value().is_none() {

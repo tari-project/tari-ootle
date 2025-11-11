@@ -38,6 +38,8 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
     handlers::substates::get_substate,
     handlers::substates::list_substates,
     handlers::substates::fetch_substates,
+    handlers::nfts::get_non_fungibles,
+    handlers::resources::get_resource,
     handlers::transactions::submit_transaction,
     handlers::transactions::list_recent_transactions,
     handlers::transactions::get_transaction_result,
@@ -124,6 +126,10 @@ impl Server {
                         get(handlers::transaction_receipts::get_transaction_receipt),
                     ),
             )
+            .nest("/resources/", Router::new()
+                // Convenience Shortcut
+                .route("/xtr" , get(handlers::resources::get_xtr))
+                .route("/{resource_address}" , get(handlers::resources::get_resource)))
             .layer(CorsLayer::permissive())
             .layer(RequestBodyLimitLayer::new(REQUEST_BODY_LIMIT))
             .merge(SwaggerUi::new("/swagger-ui").url("/openapi.json", ApiDoc::openapi()))

@@ -7,6 +7,7 @@ use tari_consensus::hotstuff::{
     calculate_dummy_blocks_from_justify,
     calculate_last_dummy_block,
 };
+use tari_consensus_types::ShardGroupAccumulatedData;
 use tari_engine_types::ToByteType;
 use tari_ootle_common_types::{
     committee::{Committee, CommitteeMember},
@@ -56,6 +57,7 @@ fn dummy_blocks() {
         &RoundRobinLeaderStrategy,
         &committee,
         genesis.timestamp(),
+        ShardGroupAccumulatedData::default(),
         FixedHash::zero(),
     );
     let last = calculate_last_dummy_block(
@@ -70,6 +72,7 @@ fn dummy_blocks() {
         &RoundRobinLeaderStrategy,
         &committee,
         genesis.timestamp(),
+        ShardGroupAccumulatedData::default(),
         FixedHash::zero(),
     )
     .expect("last dummy block");
@@ -112,6 +115,7 @@ fn last_matches_generated_using_real_data() {
         &RoundRobinLeaderStrategy,
         &committee,
         justify.timestamp(),
+        ShardGroupAccumulatedData::default(),
         *justify.epoch_hash(),
     )
     .expect("last dummy block");

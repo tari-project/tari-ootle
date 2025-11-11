@@ -199,6 +199,14 @@ export default function BlockDetails() {
                             </DataTableCell>
                           </TableRow>
                           <TableRow>
+                            <TableCell
+                              title="The total fees burnt by this shard group for this epoch as part of the exhaust">Accumulated
+                              Fee Burn</TableCell>
+                            <DataTableCell>
+                              {block!.header.accumulated_data.total_exhaust_burn.toString()}
+                            </DataTableCell>
+                          </TableRow>
+                          <TableRow>
                             <TableCell>Status</TableCell>
                             <DataTableCell>
                               {/* For some reason, typescript cannot find the commit_qc_id  in Block even though it is there

@@ -19,6 +19,7 @@ export * from "./types/tari-indexer-client/IndexerGetSubstateResponse";
 export * from "./types/tari-indexer-client/IndexerGetCommsStatsResponse";
 export * from "./types/tari-indexer-client/IndexerConnection";
 export * from "./types/tari-indexer-client/GetNonFungiblesRequest";
+export * from "./types/tari-indexer-client/GetResourceResponse";
 export * from "./types/tari-indexer-client/ListTransactionReceiptsRequest";
 export * from "./types/tari-indexer-client/GetUtxosRequest";
 export * from "./types/tari-indexer-client/ListRecentTransactionsResponse";

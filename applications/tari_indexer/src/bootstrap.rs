@@ -49,6 +49,7 @@ use tari_ootle_app_utilities::{
     epoch_oracle_config::EpochOracleType,
     keypair::RistrettoKeypair,
     seed_peer::SeedPeer,
+    shared_consts::TXTR_FAUCET_INITIAL_SUPPLY,
     template_download_queue::TemplateDownloadQueue,
 };
 use tari_ootle_common_types::{optional::Optional, Network, PeerAddress};
@@ -56,7 +57,7 @@ use tari_ootle_p2p::TariMessagingSpec;
 use tari_ootle_storage::global::GlobalDb;
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_shutdown::ShutdownSignal;
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
+use tari_template_lib::{prelude::RistrettoPublicKeyBytes, types::Amount};
 use tari_template_manager::{implementation::TemplateManager, interface::TemplateManagerHandle};
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
@@ -162,6 +163,11 @@ pub async fn spawn_services(
     // Connect to substate db
     let store = SqliteIndexerStore::try_create(config.state_db_path())?;
     check_store(config, &store)?;
+
+    if config.network.is_testnet() {
+        // TODO: We happen to know that the testnet faucet mints u64::MAX tXTR. This is hacky.
+        hack_xtr_initial_supply(&store)?;
+    }
 
     // Epoch event oracle
     let epoch_event_oracle = create_epoch_oracle(config, global_db.clone(), &consensus_constants).await?;
@@ -389,5 +395,18 @@ fn check_store<TStore: IndexerStore>(config: &ApplicationConfig, store: &TStore)
                     .map_err(|e| anyhow!("Failed to set network in the store: {}", e))
             },
         }
+    })
+}
+
+fn hack_xtr_initial_supply<TStore: IndexerStore>(store: &TStore) -> anyhow::Result<()> {
+    store.with_write_tx(|tx| {
+        // Check if the initial supply is already set
+        let existing_supply: Option<Amount> = tx.key_value_get_value(Key::XtrAccumulatedClaimed).optional()?;
+        if existing_supply.is_some() {
+            return Ok(());
+        }
+
+        tx.key_value_set(Key::XtrAccumulatedClaimed, TXTR_FAUCET_INITIAL_SUPPLY)
+            .map_err(|e| anyhow!("Failed to set XTR initial supply in the store: {}", e))
     })
 }

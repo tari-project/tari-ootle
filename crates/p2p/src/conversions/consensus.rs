@@ -44,6 +44,7 @@ use tari_consensus_types::{
     ProposalCertificate,
     ProposalVote,
     QcId,
+    ShardGroupAccumulatedData,
     TimeoutCertificate,
     TimeoutVote,
 };
@@ -480,6 +481,7 @@ impl From<&consensus_models::BlockHeader> for proto::consensus::BlockHeader {
             timestamp: value.timestamp(),
             epoch_hash: value.epoch_hash().as_bytes().to_vec(),
             extra_data: Some(value.extra_data().into()),
+            accumulated_data: Some(value.accumulated_data().into()),
         }
     }
 }
@@ -519,6 +521,10 @@ fn try_convert_proto_block_header(
             value.state_merkle_root.try_into()?,
             value.timestamp,
             value.epoch_hash.try_into()?,
+            value
+                .accumulated_data
+                .ok_or_else(|| anyhow!("AccumulatedData not provided"))?
+                .try_into()?,
         ))
     } else {
         // We calculate the BlockId and command MR locally from remote data. This means that they will
@@ -542,6 +548,10 @@ fn try_convert_proto_block_header(
                 .ok_or_else(|| anyhow!("Block conversion: Block signature is missing"))?,
             value.timestamp,
             value.epoch_hash.try_into()?,
+            value
+                .accumulated_data
+                .ok_or_else(|| anyhow!("AccumulatedData not provided"))?
+                .try_into()?,
             extra_data,
         )?;
 
@@ -713,7 +723,7 @@ impl From<&LeaderFee> for proto::consensus::LeaderFee {
     fn from(value: &LeaderFee) -> Self {
         Self {
             leader_fee: value.fee,
-            global_exhaust_burn: value.global_exhaust_burn,
+            exhaust_burn: value.exhaust_burn,
         }
     }
 }
@@ -724,7 +734,7 @@ impl TryFrom<proto::consensus::LeaderFee> for LeaderFee {
     fn try_from(value: proto::consensus::LeaderFee) -> Result<Self, Self::Error> {
         Ok(Self {
             fee: value.leader_fee,
-            global_exhaust_burn: value.global_exhaust_burn,
+            exhaust_burn: value.exhaust_burn,
         })
     }
 }
@@ -1070,5 +1080,31 @@ impl TryFrom<proto::consensus::ShardStateVersions> for ShardStateVersions {
 
         ShardStateVersions::from_vec(value.versions.into_iter().map(StateVersion::new).collect())
             .map_err(|e| anyhow!("Failed to convert ShardStateVersions: {}", e))
+    }
+}
+
+// -------------------------------- AccumulatedData -------------------------------- //
+
+impl From<&ShardGroupAccumulatedData> for proto::consensus::ShardGroupAccumulatedData {
+    fn from(value: &ShardGroupAccumulatedData) -> Self {
+        // Extract 2 u64s from the total_exhaust_burn u128
+        let msb = value.total_exhaust_burn >> 64;
+        let lsb = value.total_exhaust_burn & u128::from(u64::MAX);
+
+        Self {
+            total_exhaust_burn_msb: msb as u64,
+            total_exhaust_burn_lsb: lsb as u64,
+        }
+    }
+}
+
+impl TryFrom<proto::consensus::ShardGroupAccumulatedData> for ShardGroupAccumulatedData {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::ShardGroupAccumulatedData) -> Result<Self, anyhow::Error> {
+        let total_exhaust_burn =
+            (u128::from(value.total_exhaust_burn_msb) << 64) | u128::from(value.total_exhaust_burn_lsb);
+
+        Ok(Self { total_exhaust_burn })
     }
 }

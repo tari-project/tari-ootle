@@ -20,6 +20,9 @@
     },
     "timestamp": 1733818570,
     "epoch_hash": "99c5d0b18045f1c675c55ec9dd4ba08e06e101e57b9b0c8c44f6ec00f7257e94",
+    "accumulated_data": {
+      "total_exhaust_burn": 0
+    },
     "extra_data": {}
   },
   "justify": {

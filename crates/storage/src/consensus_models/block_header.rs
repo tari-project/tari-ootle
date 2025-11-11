@@ -17,6 +17,7 @@ use tari_consensus_types::{
     LockedBlock,
     ProposalCertificate,
     QcId,
+    ShardGroupAccumulatedData,
     SignedMessage,
     ToSignatureMessage,
 };
@@ -27,8 +28,7 @@ use tari_sidechain::{BlockHeaderHashFields, BlockHeaderHashFieldsV1};
 use tari_state_tree::{compute_merkle_root_for_hashes, TreeHash};
 use tari_template_lib::{prelude::SchnorrSignatureBytes, types::crypto::RistrettoPublicKeyBytes};
 
-use super::BlockError;
-use crate::consensus_models::Command;
+use super::{BlockError, Command};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -75,6 +75,8 @@ pub struct BlockHeader {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "serde_with::hex")]
     epoch_hash: FixedHash,
+    /// Accumulated data for the shard group up to and including this block.
+    accumulated_data: ShardGroupAccumulatedData,
     /// Extra data to allow for potential future data to be provided as necessary without breaking changes.
     /// Currently, this is used to store the block's sidechain_id (if applicable).
     extra_data: ExtraData,
@@ -96,6 +98,7 @@ impl BlockHeader {
         signature: SchnorrSignatureBytes,
         timestamp: u64,
         epoch_hash: FixedHash,
+        accumulated_data: ShardGroupAccumulatedData,
         extra_data: ExtraData,
     ) -> Result<Self, BlockError> {
         let mut header = Self::create_unsigned(
@@ -111,6 +114,7 @@ impl BlockHeader {
             total_leader_fee,
             timestamp,
             epoch_hash,
+            accumulated_data,
             extra_data,
         )?;
 
@@ -133,6 +137,7 @@ impl BlockHeader {
         total_leader_fee: u64,
         timestamp: u64,
         epoch_hash: FixedHash,
+        accumulated_data: ShardGroupAccumulatedData,
         extra_data: ExtraData,
     ) -> Result<Self, BlockError> {
         let command_merkle_root = Self::compute_command_merkle_root(commands)?;
@@ -151,6 +156,7 @@ impl BlockHeader {
             signature: None,
             timestamp,
             epoch_hash,
+            accumulated_data,
             extra_data,
         };
         header.id = header.calculate_id();
@@ -165,6 +171,7 @@ impl BlockHeader {
         shard_group: ShardGroup,
         state_merkle_root: FixedHash,
         epoch_hash: FixedHash,
+        accumulated_data: ShardGroupAccumulatedData,
         extra_data: ExtraData,
     ) -> Self {
         Self::create(
@@ -181,6 +188,7 @@ impl BlockHeader {
             SchnorrSignatureBytes::zero(),
             0,
             epoch_hash,
+            accumulated_data,
             extra_data,
         )
         .expect("Infallible with empty commands")
@@ -207,6 +215,7 @@ impl BlockHeader {
             signature: Some(SchnorrSignatureBytes::zero()),
             timestamp: EpochTime::now().as_u64(),
             epoch_hash: FixedHash::zero(),
+            accumulated_data: ShardGroupAccumulatedData::default(),
             extra_data: ExtraData::new(),
         }
     }
@@ -222,6 +231,7 @@ impl BlockHeader {
         parent_state_merkle_root: FixedHash,
         parent_timestamp: u64,
         parent_epoch_hash: FixedHash,
+        parent_accumulated_data: ShardGroupAccumulatedData,
     ) -> Self {
         let mut block = Self {
             id: BlockId::zero(),
@@ -239,6 +249,7 @@ impl BlockHeader {
             signature: None,
             timestamp: parent_timestamp,
             epoch_hash: parent_epoch_hash,
+            accumulated_data: parent_accumulated_data,
             extra_data: ExtraData::new(),
         };
         block.id = block.calculate_id();
@@ -290,6 +301,7 @@ impl BlockHeader {
         // This hash reduces proof sizes. A proof-of-commit only needs to include this hash and not
         // the data.
         let metadata_hash = self.calculate_metadata_hash();
+        let accumulated_data = self.accumulated_data.into();
 
         let fields = BlockHeaderHashFields::V1(BlockHeaderHashFieldsV1 {
             network: self.network.as_byte(),
@@ -303,6 +315,7 @@ impl BlockHeader {
             proposed_by: self.proposed_by.as_bytes(),
             state_merkle_root: &self.state_merkle_root,
             command_merkle_root: &self.command_merkle_root,
+            accumulated_data: &accumulated_data,
             metadata_hash: &metadata_hash,
         });
 
@@ -417,6 +430,10 @@ impl BlockHeader {
 
     pub fn set_signature(&mut self, signature: SchnorrSignatureBytes) {
         self.signature = Some(signature);
+    }
+
+    pub fn accumulated_data(&self) -> &ShardGroupAccumulatedData {
+        &self.accumulated_data
     }
 
     pub fn epoch_hash(&self) -> &FixedHash {

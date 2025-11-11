@@ -316,17 +316,18 @@ where TConsensusSpec: ConsensusSpec
         let justify_block = Block::get(tx, &high_qc_certificate.calculate_block_id())?;
         let start_of_chain_block = highest_seen_block;
         let parent_block = dummy_block.unwrap_or_else(|| highest_seen_block.as_leaf());
+        let highest_seen_block = Block::get(tx, highest_seen_block.block_id())?;
 
         let should_not_propose_commands = can_propose_epoch_end || {
             // TODO: prevent proposers from proposing transactions after an epoch end command is in the justified
             // pending chain, regardless of whether we see the end of epoch or not (race condition).
             // If the last justified/parent block is an epoch end block, we dont propose commands since the block will
             // be rejected
-            let block = Block::get(tx, highest_seen_block.block_id())?;
-            block.is_epoch_end()
+            highest_seen_block.is_epoch_end()
         };
 
-        let mut total_leader_fee = 0;
+        let mut total_leader_fee = 0u64;
+        let mut accumulated_data = *highest_seen_block.header().accumulated_data();
 
         let batch = if should_not_propose_commands {
             ProposalBatch::default()
@@ -418,10 +419,21 @@ where TConsensusSpec: ConsensusSpec
                 &mut executed_transactions,
                 &mut lock_conflicts,
             )? {
-                total_leader_fee += command
+                total_leader_fee = total_leader_fee
+                    .checked_add(
+                        command
+                            .committing()
+                            .and_then(|tx| tx.leader_fee.as_ref())
+                            .map(|f| f.fee)
+                            .unwrap_or(0),
+                    )
+                    .ok_or_else(|| {
+                        HotStuffError::InvariantError("Leader fee overflow when summing for block".to_string())
+                    })?;
+                accumulated_data.total_exhaust_burn += command
                     .committing()
                     .and_then(|tx| tx.leader_fee.as_ref())
-                    .map(|f| f.fee)
+                    .map(|f| u128::from(f.exhaust_burn()))
                     .unwrap_or(0);
                 // TODO: a BTreeSet changes the order from the original batch. Uncertain if this is a problem since the
                 // proposer also processes transactions in the completed block order, however on_propose does perform
@@ -477,6 +489,7 @@ where TConsensusSpec: ConsensusSpec
             total_leader_fee,
             EpochTime::now().as_u64(),
             epoch_hash,
+            accumulated_data,
             ExtraData::new(),
         )?;
 

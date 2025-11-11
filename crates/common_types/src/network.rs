@@ -63,6 +63,10 @@ impl Network {
             LocalNet => "localnet",
         }
     }
+
+    pub fn is_testnet(&self) -> bool {
+        !matches!(self, Network::MainNet)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

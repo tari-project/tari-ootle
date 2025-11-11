@@ -103,6 +103,7 @@ export * from "./types/RistrettoPublicKeyBytes";
 export * from "./types/RuleRequirement";
 export * from "./types/Scalar32Bytes";
 export * from "./types/SchnorrSignatureBytes";
+export * from "./types/ShardGroupAccumulatedData";
 export * from "./types/ShardGroupEvidence";
 export * from "./types/ShardGroup";
 export * from "./types/ShardStateVersions";

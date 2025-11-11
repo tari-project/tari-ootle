@@ -5,6 +5,7 @@ import type { NodeHeight } from "./NodeHeight";
 import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
 import type { SchnorrSignatureBytes } from "./SchnorrSignatureBytes";
 import type { ShardGroup } from "./ShardGroup";
+import type { ShardGroupAccumulatedData } from "./ShardGroupAccumulatedData";
 
 export type BlockHeader = {
   /**
@@ -65,6 +66,10 @@ export type BlockHeader = {
    * of the epoch.
    */
   epoch_hash: string;
+  /**
+   * Accumulated data for the shard group up to and including this block.
+   */
+  accumulated_data: ShardGroupAccumulatedData;
   /**
    * Extra data to allow for potential future data to be provided as necessary without breaking changes.
    * Currently, this is used to store the block's sidechain_id (if applicable).

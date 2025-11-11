@@ -6,7 +6,7 @@ use std::{collections::HashMap, iter, ops::ControlFlow};
 use indexmap::IndexMap;
 use log::*;
 use tari_common_types::types::FixedHash;
-use tari_consensus_types::{BlockId, HighPc, HighTc, LeafBlock, ProposalCertificate, QcId};
+use tari_consensus_types::{BlockId, HighPc, HighTc, LeafBlock, ProposalCertificate, QcId, ShardGroupAccumulatedData};
 use tari_engine_types::{substate::SubstateDiff, ValidatorFeePool};
 use tari_ootle_common_types::{
     committee::{Committee, CommitteeInfo},
@@ -65,6 +65,7 @@ pub fn calculate_last_dummy_block<TAddr: NodeAddressable, TLeaderStrategy: Leade
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
     parent_timestamp: u64,
+    parent_accumulated_data: ShardGroupAccumulatedData,
     parent_epoch_hash: FixedHash,
 ) -> Option<LeafBlock> {
     let mut dummy = None;
@@ -80,6 +81,7 @@ pub fn calculate_last_dummy_block<TAddr: NodeAddressable, TLeaderStrategy: Leade
         leader_strategy,
         local_committee,
         parent_timestamp,
+        parent_accumulated_data,
         parent_epoch_hash,
         |dummy_block| {
             dummy = Some(dummy_block.as_leaf());
@@ -103,6 +105,7 @@ pub fn calculate_dummy_blocks<TAddr: NodeAddressable, TLeaderStrategy: LeaderStr
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
     parent_timestamp: u64,
+    parent_accumulated_data: ShardGroupAccumulatedData,
     parent_epoch_hash: FixedHash,
 ) -> Vec<Block> {
     let mut dummies = Vec::with_capacity(new_height.saturating_sub(from_height).as_u64() as usize);
@@ -118,6 +121,7 @@ pub fn calculate_dummy_blocks<TAddr: NodeAddressable, TLeaderStrategy: LeaderStr
         leader_strategy,
         local_committee,
         parent_timestamp,
+        parent_accumulated_data,
         parent_epoch_hash,
         |dummy_block| {
             if dummy_block.id() == expected_parent_block_id {
@@ -153,6 +157,7 @@ pub fn calculate_dummy_blocks_from_justify<TAddr: NodeAddressable, TLeaderStrate
         leader_strategy,
         local_committee,
         justify_block.timestamp(),
+        *justify_block.header().accumulated_data(),
         *justify_block.epoch_hash(),
     )
 }
@@ -169,6 +174,7 @@ fn with_dummy_blocks<TAddr, TLeaderStrategy, F>(
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
     parent_timestamp: u64,
+    parent_accumulated_data: ShardGroupAccumulatedData,
     parent_epoch_hash: FixedHash,
     mut callback: F,
 ) where
@@ -213,6 +219,7 @@ fn with_dummy_blocks<TAddr, TLeaderStrategy, F>(
             parent_merkle_root,
             parent_timestamp,
             parent_epoch_hash,
+            parent_accumulated_data,
         );
         let dummy_block = Block::new(dummy_header, qc.clone(), Default::default(), None);
         debug!(

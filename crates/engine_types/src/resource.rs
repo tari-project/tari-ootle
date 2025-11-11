@@ -38,13 +38,11 @@ use crate::ConvertFromByteType;
 pub struct Resource {
     resource_type: ResourceType,
     owner_rule: OwnerRule,
-    #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
     owner_key: Option<RistrettoPublicKeyBytes>,
     access_rules: ResourceAccessRules,
     metadata: Metadata,
     /// The total supply of the resource. None means total_supply tracking is disabled.
     total_supply: Option<Amount>,
-    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     view_key: Option<RistrettoPublicKeyBytes>,
     auth_hook: Option<AuthHook>,
     divisibility: u8,

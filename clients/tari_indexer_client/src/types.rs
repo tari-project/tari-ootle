@@ -10,6 +10,7 @@ use tari_common_types::types::FixedHash;
 use tari_consensus_types::Decision;
 use tari_engine_types::{
     commit_result::ExecuteResult,
+    resource::Resource,
     substate::{Substate, SubstateId, SubstateValue},
     template_lib_models::{NonFungibleAddress, ResourceAddress, UtxoId},
     transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
@@ -28,6 +29,7 @@ use tari_ootle_wallet_sdk::models::UtxoUpdateSet;
 use tari_template_abi::TemplateDef;
 use tari_template_lib_types::{
     crypto::{RistrettoPublicKeyBytes, UtxoTag},
+    Amount,
     TemplateAddress,
 };
 use tari_transaction::{Transaction, TransactionId};
@@ -460,4 +462,12 @@ pub struct ListTransactionReceiptsResponse {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 pub struct GetTransactionReceiptResponse {
     pub receipt: TransactionReceipt,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
+pub struct GetResourceResponse {
+    pub resource: Resource,
+    pub version: u32,
+    pub total_supply: Option<Amount>,
 }

@@ -9,7 +9,7 @@ use serde::Serialize;
 use tari_engine_types::transaction_receipt::{TransactionReceipt, TransactionReceiptAddress};
 use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, StateVersion};
 use tari_ootle_storage::{
-    consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof},
+    consensus_models::{Block, EpochCheckpoint, SubstateData, SubstateUpdateProof},
     StorageError,
 };
 use tari_ootle_storage_sqlite::SqliteTransaction;
@@ -67,6 +67,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         const OPERATION: &str = "key_value_set";
         use crate::storage_sqlite::schema::key_values;
         let json = serialize_json(&value)?;
+        debug!(target: LOG_TARGET, "key_value_set called {} {}", key.as_ref(), json);
 
         diesel::insert_into(key_values::table)
             .values((key_values::key.eq(key.as_ref()), key_values::value.eq(&json)))
@@ -297,7 +298,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             .values(&new)
             .on_conflict((scanned_block_ids::epoch, scanned_block_ids::shard_group))
             .do_update()
-            .set(new.clone())
+            .set(&new)
             .execute(&mut *self.connection())
             .map_err(|e| StorageError::QueryError {
                 reason: format!("save_scanned_block_id error: {}", e),
@@ -356,6 +357,37 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             ))
             .on_conflict((epoch_checkpoints::epoch, epoch_checkpoints::shard_group))
             .do_nothing()
+            .execute(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))?;
+
+        Ok(())
+    }
+
+    fn insert_block_or_ignore(&mut self, block: &Block) -> Result<(), StorageError> {
+        const OPERATION: &str = "insert_block_or_ignore";
+        use crate::storage_sqlite::schema::blocks;
+
+        diesel::insert_into(blocks::table)
+            .values((
+                blocks::epoch.eq(block.epoch().as_u64() as i64),
+                blocks::shard_group.eq(block.shard_group().to_parsable_string()),
+                blocks::block_id.eq(serialize_hex(block.id())),
+                blocks::height.eq(block.height().as_u64() as i64),
+                blocks::header.eq(serialize_json(block.header())?),
+            ))
+            .on_conflict_do_nothing()
+            .execute(self.connection())
+            .map_err(|e| StorageError::general(OPERATION, e))?;
+
+        Ok(())
+    }
+
+    fn delete_blocks_by_epoch(&mut self, epoch: Epoch) -> Result<(), StorageError> {
+        const OPERATION: &str = "delete_blocks_by_epoch";
+        use crate::storage_sqlite::schema::blocks;
+
+        diesel::delete(blocks::table)
+            .filter(blocks::epoch.eq(epoch.as_u64() as i64))
             .execute(self.connection())
             .map_err(|e| StorageError::general(OPERATION, e))?;
 

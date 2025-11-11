@@ -146,3 +146,19 @@ create table utxos
 CREATE INDEX utxos_resource_state_version_shard_epoch_idx ON utxos (resource_address, state_version, shard, epoch);
 CREATE UNIQUE INDEX utxos_resource_public_nonce_utxo_tag_uniq_partial ON utxos (resource_address, public_nonce, utxo_tag) WHERE is_spent = false;
 
+
+create table blocks
+(
+    id          integer   not NULL primary key AUTOINCREMENT,
+    shard_group text      not NULL,
+    epoch       bigint    not NULL,
+    height      bigint    not NULL,
+    block_id    text      not NULL,
+    header      text      not NULL,
+    created_at  timestamp not null default current_timestamp
+);
+
+CREATE UNIQUE INDEX blocks_shard_group_epoch_height_uniq ON blocks (shard_group, epoch, height);
+CREATE INDEX blocks_shard_group_epoch_idx ON blocks (shard_group, epoch);
+CREATE UNIQUE INDEX blocks_block_id_uniq ON blocks (block_id);
+

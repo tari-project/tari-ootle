@@ -55,6 +55,7 @@ pub struct StealthOutputInfo {
     pub public_nonce: RistrettoPublicKeyBytes,
     pub encrypted_data: EncryptedData,
     pub value: u64,
+    pub memo: Option<Memo>,
     pub is_on_chain: bool,
 }
 

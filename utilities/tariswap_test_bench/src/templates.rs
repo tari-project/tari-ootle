@@ -1,44 +1,45 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_validator_node_client::types::{GetTemplatesRequest, GetTemplatesResponse, TemplateMetadata};
+use tari_indexer_client::types::{ListTemplatesRequest, ListTemplatesResponse};
+use tari_template_lib::types::TemplateAddress;
 
 use crate::cli::CommonArgs;
 
-pub async fn get_templates(cli: &CommonArgs) -> anyhow::Result<(TemplateMetadata, TemplateMetadata)> {
-    let mut client = tari_validator_node_client::ValidatorNodeClient::connect(cli.validator_node_url.clone())?;
-    let GetTemplatesResponse { templates } = client.get_active_templates(GetTemplatesRequest { limit: 100 }).await?;
+pub async fn get_templates(cli: &CommonArgs) -> anyhow::Result<(TemplateAddress, TemplateAddress)> {
+    let mut client = tari_indexer_client::rest_api_client::IndexerRestApiClient::connect(cli.indexer_url.clone())?;
+
+    let templates = if cli.swap_template.is_none() || cli.faucet_template.is_none() {
+        let ListTemplatesResponse { templates } = client
+            .list_cached_templates(ListTemplatesRequest { limit: Some(100) })
+            .await?;
+        templates
+    } else {
+        vec![]
+    };
 
     let tariswap = if let Some(template_address) = cli.swap_template {
-        templates
-            .iter()
-            .find(|t| t.address == template_address)
-            .ok_or(anyhow::anyhow!("Tariswap template not found"))?
-            .clone()
+        template_address
     } else {
         templates
             .iter()
             .find(|t| t.name.eq_ignore_ascii_case("TariSwapPool"))
+            .map(|t| t.address)
             .ok_or(anyhow::anyhow!("Tariswap template not found"))?
-            .clone()
     };
 
     let faucet = if let Some(template_address) = cli.faucet_template {
-        templates
-            .iter()
-            .find(|t| t.address == template_address)
-            .ok_or(anyhow::anyhow!("Faucet template not found"))?
-            .clone()
+        template_address
     } else {
         templates
             .iter()
             .find(|t| t.name.eq_ignore_ascii_case("TestFaucet"))
+            .map(|t| t.address)
             .ok_or(anyhow::anyhow!("Faucet template not found"))?
-            .clone()
     };
 
-    log::info!("Faucet template: {}", faucet.address);
-    log::info!("Tariswap template: {}", tariswap.address);
+    log::info!("Faucet template: {}", faucet);
+    log::info!("Tariswap template: {}", tariswap);
 
     Ok((faucet, tariswap))
 }

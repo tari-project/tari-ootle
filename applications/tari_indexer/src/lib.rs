@@ -41,6 +41,7 @@ mod storage_sqlite;
 mod store;
 mod substate_file_cache;
 mod substate_manager;
+mod template_manager;
 mod transaction_manager;
 
 use std::{convert::Infallible, fs, future, future::Future};
@@ -58,7 +59,7 @@ use tari_epoch_manager::{
 };
 use tari_epoch_oracles::EpochOracle;
 use tari_networking::NetworkingService;
-use tari_ootle_app_utilities::{keypair::setup_keypair_prompt, template_download_queue::TemplateDownloadQueue};
+use tari_ootle_app_utilities::keypair::setup_keypair_prompt;
 use tari_ootle_common_types::{layer_one_transaction::LayerOneTransactionDef, PeerAddress};
 use tari_ootle_storage::global::{DbFactory, GlobalDb};
 use tari_ootle_storage_sqlite::{global::SqliteGlobalDbAdapter, SqliteDbFactory};
@@ -235,7 +236,6 @@ impl EpochManagerSpec for IndexerEpochManagerSpec {
     type Addr = PeerAddress;
     type EpochEventOracle = EpochOracle<GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>>;
     type LayerOneSubmitter = Noop;
-    type TemplateDownloader = TemplateDownloadQueue;
 }
 
 pub struct Noop;

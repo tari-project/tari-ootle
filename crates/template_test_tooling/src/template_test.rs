@@ -72,7 +72,7 @@ pub fn test_nft_faucet_component() -> ComponentAddress {
 }
 
 pub struct TemplateTest {
-    package: Package,
+    package: Arc<Package>,
     track_calls: TrackCallsModule,
     secret_key: RistrettoSecretKey,
     public_key: RistrettoPublicKey,
@@ -119,7 +119,7 @@ impl TemplateTest {
 
         // Add builtin templates
         for (addr, code) in all_builtin_templates() {
-            builder.add_template_from_code(addr, code);
+            builder.add_template_from_code(*addr, *code);
         }
 
         // Add the faucet template for non-XTR fungible tokens
@@ -159,7 +159,7 @@ impl TemplateTest {
         virtual_substates.insert(VirtualSubstateId::CurrentEpoch, VirtualSubstate::CurrentEpoch(0));
 
         Self {
-            package,
+            package: Arc::new(package),
             track_calls: TrackCallsModule::new(),
             public_key,
             secret_key,
@@ -207,7 +207,7 @@ impl TemplateTest {
             builder.add_loaded_template(addr, template);
         }
         let template_addr = builder.add_template_opts(path, features, envs);
-        self.package = builder.build();
+        self.package = Arc::new(builder.build());
         self.name_to_template.insert(name.into(), template_addr);
 
         template_addr
@@ -592,7 +592,7 @@ impl TemplateTest {
         };
 
         let processor = TransactionProcessor::new(
-            Arc::new(self.package.clone()),
+            self.package.clone(),
             self.state_store.clone().into_read_only(),
             auth_params,
             self.virtual_substates.clone(),

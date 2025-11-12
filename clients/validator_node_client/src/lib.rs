@@ -71,13 +71,6 @@ impl ValidatorNodeClient {
         self.send_request("get_consensus_status", json!({})).await
     }
 
-    pub async fn get_active_templates(
-        &mut self,
-        request: GetTemplatesRequest,
-    ) -> Result<GetTemplatesResponse, ValidatorNodeClientError> {
-        self.send_request("get_templates", request).await
-    }
-
     pub async fn get_state(&mut self, request: GetStateRequest) -> Result<GetStateResponse, ValidatorNodeClientError> {
         self.send_request("get_state", request).await
     }

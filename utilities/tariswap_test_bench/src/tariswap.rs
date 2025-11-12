@@ -41,7 +41,7 @@ impl Runner {
             .fee_transaction_pay_from_component(in_account.component_address, 1000 * num_tariswaps)
             .then(|mut builder| {
                 for _ in 0..num_tariswaps {
-                    builder = builder.call_function(self.tariswap_template.address, "new", args![
+                    builder = builder.call_function(self.tariswap_template, "new", args![
                         XTR,
                         faucet.resource_address,
                         1 // fee

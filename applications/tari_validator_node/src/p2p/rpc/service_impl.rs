@@ -54,8 +54,6 @@ use tari_ootle_p2p::{
         SyncBlocksResponse,
         SyncStateRequest,
         SyncStateResponse,
-        SyncTemplatesRequest,
-        SyncTemplatesResponse,
     },
 };
 use tari_ootle_storage::{
@@ -63,14 +61,12 @@ use tari_ootle_storage::{
     StateStore,
 };
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
-use tari_template_lib::types::{HashParseError, TemplateAddress};
-use tari_template_manager::interface::TemplateManagerHandle;
 use tari_transaction::{Transaction, TransactionId};
 use tari_validator_node_rpc::{rpc_service::ValidatorNodeRpcService, STATE_SYNC_MAX_BATCH_SIZE};
 use tokio::{sync::mpsc, task};
 
 use crate::p2p::{
-    rpc::{block_sync_task::BlockSyncTask, state_sync_task::StateSyncTask, template_sync_task::TemplateSyncTask},
+    rpc::{block_sync_task::BlockSyncTask, state_sync_task::StateSyncTask},
     services::mempool::MempoolHandle,
 };
 
@@ -78,7 +74,6 @@ const LOG_TARGET: &str = "tari::ootle::p2p::rpc";
 
 pub struct ValidatorNodeRpcServiceImpl<TStateStore> {
     epoch_manager: EpochManagerHandle<PeerAddress>,
-    template_manager: TemplateManagerHandle,
     state_store: TStateStore,
     mempool: MempoolHandle,
 }
@@ -86,13 +81,11 @@ pub struct ValidatorNodeRpcServiceImpl<TStateStore> {
 impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
     pub fn new(
         epoch_manager: EpochManagerHandle<PeerAddress>,
-        template_manager: TemplateManagerHandle,
         state_store: TStateStore,
         mempool: MempoolHandle,
     ) -> Self {
         Self {
             epoch_manager,
-            template_manager,
             state_store,
             mempool,
         }
@@ -434,37 +427,6 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         );
 
         Ok(Streaming::new(receiver))
-    }
-
-    async fn sync_templates(
-        &self,
-        request: Request<SyncTemplatesRequest>,
-    ) -> Result<Streaming<SyncTemplatesResponse>, RpcStatus> {
-        let req = request.into_message();
-        const MAX_BATCH_SIZE: usize = 20;
-        info!(target: LOG_TARGET, "♻️ peer requesting template sync with {} template(s)", req.addresses.len());
-
-        if req.addresses.is_empty() {
-            return Err(RpcStatus::bad_request("No templates requested"));
-        }
-
-        if req.addresses.len() > MAX_BATCH_SIZE {
-            return Err(RpcStatus::bad_request(format!(
-                "Number of requested templates exceeds max {MAX_BATCH_SIZE}"
-            )));
-        }
-
-        let (tx, rx) = mpsc::channel(10);
-        let addresses = req
-            .addresses
-            .iter()
-            .map(|raw| TemplateAddress::try_from_slice(raw))
-            .collect::<Result<Vec<TemplateAddress>, HashParseError>>()
-            .map_err(|error| RpcStatus::bad_request(format!("Failed to parse address: {}", error)))?;
-
-        task::spawn(TemplateSyncTask::new(MAX_BATCH_SIZE, addresses, tx, self.template_manager.clone()).run());
-
-        Ok(Streaming::new(rx))
     }
 
     // async fn get_chain_summary(

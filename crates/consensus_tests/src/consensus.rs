@@ -1411,7 +1411,7 @@ async fn multishard_publish_template() {
             .unwrap()
             .into_template()
             .expect("Expected template substate")
-            .binary_hash;
+            .to_binary_hash();
         assert_eq!(binary_hash, expected_binary_hash, "Template binary does not match");
     }
 

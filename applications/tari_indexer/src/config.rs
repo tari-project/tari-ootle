@@ -36,9 +36,8 @@ use tari_ootle_app_utilities::{
     p2p_config::{P2pConfig, PeerSeedsConfig},
 };
 use tari_ootle_common_types::Network;
-use tari_template_manager::implementation::TemplateConfig;
 
-use crate::network_state_sync::EventFilter;
+use crate::{network_state_sync::EventFilter, template_manager::TemplateConfig};
 
 #[derive(Debug, Clone)]
 pub struct ApplicationConfig {

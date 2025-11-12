@@ -124,7 +124,7 @@ impl TemplateProvider for Package {
     type Error = PackageError;
     type Template = LoadedTemplate;
 
-    fn get_template_module(&self, id: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error> {
+    fn get_template(&self, id: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error> {
         Ok(self.templates.lock().unwrap().get(id).cloned())
     }
 }

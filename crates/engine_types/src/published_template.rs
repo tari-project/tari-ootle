@@ -10,10 +10,13 @@ use std::{
 use tari_bor::{BorTag, Deserialize, Serialize};
 use tari_template_lib::{
     models::{address_prefixes, BinaryTag},
-    types::{crypto::RistrettoPublicKeyBytes, Hash, KeyParseError, ObjectKey, TemplateAddress},
+    types::{crypto::RistrettoPublicKeyBytes, Hash, KeyParseError, MaxBytes, ObjectKey, TemplateAddress},
 };
 
-use crate::hashing::{hasher32, EngineHashDomainLabel};
+use crate::{
+    hashing::{hash_template_code, template_hasher32},
+    limits,
+};
 
 const TAG: u64 = BinaryTag::TemplateAddress.as_u64();
 
@@ -41,19 +44,20 @@ impl PublishedTemplateAddress {
     }
 
     pub fn from_author_and_binary_hash(author_public_key: &RistrettoPublicKeyBytes, binary_hash: &Hash) -> Self {
-        let hash = hasher32(EngineHashDomainLabel::TemplateAddress)
-            .chain(author_public_key)
-            .chain(binary_hash)
-            .result();
+        let hash = template_hasher32().chain(author_public_key).chain(binary_hash).result();
         Self::from_hash(hash)
-    }
-
-    pub fn as_object_key(&self) -> &ObjectKey {
-        self.0.inner()
     }
 
     pub fn from_hex(hex: &str) -> Result<Self, KeyParseError> {
         Ok(Self(BorTag::new(ObjectKey::from_hex(hex)?)))
+    }
+
+    pub fn from_template_address(address: TemplateAddress) -> Self {
+        Self::from_hash(address)
+    }
+
+    pub fn as_object_key(&self) -> &ObjectKey {
+        self.0.inner()
     }
 
     pub fn as_hash(&self) -> Hash {
@@ -86,11 +90,23 @@ impl FromStr for PublishedTemplateAddress {
     }
 }
 
+pub type TemplateBlob = MaxBytes<{ limits::ENGINE_LIMITS.max_template_binary_size_bytes }>;
+
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct PublishedTemplate {
+    /// Author's public key
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub author: RistrettoPublicKeyBytes,
+    /// Binary of the template
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub binary_hash: Hash,
+    pub binary: TemplateBlob,
+    /// Epoch at which the template was published
+    pub at_epoch: u64,
+}
+
+impl PublishedTemplate {
+    pub fn to_binary_hash(&self) -> Hash {
+        hash_template_code(&self.binary)
+    }
 }

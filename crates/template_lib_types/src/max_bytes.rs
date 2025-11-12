@@ -42,8 +42,12 @@ impl<const N: usize> MaxBytes<N> {
         Self { bytes: bytes.into() }
     }
 
+    pub fn into_bytes(self) -> Box<[u8]> {
+        self.bytes
+    }
+
     pub fn into_vec(self) -> Vec<u8> {
-        self.bytes.into_vec()
+        self.into_bytes().into_vec()
     }
 
     pub fn empty() -> Self {

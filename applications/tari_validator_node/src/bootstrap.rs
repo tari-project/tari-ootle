@@ -57,17 +57,15 @@ use tari_ootle_app_utilities::{
     fee_tables::get_fee_table_by_network,
     keypair::RistrettoKeypair,
     seed_peer::SeedPeer,
-    template_download_queue::TemplateDownloadQueue,
     transaction_executor::TariTransactionProcessor,
 };
-use tari_ootle_common_types::{Network, PeerAddress};
+use tari_ootle_common_types::{services::template_provider::TemplateProvider, Network, PeerAddress};
 use tari_ootle_p2p::TariMessagingSpec;
 use tari_ootle_storage::{global::GlobalDb, StateStore};
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_rpc_framework::RpcServer;
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_rocksdb::DatabaseOptions;
-use tari_template_manager::{implementation::TemplateManager, interface::TemplateManagerHandle};
 use tari_transaction::Transaction;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 use tokio::{
@@ -90,6 +88,7 @@ use crate::{
         },
         NopLogger,
     },
+    state_store_template_provider::StateStoreTemplateProvider,
     transaction_validators::{
         EpochRangeValidator,
         FeeTransactionValidator,
@@ -195,11 +194,11 @@ pub async fn spawn_services(
                     if let Some(peer_id) = server.to_peer_id() {
                         let addr = server.address().clone();
                         builder.with_rendezvous_server(peer_id, addr)
-                    } else{
+                    } else {
                         warn!(target: LOG_TARGET, "Rendezvous server peer ID is not set, skipping rendezvous server configuration");
                         builder
                     }
-                },
+                }
                 None => builder,
             }
         });
@@ -234,8 +233,6 @@ pub async fn spawn_services(
     // Epoch event scanner
     let epoch_event_oracle = create_epoch_oracle(&config, global_db.clone(), &consensus_constants).await?;
 
-    let (template_queue_sender, template_queue_receiver) = TemplateDownloadQueue::create();
-
     let layer_one_transaction_submitter = FileLayerOneSubmitter::new(config.get_layer_one_transaction_base_path());
 
     // Epoch manager
@@ -245,7 +242,6 @@ pub async fn spawn_services(
             global_db.clone(),
             keypair.public_key().to_byte_type(),
             epoch_event_oracle,
-            template_queue_sender,
             layer_one_transaction_submitter.clone(),
             shutdown.clone(),
         );
@@ -256,15 +252,7 @@ pub async fn spawn_services(
 
     info!(target: LOG_TARGET, "Template manager initializing");
     // Template manager
-    let template_manager = TemplateManager::initialize(global_db.clone(), config.validator_node.templates.clone())?;
-    let (template_manager_service, join_handle) = tari_template_manager::implementation::spawn(
-        template_manager.clone(),
-        epoch_manager.clone(),
-        validator_node_client_factory.clone(),
-        template_queue_receiver,
-        shutdown.clone(),
-    );
-    handles.push(join_handle);
+    let template_provider = StateStoreTemplateProvider::new(state_store.clone(), &config.validator_node.templates);
 
     info!(target: LOG_TARGET, "Payload processor initializing");
     // Payload processor
@@ -299,14 +287,14 @@ pub async fn spawn_services(
 
     // Transaction executor
     let fee_table = get_fee_table_by_network(config.network);
-    let payload_processor = TariTransactionProcessor::new(
-        template_manager.clone(),
+    let transaction_processor = TariTransactionProcessor::new(
+        template_provider.clone(),
         fee_table.clone(),
         Arc::new(TariClaimBurnProofVerifier::new(config.network, global_db.clone())),
     );
     let transaction_executor = TarBlockTransactionExecutor::new(
-        payload_processor.clone(),
-        create_consensus_transaction_validator(config.network, template_manager.clone()).boxed(),
+        transaction_processor,
+        create_consensus_transaction_validator(config.network, template_provider.clone()).boxed(),
     );
 
     #[cfg(feature = "metrics")]
@@ -340,14 +328,13 @@ pub async fn spawn_services(
         transaction_executor,
         tx_hotstuff_events,
         consensus_constants.clone(),
-        template_manager_service.clone(),
     )
     .await;
     handles.push(consensus_join_handle);
 
     let (mempool, join_handle) = mempool::spawn(
         epoch_manager.clone(),
-        create_mempool_transaction_validator(config.network, template_manager.clone()),
+        create_mempool_transaction_validator(config.network, template_provider.clone()),
         state_store.clone(),
         consensus_handle.clone(),
         networking.clone(),
@@ -363,7 +350,6 @@ pub async fn spawn_services(
         epoch_manager.clone(),
         state_store.clone(),
         mempool.clone(),
-        template_manager_service.clone(),
     )
     .await?;
     // Save final node identity after comms has initialized. This is required because the public_address can be
@@ -377,7 +363,7 @@ pub async fn spawn_services(
         mempool,
         epoch_manager,
         global_db,
-        template_manager: template_manager_service,
+        template_provider,
         consensus_handle,
         state_store,
         handles,
@@ -402,7 +388,7 @@ pub struct Services<TStore> {
     pub networking: NetworkingHandle<TariMessagingSpec>,
     pub mempool: MempoolHandle,
     pub epoch_manager: EpochManagerHandle<PeerAddress>,
-    pub template_manager: TemplateManagerHandle,
+    pub template_provider: StateStoreTemplateProvider<ValidatorNodeStateStore>,
     pub consensus_handle: ConsensusHandle,
     pub state_store: TStore,
     pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
@@ -434,7 +420,6 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
     epoch_manager: EpochManagerHandle<PeerAddress>,
     shard_store_store: TStateStore,
     mempool: MempoolHandle,
-    template_manager: TemplateManagerHandle,
 ) -> anyhow::Result<()> {
     let rpc_server = RpcServer::builder()
         .with_maximum_simultaneous_sessions(config.validator_node.rpc.max_simultaneous_sessions)
@@ -442,7 +427,6 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
         .finish()
         .add_service(create_tari_validator_node_rpc_service(
             epoch_manager,
-            template_manager,
             shard_store_store,
             mempool,
         ));
@@ -455,9 +439,9 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
     Ok(())
 }
 
-pub fn create_mempool_transaction_validator(
+pub fn create_mempool_transaction_validator<TProvider: TemplateProvider>(
     network: Network,
-    template_manager: TemplateManager<PeerAddress>,
+    template_manager: TProvider,
 ) -> impl Validator<Transaction, Context = (), Error = TransactionValidationError> {
     TransactionNetworkValidator::new(network)
         .and_then(TransactionDryRunValidator)
@@ -467,9 +451,9 @@ pub fn create_mempool_transaction_validator(
         .and_then(TemplateExistsValidator::new(template_manager))
 }
 
-pub fn create_consensus_transaction_validator(
+pub fn create_consensus_transaction_validator<TProvider: TemplateProvider>(
     network: Network,
-    template_manager: TemplateManager<PeerAddress>,
+    template_manager: TProvider,
 ) -> impl Validator<Transaction, Context = ValidationContext, Error = TransactionValidationError> {
     WithContext::<ValidationContext, _, _>::new()
         .map_context(|_| (), create_mempool_transaction_validator(network, template_manager))

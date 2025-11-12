@@ -26,7 +26,9 @@ fn new_public_key() -> RistrettoPublicKey {
 
 fn derived_substate_address(public_key: &RistrettoPublicKey) -> SubstateAddress {
     let hash = FixedHash::try_from(public_key.as_bytes()).unwrap();
-    SubstateAddress::from_hash_and_version(hash, 0)
+    let mut arr = [0u8; SubstateAddress::LENGTH];
+    arr[..hash.as_bytes().len()].copy_from_slice(hash.as_bytes());
+    SubstateAddress::from_array(arr)
 }
 
 fn insert_vns(

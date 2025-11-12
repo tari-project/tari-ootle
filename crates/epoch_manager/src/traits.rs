@@ -35,9 +35,8 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_storage::global::models::ValidatorNode;
 use tari_sidechain::EvictionProof;
-use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::sync::broadcast;
-use url::Url;
 
 use crate::{epoch_event_oracle::EpochEventOracle, EpochManagerError, EpochManagerEvent};
 
@@ -45,7 +44,6 @@ pub trait EpochManagerSpec: Send + 'static {
     type Addr: NodeAddressable + DerivableFromPublicKey + 'static;
     type EpochEventOracle: EpochEventOracle + Send + 'static;
     type LayerOneSubmitter: LayerOneTransactionSubmitter + Send + Sync + 'static;
-    type TemplateDownloader: TemplateDownloader + Send + 'static;
 }
 
 pub trait EpochManagerWriter: Send + Sync {
@@ -235,20 +233,4 @@ pub trait LayerOneTransactionSubmitter {
         &self,
         transaction: LayerOneTransactionDef<T>,
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send;
-}
-
-pub trait TemplateDownloader {
-    type Error: std::error::Error + Send + Sync + 'static;
-
-    /// Enqueues the template for download. An implementation should not wait for the download to complete before
-    /// resolving the returned future.
-    fn enqueue_download(
-        &mut self,
-        epoch: Epoch,
-        name: String,
-        address: TemplateAddress,
-        author_public_key: RistrettoPublicKeyBytes,
-        url: Url,
-        binary_hash: FixedHash,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }

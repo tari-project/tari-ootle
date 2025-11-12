@@ -28,7 +28,6 @@ use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_networking::NetworkingService;
 use tari_ootle_storage::{consensus_models::Block, StateStore};
 use tari_shutdown::Shutdown;
-use tari_template_manager::interface::TemplateExecutable;
 
 // use tokio::signal::unix::{signal, SignalKind};
 use crate::{Services, ValidatorNodeStateStore};
@@ -123,54 +122,6 @@ impl ValidatorNode {
         Ok(())
     }
 
-    /// Handles template publishes, adds all the committed templates to template manager
-    /// from the given block.
-    async fn handle_template_publishes(&self, block: &Block) -> Result<(), anyhow::Error> {
-        // add wasm templates to template manager if available in any of the new block's transactions
-        let transactions = self
-            .services
-            .state_store
-            .with_read_tx(|tx| block.get_committing_transactions(tx))?;
-
-        let epoch = self.services.consensus_handle.current_epoch();
-        // adding templates to template manager
-        let mut template_counter = 0;
-        for transaction in transactions {
-            let author_pk = transaction.transaction().seal_signature().public_key();
-            for (template_address, code) in transaction.transaction().all_published_templates_iter() {
-                info!(
-                    target: LOG_TARGET,
-                    "📰 Adding template {} from block {}",
-                    template_address,
-                    block
-                );
-                if let Err(err) = self
-                    .services
-                    .template_manager
-                    .add_template(
-                        *author_pk,
-                        template_address.as_hash(),
-                        TemplateExecutable::CompiledWasm(code.to_vec()),
-                        None,
-                        epoch,
-                    )
-                    .await
-                {
-                    error!(target: LOG_TARGET, "🚨Failed to add template: {}", err);
-                }
-                template_counter += 1;
-            }
-        }
-
-        if template_counter == 0 {
-            debug!(target: LOG_TARGET, "No new templates published in block {}", block);
-        } else {
-            info!(target: LOG_TARGET, "🏁 {} new template(s) have been persisted locally.", template_counter);
-        }
-
-        Ok(())
-    }
-
     async fn handle_hotstuff_event(&self, event: HotstuffEvent) -> Result<(), anyhow::Error> {
         info!(target: LOG_TARGET, "🔥 consensus event: {event}");
 
@@ -192,8 +143,6 @@ impl ValidatorNode {
         if committed_transactions.is_empty() {
             return Ok(());
         }
-
-        self.handle_template_publishes(&block).await?;
 
         info!(target: LOG_TARGET, "🏁 Removing {} finalized transaction(s) from mempool", committed_transactions.len());
         if let Err(err) = self.services.mempool.remove_transactions(committed_transactions).await {

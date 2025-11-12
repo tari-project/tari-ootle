@@ -308,7 +308,7 @@ async fn assert_template_is_registered(world: &mut TariWorld, template_name: Str
         }
 
         // check that the template is indeed in the response
-        assert_eq!(resp.unwrap().registration_metadata.address, template_address);
+        assert_eq!(resp.unwrap().metadata.address, template_address);
         break;
     }
 }
@@ -339,7 +339,7 @@ async fn assert_template_is_registered_by_all(world: &mut TariWorld, template_na
             }
             let resp = resp.unwrap();
             // check that the template is indeed in the response
-            assert_eq!(resp.registration_metadata.address, template_address);
+            assert_eq!(resp.metadata.address, template_address);
         }
         break;
     }

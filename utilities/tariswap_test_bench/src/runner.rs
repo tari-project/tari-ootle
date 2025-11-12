@@ -10,8 +10,8 @@ use tari_ootle_common_types::Network;
 use tari_ootle_wallet_sdk::{cipher_seed::CipherSeedRestore, models::EpochBirthday, WalletSdk as Sdk, WalletSdkConfig};
 use tari_ootle_wallet_sdk_services::indexer_rest_api::IndexerRestApiNetworkInterface;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
+use tari_template_lib::types::TemplateAddress;
 use tari_transaction::{Transaction, TransactionBuilder, TransactionId};
-use tari_validator_node_client::types::TemplateMetadata;
 use tokio::time::sleep;
 use url::Url;
 
@@ -21,8 +21,8 @@ type WalletSdk = Sdk<SqliteWalletStore, IndexerRestApiNetworkInterface>;
 pub struct Runner {
     pub(crate) sdk: WalletSdk,
     pub(crate) _cli: CommonArgs,
-    pub(crate) faucet_template: TemplateMetadata,
-    pub(crate) tariswap_template: TemplateMetadata,
+    pub(crate) faucet_template: TemplateAddress,
+    pub(crate) tariswap_template: TemplateAddress,
     pub(crate) stats: Stats,
 }
 

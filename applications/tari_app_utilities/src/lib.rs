@@ -30,5 +30,4 @@ pub mod p2p_config;
 pub mod seed_peer;
 pub mod shared_consts;
 pub mod tcp;
-pub mod template_download_queue;
 pub mod transaction_executor;

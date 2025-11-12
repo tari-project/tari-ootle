@@ -48,6 +48,7 @@ use tari_ootle_common_types::{
     },
     optional::Optional,
     public_key_to_peer_id,
+    services::template_provider::{TemplateMetadataProvider, TemplateProvider},
     Epoch,
     PeerAddress,
     SubstateAddress,
@@ -63,7 +64,6 @@ use tari_ootle_storage::{
 };
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_template_lib::prelude::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
-use tari_template_manager::interface::TemplateManagerHandle;
 use tari_transaction_components::transaction_components::ValidatorNodeSignature;
 use tari_validator_node_client::types::{
     self,
@@ -96,8 +96,6 @@ use tari_validator_node_client::types::{
     GetSubstateResponse,
     GetTemplateRequest,
     GetTemplateResponse,
-    GetTemplatesRequest,
-    GetTemplatesResponse,
     GetTransactionRequest,
     GetTransactionResponse,
     GetTransactionResultRequest,
@@ -118,6 +116,7 @@ use crate::{
     file_l1_submitter::FileLayerOneSubmitter,
     json_rpc::jrpc_errors::{general_error, internal_error, invalid_operation, not_found},
     p2p::services::mempool::MempoolHandle,
+    state_store_template_provider::StateStoreTemplateProvider,
     ApplicationConfig,
 };
 
@@ -127,7 +126,7 @@ pub struct JsonRpcHandlers {
     config: ApplicationConfig,
     keypair: RistrettoKeypair,
     mempool: MempoolHandle,
-    template_manager: TemplateManagerHandle,
+    template_provider: StateStoreTemplateProvider<ValidatorNodeStateStore>,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     layer_one_transaction_submitter: FileLayerOneSubmitter,
     global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
@@ -142,10 +141,10 @@ impl JsonRpcHandlers {
             config: services.config.clone(),
             keypair: services.keypair.clone(),
             mempool: services.mempool.clone(),
+            template_provider: services.template_provider.clone(),
             epoch_manager: services.epoch_manager.clone(),
             consensus: services.consensus_handle.clone(),
             global_db: services.global_db.clone(),
-            template_manager: services.template_manager.clone(),
             layer_one_transaction_submitter: services.layer_one_transaction_submitter.clone(),
             networking: services.networking.clone(),
             state_store: services.state_store.clone(),
@@ -451,43 +450,35 @@ impl JsonRpcHandlers {
         Ok(JsonRpcResponse::success(answer_id, res))
     }
 
-    pub async fn get_templates(&self, value: JsonRpcExtractor) -> JrpcResult {
-        let answer_id = value.get_answer_id();
-        let req: GetTemplatesRequest = value.parse_params()?;
-
-        let templates = self
-            .template_manager
-            .get_templates(req.limit as usize)
-            .await
-            .map_err(internal_error(answer_id.clone()))?;
-
-        Ok(JsonRpcResponse::success(answer_id, GetTemplatesResponse {
-            templates: templates
-                .into_iter()
-                .map(|t| TemplateMetadata {
-                    name: t.name,
-                    address: t.address,
-                    binary_sha: t.binary_sha.to_vec(),
-                })
-                .collect(),
-        }))
-    }
-
     pub async fn get_template(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
         let req: GetTemplateRequest = value.parse_params()?;
 
-        let template = self
-            .template_manager
-            .get_template(req.template_address)
-            .await
-            .map_err(internal_error(answer_id.clone()))?;
-
         let loaded = self
-            .template_manager
-            .load_template_abi(req.template_address)
-            .await
-            .map_err(internal_error(answer_id.clone()))?;
+            .template_provider
+            .get_template(&req.template_address)
+            .map_err(internal_error(answer_id.clone()))?
+            .ok_or_else(|| {
+                not_found(
+                    answer_id.clone(),
+                    format!("Template with address {} not found ", req.template_address),
+                )
+            })?;
+
+        let template = self
+            .template_provider
+            .get_template_metadata(&req.template_address)
+            .map_err(internal_error(answer_id.clone()))?
+            .ok_or_else(|| {
+                not_found(
+                    answer_id.clone(),
+                    format!(
+                        "Template with address {} not found (after template found?)",
+                        req.template_address
+                    ),
+                )
+            })?;
+
         let abi = TemplateAbi {
             template_name: loaded.template_def().template_name().to_string(),
             functions: loaded
@@ -505,10 +496,11 @@ impl JsonRpcHandlers {
         };
 
         Ok(JsonRpcResponse::success(answer_id, GetTemplateResponse {
-            registration_metadata: TemplateMetadata {
-                name: template.metadata.name,
-                address: template.metadata.address,
-                binary_sha: template.metadata.binary_sha.to_vec(),
+            metadata: TemplateMetadata {
+                name: loaded.template_name().to_string(),
+                address: req.template_address,
+                code_size: loaded.code_size(),
+                author: template.author,
             },
             abi,
         }))

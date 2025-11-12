@@ -28,7 +28,6 @@ use tari_ootle_storage::{
     consensus_models::{
         BookkeepingModel,
         EpochCheckpoint,
-        SubstateCreate,
         SubstateRecord,
         SubstateTransition,
         SubstateUpdateBatch,
@@ -42,7 +41,6 @@ use tari_ootle_storage::{
 };
 use tari_rpc_framework::RpcError;
 use tari_state_tree::{SpreadPrefixStateTree, SubstateTreeChange, TreeHash, Version, SPARSE_MERKLE_PLACEHOLDER_HASH};
-use tari_template_manager::interface::{TemplateChange, TemplateManagerHandle};
 use tari_validator_node_rpc::{
     client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory},
     rpc_service::ValidatorNodeRpcClient,
@@ -57,7 +55,6 @@ pub struct RpcStateSyncClientProtocol<TConsensusSpec: ConsensusSpec> {
     epoch_manager: TConsensusSpec::EpochManager,
     state_store: TConsensusSpec::StateStore,
     client_factory: TariValidatorNodeRpcClientFactory,
-    template_manager: TemplateManagerHandle,
     valid_checkpoints: HashMap<ShardGroup, EpochCheckpoint>,
     stats: StateSyncStats,
 }
@@ -69,13 +66,11 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         epoch_manager: TConsensusSpec::EpochManager,
         state_store: TConsensusSpec::StateStore,
         client_factory: TariValidatorNodeRpcClientFactory,
-        template_manager: TemplateManagerHandle,
     ) -> Self {
         Self {
             epoch_manager,
             state_store,
             client_factory,
-            template_manager,
             valid_checkpoints: HashMap::new(),
             stats: StateSyncStats::default(),
         }
@@ -138,8 +133,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         shard: Shard,
         checkpoint: &EpochCheckpoint,
         mut maybe_persisted_state_version: Option<Version>,
-    ) -> Result<(Option<Version>, Vec<TemplateChange>), RpcStateSyncError> {
-        let mut template_changes = vec![];
+    ) -> Result<Option<Version>, RpcStateSyncError> {
         let checkpoint_shard_root = checkpoint.get_shard_root(shard);
         let checkpoint_state_version = checkpoint.get_shard_state_version(shard);
 
@@ -148,7 +142,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             .with_read_tx(|tx| self.calculate_state_root_for_shard(tx, shard, maybe_persisted_state_version))?;
         if checkpoint_shard_root == initial_local_state_root {
             info!(target: LOG_TARGET, "Checkpoint state root indicates no further state changes. Nothing to sync for {shard}");
-            return Ok((None, vec![]));
+            return Ok(None);
         }
 
         // We start at 1 because bootstrapped state is at 0
@@ -232,15 +226,14 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             info!(target: LOG_TARGET, "🛜 Buffering {} state update(s) (state version: v{})", updates_for_state_version.len(), state_version);
             for result in updates_for_state_version {
                 let update = result?;
-                let (tree_change, template_change) = extract_tree_and_template_changes(msg_epoch, &update)?;
+                let tree_change = extract_tree_changes(&update)?;
 
                 debug!(target: LOG_TARGET, "🛜 -> state update (v{}) {}", state_version, update);
-                template_changes.extend(template_change);
                 tree_changes.push(tree_change);
                 updates.push(update);
             }
 
-            info!(target: LOG_TARGET, "🛜 Sync: {} state update(s), {} new template(s) (state version: v{})", updates.len(), template_changes.len(), state_version);
+            info!(target: LOG_TARGET, "🛜 Sync: {} state update(s), state version: v{}", updates.len(), state_version);
 
             if msg.has_more {
                 info!(
@@ -319,7 +312,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 
         info!(target: LOG_TARGET, "🛜 Synced state for {shard} to v{}", maybe_persisted_state_version.unwrap_or(1));
 
-        Ok((maybe_persisted_state_version, template_changes))
+        Ok(maybe_persisted_state_version)
     }
 
     fn calculate_state_root_for_shard(
@@ -486,11 +479,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                 .start_state_sync(&mut client, shard, &checkpoint, maybe_persisted_state_version)
                 .await
             {
-                Ok((maybe_version, template_changes)) => {
-                    // We only enqueue these if state sync succeeds and the state root matches
-                    if !template_changes.is_empty() {
-                        self.template_manager.enqueue_template_changes(template_changes).await?;
-                    }
+                Ok(maybe_version) => {
                     return Ok(maybe_version);
                 },
                 Err(err) => {
@@ -656,73 +645,17 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
     }
 }
 
-fn extract_template_change(
-    // Extra data required by the template db - necessary?
-    epoch: Epoch,
-    create: &SubstateCreate,
-) -> Result<Option<TemplateChange>, RpcStateSyncError> {
-    let Some(template_address) = create.substate.substate_id.as_template() else {
-        return Ok(None);
-    };
-    match create.substate.value.value() {
-        Some(value) => {
-            let template = value.as_template().ok_or_else(|| {
-                // This is possible if the VN is malicious
-                RpcStateSyncError::InvalidResponse(anyhow!(
-                    "Validator returned a template address {} but substate value was not a template",
-                    create.substate.substate_id()
-                ))
-            })?;
-
-            info!(target: LOG_TARGET, "🛜 Add template {}", create.substate.substate_id);
-            Ok(Some(TemplateChange::Add {
-                template_address,
-                author_public_key: template.author,
-                binary_hash: template.binary_hash.into_array().into(),
-                epoch,
-            }))
-        },
-        None => {
-            // TODO: currently you cannot DOWN a template. If we were to allow deprecations, it would likely be
-            // marking the template as deprecated rather than DOWNing it, and not permitting any template
-            // (non-component) calls to the template. We could still handle this case by requesting
-            // the template by address and verifying the template address hash i.e. peers send author and binary.
-            warn!(target: LOG_TARGET, "❗️ NEVER HAPPEN: Validator sent us a template {} that has no value, indicating it was DOWNed later. We are not able to sync it", create.substate.substate_id);
-            Ok(None)
-        },
-    }
-}
-
-fn extract_tree_and_template_changes(
-    epoch: Epoch,
-    update: &SubstateUpdateProof,
-) -> Result<(SubstateTreeChange, Option<TemplateChange>), RpcStateSyncError> {
+fn extract_tree_changes(update: &SubstateUpdateProof) -> Result<SubstateTreeChange, RpcStateSyncError> {
     match update {
         SubstateUpdateProof::Create(create) => {
             let id = create.substate.as_versioned_substate_id_ref();
-            let template_change = extract_template_change(epoch, create)?;
-
-            Ok((
-                SubstateTreeChange::Up {
-                    id: id.to_owned(),
-                    value_hash: create.substate.to_value_hash(),
-                },
-                template_change,
-            ))
+            Ok(SubstateTreeChange::Up {
+                id: id.to_owned(),
+                value_hash: create.substate.to_value_hash(),
+            })
         },
-        SubstateUpdateProof::Destroy(destroy) => {
-            let template_change = destroy.substate_id.as_template().map(|template_address| {
-                // TODO: Currently not possible to down a template
-                info!(target: LOG_TARGET, "🛜 Deprecate template {}", template_address);
-                TemplateChange::Deprecate { template_address }
-            });
-
-            Ok((
-                SubstateTreeChange::Down {
-                    id: destroy.to_versioned_substate_id(),
-                },
-                template_change,
-            ))
-        },
+        SubstateUpdateProof::Destroy(destroy) => Ok(SubstateTreeChange::Down {
+            id: destroy.to_versioned_substate_id(),
+        }),
     }
 }

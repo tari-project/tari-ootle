@@ -7,13 +7,14 @@ use rand::random;
 use tari_engine::{transaction::TransactionError, wasm::compile::compile_template};
 use tari_engine_types::{
     commit_result::{RejectReason, TransactionResult},
-    hashing::{hash_template_code, hasher32, EngineHashDomainLabel},
+    hashing::hash_template_code,
     limits,
-    published_template::PublishedTemplateAddress,
+    published_template::{PublishedTemplateAddress, TemplateBlob},
     substate::{SubstateId, SubstateValue},
+    ToByteType,
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
-use tari_transaction::{TemplateBlob, Transaction};
+use tari_transaction::Transaction;
 
 #[test]
 fn publish_template_success() {
@@ -21,12 +22,8 @@ fn publish_template_success() {
     let (account_address, owner_proof, account_key, public_key) = test.create_custom_funded_account(250_000);
     let template = compile_template("tests/templates/hello_world", &[]).unwrap();
     let expected_binary_hash = hash_template_code(template.code());
-    let expected_template_address = PublishedTemplateAddress::from_hash(
-        hasher32(EngineHashDomainLabel::TemplateAddress)
-            .chain(&public_key)
-            .chain(&expected_binary_hash)
-            .result(),
-    );
+    let expected_template_address =
+        PublishedTemplateAddress::from_author_and_binary_hash(&public_key.to_byte_type(), &expected_binary_hash);
 
     let result = test.execute_expect_success(
         Transaction::builder()
@@ -39,19 +36,18 @@ fn publish_template_success() {
     assert!(matches!(result.finalize.result, TransactionResult::Accept(_)));
 
     let mut template_found = false;
-    if let TransactionResult::Accept(diff) = result.finalize.result {
-        diff.up_iter().for_each(|(substate_id, substate)| {
-            if let SubstateValue::Template(curr_template) = substate.substate_value() {
-                if curr_template.binary_hash == expected_binary_hash {
-                    template_found = true;
-                    assert!(matches!(substate_id, SubstateId::Template(_)));
-                    if let SubstateId::Template(curr_template_addr) = substate_id {
-                        assert_eq!(expected_template_address, *curr_template_addr);
-                    }
+    let diff = result.expect_success();
+    diff.up_iter().for_each(|(substate_id, substate)| {
+        if let SubstateValue::Template(curr_template) = substate.substate_value() {
+            if curr_template.to_binary_hash() == expected_binary_hash {
+                template_found = true;
+                assert!(matches!(substate_id, SubstateId::Template(_)));
+                if let SubstateId::Template(curr_template_addr) = substate_id {
+                    assert_eq!(expected_template_address, *curr_template_addr);
                 }
             }
-        });
-    }
+        }
+    });
 
     assert!(template_found);
 }

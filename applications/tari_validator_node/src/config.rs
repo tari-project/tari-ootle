@@ -34,7 +34,8 @@ use tari_ootle_app_utilities::{
     p2p_config::{P2pConfig, PeerSeedsConfig, RpcConfig},
 };
 use tari_ootle_common_types::Network;
-use tari_template_manager::implementation::TemplateConfig;
+
+use crate::state_store_template_provider::TemplateConfig;
 
 #[derive(Debug, Clone)]
 pub struct ApplicationConfig {

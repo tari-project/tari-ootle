@@ -7,7 +7,6 @@ use axum::{
     Extension,
     Json,
 };
-use tari_engine::{template::TemplateModuleLoader, wasm::WasmModule};
 use tari_indexer_client::types::{
     GetTemplateDefinitionResponse,
     ListTemplatesRequest,
@@ -17,9 +16,11 @@ use tari_indexer_client::types::{
 use tari_ootle_common_types::optional::Optional;
 use tari_ootle_storage::global::TemplateStatus;
 use tari_template_lib::types::TemplateAddress;
-use tari_template_manager::interface::{TemplateExecutable, TemplateManagerError};
 
-use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
+use crate::{
+    rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult},
+    template_manager::TemplateManagerError,
+};
 
 #[utoipa::path(
     get,
@@ -32,7 +33,7 @@ pub async fn get_template_definition(
 ) -> HandlerResult<Response> {
     let template = context
         .template_manager()
-        .fetch_template(&template_address)
+        .fetch_and_load_template(&template_address)
         .optional()
         .map_err(|err| {
             // If it's pending, we return a 404 to the client - this allows them to retry later
@@ -49,18 +50,10 @@ pub async fn get_template_definition(
         })?
         .ok_or_else(|| ErrorResponse::not_found(format!("Template with address {} not found", template_address)))?;
 
-    let template = match template.executable {
-        TemplateExecutable::CompiledWasm(code) => WasmModule::from_code(code)
-            .load_template()
-            .map_err(|e| ErrorResponse::internal_error(format!("Error loading template: {}", e)))?,
-        // TemplateExecutable::DownloadableWasm is never returned ad there is no DB type for that
-        TemplateExecutable::DownloadableWasm(_, _) | TemplateExecutable::Manifest(_) => {
-            return Err(ErrorResponse::bad_request("Template is not a wasm module".to_string()));
-        },
-    };
     let resp = Json(GetTemplateDefinitionResponse {
         definition: template.template_def().clone(),
         name: template.template_name().to_string(),
+        code_size: template.code_size(),
     });
 
     Ok(context.apply_cache_control(resp, 1000))
@@ -68,13 +61,13 @@ pub async fn get_template_definition(
 
 #[utoipa::path(
     get,
-    path = "/templates",
-    description = "List all templates",
+    path = "/templates/cached",
+    description = "List all template cached by this indexer",
     params(
         ("limit" = Option<u32>, Query, description = "Limit the number of results returned"),
     ),
 )]
-pub async fn list_templates(
+pub async fn list_cached_templates(
     Extension(context): Extension<HandlerContext>,
     Query(req): Query<ListTemplatesRequest>,
 ) -> HandlerResult<Response> {
@@ -89,16 +82,19 @@ pub async fn list_templates(
         .template_manager()
         .fetch_template_metadata(limit as usize)
         .map_err(ErrorResponse::anyhow)?;
-    let resp = Json(ListTemplatesResponse {
-        templates: templates
-            .into_iter()
-            .map(|t| TemplateMetadata {
-                name: t.name,
-                address: t.address,
-                binary_sha: t.binary_sha,
-            })
-            .collect(),
-    });
 
+    let templates = templates
+        .into_iter()
+        .map(|t| TemplateMetadata {
+            name: t.name,
+            address: t.address,
+            binary_sha: t.binary_sha,
+            author_public_key: t.author_public_key,
+            code_size: t.code_size,
+            epoch: t.epoch,
+        })
+        .collect();
+
+    let resp = Json(ListTemplatesResponse { templates });
     Ok(context.apply_cache_control(resp, 1000))
 }

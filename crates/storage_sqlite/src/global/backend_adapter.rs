@@ -202,13 +202,13 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
     fn template_exists(
         &self,
         tx: &mut Self::DbTransaction<'_>,
-        key: &[u8],
+        key: &TemplateAddress,
         status: Option<TemplateStatus>,
     ) -> Result<bool, Self::Error> {
         use crate::global::schema::templates;
 
         let mut query = templates::table
-            .filter(templates::template_address.eq(key))
+            .filter(templates::template_address.eq(key.as_slice()))
             .into_boxed();
         if let Some(status) = status {
             query = query.filter(templates::status.eq(status.as_str()));
@@ -302,16 +302,16 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .collect()
     }
 
-    fn get_templates_by_addresses(
+    fn get_templates_by_addresses<'a, I: IntoIterator<Item = &'a TemplateAddress>>(
         &self,
         tx: &mut Self::DbTransaction<'_>,
-        addresses: Vec<&[u8]>,
+        addresses: I,
     ) -> Result<Vec<DbTemplate>, Self::Error> {
         use crate::global::schema::templates;
 
         templates::table
             .filter(templates::status.eq(TemplateStatus::Active.as_str()))
-            .filter(templates::template_address.eq_any(addresses))
+            .filter(templates::template_address.eq_any(addresses.into_iter().map(|a| a.as_slice())))
             .get_results::<TemplateModel>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,

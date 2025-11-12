@@ -50,7 +50,6 @@ use tari_ootle_app_utilities::{
     keypair::RistrettoKeypair,
     seed_peer::SeedPeer,
     shared_consts::TXTR_FAUCET_INITIAL_SUPPLY,
-    template_download_queue::TemplateDownloadQueue,
 };
 use tari_ootle_common_types::{optional::Optional, Network, PeerAddress};
 use tari_ootle_p2p::TariMessagingSpec;
@@ -58,7 +57,6 @@ use tari_ootle_storage::global::GlobalDb;
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib::{prelude::RistrettoPublicKeyBytes, types::Amount};
-use tari_template_manager::{implementation::TemplateManager, interface::TemplateManagerHandle};
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
 use crate::{
@@ -70,6 +68,7 @@ use crate::{
     store::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreWriteTransaction},
     substate_file_cache::SubstateFileCache,
     substate_manager::SubstateManager,
+    template_manager::TemplateManager,
     transaction_manager::TransactionManager,
     ApplicationConfig,
     IndexerEpochManagerSpec,
@@ -172,8 +171,6 @@ pub async fn spawn_services(
     // Epoch event oracle
     let epoch_event_oracle = create_epoch_oracle(config, global_db.clone(), &consensus_constants).await?;
 
-    let (template_queue_sender, template_queue_receiver) = TemplateDownloadQueue::create();
-
     // Epoch manager
     let (epoch_manager, _) = tari_epoch_manager::service::spawn_service::<IndexerEpochManagerSpec>(
         EpochManagerConfig {
@@ -190,7 +187,6 @@ pub async fn spawn_services(
         global_db.clone(),
         keypair.public_key().to_byte_type(),
         epoch_event_oracle,
-        template_queue_sender,
         Noop,
         shutdown.clone(),
     );
@@ -205,18 +201,10 @@ pub async fn spawn_services(
 
     // Template manager
     let template_manager = TemplateManager::initialize(global_db.clone(), config.indexer.templates.clone())?;
-    let (template_manager_service, _) = tari_template_manager::implementation::spawn(
-        template_manager.clone(),
-        epoch_manager.clone(),
-        validator_node_client_factory.clone(),
-        template_queue_receiver,
-        shutdown.clone(),
-    );
     network_state_sync::NetworkWideStateSync::new(
         epoch_manager.clone(),
         networking.clone(),
         store.clone(),
-        template_manager_service.clone(),
         NetworkWideStateSyncConfig {
             event_filters: Arc::from(config.indexer.event_filters.clone()),
             work_interval: config.indexer.state_scanning_interval,
@@ -257,7 +245,6 @@ pub async fn spawn_services(
         store,
         global_db,
         template_manager,
-        _template_manager_service: template_manager_service,
         substate_manager,
         transaction_manager,
         dry_run_transaction_processor,
@@ -272,7 +259,6 @@ pub struct Services {
     pub store: SqliteIndexerStore,
     pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     pub template_manager: TemplateManager<PeerAddress>,
-    pub _template_manager_service: TemplateManagerHandle,
     pub substate_manager: SubstateManager,
     pub transaction_manager:
         TransactionManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SqliteIndexerStore>,

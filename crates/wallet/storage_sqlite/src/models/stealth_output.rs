@@ -131,6 +131,7 @@ impl TryFrom<StealthOutput> for StealthOutputInfo {
                 details: "Corrupt db: invalid hex representation".to_string(),
             })?,
             value: value.value as u64,
+            memo: value.memo_json.as_ref().map(deserialize_json).transpose()?,
             is_on_chain: value.is_on_chain,
         })
     }

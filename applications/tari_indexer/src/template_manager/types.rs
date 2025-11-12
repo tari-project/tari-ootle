@@ -24,7 +24,7 @@ impl From<DbTemplate> for TemplateMetadata {
         TemplateMetadata {
             name: record.template_name,
             address: record.template_address,
-            binary_sha: FixedHash::zero(),
+            binary_sha: record.binary_hash,
             author_public_key: record.author_public_key,
             code_size: record.code.as_ref().map(|code| code.len()).unwrap_or_default(),
             epoch: record.epoch,
@@ -89,7 +89,7 @@ impl TryFrom<DbTemplate> for Template {
             metadata: TemplateMetadata {
                 name: record.template_name,
                 address: record.template_address,
-                binary_sha: record.expected_hash,
+                binary_sha: record.binary_hash,
                 author_public_key: record.author_public_key,
                 code_size: record.code.as_ref().map(|code| code.len()).unwrap_or_default(),
                 epoch: record.epoch,

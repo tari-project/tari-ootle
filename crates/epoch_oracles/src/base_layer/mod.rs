@@ -657,8 +657,6 @@ pub enum BaseLayerOracleError {
     BaseNodeError(#[from] BaseNodeClientError),
     #[error("Invalid base node response: {0}")]
     InvalidBaseNodeResponse(String),
-    #[error("Template URL failed to parse: {0}")]
-    TemplateUrlParseError(#[from] url::ParseError),
 }
 
 enum BlockchainProgression {

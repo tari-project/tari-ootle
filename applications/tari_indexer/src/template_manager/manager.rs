@@ -71,7 +71,7 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
                     author_public_key: template.metadata.author_public_key,
                     template_address: address,
                     template_name: template.metadata.name.clone(),
-                    expected_hash: template.metadata.binary_sha,
+                    binary_hash: template.metadata.binary_sha,
                     status: TemplateStatus::Active,
                     code: Some(template.code.as_raw_bytes().to_vec()),
                     url: None,
@@ -183,7 +183,7 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
             author_public_key,
             template_name: loaded_template.template_name().to_string(),
             template_address,
-            expected_hash: hash_template_code(binary).into_array().into(),
+            binary_hash: hash_template_code(binary).into_array().into(),
             status: template_status,
             code: Some(binary.to_vec()),
             added_at: now(),
@@ -217,7 +217,8 @@ impl<TAddr: NodeAddressable + Send + Sync + 'static> TemplateProvider for Templa
     }
 
     fn has_template(&self, address: &TemplateAddress) -> Result<bool, Self::Error> {
-        self.template_exists(address, Some(TemplateStatus::Active))
+        Ok(self.template_exists(address, Some(TemplateStatus::Active))? ||
+            self.template_exists(address, Some(TemplateStatus::Deprecated))?)
     }
 }
 

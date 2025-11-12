@@ -27,7 +27,6 @@ tokio = { workspace = true, features = ["time"] }
 thiserror = { workspace = true }
 serde = { workspace = true }
 time = { workspace = true, features = ["serde", "serde-human-readable"] }
-url = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["time", "macros", "rt"] }
@@ -38,5 +37,4 @@ base_layer = [
     "tari_base_node_client",
     "tari_transaction_components",
     "tari_node_components",
-    "url"
 ]

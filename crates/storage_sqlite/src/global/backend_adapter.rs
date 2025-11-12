@@ -265,7 +265,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 author_public_key: RistrettoPublicKeyBytes::from_bytes(&t.author_public_key)
                     .map_err(|e| SqliteStorageError::MalformedDbData(format!("Failed to decode public key:{e}")))?,
                 template_name: t.template_name,
-                expected_hash: t.expected_hash.try_into()?,
+                binary_hash: t.expected_hash.try_into()?,
                 template_address: t.template_address.try_into()?,
                 template_type: t.template_type.parse().expect("DB template type corrupted"),
                 epoch: Epoch(t.epoch as u64),
@@ -345,7 +345,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                         SqliteStorageError::MalformedDbData(format!("Failed to decode public key: {e}"))
                     })?,
                     template_name: t.template_name,
-                    expected_hash: t.expected_hash.try_into()?,
+                    binary_hash: t.expected_hash.try_into()?,
                     template_address: TemplateAddress::try_from_slice(&t.template_address)?,
                     template_type: t.template_type.parse().expect("DB template type corrupted"),
                     code: t.code,
@@ -363,7 +363,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         let new_template = NewTemplateModel {
             author_public_key: item.author_public_key.to_vec(),
             template_name: item.template_name,
-            expected_hash: item.expected_hash.to_vec(),
+            expected_hash: item.binary_hash.to_vec(),
             template_address: item.template_address.to_vec(),
             template_type: item.template_type.as_str().to_string(),
             code: item.code,

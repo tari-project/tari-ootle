@@ -202,13 +202,13 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
     fn template_exists(
         &self,
         tx: &mut Self::DbTransaction<'_>,
-        key: &[u8],
+        key: &TemplateAddress,
         status: Option<TemplateStatus>,
     ) -> Result<bool, Self::Error> {
         use crate::global::schema::templates;
 
         let mut query = templates::table
-            .filter(templates::template_address.eq(key))
+            .filter(templates::template_address.eq(key.as_slice()))
             .into_boxed();
         if let Some(status) = status {
             query = query.filter(templates::status.eq(status.as_str()));
@@ -265,7 +265,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 author_public_key: RistrettoPublicKeyBytes::from_bytes(&t.author_public_key)
                     .map_err(|e| SqliteStorageError::MalformedDbData(format!("Failed to decode public key:{e}")))?,
                 template_name: t.template_name,
-                expected_hash: t.expected_hash.try_into()?,
+                binary_hash: t.expected_hash.try_into()?,
                 template_address: t.template_address.try_into()?,
                 template_type: t.template_type.parse().expect("DB template type corrupted"),
                 epoch: Epoch(t.epoch as u64),
@@ -302,16 +302,16 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .collect()
     }
 
-    fn get_templates_by_addresses(
+    fn get_templates_by_addresses<'a, I: IntoIterator<Item = &'a TemplateAddress>>(
         &self,
         tx: &mut Self::DbTransaction<'_>,
-        addresses: Vec<&[u8]>,
+        addresses: I,
     ) -> Result<Vec<DbTemplate>, Self::Error> {
         use crate::global::schema::templates;
 
         templates::table
             .filter(templates::status.eq(TemplateStatus::Active.as_str()))
-            .filter(templates::template_address.eq_any(addresses))
+            .filter(templates::template_address.eq_any(addresses.into_iter().map(|a| a.as_slice())))
             .get_results::<TemplateModel>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
@@ -345,7 +345,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                         SqliteStorageError::MalformedDbData(format!("Failed to decode public key: {e}"))
                     })?,
                     template_name: t.template_name,
-                    expected_hash: t.expected_hash.try_into()?,
+                    binary_hash: t.expected_hash.try_into()?,
                     template_address: TemplateAddress::try_from_slice(&t.template_address)?,
                     template_type: t.template_type.parse().expect("DB template type corrupted"),
                     code: t.code,
@@ -363,7 +363,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         let new_template = NewTemplateModel {
             author_public_key: item.author_public_key.to_vec(),
             template_name: item.template_name,
-            expected_hash: item.expected_hash.to_vec(),
+            expected_hash: item.binary_hash.to_vec(),
             template_address: item.template_address.to_vec(),
             template_type: item.template_type.as_str().to_string(),
             code: item.code,

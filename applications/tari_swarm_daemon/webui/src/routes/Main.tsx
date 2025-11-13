@@ -1,7 +1,7 @@
 //  Copyright 2024 The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
-import { ChangeEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { jsonRpc } from "../utils/json_rpc";
 import { ExecutedTransaction } from "../Types.ts";
 import MinotariWallet from "../components/MinotariWallet";
@@ -433,7 +433,6 @@ export default function Main() {
   const [indexers, setIndexers] = useState({});
   const [logs, setLogs] = useState<any | null>({});
   const [stdoutLogs, setStdoutLogs] = useState<any | null>({});
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [showLogs, setShowLogs] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [horizontal, setHorizontal] = useState(false);
@@ -525,24 +524,6 @@ export default function Main() {
 
   useEffect(getInfo, []);
 
-  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.item(0);
-    if (file) {
-      setSelectedFile(file);
-    }
-  };
-
-  const handleFileUpload = () => {
-    if (!selectedFile) {
-      return;
-    }
-    const address = import.meta.env.VITE_DAEMON_JRPC_ADDRESS || ""; //Current host
-    const formData = new FormData();
-    formData.append("file", selectedFile);
-    fetch(`${address}/upload_template`, { method: "POST", body: formData }).then((resp) => {
-      console.log("resp", resp);
-    });
-  };
 
   const stopAll = () => {
     jsonRpc("stop_all", { instance_type: "TariValidatorNode" }).then(getInfo);
@@ -607,13 +588,6 @@ export default function Main() {
         <div className="label">Indexers</div>
         <ShowInfos nodes={indexers} logs={logs} stdoutLogs={stdoutLogs} name="indexer" showLogs={showLogs}
                    autoRefresh={autoRefresh} horizontal={horizontal} onReload={getInfo} />
-      </div>
-      <div className="label">Templates</div>
-      <div className="infos">
-        <ShowInfo executable={Executable.Templates} horizontal={horizontal}>
-          <input type="file" onChange={handleFileChange} />
-          <button onClick={handleFileUpload}>Upload template</button>
-        </ShowInfo>
       </div>
       <div className="label">All Instances</div>
       <div>

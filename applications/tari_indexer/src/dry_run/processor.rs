@@ -20,19 +20,29 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use log::{debug, info};
 use tari_engine::{fees::FeeTable, state_store::new_memory_store, traits::ClaimProofVerifier};
 use tari_engine_types::{
     commit_result::ExecuteResult,
+    published_template::{PublishedTemplate, PublishedTemplateAddress},
     substate::{Substate, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_ootle_app_utilities::transaction_executor::{TariTransactionProcessor, TransactionExecutor as _};
-use tari_ootle_common_types::{Epoch, PeerAddress, SubstateRequirement};
-use tari_template_manager::implementation::TemplateManager;
+use tari_ootle_common_types::{
+    optional::Optional,
+    services::template_provider::TemplateProvider,
+    Epoch,
+    PeerAddress,
+    SubstateRequirement,
+};
+use tari_ootle_storage::global::TemplateStatus;
 use tari_transaction::Transaction;
 use tari_validator_node_rpc::client::{
     SubstateResult,
@@ -42,15 +52,20 @@ use tari_validator_node_rpc::client::{
 };
 use tokio::task;
 
-use crate::dry_run::error::DryRunTransactionProcessorError;
+use crate::{
+    dry_run::{error::DryRunTransactionProcessorError, package::Package},
+    template_manager::{TemplateCode, TemplateManager, TemplateManagerError},
+};
 
 const LOG_TARGET: &str = "tari::indexer::dry_run_transaction_processor";
 
 #[derive(Clone)]
 pub struct DryRunTransactionProcessor {
-    processor: TariTransactionProcessor<TemplateManager<PeerAddress>>,
+    fee_table: FeeTable,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     client_provider: TariValidatorNodeRpcClientFactory,
+    template_manager: TemplateManager<PeerAddress>,
+    claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
 }
 
 impl DryRunTransactionProcessor {
@@ -61,11 +76,12 @@ impl DryRunTransactionProcessor {
         template_manager: TemplateManager<PeerAddress>,
         claim_burn_proof_verifier: impl ClaimProofVerifier + Send + Sync + 'static,
     ) -> Self {
-        let processor = TariTransactionProcessor::new(template_manager, fee_table, Arc::new(claim_burn_proof_verifier));
         Self {
-            processor,
+            fee_table,
             epoch_manager,
             client_provider,
+            template_manager,
+            claim_burn_proof_verifier: Arc::new(claim_burn_proof_verifier),
         }
     }
 
@@ -81,6 +97,9 @@ impl DryRunTransactionProcessor {
 
         let epoch = self.epoch_manager.current_epoch().await?;
         let found_substates = self.fetch_input_substates(&transaction, epoch).await?;
+        let package = self
+            .construct_template_package(&transaction, &found_substates, epoch)
+            .await?;
 
         let virtual_substates = self.get_virtual_substates(&transaction, epoch).await?;
 
@@ -88,12 +107,91 @@ impl DryRunTransactionProcessor {
         state_store.set_many(found_substates)?;
 
         // execute the payload in the WASM engine and return the result
-        let exec_output = task::block_in_place(|| {
-            self.processor
-                .execute(&transaction, state_store.into_read_only(), virtual_substates)
-        })?;
+        let processor =
+            TariTransactionProcessor::new(package, self.fee_table.clone(), self.claim_burn_proof_verifier.clone());
+        let exec_output = task::spawn_blocking(move || {
+            processor.execute(&transaction, state_store.into_read_only(), virtual_substates)
+        })
+        .await??;
 
         Ok(exec_output.result)
+    }
+
+    async fn construct_template_package(
+        &self,
+        transaction: &Transaction,
+        inputs: &HashMap<SubstateId, Substate>,
+        epoch: Epoch,
+    ) -> Result<Package, DryRunTransactionProcessorError> {
+        let component_templates = inputs.values().filter_map(|substate| {
+            substate
+                .substate_value()
+                .as_component()
+                .map(|component| &component.template_address)
+        });
+
+        let req_templates = transaction
+            .referenced_templates_iter()
+            .chain(component_templates)
+            .collect::<HashSet<_>>();
+
+        let mut package = Package::builder(req_templates.len());
+        debug!(
+            target: LOG_TARGET,
+            "Fetching {} required templates for transaction {}",
+            req_templates.len(),
+            transaction.calculate_id()
+        );
+
+        for address in req_templates {
+            match self.template_manager.get_template(address)? {
+                Some(template) => {
+                    debug!(
+                        target: LOG_TARGET,
+                        "Template {} found in local template manager cache",
+                        address
+                    );
+                    package.add_template(*address, template);
+                },
+                None => {
+                    debug!(
+                        target: LOG_TARGET,
+                        "Template {} not found in local cache. Fetching from validator nodes...",
+                        address
+                    );
+                    // Fetch and cache
+                    let substate_id = PublishedTemplateAddress::from_template_address(*address);
+                    // TODO: batch missing and fetch templates in one/a few requests
+                    let substate = self
+                        .fetch_substate(&SubstateRequirement::unversioned(substate_id), epoch)
+                        .await
+                        .optional()?
+                        .ok_or_else(|| {
+                            DryRunTransactionProcessorError::TemplateManagerError(
+                                TemplateManagerError::TemplateNotFound { address: *address },
+                            )
+                        })?;
+
+                    let template: PublishedTemplate = substate.into_substate_value().into_template().ok_or(
+                        DryRunTransactionProcessorError::InvariantViolation {
+                            details: format!("Expected template substate at address {}", substate_id),
+                        },
+                    )?;
+
+                    let loaded = self.template_manager.add_and_load_template(
+                        template.author,
+                        substate_id.as_template_address(),
+                        TemplateCode::CompiledWasm(template.binary.into_bytes()),
+                        TemplateStatus::Active,
+                        Epoch(template.at_epoch),
+                    )?;
+
+                    package.add_template(substate_id.as_template_address(), loaded);
+                },
+            }
+        }
+
+        Ok(package.build())
     }
 
     async fn fetch_input_substates(
@@ -101,12 +199,12 @@ impl DryRunTransactionProcessor {
         transaction: &Transaction,
         epoch: Epoch,
     ) -> Result<HashMap<SubstateId, Substate>, DryRunTransactionProcessorError> {
-        let mut substates = HashMap::new();
+        let mut substates = HashMap::with_capacity(transaction.inputs().len());
 
         // Fetch explicit inputs that may not have been resolved by the autofiller
         for requirement in transaction.inputs() {
-            let (id, substate) = self.fetch_substate(requirement, epoch).await?;
-            substates.insert(id, substate);
+            let substate = self.fetch_substate(requirement, epoch).await?;
+            substates.insert(requirement.substate_id.clone(), substate);
         }
 
         Ok(substates)
@@ -116,7 +214,7 @@ impl DryRunTransactionProcessor {
         &self,
         substate_requirement: &SubstateRequirement,
         epoch: Epoch,
-    ) -> Result<(SubstateId, Substate), DryRunTransactionProcessorError> {
+    ) -> Result<Substate, DryRunTransactionProcessorError> {
         let address = substate_requirement.to_substate_address_zero_version();
         let mut committee = self.epoch_manager.get_committee_for_substate(epoch, address).await?;
         committee.shuffle();
@@ -131,8 +229,8 @@ impl DryRunTransactionProcessor {
             let mut client = self.client_provider.create_client(vn_addr);
 
             match client.get_substate(substate_requirement.as_ref()).await {
-                Ok(SubstateResult::Up { substate, id, .. }) => {
-                    return Ok((id, *substate));
+                Ok(SubstateResult::Up { substate, .. }) => {
+                    return Ok(*substate);
                 },
                 Ok(SubstateResult::Down { id, version, .. }) => {
                     // TODO: we should seek proof of this.

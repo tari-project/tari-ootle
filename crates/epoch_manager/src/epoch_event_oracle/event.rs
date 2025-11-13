@@ -6,8 +6,7 @@ use std::fmt::Display;
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{displayable::Displayable, Epoch, SubstateAddress};
 use tari_sidechain::EvictionProof;
-use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
-use url::Url;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::epoch_event_oracle::block_header_data::BlockHeaderData;
 
@@ -26,14 +25,6 @@ pub enum EpochEvent {
     NewValidatorNodeExit {
         epoch: Epoch,
         validator_node_public_key: RistrettoPublicKeyBytes,
-    },
-    NewCodeTemplateDownload {
-        epoch: Epoch,
-        name: String,
-        address: TemplateAddress,
-        author_public_key: RistrettoPublicKeyBytes,
-        url: Url,
-        binary_hash: FixedHash,
     },
     NewBlockHeader {
         epoch: Epoch,
@@ -92,21 +83,6 @@ impl Display for EpochEvent {
                     epoch, validator_node_public_key
                 )
             },
-            EpochEvent::NewCodeTemplateDownload {
-                epoch,
-                name,
-                address,
-                author_public_key,
-                url,
-                binary_hash,
-            } => {
-                write!(
-                    f,
-                    "NewCodeTemplateDownload {{ epoch: {}, name: {}, address: {}, author_public_key: {}, url: {}, \
-                     binary_hash: {} }}",
-                    epoch, name, address, author_public_key, url, binary_hash
-                )
-            },
             EpochEvent::NewBlockHeader { epoch, header } => {
                 write!(f, "NewBlockHeader {{ epoch: {}, commitment: {} }}", epoch, header)
             },
@@ -136,6 +112,7 @@ pub enum ValidatorNodeChange {
         validator_node_public_key: RistrettoPublicKeyBytes,
         activation_epoch: Epoch,
         minimum_value_promise: u64,
+        // TODO: replace with ValidatorShardKey type
         shard_key: SubstateAddress,
     },
     Remove {

@@ -30,7 +30,6 @@ use tari_transaction_components::transaction_components::{
 };
 use tari_utilities::ByteArray;
 use tokio::time;
-use url::Url;
 
 use crate::{
     base_layer::header_hasher::hash_header,
@@ -351,34 +350,12 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                             );
                             continue;
                         }
-                        let template_address = (*output_hash).into();
                         debug!(
                             target: LOG_TARGET,
-                            "🌠 new template found with address {} at height {}", template_address, block_info.height
+                            "🌠 new template found with hash {} at height {}", registration.binary_sha, block_info.height
                         );
 
-                        let url = match Url::parse(registration.binary_url.as_str()) {
-                            Ok(url) => url,
-                            Err(err) => {
-                                self.pending_events
-                                    .push_back(EpochEvent::error(BaseLayerOracleError::from(err)));
-                                continue;
-                            },
-                        };
-                        self.pending_events.push_back(EpochEvent::NewCodeTemplateDownload {
-                            name: registration.template_name.to_string(),
-                            author_public_key: RistrettoPublicKeyBytes::from_bytes(
-                                registration.author_public_key.as_bytes(),
-                            )
-                            .expect(
-                                "author_public_key: Compressed<RistrettoPublicKey> and RistrettoPublicKeyBytes must \
-                                 be the same length",
-                            ),
-                            address: template_address,
-                            url,
-                            binary_hash: registration.binary_sha,
-                            epoch: current_epoch,
-                        });
+                        // Nothing to do. Template registrations on minotari are deprecated
                     },
                     SideChainFeatureData::ConfidentialOutput(_) => {
                         if sidechain_id.as_ref().map(|s| s.public_key().as_bytes()) !=
@@ -680,8 +657,6 @@ pub enum BaseLayerOracleError {
     BaseNodeError(#[from] BaseNodeClientError),
     #[error("Invalid base node response: {0}")]
     InvalidBaseNodeResponse(String),
-    #[error("Template URL failed to parse: {0}")]
-    TemplateUrlParseError(#[from] url::ParseError),
 }
 
 enum BlockchainProgression {

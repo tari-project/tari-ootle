@@ -51,7 +51,7 @@ use crate::{
         types::EpochManagerRequest,
         EpochManagerHandle,
     },
-    traits::{EpochManagerSpec, TemplateDownloader},
+    traits::EpochManagerSpec,
     EpochManagerEvent,
 };
 
@@ -61,7 +61,6 @@ pub struct EpochManagerService<TSpec: EpochManagerSpec> {
     rx_request: mpsc::Receiver<EpochManagerRequest<TSpec::Addr>>,
     inner: EpochManager<TSpec>,
     epoch_events: TSpec::EpochEventOracle,
-    template_downloader: TSpec::TemplateDownloader,
 
     tx_events: broadcast::Sender<EpochManagerEvent>,
     is_initial_epoch_sync_complete: bool,
@@ -76,7 +75,6 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
         config: EpochManagerConfig,
         global_db: GlobalDb<SqliteGlobalDbAdapter<TSpec::Addr>>,
         epoch_events: TSpec::EpochEventOracle,
-        template_downloader: TSpec::TemplateDownloader,
         layer_one_transaction_submitter: TSpec::LayerOneSubmitter,
         node_public_key: RistrettoPublicKeyBytes,
         shutdown: ShutdownSignal,
@@ -101,7 +99,6 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                 is_initial_epoch_sync_complete: false,
                 waiting_for_scanning_complete: Vec::new(),
                 epoch_events,
-                template_downloader,
                 shutdown,
             }
             .run()
@@ -221,22 +218,6 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     target: LOG_TARGET,
                     "🖥️ validator exit in {epoch} with public key {validator_node_public_key}",
                 );
-            },
-            EpochEvent::NewCodeTemplateDownload {
-                epoch,
-                name,
-                address,
-                author_public_key,
-                url,
-                binary_hash,
-            } => {
-                info!(
-                    target: LOG_TARGET,
-                    "🌠 new template found with address {address} at {epoch}",
-                );
-                self.template_downloader
-                    .enqueue_download(epoch, name, address, author_public_key, url, binary_hash)
-                    .await?
             },
             EpochEvent::NewBlockHeader { epoch, header } => {
                 trace!(target: LOG_TARGET, "New block header at {epoch}: {header}");

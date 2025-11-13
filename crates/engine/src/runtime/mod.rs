@@ -61,6 +61,7 @@ use tari_engine_types::{
     indexed_value::IndexedValue,
     limits,
     lock::LockFlag,
+    published_template::TemplateBlob,
     ValidatorFeePoolAddress,
 };
 use tari_template_lib::{
@@ -188,7 +189,7 @@ pub trait RuntimeInterface: Send + Sync {
 
     fn push_call_frame(&self, frame: PushCallFrame) -> Result<(), RuntimeError>;
     fn pop_call_frame(&self) -> Result<(), RuntimeError>;
-    fn publish_template(&self, template: Vec<u8>) -> Result<(), RuntimeError>;
+    fn publish_template(&self, template: TemplateBlob) -> Result<(), RuntimeError>;
     fn put_on_workspace(&self, id: WorkspaceId, value: IndexedValue) -> Result<(), RuntimeError>;
 
     fn signature_invoke(&self, action: SignatureAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError>;

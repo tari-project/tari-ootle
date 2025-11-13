@@ -125,8 +125,7 @@ where TTemplateProvider: TemplateProvider<Template = LoadedTemplate>
             initial_ownership_proofs,
         };
 
-        let initial_cost = 0;
-        let modules: Vec<Arc<dyn RuntimeModule>> = vec![Arc::new(FeeModule::new(initial_cost, self.fee_table.clone()))];
+        let modules: Vec<Arc<dyn RuntimeModule>> = vec![Arc::new(FeeModule::new(0, self.fee_table.clone()))];
 
         let processor = TransactionProcessor::new(
             self.template_provider.clone(),

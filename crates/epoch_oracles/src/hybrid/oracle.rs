@@ -42,7 +42,6 @@ impl<TStore: EpochOracleStore + Send + 'static> HybridEpochOracle<TStore> {
             EpochEvent::ActiveValidatorNodeSetChanged { .. } |
             EpochEvent::NewValidatorRegistered { .. } |
             EpochEvent::NewValidatorNodeExit { .. } |
-            EpochEvent::NewCodeTemplateDownload { .. } |
             EpochEvent::EpochChanged { .. } |
             EpochEvent::NewEvictionProof { .. } |
             EpochEvent::DoneForNow { .. } => true,
@@ -55,8 +54,7 @@ impl<TStore: EpochOracleStore + Send + 'static> HybridEpochOracle<TStore> {
         match event {
             EpochEvent::Error(_) |
             // Let the base layer oracle handle epoch timing and UTXO events
-            EpochEvent::NewBlockHeader { .. } |
-            EpochEvent::NewCodeTemplateDownload { .. } => true,
+            EpochEvent::NewBlockHeader { .. } => true,
             EpochEvent::DoneForNow { .. }  |
             EpochEvent::EpochChanged { .. } |
             EpochEvent::ActiveValidatorNodeSetChanged { .. } |

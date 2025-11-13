@@ -86,7 +86,6 @@ async fn handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: Js
         "get_filtered_blocks_count" => handlers.get_filtered_blocks_count(value).await,
         // Template
         "get_template" => handlers.get_template(value).await,
-        "get_templates" => handlers.get_templates(value).await,
         // Validator Node
         "get_identity" => handlers.get_identity(value).await,
         "get_mempool_stats" => handlers.get_mempool_stats(value).await,

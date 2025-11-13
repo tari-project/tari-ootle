@@ -28,7 +28,6 @@ use tari_ootle_storage::{
 use tari_rpc_framework::__macro_reexports::future::Either;
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib::prelude::Amount;
-use tari_template_manager::interface::{TemplateChange, TemplateManagerHandle};
 use tokio::time;
 
 use crate::{
@@ -55,7 +54,6 @@ pub struct NetworkWideStateSync {
     epoch_manager: EpochManagerHandle<PeerAddress>,
     networking: NetworkingHandle<TariMessagingSpec>,
     store: SqliteIndexerStore,
-    template_manager: TemplateManagerHandle,
     stats: SyncStats,
     config: NetworkWideStateSyncConfig,
 }
@@ -65,14 +63,12 @@ impl NetworkWideStateSync {
         epoch_manager: EpochManagerHandle<PeerAddress>,
         networking: NetworkingHandle<TariMessagingSpec>,
         storage: SqliteIndexerStore,
-        template_manager: TemplateManagerHandle,
         config: NetworkWideStateSyncConfig,
     ) -> Self {
         Self {
             epoch_manager,
             networking,
             store: storage,
-            template_manager,
             stats: SyncStats::new(),
             config,
         }
@@ -363,7 +359,6 @@ impl NetworkWideStateSync {
                 // Sync to latest epoch
                 until_epoch: None,
                 value_filters: (SubstateValueFilterFlags::UTXO |
-                    SubstateValueFilterFlags::TEMPLATE |
                     SubstateValueFilterFlags::VALIDATOR_FEE_POOL |
                     SubstateValueFilterFlags::CLAIMED_OUTPUT_TOMBSTONE |
                     SubstateValueFilterFlags::TRANSACTION_RECEIPT)
@@ -374,11 +369,6 @@ impl NetworkWideStateSync {
         let mut is_first_iter = true;
         let mut xtr_claimed = Amount::zero();
         while let Some(result) = stream.next().await {
-            // Allocations are unavoidable for templates (since the call to the template manager requires owned data due
-            // to async service call). This is completely fine as published templates are expected to be
-            // relatively rare compared to other substate updates.
-            let mut templates_buf = Vec::new();
-
             if is_first_iter {
                 // Avoid log spam, only log if we actually get something from the stream
                 debug!(target: LOG_TARGET, "🌍️ Established stream for {shard} in shard group {shard_group} from peer {} (last sync: {prev_epoch} {prev_version})", session.peer_address());
@@ -405,7 +395,6 @@ impl NetworkWideStateSync {
                     update,
                     msg_epoch,
                     update_buf,
-                    &mut templates_buf,
                     utxos_buf,
                     transactions_buf,
                     validator_fee_pools_buf,
@@ -444,13 +433,6 @@ impl NetworkWideStateSync {
                 let new_claimed = claimed.unwrap_or_else(Amount::zero) + xtr_claimed;
                 tx.key_value_set(Key::XtrAccumulatedClaimed, new_claimed)
             })?;
-
-            if !templates_buf.is_empty() {
-                info!(target: LOG_TARGET, "🌍️ Persisting {} template changes for shard {shard} (epoch: {msg_epoch})", templates_buf.len());
-                if let Err(err) = self.template_manager.enqueue_template_changes(templates_buf).await {
-                    error!(target: LOG_TARGET, "⚠️ Failed to enqueue template changes: {}", err);
-                }
-            }
         }
         Ok(())
     }
@@ -471,7 +453,6 @@ fn extend_bufs_from_substate_update(
     update: SubstateUpdateProof,
     msg_epoch: Epoch,
     update_buf: &mut Vec<(Epoch, SubstateUpdateProof)>,
-    templates_buf: &mut Vec<TemplateChange>,
     utxos_buf: &mut Vec<UtxoUpdateRecord>,
     transactions_buf: &mut Vec<(TransactionReceiptAddress, TransactionReceipt)>,
     validator_fee_pools_buf: &mut Vec<SubstateData>,
@@ -501,19 +482,6 @@ fn extend_bufs_from_substate_update(
                     transactions_buf.push((address, receipt.clone()));
                 }
             },
-            Some(SubstateValue::Template(template)) => {
-                if let Some(address) = create.substate.substate_id().as_template() {
-                    templates_buf.push(TemplateChange::Add {
-                        template_address: address,
-                        author_public_key: template.author,
-                        binary_hash: template.binary_hash.into_array().into(),
-                        epoch: msg_epoch,
-                    });
-                } else {
-                    // This is invalid, but possible given a malfunctioning validator
-                    warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received template substate with invalid address: {}", create.substate.substate_id());
-                }
-            },
             Some(SubstateValue::ValidatorFeePool(_)) => {
                 validator_fee_pools_buf.push(SubstateData {
                     substate_id: create.substate.substate_id().clone(),
@@ -540,12 +508,6 @@ fn extend_bufs_from_substate_update(
         SubstateUpdateProof::Destroy(destroy) => match &destroy.substate_id {
             SubstateId::TransactionReceipt(_) => {
                 warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received destroy for transaction receipt substate: {}", destroy.substate_id);
-            },
-            SubstateId::Template(template_address) => {
-                // Currently not possible
-                templates_buf.push(TemplateChange::Deprecate {
-                    template_address: *template_address,
-                });
             },
             SubstateId::Utxo(address) => {
                 utxos_buf.push(UtxoUpdateRecord::Spent(UtxoSpent {

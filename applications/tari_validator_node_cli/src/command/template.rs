@@ -23,7 +23,7 @@
 use clap::Subcommand;
 use tari_template_lib::types::TemplateAddress;
 use tari_validator_node_client::{
-    types::{GetTemplateRequest, GetTemplateResponse, GetTemplatesRequest},
+    types::{GetTemplateRequest, GetTemplateResponse},
     ValidatorNodeClient,
 };
 
@@ -32,7 +32,6 @@ use crate::{from_hex::FromHex, table::Table, table_row};
 #[derive(Debug, Subcommand, Clone)]
 pub enum TemplateSubcommand {
     Get { template_address: FromHex<TemplateAddress> },
-    List,
 }
 
 impl TemplateSubcommand {
@@ -41,7 +40,6 @@ impl TemplateSubcommand {
         use TemplateSubcommand::*;
         match self {
             Get { template_address } => handle_get(template_address.into_inner(), client).await?,
-            List => handle_list(client).await?,
         }
         Ok(())
     }
@@ -49,7 +47,7 @@ impl TemplateSubcommand {
 
 async fn handle_get(template_address: TemplateAddress, mut client: ValidatorNodeClient) -> Result<(), anyhow::Error> {
     let GetTemplateResponse {
-        registration_metadata,
+        metadata: registration_metadata,
         abi,
     } = client.get_template(GetTemplateRequest { template_address }).await?;
     println!("Template {}", registration_metadata.address);
@@ -70,17 +68,5 @@ async fn handle_get(template_address: TemplateAddress, mut client: ValidatorNode
     }
     table.print_stdout();
 
-    Ok(())
-}
-
-async fn handle_list(mut client: ValidatorNodeClient) -> Result<(), anyhow::Error> {
-    let templates = client.get_active_templates(GetTemplatesRequest { limit: 10 }).await?;
-
-    let mut table = Table::new();
-    table.set_titles(vec!["Name", "Address", "Status"]).enable_row_count();
-    for template in templates.templates {
-        table.add_row(table_row![template.name, template.address, "Active"]);
-    }
-    table.print_stdout();
     Ok(())
 }

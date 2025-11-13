@@ -31,7 +31,7 @@ use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
 use tokio::fs;
 use tower_http::{cors::CorsLayer, services::ServeDir};
 
-use crate::webserver::{context::HandlerContext, error::HandlerError, handler::JrpcHandler, rpc, templates};
+use crate::webserver::{context::HandlerContext, error::HandlerError, handler::JrpcHandler, rpc};
 
 const LOG_TARGET: &str = "tari::ootle::swarm::webserver";
 
@@ -58,7 +58,6 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
     let serve_misc = ServeDir::new(misc_dir).not_found_service(not_found.into_service());
 
     let router = Router::new()
-        .route("/upload_template", post(templates::upload))
         .route("/json_rpc", post(json_rpc_handler))
         .nest_service("/templates", serve_templates)
         .nest_service("/misc", serve_misc)

@@ -24,7 +24,6 @@ log = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, default-features = false, features = ["sync"] }
 serde = { workspace = true }
-url = { workspace = true }
 
 [features]
 service = [

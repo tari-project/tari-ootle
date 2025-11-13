@@ -20,5 +20,23 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-pub mod implementation;
-pub mod interface;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TemplateConfig {
+    max_cache_size_bytes: u64,
+}
+
+impl Default for TemplateConfig {
+    fn default() -> Self {
+        Self {
+            max_cache_size_bytes: 200 * 1024 * 1024,
+        }
+    }
+}
+
+impl TemplateConfig {
+    pub fn max_cache_size_bytes(&self) -> u64 {
+        self.max_cache_size_bytes
+    }
+}

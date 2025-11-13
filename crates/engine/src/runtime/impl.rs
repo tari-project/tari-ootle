@@ -37,7 +37,7 @@ use tari_engine_types::{
     limits,
     lock::LockFlag,
     logs::LogEntry,
-    published_template::{PublishedTemplate, PublishedTemplateAddress},
+    published_template::{PublishedTemplate, PublishedTemplateAddress, TemplateBlob},
     resource::Resource,
     resource_container::{ResourceContainer, ResourceError},
     stealth,
@@ -213,7 +213,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     pub fn get_template_def(&self, template_address: &TemplateAddress) -> Result<TemplateDef, RuntimeError> {
         let loaded = self
             .template_provider
-            .get_template_module(template_address)
+            .get_template(template_address)
             .map_err(|e| RuntimeError::FailedToLoadTemplate {
                 address: *template_address,
                 details: e.to_string(),
@@ -2710,19 +2710,20 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         Ok(())
     }
 
-    fn publish_template(&self, template: Vec<u8>) -> Result<(), RuntimeError> {
+    fn publish_template(&self, template: TemplateBlob) -> Result<(), RuntimeError> {
         self.invoke_modules_on_runtime_call("publish_template")?;
         self.tracker.write_with(|state_mut| {
             let template_byte_size = template.len();
-            let binary_hash = hash_template_code(&template);
+            let code_hash = hash_template_code(&template);
             let template_address =
-                PublishedTemplateAddress::from_author_and_binary_hash(&self.seal_signer_public_key, &binary_hash);
+                PublishedTemplateAddress::from_author_and_binary_hash(&self.seal_signer_public_key, &code_hash);
+            let epoch = state_mut.get_current_epoch()?;
             state_mut.new_substate(
                 template_address,
                 SubstateValue::Template(PublishedTemplate {
-                    // We essentially store the pre-image of the template address in the substate
-                    binary_hash,
+                    binary: template,
                     author: self.seal_signer_public_key,
+                    at_epoch: epoch.as_u64(),
                 }),
             )?;
             // Mark template substate as owned by current call stack

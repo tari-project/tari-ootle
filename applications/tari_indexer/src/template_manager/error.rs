@@ -22,7 +22,6 @@
 
 use std::string::FromUtf8Error;
 
-use serde_json;
 use tari_common_types::types::FixedHashSizeError;
 use tari_engine::template::TemplateLoaderError;
 use tari_epoch_manager::EpochManagerError;
@@ -35,18 +34,12 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum TemplateManagerError {
-    #[error("The template in the base layer is invalid")]
-    InvalidBaseLayerTemplate,
-    #[error("Internal service channel closed unexpectedly")]
-    ChannelClosed,
     #[error("Storage error: {0}")]
     StorageError(#[from] StorageError),
     #[error("Storage error: {0}")]
     SqliteStorageError(#[from] SqliteStorageError),
     #[error("Template not found: {address}")]
     TemplateNotFound { address: TemplateAddress },
-    #[error("Templates not found: {addresses:?}")]
-    TemplatesNotFound { addresses: Vec<TemplateAddress> },
     #[error("The template is unavailable for use (status={})", .status.display())]
     TemplateUnavailable { status: Option<TemplateStatus> },
     #[error(transparent)]

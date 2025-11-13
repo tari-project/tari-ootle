@@ -28,9 +28,7 @@ pub struct TarBlockTransactionExecutor<TExecutor, TValidator> {
     validator: Arc<TValidator>,
 }
 
-impl<TExecutor, TValidator> TarBlockTransactionExecutor<TExecutor, TValidator>
-where TExecutor: TransactionExecutor
-{
+impl<TExecutor: TransactionExecutor, TValidator> TarBlockTransactionExecutor<TExecutor, TValidator> {
     pub fn new(executor: TExecutor, validator: TValidator) -> Self {
         Self {
             executor,

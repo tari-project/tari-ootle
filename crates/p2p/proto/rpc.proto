@@ -250,7 +250,6 @@ message SyncStateResponse {
 
 enum TemplateType {
   Wasm = 0;
-  Manifest = 1;
 }
 
 message SyncTemplatesRequest {

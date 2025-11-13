@@ -11,6 +11,7 @@ use tari_consensus_types::Decision;
 use tari_engine_types::{
     commit_result::ExecuteResult,
     resource::Resource,
+    serde_with,
     substate::{Substate, SubstateId, SubstateValue},
     template_lib_models::{NonFungibleAddress, ResourceAddress, UtxoId},
     transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
@@ -158,9 +159,12 @@ pub struct ListTemplatesResponse {
 pub struct TemplateMetadata {
     pub name: String,
     pub address: TemplateAddress,
-    /// SHA hash of binary
-    #[cfg_attr(feature = "ts", ts(type = "number[]"))]
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "serde_with::hex")]
     pub binary_sha: FixedHash,
+    pub author_public_key: RistrettoPublicKeyBytes,
+    pub code_size: usize,
+    pub epoch: Epoch,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -311,7 +315,8 @@ pub struct GetEpochManagerStatsResponse {
     pub current_epoch: Epoch,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub current_block_height: u64,
-    #[cfg_attr(feature = "ts", ts(type = "number[]"))]
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "serde_with::hex")]
     pub current_block_hash: FixedHash,
 }
 
@@ -366,6 +371,7 @@ pub struct GetTemplateDefinitionRequest {
 pub struct GetTemplateDefinitionResponse {
     pub name: String,
     pub definition: TemplateDef,
+    pub code_size: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -26,6 +26,7 @@ pub mod error;
 #[cfg(feature = "client")]
 pub mod graphql_client;
 pub mod protobuf;
+#[cfg(feature = "client")]
 pub mod protobuf_stream;
 pub mod rest_api;
 #[cfg(feature = "client")]

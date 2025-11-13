@@ -254,6 +254,8 @@ impl Transaction {
         }
     }
 
+    /// Returns an iterator that iterates over all the statically referenced template addresses in this transaction.
+    /// NOTE: This does not include templates required for component method calls.
     pub fn referenced_templates_iter(&self) -> impl Iterator<Item = &TemplateAddress> + '_ {
         self.instructions()
             .iter()

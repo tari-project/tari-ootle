@@ -35,7 +35,6 @@ tari_template_lib = { workspace = true }
 tari_transaction = { workspace = true }
 tari_validator_node_client = { workspace = true }
 tari_base_node_client = { workspace = true }
-tari_template_manager = { workspace = true }
 tari_epoch_manager = { workspace = true, features = ["service"] }
 tari_rpc_state_sync = { workspace = true }
 tari_bor = { workspace = true, default-features = true }
@@ -55,6 +54,7 @@ axum = { workspace = true }
 axum-jrpc = { workspace = true, features = ["anyhow_error"] }
 clap = { workspace = true, features = ["env"] }
 config = { workspace = true }
+dashmap = { workspace = true }
 either = { workspace = true }
 futures = { workspace = true }
 include_dir = { workspace = true }
@@ -72,8 +72,10 @@ mime_guess = { workspace = true }
 prometheus-client = { workspace = true, optional = true }
 rand = { workspace = true }
 url = { workspace = true }
+mini-moka = { workspace = true }
 serde = { workspace = true, features = ["default", "derive"] }
 serde_json = { workspace = true }
+std-semaphore = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["default", "macros", "time", "sync", "rt-multi-thread", "fs", "signal"] }
 tower-http = { workspace = true, features = ["default", "cors"] }

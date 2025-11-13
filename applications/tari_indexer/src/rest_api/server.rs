@@ -44,7 +44,7 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
     handlers::transactions::list_recent_transactions,
     handlers::transactions::get_transaction_result,
     handlers::templates::get_template_definition,
-    handlers::templates::list_templates,
+    handlers::templates::list_cached_templates,
     handlers::utxos::fetch_utxos,
     handlers::utxos::list_utxos,
     handlers::utxos::stream_utxo_updates,
@@ -105,11 +105,11 @@ impl Server {
                 )
             )
             .nest("/templates", Router::new()
+                .route("/cached", get(handlers::templates::list_cached_templates))
                 .route(
                     "/{template_address}",
                     get(handlers::templates::get_template_definition),
                 )
-                .route("/", get(handlers::templates::list_templates))
             )
             .route("/non-fungibles", get(handlers::nfts::get_non_fungibles)) // Placeholder for future non-fungible endpoints
             .nest("/utxos", Router::new()

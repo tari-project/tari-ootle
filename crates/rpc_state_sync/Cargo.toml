@@ -16,7 +16,6 @@ tari_ootle_storage = { workspace = true }
 tari_epoch_manager = { workspace = true }
 tari_rpc_framework = { workspace = true }
 tari_state_tree = { workspace = true }
-tari_template_manager = { workspace = true }
 tari_validator_node_rpc = { workspace = true }
 
 anyhow = { workspace = true }

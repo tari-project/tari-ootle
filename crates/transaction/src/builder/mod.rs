@@ -12,6 +12,7 @@ pub use named_component_call::*;
 use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey};
 use tari_engine_types::{
     confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
+    published_template::TemplateBlob,
     substate::SubstateId,
     ToByteType,
     ValidatorFeePoolAddress,
@@ -37,7 +38,6 @@ use crate::{
     ComponentCall,
     Instruction,
     ResourceAddressRef,
-    TemplateBlob,
     Transaction,
     TransactionSignature,
     UnsealedTransactionV1,

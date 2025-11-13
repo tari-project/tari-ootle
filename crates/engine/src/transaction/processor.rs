@@ -32,6 +32,7 @@ use tari_engine_types::{
     instruction_result::InstructionResult,
     limits,
     lock::LockFlag,
+    published_template::TemplateBlob,
     virtual_substate::VirtualSubstates,
 };
 use tari_ootle_common_types::services::template_provider::TemplateProvider;
@@ -53,7 +54,6 @@ use tari_transaction::{
     ComponentCall,
     Instruction,
     ResourceAddressRef,
-    TemplateBlob,
 };
 
 use crate::{
@@ -88,7 +88,7 @@ pub struct TransactionProcessor<TTemplateProvider> {
     claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
 }
 
-impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> TransactionProcessor<TTemplateProvider> {
+impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> TransactionProcessor<TTemplateProvider> {
     pub fn new(
         template_provider: Arc<TTemplateProvider>,
         state_db: ReadOnlyMemoryStateStore,
@@ -194,7 +194,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             },
         };
 
-        let instruction_result = Self::process_instructions(&*template_provider, &runtime, instructions.main);
+        let instruction_result = Self::process_instructions(&template_provider, &runtime, instructions.main);
 
         match instruction_result {
             Ok(execution_results) => {
@@ -462,7 +462,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         // validate binary
         WasmModule::load_template_from_code(&binary)?;
         // creating new substate
-        runtime.interface().publish_template(binary.into_vec())?;
+        runtime.interface().publish_template(binary)?;
 
         Ok(InstructionResult::empty())
     }
@@ -476,7 +476,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         workspace_id: Option<WorkspaceOffsetId>,
     ) -> Result<InstructionResult, TransactionError> {
         let template = template_provider
-            .get_template_module(&ACCOUNT_TEMPLATE_ADDRESS)
+            .get_template(&ACCOUNT_TEMPLATE_ADDRESS)
             .map_err(|e| TransactionError::FailedToLoadTemplate {
                 address: ACCOUNT_TEMPLATE_ADDRESS,
                 details: e.to_string(),
@@ -540,7 +540,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         args: Vec<InstructionArg>,
     ) -> Result<InstructionResult, TransactionError> {
         let template = template_provider
-            .get_template_module(template_address)
+            .get_template(template_address)
             .map_err(|e| TransactionError::FailedToLoadTemplate {
                 address: *template_address,
                 details: e.to_string(),
@@ -588,7 +588,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         let template_address = component.template_address;
 
         let template = template_provider
-            .get_template_module(&template_address)
+            .get_template(&template_address)
             .map_err(|e| TransactionError::FailedToLoadTemplate {
                 address: template_address,
                 details: e.to_string(),

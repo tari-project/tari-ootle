@@ -94,6 +94,7 @@ impl SubstateAddress {
         Self([0xffu8; SubstateAddress::LENGTH])
     }
 
+    // TODO: remove this
     pub fn from_hash_and_version<T: Into<FixedHash>>(hash: T, version: u32) -> Self {
         // This will cause an error at compile-time if ObjectKey::LENGTH != FixedHash::byte_size()
         // If ObjectKey should differ in length, then this function should ideally be removed.

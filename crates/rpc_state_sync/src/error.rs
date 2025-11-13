@@ -8,7 +8,6 @@ use tari_ootle_common_types::Epoch;
 use tari_ootle_storage::{consensus_models::TransactionPoolError, StorageError};
 use tari_rpc_framework::{RpcError, RpcStatus};
 use tari_state_tree::{JmtStorageError, TreeHash};
-use tari_template_manager::interface::TemplateManagerError;
 use tari_validator_node_rpc::ValidatorNodeRpcClientError;
 
 #[derive(Debug, thiserror::Error)]
@@ -35,12 +34,6 @@ pub enum RpcStateSyncError {
     StateTreeError(#[from] tari_state_tree::StateTreeError),
     #[error("State root mismatch. Expected: {expected}, actual: {actual}")]
     StateRootMismatch { expected: TreeHash, actual: TreeHash },
-    #[error("Template manager error: {0}")]
-    TemplateManager(#[from] TemplateManagerError),
-    #[error("Task join error: {0}")]
-    TaskJoin(String),
-    #[error("Failed to sync templates!")]
-    TemplateSyncFailure,
     #[error("No committees found for epoch {0}")]
     NoCommittees(Epoch),
 }

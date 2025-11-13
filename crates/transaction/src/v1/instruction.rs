@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use tari_engine_types::{
     confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
     limits,
+    published_template::TemplateBlob,
     serde_with,
     ValidatorFeePoolAddress,
 };
@@ -15,7 +16,7 @@ use tari_template_lib::{
     auth::OwnerRule,
     models::{ResourceAddress, StealthTransferStatement},
     prelude::{AccessRules, Amount},
-    types::{crypto::RistrettoPublicKeyBytes, MaxBytes, MaxString, TemplateAddress},
+    types::{crypto::RistrettoPublicKeyBytes, MaxString, TemplateAddress},
 };
 
 use crate::{
@@ -24,8 +25,6 @@ use crate::{
     ComponentCall,
     ResourceAddressRef,
 };
-
-pub type TemplateBlob = MaxBytes<{ limits::ENGINE_LIMITS.max_template_binary_size_bytes }>;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]

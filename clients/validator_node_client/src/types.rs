@@ -79,7 +79,7 @@ pub struct GetTemplateRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
 pub struct GetTemplateResponse {
-    pub registration_metadata: TemplateMetadata,
+    pub metadata: TemplateMetadata,
     pub abi: TemplateAbi,
 }
 
@@ -105,19 +105,6 @@ pub struct FunctionDef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
-pub struct GetTemplatesRequest {
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub limit: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
-pub struct GetTemplatesResponse {
-    pub templates: Vec<TemplateMetadata>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -126,8 +113,8 @@ pub struct GetTemplatesResponse {
 pub struct TemplateMetadata {
     pub name: String,
     pub address: TemplateAddress,
-    /// SHA hash of binary
-    pub binary_sha: Vec<u8>,
+    pub code_size: usize,
+    pub author: RistrettoPublicKeyBytes,
 }
 
 /// A request to submit a transaction

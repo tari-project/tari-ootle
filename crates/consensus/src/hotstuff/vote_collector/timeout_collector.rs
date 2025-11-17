@@ -13,7 +13,7 @@ use crate::{
     traits::{CertificateStore, ConsensusSpec, ValidatorSignatureVerifierService},
 };
 
-const LOG_TARGET: &str = "tari::consensus::hotstuff::timeout_collector";
+const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::timeout_collector";
 
 #[derive(Clone)]
 pub struct TimeoutVoteCollector<TConsensusSpec: ConsensusSpec> {
@@ -75,6 +75,7 @@ where TConsensusSpec: ConsensusSpec
             )
             .await
         else {
+            debug!(target: LOG_TARGET, "🟡 No quorum reached yet for TimeoutVote at height {}", height);
             return Ok(None);
         };
 

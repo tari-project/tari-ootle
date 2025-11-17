@@ -36,9 +36,13 @@ impl<TConsensusSpec: ConsensusSpec> OnInboundMessage<TConsensusSpec> {
         &mut self,
         current_epoch: Epoch,
         current_height: NodeHeight,
+        has_processed_first_block: bool,
     ) -> Option<Result<(TConsensusSpec::Addr, HotstuffMessage), HotStuffError>> {
         // Then incoming messages for the current epoch/height
-        let result = self.message_buffer.next(current_epoch, current_height).await;
+        let result = self
+            .message_buffer
+            .next(current_epoch, current_height, has_processed_first_block)
+            .await;
         match result {
             Ok(Some((from, msg))) => {
                 self.hooks.on_message_received(&msg);
@@ -80,16 +84,28 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
         &mut self,
         current_epoch: Epoch,
         current_height: NodeHeight,
+        has_processed_first_block: bool,
     ) -> IncomingMessageResult<TConsensusSpec::Addr> {
-        // We listen for messages for the next view
-        let next_height = current_height; // + NodeHeight(1);
-                                          // Clear buffer with lower (epoch, heights)
+        let next_height = current_height + NodeHeight(1);
+        // Clear buffer with lower (epoch, heights)
+        let before_len = self.buffer.len();
         self.buffer = self.buffer.split_off(&(current_epoch, next_height));
+        let after_len = self.buffer.len();
 
-        // Drain all buffered messages for the current view
-        if let Some(buffer) = self.buffer.get_mut(&(current_epoch, next_height)) {
-            if let Some(msg_tuple) = buffer.pop_front() {
-                return Ok(Some(msg_tuple));
+        debug!(
+            target: LOG_TARGET,
+            "Next message for current view {}/{} (has_processed_first_block={}, discard={})",
+            current_epoch,
+            current_height,
+            has_processed_first_block,
+            before_len - after_len
+        );
+        if has_processed_first_block {
+            // Drain all buffered messages for the current view
+            if let Some(buffer) = self.buffer.get_mut(&(current_epoch, next_height)) {
+                if let Some(msg_tuple) = buffer.pop_front() {
+                    return Ok(Some(msg_tuple));
+                }
             }
         }
 
@@ -104,7 +120,7 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
                 }
             }
 
-            match msg_relative_view(&msg, current_epoch, next_height) {
+            match msg_relative_view(&msg, current_epoch, current_height, has_processed_first_block) {
                 MessageRelativeView::Current => {
                     return Ok(Some((from, msg)));
                 },
@@ -114,21 +130,21 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
                 MessageRelativeView::Future { epoch, height } => {
                     // Buffer message for future epoch/height
                     if msg.proposal().is_some() {
-                        info!(target: LOG_TARGET, "🔮 Proposal {msg} is for future view (Current view: {current_epoch}, {current_height})");
+                        info!(target: LOG_TARGET, "🔮 Proposal {msg} is for future view {height} (Current view: {current_epoch}, {current_height})");
                     } else {
-                        info!(target: LOG_TARGET, "🔮 Message {msg} is for future view (Current view: {current_epoch}, {current_height})");
+                        info!(target: LOG_TARGET, "🔮 Message {msg} is for future view {height} (Current view: {current_epoch}, {current_height})");
                     }
                     self.push_to_buffer(epoch, height, from, msg);
                 },
                 MessageRelativeView::Discard => {
-                    info!(target: LOG_TARGET, "🗑️ Discard non-applicable message {}. Current view {}/{}", msg, current_epoch, current_height);
+                    warn!(target: LOG_TARGET, "🗑️ Discard non-applicable message {}. Current view {}/{}", msg, current_epoch, current_height);
                 },
             }
         }
 
         info!(
             target: LOG_TARGET,
-            "Inbound messaging has terminated. Current view: {}/{}", current_epoch, next_height
+            "Inbound messaging has terminated. Current view: {}/{}", current_epoch, current_height
         );
         // Inbound messaging has terminated
         Ok(None)
@@ -160,39 +176,74 @@ enum MessageRelativeView {
 }
 
 #[allow(clippy::too_many_lines)]
-fn msg_relative_view(msg: &HotstuffMessage, current_epoch: Epoch, current_height: NodeHeight) -> MessageRelativeView {
+fn msg_relative_view(
+    msg: &HotstuffMessage,
+    current_epoch: Epoch,
+    current_height: NodeHeight,
+    has_processed_first_block: bool,
+) -> MessageRelativeView {
     match msg {
         HotstuffMessage::Proposal(msg) => {
             let next_height = current_height + NodeHeight(1);
             let epoch = msg.block.epoch();
             let block_height = msg.block.height();
-            let justify_height = msg.block.max_certificate_height();
-            if epoch == current_epoch &&
-                // Special case, the justify height and the current height are zero
-                ((current_height.is_zero() && justify_height.is_zero()) ||
-                    // The proposal (supposedly) justifies the next view change
-                    justify_height >= next_height ||
-                    // The proposal is for the current view (catch up)
-                    block_height == next_height ||
-                    // or, the timeout certificate height is higher than the current height
-                    msg.block
-                        .timeout_certificate()
-                        .is_some_and(|t| t.height() >= current_height))
-            {
-                return MessageRelativeView::Current;
-            }
+            // let max_justify_height = msg.block.max_certificate_height();
+            let pc_height = msg.block.justify().height();
 
-            if epoch < current_epoch || (epoch == current_epoch && justify_height < next_height) {
+            if epoch < current_epoch {
+                //|| (epoch == current_epoch && max_justify_height < current_height) {
                 return MessageRelativeView::Past {
                     epoch: msg.block.epoch(),
-                    height: justify_height,
+                    height: pc_height,
                 };
             }
 
-            MessageRelativeView::Future {
-                epoch: msg.block.epoch(),
-                height: justify_height,
+            if epoch > current_epoch {
+                return MessageRelativeView::Discard;
             }
+
+            if pc_height < current_height || (pc_height == current_height && block_height <= current_height) {
+                return MessageRelativeView::Past {
+                    epoch,
+                    height: pc_height,
+                };
+            }
+
+            if has_processed_first_block {
+                if pc_height > next_height {
+                    let msg_height = msg
+                        .block
+                        .timeout_certificate()
+                        .map(|_| pc_height + NodeHeight(1))
+                        .unwrap_or(pc_height);
+
+                    return MessageRelativeView::Future {
+                        epoch,
+                        height: msg_height,
+                    };
+                }
+            } else {
+                // (a) Special case, the justify height and the current height are zero, and we have not processed the
+                // first block This is specifically to handle the case where we are starting from
+                // genesis and immediately run a catch up. The first and second blocks both are for view
+                // 1. If has_processed_first_block is false for the second block, we want to process it
+                // in the future not immediately (which would happen in (c) below).
+                // TODO: hacky
+                if pc_height == NodeHeight(1) && block_height == NodeHeight(2) {
+                    return MessageRelativeView::Future {
+                        epoch,
+                        height: NodeHeight(1),
+                    };
+                }
+                if block_height > NodeHeight(1) {
+                    return MessageRelativeView::Future {
+                        epoch,
+                        height: pc_height,
+                    };
+                }
+            }
+
+            MessageRelativeView::Current
         },
         HotstuffMessage::Vote(msg) => {
             let vote = &msg.vote;

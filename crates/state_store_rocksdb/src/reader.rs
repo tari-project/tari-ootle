@@ -131,6 +131,7 @@ use crate::{
         foreign_substate_pledge,
         foreign_substate_pledge::ForeignSubstatePledgeCf,
         lock_conflict,
+        parked_block,
         pending_state_tree_diff,
         state_transition,
         state_transition::StateTransitionType,
@@ -589,6 +590,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn finalized_transaction_execution_get(&self, tx_id: &TransactionId) -> Result<TransactionExecution, StorageError> {
         const OPERATION: &str = "transaction_executions_get";
 
+        let finalized_cf = self.db().cf(FinalizedTransactionLinkCf)?;
+        if !finalized_cf.exists(tx_id, OPERATION)? {
+            return Err(StorageError::NotFound {
+                item: "TransactionExecution",
+                key: format!("{tx_id}"),
+            });
+        }
         let cf = self.db().cf(block_transaction_execution::ByTransactionIdQuery)?;
         let mut iter = cf.query_prefix_range_key_iterator(Ordering::default(), tx_id);
         let Some((tx_id, block_id, height)) = iter.next().transpose()? else {
@@ -724,7 +732,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         const OPERATION: &str = "blocks_get_all_between";
 
         // Prevent the possibility of memory exhaustion (defensive, not in response to an observed bug)
-        if limit > 1_000_000 {
+        if limit > 1_000 {
             return Err(StorageError::QueryError {
                 reason: format!("{OPERATION}: limit {limit} is too large"),
             });
@@ -1800,6 +1808,12 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         }
 
         Ok(pledges)
+    }
+
+    fn parked_block_exists(&self, block_id: &BlockId) -> Result<bool, StorageError> {
+        const OPERATION: &str = "parked_block_exists";
+        let exists = self.db().cf(parked_block::ParkedBlockCf)?.exists(block_id, OPERATION)?;
+        Ok(exists)
     }
 
     fn foreign_parked_blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError> {

@@ -402,7 +402,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
 
         let value_filter_flags = SubstateValueFilterFlags::from_bits_truncate(req.value_filters);
 
-        info!(
+        debug!(
             target: LOG_TARGET,
             "🌍 peer initiated sync with this node (start: v{}, {}) to {} (values: {:?})",
             req.start_state_version,

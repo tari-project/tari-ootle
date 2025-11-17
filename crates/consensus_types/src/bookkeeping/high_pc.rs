@@ -40,7 +40,7 @@ impl HighPc {
         &self.block_id
     }
 
-    pub fn block_height(&self) -> NodeHeight {
+    pub fn height(&self) -> NodeHeight {
         self.block_height
     }
 

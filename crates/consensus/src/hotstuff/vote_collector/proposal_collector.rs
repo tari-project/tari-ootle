@@ -68,6 +68,12 @@ where TConsensusSpec: ConsensusSpec
         let sender_vn =
             check_eligibility::<TConsensusSpec, _>(&self.epoch_manager, from, &vote, local_committee_info).await?;
         self.validate_vote(current_epoch, &vote)?;
+        debug!(
+            target: LOG_TARGET,
+            "✅ Vote from {} for block {} is valid",
+            sender_vn,
+            block_id
+        );
         let sender_leaf_hash = sender_vn.get_node_hash(self.network);
         let Some((quorum_votes, quorum_decision)) = self
             .vote_collector

@@ -110,7 +110,8 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         column_families::lock_conflict::LockConflictCf,
         column_families::lock_conflict::LockConflictBlockIdIndex,
         column_families::evicted_node::EvictedNodeCf,
-        column_families::validator_node_epoch_stats::ValidatorNodeEpochStatsCf
+        column_families::validator_node_epoch_stats::ValidatorNodeEpochStatsCf,
+        column_families::diagnostic_no_vote::DiagnosticsNoVoteCf
     );
 
     let api = api.fallback(handlers::not_found);

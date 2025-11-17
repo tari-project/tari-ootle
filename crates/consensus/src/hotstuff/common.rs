@@ -424,7 +424,7 @@ pub(crate) fn get_highest_seen_justified_view<TTx: StateStoreReadTransaction>(
 ) -> Result<NodeHeight, HotStuffError> {
     let high_pc = HighPc::get(tx, epoch)
         .optional()?
-        .map(|high_pc| high_pc.block_height())
+        .map(|high_pc| high_pc.height())
         .unwrap_or_default();
     let high_tc = HighTc::get(tx, epoch)
         .optional()?

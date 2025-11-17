@@ -36,6 +36,10 @@ pub struct LeafBlock {
 }
 
 impl LeafBlock {
+    pub fn is_genesis(&self) -> bool {
+        self.height.is_zero()
+    }
+
     pub fn height(&self) -> NodeHeight {
         self.height
     }

@@ -107,7 +107,18 @@ function NftRow({ nft }: { nft: NonFungibleToken }) {
   const mutableData = convertCborValue(nft.mutable_data);
   const data = convertCborValue(nft.data);
   const imageUrl = mutableData?.image_url;
-  const originalOwner = data?.original_owner;
+
+  const metadata: [string, string][] = [];
+  if (data && typeof data === "object") {
+    let limit = 5;
+    for (const [key, value] of Object.entries(data)) {
+      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        metadata.push([key, value.toString()]);
+        limit -= 1;
+        if (limit == 0) break;
+      }
+    }
+  }
 
   return (
     <TableRow>
@@ -137,7 +148,11 @@ function NftRow({ nft }: { nft: NonFungibleToken }) {
       </DataTableCell>
       <DataTableCell>
         <Typography variant="body2">
-          <CopyAddress address={originalOwner || ""} />
+          {metadata.map(([key, value], index) => (
+            <div key={index}>
+              <strong>{key}:</strong> {value}
+            </div>
+          ))}
         </Typography>
       </DataTableCell>
       <DataTableCell>

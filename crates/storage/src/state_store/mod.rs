@@ -324,6 +324,8 @@ pub trait StateStoreReadTransaction: Sized {
         &self,
         transaction_id: &TransactionId,
     ) -> Result<SubstatePledges, StorageError>;
+    // -------------------------------- Parked blocks / Missing Transactions -------------------------------- //
+    fn parked_block_exists(&self, block_id: &BlockId) -> Result<bool, StorageError>;
 
     // -------------------------------- Foreign parked block -------------------------------- //
     fn foreign_parked_blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError>;

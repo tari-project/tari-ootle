@@ -14,7 +14,7 @@ use crate::hotstuff::{
     current_view::CurrentView,
     on_beat::OnBeat,
     on_force_beat::OnForceBeat,
-    on_leader_timeout::OnLeaderTimeout,
+    on_leader_timeout::{LeaderTimeout, OnLeaderTimeout},
     pacemaker_handle::{PaceMakerHandle, PacemakerRequest},
     HotStuffError,
 };
@@ -72,6 +72,7 @@ impl PaceMaker {
         });
     }
 
+    #[allow(clippy::too_many_lines)]
     pub async fn run(
         &mut self,
         on_beat: OnBeat,
@@ -84,6 +85,7 @@ impl PaceMaker {
         tokio::pin!(leader_timeout);
         tokio::pin!(block_timer);
 
+        let mut num_timeouts = 0u32;
         let mut started = false;
         let mut leader_failure_suspended = false;
         let mut leader_failure_triggered_during_suspension = false;
@@ -98,6 +100,7 @@ impl PaceMaker {
                                 if !started {
                                     continue;
                                 }
+                                num_timeouts = 0;
                                 leader_failure_suspended = false;
                                 leader_failure_triggered_during_suspension = false;
 
@@ -151,9 +154,15 @@ impl PaceMaker {
                                     leader_failure_triggered_during_suspension = false;
                                     leader_timeout.as_mut().reset(self.leader_timeout());
                                     info!(target: LOG_TARGET, "⚠️ Resumed leader timeout! Current view: {}, Delta: {:.2?}", self.current_view, self.delta_time());
-                                    on_leader_timeout.leader_timed_out(self.current_view.get_height());
+                                    num_timeouts += 1;
+                                    on_leader_timeout.leader_timed_out(LeaderTimeout {
+                                        current_height: self.current_view.get_height(),
+                                        current_high_pc: self.current_high_pc_height,
+                                        num_timeouts,
+                                    });
+
                                 }
-                                debug!(target: LOG_TARGET, "🧿 Pacemaker resume");
+                                debug!(target: LOG_TARGET, "🧿 Pacemaker resume {}", self.current_view);
                             }
                         }
                     } else{
@@ -174,7 +183,12 @@ impl PaceMaker {
                         leader_failure_triggered_during_suspension = true;
                     } else {
                         info!(target: LOG_TARGET, "⚠️ Leader timeout! Current view: {}, Delta: {:.2?}", self.current_view, self.delta_time());
-                        on_leader_timeout.leader_timed_out(self.current_view.get_height());
+                        num_timeouts += 1;
+                        on_leader_timeout.leader_timed_out(LeaderTimeout {
+                            current_height: self.current_view.get_height(),
+                            current_high_pc: self.current_high_pc_height,
+                            num_timeouts,
+                        });
                     }
                 },
 

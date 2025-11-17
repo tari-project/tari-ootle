@@ -14,7 +14,7 @@ use tari_ootle_common_types::{committee::Committee, Epoch, NodeAddressable, Node
 use tari_sidechain::QuorumDecision;
 use tokio::sync::RwLock;
 
-const LOG_TARGET: &str = "tari::consensus::hotstuff::vote_collector";
+const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::vote_collector";
 
 #[derive(Clone)]
 pub struct VoteCollector<V: Vote> {
@@ -52,11 +52,11 @@ impl<V: Vote + Display> VoteCollector<V> {
             return None;
         }
 
-        let quorum_threshold = committee.quorum_threshold();
         let threshold_decision = access_mut.calculate_threshold_decision(epoch, height, &key, committee);
 
+        let quorum_threshold = committee.quorum_threshold();
         let Some(quorum_decision) = threshold_decision.decision else {
-            info!(
+            debug!(
                 target: LOG_TARGET,
                 "🔥 Received {} from {} ({} of {}).",
                 vote_display,
@@ -70,7 +70,7 @@ impl<V: Vote + Display> VoteCollector<V> {
         // We only generate the next qc once when we have a quorum of votes. Any votes received after this
         // are not included in the QC.
         if threshold_decision.total_power < quorum_threshold {
-            info!(
+            debug!(
                 target: LOG_TARGET,
                 "🔥 Received {} from {} ({} of {}).",
                 vote_display,
@@ -81,7 +81,7 @@ impl<V: Vote + Display> VoteCollector<V> {
             return None;
         }
 
-        info!(
+        debug!(
             target: LOG_TARGET,
             "🔥 Received {} from {} ({} of {}). QUORUM!",
             vote_display,
@@ -234,4 +234,92 @@ impl<V: Vote + Display> VoteStoreInner<V> {
 pub struct ThresholdDecision {
     pub decision: Option<QuorumDecision>,
     pub total_power: VotePower,
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_consensus_types::{SignedMessage, ToSignatureMessage};
+    use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
+
+    use super::*;
+
+    const ZERO_SIG: SchnorrSignatureBytes = SchnorrSignatureBytes::zero();
+    const ZERO_PUBKEY: RistrettoPublicKeyBytes = RistrettoPublicKeyBytes::zero();
+
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    struct TestVote {
+        epoch: Epoch,
+        height: NodeHeight,
+        key: u32,
+    }
+
+    impl Display for TestVote {
+        fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            Ok(())
+        }
+    }
+
+    impl ToSignatureMessage for TestVote {
+        fn to_signature_message(&self) -> FixedHash {
+            FixedHash::zero()
+        }
+    }
+
+    impl SignedMessage for TestVote {
+        fn signature(&self) -> &SchnorrSignatureBytes {
+            &ZERO_SIG
+        }
+
+        fn public_key(&self) -> &RistrettoPublicKeyBytes {
+            &ZERO_PUBKEY
+        }
+    }
+
+    impl Vote for TestVote {
+        type Key = u32;
+
+        fn epoch(&self) -> Epoch {
+            self.epoch
+        }
+
+        fn height(&self) -> NodeHeight {
+            self.height
+        }
+
+        fn key(&self) -> Self::Key {
+            self.key
+        }
+
+        fn decision(&self) -> QuorumDecision {
+            QuorumDecision::Accept
+        }
+    }
+
+    #[test]
+    fn it_saves_a_new_vote() {
+        let mut store = VoteStoreInner::<TestVote>::new();
+        let vote = TestVote {
+            epoch: Epoch(1),
+            height: NodeHeight(1),
+            key: 42,
+        };
+        let result = store.save_vote(FixedHash::zero(), vote.clone());
+        assert!(result, "Expected to save a new vote successfully");
+    }
+
+    #[test]
+    fn it_detects_a_duplicate_vote() {
+        let mut store = VoteStoreInner::<TestVote>::new();
+        let vote = TestVote {
+            epoch: Epoch(1),
+            height: NodeHeight(1),
+            key: 42,
+        };
+        let result = store.save_vote(FixedHash::zero(), vote.clone());
+        assert!(result, "Expected to save a new vote successfully");
+
+        // Try to save the same vote again
+        let result_duplicate = store.save_vote(FixedHash::zero(), vote);
+        assert!(!result_duplicate, "Expected duplicate vote to be rejected");
+    }
 }

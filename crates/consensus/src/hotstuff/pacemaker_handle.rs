@@ -1,6 +1,7 @@
 //  Copyright 2022 The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
+use tari_consensus_types::HighPc;
 use tari_ootle_common_types::{Epoch, NodeHeight};
 use tokio::sync::mpsc;
 
@@ -99,14 +100,17 @@ impl PaceMakerHandle {
         self.on_leader_timeout.clone()
     }
 
-    pub async fn reset_leader_timeout(&self, high_pc_height: NodeHeight) -> Result<(), HotStuffError> {
+    pub async fn reset_leader_timeout(&self, high_pc: &HighPc) -> Result<(), HotStuffError> {
+        // if self.current_view.enter(high_pc.epoch(), high_pc.height()) {
         self.sender
             .send(PacemakerRequest::Reset {
-                high_pc_height: Some(high_pc_height),
+                high_pc_height: Some(high_pc.height()),
                 reset_block_time: false,
             })
             .await
-            .map_err(|e| HotStuffError::PacemakerChannelDropped { details: e.to_string() })
+            .map_err(|e| HotStuffError::PacemakerChannelDropped { details: e.to_string() })?;
+        // }
+        Ok(())
     }
 
     async fn reset(&self, high_pc_height: NodeHeight) -> Result<(), HotStuffError> {
@@ -119,7 +123,8 @@ impl PaceMakerHandle {
             .map_err(|e| HotStuffError::PacemakerChannelDropped { details: e.to_string() })
     }
 
-    /// Reset the leader timeout. This should be called when a valid leader proposal is received.
+    /// Reset the leader timeout. This should be called when a valid leader proposal is received. If the provided view <
+    /// current view, this is a no-op.
     pub async fn enter_view(
         &self,
         epoch: Epoch,

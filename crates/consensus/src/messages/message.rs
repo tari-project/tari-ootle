@@ -15,20 +15,29 @@ use super::{
     ProposalMessage,
     VoteMessage,
 };
-use crate::messages::{MissingTransactionsRequest, SyncRequestMessage};
+use crate::messages::{CatchUpRequestMessage, MissingTransactionsRequest};
 
 // Serialize is implemented for the message logger
 #[derive(Debug, Clone, serde::Serialize)]
 pub enum HotstuffMessage {
+    /// New view message: a vote to move to a new view after a leader timeout
     NewView(Box<NewViewMessage>),
+    /// Proposal message: a proposed block from the leader
     Proposal(Box<ProposalMessage>),
+    /// Foreign proposal message: proposal from a foreign shard that involves this shard
     ForeignProposal(ForeignProposalMessage),
+    /// A broadcast notification that a foreign proposal should be requested if not already known
     ForeignProposalNotification(ForeignProposalNotificationMessage),
+    /// A request for a foreign proposal (after recieving a notification)
     ForeignProposalRequest(ForeignProposalRequestMessage),
+    /// Vote message: a vote for a proposed block
     Vote(VoteMessage),
+    /// Request for missing transactions
     MissingTransactionsRequest(MissingTransactionsRequest),
+    /// Response with missing transactions
     MissingTransactionsResponse(MissingTransactionsResponse),
-    CatchUpSyncRequest(SyncRequestMessage),
+    /// Request to send blocks from a given height
+    CatchUpSyncRequest(CatchUpRequestMessage),
 }
 
 impl HotstuffMessage {
@@ -74,12 +83,19 @@ impl HotstuffMessage {
             _ => None,
         }
     }
+
+    pub fn into_proposal(self) -> Option<ProposalMessage> {
+        match self {
+            Self::Proposal(msg) => Some(*msg),
+            _ => None,
+        }
+    }
 }
 
 impl Display for HotstuffMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            HotstuffMessage::NewView(msg) => {
+            Self::NewView(msg) => {
                 write!(
                     f,
                     "NewView({}, {}, high-qc: {})",
@@ -88,7 +104,7 @@ impl Display for HotstuffMessage {
                     msg.high_pc.height()
                 )
             },
-            HotstuffMessage::Proposal(msg) => {
+            Self::Proposal(msg) => {
                 write!(
                     f,
                     "Proposal(Epoch={},Height={},QC={},TC={},#foreign={})",
@@ -99,10 +115,10 @@ impl Display for HotstuffMessage {
                     msg.foreign_proposals.len()
                 )
             },
-            HotstuffMessage::ForeignProposal(msg) => write!(f, "ForeignProposal({})", msg),
-            HotstuffMessage::ForeignProposalNotification(msg) => write!(f, "ForeignProposalNotification({})", msg),
-            HotstuffMessage::ForeignProposalRequest(msg) => write!(f, "ForeignProposalRequest({})", msg),
-            HotstuffMessage::Vote(VoteMessage { vote }) => write!(
+            Self::ForeignProposal(msg) => write!(f, "ForeignProposal({})", msg),
+            Self::ForeignProposalNotification(msg) => write!(f, "ForeignProposalNotification({})", msg),
+            Self::ForeignProposalRequest(msg) => write!(f, "ForeignProposalRequest({})", msg),
+            Self::Vote(VoteMessage { vote }) => write!(
                 f,
                 "Vote({}, {}, {}, {})",
                 vote.height(),
@@ -110,7 +126,7 @@ impl Display for HotstuffMessage {
                 vote.block_id,
                 vote.decision,
             ),
-            HotstuffMessage::MissingTransactionsRequest(msg) => {
+            Self::MissingTransactionsRequest(msg) => {
                 write!(
                     f,
                     "RequestMissingTransactions({} transaction(s), block: {}, epoch: {})",
@@ -119,14 +135,14 @@ impl Display for HotstuffMessage {
                     msg.epoch
                 )
             },
-            HotstuffMessage::MissingTransactionsResponse(msg) => write!(
+            Self::MissingTransactionsResponse(msg) => write!(
                 f,
                 "RequestedTransaction({} transaction(s), block: {}, epoch: {})",
                 msg.transactions.len(),
                 msg.block_id,
                 msg.epoch
             ),
-            HotstuffMessage::CatchUpSyncRequest(msg) => write!(f, "SyncRequest({}/{})", msg.epoch, msg.block_height),
+            Self::CatchUpSyncRequest(msg) => write!(f, "SyncRequest({}/{})", msg.epoch, msg.block_height),
         }
     }
 }

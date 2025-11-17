@@ -21,10 +21,10 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 mod block_sync_task;
-mod service_impl;
+mod rpc_impl;
 mod state_sync_task;
 
-pub use service_impl::ValidatorNodeRpcServiceImpl;
+pub use rpc_impl::ValidatorNodeRpcServiceImpl;
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_ootle_common_types::PeerAddress;
 use tari_ootle_storage::StateStore;

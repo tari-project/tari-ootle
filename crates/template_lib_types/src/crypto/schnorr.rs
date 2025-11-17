@@ -19,7 +19,7 @@ impl SchnorrSignatureBytes {
         RistrettoPublicKeyBytes::length() + Scalar32Bytes::length()
     }
 
-    pub fn zero() -> Self {
+    pub const fn zero() -> Self {
         Self {
             public_nonce: RistrettoPublicKeyBytes::zero(),
             signature: Scalar32Bytes::zero(),

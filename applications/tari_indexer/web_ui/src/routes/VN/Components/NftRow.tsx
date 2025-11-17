@@ -32,7 +32,6 @@ export interface NftData {
   address: string;
   version: number;
   nft: NonFungibleSubstate;
-  original_owner?: string;
   amount?: number;
 }
 
@@ -59,10 +58,6 @@ function NftRow({ nftData }: { nftData: NftData }) {
             </Typography>
             <Stack direction="row" alignItems="baseline" spacing={1}>
               <Typography variant="body2">Original Owner:</Typography>
-              <Typography variant="body2" color="text.secondary">
-                {nftData.original_owner ? shortenString(nftData.original_owner) : "No owner"}
-                {nftData.original_owner && <CopyToClipboard copy={nftData.original_owner} />}
-              </Typography>
             </Stack>
             <Stack direction="row" alignItems="baseline" spacing={1}>
               <Typography variant="body2">Version:</Typography>

@@ -230,7 +230,7 @@ fn add_substate(store: &TestStore, seed: u8, version: u32) -> VersionedSubstateI
 
 fn create_store() -> (TestStore, TempDir) {
     let temp_dir = tempfile::tempdir().unwrap();
-    let store = RocksDbStateStore::open(&temp_dir, DatabaseOptions::default()).unwrap();
+    let store = RocksDbStateStore::open(&temp_dir, DatabaseOptions::default().with_debugging_data(true)).unwrap();
     store
         .with_write_tx(|tx| {
             let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);

@@ -261,7 +261,7 @@ impl Test {
             } else {
                 self.on_hotstuff_event().await
             };
-            if self.network.is_offline(&address, self.num_committees).await {
+            if self.network.is_offline(&address).await {
                 info!("[{}] Ignoring event for offline node: {:?}", address, event);
                 continue;
             }
@@ -650,8 +650,8 @@ impl TestBuilder {
                     fee_exhaust_divisor: 20,
                     epochs_per_era: Epoch(10),
                 },
-                state_tree_cleanup_interval: Duration::from_secs(60),
-                epoch_gc_interval: Duration::from_secs(60),
+                state_tree_cleanup_interval: Duration::from_secs(1000),
+                epoch_gc_interval: Duration::from_secs(1000),
                 enable_eviction_proposal: true,
             },
         }
@@ -660,6 +660,11 @@ impl TestBuilder {
     #[allow(dead_code)]
     pub fn disable_timeout(mut self) -> Self {
         self.timeout = None;
+        self
+    }
+
+    pub fn modify_config<F: FnOnce(&mut HotstuffConfig)>(mut self, f: F) -> Self {
+        f(&mut self.config);
         self
     }
 

@@ -167,6 +167,12 @@ pub enum ProposalValidationError {
         block_id: BlockId,
         details: String,
     },
+    #[error("Justified block {justify_block} for proposed block {block_description} by {proposed_by} is parked")]
+    JustifyBlockParked {
+        proposed_by: String,
+        block_description: String,
+        justify_block: LeafBlock,
+    },
     #[error("Candidate block {candidate_block_height} is not higher than justify {justify_block_height}")]
     CandidateBlockNotHigherThanJustify {
         justify_block_height: NodeHeight,

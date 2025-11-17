@@ -55,7 +55,7 @@ const MEM_MAX_PROPOSED_UTXO_MINTS_SIZE: usize = 1000;
 
 #[derive(Debug, Clone)]
 pub struct BlockDecision {
-    pub quorum_decision: Option<QuorumDecision>,
+    pub local_decision: Option<QuorumDecision>,
     /// Contains newly-committed non-dummy blocks
     pub commit_blocks: Vec<Block>,
     pub finalized_transactions: Vec<Vec<TransactionPoolRecord>>,
@@ -66,7 +66,7 @@ pub struct BlockDecision {
 
 impl BlockDecision {
     pub fn is_accept(&self) -> bool {
-        matches!(self.quorum_decision, Some(QuorumDecision::Accept))
+        matches!(self.local_decision, Some(QuorumDecision::Accept))
     }
 
     pub fn is_committed_epoch_end(&self) -> bool {
@@ -90,7 +90,7 @@ impl BlockDecision {
 
     pub fn highest_qc_view(&self) -> NodeHeight {
         self.high_pc
-            .block_height()
+            .height()
             .max(self.new_high_tc.as_ref().map_or(NodeHeight(0), |tc| tc.height()))
     }
 }

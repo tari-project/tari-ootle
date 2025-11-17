@@ -214,7 +214,11 @@ pub async fn spawn_services(
 
     info!(target: LOG_TARGET, "State store initializing");
 
-    let state_store = ValidatorNodeStateStore::open(&config.validator_node.state_db_path, DatabaseOptions::default())?;
+    let state_store = ValidatorNodeStateStore::open(
+        &config.validator_node.state_db_path,
+        // TODO: just enable it always for now, later make it configurable and default to true for testnets
+        DatabaseOptions::default().with_debugging_data(true),
+    )?;
 
     state_store.with_write_tx(|tx| create_genesis_state(tx, config.network, consensus_constants.num_preshards))?;
 

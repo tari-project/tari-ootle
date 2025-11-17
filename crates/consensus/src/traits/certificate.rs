@@ -61,7 +61,7 @@ impl CertificateStore for ProposalCertificate {
         TTx::Target: StateStoreReadTransaction,
     {
         match HighPc::get(&**tx, self.epoch()).optional()? {
-            Some(high_pc) if high_pc.block_height() >= self.height() => {
+            Some(high_pc) if high_pc.height() >= self.height() => {
                 // EDGE CASE: If we receive a new high PC, clear the last sent new view. This is because we could have
                 // sent many unsuccessful NEWVIEWs (likely we're offline) and the chain progressed
                 // without us. But then if we need to send NEWVIEWs again, it will be aligned with the network view.
@@ -71,7 +71,7 @@ impl CertificateStore for ProposalCertificate {
                     "🔥 HIGH_PC ({}, previous high PC: {} {}) - not new",
                     self,
                     high_pc.block_id(),
-                    high_pc.block_height(),
+                    high_pc.height(),
                 );
                 Ok(high_pc)
             },
@@ -82,7 +82,7 @@ impl CertificateStore for ProposalCertificate {
                     "🔥 NEW HIGH_PC ({}, previous high PC: {} {})",
                     self,
                     high_pc.block_id(),
-                    high_pc.block_height(),
+                    high_pc.height(),
                 );
 
                 self.save(tx)?;

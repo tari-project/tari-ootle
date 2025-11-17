@@ -145,7 +145,7 @@ impl ValidatorBuilder {
                 .as_deref()
                 .unwrap_or_else(|| self.rocks_tmp_path.path());
             log::info!("Rocksdb path {}", rocks_path.display());
-            TestStore::open(rocks_path, DatabaseOptions::default()).unwrap()
+            TestStore::open(rocks_path, DatabaseOptions::default().with_debugging_data(true)).unwrap()
         };
         let signing_service = TestVoteSignatureService::new(self.address.clone());
         let transaction_pool = TransactionPool::new();

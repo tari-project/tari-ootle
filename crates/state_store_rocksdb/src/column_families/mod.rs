@@ -32,6 +32,7 @@ pub mod foreign_proposal;
 pub mod foreign_substate_pledge;
 
 pub mod certificates;
+pub mod diagnostic_no_vote;
 pub mod finalized_transaction;
 pub mod lock_conflict;
 pub mod missing_transactions;

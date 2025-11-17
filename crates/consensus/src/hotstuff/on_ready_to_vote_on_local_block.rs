@@ -178,35 +178,6 @@ where TConsensusSpec: ConsensusSpec
             change_set.set_no_vote(NoVoteReason::AlreadyVotedAtHeight);
         }
 
-        // if change_set.is_accept() {
-        // Update high TC
-        // maybe_high_tc = valid_block
-        //     .block()
-        //     .timeout_certificate()
-        //     .map(|tc| tc.update_highest(tx))
-        //     .transpose()?;
-        //
-        // // Update nodes
-        // let high_qc = valid_block.block().update_nodes(
-        //     tx,
-        //     |tx, _prev_locked, block, _justify_qc| self.on_lock_block(tx, block),
-        //     |tx, mut commit_block| {
-        //         let committed = self.on_commit(tx, &block_qc_id, &commit_block, local_committee_info)?;
-        //         // NOTE: update the commit QC in the local copy so that foreign proposals can obtain the commit QC
-        //         // on_commit already sets the persisted commit_qc for the block
-        //         commit_block.set_commit_qc(block_qc_id);
-        //         if !commit_block.is_dummy() {
-        //             commit_blocks.push(commit_block);
-        //         }
-        //         if !committed.is_empty() {
-        //             finalized_transactions.push(committed);
-        //         }
-        //         Ok(())
-        //     },
-        // )?;
-        //
-        // maybe_high_qc = Some(high_qc);
-
         let quorum_decision = change_set.quorum_decision();
         if change_set.is_accept() {
             info!(
@@ -224,12 +195,8 @@ where TConsensusSpec: ConsensusSpec
             );
         }
 
-        // let high_qc = maybe_high_qc
-        //     .map(Ok)
-        //     .unwrap_or_else(|| HighPc::get(&**tx, valid_block.epoch()))?;
-
         Ok(BlockDecision {
-            quorum_decision,
+            local_decision: quorum_decision,
             commit_blocks,
             finalized_transactions,
             high_pc: high_qc,

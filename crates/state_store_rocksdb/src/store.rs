@@ -38,6 +38,7 @@ use crate::{
         bookkeeping::DatabaseMigrationVersion,
         certificates::{proposal::ProposalCertificateCf, timeout::TimeoutCertificateCf},
         chain,
+        diagnostic_no_vote::DiagnosticsNoVoteCf,
         epoch_checkpoint::EpochCheckpointCf,
         evicted_node::EvictedNodeCf,
         finalized_transaction::FinalizedTransactionLinkCf,
@@ -123,6 +124,7 @@ pub fn all_column_families_iter() -> impl Iterator<Item = &'static str> {
         lock_conflict::LockConflictBlockIdIndex::name(),
         EvictedNodeCf::name(),
         ValidatorNodeEpochStatsCf::name(),
+        DiagnosticsNoVoteCf::name(),
     ]
     .into_iter()
 }

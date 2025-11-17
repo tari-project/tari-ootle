@@ -27,6 +27,7 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use tari_consensus::messages::{
+    CatchUpRequestMessage,
     ForeignProposalMessage,
     ForeignProposalNotificationMessage,
     ForeignProposalRequestMessage,
@@ -35,7 +36,6 @@ use tari_consensus::messages::{
     MissingTransactionsResponse,
     NewViewMessage,
     ProposalMessage,
-    SyncRequestMessage,
     VoteMessage,
 };
 use tari_consensus_types::{
@@ -1034,8 +1034,8 @@ impl From<SubstateDestroyed> for proto::consensus::SubstateDestroyedMetadata {
 
 // -------------------------------- SyncRequest -------------------------------- //
 
-impl From<&SyncRequestMessage> for proto::consensus::SyncRequest {
-    fn from(value: &SyncRequestMessage) -> Self {
+impl From<&CatchUpRequestMessage> for proto::consensus::SyncRequest {
+    fn from(value: &CatchUpRequestMessage) -> Self {
         Self {
             epoch: value.epoch.as_u64(),
             block_height: value.block_height.as_u64(),
@@ -1043,7 +1043,7 @@ impl From<&SyncRequestMessage> for proto::consensus::SyncRequest {
     }
 }
 
-impl TryFrom<proto::consensus::SyncRequest> for SyncRequestMessage {
+impl TryFrom<proto::consensus::SyncRequest> for CatchUpRequestMessage {
     type Error = anyhow::Error;
 
     fn try_from(value: proto::consensus::SyncRequest) -> Result<Self, Self::Error> {

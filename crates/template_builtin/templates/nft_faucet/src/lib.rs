@@ -43,7 +43,7 @@ mod template {
             let owner = CallerContext::transaction_signer_public_key().to_string();
 
             let mut metadata = Metadata::new();
-            metadata.insert("original_owner", &owner);
+            metadata.insert("original_minter", &owner);
 
             let mut counter = 0;
             let amount_to_mint = amount.to_u64_checked().expect("Amount must be a positive");

@@ -66,7 +66,7 @@ use crate::{
     ReachabilityMode,
 };
 
-const LOG_TARGET: &str = "tari::ootle::networking::service::worker";
+const LOG_TARGET: &str = "tari::networking::service::worker";
 
 type ReplyTx<T> = oneshot::Sender<Result<T, NetworkingError>>;
 

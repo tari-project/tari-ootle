@@ -24,7 +24,7 @@ impl RistrettoPublicKeyBytes {
         32
     }
 
-    pub fn zero() -> Self {
+    pub const fn zero() -> Self {
         Self([0u8; Self::length()])
     }
 

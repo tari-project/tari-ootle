@@ -10,16 +10,11 @@ use tari_crypto::{
     tari_utilities,
     tari_utilities::ByteArray,
 };
-use tari_engine_types::{
-    hashing::{engine_hasher64, EngineHashDomainLabel},
-    ConvertFromByteType,
-    FromByteType,
-    ToByteType,
-};
+use tari_engine_types::{ConvertFromByteType, FromByteType, ToByteType};
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
-use crate::{Instruction, UnsealedTransactionV1, UnsignedTransactionV1};
+use crate::{hashing::transaction_hasher_v1, Instruction, UnsealedTransactionV1, UnsignedTransactionV1};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -69,7 +64,7 @@ impl TransactionSealSignature {
     }
 
     fn create_message(transaction: &UnsealedTransactionV1) -> [u8; 64] {
-        engine_hasher64(EngineHashDomainLabel::TransactionSignature)
+        transaction_hasher_v1("SealSignature")
             .chain(&transaction.schema_version())
             .chain(transaction)
             .result()
@@ -129,7 +124,7 @@ impl TransactionSignature {
         transaction: &UnsignedTransactionV1,
     ) -> [u8; 64] {
         let signature_fields = TransactionSignatureFields::from(transaction);
-        engine_hasher64(EngineHashDomainLabel::TransactionSignature)
+        transaction_hasher_v1("Signature")
             .chain(&schema_version)
             .chain(seal_signer)
             .chain(&signature_fields)
@@ -137,7 +132,7 @@ impl TransactionSignature {
     }
 }
 
-#[derive(Debug, Clone, Serialize, borsh::BorshSerialize)]
+#[derive(Debug, Clone, borsh::BorshSerialize)]
 struct TransactionSignatureFields<'a> {
     network: u8,
     fee_instructions: &'a [Instruction],

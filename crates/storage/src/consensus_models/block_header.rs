@@ -436,6 +436,10 @@ impl BlockHeader {
         &self.accumulated_data
     }
 
+    pub fn total_accumulated_exhaust_burn(&self) -> u128 {
+        self.accumulated_data.total_exhaust_burn
+    }
+
     pub fn epoch_hash(&self) -> &FixedHash {
         &self.epoch_hash
     }

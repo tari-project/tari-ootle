@@ -53,6 +53,8 @@ pub enum NoVoteReason {
     LeaderFeeDisagreement,
     #[error("Total leader fee disagreement")]
     TotalLeaderFeeDisagreement,
+    #[error("Total accumulated exhaust burn disagreement")]
+    TotalExhaustBurnDisagreement,
     #[error("No leader fee")]
     NoLeaderFee,
     #[error("Local only proposed for multi shard")]
@@ -116,6 +118,7 @@ impl NoVoteReason {
             Self::AllAcceptMustBeCommit { .. } => "AllAcceptMustBeCommit",
             Self::FeeDisagreement => "FeeDisagreement",
             Self::LeaderFeeDisagreement => "LeaderFeeDisagreement",
+            Self::TotalExhaustBurnDisagreement => "TotalExhaustBurnDisagreement",
             Self::NoLeaderFee => "NoLeaderFee",
             Self::LocalOnlyProposedForMultiShard => "LocalOnlyProposedForMultiShard",
             Self::MultiShardProposedForLocalOnly => "MultiShardProposedForLocalOnly",

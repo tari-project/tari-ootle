@@ -166,8 +166,11 @@ where TConsensusSpec: ConsensusSpec
         }
 
         if self.should_vote(tx, valid_block.block())? {
+            let parent = valid_block.block().get_parent(&**tx)?;
+
             self.decide_what_to_vote(
                 tx,
+                &parent,
                 valid_block.block(),
                 local_committee_info,
                 proposer_claim_public_key_bytes,
@@ -236,6 +239,7 @@ where TConsensusSpec: ConsensusSpec
     fn decide_what_to_vote(
         &self,
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
+        parent: &Block,
         block: &Block,
         local_committee_info: &CommitteeInfo,
         proposer_claim_public_key_bytes: &RistrettoPublicKeyBytes,
@@ -247,6 +251,7 @@ where TConsensusSpec: ConsensusSpec
         let mut substate_store =
             PendingSubstateStore::new(tx, block.as_leaf(), self.config.consensus_constants.num_preshards);
         let mut total_leader_fee = 0;
+        let mut total_exhaust_burn = parent.header().total_accumulated_exhaust_burn();
 
         for cmd in block.commands() {
             match cmd {
@@ -259,6 +264,7 @@ where TConsensusSpec: ConsensusSpec
                         &mut substate_store,
                         proposed_block_change_set,
                         &mut total_leader_fee,
+                        &mut total_exhaust_burn,
                     )? {
                         proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
@@ -299,6 +305,7 @@ where TConsensusSpec: ConsensusSpec
                         &mut substate_store,
                         proposed_block_change_set,
                         &mut total_leader_fee,
+                        &mut total_exhaust_burn,
                     )? {
                         proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
@@ -411,6 +418,18 @@ where TConsensusSpec: ConsensusSpec
             return Ok(());
         }
 
+        if total_exhaust_burn != block.header().total_accumulated_exhaust_burn() {
+            warn!(
+                target: LOG_TARGET,
+                "❌ Exhaust burn disagreement for block {}. Leader proposed {}, we calculated {}",
+                block,
+                block.header().total_accumulated_exhaust_burn(),
+                total_exhaust_burn
+            );
+            proposed_block_change_set.set_no_vote(NoVoteReason::TotalExhaustBurnDisagreement);
+            return Ok(());
+        }
+
         // Apply leader fee to substate store before we calculate the state root
         if total_leader_fee > 0 {
             apply_leader_fee_to_substate_store(
@@ -472,6 +491,7 @@ where TConsensusSpec: ConsensusSpec
         substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
         total_leader_fee: &mut u64,
+        total_exhaust_burn: &mut u128,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let _timer = TraceTimer::info(LOG_TARGET, "Evaluate LocalOnly command");
         let Some(mut pool_tx) = proposed_block_change_set
@@ -587,6 +607,7 @@ where TConsensusSpec: ConsensusSpec
                             }
 
                             *total_leader_fee += calculated_leader_fee.fee();
+                            *total_exhaust_burn += u128::from(calculated_leader_fee.exhaust_burn());
                         }
 
                         proposed_block_change_set.add_transaction_execution(*pool_tx.transaction_id(), execution)?;
@@ -1104,6 +1125,7 @@ where TConsensusSpec: ConsensusSpec
         substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
         total_leader_fee: &mut u64,
+        total_exhaust_burn: &mut u128,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         if atom.decision.is_abort() {
             warn!(
@@ -1262,6 +1284,7 @@ where TConsensusSpec: ConsensusSpec
         })?;
 
         *total_leader_fee += leader_fee.fee();
+        *total_exhaust_burn += u128::from(leader_fee.exhaust_burn());
 
         substate_store.put_diff(&filter_diff_for_committee(local_committee_info, diff))?;
 

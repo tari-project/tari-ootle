@@ -5,6 +5,7 @@ use tari_template_lib::prelude::*;
 
 #[template]
 mod template {
+    const FAUCET_MAX: u64 = 1_000_000_000;
     use super::*;
 
     pub struct XtrFaucet {
@@ -13,6 +14,12 @@ mod template {
 
     impl XtrFaucet {
         pub fn take(&self, amount: Amount) -> Bucket {
+            assert!(
+                amount <= FAUCET_MAX,
+                "Requested amount {} exceeds faucet max of {}",
+                amount,
+                FAUCET_MAX
+            );
             debug!("Withdrawing {} coins from faucet", amount);
             let signer = CallerContext::transaction_signer_public_key();
             emit_event("take", [("amount", amount.to_string()), ("signer", signer.to_string())]);
@@ -25,6 +32,12 @@ mod template {
             output: StealthOutputsStatement,
             balance_proof: Option<BalanceProofSignature>,
         ) -> Option<Bucket> {
+            assert!(
+                amount <= FAUCET_MAX,
+                "Requested amount {} exceeds faucet max of {}",
+                amount,
+                FAUCET_MAX
+            );
             let signer = CallerContext::transaction_signer_public_key();
             let revealed_bucket = self.vault.withdraw(amount);
             let transfer = StealthTransferStatement {

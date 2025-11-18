@@ -115,7 +115,7 @@ function NftRow({ nft }: { nft: NonFungibleToken }) {
       if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
         metadata.push([key, value.toString()]);
         limit -= 1;
-        if (limit == 0) break;
+        if (limit === 0) break;
       }
     }
   }

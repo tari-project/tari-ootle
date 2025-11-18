@@ -16,8 +16,8 @@ use tari_ootle_wallet_sdk::{
     apis::config::ConfigKey,
     models::{DerivedWalletKey, KeyBranch, KeyId},
     network::{StatusResponseError, WalletNetworkInterface},
-    storage::WalletStore,
     WalletSdk,
+    WalletSdkSpec,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tokio::time;
@@ -27,21 +27,20 @@ use crate::{account_monitor::AccountMonitorHandle, account_recovery::AccountReco
 const LOG_TARGET: &str = "tari::ootle_wallet_daemon::resource_scanner";
 
 /// Scans through all the substates to find related resources to current wallet.
-pub struct AccountRecoveryService<TStore, TNetworkInterface> {
-    wallet_sdk: WalletSdk<TStore, TNetworkInterface>,
+pub struct AccountRecoveryService<TSpec: WalletSdkSpec> {
+    wallet_sdk: WalletSdk<TSpec>,
     account_monitor_handle: AccountMonitorHandle,
     abandon_after_not_found: usize,
     cipher_seed_birthday_epoch: Epoch,
 }
 
-impl<TStore, TNetworkInterface> AccountRecoveryService<TStore, TNetworkInterface>
+impl<TSpec> AccountRecoveryService<TSpec>
 where
-    TStore: WalletStore,
-    TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
+    TSpec: WalletSdkSpec,
+    <TSpec::NetworkInterface as WalletNetworkInterface>::Error: IsNotFoundError + StatusResponseError,
 {
     pub fn new(
-        wallet_sdk: WalletSdk<TStore, TNetworkInterface>,
+        wallet_sdk: WalletSdk<TSpec>,
         account_monitor_handle: AccountMonitorHandle,
         abandon_after_not_found: usize,
         cipher_seed_birthday_epoch: Epoch,
@@ -77,7 +76,7 @@ where
         let mut not_found_accounts_count = 0;
         let mut found_accounts_count = 0;
         let initial_key_index = match key_manager_api.get_active_key(KeyBranch::Account) {
-            Ok(key) => key.key_index,
+            Ok(key) => key.key_index(),
             Err(err) => {
                 error!(target: LOG_TARGET, "Error getting active key: {err}. Scanning failed...");
                 return;
@@ -92,11 +91,11 @@ where
                     return;
                 },
             };
-            info!(target: LOG_TARGET, "🔍️ Attempting to recover account with key index {}", key.key_index);
+            info!(target: LOG_TARGET, "🔍️ Attempting to recover account with key index {}", key.key_index());
             match self.try_recover_account(&key).await {
                 Ok(true) => {
-                    last_found_key = Some(key.key_index);
-                    info!(target: LOG_TARGET, "✅ Account with key index {} found!", key.key_index);
+                    last_found_key = Some(key.key_index());
+                    info!(target: LOG_TARGET, "✅ Account with key index {} found!", key.key_index());
                     not_found_accounts_count = 0;
                     found_accounts_count += 1;
                 },
@@ -171,14 +170,14 @@ where
                 // We cannot find this account on chain, however there could be UTXOs owned by this key which we'll need
                 // to scan for.
                 self.wallet_sdk.accounts_api().add_account(
-                    Some(format!("recovered-account-{}", key.key_index).as_str()),
+                    Some(format!("recovered-account-{}", key.key_index()).as_str()),
                     &account_addr,
                     key.as_key_id(),
                     key.as_key_id(),
                     birthday_epoch,
                     false,
                     // if this is the first account, set it as the default
-                    key.key_index == 0,
+                    key.key_index() == 0,
                 )?;
 
                 // Update UTXOs
@@ -220,17 +219,17 @@ where
                     "🔑 Adding account {} with owner key {} and key index {}",
                     account_addr,
                     component.owner_key.display(),
-                    key.key_index
+                    key.key_index()
                 );
                 self.wallet_sdk.accounts_api().add_account(
-                    Some(format!("recovered-account-{}", key.key_index).as_str()),
+                    Some(format!("recovered-account-{}", key.key_index()).as_str()),
                     &account_addr,
-                    KeyId::derived(key.key_index),
-                    KeyId::derived(key.key_index),
+                    KeyId::derived(KeyBranch::ViewOnlyKey, key.key_index()),
+                    KeyId::derived(KeyBranch::Account, key.key_index()),
                     birthday_epoch,
                     true,
                     // if this is the first account, set it as the default
-                    key.key_index == 0,
+                    key.key_index() == 0,
                 )?;
 
                 // Update vaults, UTXOs, nfts etc

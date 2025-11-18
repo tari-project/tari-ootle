@@ -11,7 +11,7 @@ use tari_engine_types::{
     substate::{Substate, SubstateId, SubstateValue},
     Utxo,
 };
-use tari_ootle_common_types::{shard::Shard, Epoch, StateVersion};
+use tari_ootle_common_types::{optional::IsNotFoundError, shard::Shard, Epoch, StateVersion};
 use tari_template_abi::TemplateDef;
 use tari_template_lib::{
     models::{ResourceAddress, UtxoId},
@@ -27,7 +27,7 @@ use crate::models::UtxoUpdatePayload;
 pub type UtxoUpdateStream<E> = Pin<Box<dyn Stream<Item = Result<UtxoUpdatePayload, E>> + Send + 'static>>;
 
 pub trait WalletNetworkInterface {
-    type Error: std::error::Error + Send + Sync + 'static;
+    type Error: IsNotFoundError + StatusResponseError + std::error::Error + Send + Sync + 'static;
 
     fn query_substate(
         &self,

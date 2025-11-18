@@ -17,9 +17,8 @@ use tari_ootle_wallet_sdk::{
         transaction::TransactionApiError,
     },
     models::{NewAccountData, WalletEvent},
-    network::{StatusResponseError, WalletNetworkInterface},
-    storage::WalletStore,
     WalletSdk,
+    WalletSdkSpec,
 };
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib::{models::ResourceAddress, prelude::ComponentAddress};
@@ -41,27 +40,26 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::wallet_services::account_monitor";
 
-pub struct AccountMonitor<TStore, TNetworkInterface> {
+pub struct AccountMonitor<TSpec: WalletSdkSpec> {
     notify_subscription: broadcast::Receiver<WalletEvent>,
-    wallet_sdk: WalletSdk<TStore, TNetworkInterface>,
+    wallet_sdk: WalletSdk<TSpec>,
     request_rx: mpsc::Receiver<AccountMonitorRequest>,
     pending_accounts: HashMap<TransactionId, NewAccountData>,
     utxo_scanner_handle: UtxoScannerHandle,
     periodic_scan_interval: Duration,
     enable_periodic_scanning_of_utxos: bool,
-    scanner: AccountScanner<TStore, TNetworkInterface>,
+    scanner: AccountScanner<TSpec>,
     shutdown_signal: ShutdownSignal,
 }
 
-impl<TStore, TNetworkInterface> AccountMonitor<TStore, TNetworkInterface>
+impl<TSpec> AccountMonitor<TSpec>
 where
-    TStore: WalletStore + Clone,
-    TNetworkInterface: WalletNetworkInterface + Clone,
-    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
+    TSpec: WalletSdkSpec,
+    WalletSdk<TSpec>: Clone,
 {
     pub fn new(
         notify: Notify<WalletEvent>,
-        wallet_sdk: WalletSdk<TStore, TNetworkInterface>,
+        wallet_sdk: WalletSdk<TSpec>,
         utxo_scanner_handle: UtxoScannerHandle,
         shutdown_signal: ShutdownSignal,
     ) -> (Self, AccountMonitorHandle) {

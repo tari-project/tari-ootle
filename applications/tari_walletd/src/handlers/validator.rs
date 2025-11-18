@@ -49,10 +49,9 @@ pub async fn handle_get_validator_fees(
             let account_key_id = account.owner_key_id().ok_or_else(|| {
                 anyhow!("The specified account does not have an associated owner key to derive the claim key from")
             })?;
-            sdk.key_manager_api()
-                .get_public_key(KeyBranch::Account, account_key_id)?
+            sdk.key_manager_api().get_public_key(account_key_id)?
         },
-        AccountOrKeyId::KeyId(key_id) => sdk.key_manager_api().get_public_key(KeyBranch::Account, key_id)?,
+        AccountOrKeyId::KeyId(key_id) => sdk.key_manager_api().get_public_key(key_id)?,
     };
     let claim_public_key = claim_key.public_key().to_byte_type();
 
@@ -121,7 +120,7 @@ pub async fn handle_claim_validator_fees(
     let claim_public_key = match req.claim_key_index {
         Some(index) => sdk
             .key_manager_api()
-            .get_public_key(KeyBranch::Account, KeyId::derived(index))?
+            .get_public_key(KeyId::derived(KeyBranch::Account, index))?
             .public_key
             .to_byte_type(),
         None => *account.address.account_public_key(),
@@ -185,9 +184,8 @@ pub async fn handle_claim_validator_fees(
                     Ok(builder)
                 } else {
                     // If the claim key is different from the account secret, we need to sign with both
-                    sdk.local_signer_api().sign_with_context(
-                        KeyBranch::Account,
-                        KeyId::derived(index),
+                    sdk.signer_api().sign_with_context(
+                        KeyId::derived(KeyBranch::Account, index),
                         account.address.account_public_key(),
                         builder.with_authorized_seal_signer(),
                     )
@@ -198,9 +196,7 @@ pub async fn handle_claim_validator_fees(
         })?
         .build();
 
-    let transaction = sdk
-        .local_signer_api()
-        .sign(KeyBranch::Account, account_key_id, unsigned_transaction)?;
+    let transaction = sdk.signer_api().sign(account_key_id, unsigned_transaction)?;
 
     // send the transaction
     if req.dry_run {

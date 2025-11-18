@@ -4,16 +4,12 @@
 use std::{collections::HashSet, fmt::Display};
 
 use tari_engine_types::{component::derive_component_address_from_public_key, ToByteType};
-use tari_ootle_common_types::{
-    optional::{IsNotFoundError, Optional},
-    SubstateRequirement,
-};
+use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
 use tari_ootle_wallet_sdk::{
     apis::accounts::{AccountsApi, AccountsApiError},
     models::{AccountWithAddress, DerivedKeyIndex, TransactionFinalizedEvent, WalletEvent},
-    network::{StatusResponseError, WalletNetworkInterface},
-    storage::WalletStore,
     WalletSdk,
+    WalletSdkSpec,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::models::ComponentAddress;
@@ -88,15 +84,10 @@ pub async fn wait_for_result_and_account(
     }
 }
 
-pub fn get_account_with_inputs<TStore, TNetworkInterface>(
+pub fn get_account_with_inputs<TSpec: WalletSdkSpec>(
     account: Option<&ComponentAddressOrName>,
-    sdk: &WalletSdk<TStore, TNetworkInterface>,
-) -> Result<(AccountWithAddress, HashSet<SubstateRequirement>), anyhow::Error>
-where
-    TStore: WalletStore,
-    TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
-{
+    sdk: &WalletSdk<TSpec>,
+) -> Result<(AccountWithAddress, HashSet<SubstateRequirement>), anyhow::Error> {
     let account = get_account_or_default(account, &sdk.accounts_api())?;
     let inputs = if account.is_confirmed_on_chain() {
         // Add all versioned account child addresses as inputs
@@ -109,41 +100,30 @@ where
     Ok((account, inputs))
 }
 
-pub fn get_account<TStore, TNetworkInterface>(
+pub fn get_account<TSpec: WalletSdkSpec>(
     account: &ComponentAddressOrName,
-    accounts_api: &AccountsApi<'_, TStore, TNetworkInterface>,
-) -> Result<AccountWithAddress, AccountsApiError>
-where
-    TStore: WalletStore,
-{
+    accounts_api: &AccountsApi<'_, TSpec>,
+) -> Result<AccountWithAddress, AccountsApiError> {
     match account {
         ComponentAddressOrName::ComponentAddress(address) => Ok(accounts_api.get_account_by_address(address)?),
         ComponentAddressOrName::Name(name) => Ok(accounts_api.get_account_by_name(name)?),
     }
 }
 
-pub(crate) fn get_account_by_key_index<TStore, TNetworkInterface>(
-    sdk: &WalletSdk<TStore, TNetworkInterface>,
+pub(crate) fn get_account_by_key_index<TSpec: WalletSdkSpec>(
+    sdk: &WalletSdk<TSpec>,
     key_index: DerivedKeyIndex,
-) -> Result<AccountWithAddress, AccountsApiError>
-where
-    TStore: WalletStore,
-    TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
-{
+) -> Result<AccountWithAddress, AccountsApiError> {
     let key = sdk.key_manager_api().derive_account_address(key_index)?;
     let address =
         derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &key.address.account_key().to_byte_type());
     sdk.accounts_api().get_account_by_address(&address)
 }
 
-pub fn get_account_or_default<TStore, TNetworkInterface>(
+pub fn get_account_or_default<TSpec: WalletSdkSpec>(
     account: Option<&ComponentAddressOrName>,
-    accounts_api: &AccountsApi<'_, TStore, TNetworkInterface>,
-) -> Result<AccountWithAddress, anyhow::Error>
-where
-    TStore: WalletStore,
-{
+    accounts_api: &AccountsApi<'_, TSpec>,
+) -> Result<AccountWithAddress, anyhow::Error> {
     let result;
     if let Some(a) = account {
         result = get_account(a, accounts_api)

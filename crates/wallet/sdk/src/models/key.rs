@@ -3,12 +3,15 @@
 
 use std::{fmt::Display, str::FromStr};
 
+use anyhow::anyhow;
+use rand::rngs::OsRng;
 use tari_bor::{Deserialize, Serialize};
 use tari_crypto::{
     keys::PublicKey as _,
-    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
 };
 use tari_ootle_address::RistrettoOotleAddress;
+use tari_ootle_common_types::Signable;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
@@ -53,12 +56,17 @@ impl AsRef<str> for KeyBranch {
     }
 }
 
+impl Display for KeyBranch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 #[derive(Clone)]
 pub struct WalletKeyRecord {
     pub(crate) key_id: KeyId,
     pub(crate) public_key: RistrettoPublicKey,
     pub(crate) secret_key: RistrettoSecretKey,
-    pub(crate) branch: KeyBranch,
     pub(crate) is_active: bool,
 }
 
@@ -73,10 +81,6 @@ impl WalletKeyRecord {
 
     pub fn public_key(&self) -> &RistrettoPublicKey {
         &self.public_key
-    }
-
-    pub fn branch(&self) -> KeyBranch {
-        self.branch
     }
 }
 
@@ -106,8 +110,7 @@ impl ImportedWalletKey {
 #[derive(Clone)]
 pub struct DerivedWalletKey {
     pub key: RistrettoSecretKey,
-    pub branch: KeyBranch,
-    pub key_index: DerivedKeyIndex,
+    pub derived_key_id: DerivedKeyId,
 }
 
 impl DerivedWalletKey {
@@ -115,15 +118,22 @@ impl DerivedWalletKey {
         RistrettoPublicKey::from_secret_key(&self.key)
     }
 
+    pub fn key_index(&self) -> DerivedKeyIndex {
+        self.derived_key_id.index
+    }
+
     pub fn as_key_id(&self) -> KeyId {
-        KeyId::derived(self.key_index)
+        self.derived_key_id.into()
+    }
+
+    pub fn derived_key_id(&self) -> &DerivedKeyId {
+        &self.derived_key_id
     }
 }
 
 #[derive(Clone)]
 pub struct WalletPublicKey {
     pub public_key: RistrettoPublicKey,
-    pub branch: KeyBranch,
     pub key_id: KeyId,
 }
 
@@ -141,7 +151,6 @@ impl From<DerivedWalletKey> for WalletPublicKey {
     fn from(derived: DerivedWalletKey) -> Self {
         Self {
             key_id: derived.as_key_id(),
-            branch: derived.branch,
             public_key: derived.to_public_key(),
         }
     }
@@ -164,6 +173,12 @@ impl WalletSecretKey {
 
     pub fn to_public_key(&self) -> RistrettoPublicKey {
         RistrettoPublicKey::from_secret_key(&self.secret)
+    }
+
+    pub fn sign<T: Signable<C>, C>(&self, context: C, item: &T) -> RistrettoSchnorr {
+        let message = item.as_signing_message(context);
+        RistrettoSchnorr::sign(&self.secret, message.as_ref(), &mut OsRng)
+            .expect("message is hashed internally into canonical form, so signing is infallible")
     }
 }
 
@@ -218,7 +233,7 @@ pub struct DerivedKeyPair {
 
 impl DerivedKeyPair {
     pub fn key_index(&self) -> DerivedKeyIndex {
-        self.derived_key.key_index
+        self.derived_key.derived_key_id.index
     }
 
     pub fn public_key(&self) -> &RistrettoPublicKey {
@@ -283,29 +298,42 @@ impl From<RistrettoPublicKeyBytes> for KeyIdOrPublicKey {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
-pub struct BranchAndKeyId {
+pub struct DerivedKeyId {
     pub branch: KeyBranch,
-    pub key_id: KeyId,
+    pub index: DerivedKeyIndex,
 }
 
-impl BranchAndKeyId {
-    pub fn new(branch: KeyBranch, key_id: KeyId) -> Self {
-        Self { branch, key_id }
+impl DerivedKeyId {
+    pub fn new(branch: KeyBranch, index: DerivedKeyIndex) -> Self {
+        Self { branch, index }
     }
 
-    pub fn for_account(key_id: KeyId) -> Self {
-        Self {
-            branch: KeyBranch::Account,
-            key_id,
+    pub fn index(&self) -> DerivedKeyIndex {
+        self.index
+    }
+
+    pub fn branch(&self) -> KeyBranch {
+        self.branch
+    }
+
+    pub fn as_key_id(&self) -> KeyId {
+        KeyId::derived(self.branch, self.index)
+    }
+}
+
+impl TryFrom<KeyId> for DerivedKeyId {
+    type Error = anyhow::Error;
+
+    fn try_from(value: KeyId) -> Result<Self, Self::Error> {
+        match value {
+            KeyId::Derived { key_branch, index } => Ok(DerivedKeyId {
+                branch: key_branch,
+                index,
+            }),
+            KeyId::Imported { .. } => Err(anyhow!("Cannot convert Imported KeyId to DerivedKeyId")),
         }
-    }
-}
-
-impl Display for BranchAndKeyId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.branch.as_str(), self.key_id)
     }
 }
 
@@ -313,14 +341,17 @@ impl Display for BranchAndKeyId {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub enum KeyId {
     /// Derived from the seed key
-    Derived { index: DerivedKeyIndex },
+    Derived {
+        key_branch: KeyBranch,
+        index: DerivedKeyIndex,
+    },
     /// Imported key
     Imported { local_key_id: ImportedKeyId },
 }
 
 impl KeyId {
-    pub fn derived(index: DerivedKeyIndex) -> Self {
-        Self::Derived { index }
+    pub fn derived(key_branch: KeyBranch, index: DerivedKeyIndex) -> Self {
+        Self::Derived { key_branch, index }
     }
 
     pub fn imported(local_key_id: ImportedKeyId) -> Self {
@@ -329,7 +360,7 @@ impl KeyId {
 
     pub fn derived_index(&self) -> Option<DerivedKeyIndex> {
         match self {
-            Self::Derived { index } => Some(*index),
+            Self::Derived { index, .. } => Some(*index),
             Self::Imported { .. } => None,
         }
     }
@@ -340,12 +371,28 @@ impl KeyId {
             Self::Derived { .. } => None,
         }
     }
+
+    pub fn derived_branch(&self) -> Option<KeyBranch> {
+        match self {
+            Self::Derived { key_branch, .. } => Some(*key_branch),
+            Self::Imported { .. } => None,
+        }
+    }
+}
+
+impl From<DerivedKeyId> for KeyId {
+    fn from(derived: DerivedKeyId) -> Self {
+        Self::Derived {
+            key_branch: derived.branch,
+            index: derived.index,
+        }
+    }
 }
 
 impl Display for KeyId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Derived { index } => write!(f, "Derived({index})"),
+            Self::Derived { key_branch, index } => write!(f, "Derived({key_branch},{index})"),
             Self::Imported {
                 local_key_id: local_import_id,
             } => write!(f, "Imported({local_import_id})"),

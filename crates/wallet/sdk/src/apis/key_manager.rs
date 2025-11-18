@@ -15,14 +15,14 @@ use tari_ootle_common_types::{
     Epoch,
     Network,
 };
-use tari_ootle_wallet_crypto::encryption::encrypt_with_password;
+use tari_ootle_wallet_crypto::encryption::{decrypt_with_password, encrypt_with_password, CipherError};
 use tari_transaction_components::key_manager::tari_key_manager::TariKeyManager;
 
 use crate::{
     apis::password_manager::{PasswordManagerApi, PasswordManagerApiError},
     key_managers::WalletKeyStore,
-    local_key_store::LocalKeyStore,
     models::{
+        DerivedKeyId,
         DerivedKeyIndex,
         DerivedKeyPair,
         DerivedWalletKey,
@@ -37,26 +37,33 @@ use crate::{
         WalletPublicKey,
         WalletSecretKey,
     },
-    storage::{CommittableStore, WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
+    spec::WalletSdkSpec,
+    storage::{
+        CommittableStore,
+        ReadableWalletStore,
+        WalletStorageError,
+        WalletStoreReader,
+        WalletStoreWriter,
+        WriteableWalletStore,
+    },
 };
 
 pub type WalletKeyManager = TariKeyManager<Blake2b<U64>>;
 
-#[derive(Clone)]
-pub struct KeyManagerApi<'a, TStore> {
+pub struct KeyManagerApi<'a, TSpec: WalletSdkSpec> {
     network: Network,
-    store: &'a TStore,
-    key_store: LocalKeyStore<'a, TStore>,
-    password_manager: PasswordManagerApi<'a, TStore>,
+    store: &'a TSpec::Store,
+    key_store: &'a TSpec::KeyStore,
+    password_manager: PasswordManagerApi<'a, TSpec::Store>,
     epoch_birthday: EpochBirthday,
 }
 
-impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
+impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
     pub(crate) fn new(
         network: Network,
-        store: &'a TStore,
-        key_store: LocalKeyStore<'a, TStore>,
-        password_manager: PasswordManagerApi<'a, TStore>,
+        store: &'a TSpec::Store,
+        key_store: &'a TSpec::KeyStore,
+        password_manager: PasswordManagerApi<'a, TSpec::Store>,
         epoch_birthday: EpochBirthday,
     ) -> Self {
         Self {
@@ -66,6 +73,10 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
             password_manager,
             epoch_birthday,
         }
+    }
+
+    pub(crate) fn key_store(&self) -> &'a TSpec::KeyStore {
+        self.key_store
     }
 
     pub fn get_all_derived_keys(&self, branch: KeyBranch) -> Result<Vec<WalletKeyRecord>, KeyManagerApiError> {
@@ -79,10 +90,9 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
                 .map_err(|e| KeyManagerApiError::KeyStoreError { source: e.into() })?;
             let pk = RistrettoPublicKey::from_secret_key(&key);
             keys.push(WalletKeyRecord {
-                key_id: KeyId::derived(index),
+                key_id: KeyId::derived(branch, index),
                 public_key: pk,
                 secret_key: key,
-                branch,
                 is_active: active,
             });
         }
@@ -90,11 +100,19 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
     }
 
     pub fn get_imported_key(&self, id: ImportedKeyId) -> Result<ImportedWalletKey, KeyManagerApiError> {
-        let key = self
-            .key_store
-            .get_imported_secret(id)
-            .map_err(|e| KeyManagerApiError::KeyStoreError { source: e.into() })?;
-        Ok(ImportedWalletKey { key, import_id: id })
+        let password = self.password_manager.get_cipher_seed_password()?;
+        let (_ty, encrypted) = self.store.with_read_tx(|tx| tx.key_manager_get_raw_imported_key(id))?;
+        let decrypted = decrypt_with_password(&encrypted, password.reveal())?;
+        let secret =
+            RistrettoSecretKey::from_canonical_bytes(&decrypted).map_err(|e| WalletStorageError::DecodingError {
+                operation: "get_imported_secret",
+                item: "imported secret key",
+                details: format!("Imported key at id {id} is non-canonical {e}"),
+            })?;
+        Ok(ImportedWalletKey {
+            key: secret,
+            import_id: id,
+        })
     }
 
     pub fn import_key(
@@ -116,43 +134,34 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         Ok(KeyId::imported(id))
     }
 
-    pub fn get_account_owner_key(&self, key_id: KeyId) -> Result<WalletSecretKey, KeyManagerApiError> {
-        self.get_key(KeyBranch::Account, key_id)
-    }
-
-    pub fn get_view_only_key(&self, key_id: KeyId) -> Result<WalletSecretKey, KeyManagerApiError> {
-        self.get_key(KeyBranch::ViewOnlyKey, key_id)
-    }
-
-    pub(crate) fn get_key(&self, branch: KeyBranch, key_id: KeyId) -> Result<WalletSecretKey, KeyManagerApiError> {
+    pub fn get_key(&self, key_id: KeyId) -> Result<WalletSecretKey, KeyManagerApiError> {
         match key_id {
             KeyId::Imported { local_key_id } => {
                 let imported_key = self.get_imported_key(local_key_id)?;
                 Ok(imported_key.into())
             },
-            KeyId::Derived { index } => {
-                let derived_key = self.derive_key(branch, index)?;
+            KeyId::Derived { key_branch, index } => {
+                let derived_key = self.derive_key(key_branch, index)?;
                 Ok(derived_key.into())
             },
         }
     }
 
-    pub fn get_public_key(&self, branch: KeyBranch, key_id: KeyId) -> Result<WalletPublicKey, KeyManagerApiError> {
+    pub fn get_public_key<T: Into<KeyId>>(&self, key_id: T) -> Result<WalletPublicKey, KeyManagerApiError> {
+        let key_id = key_id.into();
         match key_id {
             KeyId::Imported { local_key_id } => {
                 // TODO: could be implemented without fetching the secret key, if we stored the public key in the DB
                 let imported_key = self.get_imported_key(local_key_id)?;
                 Ok(WalletPublicKey {
                     public_key: imported_key.to_public_key(),
-                    branch,
                     key_id,
                 })
             },
-            KeyId::Derived { index } => {
-                let derived_key = self.derive_key(branch, index)?;
+            KeyId::Derived { key_branch, index } => {
+                let derived_key = self.derive_key(key_branch, index)?;
                 Ok(WalletPublicKey {
                     public_key: derived_key.to_public_key(),
-                    branch,
                     key_id,
                 })
             },
@@ -177,8 +186,7 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
             .map_err(|e| KeyManagerApiError::KeyStoreError { source: e.into() })?;
         Ok(DerivedWalletKey {
             key: secret,
-            branch,
-            key_index: index,
+            derived_key_id: DerivedKeyId { branch, index },
         })
     }
 
@@ -202,8 +210,8 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         &self,
         index: DerivedKeyIndex,
     ) -> Result<WalletOotleAddressWithKeyIds, KeyManagerApiError> {
-        let key = self.derive_account_key(index)?;
-        let view_only_key = self.derive_view_only_key(index)?;
+        let key = self.derive_key(KeyBranch::Account, index)?;
+        let view_only_key = self.derive_key(KeyBranch::ViewOnlyKey, index)?;
         Ok(WalletOotleAddressWithKeyIds {
             address: RistrettoOotleAddress {
                 network: self.network,
@@ -211,27 +219,14 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
                 account_key: RistrettoPublicKey::from_secret_key(&key.key),
                 pay_ref: None,
             },
-            view_only_key_id: key.as_key_id(),
-            owner_key_id: key.as_key_id(),
+            view_only_key_id: view_only_key.as_key_id(),
+            owner_key_id: (*key.derived_key_id()).into(),
         })
     }
 
     pub fn next_account_address(&self) -> Result<WalletOotleAddressWithKeyIds, KeyManagerApiError> {
         let key = self.next_key(KeyBranch::Account)?;
-        self.derive_account_address(key.key_index)
-    }
-
-    pub fn derive_view_only_key(&self, index: DerivedKeyIndex) -> Result<DerivedWalletKey, KeyManagerApiError> {
-        self.derive_key(KeyBranch::ViewOnlyKey, index)
-    }
-
-    pub fn derive_view_only_keypair(&self, index: u64) -> Result<DerivedKeyPair, KeyManagerApiError> {
-        let key = self.derive_view_only_key(index)?;
-        let public_key = RistrettoPublicKey::from_secret_key(&key.key);
-        Ok(DerivedKeyPair {
-            public_key,
-            derived_key: key,
-        })
+        self.derive_account_address(key.key_index())
     }
 
     pub fn derive_account_key_pair(&self, index: u64) -> Result<DerivedKeyPair, KeyManagerApiError> {
@@ -252,8 +247,8 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
     /// If the branch does not exist, it will be created with index 0 and the first key will be returned.
     /// TODO: if there is another active DB transaction this function will block until it can acquire it.
     pub fn next_key(&self, branch: KeyBranch) -> Result<DerivedWalletKey, KeyManagerApiError> {
-        let next_key_id = self.next_derived_key_index(branch)?;
-        let key = self.derive_key(branch, next_key_id)?;
+        let next_key_id = self.next_derived_key_id(branch)?;
+        let key = self.derive_key(branch, next_key_id.index())?;
         Ok(key)
     }
 
@@ -261,16 +256,15 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
     /// If the branch does not exist, it will be created with index 0 and the first key will be returned.
     /// TODO: if there is another active DB transaction this function will block until it can acquire it.
     pub fn next_public_key(&self, branch: KeyBranch) -> Result<WalletPublicKey, KeyManagerApiError> {
-        let next_key_id = self.next_derived_key_index(branch)?;
-        let key = self.derive_key(branch, next_key_id)?;
+        let next_key_id = self.next_derived_key_id(branch)?;
+        let key = self.derive_key(branch, next_key_id.index())?;
         Ok(WalletPublicKey {
             public_key: key.to_public_key(),
-            branch,
             key_id: key.as_key_id(),
         })
     }
 
-    pub fn next_derived_key_index(&self, branch: KeyBranch) -> Result<DerivedKeyIndex, KeyManagerApiError> {
+    pub fn next_derived_key_id(&self, branch: KeyBranch) -> Result<DerivedKeyId, KeyManagerApiError> {
         let mut tx = self.store.create_write_tx()?;
         let next_index = tx
             .key_manager_get_last_index(branch.as_str())
@@ -283,7 +277,10 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         }
         tx.key_manager_insert_or_ignore(branch.as_str(), next_index)?;
         tx.commit()?;
-        Ok(next_index)
+        Ok(DerivedKeyId {
+            branch,
+            index: next_index,
+        })
     }
 
     pub fn create_throwaway_nonce(&self) -> RistrettoSecretKey {
@@ -316,24 +313,10 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         self.derive_key(branch, key_index)
     }
 
-    pub fn get_key_or_active(
-        &self,
-        branch: KeyBranch,
-        maybe_key_id: Option<KeyId>,
-    ) -> Result<WalletPublicKey, KeyManagerApiError> {
-        match maybe_key_id {
-            Some(id) => Ok(self.get_public_key(branch, id)?),
-            None => {
-                let key = self.get_active_key(branch)?;
-                Ok(key.into())
-            },
-        }
-    }
-
     pub fn get_cipher_seed_birthday_epoch(&self) -> Result<Epoch, KeyManagerApiError> {
         let birthday = self
             .key_store
-            .cipher_seed_birthday()
+            .key_birthday()
             .map_err(|e| KeyManagerApiError::KeyStoreError { source: e.into() })?;
         let Some(birthday) = birthday else {
             return Ok(Epoch::zero());
@@ -343,6 +326,18 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         let epoch = self.epoch_birthday.calculate_epoch_rel_minotari(birthday);
 
         Ok(epoch)
+    }
+}
+
+impl<TSpec: WalletSdkSpec> Clone for KeyManagerApi<'_, TSpec> {
+    fn clone(&self) -> Self {
+        Self {
+            network: self.network,
+            store: self.store,
+            key_store: self.key_store,
+            password_manager: self.password_manager.clone(),
+            epoch_birthday: self.epoch_birthday,
+        }
     }
 }
 
@@ -360,6 +355,8 @@ pub enum KeyManagerApiError {
     PasswordManagerApiError(#[from] PasswordManagerApiError),
     #[error("Key manager is in read only mode")]
     ReadOnlyMode,
+    #[error("Cipher error: {0}")]
+    CipherError(#[from] CipherError),
 }
 
 impl IsNotFoundError for KeyManagerApiError {

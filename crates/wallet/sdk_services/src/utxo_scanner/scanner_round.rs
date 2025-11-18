@@ -7,13 +7,7 @@ use futures::StreamExt;
 use log::{debug, info, trace, warn};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::ConvertFromByteType;
-use tari_ootle_common_types::{
-    optional::{IsNotFoundError, Optional},
-    shard::Shard,
-    Network,
-    NumPreshards,
-    StateVersion,
-};
+use tari_ootle_common_types::{optional::Optional, shard::Shard, Network, NumPreshards, StateVersion};
 use tari_ootle_wallet_sdk::{
     models::{
         AccountWithAddress,
@@ -25,9 +19,11 @@ use tari_ootle_wallet_sdk::{
         WalletSecretKey,
         WalletUtxoUpdate,
     },
-    network::{StatusResponseError, UtxoUpdateStream, WalletNetworkInterface},
-    storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
+    network::{UtxoUpdateStream, WalletNetworkInterface},
+    storage::{ReadableWalletStore, WalletStorageError, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
+    NetworkInterfaceError,
     WalletSdk,
+    WalletSdkSpec,
 };
 use tari_template_lib::models::{ComponentAddress, ResourceAddress, UtxoAddress};
 
@@ -37,13 +33,13 @@ const LOG_TARGET: &str = "tari::ootle::wallet_services::scanner_round";
 // TODO: either fetch num preshards from the network or we should hardcode it to a single value for all apps
 const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
 
-pub struct UtxoScannerRound<'a, TStore, TNetworkInterface> {
+pub struct UtxoScannerRound<'a, TSpec: WalletSdkSpec> {
     network: Network,
     account: &'a AccountWithAddress,
     view_key: &'a WalletSecretKey,
     resource_address: &'a ResourceAddress,
 
-    sdk: &'a WalletSdk<TStore, TNetworkInterface>,
+    sdk: &'a WalletSdk<TSpec>,
     stats: UtxoScanRoundStats,
 
     shard_state_versions_to_set: HashMap<Shard, StateVersion>,
@@ -52,15 +48,12 @@ pub struct UtxoScannerRound<'a, TStore, TNetworkInterface> {
     notify: &'a Notify<WalletEvent>,
 }
 
-impl<'a, TStore, TNetworkInterface> UtxoScannerRound<'a, TStore, TNetworkInterface>
-where
-    TStore: WalletStore,
-    TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
+impl<'a, TSpec> UtxoScannerRound<'a, TSpec>
+where TSpec: WalletSdkSpec
 {
     pub fn new(
         network: Network,
-        sdk: &'a WalletSdk<TStore, TNetworkInterface>,
+        sdk: &'a WalletSdk<TSpec>,
         account: &'a AccountWithAddress,
         view_key: &'a WalletSecretKey,
         resource_address: &'a ResourceAddress,
@@ -141,7 +134,7 @@ where
 
     async fn process_stream(
         &mut self,
-        mut stream: UtxoUpdateStream<TNetworkInterface::Error>,
+        mut stream: UtxoUpdateStream<NetworkInterfaceError<TSpec>>,
     ) -> Result<bool, StealthScannerApiError> {
         let mut num_received = 0usize;
         let mut sos: Option<StartOfShard> = None;
@@ -301,7 +294,7 @@ where
     }
 
     fn spend(
-        tx: &mut TStore::WriteTransaction<'_>,
+        tx: &mut <TSpec::Store as WriteableWalletStore>::WriteTransaction<'_>,
         resource_address: &ResourceAddress,
         spent: &UtxoSpent,
     ) -> Result<bool, WalletStorageError> {

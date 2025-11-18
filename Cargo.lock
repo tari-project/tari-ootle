@@ -11433,6 +11433,7 @@ dependencies = [
  "keyring",
  "log",
  "passwords",
+ "rand 0.8.5",
  "serde",
  "tari_bor",
  "tari_common_types",

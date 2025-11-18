@@ -29,38 +29,35 @@ use crate::{
         transaction::{TransactionApi, TransactionApiError},
     },
     models::{ConfidentialOutputModel, KeyBranch, OutputStatus, WalletLockId},
-    network::{StatusResponseError, WalletNetworkInterface},
-    storage::{WalletStorageError, WalletStore},
+    spec::WalletSdkSpec,
+    storage::WalletStorageError,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_sdk::apis::confidential_transfers";
 
-pub struct ConfidentialTransferApi<'a, TStore, TNetworkInterface> {
-    key_manager_api: KeyManagerApi<'a, TStore>,
-    locks_api: LocksApi<'a, TStore>,
-    accounts_api: AccountsApi<'a, TStore, TNetworkInterface>,
-    confidential_outputs_api: ConfidentialOutputsApi<'a, TStore>,
-    transaction_api: TransactionApi<'a, TStore, TNetworkInterface>,
-    substate_api: SubstatesApi<'a, TStore, TNetworkInterface>,
+pub struct ConfidentialTransferApi<'a, TSpec: WalletSdkSpec> {
+    key_manager_api: KeyManagerApi<'a, TSpec>,
+    locks_api: LocksApi<'a, TSpec::Store>,
+    accounts_api: AccountsApi<'a, TSpec>,
+    confidential_outputs_api: ConfidentialOutputsApi<'a, TSpec>,
+    transaction_api: TransactionApi<'a, TSpec::Store, TSpec::NetworkInterface>,
+    substate_api: SubstatesApi<'a, TSpec::Store, TSpec::NetworkInterface>,
     crypto_api: ConfidentialCryptoApi,
-    config_api: ConfigApi<'a, TStore>,
+    config_api: ConfigApi<'a, TSpec::Store>,
 }
 
-impl<'a, TStore, TNetworkInterface> ConfidentialTransferApi<'a, TStore, TNetworkInterface>
-where
-    TStore: WalletStore,
-    TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
+impl<'a, TSpec: WalletSdkSpec> ConfidentialTransferApi<'a, TSpec>
+where TSpec: WalletSdkSpec
 {
     pub fn new(
-        key_manager_api: KeyManagerApi<'a, TStore>,
-        accounts_api: AccountsApi<'a, TStore, TNetworkInterface>,
-        locks_api: LocksApi<'a, TStore>,
-        confidential_outputs_api: ConfidentialOutputsApi<'a, TStore>,
-        substate_api: SubstatesApi<'a, TStore, TNetworkInterface>,
-        transaction_api: TransactionApi<'a, TStore, TNetworkInterface>,
+        key_manager_api: KeyManagerApi<'a, TSpec>,
+        accounts_api: AccountsApi<'a, TSpec>,
+        locks_api: LocksApi<'a, TSpec::Store>,
+        confidential_outputs_api: ConfidentialOutputsApi<'a, TSpec>,
+        substate_api: SubstatesApi<'a, TSpec::Store, TSpec::NetworkInterface>,
+        transaction_api: TransactionApi<'a, TSpec::Store, TSpec::NetworkInterface>,
         crypto_api: ConfidentialCryptoApi,
-        config_api: ConfigApi<'a, TStore>,
+        config_api: ConfigApi<'a, TSpec::Store>,
     ) -> Self {
         Self {
             key_manager_api,
@@ -275,7 +272,7 @@ where
         // Reserve and lock input funds for fees
         let max_fee = params.max_fee;
 
-        let account_key = self.key_manager_api.get_account_owner_key(account_owner_key_id)?;
+        let account_key = self.key_manager_api.get_key(account_owner_key_id)?;
         let account_public_key = PublicKey::from_secret_key(&account_key.secret);
 
         // Reserve and lock input funds

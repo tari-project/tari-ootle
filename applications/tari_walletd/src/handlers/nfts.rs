@@ -13,7 +13,7 @@ use tari_engine_types::{
     ToByteType,
 };
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
-use tari_ootle_wallet_sdk::{apis::substate::ValidatorScanResult, models::KeyBranch};
+use tari_ootle_wallet_sdk::apis::substate::ValidatorScanResult;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS},
@@ -121,9 +121,7 @@ pub async fn handle_mint_faucet(
         .add_input(NFT_FAUCET_RESOURCE_ADDRESS)
         .build();
 
-    let transaction = sdk
-        .local_signer_api()
-        .sign(KeyBranch::Account, account_owner_key_id, transaction)?;
+    let transaction = sdk.signer_api().sign(account_owner_key_id, transaction)?;
 
     let mut events = context.notifier().subscribe();
     let tx_id = context.transaction_service().submit_transaction(transaction).await?;
@@ -293,9 +291,7 @@ pub async fn handle_transfer(
             .call_method(target_account_address, "deposit", args![Workspace(format!("b-{i}"))]);
     }
 
-    let fee_owner_key = sdk
-        .key_manager_api()
-        .get_public_key(KeyBranch::Account, fee_payer_key_id)?;
+    let fee_owner_key = sdk.key_manager_api().get_public_key(fee_payer_key_id)?;
 
     let transaction = builder
         .with_dry_run(req.dry_run)
@@ -304,8 +300,7 @@ pub async fn handle_transfer(
         // Seal signer is the fee payer account
         .with_authorized_seal_signer()
         .map(|builder| {
-            sdk.local_signer_api().sign_with_context(
-                KeyBranch::Account,
+            sdk.signer_api().sign_with_context(
                 account_owner_key_id,
                 &fee_owner_key.public_key().to_byte_type(),
                 builder,
@@ -313,9 +308,7 @@ pub async fn handle_transfer(
         })?
         .build();
 
-    let transaction = sdk
-        .local_signer_api()
-        .sign(KeyBranch::Account, account_owner_key_id, transaction)?;
+    let transaction = sdk.signer_api().sign(account_owner_key_id, transaction)?;
 
     // if dry run, we can return the result immediately
     if req.dry_run {

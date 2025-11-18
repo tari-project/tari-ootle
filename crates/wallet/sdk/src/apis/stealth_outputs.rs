@@ -57,24 +57,32 @@ use crate::{
         StealthOutputModel,
         WalletLockId,
     },
-    storage::{CommittableStore, WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
+    storage::{
+        CommittableStore,
+        ReadableWalletStore,
+        WalletStorageError,
+        WalletStoreReader,
+        WalletStoreWriter,
+        WriteableWalletStore,
+    },
+    WalletSdkSpec,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet::apis::stealth_outputs";
 
-pub struct StealthOutputsApi<'a, TStore> {
-    store: &'a TStore,
-    key_manager_api: KeyManagerApi<'a, TStore>,
+pub struct StealthOutputsApi<'a, TSpec: WalletSdkSpec> {
+    store: &'a TSpec::Store,
+    key_manager_api: KeyManagerApi<'a, TSpec>,
     crypto_api: StealthCryptoApi,
-    config_api: ConfigApi<'a, TStore>,
+    config_api: ConfigApi<'a, TSpec::Store>,
 }
 
-impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
+impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
     pub fn new(
-        store: &'a TStore,
-        key_manager_api: KeyManagerApi<'a, TStore>,
+        store: &'a TSpec::Store,
+        key_manager_api: KeyManagerApi<'a, TSpec>,
         crypto_api: StealthCryptoApi,
-        config_api: ConfigApi<'a, TStore>,
+        config_api: ConfigApi<'a, TSpec::Store>,
     ) -> Self {
         Self {
             store,
@@ -144,7 +152,7 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
 
     fn lock_outputs_internal(
         &self,
-        tx: &mut TStore::WriteTransaction<'_>,
+        tx: &mut <TSpec::Store as WriteableWalletStore>::WriteTransaction<'_>,
         account_address: &ComponentAddress,
         resource_address: &ResourceAddress,
         amount: Amount,
@@ -247,14 +255,13 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
 
     fn resolve_output_masks_for_spending(
         &self,
-        spend_key_branch: KeyBranch,
         owner_key_id: KeyId,
         view_only_key_id: KeyId,
         inputs: &[InputSpendData],
     ) -> Result<Vec<UnblindedInputToSpend>, StealthOutputsApiError> {
         let network = self.config_api.get_network()?;
 
-        let owner_key_part = self.key_manager_api.get_key(spend_key_branch, owner_key_id)?;
+        let owner_key_part = self.key_manager_api.get_key(owner_key_id)?;
         let mut inputs_with_masks = Vec::with_capacity(inputs.len());
         for input in inputs {
             // Derive the decryption key from the DHKE(sender's public nonce, encryption secret key);
@@ -271,7 +278,6 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
             let decrypted = self.decrypt_value_and_mask(
                 &input.encrypted_data,
                 &input.commitment,
-                KeyBranch::ViewOnlyKey,
                 view_only_key_id,
                 &nonce,
                 // We don't need to decrypt the memo to spend the output
@@ -690,12 +696,8 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
     where
         I: IntoIterator<Item = StealthOutputToCreate<'a>>,
     {
-        let unblinded_inputs = self.resolve_output_masks_for_spending(
-            params.spend_key_branch,
-            params.spend_key_id,
-            params.view_only_key_id,
-            params.inputs,
-        )?;
+        let unblinded_inputs =
+            self.resolve_output_masks_for_spending(params.spend_key_id, params.view_only_key_id, params.inputs)?;
         let outputs = params
             .outputs
             .into_iter()
@@ -737,12 +739,11 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
         &self,
         output_encrypted_value: &EncryptedData,
         output_commitment: &PedersenCommitmentBytes,
-        key_branch: KeyBranch,
         claim_secret_key_id: KeyId,
         reciprocal_public_key: &RistrettoPublicKey,
         skip_memo: bool,
     ) -> Result<DecryptedData, StealthOutputsApiError> {
-        let key = self.key_manager_api.get_key(key_branch, claim_secret_key_id)?;
+        let key = self.key_manager_api.get_key(claim_secret_key_id)?;
         let decrypted = self.crypto_api.decrypt_value_and_mask(
             output_encrypted_value,
             output_commitment,
@@ -770,7 +771,6 @@ impl<'a, TStore: WalletStore> StealthOutputsApi<'a, TStore> {
 }
 
 pub struct TransferStatementParams<'a, I> {
-    pub spend_key_branch: KeyBranch,
     pub spend_key_id: KeyId,
     pub view_only_key_id: KeyId,
     pub resource_address: &'a ResourceAddress,

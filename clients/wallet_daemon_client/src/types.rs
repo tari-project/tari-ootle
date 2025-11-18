@@ -47,7 +47,6 @@ use tari_ootle_wallet_sdk::{
     models::{
         Account,
         AuthoredTemplateModel,
-        BranchAndKeyId,
         DerivedKeyIndex,
         KeyBranch,
         KeyId,
@@ -119,8 +118,8 @@ pub struct CallInstructionRequest {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct TransactionSubmitRequest {
     pub transaction: UnsignedTransaction,
-    pub seal_signer: BranchAndKeyId,
-    pub other_signers: Vec<BranchAndKeyId>,
+    pub seal_signer: KeyId,
+    pub other_signers: Vec<KeyId>,
     /// Attempt to infer inputs and their dependencies from instructions. If false, the provided transaction must
     /// contain the required inputs.
     pub detect_inputs: bool,
@@ -1110,7 +1109,7 @@ impl InputSelection {
 pub struct AccountsCreateStealthTransferStatementResponse {
     pub statements: Vec<StealthTransferStatement>,
     pub lock_id: WalletLockId,
-    pub signing_keys: Vec<BranchAndKeyId>,
+    pub signing_keys: Vec<KeyId>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

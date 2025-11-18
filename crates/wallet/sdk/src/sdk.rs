@@ -1,6 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::{fmt::Debug, sync::Arc};
+
 use log::{info, warn};
 use tari_common_types::seeds::{
     cipher_seed::CipherSeed,
@@ -9,12 +11,7 @@ use tari_common_types::seeds::{
     seed_words::SeedWords,
 };
 use tari_crypto::tari_utilities::SafePassword;
-use tari_ootle_common_types::{
-    optional::{IsNotFoundError, Optional},
-    Epoch,
-    Network,
-    NetworkParseError,
-};
+use tari_ootle_common_types::{optional::Optional, Epoch, Network, NetworkParseError};
 use zeroize::Zeroizing;
 
 use crate::{
@@ -40,16 +37,13 @@ use crate::{
         viewable_balance::ViewableBalanceApi,
     },
     cipher_seed::{CipherSeedRestore, WalletCipherSeed},
-    key_managers::local::LocalKeyManager,
     local_key_store::LocalKeyStore,
     models::EpochBirthday,
-    network::{StatusResponseError, WalletNetworkInterface},
-    storage::{WalletStorageError, WalletStore},
+    spec::WalletSdkSpec,
+    storage::WalletStorageError,
 };
 
 const LOG_TARGET: &str = "wallet::sdk::api";
-
-pub type LocalSignerApi<'a, TStore> = SignerApi<LocalKeyManager<LocalKeyStore<'a, TStore>>>;
 
 #[derive(Debug, Clone)]
 pub struct WalletSdkConfig {
@@ -58,61 +52,279 @@ pub struct WalletSdkConfig {
     pub override_keyring_password: Option<SafePassword>,
 }
 
-#[derive(Debug, Clone)]
-pub struct WalletSdk<TStore, TNetworkInterface> {
-    store: TStore,
-    network_interface: TNetworkInterface,
+pub struct WalletSdk<TSpec: WalletSdkSpec> {
+    store: TSpec::Store,
+    network_interface: TSpec::NetworkInterface,
+    key_store: TSpec::KeyStore,
     config: WalletSdkConfig,
-    loaded_cipher_seed: WalletCipherSeed,
     epoch_birthday: EpochBirthday,
 }
 
-impl<TStore, TNetworkInterface> WalletSdk<TStore, TNetworkInterface>
-where
-    TStore: WalletStore,
-    TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
-{
+impl<TSpec: WalletSdkSpec> WalletSdk<TSpec> {
     pub fn initialize(
-        store: TStore,
-        indexer: TNetworkInterface,
+        store: TSpec::Store,
+        indexer: TSpec::NetworkInterface,
+        key_store: TSpec::KeyStore,
         config: WalletSdkConfig,
         epoch_birthday: EpochBirthday,
-    ) -> Result<WalletSdk<TStore, TNetworkInterface>, WalletSdkError> {
-        // initialize network
-        if let Some(network) = Self::get_store_network(&store)? {
-            if config.network != network {
-                return Err(WalletSdkError::InvariantError {
-                    details: format!(
-                        "Network mismatch. Config network is {:?} but database network is {:?}",
-                        config.network, network
-                    ),
-                });
-            }
-        } else {
-            ConfigApi::new(&store).set(ConfigKey::Network, config.network.as_key_str())?;
-        }
+    ) -> Result<Self, WalletSdkError> {
+        Self::check_or_set_store_network(&store, config.network)?;
 
         Ok(Self {
             store,
             network_interface: indexer,
+            key_store,
             config,
-            loaded_cipher_seed: WalletCipherSeed::None,
             epoch_birthday,
         })
     }
 
-    pub fn get_store_network(store: &TStore) -> Result<Option<Network>, WalletSdkError> {
+    pub fn get_store_network(store: &TSpec::Store) -> Result<Option<Network>, WalletSdkError> {
         let config_api = ConfigApi::new(store);
         let network = config_api.get(ConfigKey::Network).optional()?;
         Ok(network)
+    }
+
+    fn check_or_set_store_network(store: &TSpec::Store, config_network: Network) -> Result<(), WalletSdkError> {
+        if let Some(network) = Self::get_store_network(store)? {
+            if config_network != network {
+                return Err(WalletSdkError::InvariantError {
+                    details: format!(
+                        "Network mismatch. Config network is {:?} but database network is {:?}",
+                        config_network, network
+                    ),
+                });
+            }
+        } else {
+            ConfigApi::new(&store).set(ConfigKey::Network, config_network.as_key_str())?;
+        }
+        Ok(())
+    }
+
+    pub fn store(&self) -> &TSpec::Store {
+        &self.store
+    }
+
+    pub fn config_api(&self) -> ConfigApi<'_, TSpec::Store> {
+        ConfigApi::new(&self.store)
+    }
+
+    pub fn sdk_config(&self) -> &WalletSdkConfig {
+        &self.config
+    }
+
+    pub fn network(&self) -> Network {
+        self.config.network
+    }
+
+    pub fn get_network_interface(&self) -> &TSpec::NetworkInterface {
+        &self.network_interface
+    }
+
+    pub fn locks_api(&self) -> LocksApi<'_, TSpec::Store> {
+        LocksApi::new(&self.store)
+    }
+
+    pub fn event_api(&self) -> EventsApi<'_, TSpec::Store> {
+        EventsApi::new(&self.store)
+    }
+
+    /// Returns the KeyManager API for the wallet.
+    /// This key manager uses the local key store where key material is encrypted in the local database.
+    /// The cipher seed must have been initialized before calling this method.
+    pub fn key_manager_api(&self) -> KeyManagerApi<'_, TSpec> {
+        let network = self.config.network;
+        KeyManagerApi::new(
+            network,
+            &self.store,
+            &self.key_store,
+            self.password_manager_api(),
+            self.epoch_birthday,
+        )
+    }
+
+    /// Returns the Signer API for the wallet if the cipher seed has been initialized. This signer uses the local key
+    /// store where key material is kept in the local database.
+    pub fn signer_api(&self) -> SignerApi<'_, TSpec> {
+        SignerApi::new(self.key_manager_api())
+    }
+
+    pub(crate) fn password_manager_api(&self) -> PasswordManagerApi<'_, TSpec::Store> {
+        PasswordManagerApi::new(self.config_api(), &self.config)
+    }
+
+    pub fn transaction_api(&self) -> TransactionApi<'_, TSpec::Store, TSpec::NetworkInterface> {
+        TransactionApi::new(&self.store, &self.network_interface)
+    }
+
+    pub fn substate_api(&self) -> SubstatesApi<'_, TSpec::Store, TSpec::NetworkInterface> {
+        SubstatesApi::new(&self.store, &self.network_interface)
+    }
+
+    pub fn accounts_api(&self) -> AccountsApi<'_, TSpec> {
+        AccountsApi::new(
+            self.config.network,
+            &self.store,
+            self.substate_api(),
+            self.key_manager_api(),
+            self.epoch_birthday,
+        )
+    }
+
+    pub fn resources_api(&self) -> ResourcesApi<'_, TSpec::Store> {
+        ResourcesApi::new(&self.store)
+    }
+
+    pub fn confidential_crypto_api(&self) -> ConfidentialCryptoApi {
+        ConfidentialCryptoApi::new()
+    }
+
+    pub fn confidential_outputs_api(&self) -> ConfidentialOutputsApi<'_, TSpec> {
+        ConfidentialOutputsApi::new(&self.store, self.key_manager_api(), self.confidential_crypto_api())
+    }
+
+    pub fn confidential_transfer_api(&self) -> ConfidentialTransferApi<'_, TSpec> {
+        ConfidentialTransferApi::new(
+            self.key_manager_api(),
+            self.accounts_api(),
+            self.locks_api(),
+            self.confidential_outputs_api(),
+            self.substate_api(),
+            self.transaction_api(),
+            self.confidential_crypto_api(),
+            self.config_api(),
+        )
+    }
+
+    pub fn stealth_crypto_api(&self) -> StealthCryptoApi {
+        StealthCryptoApi::new()
+    }
+
+    pub fn stealth_transfer_api(&self) -> StealthTransferApi<'_, TSpec> {
+        StealthTransferApi::new(
+            self.accounts_api(),
+            self.stealth_outputs_api(),
+            self.locks_api(),
+            self.substate_api(),
+            self.key_manager_api(),
+            self.config_api(),
+        )
+    }
+
+    pub fn stealth_outputs_api(&self) -> StealthOutputsApi<'_, TSpec> {
+        StealthOutputsApi::new(
+            self.store(),
+            self.key_manager_api(),
+            self.stealth_crypto_api(),
+            self.config_api(),
+        )
+    }
+
+    pub fn non_fungible_api(&self) -> NonFungibleTokensApi<'_, TSpec::Store> {
+        NonFungibleTokensApi::new(&self.store)
+    }
+
+    pub fn template_api(&self) -> TemplateApi<'_, TSpec::Store> {
+        TemplateApi::new(&self.store)
+    }
+
+    pub fn viewable_balance_api(&self) -> ViewableBalanceApi {
+        ViewableBalanceApi
+    }
+
+    pub fn calculate_birthday_epoch(&self) -> Epoch {
+        self.epoch_birthday.calculate_current_epoch()
+    }
+}
+
+impl<TSpec> WalletSdk<TSpec>
+where TSpec: WalletSdkSpec<KeyStore = LocalKeyStore>
+{
+    pub fn initialize_with_local_key_store(
+        store: TSpec::Store,
+        indexer: TSpec::NetworkInterface,
+        config: WalletSdkConfig,
+        epoch_birthday: EpochBirthday,
+    ) -> Result<Self, WalletSdkError> {
+        Self::check_or_set_store_network(&store, config.network)?;
+
+        let cipher_seed = Self::load_cipher_seed(
+            ConfigApi::new(&store),
+            PasswordManagerApi::new(ConfigApi::new(&store), &config),
+        )?
+        .map(Arc::new)
+        .map(WalletCipherSeed::CipherSeed)
+        .unwrap_or(WalletCipherSeed::None);
+
+        Ok(Self {
+            store,
+            network_interface: indexer,
+            key_store: LocalKeyStore::new(cipher_seed),
+            config,
+            epoch_birthday,
+        })
+    }
+
+    fn load_cipher_seed(
+        config_api: ConfigApi<'_, TSpec::Store>,
+        password_manager_api: PasswordManagerApi<'_, TSpec::Store>,
+    ) -> Result<Option<CipherSeed>, WalletSdkError> {
+        let Some(cipher_seed_encrypted) = config_api
+            .get::<Zeroizing<Box<[u8]>>>(ConfigKey::CipherSeed)
+            .optional()?
+        else {
+            // Cipher seed not found in DB. This is expected if the wallet has not been initialized yet.
+            return Ok(None);
+        };
+        let password = password_manager_api.get_cipher_seed_password()?;
+        let cipher_seed = CipherSeed::from_enciphered_bytes(&cipher_seed_encrypted, Some(password))?;
+        Ok(Some(cipher_seed))
+    }
+
+    fn create_cipher_seed(&mut self) -> Result<(), WalletSdkError> {
+        let password = self.password_manager_api().create_cipher_seed_password()?;
+        let cipher_seed = CipherSeed::new();
+        let encrypted_cipher_seed = cipher_seed.encipher(Some(password))?;
+        self.config_api().set(ConfigKey::CipherSeed, &encrypted_cipher_seed)?;
+        self.key_store.set_cipher_seed(cipher_seed);
+        Ok(())
+    }
+
+    /// Restores cipher seed from seed words, encrypts with a new random password (and saves to OS keychain)
+    /// and replaces current cipher seed in the DB (to let every component use the new seed).
+    fn restore_cipher_seed_from_seed_words(&mut self, seed_words: &SeedWords) -> Result<(), WalletSdkError> {
+        let password = self.password_manager_api().create_cipher_seed_password()?;
+        let cipher_seed = CipherSeed::from_mnemonic(seed_words, None)?;
+        let encrypted_cipher_seed = cipher_seed.encipher(Some(password))?;
+        self.config_api().set(ConfigKey::CipherSeed, &encrypted_cipher_seed)?;
+        self.key_store.set_cipher_seed(cipher_seed);
+        Ok(())
+    }
+
+    /// Retrieve the seed words from current cipher seed stored.
+    pub fn load_seed_words(&mut self) -> Result<Option<SeedWords>, WalletSdkError> {
+        let seed_words = self
+            .key_store
+            .cipher_seed()
+            .map(|s| s.to_mnemonic(MnemonicLanguage::English, None))
+            .transpose()?;
+        Ok(seed_words)
+    }
+
+    pub fn is_recovery_needed(&self) -> Result<bool, WalletSdkError> {
+        let recovery_needed = self
+            .config_api()
+            .get::<bool>(ConfigKey::RecoveryNeeded)
+            .optional()?
+            .unwrap_or(false);
+        Ok(recovery_needed)
     }
 
     /// Initializes the cipher seed for the wallet. Either creating a new cipher seed or recovering it from the provided
     /// seed words if provided and necessary. Returns true if the cipher seed was recovered from the seed words,
     /// otherwise false.
     pub fn initialize_cipher_seed(&mut self, restore: CipherSeedRestore<'_>) -> Result<bool, WalletSdkError> {
-        match self.load_cipher_seed()? {
+        match self.key_store.cipher_seed() {
             Some(_) => {
                 if !restore.is_create_new() {
                     warn!(
@@ -141,190 +353,32 @@ where
             },
         }
     }
+}
 
-    pub fn store(&self) -> &TStore {
-        &self.store
-    }
-
-    pub fn config_api(&self) -> ConfigApi<'_, TStore> {
-        ConfigApi::new(&self.store)
-    }
-
-    pub fn sdk_config(&self) -> &WalletSdkConfig {
-        &self.config
-    }
-
-    pub fn network(&self) -> Network {
-        self.config.network
-    }
-
-    pub fn get_network_interface(&self) -> &TNetworkInterface {
-        &self.network_interface
-    }
-
-    pub fn locks_api(&self) -> LocksApi<'_, TStore> {
-        LocksApi::new(&self.store)
-    }
-
-    pub fn event_api(&self) -> EventsApi<'_, TStore> {
-        EventsApi::new(&self.store)
-    }
-
-    /// Returns the KeyManager API for the wallet.
-    pub fn key_manager_api(&self) -> KeyManagerApi<'_, TStore> {
-        let network = self.config.network;
-        KeyManagerApi::new(
-            network,
-            &self.store,
-            LocalKeyStore::new(&self.loaded_cipher_seed, self.password_manager_api(), &self.store),
-            self.password_manager_api(),
-            self.epoch_birthday,
-        )
-    }
-
-    /// Returns the Signer API for the wallet if the cipher seed has been initialized. This signer uses the local key
-    /// store where key material is kept in the local database.
-    pub fn local_signer_api(&self) -> LocalSignerApi<'_, TStore> {
-        let store = LocalKeyStore::new(&self.loaded_cipher_seed, self.password_manager_api(), &self.store);
-        let backend = LocalKeyManager::new(store);
-        SignerApi::new(backend)
-    }
-
-    pub(crate) fn password_manager_api(&self) -> PasswordManagerApi<'_, TStore> {
-        PasswordManagerApi::new(self.config_api(), &self.config)
-    }
-
-    pub fn transaction_api(&self) -> TransactionApi<'_, TStore, TNetworkInterface> {
-        TransactionApi::new(&self.store, &self.network_interface)
-    }
-
-    pub fn substate_api(&self) -> SubstatesApi<'_, TStore, TNetworkInterface> {
-        SubstatesApi::new(&self.store, &self.network_interface)
-    }
-
-    pub fn accounts_api(&self) -> AccountsApi<'_, TStore, TNetworkInterface> {
-        AccountsApi::new(
-            self.config.network,
-            &self.store,
-            self.substate_api(),
-            self.key_manager_api(),
-            self.epoch_birthday,
-        )
-    }
-
-    pub fn resources_api(&self) -> ResourcesApi<'_, TStore> {
-        ResourcesApi::new(&self.store)
-    }
-
-    pub fn confidential_crypto_api(&self) -> ConfidentialCryptoApi {
-        ConfidentialCryptoApi::new()
-    }
-
-    pub fn confidential_outputs_api(&self) -> ConfidentialOutputsApi<'_, TStore> {
-        ConfidentialOutputsApi::new(&self.store, self.key_manager_api(), self.confidential_crypto_api())
-    }
-
-    pub fn confidential_transfer_api(&self) -> ConfidentialTransferApi<'_, TStore, TNetworkInterface> {
-        ConfidentialTransferApi::new(
-            self.key_manager_api(),
-            self.accounts_api(),
-            self.locks_api(),
-            self.confidential_outputs_api(),
-            self.substate_api(),
-            self.transaction_api(),
-            self.confidential_crypto_api(),
-            self.config_api(),
-        )
-    }
-
-    pub fn stealth_crypto_api(&self) -> StealthCryptoApi {
-        StealthCryptoApi::new()
-    }
-
-    pub fn stealth_transfer_api(&self) -> StealthTransferApi<'_, TStore, TNetworkInterface> {
-        StealthTransferApi::new(
-            self.accounts_api(),
-            self.stealth_outputs_api(),
-            self.locks_api(),
-            self.substate_api(),
-            self.key_manager_api(),
-            self.config_api(),
-        )
-    }
-
-    pub fn stealth_outputs_api(&self) -> StealthOutputsApi<'_, TStore> {
-        StealthOutputsApi::new(
-            self.store(),
-            self.key_manager_api(),
-            self.stealth_crypto_api(),
-            self.config_api(),
-        )
-    }
-
-    pub fn non_fungible_api(&self) -> NonFungibleTokensApi<'_, TStore> {
-        NonFungibleTokensApi::new(&self.store)
-    }
-
-    pub fn template_api(&self) -> TemplateApi<'_, TStore> {
-        TemplateApi::new(&self.store)
-    }
-
-    pub fn viewable_balance_api(&self) -> ViewableBalanceApi {
-        ViewableBalanceApi
-    }
-
-    pub fn calculate_birthday_epoch(&self) -> Epoch {
-        self.epoch_birthday.calculate_current_epoch()
-    }
-
-    /// Tries to get encrypted cipher seed from DB and decrypts it using OS keyring if possible.
-    fn load_cipher_seed(&mut self) -> Result<Option<&CipherSeed>, WalletSdkError> {
-        // Workaround for borrow checker limitation as described in https://blog.polybdenum.com/2024/12/21/four-limitations-of-rust-s-borrow-checker.html
-        if self.loaded_cipher_seed.cipher_seed().is_some() {
-            return Ok(Some(self.loaded_cipher_seed.cipher_seed().expect("checked above")));
+impl<TSpec> Clone for WalletSdk<TSpec>
+where
+    TSpec: WalletSdkSpec,
+    TSpec::Store: Clone,
+    TSpec::NetworkInterface: Clone,
+    TSpec::KeyStore: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            store: self.store.clone(),
+            network_interface: self.network_interface.clone(),
+            key_store: self.key_store.clone(),
+            config: self.config.clone(),
+            epoch_birthday: self.epoch_birthday,
         }
-
-        let Some(cipher_seed_encrypted) = self
-            .config_api()
-            .get::<Zeroizing<Vec<u8>>>(ConfigKey::CipherSeed)
-            .optional()?
-        else {
-            // Cipher seed not found in DB. This is expected if the wallet has not been initialized yet.
-            return Ok(None);
-        };
-        let password = self.password_manager_api().get_cipher_seed_password()?;
-        let cipher_seed = CipherSeed::from_enciphered_bytes(&cipher_seed_encrypted, Some(password))?;
-        self.loaded_cipher_seed = cipher_seed.into();
-        Ok(self.loaded_cipher_seed.cipher_seed())
     }
+}
 
-    fn create_cipher_seed(&mut self) -> Result<(), WalletSdkError> {
-        let password = self.password_manager_api().create_cipher_seed_password()?;
-        let cipher_seed = CipherSeed::new();
-        let encrypted_cipher_seed = cipher_seed.encipher(Some(password))?;
-        self.config_api().set(ConfigKey::CipherSeed, &encrypted_cipher_seed)?;
-        self.loaded_cipher_seed = cipher_seed.into();
-        Ok(())
-    }
-
-    /// Restores cipher seed from seed words, encrypts with a new random password (and saves to OS keychain)
-    /// and replaces current cipher seed in the DB (to let every component use the new seed).
-    fn restore_cipher_seed_from_seed_words(&mut self, seed_words: &SeedWords) -> Result<(), WalletSdkError> {
-        let password = self.password_manager_api().create_cipher_seed_password()?;
-        let cipher_seed = CipherSeed::from_mnemonic(seed_words, None)?;
-        let encrypted_cipher_seed = cipher_seed.encipher(Some(password))?;
-        self.config_api().set(ConfigKey::CipherSeed, &encrypted_cipher_seed)?;
-        self.loaded_cipher_seed = cipher_seed.into();
-        Ok(())
-    }
-
-    /// Retrieve the seed words from current cipher seed stored.
-    pub fn load_seed_words(&mut self) -> Result<Option<SeedWords>, WalletSdkError> {
-        let seed_words = self
-            .load_cipher_seed()?
-            .map(|s| s.to_mnemonic(MnemonicLanguage::English, None))
-            .transpose()?;
-        Ok(seed_words)
+impl<TSpec: WalletSdkSpec> Debug for WalletSdk<TSpec> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WalletSdk")
+            .field("config", &self.config)
+            .field("epoch_birthday", &self.epoch_birthday)
+            .finish()
     }
 }
 

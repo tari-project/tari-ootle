@@ -109,7 +109,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 }
             }
 
-            let view_only_secret = km.get_view_only_key(account_address.view_only_key_id)?;
+            let view_only_secret = km.get_key(account_address.view_only_key_id)?;
 
             let json = json!({
                 "component_address": account_addr,

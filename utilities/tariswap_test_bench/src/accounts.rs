@@ -25,7 +25,7 @@ impl Runner {
         let owner_key = self
             .sdk
             .key_manager_api()
-            .get_public_key(KeyBranch::Account, KeyId::derived(0))?;
+            .get_public_key(KeyId::derived(KeyBranch::Account, 0))?;
         let owner_public_key = owner_key.public_key.to_byte_type();
 
         let account_address = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &owner_public_key);
@@ -45,10 +45,7 @@ impl Runner {
             ])
             .build();
 
-        let transaction = self
-            .sdk
-            .local_signer_api()
-            .sign(KeyBranch::Account, owner_key.key_id, transaction)?;
+        let transaction = self.sdk.signer_api().sign(owner_key.key_id, transaction)?;
 
         let finalize = self.submit_transaction_and_wait(transaction).await?;
         let diff = finalize.result.any_accept().unwrap();
@@ -65,8 +62,8 @@ impl Runner {
         self.sdk.accounts_api().add_account(
             None,
             &account,
-            KeyId::derived(0),
-            KeyId::derived(0),
+            KeyId::derived(KeyBranch::ViewOnlyKey, 0),
+            KeyId::derived(KeyBranch::Account, 0),
             Epoch::zero(),
             true,
             true,
@@ -87,7 +84,7 @@ impl Runner {
         let key = self
             .sdk
             .key_manager_api()
-            .get_public_key(KeyBranch::Account, KeyId::derived(0))?;
+            .get_public_key(KeyId::derived(KeyBranch::Account, 0))?;
         let key_index_start = *account_key_indexes.start();
         let num_accounts = *account_key_indexes.end() as usize - key_index_start as usize + 1;
         let owners = account_key_indexes
@@ -95,7 +92,7 @@ impl Runner {
                 let key = self
                     .sdk
                     .key_manager_api()
-                    .get_public_key(KeyBranch::Account, KeyId::derived(idx))?;
+                    .get_public_key(KeyId::derived(KeyBranch::Account, idx))?;
                 Ok(key)
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
@@ -120,10 +117,7 @@ impl Runner {
             ])
             .build();
 
-        let transaction = self
-            .sdk
-            .local_signer_api()
-            .sign(KeyBranch::Account, key.key_id, transaction)?;
+        let transaction = self.sdk.signer_api().sign(key.key_id, transaction)?;
 
         let finalize = self.submit_transaction_and_wait(transaction).await?;
         let diff = finalize.result.any_accept().unwrap();

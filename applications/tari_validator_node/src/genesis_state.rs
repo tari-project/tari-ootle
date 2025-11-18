@@ -12,7 +12,10 @@ use tari_engine_types::{
     substate::{SubstateId, SubstateValue},
     vault::Vault,
 };
-use tari_ootle_app_utilities::shared_consts::TXTR_FAUCET_INITIAL_SUPPLY;
+use tari_ootle_app_utilities::{
+    genesis_resources::{get_public_identity_resource, get_stealth_tari_resource},
+    shared_consts::TXTR_FAUCET_INITIAL_SUPPLY,
+};
 use tari_ootle_common_types::{
     Epoch,
     Network,
@@ -69,41 +72,11 @@ where
         return Ok(());
     }
 
-    let value = Resource::new(
-        ResourceType::NonFungible,
-        None,
-        OwnerRule::None,
-        ResourceAccessRules::new(),
-        Metadata::from([(TOKEN_SYMBOL, "ID".to_string())]),
-        None,
-        None,
-        0,
-        false,
-    );
-    create_substate(tx, num_preshards, PUBLIC_IDENTITY_RESOURCE_ADDRESS, value)?;
+    let (public_identity_address, resource) = get_public_identity_resource();
+    create_substate(tx, num_preshards, public_identity_address, resource)?;
 
-    let symbol = if network.is_testnet() { "tXTR" } else { "XTR" };
-    let xtr_resource = Resource::new(
-        ResourceType::Stealth,
-        None,
-        OwnerRule::None,
-        ResourceAccessRules::new()
-            // These are defaults, but just for explicitness
-            .mintable(rule!(deny_all))
-            .burnable(rule!(deny_all))
-            .recallable(rule!(deny_all))
-            .freezable(rule!(deny_all))
-            .update_access_rules(rule!(deny_all)),
-        Metadata::from([(TOKEN_SYMBOL, symbol)]),
-        None,
-        None,
-        6,
-        // Disable total supply tracking for XTR. This is because it is not feasible to include "the fee exhaust" in
-        // the tracking (as that would require mutating the resource on every transaction). Tracking supply can
-        // be done by summing up the total burn claims (ClaimedOutputTombstone) and subtracting the total exhaust in
-        // fee receipts.
-        false,
-    );
+    let (xtr_address, xtr_resource) = get_stealth_tari_resource(network);
+    create_substate(tx, num_preshards, xtr_address, xtr_resource)?;
 
     if network.is_testnet() {
         // Create tXTR faucet
@@ -111,8 +84,6 @@ where
         // Create NFT faucet
         create_nft_faucet(tx, num_preshards)?;
     }
-
-    create_substate(tx, num_preshards, STEALTH_TARI_RESOURCE_ADDRESS, xtr_resource)?;
 
     Ok(())
 }

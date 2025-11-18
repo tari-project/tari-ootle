@@ -89,7 +89,7 @@ pub async fn handle_create_transfer_proof(
     // TODO: Any errors from here need to unlock the outputs, ideally just roll back (refactor required but doable).
 
     // TODO: Wrap up key/encrypted data handling in the wallet SDK
-    let account_key = sdk.key_manager_api().get_account_owner_key(account_owner_key_id)?;
+    let account_key = sdk.key_manager_api().get_key(account_owner_key_id)?;
     let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask)?;
     let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
 

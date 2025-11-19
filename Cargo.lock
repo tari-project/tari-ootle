@@ -4899,7 +4899,6 @@ dependencies = [
  "tari_template_lib",
  "tari_transaction",
  "tari_transaction_components",
- "tari_transaction_key_manager",
  "tari_transaction_manifest",
  "tari_validator_node",
  "tari_validator_node_cli",

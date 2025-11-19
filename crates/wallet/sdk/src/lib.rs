@@ -17,8 +17,6 @@ pub mod local_key_store;
 pub mod network;
 mod spec;
 
-pub type WalletDerivedSecretKey = tari_transaction_components::key_manager::tari_key_manager::DerivedKey;
-
 // Re-export commonly used types
 pub use tari_common_types::seeds::seed_words::SeedWords;
 pub use tari_ootle_address::*;

@@ -46,9 +46,8 @@ use tari_ootle_wallet_sdk::models::AccountWithAddress;
 use tari_sidechain::EvictionProof;
 use tari_transaction_components::{
     consensus::ConsensusManager,
-    key_manager::{TariKeyId, TransactionKeyManagerInterface},
+    key_manager::{KeyManager, TariKeyId, TransactionKeyManagerInterface},
 };
-use tari_transaction_key_manager::{create_memory_db_key_manager, MemoryDbKeyManager};
 use template::RegisteredTemplate;
 use validator_node::ValidatorNodeProcess;
 use wallet::WalletProcess;
@@ -89,7 +88,7 @@ pub struct TariWorld {
     pub claim_proofs: HashMap<String, CucumberClaimProof>,
     pub substate_ids: IndexMap<String, SubstateId>,
     pub num_databases_saved: usize,
-    pub key_manager: MemoryDbKeyManager,
+    pub key_manager: KeyManager,
     pub wallet_accounts: IndexMap<String, AccountWithAddress>,
     pub wallet_daemons: IndexMap<String, TariWalletDaemonProcess>,
     /// Used for all one-sided coinbase payments
@@ -125,7 +124,7 @@ impl TariWorld {
             claim_proofs: HashMap::new(),
             substate_ids: IndexMap::new(),
             num_databases_saved: 0,
-            key_manager: create_memory_db_key_manager().await.unwrap(),
+            key_manager: KeyManager::new_random().unwrap(),
             wallet_accounts: IndexMap::new(),
             wallet_daemons: IndexMap::new(),
             minotari_wallet_private_key: wallet_private_key,
@@ -318,10 +317,9 @@ impl TariWorld {
         }
     }
 
-    pub async fn script_key_id(&self) -> TariKeyId {
+    pub fn script_key_id(&self) -> TariKeyId {
         self.key_manager
-            .import_key(self.minotari_wallet_private_key.clone(), None)
-            .await
+            .create_encrypted_key(self.minotari_wallet_private_key.clone(), None)
             .unwrap()
     }
 

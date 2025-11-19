@@ -222,7 +222,9 @@ async fn when_i_burn_funds_with_wallet_daemon(
         .create_burn_transaction(minotari_app_grpc::tari_rpc::CreateBurnTransactionRequest {
             amount,
             fee_per_gram: 1,
-            payment_id: MemoField::open_from_string("Burn", TxType::Burn).to_bytes(),
+            payment_id: MemoField::new_open_from_string("Burn", TxType::Burn)
+                .unwrap()
+                .to_bytes(),
             claim_public_key: public_key.to_vec(),
             sidechain_deployment_key: vec![],
         })

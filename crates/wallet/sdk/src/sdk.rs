@@ -250,7 +250,6 @@ where TSpec: WalletSdkSpec<KeyStore = LocalKeyStore>
             ConfigApi::new(&store),
             PasswordManagerApi::new(ConfigApi::new(&store), &config),
         )?
-        .map(Arc::new)
         .map(WalletCipherSeed::CipherSeed)
         .unwrap_or(WalletCipherSeed::None);
 
@@ -266,7 +265,7 @@ where TSpec: WalletSdkSpec<KeyStore = LocalKeyStore>
     fn load_cipher_seed(
         config_api: ConfigApi<'_, TSpec::Store>,
         password_manager_api: PasswordManagerApi<'_, TSpec::Store>,
-    ) -> Result<Option<CipherSeed>, WalletSdkError> {
+    ) -> Result<Option<Arc<CipherSeed>>, WalletSdkError> {
         let Some(cipher_seed_encrypted) = config_api
             .get::<Zeroizing<Box<[u8]>>>(ConfigKey::CipherSeed)
             .optional()?
@@ -276,15 +275,15 @@ where TSpec: WalletSdkSpec<KeyStore = LocalKeyStore>
         };
         let password = password_manager_api.get_cipher_seed_password()?;
         let cipher_seed = CipherSeed::from_enciphered_bytes(&cipher_seed_encrypted, Some(password))?;
-        Ok(Some(cipher_seed))
+        Ok(Some(Arc::new(cipher_seed)))
     }
 
     fn create_cipher_seed(&mut self) -> Result<(), WalletSdkError> {
         let password = self.password_manager_api().create_cipher_seed_password()?;
-        let cipher_seed = CipherSeed::new();
+        let cipher_seed = CipherSeed::random();
         let encrypted_cipher_seed = cipher_seed.encipher(Some(password))?;
         self.config_api().set(ConfigKey::CipherSeed, &encrypted_cipher_seed)?;
-        self.key_store.set_cipher_seed(cipher_seed);
+        self.key_store.set_cipher_seed(Arc::new(cipher_seed));
         Ok(())
     }
 
@@ -295,7 +294,7 @@ where TSpec: WalletSdkSpec<KeyStore = LocalKeyStore>
         let cipher_seed = CipherSeed::from_mnemonic(seed_words, None)?;
         let encrypted_cipher_seed = cipher_seed.encipher(Some(password))?;
         self.config_api().set(ConfigKey::CipherSeed, &encrypted_cipher_seed)?;
-        self.key_store.set_cipher_seed(cipher_seed);
+        self.key_store.set_cipher_seed(Arc::new(cipher_seed));
         Ok(())
     }
 

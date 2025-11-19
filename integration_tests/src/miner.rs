@@ -32,11 +32,10 @@ use tari_common_types::tari_address::TariAddress;
 use tari_transaction_components::{
     consensus::ConsensusManager,
     generate_coinbase_with_wallet_output,
-    key_manager::TariKeyId,
+    key_manager::{KeyManager, TariKeyId},
     transaction_components::{MemoField, RangeProofType, WalletOutput},
     MicroMinotari,
 };
-use tari_transaction_key_manager::MemoryDbKeyManager;
 
 use crate::{util::cucumber_log, TariWorld};
 
@@ -92,7 +91,7 @@ async fn create_base_node_client(world: &TariWorld, miner_name: &String) -> Base
 }
 
 async fn mine_block(world: &mut TariWorld, payment_address: &TariAddress, base_client: &mut BaseNodeClient) {
-    let key_id = world.script_key_id().await;
+    let key_id = world.script_key_id();
     let (block_template, _) = create_block_template_with_coinbase(
         base_client,
         0,
@@ -123,7 +122,7 @@ async fn mine_block_without_wallet_with_template(base_client: &mut BaseNodeClien
 async fn create_block_template_with_coinbase(
     base_client: &mut BaseNodeClient,
     weight: u64,
-    key_manager: &mut MemoryDbKeyManager,
+    key_manager: &mut KeyManager,
     script_key_id: &TariKeyId,
     wallet_payment_address: &TariAddress,
     stealth_payment: bool,
@@ -165,7 +164,6 @@ async fn create_block_template_with_coinbase(
         RangeProofType::BulletProofPlus,
         MemoField::new_empty(),
     )
-    .await
     .unwrap();
     let body = block_template.body.as_mut().unwrap();
 

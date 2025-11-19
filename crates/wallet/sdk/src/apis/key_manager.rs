@@ -1,8 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use blake2::Blake2b;
-use digest::{consts::U64, crypto_common::rand_core::OsRng};
+use rand::rngs::OsRng;
 use tari_common_types::seeds::cipher_seed;
 use tari_crypto::{
     keys::{PublicKey as _, SecretKey},
@@ -16,7 +15,6 @@ use tari_ootle_common_types::{
     Network,
 };
 use tari_ootle_wallet_crypto::encryption::{decrypt_with_password, encrypt_with_password, CipherError};
-use tari_transaction_components::key_manager::tari_key_manager::TariKeyManager;
 
 use crate::{
     apis::password_manager::{PasswordManagerApi, PasswordManagerApiError},
@@ -47,8 +45,6 @@ use crate::{
         WriteableWalletStore,
     },
 };
-
-pub type WalletKeyManager = TariKeyManager<Blake2b<U64>>;
 
 pub struct KeyManagerApi<'a, TSpec: WalletSdkSpec> {
     network: Network,

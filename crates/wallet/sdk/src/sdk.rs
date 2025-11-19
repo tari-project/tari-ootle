@@ -130,8 +130,7 @@ impl<TSpec: WalletSdkSpec> WalletSdk<TSpec> {
     }
 
     /// Returns the KeyManager API for the wallet.
-    /// This key manager uses the local key store where key material is encrypted in the local database.
-    /// The cipher seed must have been initialized before calling this method.
+    /// This key manager uses the configured key store to access key material.
     pub fn key_manager_api(&self) -> KeyManagerApi<'_, TSpec> {
         let network = self.config.network;
         KeyManagerApi::new(
@@ -143,8 +142,7 @@ impl<TSpec: WalletSdkSpec> WalletSdk<TSpec> {
         )
     }
 
-    /// Returns the Signer API for the wallet if the cipher seed has been initialized. This signer uses the local key
-    /// store where key material is kept in the local database.
+    /// Returns the Signer API for the wallet. This API uses the configured key store.
     pub fn signer_api(&self) -> SignerApi<'_, TSpec> {
         SignerApi::new(self.key_manager_api())
     }

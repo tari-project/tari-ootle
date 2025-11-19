@@ -38,7 +38,7 @@ impl<'a, TSpec: WalletSdkSpec> SignerApi<'a, TSpec> {
                     .key_manager
                     .key_store()
                     .sign(key_branch.as_str(), index, context, item)
-                    // NDTE: Cannot implement From due to rust bug/limitation
+                    // NOTE: Cannot implement From due to rust bug/limitation
                     .map_err(SignerApiError::KeyStoreError)?;
                 Ok(output)
             },

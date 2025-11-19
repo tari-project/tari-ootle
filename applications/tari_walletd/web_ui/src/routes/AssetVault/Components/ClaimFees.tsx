@@ -95,7 +95,7 @@ export default function ClaimFees() {
       return;
     }
     const selected_account = dataAccountsList?.accounts.find((account: AccountInfo) =>
-      matchesTypeEnum(account.account.owner_key_id, { Derived: { index: BigInt(keyIndex) } }),
+      matchesTypeEnum(account.account.owner_key_id, { Derived: { key_branch: "account", index: BigInt(keyIndex) } }),
     );
     const account = selected_account?.account.component_address
       ? substateIdToString(selected_account!.account.component_address)
@@ -188,7 +188,7 @@ export default function ClaimFees() {
     setIsLoading(true);
     try {
       const fees = await validatorsGetFees({
-        account_or_key: { KeyId: { Derived: { index: BigInt(formState.keyIndex) } } },
+        account_or_key: { KeyId: { Derived: { key_branch: "account", index: BigInt(formState.keyIndex) } } },
         shard_group: null,
       });
       setScannedFees(fees);

@@ -32,7 +32,6 @@ import type {
   GetBlocksResponse,
   GetCommitteeRequest,
   GetCommitteeResponse,
-  VNGetCommsStatsResponse,
   VNGetConnectionsResponse,
   GetEpochManagerStatsResponse,
   VNGetIdentityResponse,
@@ -47,8 +46,6 @@ import type {
   VNGetSubstateResponse,
   GetTemplateRequest,
   GetTemplateResponse,
-  GetTemplatesRequest,
-  GetTemplatesResponse,
   GetTransactionRequest,
   GetTransactionResponse,
   VNGetTransactionResultRequest,
@@ -125,8 +122,6 @@ export const getFilteredBlocksCount = (request: GetFilteredBlocksCountRequest): 
 // Template
 export const getTemplate = (request: GetTemplateRequest): Promise<GetTemplateResponse> =>
   jsonRpc("get_template", request);
-export const getTemplates = (request: GetTemplatesRequest): Promise<GetTemplatesResponse> =>
-  jsonRpc("get_templates", request);
 
 // Validator Node
 export const getIdentity = (): Promise<VNGetIdentityResponse> => jsonRpc("get_identity");

@@ -47,7 +47,7 @@ pub enum Network {
 }
 
 impl Network {
-    pub fn as_byte(self) -> u8 {
+    pub const fn as_byte(self) -> u8 {
         self as u8
     }
 
@@ -64,7 +64,7 @@ impl Network {
         }
     }
 
-    pub fn is_testnet(&self) -> bool {
+    pub const fn is_testnet(&self) -> bool {
         !matches!(self, Network::MainNet)
     }
 }

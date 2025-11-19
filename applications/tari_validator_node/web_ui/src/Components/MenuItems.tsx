@@ -95,12 +95,6 @@ const mainItems = [
     link: "mempool",
   },
   {
-    title: "Templates",
-    icon: <IoCodeDownloadOutline style={iconStyle} />,
-    activeIcon: <IoCodeDownload style={activeIconStyle} />,
-    link: "templates",
-  },
-  {
     title: "Validator Nodes",
     icon: <IoCheckmarkCircleOutline style={iconStyle} />,
     activeIcon: <IoCheckmarkCircle style={activeIconStyle} />,

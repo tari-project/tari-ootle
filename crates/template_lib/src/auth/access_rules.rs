@@ -221,7 +221,7 @@ impl ResourceAccessRules {
     /// * Updating the access rules is disabled for all users (i.e. only the OwnerRule applies)
     /// * Minting, burning, recalling and freezing are disabled for all users
     /// * Withdrawals, deposits and non-fungible data updates are allowed for all users
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             // User should explicitly enable minting, burning etc
             mintable: AccessRule::DenyAll,

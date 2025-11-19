@@ -29,7 +29,7 @@ use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_ootle_wallet_sdk::{
     apis::{confidential_transfer::UtxoInputSelection, stealth_transfer::BadgeUsage},
-    models::{Account, AccountWithAddress, BranchAndKeyId, KeyBranch, NonFungibleToken},
+    models::{Account, AccountWithAddress, NonFungibleToken},
 };
 use tari_template_lib::{
     prelude::{ResourceAddress, RistrettoPublicKeyBytes},
@@ -452,7 +452,7 @@ pub async fn submit_manifest_with_signing_keys(
 
     let transaction_submit_req = TransactionSubmitRequest {
         transaction,
-        seal_signer: BranchAndKeyId::for_account(owner_key_id),
+        seal_signer: owner_key_id,
         other_signers: vec![],
         detect_inputs: true,
         detect_inputs_use_unversioned: true,
@@ -540,7 +540,7 @@ pub async fn submit_manifest(
 
     let transaction_submit_req = TransactionSubmitRequest {
         transaction,
-        seal_signer: BranchAndKeyId::for_account(owner_key_id),
+        seal_signer: owner_key_id,
         other_signers: vec![],
         detect_inputs: true,
         detect_inputs_use_unversioned: true,
@@ -658,7 +658,7 @@ pub async fn create_component(
 
     let transaction_submit_req = TransactionSubmitRequest {
         transaction,
-        seal_signer: BranchAndKeyId::for_account(owner_key_id),
+        seal_signer: owner_key_id,
         other_signers: vec![],
         detect_inputs: true,
         detect_inputs_use_unversioned: true,
@@ -949,7 +949,7 @@ async fn submit_unsigned_tx_and_wait_for_response(
     );
     let submit_req = TransactionSubmitRequest {
         transaction,
-        seal_signer: BranchAndKeyId::new(KeyBranch::Account, account.owner_key_id.expect("no owner_key_id")),
+        seal_signer: account.owner_key_id.expect("no owner_key_id"),
         other_signers: vec![],
         detect_inputs: true,
         detect_inputs_use_unversioned: use_unversioned_inputs,

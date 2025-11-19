@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use tari_ootle_common_types::Epoch;
 use tari_ootle_wallet_sdk::{
-    models::{AccountUpdate, KeyId},
+    models::{AccountUpdate, KeyBranch, KeyId},
     storage::{CommittableStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
@@ -22,8 +22,8 @@ fn update_account() {
     tx.accounts_insert(
         Some("test"),
         &address,
-        KeyId::derived(0),
-        Some(KeyId::derived(0)),
+        KeyId::derived(KeyBranch::Account, 0),
+        Some(KeyId::derived(KeyBranch::Account, 0)),
         &RistrettoPublicKeyBytes::default(),
         &Default::default(),
         Epoch::zero(),

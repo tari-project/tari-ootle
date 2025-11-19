@@ -10,13 +10,7 @@ use std::{
 
 use futures_bounded::PushError;
 use log::{info, warn};
-use tari_ootle_common_types::optional::IsNotFoundError;
-use tari_ootle_wallet_sdk::{
-    models::WalletEvent,
-    network::{StatusResponseError, WalletNetworkInterface},
-    storage::WalletStore,
-    WalletSdk,
-};
+use tari_ootle_wallet_sdk::{models::WalletEvent, WalletSdk, WalletSdkSpec};
 use tari_template_lib::{models::ComponentAddress, prelude::ResourceAddress};
 use tokio::{
     sync::{mpsc, watch},
@@ -50,19 +44,20 @@ impl UtxoScannerHandle {
     }
 }
 
-pub struct StealthUtxoScannerWorker<TStore, TNetworkInterface> {
-    scanner: StealthUtxoScanner<TStore, TNetworkInterface>,
+pub struct StealthUtxoScannerWorker<TSpec: WalletSdkSpec> {
+    scanner: StealthUtxoScanner<TSpec>,
 }
 
-impl<TStore, TNetworkInterface> StealthUtxoScannerWorker<TStore, TNetworkInterface>
+impl<TSpec> StealthUtxoScannerWorker<TSpec>
 where
-    TStore: WalletStore + Clone + Send + Sync + 'static,
-    TNetworkInterface: WalletNetworkInterface + Clone + Send + Sync + 'static,
-    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
+    TSpec: WalletSdkSpec + Send + 'static,
+    TSpec::Store: Clone + Send + Sync + 'static,
+    TSpec::NetworkInterface: Clone + Send + Sync + 'static,
+    TSpec::KeyStore: Clone + Send + Sync + 'static,
 {
-    pub fn new(sdk: WalletSdk<TStore, TNetworkInterface>, notify: Notify<WalletEvent>) -> Self {
+    pub fn new(sdk: WalletSdk<TSpec>, notify: Notify<WalletEvent>) -> Self {
         Self {
-            scanner: StealthUtxoScanner::new(sdk.clone(), notify),
+            scanner: StealthUtxoScanner::new(sdk, notify),
         }
     }
 
@@ -105,20 +100,21 @@ where
 
 type ScanResult = anyhow::Result<()>;
 
-pub struct StealthUtxoScanner<TStore, TNetworkInterface> {
+pub struct StealthUtxoScanner<TSpec: WalletSdkSpec> {
     in_progress_work: futures_bounded::FuturesMap<UtxoScanRequest, ScanResult>,
-    sdk: WalletSdk<TStore, TNetworkInterface>,
+    sdk: WalletSdk<TSpec>,
     notify_tx: watch::Sender<()>,
     wallet_notify: Notify<WalletEvent>,
 }
 
-impl<TStore, TNetworkInterface> StealthUtxoScanner<TStore, TNetworkInterface>
+impl<TSpec> StealthUtxoScanner<TSpec>
 where
-    TStore: WalletStore + Clone + Send + Sync + 'static,
-    TNetworkInterface: WalletNetworkInterface + Clone + Send + Sync + 'static,
-    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
+    TSpec: WalletSdkSpec + 'static,
+    TSpec::Store: Clone + Send + Sync + 'static,
+    TSpec::NetworkInterface: Clone + Send + Sync + 'static,
+    TSpec::KeyStore: Clone + Send + Sync + 'static,
 {
-    pub(self) fn new(sdk: WalletSdk<TStore, TNetworkInterface>, wallet_events: Notify<WalletEvent>) -> Self {
+    pub(self) fn new(sdk: WalletSdk<TSpec>, wallet_events: Notify<WalletEvent>) -> Self {
         let (notify_tx, _) = watch::channel::<()>(());
         Self {
             in_progress_work: futures_bounded::FuturesMap::new(Duration::from_secs(300), MAX_CONCURRENT_SCANS),
@@ -181,17 +177,12 @@ where
     }
 }
 
-async fn do_work<TStore, TNetworkInterface>(
-    sdk: WalletSdk<TStore, TNetworkInterface>,
+async fn do_work<TSpec: WalletSdkSpec>(
+    sdk: WalletSdk<TSpec>,
     notify_tx: watch::Sender<()>,
     task: UtxoScanRequest,
     wallet_notify: Notify<WalletEvent>,
-) -> ScanResult
-where
-    TStore: WalletStore,
-    TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
-{
+) -> ScanResult {
     info!(target: LOG_TARGET, "🔍 Scanning for UTXOs for {}", task);
     let account = sdk.accounts_api().get_account_by_address(&task.account_address)?;
     let stats = UtxoScanner::new(sdk, wallet_notify)

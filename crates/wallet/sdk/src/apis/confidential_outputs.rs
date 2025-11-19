@@ -15,23 +15,31 @@ use crate::{
         key_manager::{KeyManagerApi, KeyManagerApiError},
     },
     models::{Account, ConfidentialOutputModel, OutputStatus, WalletLockId, WalletSecretKey},
-    storage::{CommittableStore, WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
+    storage::{
+        CommittableStore,
+        ReadableWalletStore,
+        WalletStorageError,
+        WalletStoreReader,
+        WalletStoreWriter,
+        WriteableWalletStore,
+    },
+    WalletSdkSpec,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_sdk::apis::confidential_outputs";
 
-pub struct ConfidentialOutputsApi<'a, TStore> {
-    store: &'a TStore,
-    key_manager_api: KeyManagerApi<'a, TStore>,
+pub struct ConfidentialOutputsApi<'a, TSpec: WalletSdkSpec> {
+    store: &'a TSpec::Store,
+    key_manager_api: KeyManagerApi<'a, TSpec>,
     crypto_api: ConfidentialCryptoApi,
 }
 
-impl<'a, TStore> ConfidentialOutputsApi<'a, TStore>
-where TStore: WalletStore
+impl<'a, TSpec> ConfidentialOutputsApi<'a, TSpec>
+where TSpec: WalletSdkSpec
 {
     pub fn new(
-        store: &'a TStore,
-        key_manager_api: KeyManagerApi<'a, TStore>,
+        store: &'a TSpec::Store,
+        key_manager_api: KeyManagerApi<'a, TSpec>,
         crypto_api: ConfidentialCryptoApi,
     ) -> Self {
         Self {
@@ -123,7 +131,7 @@ where TStore: WalletStore
         let mut outputs_with_masks = Vec::with_capacity(outputs.len());
         for output in outputs {
             // Encryption is always done with a DH of the account's public key
-            let encryption_key = self.key_manager_api.get_view_only_key(output.view_only_key_id)?;
+            let encryption_key = self.key_manager_api.get_key(output.view_only_key_id)?;
             // Either derive the mask from the sender's public nonce or from the local key manager
             let shared_decrypt_key = match output.sender_public_nonce {
                 Some(nonce) => {
@@ -174,7 +182,7 @@ where TStore: WalletStore
         vault_id: VaultId,
         outputs: I,
     ) -> Result<(), ConfidentialOutputsApiError> {
-        let view_key = self.key_manager_api.get_view_only_key(account.view_only_key_id)?;
+        let view_key = self.key_manager_api.get_key(account.view_only_key_id)?;
         let mut tx = self.store.create_write_tx()?;
 
         for (commitment, output) in outputs {

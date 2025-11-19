@@ -5,16 +5,8 @@ use std::{ops::Add, time::Duration};
 
 use anyhow::anyhow;
 use log::*;
-use tari_ootle_common_types::{
-    optional::{IsNotFoundError, Optional},
-    substate_type::SubstateType,
-};
-use tari_ootle_wallet_sdk::{
-    models::WalletEvent,
-    network::{StatusResponseError, WalletNetworkInterface},
-    storage::WalletStore,
-    WalletSdk,
-};
+use tari_ootle_common_types::{optional::Optional, substate_type::SubstateType};
+use tari_ootle_wallet_sdk::{models::WalletEvent, network::WalletNetworkInterface, WalletSdk, WalletSdkSpec};
 use tari_ootle_wallet_sdk_services::notify::Notify;
 use tari_shutdown::ShutdownSignal;
 use tari_template_abi::TemplateDef;
@@ -22,23 +14,16 @@ use tari_template_lib::types::TemplateAddress;
 
 const LOG_TARGET: &str = "tari::ootle_wallet_daemon::services::template_monitor";
 
-pub struct TemplateMonitor<TStore, TNetworkInterface> {
+pub struct TemplateMonitor<TSpec: WalletSdkSpec> {
     notify: Notify<WalletEvent>,
-    wallet_sdk: WalletSdk<TStore, TNetworkInterface>,
+    wallet_sdk: WalletSdk<TSpec>,
     shutdown_signal: ShutdownSignal,
 }
 
-impl<TStore, TNetworkInterface> TemplateMonitor<TStore, TNetworkInterface>
-where
-    TStore: WalletStore,
-    TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
+impl<TSpec> TemplateMonitor<TSpec>
+where TSpec: WalletSdkSpec
 {
-    pub fn new(
-        notify: Notify<WalletEvent>,
-        wallet_sdk: WalletSdk<TStore, TNetworkInterface>,
-        shutdown_signal: ShutdownSignal,
-    ) -> Self {
+    pub fn new(notify: Notify<WalletEvent>, wallet_sdk: WalletSdk<TSpec>, shutdown_signal: ShutdownSignal) -> Self {
         Self {
             notify,
             wallet_sdk,

@@ -33,13 +33,16 @@ use std::{fs, panic, pin, process};
 
 use log::*;
 use tari_common_types::seeds::seed_words::SeedWords;
+use tari_ootle_app_utilities::genesis_resources::{get_public_identity_resource, get_stealth_tari_resource};
 use tari_ootle_common_types::{optional::Optional, Network, NumPreshards};
 use tari_ootle_wallet_sdk::{
     apis::config::{ConfigApi, ConfigKey},
     cipher_seed::CipherSeedRestore,
+    local_key_store::LocalKeyStore,
     models::EpochBirthday,
     WalletSdk as Sdk,
     WalletSdkConfig,
+    WalletSdkSpec,
 };
 use tari_ootle_wallet_sdk_services::{
     account_recovery::AccountRecoveryService,
@@ -48,7 +51,6 @@ use tari_ootle_wallet_sdk_services::{
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_shutdown::ShutdownSignal;
-use tari_template_lib::constants::XTR;
 
 use crate::{
     config::ApplicationConfig,
@@ -62,7 +64,15 @@ const DEFAULT_FEE: u64 = 1500;
 // TODO: must match the global network value. All testnets currently have 256 pre-shards.
 const NUM_PRESHARDS: NumPreshards = NumPreshards::current();
 
-pub type WalletSdk = Sdk<SqliteWalletStore, IndexerRestApiNetworkInterface>;
+pub struct OotleWalletDaemonSpec;
+
+impl WalletSdkSpec for OotleWalletDaemonSpec {
+    type KeyStore = LocalKeyStore;
+    type NetworkInterface = IndexerRestApiNetworkInterface;
+    type Store = SqliteWalletStore;
+}
+
+pub type WalletSdk = Sdk<OotleWalletDaemonSpec>;
 
 pub async fn run_tari_ootle_walletd(
     config: ApplicationConfig,
@@ -73,20 +83,16 @@ pub async fn run_tari_ootle_walletd(
     // console_subscriber::init();
 
     let wallet_store = init_wallet_store(&config)?;
-    let mut wallet_sdk = initialize_wallet_sdk(&config, wallet_store.clone())?;
+    let mut wallet_sdk: WalletSdk = initialize_wallet_sdk(&config, wallet_store.clone())?;
 
     let needs_seed_recovery =
         wallet_sdk.initialize_cipher_seed(seed_words.map(CipherSeedRestore::FromSeedWords).unwrap_or_default())?;
 
-    tokio::spawn({
-        let wallet_sdk = wallet_sdk.clone();
-        async move {
-            // Ensures that the XTR resource is available in the substate cache
-            if let Err(err) = wallet_sdk.substate_api().fetch_resource(XTR).await {
-                error!(target: LOG_TARGET, "Failed to fetch XTR resource: {}", err);
-            }
-        }
-    });
+    // Insert genesis resources
+    let (xtr_addr, xtr_resx) = get_stealth_tari_resource(wallet_sdk.network());
+    wallet_sdk.resources_api().upsert_resource(&xtr_addr, &xtr_resx)?;
+    let (addr, resx) = get_public_identity_resource();
+    wallet_sdk.resources_api().upsert_resource(&addr, &resx)?;
 
     let notify = Notify::new(100);
     let services = spawn_services(shutdown_signal.clone(), notify.clone(), wallet_sdk.clone());
@@ -197,7 +203,7 @@ pub fn initialize_wallet_sdk(config: &ApplicationConfig, store: SqliteWalletStor
     };
     let indexer = IndexerRestApiNetworkInterface::new(indexer_endpoint);
     let birthday = get_epoch_birthday(sdk_config.network);
-    let sdk = WalletSdk::initialize(store, indexer, sdk_config, birthday)?;
+    let sdk = WalletSdk::initialize_with_local_key_store(store, indexer, sdk_config, birthday)?;
     Ok(sdk)
 }
 

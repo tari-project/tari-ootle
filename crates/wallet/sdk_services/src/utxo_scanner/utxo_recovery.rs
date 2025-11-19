@@ -18,8 +18,9 @@ use tari_ootle_wallet_sdk::{
         WalletEvent,
     },
     network::{StatusResponseError, WalletNetworkInterface},
-    storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
+    storage::{ReadableWalletStore, WalletStorageError, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
     WalletSdk,
+    WalletSdkSpec,
 };
 use tari_template_lib::models::{ComponentAddress, ResourceAddress, UtxoAddress, UtxoId};
 use tokio::sync::watch;
@@ -28,19 +29,18 @@ use crate::{notify::Notify, utxo_scanner::StealthScannerApiError};
 
 const LOG_TARGET: &str = "tari::ootle::wallet_services::utxo_recovery";
 
-pub struct UtxoRecovery<TStore, TNetworkInterface> {
-    sdk: WalletSdk<TStore, TNetworkInterface>,
+pub struct UtxoRecovery<TSpec: WalletSdkSpec> {
+    sdk: WalletSdk<TSpec>,
     notify: Option<Notify<WalletEvent>>,
     round_id: usize,
 }
 
-impl<TStore, TNetworkInterface> UtxoRecovery<TStore, TNetworkInterface>
+impl<TSpec> UtxoRecovery<TSpec>
 where
-    TStore: WalletStore,
-    TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
+    TSpec: WalletSdkSpec,
+    <TSpec::NetworkInterface as WalletNetworkInterface>::Error: IsNotFoundError + StatusResponseError,
 {
-    pub fn new(sdk: WalletSdk<TStore, TNetworkInterface>) -> Self {
+    pub fn new(sdk: WalletSdk<TSpec>) -> Self {
         Self {
             sdk,
             notify: None,
@@ -238,13 +238,10 @@ where
         found: FoundUtxo,
     ) -> Result<bool, StealthScannerApiError> {
         let account = self.sdk.accounts_api().get_account_by_address(&found.account_addr)?;
-        let view_only_key = self
-            .sdk
-            .key_manager_api()
-            .get_view_only_key(account.view_only_key_id())?;
+        let view_only_key = self.sdk.key_manager_api().get_key(account.view_only_key_id())?;
         let account_key = account
             .owner_key_id()
-            .map(|key_id| self.sdk.key_manager_api().get_account_owner_key(key_id))
+            .map(|key_id| self.sdk.key_manager_api().get_key(key_id))
             .transpose()?;
         let keys = AccountAndViewKeys {
             account_public_key: *account.owner_public_key(),

@@ -11,13 +11,12 @@ use tari_engine_types::{
     substate::{Substate, SubstateDiff, SubstateId, SubstateValue},
     vault::Vault,
 };
-use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
+use tari_ootle_common_types::optional::Optional;
 use tari_ootle_wallet_sdk::{
     apis::substate::ValidatorScanResult,
     models::{AccountChangedEvent, AccountCreatedEvent, AccountUpdate, NewAccountData, NonFungibleToken, WalletEvent},
-    network::{StatusResponseError, WalletNetworkInterface},
-    storage::WalletStore,
     WalletSdk,
+    WalletSdkSpec,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
@@ -31,19 +30,16 @@ use crate::{account_monitor::monitor::AccountMonitorError, notify::Notify};
 
 const LOG_TARGET: &str = "tari::ootle::wallet_services::account_monitor";
 
-#[derive(Debug, Clone)]
-pub struct AccountScanner<TStore, TNetworkInterface> {
+#[derive(Debug)]
+pub struct AccountScanner<TSpec: WalletSdkSpec> {
     notify: Notify<WalletEvent>,
-    wallet_sdk: WalletSdk<TStore, TNetworkInterface>,
+    wallet_sdk: WalletSdk<TSpec>,
 }
 
-impl<TStore, TNetworkInterface> AccountScanner<TStore, TNetworkInterface>
-where
-    TStore: WalletStore,
-    TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
+impl<TSpec> AccountScanner<TSpec>
+where TSpec: WalletSdkSpec
 {
-    pub fn new(notify: Notify<WalletEvent>, wallet_sdk: WalletSdk<TStore, TNetworkInterface>) -> Self {
+    pub fn new(notify: Notify<WalletEvent>, wallet_sdk: WalletSdk<TSpec>) -> Self {
         Self { notify, wallet_sdk }
     }
 

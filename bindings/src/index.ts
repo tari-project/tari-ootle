@@ -68,7 +68,6 @@ export * from "./types/Memo";
 export * from "./types/Metadata";
 export * from "./types/MinotariBurnClaimProof";
 export * from "./types/Network";
-export * from "./types/NewAccountData";
 export * from "./types/NodeHeight";
 export * from "./types/NonFungibleAddressContents";
 export * from "./types/NonFungibleAddress";

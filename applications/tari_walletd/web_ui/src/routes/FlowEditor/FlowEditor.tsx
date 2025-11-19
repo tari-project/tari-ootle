@@ -69,7 +69,6 @@ import {
   ACCOUNT_TEMPLATE_ADDRESS,
   TESTNET_NFT_FAUCET_ADDRESS,
   TESTNET_XTR_FAUCET_ADDRESS,
-  KeyBranch,
 } from "@tari-project/typescript-bindings";
 import { settingsGet, submitTransactionDryRun, transactionsSubmit, transactionsWaitResult } from "@utils/json_rpc";
 import { useAccountsList } from "@api/hooks/useAccounts";
@@ -213,7 +212,7 @@ function FlowEditor() {
     }
     const request = {
       transaction: { V1: transaction },
-      seal_signer: { branch: "account" as KeyBranch, key_id: account.account.owner_key_id! },
+      seal_signer: account.account.owner_key_id!,
       other_signers: [],
       detect_inputs: true,
       detect_inputs_use_unversioned: true,

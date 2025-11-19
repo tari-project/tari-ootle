@@ -28,7 +28,7 @@ pub async fn handle_create(
     let key_manager = sdk.key_manager_api();
     let key = req
         .specific_index
-        .map(|idx| key_manager.get_public_key(req.branch, KeyId::derived(idx)))
+        .map(|idx| key_manager.get_public_key(KeyId::derived(req.branch, idx)))
         .unwrap_or_else(|| key_manager.next_public_key(req.branch))?;
     Ok(KeysCreateResponse {
         id: key.key_id.derived_index().expect("Key is derived"),

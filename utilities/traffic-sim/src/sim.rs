@@ -20,7 +20,7 @@ use tari_ootle_common_types::{
 use tari_ootle_wallet_sdk::{
     apis::{confidential_transfer::UtxoInputSelection, stealth_transfer::TransferOutput},
     crypto::memo::Memo,
-    models::{AccountWithAddress, BranchAndKeyId, KeyBranch},
+    models::{AccountWithAddress, KeyBranch},
 };
 use tari_template_lib::{
     constants::XTR,
@@ -315,12 +315,10 @@ impl TrafficSim {
             .client
             .submit_transaction(TransactionSubmitRequest {
                 transaction,
-                seal_signer: BranchAndKeyId::for_account(
-                    account
-                        .account
-                        .owner_key_id
-                        .ok_or_else(|| anyhow::anyhow!("Exchange account has no owner key ID"))?,
-                ),
+                seal_signer: account
+                    .account
+                    .owner_key_id
+                    .ok_or_else(|| anyhow::anyhow!("Exchange account has no owner key ID"))?,
                 other_signers: vec![],
                 detect_inputs: true,
                 detect_inputs_use_unversioned: true,
@@ -487,7 +485,7 @@ impl TrafficSim {
                 .client
                 .submit_transaction(TransactionSubmitRequest {
                     transaction,
-                    seal_signer: BranchAndKeyId::for_account(exchange_account_key_id),
+                    seal_signer: exchange_account_key_id,
                     other_signers: transfer_resp.signing_keys,
                     detect_inputs: true,
                     detect_inputs_use_unversioned: true,

@@ -18,15 +18,17 @@ impl<'a> CipherSeedRestore<'a> {
     }
 }
 
+pub type SafeCipherSeed = Arc<CipherSeed>;
+
 #[derive(Debug, Clone, Default)]
 pub enum WalletCipherSeed {
     #[default]
     None,
-    CipherSeed(Arc<CipherSeed>),
+    CipherSeed(SafeCipherSeed),
 }
 
 impl WalletCipherSeed {
-    pub fn cipher_seed(&self) -> Option<&CipherSeed> {
+    pub fn cipher_seed(&self) -> Option<&SafeCipherSeed> {
         match self {
             Self::CipherSeed(seed) => Some(seed),
             Self::None => None,

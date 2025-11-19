@@ -13,13 +13,7 @@ mod template_monitor;
 use anyhow::anyhow;
 use futures::{future, future::BoxFuture, FutureExt};
 pub use session_store::*;
-use tari_ootle_common_types::optional::IsNotFoundError;
-use tari_ootle_wallet_sdk::{
-    models::WalletEvent,
-    network::{StatusResponseError, WalletNetworkInterface},
-    storage::WalletStore,
-    WalletSdk,
-};
+use tari_ootle_wallet_sdk::{models::WalletEvent, WalletSdk};
 use tari_ootle_wallet_sdk_services::{
     account_monitor::{AccountMonitor, AccountMonitorHandle},
     notify::Notify,
@@ -29,18 +23,13 @@ use tari_ootle_wallet_sdk_services::{
 use tari_shutdown::ShutdownSignal;
 use tokio::task::JoinHandle;
 
-use crate::services::template_monitor::TemplateMonitor;
+use crate::{services::template_monitor::TemplateMonitor, OotleWalletDaemonSpec};
 
-pub fn spawn_services<TStore, TNetworkInterface>(
+pub fn spawn_services(
     shutdown_signal: ShutdownSignal,
     notify: Notify<WalletEvent>,
-    wallet_sdk: WalletSdk<TStore, TNetworkInterface>,
-) -> Services
-where
-    TStore: WalletStore + Clone + Send + Sync + 'static,
-    TNetworkInterface: WalletNetworkInterface + Clone + Send + Sync + 'static,
-    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
-{
+    wallet_sdk: WalletSdk<OotleWalletDaemonSpec>,
+) -> Services {
     let (transaction_service, transaction_service_handle) =
         TransactionService::new(notify.clone(), wallet_sdk.clone(), shutdown_signal.clone());
     let transaction_service_join_handle = tokio::spawn(transaction_service.run());

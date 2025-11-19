@@ -7,12 +7,7 @@ use log::*;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::{substate::SubstateId, ConvertFromByteType, FromByteType, ToByteType};
 use tari_ootle_address::RistrettoOotleAddress;
-use tari_ootle_common_types::{
-    displayable::Displayable,
-    optional::{IsNotFoundError, Optional},
-    Network,
-    SubstateRequirement,
-};
+use tari_ootle_common_types::{displayable::Displayable, optional::Optional, Network, SubstateRequirement};
 use tari_ootle_wallet_crypto::memo::Memo;
 use tari_template_lib::{
     constants::XTR,
@@ -46,44 +41,30 @@ use crate::{
         stealth_outputs::{StealthOutputsApi, TransferStatementParams},
         substate::{SubstatesApi, ValidatorScanResult},
     },
-    models::{
-        AccountWithAddress,
-        KeyBranch,
-        KeyId,
-        OutputStatus,
-        StealthOutputModel,
-        WalletLockDropGuard,
-        WalletLockId,
-    },
-    network::WalletNetworkInterface,
-    storage::WalletStore,
+    models::{AccountWithAddress, KeyBranch, OutputStatus, StealthOutputModel, WalletLockDropGuard, WalletLockId},
+    WalletSdkSpec,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_sdk::apis::stealth_transfers";
 
-pub struct StealthTransferApi<'a, TStore, TNetworkInterface> {
-    accounts_api: AccountsApi<'a, TStore, TNetworkInterface>,
-    outputs_api: StealthOutputsApi<'a, TStore>,
-    locks_api: LocksApi<'a, TStore>,
-    substate_api: SubstatesApi<'a, TStore, TNetworkInterface>,
-    key_manager_api: KeyManagerApi<'a, TStore>,
-    config_api: ConfigApi<'a, TStore>,
+pub struct StealthTransferApi<'a, TSpec: WalletSdkSpec> {
+    accounts_api: AccountsApi<'a, TSpec>,
+    outputs_api: StealthOutputsApi<'a, TSpec>,
+    locks_api: LocksApi<'a, TSpec::Store>,
+    substate_api: SubstatesApi<'a, TSpec::Store, TSpec::NetworkInterface>,
+    key_manager_api: KeyManagerApi<'a, TSpec>,
+    config_api: ConfigApi<'a, TSpec::Store>,
     semaphore: Semaphore,
 }
 
-impl<'a, TStore, TNetworkInterface> StealthTransferApi<'a, TStore, TNetworkInterface>
-where
-    TStore: WalletStore,
-    TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError,
-{
+impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
     pub fn new(
-        accounts_api: AccountsApi<'a, TStore, TNetworkInterface>,
-        outputs_api: StealthOutputsApi<'a, TStore>,
-        locks_api: LocksApi<'a, TStore>,
-        substate_api: SubstatesApi<'a, TStore, TNetworkInterface>,
-        key_manager_api: KeyManagerApi<'a, TStore>,
-        config_api: ConfigApi<'a, TStore>,
+        accounts_api: AccountsApi<'a, TSpec>,
+        outputs_api: StealthOutputsApi<'a, TSpec>,
+        locks_api: LocksApi<'a, TSpec::Store>,
+        substate_api: SubstatesApi<'a, TSpec::Store, TSpec::NetworkInterface>,
+        key_manager_api: KeyManagerApi<'a, TSpec>,
+        config_api: ConfigApi<'a, TSpec::Store>,
     ) -> Self {
         Self {
             accounts_api,
@@ -304,7 +285,7 @@ where
         &self,
         owner_account: AccountWithAddress,
         params: StealthTransferParams,
-    ) -> Result<(WalletLockDropGuard<'a, TStore>, StealthTransferOutput), StealthTransferApiError> {
+    ) -> Result<(WalletLockDropGuard<'a, TSpec::Store>, StealthTransferOutput), StealthTransferApiError> {
         let network = self.config_api.get_network()?;
         params.validate(network)?;
 
@@ -398,21 +379,17 @@ where
             // Figure out which signing key to use - if there are no revealed funds, which necessitate using an account
             // withdraw auth signature, then we can use a nonce key.
             let must_sign_with_account_key = fee_inputs_to_spend.revealed.is_positive();
-            let (signing_key_branch, signing_key_id) = if must_sign_with_account_key {
-                (KeyBranch::Account, owner_key_id)
+            let signing_key_id = if must_sign_with_account_key {
+                owner_key_id
             } else {
-                let next_index = self.key_manager_api.next_derived_key_index(KeyBranch::Nonce)?;
-                (KeyBranch::Nonce, KeyId::derived(next_index))
+                self.key_manager_api.next_derived_key_id(KeyBranch::Nonce)?.into()
             };
-            let required_signer = self
-                .key_manager_api
-                .get_public_key(signing_key_branch, signing_key_id)?;
+            let required_signer = self.key_manager_api.get_public_key(signing_key_id)?;
             let required_signer_pk = required_signer.public_key.to_byte_type();
             let fee_signer = required_signer;
 
             // Generate fee transfer statement
             let fee_transfer_statement = self.outputs_api.generate_transfer_statement(TransferStatementParams {
-                spend_key_branch: KeyBranch::Account,
                 spend_key_id: owner_key_id,
                 view_only_key_id: owner_account.view_only_key_id(),
                 resource_address: &params.resource_address,
@@ -455,18 +432,15 @@ where
 
             // Signing key for main transfer intent
             let must_sign_with_account_key = !params.badge_usage.is_none() || inputs_to_spend.revealed.is_positive();
-            let (signing_key_branch, signing_key_id) = if must_sign_with_account_key {
-                (KeyBranch::Account, owner_key_id)
+            let signing_key_id = if must_sign_with_account_key {
+                owner_key_id
             } else {
-                let next_index = self.key_manager_api.next_derived_key_index(KeyBranch::Nonce)?;
-                (KeyBranch::Nonce, KeyId::derived(next_index))
+                self.key_manager_api.next_derived_key_id(KeyBranch::Nonce)?.into()
             };
-            let main_signer = if signing_key_branch == fee_signer.branch && signing_key_id == fee_signer.key_id {
+            let main_signer = if fee_signer.key_id() == signing_key_id {
                 None
             } else {
-                let required_signer = self
-                    .key_manager_api
-                    .get_public_key(signing_key_branch, signing_key_id)?;
+                let required_signer = self.key_manager_api.get_public_key(signing_key_id)?;
                 Some(required_signer)
             };
             let required_signer_pk = main_signer.as_ref().unwrap_or(&fee_signer).public_key().to_byte_type();
@@ -527,7 +501,6 @@ where
                 .collect::<Result<Vec<StealthOutputToCreate>, StealthTransferApiError>>()?;
 
             let transfer_statement = self.outputs_api.generate_transfer_statement(TransferStatementParams {
-                spend_key_branch: KeyBranch::Account,
                 spend_key_id: owner_key_id,
                 view_only_key_id: owner_account.view_only_key_id(),
                 resource_address: &params.resource_address,

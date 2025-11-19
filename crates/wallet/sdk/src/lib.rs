@@ -8,14 +8,14 @@ pub mod models;
 mod sdk;
 
 pub use sdk::{WalletSdk, WalletSdkConfig};
+pub use spec::*;
 pub use tari_common_types::seeds::cipher_seed::CipherSeed;
 
 pub mod cipher_seed;
 pub mod key_managers;
-mod local_key_store;
+pub mod local_key_store;
 pub mod network;
-
-pub type WalletDerivedSecretKey = tari_transaction_components::key_manager::tari_key_manager::DerivedKey;
+mod spec;
 
 // Re-export commonly used types
 pub use tari_common_types::seeds::seed_words::SeedWords;

@@ -17,8 +17,8 @@ use tari_ootle_wallet_sdk::{
         WalletLockId,
     },
     network::{StatusResponseError, WalletNetworkInterface},
-    storage::WalletStore,
     WalletSdk,
+    WalletSdkSpec,
 };
 use tari_shutdown::ShutdownSignal;
 use tari_transaction::{Transaction, TransactionId};
@@ -36,25 +36,27 @@ use crate::notify::Notify;
 
 const LOG_TARGET: &str = "tari::ootle::wallet_services::transaction_service";
 
-pub struct TransactionService<TStore, TNetworkInterface> {
+pub struct TransactionService<TSpec: WalletSdkSpec> {
     rx_request: mpsc::Receiver<TransactionServiceRequest>,
     notify: Notify<WalletEvent>,
-    wallet_sdk: WalletSdk<TStore, TNetworkInterface>,
+    wallet_sdk: WalletSdk<TSpec>,
     trigger_poll: watch::Sender<()>,
     rx_trigger: watch::Receiver<()>,
     poll_semaphore: Arc<Semaphore>,
     shutdown_signal: ShutdownSignal,
 }
 
-impl<TStore, TNetworkInterface> TransactionService<TStore, TNetworkInterface>
+impl<TSpec> TransactionService<TSpec>
 where
-    TStore: WalletStore + Clone + Send + Sync + 'static,
-    TNetworkInterface: WalletNetworkInterface + Clone + Send + Sync + 'static,
-    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
+    TSpec: WalletSdkSpec + Send + 'static,
+    TSpec::Store: Clone + Send + Sync + 'static,
+    TSpec::NetworkInterface: Clone + Send + Sync + 'static,
+    TSpec::KeyStore: Clone + Send + Sync + 'static,
+    <TSpec::NetworkInterface as WalletNetworkInterface>::Error: IsNotFoundError + StatusResponseError,
 {
     pub fn new(
         notify: Notify<WalletEvent>,
-        wallet_sdk: WalletSdk<TStore, TNetworkInterface>,
+        wallet_sdk: WalletSdk<TSpec>,
         shutdown_signal: ShutdownSignal,
     ) -> (Self, TransactionServiceHandle) {
         let (trigger, rx_trigger) = watch::channel(());
@@ -211,7 +213,7 @@ where
         Ok(())
     }
 
-    fn clear_stale_locks(wallet_sdk: &WalletSdk<TStore, TNetworkInterface>) -> Result<(), TransactionServiceError> {
+    fn clear_stale_locks(wallet_sdk: &WalletSdk<TSpec>) -> Result<(), TransactionServiceError> {
         let transaction_api = wallet_sdk.locks_api();
         let num_cleared = transaction_api.clear_stale_locks()?;
         if num_cleared > 0 {
@@ -230,7 +232,7 @@ where
     }
 
     async fn resubmit_new_transactions(
-        wallet_sdk: &WalletSdk<TStore, TNetworkInterface>,
+        wallet_sdk: &WalletSdk<TSpec>,
         notify: &Notify<WalletEvent>,
     ) -> Result<(), TransactionServiceError> {
         let transaction_api = wallet_sdk.transaction_api();
@@ -271,7 +273,7 @@ where
     }
 
     async fn check_pending_transactions(
-        wallet_sdk: &WalletSdk<TStore, TNetworkInterface>,
+        wallet_sdk: &WalletSdk<TSpec>,
         notify: &Notify<WalletEvent>,
     ) -> Result<(), TransactionServiceError> {
         let transaction_api = wallet_sdk.transaction_api();

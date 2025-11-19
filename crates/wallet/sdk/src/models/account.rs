@@ -126,7 +126,7 @@ impl Display for AccountWithAddress {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
 pub struct NewAccountData {
     pub address: ComponentAddress,
 }

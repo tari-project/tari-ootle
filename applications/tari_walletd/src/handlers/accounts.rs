@@ -30,7 +30,7 @@ use tari_ootle_wallet_sdk::{
         stealth_transfer::{StealthTransferParams, TransferOutput},
         substate::ValidatorScanResult,
     },
-    models::{BranchAndKeyId, KeyBranch, KeyId, NewAccountData, TransactionSubmittedEvent},
+    models::{KeyBranch, NewAccountData, TransactionSubmittedEvent},
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
@@ -483,9 +483,9 @@ pub async fn handle_claim_burn(
     }
 
     let (nonce, output_public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
-    let account_owner = sdk.key_manager_api().get_account_owner_key(account_owner_key_id)?;
+    let account_owner = sdk.key_manager_api().get_key(account_owner_key_id)?;
     let account_owner_public_key = account_owner.to_public_key();
-    let view_only = sdk.key_manager_api().get_view_only_key(account.view_only_key_id())?;
+    let view_only = sdk.key_manager_api().get_key(account.view_only_key_id())?;
     let view_only_public_key = view_only.to_public_key();
     let memo = Memo::new_message("Claimed burned XTR from L1").expect("valid memo");
     // NOTE: the confidential encryption format and the bullet proofs currently do not support amounts larger than
@@ -556,9 +556,7 @@ pub async fn handle_claim_burn(
         .add_input(XTR)
         .build();
 
-    let transaction = sdk
-        .local_signer_api()
-        .sign(KeyBranch::Nonce, public_signer_key.key_id, transaction)?;
+    let transaction = sdk.signer_api().sign(public_signer_key.key_id, transaction)?;
 
     let tx_id = context.transaction_service().submit_transaction(transaction).await?;
 
@@ -661,9 +659,7 @@ pub async fn handle_create_free_test_coins(
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .build();
 
-    let transaction = sdk
-        .local_signer_api()
-        .sign(KeyBranch::Account, account_owner_key_id, transaction)?;
+    let transaction = sdk.signer_api().sign(account_owner_key_id, transaction)?;
 
     info!(
         target: LOG_TARGET,
@@ -853,9 +849,7 @@ pub async fn handle_transfer(
         .with_inputs(inputs.into_iter().map(|req| req.into_unversioned()))
         .build();
 
-    let transaction = sdk
-        .local_signer_api()
-        .sign(KeyBranch::Account, account_owner_key_id, transaction)?;
+    let transaction = sdk.signer_api().sign(account_owner_key_id, transaction)?;
 
     // If dry run we can return the result immediately
     if req.dry_run {
@@ -1030,19 +1024,14 @@ pub async fn handle_stealth_transfer(
         let additional_sig = transfer
             .additional_signer
             .as_ref()
-            .map(|s| {
-                sdk.local_signer_api()
-                    .get_signature(s.branch, s.key_id, &main_pk, &transaction)
-            })
+            .map(|s| sdk.signer_api().get_signature(s.key_id, &main_pk, &transaction))
             .transpose()?
             .map(|sig| TransactionSignature::new(sig.public_key.to_byte_type(), sig.signature.to_byte_type()));
 
         let transaction = transaction.build_with_signatures(additional_sig.into_iter().collect());
 
         // Sign and seal the final transaction
-        let transaction =
-            sdk.local_signer_api()
-                .sign(transfer.main_signer.branch, transfer.main_signer.key_id, transaction)?;
+        let transaction = sdk.signer_api().sign(transfer.main_signer.key_id, transaction)?;
 
         if req.dry_run {
             // Release the lock immediately as dry run does not submit the transaction
@@ -1139,16 +1128,13 @@ pub async fn handle_create_stealth_transfer_statement(
             .transpose()?;
 
         let must_sign_with_account_key = inputs.as_ref().is_some_and(|i| i.revealed.is_positive());
-        let (signing_key_branch, signing_key_id) = if must_sign_with_account_key {
-            (KeyBranch::Account, sender_key_id)
+        let signing_key_id = if must_sign_with_account_key {
+            sender_key_id
         } else {
-            let next_index = sdk.key_manager_api().next_derived_key_index(KeyBranch::Nonce)?;
-            (KeyBranch::Nonce, KeyId::derived(next_index))
+            sdk.key_manager_api().next_derived_key_id(KeyBranch::Nonce)?.into()
         };
 
-        let required_signer = sdk
-            .key_manager_api()
-            .get_public_key(signing_key_branch, signing_key_id)?;
+        let required_signer = sdk.key_manager_api().get_public_key(signing_key_id)?;
         let required_signer = required_signer.public_key.to_byte_type();
 
         let outputs = req
@@ -1161,7 +1147,6 @@ pub async fn handle_create_stealth_transfer_statement(
         let statement = sdk
             .stealth_outputs_api()
             .generate_transfer_statement(TransferStatementParams {
-                spend_key_branch: KeyBranch::Account,
                 spend_key_id: sender_key_id,
                 view_only_key_id: sender_account.view_only_key_id(),
                 resource_address: &req.resource_address,
@@ -1185,7 +1170,7 @@ pub async fn handle_create_stealth_transfer_statement(
                 required_signer,
             })?;
 
-        required_signers.insert(BranchAndKeyId::new(signing_key_branch, signing_key_id));
+        required_signers.insert(signing_key_id);
         statements.push(statement);
     }
 

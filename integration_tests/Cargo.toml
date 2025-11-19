@@ -17,7 +17,6 @@ tari_ootle_storage = { workspace = true }
 tari_template_builtin = { workspace = true }
 
 tari_transaction_components = { workspace = true }
-tari_transaction_key_manager = { workspace = true }
 minotari_app_grpc = { workspace = true }
 minotari_app_utilities = { workspace = true }
 minotari_node_grpc_client = { workspace = true }

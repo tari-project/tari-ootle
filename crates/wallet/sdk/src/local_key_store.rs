@@ -1,75 +1,52 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_common_types::seeds::cipher_seed::CipherSeed;
-use tari_crypto::{ristretto::RistrettoSecretKey, tari_utilities::ByteArray};
-use tari_ootle_wallet_crypto::encryption::{decrypt_with_password, CipherError};
+use tari_common_types::{seeds::cipher_seed::CipherSeed, types::PrivateKey};
+use tari_crypto::{hashing::DomainSeparatedHasher, keys::SecretKey, ristretto::RistrettoSecretKey};
+use tari_ootle_wallet_crypto::encryption::CipherError;
 
 use crate::{
-    apis::{
-        key_manager::WalletKeyManager,
-        password_manager::{PasswordManagerApi, PasswordManagerApiError},
-    },
-    cipher_seed::WalletCipherSeed,
+    apis::password_manager::PasswordManagerApiError,
+    cipher_seed::{SafeCipherSeed, WalletCipherSeed},
     key_managers::WalletKeyStore,
-    models::{DerivedKeyIndex, ImportedKeyId},
-    storage::{WalletStorageError, WalletStore, WalletStoreReader},
+    models::DerivedKeyIndex,
+    storage::WalletStorageError,
 };
 
 #[derive(Clone)]
-pub struct LocalKeyStore<'a, TStore> {
-    password_manager_api: PasswordManagerApi<'a, TStore>,
-    cipher_seed: &'a WalletCipherSeed,
-    wallet_store: &'a TStore,
+pub struct LocalKeyStore {
+    cipher_seed: WalletCipherSeed,
 }
 
-impl<'a, TStore> LocalKeyStore<'a, TStore> {
-    pub fn new(
-        cipher_seed: &'a WalletCipherSeed,
-        password_manager_api: PasswordManagerApi<'a, TStore>,
-        wallet_store: &'a TStore,
-    ) -> Self {
-        Self {
-            cipher_seed,
-            password_manager_api,
-            wallet_store,
-        }
+impl LocalKeyStore {
+    pub fn new(cipher_seed: WalletCipherSeed) -> Self {
+        Self { cipher_seed }
     }
 
-    fn get_cipher_seed(&self) -> Result<&CipherSeed, LocalKeyStoreError> {
-        self.cipher_seed.cipher_seed().ok_or(LocalKeyStoreError::NoCipherSeed)
+    pub fn set_cipher_seed(&mut self, cipher_seed: SafeCipherSeed) -> &mut Self {
+        self.cipher_seed = WalletCipherSeed::CipherSeed(cipher_seed);
+        self
+    }
+
+    pub fn cipher_seed(&self) -> Option<&SafeCipherSeed> {
+        self.cipher_seed.cipher_seed()
+    }
+
+    fn get_cipher_seed(&self) -> Result<&SafeCipherSeed, LocalKeyStoreError> {
+        self.cipher_seed().ok_or(LocalKeyStoreError::NoCipherSeed)
     }
 }
 
-impl<TStore: WalletStore> WalletKeyStore<ImportedKeyId> for LocalKeyStore<'_, TStore> {
+impl WalletKeyStore for LocalKeyStore {
     type Error = LocalKeyStoreError;
 
     fn derive_secret(&self, branch: &str, key_index: DerivedKeyIndex) -> Result<RistrettoSecretKey, Self::Error> {
         let cipher_seed = self.get_cipher_seed()?;
-        let km = WalletKeyManager::from(cipher_seed.clone(), branch.to_string(), 0);
-        let secret = km
-            .derive_key(key_index)
-            .expect("Key derivation bug: derive key internally creates a canonical key and must not fail");
-        Ok(secret.key)
-    }
-
-    fn get_imported_secret(&self, key: ImportedKeyId) -> Result<RistrettoSecretKey, Self::Error> {
-        let password = self.password_manager_api.get_cipher_seed_password()?;
-        let (_ty, encrypted) = self
-            .wallet_store
-            .with_read_tx(|tx| tx.key_manager_get_raw_imported_key(key))?;
-        let decrypted = decrypt_with_password(&encrypted, password.reveal())?;
-        let secret = RistrettoSecretKey::from_canonical_bytes(&decrypted).map_err(|e| {
-            LocalKeyStoreError::WalletStorage(WalletStorageError::DecodingError {
-                operation: "get_imported_secret",
-                item: "imported secret key",
-                details: format!("Imported key at id {key} is non-canonical {e}"),
-            })
-        })?;
+        let secret = derive_private_key(cipher_seed, branch.to_string(), key_index);
         Ok(secret)
     }
 
-    fn cipher_seed_birthday(&self) -> Result<Option<u16>, Self::Error> {
+    fn key_birthday(&self) -> Result<Option<u16>, Self::Error> {
         let seed = self.get_cipher_seed()?;
         Ok(Some(seed.birthday()))
     }
@@ -85,4 +62,32 @@ pub enum LocalKeyStoreError {
     Cipher(#[from] CipherError),
     #[error("Cannot derive keys because no cipher seed was provided")]
     NoCipherSeed,
+}
+
+fn derive_private_key(seed: &CipherSeed, branch_seed: String, account: u64) -> PrivateKey {
+    use blake2::{digest::consts::U64, Blake2b};
+    use digest::typenum::ToInt;
+    use tari_hashing::KeyManagerDomain;
+
+    pub const HASHER_LABEL_DERIVE_KEY: &str = "derive_key";
+    const fn assert_equal(a: usize, b: usize) {
+        if a != b {
+            panic!("RistrettoSecretKey::WIDE_REDUCTION_LEN is not equal to 64");
+        }
+    }
+
+    let derive_key = DomainSeparatedHasher::<Blake2b<U64>, KeyManagerDomain>::new_with_label(HASHER_LABEL_DERIVE_KEY)
+        .chain(seed.entropy())
+        .chain(branch_seed.as_bytes())
+        .chain(account.to_le_bytes())
+        .finalize();
+
+    // At compile time, fail if the length of the derived key is not equal to the expected length which would lead to a
+    // runtime panic
+    const {
+        assert_equal(RistrettoSecretKey::WIDE_REDUCTION_LEN, U64::INT);
+    }
+    // const _: () = assert_equal(RistrettoSecretKey::WIDE_REDUCTION_LEN, U64::INT);
+
+    PrivateKey::from_uniform_bytes(derive_key.as_ref()).expect("derived key length matches RistrettoSecretKey length")
 }

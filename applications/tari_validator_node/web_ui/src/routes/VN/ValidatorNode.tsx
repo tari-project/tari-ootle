@@ -28,7 +28,6 @@ import Fees from "./Components/Fees";
 import Info from "./Components/Info";
 import Mempool from "./Components/Mempool";
 import Blocks from "./Components/Blocks";
-import Templates from "./Components/Templates";
 import "./ValidatorNode.css";
 import { StyledPaper } from "../../Components/StyledComponents";
 import Grid from "@mui/material/Grid";
@@ -103,14 +102,6 @@ function ValidatorNode() {
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
           <Blocks />
-        </StyledPaper>
-      </Grid>
-      <Grid item xs={12} md={12} lg={12}>
-        <SecondaryHeading>Templates</SecondaryHeading>
-      </Grid>
-      <Grid item xs={12} md={12} lg={12}>
-        <StyledPaper>
-          <Templates />
         </StyledPaper>
       </Grid>
       <Grid item xs={12} md={12} lg={12}>

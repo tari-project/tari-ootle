@@ -12,7 +12,7 @@ use integration_tests::{
 };
 use rand::{rngs::OsRng, Rng};
 use tari_engine_types::commit_result::FinalizeResult;
-use tari_ootle_wallet_sdk::models::{BranchAndKeyId, KeyBranch};
+use tari_ootle_wallet_sdk::models::KeyBranch;
 use tari_template_lib::{
     constants::XTR,
     types::{bytes::Bytes, crypto::PedersenCommitmentBytes, Amount},
@@ -127,7 +127,7 @@ async fn when_i_run_up_fees(world: &mut TariWorld, amount: u64, wallet_daemon_na
 
         let transaction_submit_req = TransactionSubmitRequest {
             transaction,
-            seal_signer: BranchAndKeyId::new(KeyBranch::Account, account.owner_key_id().expect("no owner key id")),
+            seal_signer: account.owner_key_id().expect("no owner key id"),
             other_signers: vec![],
             detect_inputs: true,
             detect_inputs_use_unversioned: true,
@@ -222,7 +222,9 @@ async fn when_i_burn_funds_with_wallet_daemon(
         .create_burn_transaction(minotari_app_grpc::tari_rpc::CreateBurnTransactionRequest {
             amount,
             fee_per_gram: 1,
-            payment_id: MemoField::open_from_string("Burn", TxType::Burn).to_bytes(),
+            payment_id: MemoField::new_open_from_string("Burn", TxType::Burn)
+                .unwrap()
+                .to_bytes(),
             claim_public_key: public_key.to_vec(),
             sidechain_deployment_key: vec![],
         })

@@ -35,22 +35,22 @@ pub enum ResourceType {
 
 impl ResourceType {
     /// Returns `true` if the resource type is fungible, otherwise `false`.
-    pub fn is_public_fungible(&self) -> bool {
+    pub const fn is_public_fungible(&self) -> bool {
         matches!(self, Self::Fungible)
     }
 
     /// Returns `true` if the resource type is non-fungible, otherwise `false`.
-    pub fn is_non_fungible(&self) -> bool {
+    pub const fn is_non_fungible(&self) -> bool {
         matches!(self, Self::NonFungible)
     }
 
     /// Returns `true` if the resource type is confidential fungible, otherwise `false`.
-    pub fn is_confidential(&self) -> bool {
+    pub const fn is_confidential(&self) -> bool {
         matches!(self, Self::Confidential)
     }
 
     /// Returns `true` if the resource type is stealth, otherwise `false`.
-    pub fn is_stealth(&self) -> bool {
+    pub const fn is_stealth(&self) -> bool {
         matches!(self, Self::Stealth)
     }
 }

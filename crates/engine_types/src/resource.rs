@@ -49,7 +49,7 @@ pub struct Resource {
 }
 
 impl Resource {
-    pub fn new(
+    pub const fn new(
         resource_type: ResourceType,
         owner_key: Option<RistrettoPublicKeyBytes>,
         owner_rule: OwnerRule,
@@ -71,7 +71,11 @@ impl Resource {
             owner_key,
             access_rules,
             metadata,
-            total_supply: Some(0.into()).filter(|_| is_total_supply_tracking_enabled),
+            total_supply: if is_total_supply_tracking_enabled {
+                Some(Amount::zero())
+            } else {
+                None
+            },
             divisibility,
             view_key,
             auth_hook,

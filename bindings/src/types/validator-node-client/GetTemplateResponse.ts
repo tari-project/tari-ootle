@@ -2,4 +2,4 @@
 import type { TemplateAbi } from "./TemplateAbi";
 import type { VNTemplateMetadata } from "./VNTemplateMetadata";
 
-export type GetTemplateResponse = { registration_metadata: VNTemplateMetadata; abi: TemplateAbi };
+export type GetTemplateResponse = { metadata: VNTemplateMetadata; abi: TemplateAbi };

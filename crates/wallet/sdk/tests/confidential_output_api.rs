@@ -6,7 +6,7 @@ mod support;
 use tari_crypto::commitment::HomomorphicCommitmentFactory;
 use tari_engine_types::{crypto::get_commitment_factory, substate::SubstateDiff, ToByteType};
 use tari_ootle_wallet_sdk::{
-    models::{ConfidentialOutputModel, KeyId, OutputStatus},
+    models::{ConfidentialOutputModel, KeyBranch, KeyId, OutputStatus},
     storage::{ReadableWalletStore, WalletStoreReader},
 };
 use tari_template_lib::types::EncryptedData;
@@ -86,8 +86,8 @@ fn outputs_locked_and_finalized() {
             commitment: commitment_change,
             value: 24.into(),
             sender_public_nonce: None,
-            view_only_key_id: KeyId::derived(0),
-            owner_key_id: Some(KeyId::derived(0)),
+            view_only_key_id: KeyId::derived(KeyBranch::ViewOnlyKey, 0),
+            owner_key_id: Some(KeyId::derived(KeyBranch::Account, 0)),
             encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
             public_asset_tag: None,
             memo: None,

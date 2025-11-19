@@ -72,6 +72,6 @@ impl<T: WriteableWalletStore> WriteableWalletStore for &T {
     }
 }
 
-pub trait WalletStore: ReadableWalletStore + WriteableWalletStore {}
+pub trait WalletStore: ReadableWalletStore + WriteableWalletStore + Clone {}
 
-impl<T> WalletStore for T where T: ReadableWalletStore + WriteableWalletStore {}
+impl<T> WalletStore for T where T: ReadableWalletStore + WriteableWalletStore + Clone {}

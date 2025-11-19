@@ -41,11 +41,7 @@ use tari_engine_types::{
 };
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{Epoch, SubstateAddress, SubstateRequirement};
-use tari_ootle_wallet_sdk::{
-    apis::confidential_transfer::UtxoInputSelection,
-    crypto::memo::Memo,
-    models::BranchAndKeyId,
-};
+use tari_ootle_wallet_sdk::{apis::confidential_transfer::UtxoInputSelection, crypto::memo::Memo};
 use tari_template_lib::{
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
     models::{BucketId, NonFungibleAddress, NonFungibleId},
@@ -283,7 +279,7 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
         let resp = client
             .submit_transaction_dry_run(TransactionSubmitDryRunRequest {
                 transaction,
-                seal_signer: BranchAndKeyId::for_account(owner_key_id),
+                seal_signer: owner_key_id,
                 other_signers: vec![],
                 detect_inputs: common.detect_inputs.unwrap_or(true),
                 detect_inputs_use_unversioned: true,
@@ -294,7 +290,7 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
     } else {
         let request = TransactionSubmitRequest {
             transaction,
-            seal_signer: BranchAndKeyId::for_account(owner_key_id),
+            seal_signer: owner_key_id,
             other_signers: vec![],
             detect_inputs: common.detect_inputs.unwrap_or(true),
             detect_inputs_use_unversioned: true,
@@ -352,7 +348,7 @@ async fn handle_submit_manifest(
         let resp = client
             .submit_transaction_dry_run(TransactionSubmitDryRunRequest {
                 transaction,
-                seal_signer: BranchAndKeyId::for_account(owner_key_id),
+                seal_signer: owner_key_id,
                 other_signers: vec![],
                 detect_inputs: common.detect_inputs.unwrap_or(true),
                 detect_inputs_use_unversioned: true,
@@ -363,7 +359,7 @@ async fn handle_submit_manifest(
     } else {
         let request = TransactionSubmitRequest {
             transaction,
-            seal_signer: BranchAndKeyId::for_account(owner_key_id),
+            seal_signer: owner_key_id,
             other_signers: vec![],
             detect_inputs: common.detect_inputs.unwrap_or(true),
             detect_inputs_use_unversioned: true,

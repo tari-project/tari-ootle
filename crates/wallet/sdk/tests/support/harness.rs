@@ -10,22 +10,38 @@ use tari_engine_types::{
     ToByteType,
     Utxo,
 };
-use tari_ootle_common_types::{optional::Optional, shard::Shard, Epoch, Network, StateVersion};
+use tari_ootle_common_types::{
+    optional::{IsNotFoundError, Optional},
+    shard::Shard,
+    Epoch,
+    Network,
+    StateVersion,
+};
 use tari_ootle_wallet_sdk::{
     cipher_seed::CipherSeedRestore,
+    local_key_store::LocalKeyStore,
     models::{
         ConfidentialOutputModel,
         EpochBirthday,
+        KeyBranch,
         KeyId,
         OutputStatus,
         UtxoUpdateSet,
         WalletLockDropGuard,
         WalletLockId,
     },
-    network::{SubstateQueryResult, TransactionQueryResult, UtxoUpdateStream, WalletNetworkInterface},
+    network::{
+        StatusResponseError,
+        SubstateQueryResult,
+        TransactionQueryResult,
+        UtxoUpdateStream,
+        WalletNetworkInterface,
+        WalletQueryErrorStatus,
+    },
     storage::TagAndPublicNoncePair,
     WalletSdk,
     WalletSdkConfig,
+    WalletSdkSpec,
 };
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_abi::TemplateDef;
@@ -37,9 +53,17 @@ use tari_template_lib::{
 };
 use tari_transaction::{Transaction, TransactionId};
 
+pub struct TestSdkSpec;
+
+impl WalletSdkSpec for TestSdkSpec {
+    type KeyStore = LocalKeyStore;
+    type NetworkInterface = PanicNetworkInterface;
+    type Store = SqliteWalletStore;
+}
+
 pub struct Test {
     store: SqliteWalletStore,
-    sdk: WalletSdk<SqliteWalletStore, PanicNetworkInterface>,
+    sdk: WalletSdk<TestSdkSpec>,
     _temp: tempfile::TempDir,
 }
 
@@ -49,7 +73,7 @@ impl Test {
         let store = SqliteWalletStore::try_open(temp.path().join("data/wallet.sqlite")).unwrap();
         store.run_migrations().unwrap();
 
-        let mut sdk = WalletSdk::initialize(
+        let mut sdk = WalletSdk::initialize_with_local_key_store(
             store.clone(),
             PanicNetworkInterface,
             WalletSdkConfig {
@@ -66,8 +90,8 @@ impl Test {
             .add_account(
                 Some("test"),
                 &Test::test_account_address(),
-                KeyId::derived(0),
-                KeyId::derived(0),
+                KeyId::derived(KeyBranch::ViewOnlyKey, 0),
+                KeyId::derived(KeyBranch::Account, 0),
                 Epoch::zero(),
                 true,
                 true,
@@ -117,8 +141,8 @@ impl Test {
                 commitment,
                 value: amount,
                 sender_public_nonce: None,
-                view_only_key_id: KeyId::derived(0),
-                owner_key_id: Some(KeyId::derived(0)),
+                view_only_key_id: KeyId::derived(KeyBranch::ViewOnlyKey, 0),
+                owner_key_id: Some(KeyId::derived(KeyBranch::Account, 0)),
                 encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
                 public_asset_tag: None,
                 memo: None,
@@ -142,7 +166,7 @@ impl Test {
             .unwrap_or_default()
     }
 
-    pub fn sdk(&self) -> &WalletSdk<SqliteWalletStore, PanicNetworkInterface> {
+    pub fn sdk(&self) -> &WalletSdk<TestSdkSpec> {
         &self.sdk
     }
 
@@ -156,7 +180,7 @@ pub struct PanicNetworkInterface;
 
 // TODO: test the substate scanning in the SDK
 impl WalletNetworkInterface for PanicNetworkInterface {
-    type Error = Infallible;
+    type Error = PanicError;
 
     #[allow(clippy::diverging_sub_expression)]
     async fn query_substate(
@@ -217,5 +241,32 @@ impl WalletNetworkInterface for PanicNetworkInterface {
 
     async fn wait_until_ready(&self) -> Result<(), Self::Error> {
         panic!("PanicNetworkInterface called")
+    }
+}
+
+#[derive(Debug)]
+pub struct PanicError;
+
+impl std::fmt::Display for PanicError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PanicError")
+    }
+}
+
+impl std::error::Error for PanicError {}
+
+impl StatusResponseError for PanicError {
+    fn get_status(&self) -> WalletQueryErrorStatus {
+        panic!("get_status called on PanicError")
+    }
+
+    fn get_error_message(&self) -> String {
+        panic!("get_error_message called on PanicError")
+    }
+}
+
+impl IsNotFoundError for PanicError {
+    fn is_not_found_error(&self) -> bool {
+        false
     }
 }

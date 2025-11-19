@@ -40,15 +40,22 @@ use crate::{
         VaultModel,
         WalletOotleAddressWithKeyIds,
     },
-    network::WalletNetworkInterface,
-    storage::{CommittableStore, WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
+    spec::WalletSdkSpec,
+    storage::{
+        CommittableStore,
+        ReadableWalletStore,
+        WalletStorageError,
+        WalletStoreReader,
+        WalletStoreWriter,
+        WriteableWalletStore,
+    },
 };
 
-pub struct AccountsApi<'a, TStore, TNetworkInterface> {
+pub struct AccountsApi<'a, TSpec: WalletSdkSpec> {
     network: Network,
-    store: &'a TStore,
-    substates_api: SubstatesApi<'a, TStore, TNetworkInterface>,
-    key_manager_api: KeyManagerApi<'a, TStore>,
+    store: &'a TSpec::Store,
+    substates_api: SubstatesApi<'a, TSpec::Store, TSpec::NetworkInterface>,
+    key_manager_api: KeyManagerApi<'a, TSpec>,
     epoch_birthday: EpochBirthday,
 }
 
@@ -56,12 +63,12 @@ pub fn derive_account_address_from_public_key(public_key: &RistrettoPublicKeyByt
     derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, public_key)
 }
 
-impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetworkInterface> {
+impl<'a, TSpec: WalletSdkSpec> AccountsApi<'a, TSpec> {
     pub fn new(
         network: Network,
-        store: &'a TStore,
-        substates_api: SubstatesApi<'a, TStore, TNetworkInterface>,
-        key_manager_api: KeyManagerApi<'a, TStore>,
+        store: &'a TSpec::Store,
+        substates_api: SubstatesApi<'a, TSpec::Store, TSpec::NetworkInterface>,
+        key_manager_api: KeyManagerApi<'a, TSpec>,
         epoch_birthday: EpochBirthday,
     ) -> Self {
         Self {
@@ -125,11 +132,7 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
     ) -> Result<(), AccountsApiError> {
         let (owner_pk, owner_key_id) = match owner_key.into() {
             KeyIdOrPublicKey::KeyId(key_id) => {
-                let pk = self
-                    .key_manager_api
-                    .get_account_owner_key(key_id)?
-                    .to_public_key()
-                    .to_byte_type();
+                let pk = self.key_manager_api.get_key(key_id)?.to_public_key().to_byte_type();
                 (pk, Some(key_id))
             },
             KeyIdOrPublicKey::PublicKey(pk) => (pk, None),
@@ -237,8 +240,8 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
 
     pub fn get_address_for_account(&self, account: &Account) -> Result<RistrettoOotleAddress, AccountsApiError> {
         let view_only_key = match account.view_only_key_id {
-            KeyId::Derived { index } => {
-                let view_only_key = self.key_manager_api.derive_view_only_key(index)?;
+            KeyId::Derived { key_branch, index } => {
+                let view_only_key = self.key_manager_api.derive_key(key_branch, index)?;
                 view_only_key.to_public_key()
             },
             KeyId::Imported { local_key_id } => {
@@ -394,11 +397,8 @@ impl<'a, TStore: WalletStore, TNetworkInterface> AccountsApi<'a, TStore, TNetwor
     }
 }
 
-impl<'a, TStore, TNetworkInterface> AccountsApi<'a, TStore, TNetworkInterface>
-where
-    TStore: WalletStore,
-    TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError,
+impl<'a, TSpec> AccountsApi<'a, TSpec>
+where TSpec: WalletSdkSpec
 {
     pub async fn resolve_account_by_public_key(
         &self,

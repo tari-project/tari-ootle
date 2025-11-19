@@ -69,7 +69,11 @@ RUN if [ "${BUILDARCH}" != "${TARGETARCH}" ] ; then \
     if [ -n "${RUST_TOOLCHAIN}" ] ; then \
       # Install a non-standard toolchain if it has been requested.
       # By default we use the toolchain specified in rust-toolchain.toml
-      rustup toolchain install ${RUST_TOOLCHAIN} --force-non-host ; \
+      rustup toolchain install "${RUST_TOOLCHAIN}" --force-non-host ; \
+    fi && \
+    if [ -n "${RUST_TARGET}" ] ; then \
+      # Install rust tripple target.
+      rustup target add "${RUST_TARGET}" ; \
     fi && \
     set -e && \
     cd /base/bindings && \
@@ -89,14 +93,15 @@ RUN if [ "${BUILDARCH}" != "${TARGETARCH}" ] ; then \
     rustup target list --installed && \
     rustup toolchain list && \
     rustup show && \
-    cargo build ${RUST_TARGET} \
+    cargo build \
+      $( [ -n "${RUST_TARGET}" ] && echo --target "${RUST_TARGET}" ) \
       --release --locked \
       --bin tari_ootle_walletd \
       --bin tari_indexer \
       --bin tari_validator_node && \
     # Copy executable out of the cache so it is available in the runtime image.
-    ls -l /base/target/${BUILD_TARGET}release/tari_* && \
-    cp -v /base/target/${BUILD_TARGET}release/{ootle_walletd,indexer,validator_node} /usr/local/bin/ && \
+    ls -l /base/target/${RUST_TARGET}release/tari_* && \
+    cp -v /base/target/${RUST_TARGET}release/tari_{ootle_walletd,indexer,validator_node} /usr/local/bin/ && \
     echo "Tari Build Done"
 
 # Create runtime base minimal image for the target platform executables

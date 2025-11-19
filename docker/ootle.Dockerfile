@@ -100,8 +100,12 @@ RUN if [ "${BUILDARCH}" != "${TARGETARCH}" ] ; then \
       --bin tari_indexer \
       --bin tari_validator_node && \
     # Copy executable out of the cache so it is available in the runtime image.
-    ls -l /base/target/${RUST_TARGET}release/tari_* && \
-    cp -v /base/target/${RUST_TARGET}release/tari_{ootle_walletd,indexer,validator_node} /usr/local/bin/ && \
+    ls -l /base/target/${RUST_TARGET:+$RUST_TARGET/}release/tari_* && \
+    cp -v \
+      /base/target/${RUST_TARGET:+$RUST_TARGET/}release/tari_ootle_walletd \
+      /base/target/${RUST_TARGET:+$RUST_TARGET/}release/tari_indexer \
+      /base/target/${RUST_TARGET:+$RUST_TARGET/}release/tari_validator_node \
+        /usr/local/bin/ && \
     echo "Tari Build Done"
 
 # Create runtime base minimal image for the target platform executables

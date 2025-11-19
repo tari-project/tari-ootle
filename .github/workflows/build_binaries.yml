@@ -219,9 +219,11 @@ jobs:
           choco upgrade protoc -y
           rustup target add ${{ matrix.builds.target }}
 
-      - uses: pnpm/action-setup@v4
+      - name: Install Dependencies - Node
+        uses: pnpm/action-setup@v4
         with:
           version: 10
+          run_install: true
 
       - name: Set environment variables - Nix
         if: ${{ ! startsWith(runner.os,'Windows') }}
@@ -307,6 +309,47 @@ jobs:
             echo "CARGO_OPTIONS=${{ env.CARGO_OPTIONS }} --${{ env.TS_BUILD }}" >> $GITHUB_ENV
           fi
 
+      - name: Install Dependencies - TypeScript (globally)
+        shell: bash
+        run: |
+          npm install -g typescript
+
+      - name: Build Dependencies - Node (bindings)
+        shell: bash
+        working-directory: ${{ github.workspace }}/bindings
+        run: |
+          pnpm install
+          pnpm run build-dev
+
+      - name: Build Dependencies - Node (indexer_client)
+        shell: bash
+        working-directory: ${{ github.workspace }}/clients/javascript/indexer_client
+        run: |
+          pnpm install
+          pnpm run build
+
+      - name: Build Dependencies - applications (indexer)
+        shell: bash
+        working-directory: ${{ github.workspace }}/applications/tari_indexer/web_ui
+        run: |
+          pnpm install
+          pnpm run build
+
+      - name: Build Dependencies - applications (validator_node)
+        shell: bash
+        working-directory: ${{ github.workspace }}/applications/tari_validator_node/web_ui
+        run: |
+          pnpm install
+          pnpm run build
+
+      # - name: Build Dependencies - applications (swarm)
+      #   shell: bash
+      #   #working-directory: ${{ github.workspace }}/applications/tari_swarm_daemon/web_ui
+      #   working-directory: ${{ github.workspace }}/applications/tari_swarm_daemon/webui
+      #   run: |
+      #     pnpm install
+      #     pnpm run build
+
       - name: Show command used for Cargo
         shell: bash
         run: |
@@ -315,7 +358,7 @@ jobs:
           echo "cross flag: ${{ matrix.builds.cross }}"
 
       - name: Build release binaries
-        timeout-minutes: 60
+        timeout-minutes: 90
         shell: bash
         run: |
           ${{ env.CARGO }} build ${{ env.CARGO_OPTIONS }} \

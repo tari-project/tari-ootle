@@ -63,3 +63,5 @@ clients/validator_node_grpc_client/package-lock.json
 # moon
 .moon/cache
 .moon/docker
+
+.pnpm-store/

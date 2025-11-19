@@ -1,11 +1,8 @@
 # syntax = docker/dockerfile:1.3
 
 # https://hub.docker.com/_/rust
-ARG RUST_VERSION=1.84
-ARG OS_BASE=bookworm
-
-# Node Version
-ARG NODE_MAJOR=20
+ARG RUST_VERSION=1.90.0
+ARG OS_BASE=trixie
 
 # rust source compile with cross platform build support
 FROM --platform=$BUILDPLATFORM rust:${RUST_VERSION}-${OS_BASE} as builder-tari-ootle
@@ -25,18 +22,19 @@ ARG RUST_VERSION
 ARG OS_BASE
 
 # Node Version
-ARG NODE_MAJOR
-ENV NODE_MAJOR=$NODE_MAJOR
+# ARG NODE_MAJOR
+# ENV NODE_MAJOR=$NODE_MAJOR
 
+# https://nodesource.com/products/distributions
 # Prep nodejs lts - 20.x
-RUN apt-get update && apt-get install -y \
-      apt-transport-https \
-      ca-certificates \
-      curl \
-      gpg && \
-      mkdir -p /etc/apt/keyrings && \
-      curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
-      echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list
+# RUN apt-get update && apt-get install -y \
+#       apt-transport-https \
+#       ca-certificates \
+#       curl \
+#       gpg && \
+#       mkdir -p /etc/apt/keyrings && \
+#       curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
+#       echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list
 
 RUN apt-get update && apt-get install -y \
       libreadline-dev \
@@ -44,7 +42,11 @@ RUN apt-get update && apt-get install -y \
       openssl \
       cmake \
       protobuf-compiler \
-      nodejs
+      nodejs \
+      npm && \
+    npm install -g typescript && \
+    corepack enable && \
+    corepack prepare pnpm@latest --activate
 
 # https://gcc.gnu.org/onlinedocs/gcc/x86-Options.html
 ARG ARCH
@@ -70,34 +72,32 @@ RUN if [ "${BUILDARCH}" != "${TARGETARCH}" ] ; then \
       # By default we use the toolchain specified in rust-toolchain.toml
       rustup toolchain install ${RUST_TOOLCHAIN} --force-non-host ; \
     fi && \
+    cd /base/bindings && \
+    pnpm install && \
+    pnpm run build-dev && \
+    cd /base/clients/javascript/indexer_client && \
+    pnpm install && \
+    pnpm run build && \
     cd /base/applications/tari_indexer/web_ui && \
-    npm install react-scripts && \
-    npm run build && \
+    pnpm install && \
+    pnpm run build && \
     cd /base/applications/tari_validator_node/web_ui && \
-    npm install react-scripts && \
-    npm run build && \
-    cd /base/ && \
+    pnpm install && \
+    pnpm run build && \
+    cd /base && \
     rustup target add wasm32-unknown-unknown && \
     rustup target list --installed && \
     rustup toolchain list && \
     rustup show && \
     cargo build ${RUST_TARGET} \
       --release --locked \
-      --bin tari_ootle_wallet_cli \
       --bin tari_ootle_walletd \
       --bin tari_indexer \
-      --bin tari_generate \
-      --bin tari_swarm_daemon \
-      --bin tari_validator_node \
-      --bin tari_validator_node_cli && \
+      --bin tari_validator_node && \
     # Copy executable out of the cache so it is available in the runtime image.
-    cp -v /base/target/${BUILD_TARGET}release/tari_ootle_wallet_cli /usr/local/bin/ && \
     cp -v /base/target/${BUILD_TARGET}release/tari_ootle_walletd /usr/local/bin/ && \
     cp -v /base/target/${BUILD_TARGET}release/tari_indexer /usr/local/bin/ && \
-    cp -v /base/target/${BUILD_TARGET}release/tari_generate /usr/local/bin/ && \
-    cp -v /base/target/${BUILD_TARGET}release/tari_swarm_daemon /usr/local/bin/ && \
     cp -v /base/target/${BUILD_TARGET}release/tari_validator_node /usr/local/bin/ && \
-    cp -v /base/target/${BUILD_TARGET}release/tari_validator_node_cli /usr/local/bin/ && \
     echo "Tari Build Done"
 
 # Create runtime base minimal image for the target platform executables

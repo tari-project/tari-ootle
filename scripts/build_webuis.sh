@@ -62,13 +62,13 @@ done
 
 pushd $base_path/bindings > /dev/null
 if [ ! -z "${build_bindings}" ]; then
-	# Build bindings
-	echo "Building Bindings..."
-	pnpm install
+  # Build bindings
+  echo "Building Bindings..."
+  pnpm install
   pnpm run build
 else
-	echo "Building Bindings (Dist only)..."
-	pnpm install
+  echo "Building Bindings (Dist only)..."
+  pnpm install
   pnpm run build-dev # build with the TS definitions included
 fi
 popd > /dev/null

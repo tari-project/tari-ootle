@@ -49,7 +49,6 @@ RUN apt-get update && apt-get install -y \
     corepack prepare pnpm@latest --activate
 
 # https://gcc.gnu.org/onlinedocs/gcc/x86-Options.html
-ARG ARCH
 #ARG ARCH=native
 
 #ENV RUSTFLAGS="-C target_cpu=$ARCH"
@@ -72,6 +71,7 @@ RUN if [ "${BUILDARCH}" != "${TARGETARCH}" ] ; then \
       # By default we use the toolchain specified in rust-toolchain.toml
       rustup toolchain install ${RUST_TOOLCHAIN} --force-non-host ; \
     fi && \
+    set -e && \
     cd /base/bindings && \
     pnpm install && \
     pnpm run build-dev && \
@@ -95,9 +95,8 @@ RUN if [ "${BUILDARCH}" != "${TARGETARCH}" ] ; then \
       --bin tari_indexer \
       --bin tari_validator_node && \
     # Copy executable out of the cache so it is available in the runtime image.
-    cp -v /base/target/${BUILD_TARGET}release/tari_ootle_walletd /usr/local/bin/ && \
-    cp -v /base/target/${BUILD_TARGET}release/tari_indexer /usr/local/bin/ && \
-    cp -v /base/target/${BUILD_TARGET}release/tari_validator_node /usr/local/bin/ && \
+    ls -l /base/target/${BUILD_TARGET}release/tari_* && \
+    cp -v /base/target/${BUILD_TARGET}release/{ootle_walletd,indexer,validator_node} /usr/local/bin/ && \
     echo "Tari Build Done"
 
 # Create runtime base minimal image for the target platform executables

@@ -70,7 +70,7 @@ jobs:
           fi
 
           cd buildtools/docker_rig
-          source ./build-matrix.sh "${{ inputs.build_items }}" "${VERSION}" "${{ inputs.platforms }}" "${{ inputs.tari_network }}"
+          source ./build-matrix.sh "${{ inputs.build_items }}" "${VERSION}" "${{ inputs.platforms }}"
 
           echo "${matrix}"
           echo "${matrix}" | jq .
@@ -169,7 +169,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
-          #username: ${{ github.actor }}
+          # username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Login to Docker Image Provider
@@ -192,7 +192,6 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: |
             VERSION=${{ matrix.builds.version }}
-            ${{ env.DOCKER_SUBTAG }}
           tags: |
             ${{ secrets.DOCKER_PROVIDER }}/${{ secrets.DOCKER_REPO }}/${{ matrix.builds.image_name }}:${{ matrix.builds.version }}${{ env.DSuffix }}
             ghcr.io/${{ github.repository_owner }}/${{ matrix.builds.image_name }}:${{ matrix.builds.version }}${{ env.DSuffix }}
@@ -223,7 +222,7 @@ jobs:
 
       - name: Pre for multi-arch image merge
         env:
-          BMATRIX: ${{ needs.builds_envs_setup.outputs.matrix }}
+          BMATRIX: "${{ needs.builds_envs_setup.outputs.matrix }}"
         run: |
           set -xuo pipefail
           echo '${{ env.BMATRIX }}' | jq -r

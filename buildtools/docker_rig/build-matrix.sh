@@ -11,7 +11,12 @@ build_items=${1:-tari-ootle_all}
 echo "Building with ${build_items}."
 if [ -z "${build_items}" ] || [ "${build_items}" = "tari-ootle_all" ] ; then
   echo "Build all tari-ootle images"
-  matrix_selection=$( jq -s -c '.[]' tari-ootle.json )
+  if [ ! -f "tari-ootle.json" ]; then
+    echo "Error: tari-ootle.json not found at $(pwd)/tari-ootle.json"
+    exit 1
+  else
+    matrix_selection=$( jq -s -c '.[]' tari-ootle.json )
+  fi
 fi
 
 # Choose version prefix for minotari builds

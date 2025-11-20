@@ -264,13 +264,6 @@ where
             return Err(e.into());
         }
 
-        if !transaction.has_inputs() {
-            warn!(target: LOG_TARGET, "⚠ No involved shards for transaction {tx_id}");
-            return Err(MempoolError::TransactionValidationError(
-                TransactionValidationError::NoInvolvedShards { transaction_id: tx_id },
-            ));
-        }
-
         let current_epoch = self.consensus_handle.current_view().get_epoch();
 
         let local_committee_shard = self.epoch_manager.get_local_committee_info(current_epoch).await?;

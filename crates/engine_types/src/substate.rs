@@ -134,49 +134,49 @@ pub enum SubstateId {
 }
 
 impl SubstateId {
-    pub fn as_component_address(&self) -> Option<ComponentAddress> {
+    pub const fn as_component_address(&self) -> Option<ComponentAddress> {
         match self {
             Self::Component(addr) => Some(*addr),
             _ => None,
         }
     }
 
-    pub fn as_vault_id(&self) -> Option<VaultId> {
+    pub const fn as_vault_id(&self) -> Option<VaultId> {
         match self {
             Self::Vault(id) => Some(*id),
             _ => None,
         }
     }
 
-    pub fn as_resource_address(&self) -> Option<ResourceAddress> {
+    pub const fn as_resource_address(&self) -> Option<ResourceAddress> {
         match self {
             Self::Resource(address) => Some(*address),
             _ => None,
         }
     }
 
-    pub fn as_unclaimed_confidential_output_address(&self) -> Option<ClaimedOutputTombstoneAddress> {
+    pub const fn as_unclaimed_confidential_output_address(&self) -> Option<ClaimedOutputTombstoneAddress> {
         match self {
             Self::ClaimedOutputTombstone(address) => Some(*address),
             _ => None,
         }
     }
 
-    pub fn as_template(&self) -> Option<PublishedTemplateAddress> {
+    pub const fn as_template(&self) -> Option<PublishedTemplateAddress> {
         match self {
             Self::Template(address) => Some(*address),
             _ => None,
         }
     }
 
-    pub fn as_transaction_receipt_address(&self) -> Option<TransactionReceiptAddress> {
+    pub const fn as_transaction_receipt_address(&self) -> Option<TransactionReceiptAddress> {
         match self {
             Self::TransactionReceipt(address) => Some(*address),
             _ => None,
         }
     }
 
-    pub fn as_validator_fee_pool_address(&self) -> Option<ValidatorFeePoolAddress> {
+    pub const fn as_validator_fee_pool_address(&self) -> Option<ValidatorFeePoolAddress> {
         match self {
             Self::ValidatorFeePool(address) => Some(*address),
             _ => None,
@@ -234,22 +234,22 @@ impl SubstateId {
         self.to_string()
     }
 
-    pub fn as_non_fungible_address(&self) -> Option<&NonFungibleAddress> {
+    pub const fn as_non_fungible_address(&self) -> Option<&NonFungibleAddress> {
         match self {
             SubstateId::NonFungible(addr) => Some(addr),
             _ => None,
         }
     }
 
-    pub fn is_resource(&self) -> bool {
+    pub const fn is_resource(&self) -> bool {
         matches!(self, Self::Resource(_))
     }
 
-    pub fn is_component(&self) -> bool {
+    pub const fn is_component(&self) -> bool {
         matches!(self, Self::Component(_))
     }
 
-    pub fn is_root(&self) -> bool {
+    pub const fn is_root(&self) -> bool {
         // A component and utxo are "root" substates i.e. they may not have a parent node. NOTE: this concept isn't
         // well-defined right now, this is simply used to prevent components being detected as dangling.
         matches!(
@@ -266,39 +266,39 @@ impl SubstateId {
         self.is_public_key_identity()
     }
 
-    pub fn is_vault(&self) -> bool {
+    pub const fn is_vault(&self) -> bool {
         matches!(self, Self::Vault(_))
     }
 
-    pub fn is_non_fungible(&self) -> bool {
+    pub const fn is_non_fungible(&self) -> bool {
         matches!(self, Self::NonFungible(_))
     }
 
-    pub fn is_layer1_commitment(&self) -> bool {
+    pub const fn is_claimed_output_tombstone(&self) -> bool {
         matches!(self, Self::ClaimedOutputTombstone(_))
     }
 
-    pub fn is_transaction_receipt(&self) -> bool {
+    pub const fn is_transaction_receipt(&self) -> bool {
         matches!(self, Self::TransactionReceipt(_))
     }
 
-    pub fn is_template(&self) -> bool {
+    pub const fn is_template(&self) -> bool {
         matches!(self, Self::Template(_))
     }
 
-    pub fn is_validator_fee_pool(&self) -> bool {
+    pub const fn is_validator_fee_pool(&self) -> bool {
         matches!(self, Self::ValidatorFeePool(_))
     }
 
-    pub fn is_utxo(&self) -> bool {
+    pub const fn is_utxo(&self) -> bool {
         matches!(self, Self::Utxo(_))
     }
 
-    pub fn is_global(&self) -> bool {
+    pub const fn is_global(&self) -> bool {
         self.is_template()
     }
 
-    pub fn is_read_only(&self) -> bool {
+    pub const fn is_read_only(&self) -> bool {
         matches!(self, Self::TransactionReceipt(_) | Self::Template(_))
     }
 }

@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_consensus_types::{ProposalCertificate, QcId, TcId, TimeoutCertificate};
+use tari_consensus_types::{PcId, ProposalCertificate, TcId, TimeoutCertificate};
 use tari_ootle_common_types::Epoch;
 
 use crate::{
@@ -35,7 +35,7 @@ pub mod proposal {
     pub struct ProposalCertificateCf;
 
     impl Cf for ProposalCertificateCf {
-        type Key = (Epoch, QcId);
+        type Key = (Epoch, PcId);
         type KeyCodec = (EpochCodec, FixedBytesCodec32);
         type Value = ProposalCertificate;
         type ValueCodec = DefaultVersionedCodec<VersionedProposalCertificate>;

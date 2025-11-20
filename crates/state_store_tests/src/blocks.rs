@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_common_types::types::FixedHash;
-use tari_consensus_types::{QcId, ShardGroupAccumulatedData};
+use tari_consensus_types::{PcId, ShardGroupAccumulatedData};
 use tari_ootle_common_types::{
     optional::Optional,
     Epoch,
@@ -61,7 +61,7 @@ mod basic_block_operations {
         // set qcs
         let block1_from_db = tx.blocks_get(block1.id()).unwrap();
         assert!(!block1_from_db.has_justify_qc());
-        tx.blocks_set_qcs(block1_from_db.id(), None, Some(&QcId::zero()))
+        tx.blocks_set_qcs(block1_from_db.id(), None, Some(&PcId::zero()))
             .unwrap();
         let block1_from_db = tx.blocks_get(block1.id()).unwrap();
         assert!(block1_from_db.has_justify_qc());
@@ -69,7 +69,7 @@ mod basic_block_operations {
         // set is_commited flag
         let block1_from_db = tx.blocks_get(block1.id()).unwrap();
         assert!(!block1_from_db.is_committed());
-        tx.blocks_set_qcs(block1_from_db.id(), Some(&QcId::zero()), None)
+        tx.blocks_set_qcs(block1_from_db.id(), Some(&PcId::zero()), None)
             .unwrap();
         let block1_from_db = tx.blocks_get(block1.id()).unwrap();
         assert!(block1_from_db.is_committed());
@@ -179,9 +179,9 @@ mod block_parent_operations {
         assert_eq!(res, vec![]);
 
         // commit the blocks
-        tx.blocks_set_qcs(zero_block.id(), Some(&QcId::zero()), None).unwrap();
-        tx.blocks_set_qcs(block1.id(), Some(&QcId::zero()), None).unwrap();
-        tx.blocks_set_qcs(block2.id(), Some(&QcId::zero()), None).unwrap();
+        tx.blocks_set_qcs(zero_block.id(), Some(&PcId::zero()), None).unwrap();
+        tx.blocks_set_qcs(block1.id(), Some(&PcId::zero()), None).unwrap();
+        tx.blocks_set_qcs(block2.id(), Some(&PcId::zero()), None).unwrap();
 
         // blocks_get_all_by_parent
         let res = tx.blocks_get_committed_by_parent(zero_block.id()).unwrap();
@@ -229,7 +229,7 @@ mod block_query_operations {
 
         let zero_block = Block::zero_block(network, NumPreshards::P64);
         zero_block.insert(&mut tx).unwrap();
-        tx.blocks_set_qcs(zero_block.id(), Some(&QcId::zero()), Some(&QcId::zero()))
+        tx.blocks_set_qcs(zero_block.id(), Some(&PcId::zero()), Some(&PcId::zero()))
             .unwrap();
 
         let shard_group = ShardGroup::all_shards(NumPreshards::P64);
@@ -255,7 +255,7 @@ mod block_query_operations {
         )
         .unwrap();
         block1.insert(&mut tx).unwrap();
-        tx.blocks_set_qcs(block1.id(), Some(&QcId::zero()), Some(&QcId::zero()))
+        tx.blocks_set_qcs(block1.id(), Some(&PcId::zero()), Some(&PcId::zero()))
             .unwrap();
         block1.as_locked().set(&mut tx).unwrap();
 
@@ -282,7 +282,7 @@ mod block_query_operations {
         )
         .unwrap();
         block2.insert(&mut tx).unwrap();
-        tx.blocks_set_qcs(block2.id(), Some(&QcId::zero()), Some(&QcId::zero()))
+        tx.blocks_set_qcs(block2.id(), Some(&PcId::zero()), Some(&PcId::zero()))
             .unwrap();
         tx.proposal_certificates_save(block2.justify()).unwrap();
 

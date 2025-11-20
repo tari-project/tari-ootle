@@ -10,6 +10,7 @@ license.workspace = true
 [dependencies]
 
 [dev-dependencies]
+tari_ootle_app_utilities = { workspace = true }
 tari_bor = { workspace = true }
 tari_common_types = { workspace = true }
 tari_consensus = { workspace = true }

@@ -10,8 +10,8 @@ use tari_consensus_types::{
     LastVoted,
     LeafBlock,
     LockedBlock,
+    PcId,
     ProposalVote,
-    QcId,
     ValidatorSignatureBytes,
 };
 use tari_ootle_common_types::{optional::Optional, Epoch, Network, NodeHeight, ShardGroup};
@@ -151,7 +151,7 @@ fn miscellaneous_operations(db: impl StateStore) {
         block_id: BlockId::zero(),
         epoch,
         block_height: NodeHeight(123),
-        qc_id: QcId::zero(),
+        qc_id: PcId::zero(),
     };
     tx.high_pc_set(&high_qc).unwrap();
     let res = tx.high_pc_get(epoch).unwrap();

@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_common_types::types::FixedHash;
-use tari_consensus_types::{BlockId, LeafBlock, QcId};
+use tari_consensus_types::{BlockId, LeafBlock, PcId, QcId};
 use tari_epoch_manager::EpochManagerError;
 use tari_ootle_common_types::{Epoch, NodeHeight, ShardGroup, VersionedSubstateIdError, VotePower};
 use tari_ootle_storage::{
@@ -167,6 +167,12 @@ pub enum ProposalValidationError {
         block_id: BlockId,
         details: String,
     },
+    #[error("Justified block {justify_block} for proposed block {block_description} by {proposed_by} is parked")]
+    JustifyBlockParked {
+        proposed_by: String,
+        block_description: String,
+        justify_block: LeafBlock,
+    },
     #[error("Candidate block {candidate_block_height} is not higher than justify {justify_block_height}")]
     CandidateBlockNotHigherThanJustify {
         justify_block_height: NodeHeight,
@@ -286,7 +292,7 @@ pub enum ProposalValidationError {
     #[error("Invalid epoch in QC {qc_id} in {block_id}. Expected: {current_epoch}, given: {qc_epoch}")]
     InvalidEpochInQc {
         block_id: BlockId,
-        qc_id: QcId,
+        qc_id: PcId,
         qc_epoch: Epoch,
         current_epoch: Epoch,
     },

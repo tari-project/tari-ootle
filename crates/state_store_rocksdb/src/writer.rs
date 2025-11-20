@@ -38,8 +38,8 @@ use tari_consensus_types::{
     LastVoted,
     LeafBlock,
     LockedBlock,
+    PcId,
     ProposalCertificate,
-    QcId,
     TimeoutCertificate,
 };
 use tari_engine_types::substate::SubstateId;
@@ -117,6 +117,7 @@ use crate::{
         certificates::{proposal::ProposalCertificateCf, timeout::TimeoutCertificateCf},
         chain,
         chain::PendingChainIndex,
+        diagnostic_no_vote::{DiagnosticsNoVoteCf, DiagnosticsNoVoteData},
         epoch_checkpoint::EpochCheckpointCf,
         evicted_node,
         evicted_node::{EvictedNodeCf, EvictedNodeData},
@@ -331,8 +332,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     fn blocks_set_qcs(
         &mut self,
         block_id: &BlockId,
-        commit_qc_id: Option<&QcId>,
-        justify_qc_id: Option<&QcId>,
+        commit_qc_id: Option<&PcId>,
+        justify_qc_id: Option<&PcId>,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "blocks_set_qcs";
         if commit_qc_id.is_none() && justify_qc_id.is_none() {
@@ -855,15 +856,16 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         cf.put(&(*block.block_id(), *update.transaction_id()), &value, OPERATION)?;
 
-        // TODO: remove CF - this is only used for debugging (or maybe make it configurable)
-        let cf = self
-            .db()
-            .cf(transaction_pool_state_update::TransactionPoolStateUpdateDebugHistoryCf)?;
-        cf.put(
-            &(block.epoch(), block.height(), *update.transaction_id()),
-            &value,
-            OPERATION,
-        )?;
+        if self.options.debugging_data {
+            let cf = self
+                .db()
+                .cf(transaction_pool_state_update::TransactionPoolStateUpdateDebugHistoryCf)?;
+            cf.put(
+                &(block.epoch(), block.height(), *update.transaction_id()),
+                &value,
+                OPERATION,
+            )?;
+        }
 
         // Set is_ready and pending_stage to the updated values. This allows has_uncommitted_transactions to return an
         // accurate value without querying records in the updates table.
@@ -1721,8 +1723,18 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
-    fn diagnostics_add_no_vote(&mut self, _block_id: BlockId, _reason: NoVoteReason) -> Result<(), StorageError> {
-        // used for debugging. TODO: consider implementing as a user option or keeping in the global Sqlite db
+    fn diagnostics_add_no_vote(&mut self, block_id: BlockId, reason: NoVoteReason) -> Result<(), StorageError> {
+        const OPERATION: &str = "diagnostics_add_no_vote";
+        if self.options.debugging_data {
+            self.db().cf(DiagnosticsNoVoteCf)?.insert(
+                &block_id,
+                &DiagnosticsNoVoteData {
+                    reason: reason.to_string().into_boxed_str(),
+                },
+                OPERATION,
+            )?;
+        }
+
         Ok(())
     }
 }

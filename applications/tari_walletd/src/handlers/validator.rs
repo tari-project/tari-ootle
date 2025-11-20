@@ -10,7 +10,6 @@ use log::*;
 use tari_engine_types::{substate::SubstateId, ToByteType};
 use tari_ootle_common_types::{derive_fee_pool_address, SubstateAddress, SubstateRequirement};
 use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId};
-use tari_template_lib::constants::XTR;
 use tari_transaction::args;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
@@ -177,7 +176,6 @@ pub async fn handle_claim_validator_fees(
         })
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .with_inputs(fee_pool_addresses.map(SubstateRequirement::unversioned))
-        .add_input(XTR)
         .map(|builder| {
             if let Some(index) = req.claim_key_index {
                 if claim_public_key == *account.address.account_public_key() {

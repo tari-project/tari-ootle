@@ -61,8 +61,8 @@ async fn run(cli: cli::CommonArgs, _args: cli::RunArgs) -> anyhow::Result<()> {
 
     info!("⏳️ Creating 1000 tariswap components...");
     let mut tariswaps = vec![];
-    for _ in 0..4 {
-        tariswaps.extend(runner.create_tariswaps(&primary_account, &faucet, 250).await?);
+    for _ in 0..40 {
+        tariswaps.extend(runner.create_tariswaps(&primary_account, &faucet, 25).await?);
     }
     info!("✅ Created 1000 tariswaps");
 

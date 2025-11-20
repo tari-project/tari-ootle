@@ -15,8 +15,8 @@ use tari_consensus_types::{
     LastVoted,
     LeafBlock,
     LockedBlock,
+    PcId,
     ProposalCertificate,
-    QcId,
     ShardGroupAccumulatedData,
     SignedMessage,
     ToSignatureMessage,
@@ -44,7 +44,7 @@ pub struct BlockHeader {
     parent: BlockId,
     /// The quorum certificate proposed in this block. Note that this QC justifies a previous block.
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    justify_id: QcId,
+    justify_id: PcId,
     /// Block height.
     height: NodeHeight,
     /// Epoch this block belongs to.
@@ -87,7 +87,7 @@ impl BlockHeader {
     pub fn create(
         network: Network,
         parent: BlockId,
-        justify_id: QcId,
+        justify_id: PcId,
         height: NodeHeight,
         epoch: Epoch,
         shard_group: ShardGroup,
@@ -127,7 +127,7 @@ impl BlockHeader {
     pub fn create_unsigned(
         network: Network,
         parent: BlockId,
-        justify_id: QcId,
+        justify_id: PcId,
         height: NodeHeight,
         epoch: Epoch,
         shard_group: ShardGroup,
@@ -166,7 +166,7 @@ impl BlockHeader {
 
     pub fn genesis(
         network: Network,
-        justify_id: QcId,
+        justify_id: PcId,
         epoch: Epoch,
         shard_group: ShardGroup,
         state_merkle_root: FixedHash,
@@ -225,7 +225,7 @@ impl BlockHeader {
         parent: BlockId,
         proposed_by: RistrettoPublicKeyBytes,
         height: NodeHeight,
-        justify_id: QcId,
+        justify_id: PcId,
         epoch: Epoch,
         shard_group: ShardGroup,
         parent_state_merkle_root: FixedHash,
@@ -380,7 +380,7 @@ impl BlockHeader {
         &self.parent
     }
 
-    pub fn justify_id(&self) -> &QcId {
+    pub fn justify_id(&self) -> &PcId {
         &self.justify_id
     }
 
@@ -434,6 +434,10 @@ impl BlockHeader {
 
     pub fn accumulated_data(&self) -> &ShardGroupAccumulatedData {
         &self.accumulated_data
+    }
+
+    pub fn total_accumulated_exhaust_burn(&self) -> u128 {
+        self.accumulated_data.total_exhaust_burn
     }
 
     pub fn epoch_hash(&self) -> &FixedHash {

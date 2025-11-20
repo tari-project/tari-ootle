@@ -553,7 +553,6 @@ pub async fn handle_claim_burn(
                 .claim_burn(claim_proof, output_data)
                 .pay_fee_stealth(pay_fee_and_mint_output)
         })
-        .add_input(XTR)
         .build();
 
     let transaction = sdk.signer_api().sign(public_signer_key.key_id, transaction)?;

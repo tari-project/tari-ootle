@@ -8,6 +8,7 @@ use tari_engine_types::{
     template_lib_models::ResourceAddress,
     transaction_receipt::TransactionReceiptAddress,
 };
+use tari_template_lib_types::TemplateAddress;
 
 use crate::{
     error::IndexerRestClientError,
@@ -26,7 +27,6 @@ use crate::{
         GetSubstateResponse,
         GetSubstatesRequest,
         GetSubstatesResponse,
-        GetTemplateDefinitionRequest,
         GetTemplateDefinitionResponse,
         GetTransactionReceiptResponse,
         GetTransactionResultRequest,
@@ -145,9 +145,9 @@ impl IndexerRestApiClient {
 
     pub async fn get_template_definition(
         &mut self,
-        req: GetTemplateDefinitionRequest,
+        template_address: TemplateAddress,
     ) -> Result<GetTemplateDefinitionResponse, IndexerRestClientError> {
-        self.send_get(format!("templates/{}", req.template_address), ()).await
+        self.send_get(format!("templates/{template_address}"), ()).await
     }
 
     // pub async fn get_non_fungibles(

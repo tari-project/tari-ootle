@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_consensus_types::{LastProposed, LastSentVote, LeafBlock};
+use tari_consensus_types::{LastProposed, LeafBlock};
 use tari_ootle_common_types::{optional::Optional, Epoch, NodeHeight};
 use tari_ootle_storage::{
     consensus_models::{Block, BookkeepingModel},
@@ -12,7 +12,7 @@ use tokio::task;
 
 use crate::{
     hotstuff::HotStuffError,
-    messages::{HotstuffMessage, ProposalMessage, SyncRequestMessage},
+    messages::{CatchUpRequestMessage, HotstuffMessage, ProposalMessage},
     traits::{ConsensusSpec, OutboundMessaging},
 };
 
@@ -33,7 +33,7 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
     }
 
     #[allow(clippy::too_many_lines)]
-    pub fn handle(&self, from: TConsensusSpec::Addr, epoch: Epoch, msg: SyncRequestMessage) {
+    pub fn handle(&self, from: TConsensusSpec::Addr, epoch: Epoch, msg: CatchUpRequestMessage) {
         if msg.epoch != epoch {
             warn!(
                 target: LOG_TARGET,
@@ -66,12 +66,12 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
                         msg.epoch,
                         leaf_block
                     );
-                    return Ok(vec![]);
+                    return Ok(None);
                 }
 
                 if leaf_block.height.is_zero() {
                     info!(target: LOG_TARGET, "This node is at height 0 so cannot return any sync blocks. Ignoring request");
-                    return Ok(vec![]);
+                    return Ok(None);
                 }
 
                 if leaf_block.height() < msg.block_height {
@@ -91,89 +91,88 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
                     msg.block_height,
                     leaf_block
                 );
-                // NOTE: We have to send dummy blocks, because the messaging will ignore heights > current_view + 1,
-                // until eventually the syncing node's pacemaker leader-fails a few times.
-                // TODO: A Block containing a higher QC that justifies the previous non-dummy block should be enough to cause a view change and allow the dummies to be generated locally.
-                // sending dummies is problematic as they are unsigned and generally, you cannot prove their validity.
-                let blocks = Block::get_all_blocks_between(
-                    tx,
-                    msg.epoch,
-                    msg.block_height.max(NodeHeight(1)),
-                    leaf_block.height(),
-                    false,
-                    1000,
-                )?;
-
-                Ok::<_, HotStuffError>(blocks)
+                Ok(Some(leaf_block))
             });
 
-            let blocks = match result {
-                Ok(mut blocks) => {
-                    if let Some(pos) = blocks.iter().position(|b| b.is_genesis()) {
-                        blocks.remove(pos);
-                    }
-                    blocks
+            let leaf_block = match result {
+                Ok(Some(leaf_block)) => leaf_block,
+                Ok(None) => {
+                    return;
                 },
                 Err(err) => {
-                    warn!(target: LOG_TARGET, "Failed to fetch blocks for sync request: {}", err);
+                    warn!(target: LOG_TARGET, "Failed to process sync request: {}", err);
                     return;
                 },
             };
 
-            info!(
-                target: LOG_TARGET,
-                "🌐 Sending {} block(s) ({} to {}) to {}",
-                blocks.len(),
-                blocks.first().map(|b| b.height()).unwrap_or_default(),
-                blocks.last().map(|b| b.height()).unwrap_or_default(),
-                from
-            );
+            let mut start_height = msg.block_height.max(NodeHeight(1));
+            while start_height < leaf_block.height() {
+                let result = store.with_read_tx(|tx| {
+                    Block::get_all_blocks_between(tx, msg.epoch, start_height, leaf_block.height(), false, 100)
+                });
 
-            for block in blocks {
-                info!(
-                    target: LOG_TARGET,
-                    "🌐 Sending block {} to {}",
-                    block,
-                    from
-                );
-                // TODO(perf): O(n) queries
-                let foreign_proposals = match store.with_read_tx(|tx| block.get_foreign_proposals(tx)) {
-                    Ok(foreign_proposals) => foreign_proposals,
+                let blocks = match result {
+                    Ok(blocks) => blocks,
                     Err(err) => {
-                        warn!(target: LOG_TARGET, "Failed to fetch foreign proposals for block {}: {}", block, err);
+                        warn!(target: LOG_TARGET, "Failed to fetch blocks for catch-up request: {}", err);
                         return;
                     },
                 };
 
-                if let Err(err) = outbound_messaging
-                    .send(
-                        from.clone(),
-                        HotstuffMessage::new_proposal(ProposalMessage {
-                            block,
-                            foreign_proposals: foreign_proposals.into_iter().map(|p| p.into_proposal()).collect(),
-                        }),
-                    )
-                    .await
-                {
-                    warn!(target: LOG_TARGET, "Error sending SyncResponse: {err}");
+                if blocks.is_empty() {
+                    warn!(
+                        target: LOG_TARGET,
+                        "No blocks found between heights {} and {} for epoch {}",
+                        start_height,
+                        leaf_block.height(),
+                        epoch
+                    );
                     return;
                 }
-            }
+                start_height = blocks
+                    .last()
+                    .map(|b| b.height() + NodeHeight(1))
+                    .unwrap_or(leaf_block.height());
 
-            // Send last vote.
-            let maybe_last_vote = match store.with_read_tx(|tx| LastSentVote::get(tx, epoch)).optional() {
-                Ok(last_vote) => last_vote,
-                Err(err) => {
-                    warn!(target: LOG_TARGET, "Failed to fetch last vote for catch-up request: {}", err);
-                    return;
-                },
-            };
-            if let Some(last_vote) = maybe_last_vote {
-                if let Err(err) = outbound_messaging
-                    .send(from.clone(), HotstuffMessage::Vote(last_vote.vote.into()))
-                    .await
-                {
-                    warn!(target: LOG_TARGET, "Failed to send LastVote {err}");
+                info!(
+                    target: LOG_TARGET,
+                    "🌐 Sending {} block(s) ({} to {}) to {}",
+                    blocks.len(),
+                    blocks.first().map(|b| b.height()).unwrap_or_default(),
+                    blocks.last().map(|b| b.height()).unwrap_or_default(),
+                    from
+                );
+
+                for block in blocks {
+                    // TODO(perf): O(n) queries
+                    let foreign_proposals = match store.with_read_tx(|tx| block.get_foreign_proposals(tx)) {
+                        Ok(foreign_proposals) => foreign_proposals,
+                        Err(err) => {
+                            warn!(target: LOG_TARGET, "Failed to fetch foreign proposals for block {}: {}", block, err);
+                            return;
+                        },
+                    };
+
+                    debug!(
+                        target: LOG_TARGET,
+                        "🌐 Sending block {} to {}",
+                        block,
+                        from
+                    );
+
+                    if let Err(err) = outbound_messaging
+                        .send(
+                            from.clone(),
+                            HotstuffMessage::new_proposal(ProposalMessage {
+                                block,
+                                foreign_proposals: foreign_proposals.into_iter().map(|p| p.into_proposal()).collect(),
+                            }),
+                        )
+                        .await
+                    {
+                        warn!(target: LOG_TARGET, "Error sending SyncResponse: {err}");
+                        return;
+                    }
                 }
             }
         });

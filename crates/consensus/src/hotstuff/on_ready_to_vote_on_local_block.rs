@@ -4,7 +4,7 @@
 use std::num::NonZeroU64;
 
 use log::*;
-use tari_consensus_types::{Decision, LastVoted, LeafBlock, QcId};
+use tari_consensus_types::{Decision, LastVoted, LeafBlock, PcId};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::commit_result::{AbortReason, RejectReason};
 use tari_ootle_common_types::{committee::CommitteeInfo, optional::Optional, Epoch, ShardGroup};
@@ -166,8 +166,11 @@ where TConsensusSpec: ConsensusSpec
         }
 
         if self.should_vote(tx, valid_block.block())? {
+            let parent = valid_block.block().get_parent(&**tx)?;
+
             self.decide_what_to_vote(
                 tx,
+                &parent,
                 valid_block.block(),
                 local_committee_info,
                 proposer_claim_public_key_bytes,
@@ -177,35 +180,6 @@ where TConsensusSpec: ConsensusSpec
         } else {
             change_set.set_no_vote(NoVoteReason::AlreadyVotedAtHeight);
         }
-
-        // if change_set.is_accept() {
-        // Update high TC
-        // maybe_high_tc = valid_block
-        //     .block()
-        //     .timeout_certificate()
-        //     .map(|tc| tc.update_highest(tx))
-        //     .transpose()?;
-        //
-        // // Update nodes
-        // let high_qc = valid_block.block().update_nodes(
-        //     tx,
-        //     |tx, _prev_locked, block, _justify_qc| self.on_lock_block(tx, block),
-        //     |tx, mut commit_block| {
-        //         let committed = self.on_commit(tx, &block_qc_id, &commit_block, local_committee_info)?;
-        //         // NOTE: update the commit QC in the local copy so that foreign proposals can obtain the commit QC
-        //         // on_commit already sets the persisted commit_qc for the block
-        //         commit_block.set_commit_qc(block_qc_id);
-        //         if !commit_block.is_dummy() {
-        //             commit_blocks.push(commit_block);
-        //         }
-        //         if !committed.is_empty() {
-        //             finalized_transactions.push(committed);
-        //         }
-        //         Ok(())
-        //     },
-        // )?;
-        //
-        // maybe_high_qc = Some(high_qc);
 
         let quorum_decision = change_set.quorum_decision();
         if change_set.is_accept() {
@@ -224,12 +198,8 @@ where TConsensusSpec: ConsensusSpec
             );
         }
 
-        // let high_qc = maybe_high_qc
-        //     .map(Ok)
-        //     .unwrap_or_else(|| HighPc::get(&**tx, valid_block.epoch()))?;
-
         Ok(BlockDecision {
-            quorum_decision,
+            local_decision: quorum_decision,
             commit_blocks,
             finalized_transactions,
             high_pc: high_qc,
@@ -269,6 +239,7 @@ where TConsensusSpec: ConsensusSpec
     fn decide_what_to_vote(
         &self,
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
+        parent: &Block,
         block: &Block,
         local_committee_info: &CommitteeInfo,
         proposer_claim_public_key_bytes: &RistrettoPublicKeyBytes,
@@ -280,6 +251,7 @@ where TConsensusSpec: ConsensusSpec
         let mut substate_store =
             PendingSubstateStore::new(tx, block.as_leaf(), self.config.consensus_constants.num_preshards);
         let mut total_leader_fee = 0;
+        let mut total_exhaust_burn = parent.header().total_accumulated_exhaust_burn();
 
         for cmd in block.commands() {
             match cmd {
@@ -292,6 +264,7 @@ where TConsensusSpec: ConsensusSpec
                         &mut substate_store,
                         proposed_block_change_set,
                         &mut total_leader_fee,
+                        &mut total_exhaust_burn,
                     )? {
                         proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
@@ -332,6 +305,7 @@ where TConsensusSpec: ConsensusSpec
                         &mut substate_store,
                         proposed_block_change_set,
                         &mut total_leader_fee,
+                        &mut total_exhaust_burn,
                     )? {
                         proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
@@ -444,6 +418,18 @@ where TConsensusSpec: ConsensusSpec
             return Ok(());
         }
 
+        if total_exhaust_burn != block.header().total_accumulated_exhaust_burn() {
+            warn!(
+                target: LOG_TARGET,
+                "❌ Exhaust burn disagreement for block {}. Leader proposed {}, we calculated {}",
+                block,
+                block.header().total_accumulated_exhaust_burn(),
+                total_exhaust_burn
+            );
+            proposed_block_change_set.set_no_vote(NoVoteReason::TotalExhaustBurnDisagreement);
+            return Ok(());
+        }
+
         // Apply leader fee to substate store before we calculate the state root
         if total_leader_fee > 0 {
             apply_leader_fee_to_substate_store(
@@ -505,6 +491,7 @@ where TConsensusSpec: ConsensusSpec
         substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
         total_leader_fee: &mut u64,
+        total_exhaust_burn: &mut u128,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let _timer = TraceTimer::info(LOG_TARGET, "Evaluate LocalOnly command");
         let Some(mut pool_tx) = proposed_block_change_set
@@ -620,6 +607,7 @@ where TConsensusSpec: ConsensusSpec
                             }
 
                             *total_leader_fee += calculated_leader_fee.fee();
+                            *total_exhaust_burn += u128::from(calculated_leader_fee.exhaust_burn());
                         }
 
                         proposed_block_change_set.add_transaction_execution(*pool_tx.transaction_id(), execution)?;
@@ -1137,6 +1125,7 @@ where TConsensusSpec: ConsensusSpec
         substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
         total_leader_fee: &mut u64,
+        total_exhaust_burn: &mut u128,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         if atom.decision.is_abort() {
             warn!(
@@ -1295,6 +1284,7 @@ where TConsensusSpec: ConsensusSpec
         })?;
 
         *total_leader_fee += leader_fee.fee();
+        *total_exhaust_burn += u128::from(leader_fee.exhaust_burn());
 
         substate_store.put_diff(&filter_diff_for_committee(local_committee_info, diff))?;
 
@@ -1487,7 +1477,7 @@ where TConsensusSpec: ConsensusSpec
     fn on_commit(
         &self,
         tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
-        commit_qc_id: &QcId,
+        commit_qc_id: &PcId,
         block: &Block,
     ) -> Result<Vec<TransactionPoolRecord>, HotStuffError> {
         let committed_transactions = self.finalize_block(tx, commit_qc_id, block)?;
@@ -1541,7 +1531,7 @@ where TConsensusSpec: ConsensusSpec
     fn finalize_block(
         &self,
         tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
-        commit_qc_id: &QcId,
+        commit_qc_id: &PcId,
         block: &Block,
     ) -> Result<Vec<TransactionPoolRecord>, HotStuffError> {
         if block.is_dummy() {

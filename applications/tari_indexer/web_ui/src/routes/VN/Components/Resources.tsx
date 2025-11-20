@@ -101,7 +101,7 @@ function Resources() {
           console.error("Error converting mutable CBOR value:", e);
         }
 
-        const { name, original_owner, amount } = nftData;
+        const { name, amount } = nftData;
         const { image_url } = mutableData || {};
         const nftId = nft.address.id;
         const key = Object.keys(nftId)[0];
@@ -115,7 +115,6 @@ function Resources() {
           address,
           version: nft.version,
           nft,
-          original_owner,
           amount,
         });
       }

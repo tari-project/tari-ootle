@@ -43,7 +43,7 @@ impl UnsealedTransactionV1 {
         self.set_seal_signature(sig)
     }
 
-    pub fn set_seal_signature(self, signature: TransactionSealSignature) -> Transaction {
+    fn set_seal_signature(self, signature: TransactionSealSignature) -> Transaction {
         TransactionV1::new(self, signature).into()
     }
 

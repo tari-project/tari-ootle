@@ -76,9 +76,6 @@ pub async fn submit_transaction(
                 transaction_id,
                 details,
             } => ErrorResponse::bad_request(format!("Transaction {} is invalid: {}", transaction_id, details)),
-            TransactionManagerError::NetworkClientError(NetworkClientError::NoInputsProvided) => {
-                ErrorResponse::bad_request("Transaction has no inputs".to_string())
-            },
             e => ErrorResponse::anyhow(e),
         })?;
 

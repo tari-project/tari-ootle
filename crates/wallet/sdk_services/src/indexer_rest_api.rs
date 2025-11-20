@@ -169,10 +169,7 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
         template_address: TemplateAddress,
     ) -> Result<tari_template_abi::TemplateDef, Self::Error> {
         let mut client = self.get_client()?;
-        let resp = client
-            .get_template_definition(tari_indexer_client::types::GetTemplateDefinitionRequest { template_address })
-            .await?;
-
+        let resp = client.get_template_definition(template_address).await?;
         Ok(resp.definition)
     }
 

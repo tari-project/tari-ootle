@@ -29,6 +29,7 @@ pub struct OnNextSyncViewHandler<TConsensusSpec: ConsensusSpec> {
     outbound_messaging: TConsensusSpec::OutboundMessaging,
     leader_strategy: TConsensusSpec::LeaderStrategy,
     signer_service: TConsensusSpec::SignerService,
+    last_sent_new_view: Option<(Epoch, NodeHeight)>,
 }
 
 impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
@@ -43,6 +44,7 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
             outbound_messaging,
             leader_strategy,
             signer_service,
+            last_sent_new_view: None,
         }
     }
 
@@ -59,10 +61,9 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
 
             let leaf_block = LeafBlock::get(tx, epoch)?;
             // If we leader failure more than once in a row, propose the next higher view
-            let last_sent_new_view = LastSentNewView::get(tx, epoch).optional()?;
-            if let Some(last_sent_new_view) = last_sent_new_view {
-                if last_sent_new_view.height() >= timeout_height {
-                    timeout_height = last_sent_new_view.height() + NodeHeight(1);
+            if let Some((nv_epoch, last_sent_new_view)) = self.last_sent_new_view {
+                if nv_epoch == epoch && last_sent_new_view >= timeout_height {
+                    timeout_height = last_sent_new_view + NodeHeight(1);
                 }
             }
             let next_leader = get_leader_for_view(
@@ -78,6 +79,7 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
             let last_sent_vote = LastSentVote::get(tx, epoch)
                 .optional()?
                 .filter(|vote| high_pc.height() < vote.block_height());
+
             Ok::<_, HotStuffError>((next_leader, high_pc, last_sent_vote, timeout_height))
         })?;
 
@@ -115,6 +117,7 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
             .send(next_leader.address.clone(), HotstuffMessage::new_newview(message))
             .await?;
 
+        self.last_sent_new_view = Some((epoch, timeout_height));
         self.store.with_write_tx(|tx| {
             LastSentNewView {
                 epoch,

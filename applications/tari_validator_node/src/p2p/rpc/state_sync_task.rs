@@ -76,7 +76,7 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
                     // ))))
                     // .await?;
 
-                    info!(target: LOG_TARGET, "🌍sync complete ({}). {} update(s) sent.", current_state_version, counter);
+                    debug!(target: LOG_TARGET, "🌍sync complete ({}). {} update(s) sent.", current_state_version, counter);
                     // Finished
                     return Ok(());
                 },

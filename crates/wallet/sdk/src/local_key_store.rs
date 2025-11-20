@@ -84,10 +84,7 @@ fn derive_private_key(seed: &CipherSeed, branch_seed: String, account: u64) -> P
 
     // At compile time, fail if the length of the derived key is not equal to the expected length which would lead to a
     // runtime panic
-    const {
-        assert_equal(RistrettoSecretKey::WIDE_REDUCTION_LEN, U64::INT);
-    }
-    // const _: () = assert_equal(RistrettoSecretKey::WIDE_REDUCTION_LEN, U64::INT);
+    const _: () = assert_equal(RistrettoSecretKey::WIDE_REDUCTION_LEN, U64::INT);
 
     PrivateKey::from_uniform_bytes(derive_key.as_ref()).expect("derived key length matches RistrettoSecretKey length")
 }

@@ -12,7 +12,7 @@ use tari_sidechain::QuorumDecision;
 
 use crate::{
     bookkeeping::{HighPc, LeafBlock},
-    ids::{BlockId, QcId},
+    ids::{BlockId, PcId},
     validator_signature::ValidatorSignatureBytes,
 };
 
@@ -68,7 +68,7 @@ impl ProposalCertificate {
     /// Returns the hash of the QC. This is used to identify the QC and not for any secure purposes.
     /// However, we implement a secure hash (as opposed to a cheaper, non-collision-resistant hash e.g. siphash) to
     /// avoid any collision issues e.g. storage keys.
-    pub fn calculate_id(&self) -> QcId {
+    pub fn calculate_id(&self) -> PcId {
         // We use the same fields as tari_sidechain::QuorumCertificate. Since should calculate a consistent ID between
         // shards. Although, worth noting that in the current protocol, this does not matter because the foreign
         // QC id only needs to be consistent within a shard group. This may change in the future.
@@ -80,7 +80,7 @@ impl ProposalCertificate {
         parent_id: &BlockId,
         signatures: &[ValidatorSignatureBytes],
         decision: &QuorumDecision,
-    ) -> QcId {
+    ) -> PcId {
         quorum_certificate_id_hasher()
             .chain(header_hash)
             .chain(parent_id)
@@ -100,8 +100,8 @@ impl ProposalCertificate {
         self.epoch
     }
 
-    pub fn shard_group(&self) -> &ShardGroup {
-        &self.shard_group
+    pub fn shard_group(&self) -> ShardGroup {
+        self.shard_group
     }
 
     pub fn signatures(&self) -> &[ValidatorSignatureBytes] {

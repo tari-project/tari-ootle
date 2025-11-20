@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use tari_common_types::types::{FixedHash, PrivateKey};
-use tari_consensus_types::{Decision, QcId, ShardGroupAccumulatedData};
+use tari_consensus_types::{Decision, PcId, ShardGroupAccumulatedData};
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, TransactionResult},
     fees::{FeeBreakdown, FeeReceipt},
@@ -55,7 +55,7 @@ mod confirm_all_transitions {
         let zero_block = Block::zero_block(network, TEST_NUM_PRESHARDS);
         zero_block.insert(&mut tx).unwrap();
         tx.proposal_certificates_save(zero_block.justify()).unwrap();
-        tx.blocks_set_qcs(zero_block.id(), Some(&QcId::zero()), Some(&QcId::zero()))
+        tx.blocks_set_qcs(zero_block.id(), Some(&PcId::zero()), Some(&PcId::zero()))
             .unwrap();
 
         let shard_group = zero_block.shard_group();

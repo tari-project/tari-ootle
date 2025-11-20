@@ -1,7 +1,7 @@
 //    Copyright 2024 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashSet, fmt::Display};
+use std::{collections::HashSet, fmt::Display, iter};
 
 use indexmap::IndexSet;
 use log::*;
@@ -13,7 +13,10 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::{Epoch, SubstateRequirement, SubstateRequirementRef};
-use tari_template_lib::models::{ComponentAddress, StealthTransferStatement};
+use tari_template_lib::{
+    constants::XTR,
+    models::{ComponentAddress, StealthTransferStatement},
+};
 
 use crate::{
     args::InstructionArg,
@@ -25,6 +28,8 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::ootle::transaction::transaction";
+
+static XTR_REQUIREMENT: SubstateRequirement = SubstateRequirement::new(SubstateId::Resource(XTR), None);
 
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -111,7 +116,12 @@ impl TransactionV1 {
     }
 
     pub fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateRequirementRef<'_>> + '_ {
-        self.inputs().iter().map(Into::into)
+        self.inputs()
+            .iter()
+            .filter(|id| id.substate_id().as_resource_address() != Some(XTR))
+            // Ensure XTR requirement is always included since every transaction needs to pay fees in XTR
+            .chain(iter::once(&XTR_REQUIREMENT))
+            .map(Into::into)
     }
 
     pub fn all_published_templates_iter(&self) -> impl Iterator<Item = (PublishedTemplateAddress, &[u8])> + '_ {

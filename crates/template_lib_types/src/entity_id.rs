@@ -158,7 +158,7 @@ impl ObjectKey {
         self.0
     }
 
-    pub fn array(&self) -> &[u8; Self::LENGTH] {
+    pub const fn array(&self) -> &[u8; Self::LENGTH] {
         &self.0
     }
 

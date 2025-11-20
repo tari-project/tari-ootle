@@ -5,7 +5,7 @@ use serde::Serialize;
 use tari_ootle_common_types::{Epoch, NodeHeight};
 
 #[derive(Debug, Clone, Serialize)]
-pub struct SyncRequestMessage {
+pub struct CatchUpRequestMessage {
     pub epoch: Epoch,
     pub block_height: NodeHeight,
 }

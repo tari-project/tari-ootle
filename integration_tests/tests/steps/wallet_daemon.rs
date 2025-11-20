@@ -121,7 +121,6 @@ async fn when_i_run_up_fees(world: &mut TariWorld, amount: u64, wallet_daemon_na
         let transaction = transaction_builder()
             .fee_transaction_pay_from_component(*account.component_address(), 100_000)
             .call_function(template.address, "new", args![payload])
-            .add_input(XTR)
             .add_input(*account.component_address())
             .build_unsigned_transaction();
 

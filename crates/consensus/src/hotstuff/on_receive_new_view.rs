@@ -184,7 +184,11 @@ where TConsensusSpec: ConsensusSpec
                 current_epoch: epoch_state.epoch(),
             });
         }
-        check_quorum_certificate_signatures::<TConsensusSpec>(qc, epoch_state.local_committee(), vote_signing_service)?;
+        check_quorum_certificate_signatures::<TConsensusSpec>(
+            qc.into(),
+            epoch_state.local_committee(),
+            vote_signing_service,
+        )?;
         Ok(())
     }
 }

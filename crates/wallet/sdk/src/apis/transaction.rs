@@ -323,13 +323,14 @@ where
     ) -> Result<(), TransactionApiError> {
         let mut downed_substates_with_parents = HashMap::with_capacity(diff.down_len());
         for (id, _) in diff.down_iter() {
-            if id.is_layer1_commitment() {
-                info!(target: LOG_TARGET, "Layer 1 commitment {} downed", id);
+            if id.is_claimed_output_tombstone() {
+                // Should never happen
+                warn!(target: LOG_TARGET, "❓️ Claimed tombstone {} downed", id);
                 continue;
             }
 
             let Some(downed) = tx.substates_remove(id).optional()? else {
-                warn!(target: LOG_TARGET, "Downed substate {} not found", id);
+                debug!(target: LOG_TARGET, "Downed substate {} not found", id);
                 continue;
             };
 
@@ -341,15 +342,15 @@ where
         let (components, mut other_substates) = diff.up_iter().partition::<Vec<_>, _>(|(addr, _)| addr.is_component());
 
         for (component_addr, substate) in components {
-            let header = substate.substate_value().component().unwrap();
-            let indexed = IndexedWellKnownTypes::from_value(header.state())?;
+            let component = substate.substate_value().component().unwrap();
+            let indexed = IndexedWellKnownTypes::from_value(component.state())?;
 
             debug!(target: LOG_TARGET, "Substate {} up", component_addr);
             tx.substates_upsert_root(
                 VersionedSubstateIdRef::new(component_addr, substate.version()),
                 indexed.referenced_substates().collect(),
-                Some(header.module_name.clone()),
-                Some(header.template_address),
+                Some(component.module_name.clone()),
+                Some(component.template_address),
             )?;
 
             for owned_id in indexed.referenced_substates() {
@@ -442,22 +443,21 @@ where
                             }
                         },
                         None => {
-                            // This should never happen because Vaults can't dangle and these are removed by the
-                            // previous loop above
-                            warn!(target: LOG_TARGET, "Vault {} does not have a parent", vault_id);
-                            tx.substates_upsert_root(
-                                VersionedSubstateIdRef::new(id, substate.version()),
-                                [(*substate
-                                    .substate_value()
-                                    .vault()
-                                    .expect("should be vault")
-                                    .resource_address())
-                                .into()]
-                                .into_iter()
-                                .collect(),
-                                None,
-                                None,
-                            )?;
+                            // We don't know the parent account of this vault.
+                            debug!(target: LOG_TARGET, "Vault {} does not have a parent", vault_id);
+                            // tx.substates_upsert_root(
+                            //     VersionedSubstateIdRef::new(id, substate.version()),
+                            //     [(*substate
+                            //         .substate_value()
+                            //         .vault()
+                            //         .expect("should be vault")
+                            //         .resource_address())
+                            //     .into()]
+                            //     .into_iter()
+                            //     .collect(),
+                            //     None,
+                            //     None,
+                            // )?;
                         },
                     }
                     continue;

@@ -176,10 +176,6 @@ impl Transaction {
         self.inputs().iter().map(|i| i.substate_id())
     }
 
-    pub fn has_inputs(&self) -> bool {
-        !self.inputs().is_empty()
-    }
-
     /// Returns true if the provided committee is involved in at least one input or known output of this transaction.
     /// A committee may be involved even if this function returns false if and only if it is involved in outputs only.
     pub fn is_involved(&self, committee_info: &CommitteeInfo) -> bool {

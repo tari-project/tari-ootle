@@ -18,7 +18,7 @@ pub struct SubstateRequirement {
 }
 
 impl SubstateRequirement {
-    pub fn new(address: SubstateId, version: Option<u32>) -> Self {
+    pub const fn new(address: SubstateId, version: Option<u32>) -> Self {
         Self {
             substate_id: address,
             version,

@@ -25,14 +25,14 @@ use std::fmt::Display;
 use serde::{Deserialize, Serialize};
 use tari_ootle_common_types::{Epoch, NodeHeight};
 
-use crate::ids::{BlockId, QcId};
+use crate::ids::{BlockId, PcId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HighPc {
     pub block_id: BlockId,
     pub block_height: NodeHeight,
     pub epoch: Epoch,
-    pub qc_id: QcId,
+    pub qc_id: PcId,
 }
 
 impl HighPc {
@@ -40,11 +40,11 @@ impl HighPc {
         &self.block_id
     }
 
-    pub fn block_height(&self) -> NodeHeight {
+    pub fn height(&self) -> NodeHeight {
         self.block_height
     }
 
-    pub fn id(&self) -> &QcId {
+    pub fn id(&self) -> &PcId {
         &self.qc_id
     }
 

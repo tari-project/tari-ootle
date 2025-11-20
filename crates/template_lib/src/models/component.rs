@@ -48,8 +48,8 @@ impl ComponentAddress {
     }
 
     /// Returns the underlying `ObjectKey` of this `ComponentAddress`.
-    pub fn as_object_key(&self) -> &ObjectKey {
-        &self.0
+    pub const fn as_object_key(&self) -> &ObjectKey {
+        self.0.inner()
     }
 
     /// Returns the underlying byte slice.

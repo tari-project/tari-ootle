@@ -341,7 +341,7 @@ where TConsensusSpec: ConsensusSpec
             self.config.consensus_constants.num_preshards,
         );
 
-        debug!(target: LOG_TARGET, "🌿 PROPOSE: {batch}");
+        debug!(target: LOG_TARGET, "🌿 PROPOSE: {} (justify: {}) {batch}", highest_seen_block.height(), justify_block.height());
         let mut executed_transactions = HashMap::new();
         let mut commands = if can_propose_epoch_end {
             BTreeSet::from_iter([Command::EndEpoch])

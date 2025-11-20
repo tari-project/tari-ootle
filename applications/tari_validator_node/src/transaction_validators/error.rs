@@ -19,8 +19,8 @@ pub enum TransactionValidationError {
     // TODO: move these to MempoolValidationError type
     #[error("Template not found: {address}")]
     TemplateNotFound { address: TemplateAddress },
-    #[error("No fee instructions")]
-    NoFeeInstructions,
+    #[error("{transaction_id} has no fee instructions")]
+    NoFeeInstructions { transaction_id: TransactionId },
     #[error("Output substate exists in transaction {transaction_id}")]
     OutputSubstateExists { transaction_id: TransactionId },
     #[error("Validator fee claim instruction in transaction {transaction_id} contained invalid epoch {given_epoch}")]
@@ -32,10 +32,6 @@ pub enum TransactionValidationError {
     CurrentEpochLessThanMinimum { current_epoch: Epoch, min_epoch: Epoch },
     #[error("Current epoch ({current_epoch}) is greater than maximum epoch ({max_epoch}) required for transaction")]
     CurrentEpochGreaterThanMaximum { current_epoch: Epoch, max_epoch: Epoch },
-    #[error("Transaction {transaction_id} does not have any inputs")]
-    NoInputs { transaction_id: TransactionId },
-    #[error("Executed transaction {transaction_id} does not involved any shards")]
-    NoInvolvedShards { transaction_id: TransactionId },
     #[error("Invalid transaction signature")]
     InvalidSignature,
     #[error("Transaction {transaction_id} has no main signer")]

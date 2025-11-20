@@ -18,11 +18,12 @@ use super::common::{
     check_epoch_hash,
     check_height,
     check_network,
+    check_proposal_certificate,
     check_proposed_by_leader,
-    check_quorum_certificate,
     check_shard_group_bounds,
     check_shard_group_matches,
     check_sidechain_id,
+    check_timeout_certificate,
 };
 use crate::{
     hotstuff::{HotStuffError, HotstuffConfig, ProposalValidationError},
@@ -62,7 +63,8 @@ fn check_proposal<TConsensusSpec: ConsensusSpec>(
 ) -> Result<(), HotStuffError> {
     check_header::<TConsensusSpec>(block.header(), expected_epoch_hash, config, signer_service)?;
     check_block(leader_strategy, committee_for_block, block)?;
-    check_quorum_certificate::<TConsensusSpec>(block, committee_for_block, signer_service)?;
+    check_proposal_certificate::<TConsensusSpec>(block, committee_for_block, signer_service)?;
+    check_timeout_certificate::<TConsensusSpec>(block, committee_for_block, signer_service)?;
 
     Ok(())
 }

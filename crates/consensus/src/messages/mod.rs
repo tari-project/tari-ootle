@@ -21,6 +21,6 @@ pub use request_missing_transaction::*;
 mod requested_transaction;
 pub use requested_transaction::*;
 
-mod sync;
+mod catch_up;
 
-pub use sync::*;
+pub use catch_up::*;

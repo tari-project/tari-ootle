@@ -6,7 +6,7 @@ use std::{collections::HashMap, iter, ops::ControlFlow};
 use indexmap::IndexMap;
 use log::*;
 use tari_common_types::types::FixedHash;
-use tari_consensus_types::{BlockId, HighPc, HighTc, LeafBlock, ProposalCertificate, QcId, ShardGroupAccumulatedData};
+use tari_consensus_types::{BlockId, HighPc, HighTc, LeafBlock, PcId, ProposalCertificate, ShardGroupAccumulatedData};
 use tari_engine_types::{substate::SubstateDiff, ValidatorFeePool};
 use tari_ootle_common_types::{
     committee::{Committee, CommitteeInfo},
@@ -424,7 +424,7 @@ pub(crate) fn get_highest_seen_justified_view<TTx: StateStoreReadTransaction>(
 ) -> Result<NodeHeight, HotStuffError> {
     let high_pc = HighPc::get(tx, epoch)
         .optional()?
-        .map(|high_pc| high_pc.block_height())
+        .map(|high_pc| high_pc.height())
         .unwrap_or_default();
     let high_tc = HighTc::get(tx, epoch)
         .optional()?
@@ -437,7 +437,7 @@ pub(crate) fn get_highest_seen_justified_view<TTx: StateStoreReadTransaction>(
 pub fn process_newly_justified_block<TStore: StateStore>(
     tx: &<TStore as StateStore>::ReadTransaction<'_>,
     new_leaf_block: &Block,
-    justify_id: QcId,
+    justify_id: PcId,
     local_committee_info: &CommitteeInfo,
     change_set: &mut ProposedBlockChangeSet,
 ) -> Result<Vec<Block>, HotStuffError> {
@@ -446,7 +446,7 @@ pub fn process_newly_justified_block<TStore: StateStore>(
         tx: &<TStore as StateStore>::ReadTransaction<'_>,
         block: &Block,
         new_leaf_block: &LeafBlock,
-        justify_id: QcId,
+        justify_id: PcId,
         local_committee_info: &CommitteeInfo,
         change_set: &mut ProposedBlockChangeSet,
     ) -> Result<(), HotStuffError> {

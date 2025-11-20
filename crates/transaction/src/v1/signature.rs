@@ -63,7 +63,7 @@ impl TransactionSealSignature {
         RistrettoPublicKey::from_canonical_bytes(self.public_key.as_bytes())
     }
 
-    fn create_message(transaction: &UnsealedTransactionV1) -> [u8; 64] {
+    pub fn create_message(transaction: &UnsealedTransactionV1) -> [u8; 64] {
         transaction_hasher_v1("SealSignature")
             .chain(&transaction.schema_version())
             .chain(transaction)

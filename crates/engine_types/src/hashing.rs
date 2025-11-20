@@ -26,11 +26,14 @@ use blake2::{
 };
 use borsh::BorshSerialize;
 use tari_crypto::{
+    hash_domain,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     signatures::SchnorrSignature,
 };
-use tari_hashing::{DomainSeparatedBorshHasher, TariEngineHashDomain};
+use tari_hashing::DomainSeparatedBorshHasher;
 use tari_template_lib::types::Hash;
+
+hash_domain!(TariEngineHashDomain, "com.tari.ootle.engine", 0);
 
 pub fn engine_hasher64(label: EngineHashDomainLabel) -> TariEngineHasher64 {
     TariEngineHasher64::new_with_label(label.as_label())

@@ -5,7 +5,7 @@ use tari_ootle_common_types::substate_type::SubstateType;
 use tari_template_lib::{
     models::ComponentAddress,
     prelude::{NonFungibleAddress, ResourceAddress},
-    types::Amount,
+    types::{Amount, FunctionName},
 };
 use tari_template_test_tooling::TemplateTest;
 use tari_transaction::{args, call_args, Instruction, Transaction};
@@ -74,7 +74,7 @@ fn create_tariswap_component(
         .execute_and_commit(
             vec![Instruction::CallFunction {
                 address: tariswap_template,
-                function: "new".to_string(),
+                function: FunctionName::new_checked("new").unwrap(),
                 args: call_args![a_resource, b_resource, fee],
             }],
             vec![],

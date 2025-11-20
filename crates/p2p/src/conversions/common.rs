@@ -25,7 +25,8 @@ use std::convert::{TryFrom, TryInto};
 use anyhow::Context;
 use tari_consensus_types::ValidatorSignatureBytes;
 use tari_crypto::tari_utilities::ByteArray;
-use tari_ootle_common_types::{Epoch, SubstateAddress};
+use tari_engine_types::substate::SubstateId;
+use tari_ootle_common_types::{Epoch, SubstateAddress, SubstateRequirement, SubstateRequirementRef};
 use tari_template_lib::{
     prelude::{
         crypto::CommitmentSignatureBytes,
@@ -38,7 +39,7 @@ use tari_template_lib::{
 };
 use tari_transaction::TransactionSignature;
 
-use crate::proto;
+use crate::{proto, proto::common::OptionalVersion};
 
 //---------------------------------- Signature --------------------------------------------//
 impl TryFrom<proto::common::Signature> for SchnorrSignatureBytes {
@@ -201,6 +202,42 @@ impl From<CommitmentSignatureBytes> for proto::common::CommitmentSignature {
             public_nonce_commitment: val.public_nonce().to_vec(),
             signature_u: val.u().to_vec(),
             signature_v: val.v().to_vec(),
+        }
+    }
+}
+
+// -------------------------------- SubstateRequirement -------------------------------- //
+
+impl TryFrom<proto::common::SubstateRequirement> for SubstateRequirement {
+    type Error = anyhow::Error;
+
+    fn try_from(val: proto::common::SubstateRequirement) -> Result<Self, Self::Error> {
+        let substate_id = SubstateId::from_bytes(&val.substate_id)?;
+        let version = val.version.map(|v| v.version);
+        let substate_specification = SubstateRequirement::new(substate_id, version);
+        Ok(substate_specification)
+    }
+}
+
+impl From<SubstateRequirement> for proto::common::SubstateRequirement {
+    fn from(val: SubstateRequirement) -> Self {
+        (&val).into()
+    }
+}
+
+impl From<&SubstateRequirement> for proto::common::SubstateRequirement {
+    fn from(val: &SubstateRequirement) -> Self {
+        Self {
+            substate_id: val.substate_id().to_bytes(),
+            version: val.version().map(|v| OptionalVersion { version: v }),
+        }
+    }
+}
+impl From<SubstateRequirementRef<'_>> for proto::common::SubstateRequirement {
+    fn from(val: SubstateRequirementRef<'_>) -> Self {
+        Self {
+            substate_id: val.substate_id().to_bytes(),
+            version: val.version().map(|v| OptionalVersion { version: v }),
         }
     }
 }

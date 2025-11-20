@@ -107,7 +107,7 @@ function StealthUtxoList({ account }: { account: Account }) {
                         {bigintToDecimalString(utxo.value, divisibility)} {currencySymbol}
                       </DataTableCell>
                       <DataTableCell>
-                        <StatusChip status={utxo.status} />
+                        <StatusChip status={utxo.status} tooltip={JSON.stringify(utxo.spend_condition)} />
                       </DataTableCell>
                       <DataTableCell>
                         <Memo memo={utxo.memo} />

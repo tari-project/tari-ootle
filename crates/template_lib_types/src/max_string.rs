@@ -21,8 +21,8 @@ impl<const N: usize> Deref for MaxString<N> {
 }
 
 impl<const N: usize> MaxString<N> {
-    pub fn new_checked(bytes: impl Into<Box<str>>) -> Option<Self> {
-        let s = bytes.into();
+    pub fn new_checked(s: impl Into<Box<str>>) -> Option<Self> {
+        let s = s.into();
         if s.len() <= N {
             Some(Self { s })
         } else {
@@ -60,7 +60,7 @@ impl<'de, const N: usize> serde::Deserialize<'de> for MaxString<N> {
     where D: serde::Deserializer<'de> {
         let s = String::deserialize(deserializer)?;
         let len = s.len();
-        MaxString::new_checked(s)
+        Self::new_checked(s)
             .ok_or_else(|| serde::de::Error::custom(format!("string length exceeds maximum of {}: got {}", N, len)))
     }
 }
@@ -69,7 +69,31 @@ impl<const N: usize> TryFrom<String> for MaxString<N> {
     type Error = MaxStringError<N>;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        MaxString::new_checked(value).ok_or(MaxStringError)
+        Self::new_checked(value).ok_or(MaxStringError)
+    }
+}
+
+impl<const N: usize> TryFrom<&String> for MaxString<N> {
+    type Error = MaxStringError<N>;
+
+    fn try_from(value: &String) -> Result<Self, Self::Error> {
+        Self::new_checked(value.as_str()).ok_or(MaxStringError)
+    }
+}
+
+impl<const N: usize> TryFrom<&str> for MaxString<N> {
+    type Error = MaxStringError<N>;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::new_checked(value).ok_or(MaxStringError)
+    }
+}
+
+impl<const N: usize> TryFrom<Box<str>> for MaxString<N> {
+    type Error = MaxStringError<N>;
+
+    fn try_from(value: Box<str>) -> Result<Self, Self::Error> {
+        Self::new_checked(value).ok_or(MaxStringError)
     }
 }
 
@@ -85,6 +109,20 @@ impl<const N: usize> Display for MaxStringError<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "string length exceeds maximum of {}", N)
     }
+}
+
+#[cfg(feature = "std")]
+mod std_impl {
+    use std::fmt;
+
+    use super::*;
+
+    impl<const N: usize> fmt::Debug for MaxStringError<N> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "MaxStringError<{}>", N)
+        }
+    }
+    impl<const N: usize> std::error::Error for MaxStringError<N> {}
 }
 
 #[cfg(feature = "borsh")]

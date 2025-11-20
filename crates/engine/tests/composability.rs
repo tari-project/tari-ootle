@@ -41,7 +41,7 @@ fn initialize_composability(test: &mut ComposabilityTest) -> ComposabilityCompon
         .execute_and_commit(
             vec![Instruction::CallFunction {
                 address: test.composability_template,
-                function: "new".to_string(),
+                function: "new".try_into().unwrap(),
                 args: call_args![test.state_template],
             }],
             vec![],
@@ -77,7 +77,7 @@ fn create_resource_and_fund_account(test: &mut TemplateTest, account: ComponentA
         .execute_and_commit(
             vec![Instruction::CallFunction {
                 address: faucet_template,
-                function: "mint".to_string(),
+                function: "mint".try_into().unwrap(),
                 args: call_args![initial_supply],
             }],
             vec![],
@@ -139,7 +139,7 @@ fn it_allows_function_to_method_calls() {
         .execute_and_commit(
             vec![Instruction::CallFunction {
                 address: test.composability_template,
-                function: "new_from_component".to_string(),
+                function: "new_from_component".try_into().unwrap(),
                 args: call_args![composability_component_0],
             }],
             vec![],

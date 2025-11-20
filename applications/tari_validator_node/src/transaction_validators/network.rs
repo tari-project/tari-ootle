@@ -34,8 +34,8 @@ impl Validator<Transaction> for TransactionNetworkValidator {
         if tx_network != self.network {
             warn!(target: LOG_TARGET, "TransactionNetworkValidator - FAIL: mismatching networks: TX: {} != Current: {}", tx_network, self.network);
             return Err(Self::Error::NetworkMismatch {
-                actual: self.network,
-                expected: tx_network,
+                actual: tx_network,
+                expected: self.network,
             });
         }
 

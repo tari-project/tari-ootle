@@ -5,20 +5,26 @@ use rand::rngs::OsRng;
 use tari_common_types::seeds::cipher_seed;
 use tari_crypto::{
     keys::{PublicKey as _, SecretKey},
-    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
     tari_utilities::ByteArray,
 };
+use tari_engine_types::FromByteType;
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
     Epoch,
     Network,
+    Signable,
 };
 use tari_ootle_wallet_crypto::encryption::{decrypt_with_password, encrypt_with_password, CipherError};
+use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 
 use crate::{
-    apis::password_manager::{PasswordManagerApi, PasswordManagerApiError},
-    key_managers::WalletKeyStore,
+    apis::{
+        password_manager::{PasswordManagerApi, PasswordManagerApiError},
+        stealth_crypto::StealthCryptoApi,
+    },
+    key_managers::{SignatureOutput, WalletKeyStore},
     models::{
         DerivedKeyId,
         DerivedKeyIndex,
@@ -30,6 +36,7 @@ use crate::{
         KeyBranch,
         KeyId,
         KeyType,
+        StealthUtxoSpendKeyId,
         WalletKeyRecord,
         WalletOotleAddressWithKeyIds,
         WalletPublicKey,
@@ -51,6 +58,7 @@ pub struct KeyManagerApi<'a, TSpec: WalletSdkSpec> {
     store: &'a TSpec::Store,
     key_store: &'a TSpec::KeyStore,
     password_manager: PasswordManagerApi<'a, TSpec::Store>,
+    crypto_api: StealthCryptoApi,
     epoch_birthday: EpochBirthday,
 }
 
@@ -67,6 +75,7 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
             store,
             key_store,
             password_manager,
+            crypto_api: StealthCryptoApi::new(),
             epoch_birthday,
         }
     }
@@ -83,7 +92,7 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
             let key = self
                 .key_store
                 .derive_secret(branch.as_str(), index)
-                .map_err(|e| KeyManagerApiError::KeyStoreError { source: e.into() })?;
+                .map_err(KeyManagerApiError::key_store_error)?;
             let pk = RistrettoPublicKey::from_secret_key(&key);
             keys.push(WalletKeyRecord {
                 key_id: KeyId::derived(branch, index),
@@ -179,11 +188,27 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
         let secret = self
             .key_store
             .derive_secret(branch.as_str(), index)
-            .map_err(|e| KeyManagerApiError::KeyStoreError { source: e.into() })?;
+            .map_err(KeyManagerApiError::key_store_error)?;
         Ok(DerivedWalletKey {
             key: secret,
             derived_key_id: DerivedKeyId { branch, index },
         })
+    }
+
+    pub(crate) fn generate_stealth_owner_key(
+        &self,
+        key_id: KeyId,
+        public_nonce: &RistrettoPublicKeyBytes,
+    ) -> Result<RistrettoSecretKey, KeyManagerApiError> {
+        let public_nonce = public_nonce
+            .try_from_byte_type()
+            .map_err(|e| KeyManagerApiError::InvalidKeyId {
+                details: format!("Failed to convert public nonce to RistrettoPublicKey: {}", e),
+            })?;
+        let account_key = self.get_key(key_id)?;
+        Ok(self
+            .crypto_api
+            .derive_stealth_owner_secret(self.network, account_key.secret(), &public_nonce))
     }
 
     pub fn derive_keypair(
@@ -313,7 +338,7 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
         let birthday = self
             .key_store
             .key_birthday()
-            .map_err(|e| KeyManagerApiError::KeyStoreError { source: e.into() })?;
+            .map_err(KeyManagerApiError::key_store_error)?;
         let Some(birthday) = birthday else {
             return Ok(Epoch::zero());
         };
@@ -322,6 +347,50 @@ impl<'a, TSpec: WalletSdkSpec> KeyManagerApi<'a, TSpec> {
         let epoch = self.epoch_birthday.calculate_epoch_rel_minotari(birthday);
 
         Ok(epoch)
+    }
+
+    pub fn sign_with_stealth_key<T: Signable<C>, C>(
+        &self,
+        key_id: &StealthUtxoSpendKeyId,
+        context: C,
+        item: &T,
+    ) -> Result<SignatureOutput, KeyManagerApiError> {
+        let stealth_secret = self.generate_stealth_owner_key(key_id.account_key_id, &key_id.public_nonce)?;
+        self.sign_with_explicit_key(&stealth_secret, context, item)
+    }
+
+    pub fn sign_with_context<T: Signable<C>, C>(
+        &self,
+        key_id: KeyId,
+        context: C,
+        item: &T,
+    ) -> Result<SignatureOutput, KeyManagerApiError> {
+        match &key_id {
+            // Use the key store implementation to sign with derived keys
+            KeyId::Derived { key_branch, index } => {
+                let output = self
+                    .key_store()
+                    .sign(key_branch.as_str(), *index, context, item)
+                    .map_err(KeyManagerApiError::key_store_error)?;
+                Ok(output)
+            },
+            _ => {
+                let key = self.get_key(key_id)?;
+                self.sign_with_explicit_key(key.secret(), context, item)
+            },
+        }
+    }
+
+    pub fn sign_with_explicit_key<T: Signable<C>, C>(
+        &self,
+        secret_key: &RistrettoSecretKey,
+        context: C,
+        item: &T,
+    ) -> Result<SignatureOutput, KeyManagerApiError> {
+        let signature = RistrettoSchnorr::sign(secret_key, item.to_signing_message(context), &mut OsRng)
+            .expect("RistrettoSchnorr::sign is infallible as it internally hashes the message into canonical form");
+        let public_key = RistrettoPublicKey::from_secret_key(secret_key);
+        Ok(SignatureOutput { public_key, signature })
     }
 }
 
@@ -332,6 +401,7 @@ impl<TSpec: WalletSdkSpec> Clone for KeyManagerApi<'_, TSpec> {
             store: self.store,
             key_store: self.key_store,
             password_manager: self.password_manager.clone(),
+            crypto_api: self.crypto_api,
             epoch_birthday: self.epoch_birthday,
         }
     }
@@ -351,8 +421,18 @@ pub enum KeyManagerApiError {
     PasswordManagerApiError(#[from] PasswordManagerApiError),
     #[error("Key manager is in read only mode")]
     ReadOnlyMode,
+    #[error("Invalid key id: {details}")]
+    InvalidKeyId { details: String },
     #[error("Cipher error: {0}")]
     CipherError(#[from] CipherError),
+}
+
+impl KeyManagerApiError {
+    pub fn key_store_error<E: std::error::Error + Send + Sync + 'static>(source: E) -> Self {
+        KeyManagerApiError::KeyStoreError {
+            source: Box::new(source),
+        }
+    }
 }
 
 impl IsNotFoundError for KeyManagerApiError {

@@ -7,12 +7,14 @@ use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::Network;
 use tari_ootle_wallet_crypto::memo::Memo;
 use tari_template_lib::{
+    auth::AccessRule,
     models::{NonFungibleAddress, ResourceAddress},
     prelude::Amount,
 };
 
 use crate::apis::{
     confidential_transfer::UtxoInputSelection,
+    stealth_outputs::StealthOutputsApiError,
     stealth_transfer::{StealthOutputToCreate, StealthTransferApiError},
 };
 
@@ -100,7 +102,7 @@ impl StealthTransferParams {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct TransferOutput {
     /// Destination address used to derive the UTXO encryption keys, owner signature and the account in which to
     /// deposit revealed funds
@@ -111,6 +113,7 @@ pub struct TransferOutput {
     pub blinded_amount: u64,
     /// Optional memo to include a memo in the output. This memo is encrypted and can only be read by the recipient.
     pub memo: Option<Memo>,
+    pub pay_to: PayTo,
 }
 
 impl TransferOutput {
@@ -120,24 +123,32 @@ impl TransferOutput {
 }
 
 impl<'a> TryFrom<&'a TransferOutput> for StealthOutputToCreate<'a> {
-    type Error = StealthTransferApiError;
+    type Error = StealthOutputsApiError;
 
     fn try_from(value: &'a TransferOutput) -> Result<Self, Self::Error> {
         Ok(Self {
             owner_address: value.address.try_from_byte_type().map_err(|e| {
-                StealthTransferApiError::InvalidParameter {
+                StealthOutputsApiError::InvalidParameter {
                     param: "destination_address",
                     reason: format!("Invalid destination address: {}", e),
                 }
             })?,
             amount: value.blinded_amount,
             memo: value.memo.as_ref(),
+            pay_to: value.pay_to.clone(),
         })
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub enum PayTo {
+    StealthPublicKey,
+    AccessRule(AccessRule),
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub enum BadgeUsage {
     /// Do not use a badge
     #[default]

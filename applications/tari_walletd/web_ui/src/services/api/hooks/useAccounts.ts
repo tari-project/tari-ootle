@@ -52,6 +52,7 @@ import {
   ResourceAddress,
   ResourceType,
   XTR,
+  PayTo,
 } from "@tari-project/typescript-bindings";
 
 const DEFAULT_MAX_FEE = 2000;
@@ -169,6 +170,7 @@ export const useAccountsTransfer = () => {
               blinded_output_amount: params.output_to_revealed ? 0n : BigInt(params.amount),
               revealed_output_amount: params.output_to_revealed ? params.amount : 0,
               output_memo: params.output_memo || null,
+              pay_to: "StealthPublicKey" as PayTo,
             },
           ],
           max_fee,

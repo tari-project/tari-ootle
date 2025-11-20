@@ -19,20 +19,22 @@ use tari_engine_types::{
 };
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_common_types::{
+    displayable::Displayable,
     optional::{IsNotFoundError, Optional},
     Network,
 };
 use tari_ootle_wallet_crypto::{
     memo::Memo,
     DecryptedData,
-    UnblindedOutputWitness,
-    UnblindedStealthInputWitness,
-    UnblindedStealthOutputWitness,
+    OutputWitness,
+    SecretStealthOutputStatement,
+    StealthInputWitness,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    models::{ComponentAddress, ResourceAddress, StealthTransferStatement, UtxoAddress},
-    prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    auth::AccessRule,
+    models::{ComponentAddress, ResourceAddress, SpendCondition, StealthTransferStatement, UtxoAddress},
+    prelude::PedersenCommitmentBytes,
     types::{Amount, EncryptedData},
 };
 
@@ -42,7 +44,7 @@ use crate::{
         config::{ConfigApi, ConfigApiError},
         key_manager::{KeyManagerApi, KeyManagerApiError},
         stealth_crypto::{StealthCryptoApi, StealthCryptoApiError},
-        stealth_transfer::{StealthOutputToCreate, UnblindedInputToSpend},
+        stealth_transfer::{PayTo, StealthOutputToCreate, UnblindedInputToSpend},
     },
     models::{
         input_selection,
@@ -223,7 +225,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                 // using SmallestFirst.
                 let result = input_selection::branch_and_bound::select(&inputs, amount, INPUT_LIMIT).ok_or(
                     StealthOutputsApiError::InputSelectionFailed {
-                        details: "Failed to select inputs using branch and bound algorithm".to_string(),
+                        details: "Failed to select inputs (branch and bound algorithm)".to_string(),
                     },
                 )?;
 
@@ -253,15 +255,28 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         Ok(())
     }
 
+    pub fn is_spendable_condition(&self, spend_condition: &SpendCondition) -> bool {
+        match spend_condition {
+            SpendCondition::Signed(_) => true,
+            SpendCondition::AccessRule(rule) => self.is_spendable_access_rule(rule),
+        }
+    }
+
+    pub fn is_spendable_access_rule(&self, access_rule: &AccessRule) -> bool {
+        match access_rule {
+            AccessRule::AllowAll => true,
+            AccessRule::DenyAll => false,
+            // TODO: for now we'll mark complex access rules as unspendable (cant be selected as inputs), in future we
+            // may have a good way to evaluate this
+            AccessRule::Restricted(_) => false,
+        }
+    }
+
     fn resolve_output_masks_for_spending(
         &self,
-        owner_key_id: KeyId,
         view_only_key_id: KeyId,
         inputs: &[InputSpendData],
     ) -> Result<Vec<UnblindedInputToSpend>, StealthOutputsApiError> {
-        let network = self.config_api.get_network()?;
-
-        let owner_key_part = self.key_manager_api.get_key(owner_key_id)?;
         let mut inputs_with_masks = Vec::with_capacity(inputs.len());
         for input in inputs {
             // Derive the decryption key from the DHKE(sender's public nonce, encryption secret key);
@@ -284,14 +299,9 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                 true,
             )?;
 
-            let stealth_secret = self
-                .crypto_api
-                .derive_stealth_owner_secret(network, &owner_key_part.secret, &nonce);
-
             inputs_with_masks.push(UnblindedInputToSpend {
-                witness: UnblindedStealthInputWitness {
+                witness: StealthInputWitness {
                     mask_and_value: decrypted.mask_and_value,
-                    owner_secret: stealth_secret,
                     public_nonce: nonce,
                 },
             });
@@ -572,15 +582,19 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                             &owner_key.secret,
                             &output_stealth_public_nonce,
                         );
-                        let stealth_address = RistrettoPublicKey::from_secret_key(&stealth_secret);
-                        if output.owner_public_key == stealth_address.to_byte_type() {
+                        let stealth_address = RistrettoPublicKey::from_secret_key(&stealth_secret).to_byte_type();
+                        if output
+                            .spend_condition
+                            .signed_by()
+                            .is_none_or(|pk| *pk == stealth_address)
+                        {
                             (decrypted.value(), decrypted.memo, OutputStatus::Unspent)
                         } else {
                             warn!(
                                 target: LOG_TARGET,
                                 "⚠️ Output owner public key does not match the expected stealth address. (expected: {}, actual: {}). Utxo cannot be spent by this wallet and will be stored as invalid.",
                                 stealth_address,
-                                output.owner_public_key
+                                output.spend_condition.signed_by().display()
                             );
                             (decrypted.value(), decrypted.memo, OutputStatus::Invalid)
                         }
@@ -628,11 +642,13 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                 encrypted_data: output.output.encrypted_data.clone(),
                 tag_byte: output.tag,
                 memo,
+                spend_condition: output.spend_condition.clone(),
                 minimum_value_promise: output.output.minimum_value_promise,
                 status,
                 is_burnt: false,
                 is_frozen,
                 is_on_chain: true,
+                is_condition_spendable: self.is_spendable_condition(&output.spend_condition),
                 lock_id: None,
             }));
         }
@@ -647,7 +663,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         resource_address: &ResourceAddress,
         resource_view_key: Option<RistrettoPublicKey>,
         memo: Option<&Memo>,
-    ) -> Result<UnblindedStealthOutputWitness, StealthOutputsApiError> {
+        pay_to: PayTo,
+    ) -> Result<SecretStealthOutputStatement, StealthOutputsApiError> {
         let mask = self.key_manager_api.next_key(KeyBranch::StealthMask)?;
 
         let (nonce_secret, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
@@ -659,14 +676,21 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
             memo,
         )?;
 
-        // Create stealth address - used during spend time
-        let output_owner_public_key = self.crypto_api.derive_stealth_owner_public_key(
-            destination.network(),
-            destination.account_key(),
-            &nonce_secret,
-        );
+        let spend_condition = match pay_to {
+            PayTo::StealthPublicKey => {
+                // Create stealth address that the destination can use at spend time
+                let output_owner_public_key = self.crypto_api.derive_stealth_owner_public_key(
+                    destination.network(),
+                    destination.account_key(),
+                    &nonce_secret,
+                );
 
-        let witness = UnblindedOutputWitness {
+                SpendCondition::Signed(output_owner_public_key.to_byte_type())
+            },
+            PayTo::AccessRule(access_rule) => SpendCondition::AccessRule(access_rule),
+        };
+
+        let witness = OutputWitness {
             amount,
             mask: mask.key,
             sender_public_nonce: public_nonce,
@@ -682,22 +706,21 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
             resource_address,
         );
 
-        Ok(UnblindedStealthOutputWitness {
+        Ok(SecretStealthOutputStatement {
             witness,
-            output_owner_public_key,
+            spend_condition,
             tag: derived_tag,
         })
     }
 
-    pub fn generate_transfer_statement<I>(
+    pub fn generate_transfer_statement<'i, I>(
         &self,
-        params: TransferStatementParams<'_, I>,
+        params: TransferStatementParams<'i, I>,
     ) -> Result<StealthTransferStatement, StealthOutputsApiError>
     where
-        I: IntoIterator<Item = StealthOutputToCreate<'a>>,
+        I: IntoIterator<Item = StealthOutputToCreate<'i>>,
     {
-        let unblinded_inputs =
-            self.resolve_output_masks_for_spending(params.spend_key_id, params.view_only_key_id, params.inputs)?;
+        let unblinded_inputs = self.resolve_output_masks_for_spending(params.view_only_key_id, params.inputs)?;
         let outputs = params
             .outputs
             .into_iter()
@@ -708,6 +731,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
                     params.resource_address,
                     params.resource_view_key.clone(),
                     output.memo,
+                    output.pay_to,
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -726,11 +750,10 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
         }
 
         let statement = self.crypto_api.generate_transfer_statement(
-            unblinded_inputs.iter().map(|i| &i.witness),
+            unblinded_inputs.into_iter().map(|i| i.witness),
             params.input_revealed_amount,
             outputs.iter(),
             params.output_revealed_amount,
-            params.required_signer,
         )?;
         Ok(statement)
     }
@@ -771,7 +794,6 @@ impl<'a, TSpec: WalletSdkSpec> StealthOutputsApi<'a, TSpec> {
 }
 
 pub struct TransferStatementParams<'a, I> {
-    pub spend_key_id: KeyId,
     pub view_only_key_id: KeyId,
     pub resource_address: &'a ResourceAddress,
     pub resource_view_key: Option<RistrettoPublicKey>,
@@ -779,7 +801,6 @@ pub struct TransferStatementParams<'a, I> {
     pub input_revealed_amount: Amount,
     pub outputs: I,
     pub output_revealed_amount: Amount,
-    pub required_signer: RistrettoPublicKeyBytes,
 }
 
 #[derive(Debug, thiserror::Error)]

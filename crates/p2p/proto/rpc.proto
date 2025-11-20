@@ -90,7 +90,7 @@ message GetPeersResponse {
 }
 
 message GetSubstateRequest {
-  tari.ootle.transaction.SubstateRequirement substate_requirement = 1;
+  tari.ootle.common.SubstateRequirement substate_requirement = 1;
 }
 
 message GetSubstateResponse {

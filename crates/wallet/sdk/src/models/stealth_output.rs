@@ -3,7 +3,7 @@
 
 use tari_ootle_wallet_crypto::memo::Memo;
 use tari_template_lib::{
-    models::{ComponentAddress, UtxoAddress},
+    models::{ComponentAddress, SpendCondition, UtxoAddress},
     prelude::{PedersenCommitmentBytes, ResourceAddress, RistrettoPublicKeyBytes},
     types::{crypto::UtxoTag, Amount, EncryptedData},
 };
@@ -11,6 +11,7 @@ use tari_template_lib::{
 use crate::models::{KeyId, OutputStatus, WalletLockId};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct StealthOutputModel {
     pub owner_account: ComponentAddress,
     pub resource_address: ResourceAddress,
@@ -24,11 +25,13 @@ pub struct StealthOutputModel {
     pub encrypted_data: EncryptedData,
     pub tag_byte: UtxoTag,
     pub memo: Option<Memo>,
+    pub spend_condition: SpendCondition,
     pub minimum_value_promise: u64,
     pub status: OutputStatus,
     pub is_burnt: bool,
     pub is_frozen: bool,
     pub is_on_chain: bool,
+    pub is_condition_spendable: bool,
     pub lock_id: Option<WalletLockId>,
 }
 

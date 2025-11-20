@@ -6,11 +6,7 @@ use tari_crypto::{
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey},
     tari_utilities::ByteArrayError,
 };
-use tari_template_lib::{
-    models::{StealthInput, StealthTransferStatement},
-    prelude::RistrettoPublicKeyBytes,
-    types::Amount,
-};
+use tari_template_lib::{models::StealthTransferStatement, types::Amount};
 
 use crate::{
     crypto::{commit_amount_checked, messages, try_decode_to_signature},
@@ -18,8 +14,6 @@ use crate::{
     stealth,
     stealth::ValidatedStealthOutput,
     ConvertFromByteType,
-    Hash64,
-    UtxoOutput,
 };
 
 const LOG_TARGET: &str = "tari::engine_types::stealth::transfer";
@@ -140,43 +134,6 @@ pub fn validate_transfer_balance(
         outputs: validated_outputs,
         revealed_output_amount: transfer.outputs_statement.revealed_output_amount,
     })
-}
-
-pub fn validate_ownership_proof(
-    utxo: &UtxoOutput,
-    input: &StealthInput,
-    required_signer: &RistrettoPublicKeyBytes,
-    metadata_hash: &Hash64,
-) -> Result<(), ResourceError> {
-    if input.owner_proof.public_nonce().is_zero() {
-        return Err(ResourceError::InvalidSpend {
-            details: "Ownership proof public nonce cannot be zero".to_string(),
-        });
-    }
-
-    let owner_proof = try_decode_to_signature(&input.owner_proof).ok_or_else(|| ResourceError::InvalidSpend {
-        details: "Malformed ownership proof".to_string(),
-    })?;
-
-    let signer_pk = RistrettoPublicKey::convert_from_byte_type(&utxo.owner_public_key).map_err(|_| {
-        ResourceError::InvalidSpend {
-            details: "Non-canonical compressed owner public key".to_string(),
-        }
-    })?;
-
-    let message = messages::stealth_ownership64(
-        &input.commitment,
-        &utxo.output.public_nonce,
-        required_signer,
-        metadata_hash,
-    );
-    if !owner_proof.verify(&signer_pk, message) {
-        return Err(ResourceError::InvalidSpend {
-            details: format!("Invalid ownership proof for input with commitment {}", input.commitment),
-        });
-    }
-
-    Ok(())
 }
 
 fn basic_validations(transfer: &StealthTransferStatement) -> Result<(), ResourceError> {

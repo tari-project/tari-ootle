@@ -25,23 +25,21 @@ pub struct CallScope {
     referenced: IndexSet<SubstateId>,
     component_lock: Option<LockedSubstate>,
     lock_scope: IndexSet<LockId>,
-    proof_scope: IndexSet<ProofId>,
     bucket_scope: IndexSet<BucketId>,
     auth_scope: AuthorizationScope,
 }
 
 impl CallScope {
     pub fn new() -> Self {
-        // Encountered non-determinism bug when using HashSet.
+        // NOTE: HashSet is not appropriate due to non-determinism
         Self {
             orphans: IndexSet::new(),
             owned: IndexSet::new(),
             referenced: IndexSet::new(),
             component_lock: None,
             lock_scope: IndexSet::new(),
-            proof_scope: IndexSet::new(),
             bucket_scope: IndexSet::new(),
-            auth_scope: AuthorizationScope::new(vec![]),
+            auth_scope: AuthorizationScope::empty(),
         }
     }
 
@@ -63,16 +61,8 @@ impl CallScope {
         &self.lock_scope
     }
 
-    pub fn is_proof_in_scope(&self, proof_id: ProofId) -> bool {
-        self.proof_scope.contains(&proof_id)
-    }
-
-    pub fn proof_scope(&self) -> &IndexSet<ProofId> {
-        &self.proof_scope
-    }
-
-    pub fn bucket_scope(&self) -> &IndexSet<BucketId> {
-        &self.bucket_scope
+    pub fn is_proof_in_scope(&self, proof_id: &ProofId) -> bool {
+        self.auth_scope.contains_proof(proof_id)
     }
 
     pub fn is_bucket_in_scope(&self, bucket_id: BucketId) -> bool {
@@ -111,7 +101,6 @@ impl CallScope {
     }
 
     pub fn add_proof_to_scope(&mut self, proof_id: ProofId) {
-        self.proof_scope.insert(proof_id);
         self.auth_scope_mut().add_proof(proof_id);
     }
 
@@ -198,7 +187,6 @@ impl CallScope {
         for owned in &child.owned {
             self.orphans.swap_remove(owned);
         }
-        self.proof_scope.extend(child.proof_scope);
         self.bucket_scope.extend(child.bucket_scope);
         self.auth_scope.update_from_child(child.auth_scope);
     }
@@ -265,9 +253,9 @@ impl Display for CallScope {
             }
         }
 
-        if !self.proof_scope.is_empty() {
+        if !self.auth_scope.proofs().is_empty() {
             writeln!(f, "Proofs:")?;
-            for proof in &self.proof_scope {
+            for proof in self.auth_scope.proofs() {
                 writeln!(f, "  {}", proof)?;
             }
         }

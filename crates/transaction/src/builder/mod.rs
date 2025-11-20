@@ -22,7 +22,7 @@ use tari_template_lib::{
     auth::OwnerRule,
     models::{ResourceAddress, StealthTransferStatement},
     prelude::AccessRules,
-    types::{crypto::RistrettoPublicKeyBytes, Amount, TemplateAddress},
+    types::{crypto::RistrettoPublicKeyBytes, Amount, FunctionName, TemplateAddress},
 };
 
 use crate::{
@@ -87,7 +87,7 @@ impl TransactionBuilder {
 
     pub fn with_authorized_seal_signer(mut self) -> Self {
         self.unsigned_transaction = self.unsigned_transaction.authorized_sealed_signer();
-        self.clear_signatures();
+        self.panic_if_signed();
         self
     }
 
@@ -108,7 +108,7 @@ impl TransactionBuilder {
     ) -> Self {
         self.add_fee_instruction(Instruction::CallMethod {
             call: call.into(),
-            method: "pay_fee".to_string(),
+            method: "pay_fee".try_into().expect("Method name is longer than the limit"),
             args: call_args![max_fee.into().non_negative_checked().expect("Negative fee not allowed")],
         })
     }
@@ -123,7 +123,9 @@ impl TransactionBuilder {
     ) -> Self {
         self.add_fee_instruction(Instruction::CallMethod {
             call: call.into(),
-            method: "pay_fee_stealth".to_string(),
+            method: "pay_fee_stealth"
+                .try_into()
+                .expect("Method name is longer than the limit"),
             args: call_args![statement],
         })
     }
@@ -167,31 +169,34 @@ impl TransactionBuilder {
         })
     }
 
-    pub fn call_function<T: Into<String>>(
-        self,
-        template_address: TemplateAddress,
-        function: T,
-        args: Vec<NamedArg>,
-    ) -> Self {
+    pub fn call_function<T>(self, template_address: TemplateAddress, function: T, args: Vec<NamedArg>) -> Self
+    where
+        T: TryInto<FunctionName>,
+        <T as TryInto<FunctionName>>::Error: std::fmt::Debug,
+    {
         let args = self.resolve_args(args).expect("Invalid named arguments");
         self.add_instruction(Instruction::CallFunction {
             address: template_address,
-            function: function.into(),
+            function: function
+                .try_into()
+                .expect("Oops! The provided function name is longer than the limit"),
             args,
         })
     }
 
-    pub fn call_method<A: Into<NamedComponentCall>, T: Into<String>>(
-        self,
-        call: A,
-        method: T,
-        args: Vec<NamedArg>,
-    ) -> Self {
+    pub fn call_method<A, T>(self, call: A, method: T, args: Vec<NamedArg>) -> Self
+    where
+        A: Into<NamedComponentCall>,
+        T: TryInto<FunctionName>,
+        <T as TryInto<FunctionName>>::Error: std::fmt::Debug,
+    {
         let call = self.resolve_call(call.into());
         let args = self.resolve_args(args).expect("Invalid named arguments");
         self.add_instruction(Instruction::CallMethod {
             call,
-            method: method.into(),
+            method: method
+                .try_into()
+                .expect("Oops! The provided method name is longer than the limit"),
             args,
         })
     }
@@ -306,7 +311,9 @@ impl TransactionBuilder {
         // We may want to make this a native instruction
         self.add_instruction(Instruction::CallMethod {
             call: account.into(),
-            method: "create_proof_for_resource".to_string(),
+            method: "create_proof_for_resource"
+                .try_into()
+                .expect("Method name is longer than the limit"),
             args: call_args![resource_addr],
         })
     }
@@ -314,7 +321,7 @@ impl TransactionBuilder {
     pub fn with_fee_instructions<I: IntoIterator<Item = Instruction>>(mut self, instructions: I) -> Self {
         self.unsigned_transaction.fee_instructions_mut().extend(instructions);
         // Reset the signatures as they are no longer valid
-        self.clear_signatures();
+        self.panic_if_signed();
         self
     }
 
@@ -324,29 +331,28 @@ impl TransactionBuilder {
         self.unsigned_transaction
             .fee_instructions_mut()
             .extend(builder.unsigned_transaction.into_instructions());
-        // Reset the signatures as they are no longer valid
-        self.clear_signatures();
+        self.panic_if_signed();
         self
     }
 
     pub fn add_fee_instruction(mut self, instruction: Instruction) -> Self {
         self.unsigned_transaction.fee_instructions_mut().push(instruction);
         // Reset the signatures as they are no longer valid
-        self.clear_signatures();
+        self.panic_if_signed();
         self
     }
 
     pub fn add_instruction(mut self, instruction: Instruction) -> Self {
         self.unsigned_transaction.instructions_mut().push(instruction);
         // Reset the signatures as they are no longer valid
-        self.clear_signatures();
+        self.panic_if_signed();
         self
     }
 
     pub fn with_instructions<I: IntoIterator<Item = Instruction>>(mut self, instructions: I) -> Self {
         self.unsigned_transaction.instructions_mut().extend(instructions);
         // Reset the signatures as they are no longer valid
-        self.clear_signatures();
+        self.panic_if_signed();
         self
     }
 
@@ -354,14 +360,14 @@ impl TransactionBuilder {
     pub fn add_input<I: Into<SubstateRequirement>>(mut self, input_object: I) -> Self {
         self.unsigned_transaction.inputs_mut().insert(input_object.into());
         // Reset the signatures as they are no longer valid
-        self.clear_signatures();
+        self.panic_if_signed();
         self
     }
 
     pub fn with_inputs<I: IntoIterator<Item = SubstateRequirement>>(mut self, inputs: I) -> Self {
         self.unsigned_transaction = self.unsigned_transaction.with_inputs(inputs);
         // Reset the signatures as they are no longer valid
-        self.clear_signatures();
+        self.panic_if_signed();
         self
     }
 
@@ -372,14 +378,14 @@ impl TransactionBuilder {
     pub fn with_min_epoch(mut self, min_epoch: Option<Epoch>) -> Self {
         self.unsigned_transaction.set_min_epoch(min_epoch);
         // Reset the signatures as they are no longer valid
-        self.clear_signatures();
+        self.panic_if_signed();
         self
     }
 
     pub fn with_max_epoch(mut self, max_epoch: Option<Epoch>) -> Self {
         self.unsigned_transaction.set_max_epoch(max_epoch);
         // Reset the signatures as they are no longer valid
-        self.clear_signatures();
+        self.panic_if_signed();
         self
     }
 
@@ -427,11 +433,16 @@ impl TransactionBuilder {
         &self.signatures
     }
 
-    fn clear_signatures(&mut self) {
-        self.signatures = vec![];
+    #[track_caller]
+    fn panic_if_signed(&mut self) {
+        // TODO: use the type system to prevent this. Right now, IMO (debatable) it's better to panic than to allow the
+        // builder to potentially produce invalid transactions or unexpected results.
+        if !self.signatures.is_empty() {
+            panic!("Cannot modify a TransactionBuilder after signatures have been added");
+        }
     }
 
-    pub fn build(self) -> UnsealedTransactionV1 {
+    pub fn finish(self) -> UnsealedTransactionV1 {
         let builder = self.then(|builder| {
             // This is so that we dont have to add this in a lot of places - TODO: this is an assumption that may not
             // apply to all transactions
@@ -442,11 +453,11 @@ impl TransactionBuilder {
             }
         });
 
-        builder.unsigned_transaction.build_with_signatures(builder.signatures)
+        builder.unsigned_transaction.with_signatures(builder.signatures)
     }
 
     pub fn build_and_seal(self, secret_key: &RistrettoSecretKey) -> Transaction {
-        self.build().seal(secret_key)
+        self.finish().seal(secret_key)
     }
 
     fn resolve_call(&self, call: NamedComponentCall) -> ComponentCall {
@@ -505,8 +516,8 @@ impl TransactionBuilder {
 impl Signable<&RistrettoPublicKeyBytes> for TransactionBuilder {
     type MessageOutput = [u8; 64];
 
-    fn as_signing_message(&self, sealed_signer: &RistrettoPublicKeyBytes) -> Self::MessageOutput {
-        self.unsigned_transaction.as_signing_message(sealed_signer)
+    fn to_signing_message(&self, sealed_signer: &RistrettoPublicKeyBytes) -> Self::MessageOutput {
+        self.unsigned_transaction.to_signing_message(sealed_signer)
     }
 }
 

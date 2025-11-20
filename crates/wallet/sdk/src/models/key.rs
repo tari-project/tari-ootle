@@ -15,7 +15,7 @@ use tari_ootle_common_types::Signable;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 #[serde(rename_all = "snake_case")]
 pub enum KeyBranch {
     /// The account key branch, used for deriving account keys.
@@ -176,7 +176,7 @@ impl WalletSecretKey {
     }
 
     pub fn sign<T: Signable<C>, C>(&self, context: C, item: &T) -> RistrettoSchnorr {
-        let message = item.as_signing_message(context);
+        let message = item.to_signing_message(context);
         RistrettoSchnorr::sign(&self.secret, message.as_ref(), &mut OsRng)
             .expect("message is hashed internally into canonical form, so signing is infallible")
     }
@@ -299,7 +299,7 @@ impl From<RistrettoPublicKeyBytes> for KeyIdOrPublicKey {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub struct DerivedKeyId {
     pub branch: KeyBranch,
     pub index: DerivedKeyIndex,
@@ -332,13 +332,20 @@ impl TryFrom<KeyId> for DerivedKeyId {
                 branch: key_branch,
                 index,
             }),
-            KeyId::Imported { .. } => Err(anyhow!("Cannot convert Imported KeyId to DerivedKeyId")),
+            _ => Err(anyhow!("Cannot convert Imported KeyId to DerivedKeyId")),
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
+pub struct StealthUtxoSpendKeyId {
+    pub account_key_id: KeyId,
+    pub public_nonce: RistrettoPublicKeyBytes,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub enum KeyId {
     /// Derived from the seed key
     Derived {

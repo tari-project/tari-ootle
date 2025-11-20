@@ -2,26 +2,30 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_ootle_address::RistrettoOotleAddress;
-use tari_ootle_wallet_crypto::{memo::Memo, UnblindedStealthInputWitness};
+use tari_ootle_wallet_crypto::{memo::Memo, StealthInputWitness};
 use tari_template_lib::{
     models::{ComponentAddress, VaultId},
     prelude::Amount,
 };
 use tari_transaction::UnsignedTransaction;
 
-use crate::models::{InputSpendData, WalletPublicKey};
+use crate::{
+    apis::stealth_transfer::PayTo,
+    models::{InputSpendData, StealthUtxoSpendKeyId, WalletPublicKey},
+};
 
 pub struct StealthTransferOutput {
     pub transaction: UnsignedTransaction,
     pub fee_inputs: InputsToSpend,
     pub transfer_inputs: InputsToSpend,
+    pub utxo_spend_keys: Vec<StealthUtxoSpendKeyId>,
     pub additional_signer: Option<WalletPublicKey>,
     pub main_signer: WalletPublicKey,
 }
 
 #[derive(Debug)]
 pub struct UnblindedInputToSpend {
-    pub witness: UnblindedStealthInputWitness,
+    pub witness: StealthInputWitness,
 }
 
 impl UnblindedInputToSpend {
@@ -33,6 +37,7 @@ impl UnblindedInputToSpend {
 #[derive(Debug, Clone)]
 pub struct StealthOutputToCreate<'a> {
     pub owner_address: RistrettoOotleAddress,
+    pub pay_to: PayTo,
     pub amount: u64,
     pub memo: Option<&'a Memo>,
 }

@@ -178,7 +178,7 @@ impl UnsignedTransactionV1 {
 impl Signable<&RistrettoPublicKeyBytes> for UnsignedTransactionV1 {
     type MessageOutput = [u8; 64];
 
-    fn as_signing_message(&self, seal_signer: &RistrettoPublicKeyBytes) -> Self::MessageOutput {
-        TransactionSignature::create_message(1, seal_signer, self)
+    fn to_signing_message(&self, seal_signer: &RistrettoPublicKeyBytes) -> Self::MessageOutput {
+        TransactionSignature::create_message_v1(1, seal_signer, self)
     }
 }

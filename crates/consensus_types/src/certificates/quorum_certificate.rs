@@ -8,7 +8,6 @@ use tari_ootle_common_types::{Epoch, NodeHeight};
 use crate::{ProposalCertificate, QcId, TimeoutCertificate, ValidatorSignatureBytes};
 
 #[derive(Debug, Clone, Serialize, BorshSerialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum QuorumCertificateRef<'a> {
     ProposalCertificate(&'a ProposalCertificate),
     TimeoutCertificate(&'a TimeoutCertificate),

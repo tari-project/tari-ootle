@@ -2,7 +2,7 @@
 import type { ComponentAddress } from "./ComponentAddress";
 import type { Epoch } from "./Epoch";
 import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
-import type { KeyId } from "./wallet-daemon-client/KeyId";
+import type { KeyId } from "./wallet-types/KeyId";
 
 export type Account = {
   name: string | null;

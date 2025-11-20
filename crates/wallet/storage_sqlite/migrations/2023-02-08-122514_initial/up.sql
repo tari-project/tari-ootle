@@ -246,27 +246,29 @@ CREATE TABLE webauthn_registration_passkeys
 -- Stealth Outputs
 CREATE TABLE stealth_outputs
 (
-    id                    INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    owner_account_id      INTEGER  NOT NULL REFERENCES accounts (id),
-    resource_address      TEXT     NOT NULL,
-    commitment            TEXT     NOT NULL,
-    value                 BIGINT   NOT NULL,
-    sender_public_nonce   TEXT     NOT NULL,
+    id                     INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    owner_account_id       INTEGER  NOT NULL REFERENCES accounts (id),
+    resource_address       TEXT     NOT NULL,
+    commitment             TEXT     NOT NULL,
+    value                  BIGINT   NOT NULL,
+    sender_public_nonce    TEXT     NOT NULL,
     -- Status can be "Unspent", "Spent", "Locked", "LockedUnconfirmed", "Invalid"
-    status                TEXT     NOT NULL,
-    locked_at             DATETIME NULL,
-    lock_id               INTEGER  NULL,
-    view_only_key_id      TEXT     NOT NULL,
-    owner_key_id          TEXT     NULL,
-    encrypted_data        BLOB     NOT NULL DEFAULT '',
-    tag_byte              INTEGER  NOT NULL,
-    memo_json             TEXT     NULL,
-    minimum_value_promise BIGINT   NOT NULL,
-    is_burnt              BOOLEAN  NOT NULL DEFAULT 0,
-    is_frozen             BOOLEAN  NOT NULL DEFAULT 0,
-    is_on_chain           BOOLEAN  NOT NULL,
-    created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    status                 TEXT     NOT NULL,
+    locked_at              DATETIME NULL,
+    lock_id                INTEGER  NULL,
+    view_only_key_id       TEXT     NOT NULL,
+    owner_key_id           TEXT     NULL,
+    encrypted_data         BLOB     NOT NULL DEFAULT '',
+    tag_byte               INTEGER  NOT NULL,
+    memo_json              TEXT     NULL,
+    spend_condition        TEXT     NOT NULL,
+    minimum_value_promise  BIGINT   NOT NULL,
+    is_burnt               BOOLEAN  NOT NULL DEFAULT 0,
+    is_frozen              BOOLEAN  NOT NULL DEFAULT 0,
+    is_on_chain            BOOLEAN  NOT NULL,
+    is_condition_spendable BOOLEAN  NOT NULL,
+    created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE UNIQUE INDEX stealth_outputs_uniq_resource_addr_commitment ON stealth_outputs (resource_address, commitment);

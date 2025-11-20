@@ -3,89 +3,104 @@
 
 use std::fmt;
 
+use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_ootle_common_types::{IntoSigned, Signable};
 
 use crate::{
     apis::key_manager::{KeyManagerApi, KeyManagerApiError},
-    key_managers::{SignatureOutput, WalletKeyStore},
-    models::KeyId,
+    key_managers::SignatureOutput,
+    models::{KeyId, StealthUtxoSpendKeyId},
     spec::KeyStoreError,
     storage::WalletStorageError,
     WalletSdkSpec,
 };
 
-pub struct SignerApi<'a, TSpec: WalletSdkSpec> {
+pub struct SignerApi<'a, TSpec: WalletSdkSpec, Ctx = ()> {
     key_manager: KeyManagerApi<'a, TSpec>,
+    context: Ctx,
 }
 
-impl<'a, TSpec: WalletSdkSpec> SignerApi<'a, TSpec> {
+impl<'a, TSpec: WalletSdkSpec> SignerApi<'a, TSpec, ()> {
     pub fn new(key_manager: KeyManagerApi<'a, TSpec>) -> Self {
-        Self { key_manager }
-    }
-
-    pub fn get_signature<T, CTX>(
-        &mut self,
-        key_id: KeyId,
-        context: CTX,
-        item: &T,
-    ) -> Result<SignatureOutput, SignerApiError<TSpec>>
-    where
-        T: Signable<CTX>,
-    {
-        match key_id {
-            KeyId::Derived { key_branch, index } => {
-                let output = self
-                    .key_manager
-                    .key_store()
-                    .sign(key_branch.as_str(), index, context, item)
-                    // NOTE: Cannot implement From due to rust bug/limitation
-                    .map_err(SignerApiError::KeyStoreError)?;
-                Ok(output)
-            },
-            KeyId::Imported { local_key_id } => {
-                // TODO: do we actually need to support signing from an imported key? Typically these are view-only
-                // keys. If we removed support for this, we'd just need the key store as a dependency of the signing api
-                // instead of the key manager api.
-                let key = self.key_manager.get_key(KeyId::imported(local_key_id))?;
-                let sig = key.sign(context, item);
-                Ok(SignatureOutput {
-                    public_key: key.to_public_key(),
-                    signature: sig,
-                })
-            },
+        Self {
+            key_manager,
+            context: (),
         }
     }
 
-    pub fn sign_with_context<T, Ctx>(
-        &mut self,
-        key_id: KeyId,
-        context: Ctx,
+    pub fn with_context<Ctx>(self, context: Ctx) -> SignerApi<'a, TSpec, Ctx> {
+        SignerApi {
+            key_manager: self.key_manager,
+            context,
+        }
+    }
+}
+
+impl<'a, TSpec: WalletSdkSpec, Ctx: Copy> SignerApi<'a, TSpec, Ctx> {
+    pub fn generate_signature<T>(&self, key_id: KeyId, item: &T) -> Result<SignatureOutput, SignerApiError<TSpec>>
+    where T: Signable<Ctx> {
+        let output = self.key_manager.sign_with_context(key_id, self.context, item)?;
+        Ok(output)
+    }
+
+    pub fn generate_stealth_key_signature<T>(
+        &self,
+        key_id: &StealthUtxoSpendKeyId,
+        item: &T,
+    ) -> Result<SignatureOutput, SignerApiError<TSpec>>
+    where
+        T: Signable<Ctx>,
+    {
+        let output = self.key_manager.sign_with_stealth_key(key_id, self.context, item)?;
+        Ok(output)
+    }
+
+    pub fn sign<T>(&self, key_id: KeyId, item: T) -> Result<T::SignedOutput, SignerApiError<TSpec>>
+    where T: IntoSigned<Ctx> {
+        let output = self.generate_signature(key_id, &item)?;
+        let output = item.into_signed(output.public_key, output.signature);
+        Ok(output)
+    }
+
+    pub fn sign_with_stealth_key<T>(
+        &self,
+        key_id: &StealthUtxoSpendKeyId,
         item: T,
     ) -> Result<T::SignedOutput, SignerApiError<TSpec>>
     where
         T: IntoSigned<Ctx>,
     {
-        let output = self.get_signature(key_id, context, &item)?;
+        let output = self.generate_stealth_key_signature(key_id, &item)?;
         let output = item.into_signed(output.public_key, output.signature);
         Ok(output)
     }
 
-    pub fn sign<T>(&mut self, key_id: KeyId, item: T) -> Result<T::SignedOutput, SignerApiError<TSpec>>
-    where T: IntoSigned<()> {
-        let output = self.get_signature(key_id, (), &item)?;
+    pub fn sign_with_explicit_key<T>(
+        &self,
+        secret_key: &RistrettoSecretKey,
+        item: T,
+    ) -> Result<T::SignedOutput, SignerApiError<TSpec>>
+    where
+        T: IntoSigned<Ctx>,
+    {
+        let output = self
+            .key_manager
+            .sign_with_explicit_key(secret_key, self.context, &item)?;
         let output = item.into_signed(output.public_key, output.signature);
         Ok(output)
     }
 }
 
-impl<TSpec> Clone for SignerApi<'_, TSpec>
+impl<TSpec, Ctx> Clone for SignerApi<'_, TSpec, Ctx>
 where
     TSpec: WalletSdkSpec,
     TSpec::KeyStore: Clone,
+    Ctx: Clone,
 {
     fn clone(&self) -> Self {
         Self {
             key_manager: self.key_manager.clone(),
+            context: self.context.clone(),
         }
     }
 }

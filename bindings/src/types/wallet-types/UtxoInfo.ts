@@ -2,6 +2,7 @@
 import type { Amount } from "../Amount";
 import type { Memo } from "../Memo";
 import type { OutputStatus } from "../OutputStatus";
+import type { SpendCondition } from "../SpendCondition";
 import type { UtxoAddress } from "../UtxoAddress";
 
 export type UtxoInfo = {
@@ -9,6 +10,7 @@ export type UtxoInfo = {
   value: Amount;
   status: OutputStatus;
   memo: Memo | null;
+  spend_condition: SpendCondition;
   is_burnt: boolean;
   is_frozen: boolean;
   is_on_chain: boolean;

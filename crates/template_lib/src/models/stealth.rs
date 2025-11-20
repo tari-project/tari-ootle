@@ -3,13 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use tari_template_lib_types::{
-    crypto::{
-        BalanceProofSignature,
-        PedersenCommitmentBytes,
-        RangeProofBytes,
-        RistrettoPublicKeyBytes,
-        SchnorrSignatureBytes,
-    },
+    crypto::{BalanceProofSignature, PedersenCommitmentBytes, RangeProofBytes},
     Amount,
 };
 
@@ -41,17 +35,15 @@ impl StealthOutputsStatement {
     }
 }
 
-/// A statement for stealth outputs. A statement must contain confidential outputs
+/// A statement for stealth outputs to spend as inputs.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct StealthInput {
     /// The commitment of the unspent output being spent
     pub commitment: PedersenCommitmentBytes,
-    /// Signature that proves ownership of the unspent output. This must be signed by the owner_public_key of the
-    /// output.
-    pub owner_proof: SchnorrSignatureBytes,
 }
+
 /// A statement for stealth outputs. A statement must contain confidential outputs
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -61,12 +53,10 @@ pub struct StealthInputsStatement {
     pub inputs: Vec<StealthInput>,
     /// The total amount of revealed funds being spent.
     pub revealed_amount: Amount,
-    /// The signer that must sign the transaction to allow these inputs to be spent.
-    pub required_signer: RistrettoPublicKeyBytes,
 }
 
 impl StealthInputsStatement {
-    pub fn new(inputs: Vec<StealthInput>, revealed_amount: Amount, required_signer: RistrettoPublicKeyBytes) -> Self {
+    pub fn new(inputs: Vec<StealthInput>, revealed_amount: Amount) -> Self {
         assert!(!revealed_amount.is_negative(), "Revealed amount must be non-negative");
         assert!(
             !inputs.is_empty() || !revealed_amount.is_zero(),
@@ -75,13 +65,12 @@ impl StealthInputsStatement {
         Self {
             inputs,
             revealed_amount,
-            required_signer,
         }
     }
 
     /// Create a new input statement with no stealth inputs, only a revealed amount.
-    pub fn new_revealed_only(amount: Amount, required_signer: RistrettoPublicKeyBytes) -> Self {
-        Self::new(vec![], amount, required_signer)
+    pub fn new_revealed_only(amount: Amount) -> Self {
+        Self::new(vec![], amount)
     }
 }
 
@@ -97,13 +86,9 @@ pub struct StealthTransferStatement {
 }
 
 impl StealthTransferStatement {
-    pub fn revealed_only(
-        input_amount: Amount,
-        output_amount: Amount,
-        required_signer: RistrettoPublicKeyBytes,
-    ) -> Self {
+    pub fn revealed_only(input_amount: Amount, output_amount: Amount) -> Self {
         Self {
-            inputs_statement: StealthInputsStatement::new_revealed_only(input_amount, required_signer),
+            inputs_statement: StealthInputsStatement::new_revealed_only(input_amount),
             outputs_statement: StealthOutputsStatement::new_revealed_only(output_amount),
             balance_proof: None,
         }

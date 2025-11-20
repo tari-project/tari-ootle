@@ -90,7 +90,12 @@ impl ManifestInstructionGenerator {
                     .expect("AST parse should have failed: no template ident for TemplateInvoke statement");
                 let mut instructions = vec![Instruction::CallFunction {
                     address: self.get_imported_template(template_ident)?,
-                    function: function_name.to_string(),
+                    function: function_name
+                        .to_string()
+                        .try_into()
+                        .map_err(|e| ManifestError::InvalidInstruction {
+                            reason: format!("Function name is too long: {}", e),
+                        })?,
                     args: self.process_args(arguments)?,
                 }];
                 if let Some(var_name) = output_variable {
@@ -122,7 +127,12 @@ impl ManifestInstructionGenerator {
                     })?;
                 let mut instructions = vec![Instruction::CallMethod {
                     call: component_address.into(),
-                    method: function_name.to_string(),
+                    method: function_name
+                        .to_string()
+                        .try_into()
+                        .map_err(|e| ManifestError::InvalidInstruction {
+                            reason: format!("Method name is too long: {}", e),
+                        })?,
                     args: self.process_args(arguments)?,
                 }];
                 if let Some(var_name) = output_variable {

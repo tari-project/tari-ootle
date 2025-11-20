@@ -222,7 +222,7 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
             args,
         } => Instruction::CallFunction {
             address: template_address.into_inner(),
-            function: function_name,
+            function: function_name.try_into()?,
             args: args.into_iter().map(|s| s.into_arg()).collect(),
         },
         CliInstruction::CallMethod {
@@ -234,7 +234,7 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
                 .as_component_address()
                 .ok_or_else(|| anyhow!("Invalid component address: {}", component_address))?
                 .into(),
-            method: method_name,
+            method: method_name.try_into()?,
             args: args.into_iter().map(|s| s.into_arg()).collect(),
         },
     };

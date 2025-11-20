@@ -22,7 +22,7 @@ use tari_template_lib::{
     },
 };
 use tari_template_test_tooling::{
-    support::{assert_error::assert_reject_reason, stealth},
+    support::{assert_error::assert_reject_reason, stealth, stealth::NO_INPUTS},
     TemplateTest,
 };
 use tari_transaction::{args, Transaction};
@@ -76,13 +76,7 @@ fn claim_with_valid_signature() {
         .as_vault_id()
         .unwrap();
 
-    let transfer = stealth::generate_transfer_data(
-        &[],
-        1_000_000_000_000u64,
-        Some(1_000_000_000_000),
-        0,
-        test.to_public_key_bytes(),
-    );
+    let transfer = stealth::generate_transfer_data(NO_INPUTS, 1_000_000_000_000u64, Some(1_000_000_000_000), 0);
     let signature = sign_it(&s1);
     let result = test.execute_expect_success(
         Transaction::builder()
@@ -110,8 +104,8 @@ fn multi_claim() {
     let p2 = PublicKey::from(p2.to_byte_type());
     let (mut test, faucet) = setup(vec![p1, p2]);
 
-    let transfer1 = stealth::generate_transfer_data(&[], 1000, Some(1000), 0, test.to_public_key_bytes());
-    let transfer2 = stealth::generate_transfer_data(&[], 1000, Some(1000), 0, test.to_public_key_bytes());
+    let transfer1 = stealth::generate_transfer_data(NO_INPUTS, 1000, Some(1000), 0);
+    let transfer2 = stealth::generate_transfer_data(NO_INPUTS, 1000, Some(1000), 0);
     let sig1 = sign_it(&s1);
     let sig2 = sign_it(&s2);
     test.execute_expect_success(
@@ -129,7 +123,7 @@ fn bad_signature() {
     let p1 = PublicKey::from(p1.to_byte_type());
     let (mut test, faucet) = setup(vec![p1]);
 
-    let transfer = stealth::generate_transfer_data(&[], 1000, Some(1000), 0, test.to_public_key_bytes());
+    let transfer = stealth::generate_transfer_data(NO_INPUTS, 1000, Some(1000), 0);
     let sig1 = sign_it_with(&s1, b"A different message");
     let reason = test.execute_expect_failure(
         Transaction::builder()

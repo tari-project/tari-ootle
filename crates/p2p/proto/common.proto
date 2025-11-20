@@ -39,3 +39,12 @@ message CommitmentSignature {
   bytes signature_v = 3;
 }
 
+
+message SubstateRequirement {
+  bytes substate_id = 1;
+  OptionalVersion version = 2;
+}
+
+message OptionalVersion {
+  uint32 version = 1;
+}

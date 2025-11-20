@@ -6,7 +6,7 @@ use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSchnorr};
 pub trait Signable<Ctx = ()> {
     type MessageOutput: AsRef<[u8]>;
 
-    fn as_signing_message(&self, context: Ctx) -> Self::MessageOutput;
+    fn to_signing_message(&self, context: Ctx) -> Self::MessageOutput;
 }
 
 pub trait IntoSigned<Ctx = ()>: Signable<Ctx> {

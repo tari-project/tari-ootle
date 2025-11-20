@@ -6,10 +6,10 @@ use tari_crypto::{
     keys::PublicKey,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_engine_types::{crypto::messages, hashing::EngineSchnorrSignature, Hash64, ToByteType};
+use tari_engine_types::{crypto::messages, hashing::EngineSchnorrSignature, ToByteType};
 use tari_template_lib::{
     models::{StealthInputsStatement, StealthOutputsStatement},
-    prelude::{Amount, BalanceProofSignature, PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes},
+    prelude::{Amount, BalanceProofSignature},
 };
 
 pub(crate) fn generate_confidential_balance_proof(
@@ -51,17 +51,5 @@ pub fn generate_stealth_balance_proof_signature(
     let message = messages::stealth_balance_proof64(&public_excess, &public_nonce, inputs_statement, outputs_statement);
 
     let sig = EngineSchnorrSignature::sign_raw_uniform(&secret_excess, nonce, &message).unwrap();
-    sig.to_byte_type()
-}
-
-pub(crate) fn generate_stealth_owner_proof_signature(
-    secret_key: &RistrettoSecretKey,
-    public_output_nonce: &RistrettoPublicKeyBytes,
-    commitment: &PedersenCommitmentBytes,
-    required_signer: &RistrettoPublicKeyBytes,
-    metadata_hash: &Hash64,
-) -> SchnorrSignatureBytes {
-    let message = messages::stealth_ownership64(commitment, public_output_nonce, required_signer, metadata_hash);
-    let sig = EngineSchnorrSignature::sign(secret_key, message, &mut OsRng).unwrap();
     sig.to_byte_type()
 }

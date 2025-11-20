@@ -15,7 +15,7 @@ use tari_engine_types::{
     ToByteType,
 };
 use tari_ootle_common_types::{displayable::Displayable, optional::Optional};
-use tari_ootle_wallet_crypto::{GenerateValueLookup, IoReaderValueLookup, UnblindedOutputWitness};
+use tari_ootle_wallet_crypto::{GenerateValueLookup, IoReaderValueLookup, OutputWitness};
 use tari_ootle_wallet_sdk::models::{ConfidentialOutputModel, KeyBranch, OutputStatus};
 use tari_template_lib::types::Amount;
 use tari_wallet_daemon_client::{
@@ -132,7 +132,7 @@ pub async fn handle_create_transfer_proof(
         ))
     })?;
 
-    let output_statement = UnblindedOutputWitness {
+    let output_statement = OutputWitness {
         amount: confidential_amount,
         mask: output_mask.key,
         sender_public_nonce: public_nonce,
@@ -170,7 +170,7 @@ pub async fn handle_create_transfer_proof(
             lock_id: Some(lock.id()),
         })?;
 
-        Some(UnblindedOutputWitness {
+        Some(OutputWitness {
             amount: change_amount_u64,
             mask: change_mask.key,
             sender_public_nonce: public_nonce,
@@ -285,7 +285,7 @@ pub async fn handle_create_output_proof(
         None,
     )?;
 
-    let statement = UnblindedOutputWitness {
+    let statement = OutputWitness {
         amount: req.amount,
         mask: output_mask.key,
         sender_public_nonce: public_nonce,

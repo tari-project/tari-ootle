@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use tari_template_lib::models::ComponentAddress;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-daemon-client/"))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "wallet-types/"))]
 pub enum ComponentAddressOrName {
     ComponentAddress(ComponentAddress),
     Name(String),

@@ -92,6 +92,17 @@ impl<'a> ReadOnlyStateStore<'a> {
         Ok(substate.into_substate_value().into_utxo().unwrap())
     }
 
+    pub fn get_all_utxos(&self) -> Result<Vec<(UtxoAddress, Utxo)>, StateStoreError> {
+        let mut utxos = Vec::new();
+        self.with_substates(|id, substate| {
+            if let SubstateId::Utxo(utxo_addr) = id {
+                let utxo = substate.substate_value().as_utxo().unwrap();
+                utxos.push((utxo_addr.clone(), utxo.clone()));
+            }
+        })?;
+        Ok(utxos)
+    }
+
     pub fn inspect_component(&self, component_address: ComponentAddress) -> Result<IndexedValue, StateStoreError> {
         let component = self.get_component(component_address)?;
         Ok(IndexedValue::from_value(component.into_state()).unwrap())

@@ -14,6 +14,8 @@ mod hash;
 pub mod hex;
 mod max_bytes;
 mod max_string;
+mod max_vec;
+mod misc;
 mod resource_type;
 pub mod serde_helpers;
 
@@ -24,6 +26,8 @@ pub use error::*;
 pub use hash::*;
 pub use max_bytes::MaxBytes;
 pub use max_string::MaxString;
+pub use max_vec::*;
+pub use misc::*;
 pub use resource_type::*;
 
 /// The address of a Template

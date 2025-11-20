@@ -5,7 +5,7 @@ use std::{cmp, collections::HashSet, time::Duration};
 
 use log::*;
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_engine_types::{substate::SubstateId, ConvertFromByteType, FromByteType, ToByteType};
+use tari_engine_types::{substate::SubstateId, ConvertFromByteType, FromByteType};
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_common_types::{displayable::Displayable, optional::Optional, Network, SubstateRequirement};
 use tari_ootle_wallet_crypto::memo::Memo;
@@ -29,6 +29,7 @@ use super::{
     params::StealthTransferParams,
     types::{InputsToSpend, StealthOutputToCreate, StealthTransferOutput},
     BadgeUsage,
+    PayTo,
     TransferOutput,
 };
 use crate::{
@@ -38,10 +39,18 @@ use crate::{
         config::ConfigApi,
         key_manager::KeyManagerApi,
         locks::LocksApi,
-        stealth_outputs::{StealthOutputsApi, TransferStatementParams},
+        stealth_outputs::{StealthOutputsApi, StealthOutputsApiError, TransferStatementParams},
         substate::{SubstatesApi, ValidatorScanResult},
     },
-    models::{AccountWithAddress, KeyBranch, OutputStatus, StealthOutputModel, WalletLockDropGuard, WalletLockId},
+    models::{
+        AccountWithAddress,
+        KeyBranch,
+        OutputStatus,
+        StealthOutputModel,
+        StealthUtxoSpendKeyId,
+        WalletLockDropGuard,
+        WalletLockId,
+    },
     WalletSdkSpec,
 };
 
@@ -289,7 +298,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         let network = self.config_api.get_network()?;
         params.validate(network)?;
 
-        let Some(owner_key_id) = owner_account.owner_key_id() else {
+        let Some(account_key_id) = owner_account.owner_key_id() else {
             return Err(StealthTransferApiError::InvalidParameter {
                 param: "owner_account",
                 reason: format!(
@@ -373,6 +382,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 owner_address: owner_address.clone(),
                 amount: fee_stealth_change_amt,
                 memo: None,
+                pay_to: PayTo::StealthPublicKey,
             })
             .filter(|o| o.amount > 0);
 
@@ -380,17 +390,14 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             // withdraw auth signature, then we can use a nonce key.
             let must_sign_with_account_key = fee_inputs_to_spend.revealed.is_positive();
             let signing_key_id = if must_sign_with_account_key {
-                owner_key_id
+                account_key_id
             } else {
                 self.key_manager_api.next_derived_key_id(KeyBranch::Nonce)?.into()
             };
-            let required_signer = self.key_manager_api.get_public_key(signing_key_id)?;
-            let required_signer_pk = required_signer.public_key.to_byte_type();
-            let fee_signer = required_signer;
+            let fee_signer = self.key_manager_api.get_public_key(signing_key_id)?;
 
             // Generate fee transfer statement
             let fee_transfer_statement = self.outputs_api.generate_transfer_statement(TransferStatementParams {
-                spend_key_id: owner_key_id,
                 view_only_key_id: owner_account.view_only_key_id(),
                 resource_address: &params.resource_address,
                 resource_view_key: None,
@@ -398,7 +405,6 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 input_revealed_amount: fee_inputs_to_spend.revealed,
                 outputs: fee_change_output,
                 output_revealed_amount: Amount::from(params.max_fee),
-                required_signer: required_signer_pk,
             })?;
 
             // Add the unconfirmed fee change output to the wallet store
@@ -433,17 +439,18 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             // Signing key for main transfer intent
             let must_sign_with_account_key = !params.badge_usage.is_none() || inputs_to_spend.revealed.is_positive();
             let signing_key_id = if must_sign_with_account_key {
-                owner_key_id
+                account_key_id
             } else {
                 self.key_manager_api.next_derived_key_id(KeyBranch::Nonce)?.into()
             };
-            let main_signer = if fee_signer.key_id() == signing_key_id {
+
+            // No need to add another signature if the fee signer is the same as the main signer
+            let main_intent_signer = if fee_signer.key_id() == signing_key_id {
                 None
             } else {
                 let required_signer = self.key_manager_api.get_public_key(signing_key_id)?;
                 Some(required_signer)
             };
-            let required_signer_pk = main_signer.as_ref().unwrap_or(&fee_signer).public_key().to_byte_type();
 
             // If we're spending from the owner account, add the inputs
             if inputs_to_spend.revealed.is_positive() || fee_inputs_to_spend.revealed.is_positive() {
@@ -492,16 +499,17 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                         details: "Change amount exceeds u64".to_string(),
                     })?,
                 memo: None,
+                pay_to: PayTo::StealthPublicKey,
             });
 
+            let output_revealed_amount = params.total_revealed_output_amount();
             let outputs_to_create = params
                 .outputs
                 .iter()
                 .map(TryInto::try_into)
-                .collect::<Result<Vec<StealthOutputToCreate>, StealthTransferApiError>>()?;
+                .collect::<Result<Vec<_>, StealthOutputsApiError>>()?;
 
             let transfer_statement = self.outputs_api.generate_transfer_statement(TransferStatementParams {
-                spend_key_id: owner_key_id,
                 view_only_key_id: owner_account.view_only_key_id(),
                 resource_address: &params.resource_address,
                 resource_view_key,
@@ -511,8 +519,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                     .into_iter()
                     .chain(change_output)
                     .filter(|o| o.amount > 0),
-                output_revealed_amount: params.total_revealed_output_amount(),
-                required_signer: required_signer_pk,
+                output_revealed_amount,
             })?;
 
             // Add the unconfirmed change output to the wallet store
@@ -576,6 +583,18 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 substate_inputs.push(SubstateRequirement::unversioned(badge_vault.id));
             }
 
+            // We assume that all inputs being spent require a signature. This is fine because we currently filter out
+            // inputs that have complex access rules from input selection.
+            let utxo_spend_keys = inputs_to_spend
+                .inputs
+                .iter()
+                .chain(&fee_inputs_to_spend.inputs)
+                .map(|i| StealthUtxoSpendKeyId {
+                    account_key_id,
+                    public_nonce: i.public_nonce,
+                })
+                .collect();
+
             let transaction = self.generate_transfer_transaction(
                 network,
                 &owner_account,
@@ -590,7 +609,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 transaction,
                 fee_inputs: fee_inputs_to_spend,
                 transfer_inputs: inputs_to_spend,
-                additional_signer: main_signer,
+                utxo_spend_keys,
+                additional_signer: main_intent_signer,
                 main_signer: fee_signer,
             }))
         })
@@ -830,12 +850,14 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             encrypted_data: output.output.encrypted_data.clone(),
             status: OutputStatus::LockedUnconfirmed,
             memo,
+            spend_condition: output.spend_condition.clone(),
             minimum_value_promise: output.output.minimum_value_promise,
             tag_byte: output.tag,
             lock_id: Some(lock_id),
             is_burnt: false,
             is_frozen: false,
             is_on_chain: false,
+            is_condition_spendable: self.outputs_api.is_spendable_condition(&output.spend_condition),
         })?;
         Ok(())
     }

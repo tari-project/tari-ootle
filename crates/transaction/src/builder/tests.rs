@@ -44,7 +44,7 @@ fn it_converts_workspace_names_to_ids() {
     });
     assert_eq!(transaction.instructions()[3], Instruction::CallFunction {
         address: TemplateAddress::default(),
-        function: "do_something".to_string(),
+        function: "do_something".try_into().unwrap(),
         args: vec![
             InstructionArg::Workspace(WorkspaceOffsetId::new(0)),
             InstructionArg::from_type(&"thing2").unwrap(),
@@ -54,7 +54,7 @@ fn it_converts_workspace_names_to_ids() {
     });
     assert_eq!(transaction.instructions()[4], Instruction::CallMethod {
         call: ComponentCall::Workspace(2),
-        method: "do_something_else".to_string(),
+        method: "do_something_else".try_into().unwrap(),
         args: vec![InstructionArg::Workspace(WorkspaceOffsetId::new(0))]
     });
 }

@@ -3,12 +3,15 @@
 
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey};
 use tari_engine_types::crypto::commit_u64_amount;
-use tari_template_lib::types::{crypto::UtxoTag, EncryptedData};
+use tari_template_lib::{
+    models::SpendCondition,
+    types::{crypto::UtxoTag, EncryptedData},
+};
 
 use crate::memo::Memo;
 
 #[derive(Debug, Clone)]
-pub struct UnblindedOutputWitness {
+pub struct OutputWitness {
     pub amount: u64,
     pub mask: RistrettoSecretKey,
     pub sender_public_nonce: RistrettoPublicKey,
@@ -17,16 +20,16 @@ pub struct UnblindedOutputWitness {
     pub resource_view_key: Option<RistrettoPublicKey>,
 }
 
-impl UnblindedOutputWitness {
+impl OutputWitness {
     pub fn to_commitment(&self) -> PedersenCommitment {
         commit_u64_amount(&self.mask, self.amount)
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct UnblindedStealthOutputWitness {
-    pub witness: UnblindedOutputWitness,
-    pub output_owner_public_key: RistrettoPublicKey,
+pub struct SecretStealthOutputStatement {
+    pub witness: OutputWitness,
+    pub spend_condition: SpendCondition,
     pub tag: UtxoTag,
 }
 
@@ -75,8 +78,7 @@ impl DecryptedData {
 }
 
 #[derive(Debug, Clone)]
-pub struct UnblindedStealthInputWitness {
+pub struct StealthInputWitness {
     pub mask_and_value: MaskAndValue,
-    pub owner_secret: RistrettoSecretKey,
     pub public_nonce: RistrettoPublicKey,
 }

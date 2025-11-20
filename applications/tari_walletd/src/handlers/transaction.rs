@@ -155,12 +155,12 @@ pub async fn handle_submit(
 
     let main_signer = sdk.key_manager_api().get_public_key(req.seal_signer)?;
     let main_signer_pk = main_signer.public_key.to_byte_type();
-    let mut local_signer = sdk.signer_api();
+    let local_signer = sdk.signer_api().with_context(&main_signer_pk);
     for key in req.other_signers {
-        builder = local_signer.sign_with_context(key, &main_signer_pk, builder)?;
+        builder = local_signer.sign(key, builder)?;
     }
 
-    let transaction = local_signer.sign(req.seal_signer, builder.build())?;
+    let transaction = sdk.signer_api().sign(req.seal_signer, builder.finish())?;
 
     let tx_id = transaction.calculate_id();
     for lock_id in req.lock_ids {
@@ -246,7 +246,7 @@ pub async fn handle_submit_dry_run(
         .with_unsigned_transaction(req.transaction)
         .with_inputs(detected_inputs)
         .with_dry_run(true)
-        .build();
+        .finish();
     let transaction = sdk.signer_api().sign(key.key_id, transaction)?;
 
     for lock_id in req.lock_ids {
@@ -330,7 +330,8 @@ pub async fn handle_submit_manifest(
                 Ok(builder)
             } else {
                 sdk.signer_api()
-                    .sign_with_context(signing_key_id, &key.to_public_key().to_byte_type(), builder)
+                    .with_context(&key.to_public_key().to_byte_type())
+                    .sign(signing_key_id, builder)
             }
         })?;
     let signatures = builder.signatures().to_vec();
@@ -344,7 +345,7 @@ pub async fn handle_submit_manifest(
     let transaction = transaction
         .with_inputs(inputs)
         .authorized_sealed_signer()
-        .build_with_signatures(signatures);
+        .with_signatures(signatures);
 
     let transaction = sdk.signer_api().sign(key.key_id, transaction)?;
 

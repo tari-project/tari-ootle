@@ -22,6 +22,7 @@ use crate::{
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
 #[diesel(table_name = stealth_outputs)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct StealthOutput {
     pub id: i32,
     pub owner_account_id: i32,
@@ -37,10 +38,12 @@ pub struct StealthOutput {
     pub encrypted_data: Vec<u8>,
     pub tag_byte: i32,
     pub memo_json: Option<String>,
+    pub spend_condition: String,
     pub minimum_value_promise: i64,
     pub is_burnt: bool,
     pub is_frozen: bool,
     pub is_on_chain: bool,
+    pub is_condition_spendable: bool,
     pub created_at: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
 }
@@ -84,6 +87,7 @@ impl StealthOutput {
             })?,
             tag_byte: UtxoTag::new(self.tag_byte as u32),
             memo: self.memo_json.as_ref().map(deserialize_json).transpose()?,
+            spend_condition: deserialize_json(&self.spend_condition)?,
             minimum_value_promise: self.minimum_value_promise as u64,
             status: self.status.parse().map_err(|_| WalletStorageError::DecodingError {
                 operation: "try_into_output",
@@ -93,6 +97,7 @@ impl StealthOutput {
             is_burnt: self.is_burnt,
             is_frozen: self.is_frozen,
             is_on_chain: self.is_on_chain,
+            is_condition_spendable: self.is_condition_spendable,
             lock_id: self.locked_by_proof,
         })
     }

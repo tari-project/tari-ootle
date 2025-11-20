@@ -119,7 +119,7 @@ pub async fn handle_mint_faucet(
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .add_input(NFT_FAUCET_COMPONENT_ADDRESS)
         .add_input(NFT_FAUCET_RESOURCE_ADDRESS)
-        .build();
+        .finish();
 
     let transaction = sdk.signer_api().sign(account_owner_key_id, transaction)?;
 
@@ -300,13 +300,11 @@ pub async fn handle_transfer(
         // Seal signer is the fee payer account
         .with_authorized_seal_signer()
         .map(|builder| {
-            sdk.signer_api().sign_with_context(
-                account_owner_key_id,
-                &fee_owner_key.public_key().to_byte_type(),
-                builder,
-            )
+            sdk.signer_api()
+                .with_context(&fee_owner_key.public_key().to_byte_type())
+                .sign(account_owner_key_id, builder)
         })?
-        .build();
+        .finish();
 
     let transaction = sdk.signer_api().sign(account_owner_key_id, transaction)?;
 

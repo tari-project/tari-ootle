@@ -18,7 +18,10 @@ use tari_ootle_common_types::{
     Network,
 };
 use tari_ootle_wallet_sdk::{
-    apis::{confidential_transfer::UtxoInputSelection, stealth_transfer::TransferOutput},
+    apis::{
+        confidential_transfer::UtxoInputSelection,
+        stealth_transfer::{PayTo, TransferOutput},
+    },
     crypto::memo::Memo,
     models::{AccountWithAddress, KeyBranch},
 };
@@ -232,6 +235,7 @@ impl TrafficSim {
                     blinded_output_amount: amount_to_send,
                     revealed_output_amount: Default::default(),
                     output_memo: Some(Memo::new_message(format!("Transfer {id}: {amount_to_send}")).unwrap()),
+                    pay_to: PayTo::StealthPublicKey,
                 }],
                 max_fee: 1000,
                 dry_run: false,
@@ -457,6 +461,7 @@ impl TrafficSim {
                             revealed_amount: Amount::zero(),
                             blinded_amount: fund_amount,
                             memo: Some(Memo::new_message(format!("Initial Funding: {fund_amount}")).unwrap()),
+                            pay_to: PayTo::StealthPublicKey,
                         }],
                     }],
                 })

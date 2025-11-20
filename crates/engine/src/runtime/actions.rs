@@ -62,15 +62,17 @@ pub enum NativeAction {
     Component(ComponentAction),
     Resource(ResourceAuthAction),
     Vault(VaultAction),
+    StealthUtxoSpend,
 }
 
 impl Display for NativeAction {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            NativeAction::WithdrawValidatorFunds => write!(f, "withdraw_validator_funds"),
-            NativeAction::Component(action) => write!(f, "component.call_method.{:?}", action),
-            NativeAction::Resource(action) => write!(f, "resource.{:?}", action),
-            NativeAction::Vault(action) => write!(f, "vault.{:?}", action),
+            Self::WithdrawValidatorFunds => write!(f, "withdraw_validator_funds"),
+            Self::Component(action) => write!(f, "component.call_method.{:?}", action),
+            Self::Resource(action) => write!(f, "resource.{:?}", action),
+            Self::Vault(action) => write!(f, "vault.{:?}", action),
+            Self::StealthUtxoSpend => write!(f, "stealth_utxo.spend"),
         }
     }
 }

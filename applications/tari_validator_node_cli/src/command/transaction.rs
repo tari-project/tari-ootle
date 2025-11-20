@@ -185,7 +185,7 @@ pub async fn handle_submit(
             args,
         } => Instruction::CallFunction {
             address: template_address.into_inner(),
-            function: function_name,
+            function: function_name.try_into()?,
             args: args
                 .into_iter()
                 .map(|s| {
@@ -205,7 +205,7 @@ pub async fn handle_submit(
                 .as_component_address()
                 .ok_or_else(|| anyhow!("Invalid component address: {}", component_address))?
                 .into(),
-            method: method_name,
+            method: method_name.try_into()?,
             args: args
                 .into_iter()
                 .map(|s| {

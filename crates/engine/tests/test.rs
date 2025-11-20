@@ -364,7 +364,7 @@ mod errors {
                 vec![],
                 vec![Instruction::CallFunction {
                     address: template_test.get_template_address("Errors"),
-                    function: "panic".to_string(),
+                    function: "panic".try_into().unwrap(),
                     args: args![],
                 }],
                 vec![],
@@ -391,7 +391,7 @@ mod errors {
                 vec![],
                 vec![Instruction::CallFunction {
                     address: template_test.get_template_address("Errors"),
-                    function: "please_pass_invalid_args".to_string(),
+                    function: "please_pass_invalid_args".try_into().unwrap(),
                     args: call_args![text],
                 }],
                 vec![],
@@ -450,7 +450,7 @@ mod fungible {
             .execute_and_commit(
                 vec![Instruction::CallFunction {
                     address: faucet_template,
-                    function: "mint".to_string(),
+                    function: "mint".try_into().unwrap(),
                     args: call_args![initial_supply],
                 }],
                 vec![],

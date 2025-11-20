@@ -2,6 +2,7 @@
 import type { Amount } from "../Amount";
 import type { Memo } from "../Memo";
 import type { OotleAddress } from "../OotleAddress";
+import type { PayTo } from "./PayTo";
 
 export type TransferOutput = {
   /**
@@ -21,4 +22,5 @@ export type TransferOutput = {
    * Optional memo to include a memo in the output. This memo is encrypted and can only be read by the recipient.
    */
   memo: Memo | null;
+  pay_to: PayTo;
 };

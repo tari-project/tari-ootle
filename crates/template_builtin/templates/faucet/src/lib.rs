@@ -21,8 +21,7 @@ mod template {
                 FAUCET_MAX
             );
             debug!("Withdrawing {} coins from faucet", amount);
-            let signer = CallerContext::transaction_signer_public_key();
-            emit_event("take", [("amount", amount.to_string()), ("signer", signer.to_string())]);
+            emit_event("take", [("amount", amount.to_string())]);
             self.vault.withdraw(amount)
         }
 
@@ -38,10 +37,9 @@ mod template {
                 amount,
                 FAUCET_MAX
             );
-            let signer = CallerContext::transaction_signer_public_key();
             let revealed_bucket = self.vault.withdraw(amount);
             let transfer = StealthTransferStatement {
-                inputs_statement: StealthInputsStatement::new_revealed_only(amount, signer),
+                inputs_statement: StealthInputsStatement::new_revealed_only(amount),
                 outputs_statement: output,
                 balance_proof,
             };
@@ -50,7 +48,6 @@ mod template {
             emit_event("take", [
                 ("amount", amount.to_string()),
                 ("confidential", "true".to_string()),
-                ("signer", signer.to_string()),
             ]);
 
             self.vault

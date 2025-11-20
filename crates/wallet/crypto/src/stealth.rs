@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_engine_types::{crypto::messages, ToByteType};
+use tari_engine_types::ToByteType;
 use tari_template_lib::{
     models::{
         StealthInput,
@@ -12,17 +12,16 @@ use tari_template_lib::{
         StealthUnspentOutput,
         UnspentOutput,
     },
-    prelude::RistrettoPublicKeyBytes,
     types::Amount,
 };
 
 use crate::{
-    balance_proof::{generate_stealth_balance_proof_signature, generate_stealth_owner_proof_signature},
+    balance_proof::generate_stealth_balance_proof_signature,
     bullet_proof::generate_extended_bullet_proof,
     error::ConfidentialProofError,
     viewable_balance_proof::create_viewable_balance_proof,
-    UnblindedStealthInputWitness,
-    UnblindedStealthOutputWitness,
+    SecretStealthOutputStatement,
+    StealthInputWitness,
     WalletCryptoError,
 };
 
@@ -31,11 +30,12 @@ pub fn create_transfer_statement<'a, Inputs, Outputs>(
     revealed_input_amount: Amount,
     output_statements: Outputs,
     revealed_output_amount: Amount,
-    required_signer: RistrettoPublicKeyBytes,
 ) -> Result<StealthTransferStatement, WalletCryptoError>
 where
-    Inputs: IntoIterator<Item = &'a UnblindedStealthInputWitness> + ExactSizeIterator,
-    Outputs: IntoIterator<Item = &'a UnblindedStealthOutputWitness> + ExactSizeIterator + Clone,
+    Inputs: IntoIterator<Item = StealthInputWitness>,
+    Inputs::IntoIter: ExactSizeIterator,
+    Outputs: IntoIterator<Item = &'a SecretStealthOutputStatement> + Clone,
+    Outputs::IntoIter: ExactSizeIterator,
 {
     if revealed_input_amount.is_negative() {
         return Err(WalletCryptoError::InvalidArgument {
@@ -50,41 +50,30 @@ where
         });
     }
 
+    let mut inputs = inputs.into_iter();
     let num_inputs = inputs.len();
-    let num_outputs = output_statements.len();
 
     let outputs_statement = create_outputs_statement(output_statements.clone(), revealed_output_amount)?;
-    let outputs_statement_hash = messages::stealth_statement_metadata64(&outputs_statement);
+    let output_statements = output_statements.into_iter();
+    let num_outputs = output_statements.len();
 
-    let (inputs_to_spend, agg_input_mask) = inputs.into_iter().try_fold(
+    let (inputs_to_spend, agg_input_mask) = inputs.try_fold(
         (Vec::with_capacity(num_inputs), RistrettoSecretKey::default()),
         |(mut inputs, agg_input), input| {
-            let commitment = input.mask_and_value.to_commitment();
-
-            let signature = generate_stealth_owner_proof_signature(
-                &input.owner_secret,
-                &input.public_nonce.to_byte_type(),
-                &commitment.to_byte_type(),
-                &required_signer,
-                &outputs_statement_hash,
-            );
             inputs.push(StealthInput {
-                commitment: commitment.to_byte_type(),
-                owner_proof: signature,
+                commitment: input.mask_and_value.to_commitment().to_byte_type(),
             });
             Ok::<_, WalletCryptoError>((inputs, agg_input + &input.mask_and_value.mask))
         },
     )?;
 
     let agg_output_mask = output_statements
-        .into_iter()
         .map(|stmt| &stmt.witness.mask)
         .fold(RistrettoSecretKey::default(), |agg, mask| agg + mask);
 
     let inputs_statement = StealthInputsStatement {
         inputs: inputs_to_spend.clone(),
         revealed_amount: revealed_input_amount,
-        required_signer,
     };
 
     let balance_proof = if num_outputs == 0 && num_inputs == 0 {
@@ -102,14 +91,13 @@ where
         inputs_statement: StealthInputsStatement {
             inputs: inputs_to_spend,
             revealed_amount: revealed_input_amount,
-            required_signer,
         },
         outputs_statement,
         balance_proof,
     })
 }
 
-pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a UnblindedStealthOutputWitness> + Clone>(
+pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a SecretStealthOutputStatement> + Clone>(
     output_statements: Outputs,
     revealed_output_amount: Amount,
 ) -> Result<StealthOutputsStatement, ConfidentialProofError> {
@@ -136,7 +124,7 @@ pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a UnblindedSt
 
             Ok::<_, ConfidentialProofError>(StealthUnspentOutput {
                 output,
-                owner_public_key: output_stmt.output_owner_public_key.to_byte_type(),
+                spend_condition: output_stmt.spend_condition.clone(),
                 tag: output_stmt.tag,
             })
         })
@@ -154,21 +142,22 @@ pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a UnblindedSt
 #[cfg(test)]
 mod tests {
     use rand::rngs::OsRng;
-    use tari_crypto::{
-        keys::SecretKey,
-        ristretto::{RistrettoPublicKey, RistrettoSecretKey},
-    };
+    use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
     use tari_engine_types::stealth::validate_stealth_outputs_statement;
-    use tari_template_lib::types::{crypto::UtxoTag, Amount, EncryptedData};
+    use tari_template_lib::{
+        models::SpendCondition,
+        prelude::RistrettoPublicKeyBytes,
+        types::{crypto::UtxoTag, Amount, EncryptedData},
+    };
 
     use super::*;
-    use crate::UnblindedOutputWitness;
+    use crate::OutputWitness;
 
     fn create_valid_proof(amount: u64, minimum_value_promise: u64) -> StealthOutputsStatement {
         let mask = RistrettoSecretKey::random(&mut OsRng);
         create_outputs_statement(
-            &[UnblindedStealthOutputWitness {
-                witness: UnblindedOutputWitness {
+            &[SecretStealthOutputStatement {
+                witness: OutputWitness {
                     amount,
                     minimum_value_promise,
                     mask,
@@ -176,7 +165,7 @@ mod tests {
                     encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
                     resource_view_key: None,
                 },
-                output_owner_public_key: RistrettoPublicKey::default(),
+                spend_condition: SpendCondition::Signed(RistrettoPublicKeyBytes::default()),
                 tag: UtxoTag::new(0),
             }],
             Amount::zero(),

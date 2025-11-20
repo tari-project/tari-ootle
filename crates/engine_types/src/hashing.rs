@@ -26,11 +26,14 @@ use blake2::{
 };
 use borsh::BorshSerialize;
 use tari_crypto::{
+    hash_domain,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     signatures::SchnorrSignature,
 };
-use tari_hashing::{DomainSeparatedBorshHasher, TariEngineHashDomain};
+use tari_hashing::DomainSeparatedBorshHasher;
 use tari_template_lib::types::Hash;
+
+hash_domain!(TariEngineHashDomain, "com.tari.ootle.engine", 0);
 
 pub fn engine_hasher64(label: EngineHashDomainLabel) -> TariEngineHasher64 {
     TariEngineHasher64::new_with_label(label.as_label())
@@ -112,7 +115,6 @@ pub enum EngineHashDomainLabel {
     UuidOutput,
     Output,
     EntityId,
-    TransactionSignature,
     ResourceAddress,
     ComponentAddress,
     TransactionReceipt,
@@ -138,7 +140,6 @@ impl EngineHashDomainLabel {
             Self::UuidOutput => "UuidOutput",
             Self::Output => "Output",
             Self::EntityId => "EntityId",
-            Self::TransactionSignature => "TransactionSignature",
             Self::ResourceAddress => "ResourceAddress",
             Self::ComponentAddress => "ComponentAddress",
             Self::TransactionReceipt => "TransactionReceipt",

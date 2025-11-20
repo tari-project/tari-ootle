@@ -22,6 +22,7 @@
 
 pub mod args;
 pub mod builder;
+mod hashing;
 mod special_json_arg_syntax;
 mod transaction;
 mod transaction_id;

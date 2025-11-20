@@ -6,12 +6,7 @@ use std::collections::HashSet;
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey};
-use tari_engine_types::{
-    hashing::{engine_hasher64, EngineHashDomainLabel},
-    indexed_value::IndexedValueError,
-    substate::SubstateId,
-    ToByteType,
-};
+use tari_engine_types::{indexed_value::IndexedValueError, substate::SubstateId, ToByteType};
 use tari_ootle_common_types::{Epoch, IntoSigned, Signable, SubstateRequirement};
 use tari_template_lib::{models::ComponentAddress, types::crypto::RistrettoPublicKeyBytes};
 
@@ -128,10 +123,7 @@ impl Signable for UnsealedTransactionV1 {
     type MessageOutput = [u8; 64];
 
     fn as_signing_message(&self, _context: ()) -> Self::MessageOutput {
-        engine_hasher64(EngineHashDomainLabel::TransactionSignature)
-            .chain(&self.schema_version())
-            .chain(self)
-            .result()
+        TransactionSealSignature::create_message(self)
     }
 }
 

@@ -14,6 +14,7 @@ use tari_consensus_types::{
     HighestSeenBlock,
     LastProposed,
     LastSentVote,
+    LeafBlock,
     PcId,
     ProposalCertificate,
     TimeoutCertificate,
@@ -247,17 +248,15 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let current_epoch_hash = self.epoch_manager.get_current_epoch_hash().await?;
         let local_committee_info = self.epoch_manager.get_local_committee_info(current_epoch).await?;
 
-        let is_genesis = self.create_genesis_block_if_required(
-            current_epoch,
-            current_epoch_hash,
-            local_committee_info.shard_group(),
-        )?;
-        self.worker_state.has_processed_first_block = !is_genesis;
-
+        self.create_genesis_block_if_required(current_epoch, current_epoch_hash, local_committee_info.shard_group())?;
         // Resume pacemaker from the last epoch/height
-        let current_height = self
-            .state_store
-            .with_read_tx(|tx| get_highest_seen_justified_view(tx, current_epoch))?;
+        let (current_height, leaf_height) = self.state_store.with_read_tx(|tx| {
+            let height = get_highest_seen_justified_view(tx, current_epoch)?;
+            let leaf_block = LeafBlock::get(tx, current_epoch)?;
+            Ok::<_, HotStuffError>((height, leaf_block.height()))
+        })?;
+
+        self.worker_state.has_processed_first_block = !leaf_height.is_zero();
 
         self.pacemaker
             .start(current_epoch, current_height, current_height)

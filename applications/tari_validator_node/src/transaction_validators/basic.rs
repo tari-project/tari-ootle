@@ -8,30 +8,32 @@ use crate::{transaction_validators::TransactionValidationError, validator::Valid
 
 const LOG_TARGET: &str = "tari::ootle::mempool::validators::is_shard_applicable";
 
-/// Refuse to process the transaction if it does not apply to any shard (i.e. does not have any inputs or claim burn
-/// tombstones).
+/// Basic validations for a transaction:
+/// - Has at least one fee instruction
 #[derive(Debug, Clone, Default)]
-pub struct IsShardApplicable;
+pub struct BasicValidations;
 
-impl IsShardApplicable {
+impl BasicValidations {
     pub fn new() -> Self {
         Self
     }
 }
 
-impl Validator<Transaction> for IsShardApplicable {
+impl Validator<Transaction> for BasicValidations {
     type Context = ();
     type Error = TransactionValidationError;
 
     fn validate(&self, _context: &(), transaction: &Transaction) -> Result<(), Self::Error> {
-        if !transaction.has_inputs() {
-            warn!(target: LOG_TARGET, "HasInputs - FAIL: No input shards");
-            return Err(TransactionValidationError::NoInputs {
+        if transaction.fee_instructions().is_empty() {
+            warn!(target: LOG_TARGET, "BasicValidations - FAIL: No fee instructions");
+            return Err(TransactionValidationError::NoFeeInstructions {
                 transaction_id: transaction.calculate_id(),
             });
         }
 
-        debug!(target: LOG_TARGET, "HasInputs - OK");
+        // TODO: additional checks?
+
+        debug!(target: LOG_TARGET, "BasicValidations - OK");
         Ok(())
     }
 }

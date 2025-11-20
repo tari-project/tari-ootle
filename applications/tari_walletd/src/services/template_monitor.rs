@@ -7,6 +7,7 @@ use tari_ootle_common_types::substate_type::SubstateType;
 use tari_ootle_wallet_sdk::{models::WalletEvent, WalletSdk, WalletSdkSpec};
 use tari_ootle_wallet_sdk_services::notify::Notify;
 use tari_shutdown::ShutdownSignal;
+use tokio::task;
 
 const LOG_TARGET: &str = "tari::ootle_wallet_daemon::services::template_monitor";
 
@@ -29,11 +30,11 @@ where TSpec: WalletSdkSpec
 
     async fn handle_wallet_event(&self, event: WalletEvent) -> anyhow::Result<()> {
         if let WalletEvent::TransactionFinalized(event) = event {
-            let Some(diff) = event.finalize.result.any_accept() else {
+            let Some(diff) = event.finalize.result.into_any_accept() else {
                 return Ok(());
             };
 
-            for (id, substate) in diff.up_iter().filter(|(id, _)| id.is_template()) {
+            for (id, substate) in diff.into_up_iter().filter(|(id, _)| id.is_template()) {
                 let template_address = id
                     .as_template()
                     .expect("is_template checked but as_template returned None");
@@ -47,13 +48,18 @@ where TSpec: WalletSdkSpec
                     continue;
                 }
 
-                let Some(template) = substate.substate_value().as_template() else {
-                    error!(target: LOG_TARGET, "Diff contained a template substate ID {id} but the substate was type {}. This should not be possible", SubstateType::from(substate.substate_value()));
+                let substate_type = SubstateType::from(substate.substate_value());
+                let Some(template) = substate.into_substate_value().into_template() else {
+                    error!(target: LOG_TARGET, "Diff contained a template substate ID {id} but the substate was type {}. This should not be possible", substate_type);
                     continue;
                 };
 
-                match WasmModule::load_template_from_code(&template.binary) {
-                    Ok(loaded) => {
+                match task::spawn_blocking(move || {
+                    WasmModule::load_template_from_code(&template.binary).map(|loaded| (template, loaded))
+                })
+                .await?
+                {
+                    Ok((template, loaded)) => {
                         self.wallet_sdk.template_api().add_authored_template(
                             template.author,
                             template_address.as_hash(),

@@ -151,7 +151,6 @@ loggers:
   tari::ootle:
     level: debug
     appenders:
-      #      - ootle
       - stdout
     additive: false
 

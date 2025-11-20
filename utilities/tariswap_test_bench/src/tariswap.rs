@@ -95,12 +95,12 @@ impl Runner {
             .sdk
             .key_manager_api()
             .get_public_key(primary_account.owner_key_id.expect("no owner key id"))?;
-        let mut tx_ids = Vec::with_capacity(200);
         let primary_account_pk = primary_account_key.public_key().to_byte_type();
 
         const BATCH_SIZE: usize = 100;
+        let mut tx_ids = Vec::with_capacity(BATCH_SIZE);
 
-        for i in 0..(1000 / BATCH_SIZE) {
+        for i in 0..(tariswaps.len() / BATCH_SIZE) {
             let _timer = TraceTimer::info("tariswap", "add_liquidity")
                 .with_iterations(BATCH_SIZE.min(tariswaps.len().saturating_sub(i * BATCH_SIZE)));
 
@@ -130,7 +130,6 @@ impl Runner {
                         SubstateRequirement::unversioned(tariswap.component_address),
                         SubstateRequirement::unversioned(tariswap.lp_resource_address),
                         SubstateRequirement::unversioned(faucet.resource_address),
-                        SubstateRequirement::unversioned(XTR),
                     ])
                     .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
                     .fee_transaction_pay_from_component(account.component_address, 2000)

@@ -90,9 +90,8 @@ use crate::{
     },
     state_store_template_provider::StateStoreTemplateProvider,
     transaction_validators::{
+        BasicValidations,
         EpochRangeValidator,
-        FeeTransactionValidator,
-        IsShardApplicable,
         TemplateExistsValidator,
         TransactionDryRunValidator,
         TransactionNetworkValidator,
@@ -449,8 +448,7 @@ pub fn create_mempool_transaction_validator<TProvider: TemplateProvider>(
 ) -> impl Validator<Transaction, Context = (), Error = TransactionValidationError> {
     TransactionNetworkValidator::new(network)
         .and_then(TransactionDryRunValidator)
-        .and_then(IsShardApplicable::new())
-        .and_then(FeeTransactionValidator)
+        .and_then(BasicValidations::new())
         .and_then(TransactionSignatureValidator)
         .and_then(TemplateExistsValidator::new(template_manager))
 }

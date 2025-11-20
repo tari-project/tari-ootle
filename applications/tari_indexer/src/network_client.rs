@@ -38,10 +38,6 @@ where
     }
 
     pub async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, NetworkClientError> {
-        if !transaction.has_inputs() {
-            return Err(NetworkClientError::NoInputsProvided);
-        }
-
         // Ensure initial scanning has completed to ensure an accurate epoch
         self.epoch_manager.wait_for_initial_scanning_to_complete().await?;
 
@@ -210,6 +206,4 @@ pub enum NetworkClientError {
     },
     #[error("No committee at present. Try again later")]
     NoCommitteeMembers,
-    #[error("No inputs provided in transaction.")]
-    NoInputsProvided,
 }

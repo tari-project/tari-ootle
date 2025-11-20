@@ -53,7 +53,7 @@ impl TransactionReceiptAddress {
         Self(BorTag::new(key))
     }
 
-    pub fn as_object_key(&self) -> &ObjectKey {
+    pub const fn as_object_key(&self) -> &ObjectKey {
         self.0.inner()
     }
 

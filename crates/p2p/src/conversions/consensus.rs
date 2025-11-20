@@ -41,9 +41,9 @@ use tari_consensus::messages::{
 use tari_consensus_types::{
     BlockId,
     Decision,
+    PcId,
     ProposalCertificate,
     ProposalVote,
-    QcId,
     ShardGroupAccumulatedData,
     TimeoutCertificate,
     TimeoutVote,
@@ -488,7 +488,7 @@ impl From<&consensus_models::BlockHeader> for proto::consensus::BlockHeader {
 
 fn try_convert_proto_block_header(
     value: proto::consensus::BlockHeader,
-    justify_id: QcId,
+    justify_id: PcId,
     commands: &BTreeSet<Command>,
 ) -> Result<consensus_models::BlockHeader, anyhow::Error> {
     let network = u8::try_from(value.network)

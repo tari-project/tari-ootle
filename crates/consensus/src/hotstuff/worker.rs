@@ -14,8 +14,8 @@ use tari_consensus_types::{
     HighestSeenBlock,
     LastProposed,
     LastSentVote,
+    PcId,
     ProposalCertificate,
-    QcId,
     TimeoutCertificate,
 };
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
@@ -1139,13 +1139,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             target: LOG_TARGET,
             "⚠️This node has fallen behind due to a missing justified block: {err}. Catching up"
         );
-        if self.worker_state.catch_up.is_some() {
-            warn!(
-                target: LOG_TARGET,
-                "⏳ Already catching up. Ignoring additional catch up request."
-            );
-            return Ok(());
-        }
+
         self.on_catch_up_sync
             .request_sync(local_epoch_state.epoch(), vn.address.clone())
             .await?;
@@ -1172,7 +1166,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 debug!(target: LOG_TARGET, "Creating zero block");
                 zero_block.justify().save(tx)?;
                 zero_block.insert(tx)?;
-                zero_block.add_justify_qc(tx, &QcId::zero())?;
+                zero_block.add_justify_qc(tx, &PcId::zero())?;
                 zero_block.commit_block_without_state_changes(tx, &zero_block.justify().calculate_id())?;
             }
 
@@ -1195,7 +1189,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             info!(target: LOG_TARGET, "✨Creating genesis block {genesis}");
             genesis.justify().save(tx)?;
             genesis.insert(tx)?;
-            genesis.add_justify_qc(tx, &QcId::zero())?;
+            genesis.add_justify_qc(tx, &PcId::zero())?;
             genesis.as_locked().set(tx)?;
             genesis.as_leaf().set(tx)?;
             genesis.as_highest_seen().set(tx)?;

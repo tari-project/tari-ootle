@@ -20,8 +20,8 @@ use tari_consensus_types::{
     LastVoted,
     LeafBlock,
     LockedBlock,
+    PcId,
     ProposalCertificate,
-    QcId,
     ShardGroupAccumulatedData,
     TimeoutCertificate,
 };
@@ -99,10 +99,10 @@ pub struct Block {
     // Metadata - not included in the block hash
     /// The QC that justified this block
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
-    justify_qc_id: Option<QcId>,
+    justify_qc_id: Option<PcId>,
     /// The QC that caused this block to be committed
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
-    commit_qc_id: Option<QcId>,
+    commit_qc_id: Option<PcId>,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     block_time: Option<u64>,
     /// Timestamp when was this stored.
@@ -401,7 +401,7 @@ impl Block {
         self.justify_qc_id.is_some()
     }
 
-    pub fn justify_qc_id(&self) -> Option<QcId> {
+    pub fn justify_qc_id(&self) -> Option<PcId> {
         self.justify_qc_id
     }
 
@@ -446,15 +446,15 @@ impl Block {
         Ok(proof)
     }
 
-    pub fn set_justify_qc(&mut self, justify_qc_id: QcId) {
+    pub fn set_justify_qc(&mut self, justify_qc_id: PcId) {
         self.justify_qc_id = Some(justify_qc_id);
     }
 
-    pub fn set_commit_qc(&mut self, commit_qc_id: QcId) {
+    pub fn set_commit_qc(&mut self, commit_qc_id: PcId) {
         self.commit_qc_id = Some(commit_qc_id);
     }
 
-    pub fn commit_qc_id(&self) -> Option<&QcId> {
+    pub fn commit_qc_id(&self) -> Option<&PcId> {
         self.commit_qc_id.as_ref()
     }
 }
@@ -576,7 +576,7 @@ impl Block {
         tx.blocks_delete(block_id)
     }
 
-    pub fn commit_block_without_state_changes<TTx>(&self, tx: &mut TTx, commit_qc_id: &QcId) -> Result<(), StorageError>
+    pub fn commit_block_without_state_changes<TTx>(&self, tx: &mut TTx, commit_qc_id: &PcId) -> Result<(), StorageError>
     where
         TTx: StateStoreWriteTransaction + Deref,
         TTx::Target: StateStoreReadTransaction,
@@ -587,7 +587,7 @@ impl Block {
     pub fn commit_block<TTx>(
         &self,
         tx: &mut TTx,
-        commit_qc_id: &QcId,
+        commit_qc_id: &PcId,
         version_updates: &HashMap<Shard, Version>,
     ) -> Result<(), StorageError>
     where
@@ -676,7 +676,7 @@ impl Block {
     pub fn add_justify_qc<TTx: StateStoreWriteTransaction>(
         &mut self,
         tx: &mut TTx,
-        qc_id: &QcId,
+        qc_id: &PcId,
     ) -> Result<(), StorageError> {
         self.justify_qc_id = Some(*qc_id);
         tx.blocks_set_qcs(self.id(), None, Some(qc_id))
@@ -881,11 +881,13 @@ impl Block {
         let locked = LockedBlock::get(tx, self.epoch())?;
 
         // Liveness rules
-        if self.justify().height() > locked.height() {
+        //  (qc.viewNumber > lockedQC.viewNumber)
+        if self.max_certificate_height() > locked.height() {
             return Ok(true);
         }
 
         // Safety rule
+        // (node extends from lockedQC.node)
         if self.extends_pending(tx, locked.block_id())? {
             return Ok(true);
         }

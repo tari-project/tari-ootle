@@ -46,7 +46,7 @@ impl RistrettoPublicKeyBytes {
         Ok(Self(bytes))
     }
 
-    pub fn as_bytes(&self) -> &[u8] {
+    pub const fn as_bytes(&self) -> &[u8] {
         &self.0
     }
 
@@ -54,11 +54,11 @@ impl RistrettoPublicKeyBytes {
         self.0.iter().all(|&b| b == 0)
     }
 
-    pub fn into_array(self) -> [u8; Self::length()] {
+    pub const fn into_array(self) -> [u8; Self::length()] {
         self.0
     }
 
-    pub fn as_hash(&self) -> Hash {
+    pub const fn as_hash(&self) -> Hash {
         Hash::from_array(self.0)
     }
 }

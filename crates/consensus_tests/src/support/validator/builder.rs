@@ -1,17 +1,30 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::path::{Path, PathBuf};
+use std::{
+    ops::Deref,
+    path::{Path, PathBuf},
+};
 
+use serde::Serialize;
 use tari_common_types::types::PrivateKey;
 use tari_consensus::{
     hotstuff::{ConsensusCurrentState, ConsensusWorker, ConsensusWorkerContext, HotstuffConfig, HotstuffWorker},
     traits::hooks::NoopHooks,
 };
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
-use tari_engine_types::ToByteType;
-use tari_ootle_common_types::{ShardGroup, SubstateAddress};
-use tari_ootle_storage::consensus_models::TransactionPool;
+use tari_engine_types::{
+    substate::{SubstateId, SubstateValue},
+    ToByteType,
+};
+use tari_ootle_common_types::{Epoch, NodeAddressable, ShardGroup, SubstateAddress, VersionedSubstateIdRef};
+use tari_ootle_storage::{
+    consensus_models::{SubstateRecord, SubstateTransition, SubstateUpdateBatch, TransactionPool},
+    StateStore,
+    StateStoreReadTransaction,
+    StateStoreWriteTransaction,
+    StorageError,
+};
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_rocksdb::DatabaseOptions;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
@@ -147,6 +160,12 @@ impl ValidatorBuilder {
             log::info!("Rocksdb path {}", rocks_path.display());
             TestStore::open(rocks_path, DatabaseOptions::default().with_debugging_data(true)).unwrap()
         };
+
+        // Add XTR to the store, since this is implicit for all transactions.
+        let (addr, xtr) = tari_ootle_app_utilities::genesis_resources::get_stealth_tari_resource(
+            self.config.as_ref().unwrap().network,
+        );
+        store.with_write_tx(|tx| create_substate(tx, addr, xtr)).unwrap();
         let signing_service = TestVoteSignatureService::new(self.address.clone());
         let transaction_pool = TransactionPool::new();
         let (tx_events, _) = broadcast::channel(100);
@@ -213,4 +232,26 @@ impl ValidatorBuilder {
         };
         (channels, validator)
     }
+}
+
+fn create_substate<TTx, TId, TVal>(tx: &mut TTx, substate_id: TId, value: TVal) -> Result<(), StorageError>
+where
+    TTx: StateStoreWriteTransaction + Deref,
+    TTx::Target: StateStoreReadTransaction,
+    TTx::Addr: NodeAddressable + Serialize,
+    TId: Into<SubstateId>,
+    TVal: Into<SubstateValue>,
+{
+    let substate_id = substate_id.into();
+    let shard = VersionedSubstateIdRef::new(&substate_id, 0).to_shard(TEST_NUM_PRESHARDS);
+    let mut batch = SubstateUpdateBatch::new(Epoch::zero());
+    batch.with_transition(shard, 0).push(SubstateTransition::Up {
+        id: substate_id,
+        version: 0,
+        substate_or_hash: value.into().into(),
+    });
+
+    SubstateRecord::commit_batch(tx, batch)?;
+
+    Ok(())
 }

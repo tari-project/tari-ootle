@@ -719,34 +719,27 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 // Badge if required
                 match &params.badge_usage {
                     BadgeUsage::None => builder,
-                    BadgeUsage::Resource(resx) => {
-                        builder.call_method(
-                            *owner_account.component_address(),
-                            "create_proof_for_resource",
-                            args![resx],
-                        )
+                    BadgeUsage::Resource(resx) => builder
+                        .call_method(*owner_account.component_address(), "create_proof_for_resource", args![
+                            resx
+                        ])
                         .put_last_instruction_output_on_workspace("proof")
-                        .add_input(*resx)
-                    },
-                    BadgeUsage::NonFungible(nft) => {
-                        builder.call_method(
+                        .add_input(*resx),
+                    BadgeUsage::NonFungible(nft) => builder
+                        .call_method(
                             *owner_account.component_address(),
                             "create_proof_by_non_fungible",
                             args![nft],
                         )
                         .put_last_instruction_output_on_workspace("proof")
                         .add_input(*nft.resource_address())
-                        .add_input(nft.clone())
-                    }
-                    BadgeUsage::AmountOfResource { amount, resource } => {
-                        builder.call_method(
-                            *owner_account.component_address(),
-                            "create_proof_by_amount",
-                            args![resource, amount],
-                        )
+                        .add_input(nft.clone()),
+                    BadgeUsage::AmountOfResource { amount, resource } => builder
+                        .call_method(*owner_account.component_address(), "create_proof_by_amount", args![
+                            resource, amount
+                        ])
                         .put_last_instruction_output_on_workspace("proof")
-                        .add_input(*resource)
-                    }
+                        .add_input(*resource),
                 }
             })
             .then(|builder| {
@@ -778,7 +771,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                             }
                             let needs_to_split = params.outputs.len() > 1;
 
-                            let dest_account = derive_account_address_from_public_key(output.address.account_public_key());
+                            let dest_account =
+                                derive_account_address_from_public_key(output.address.account_public_key());
                             let need_to_create_account = accounts_to_create.contains(&dest_account);
                             if needs_to_split {
                                 let sub_bucket_name = format!("output-sub-bucket-{i}");
@@ -787,26 +781,18 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                                         .take_from_bucket("output_bucket", output.revealed_amount, &sub_bucket_name)
                                         .create_account_with_bucket(
                                             *output.address.account_public_key(),
-                                            sub_bucket_name
+                                            sub_bucket_name,
                                         )
                                 } else {
                                     builder
                                         .take_from_bucket("output_bucket", output.revealed_amount, &sub_bucket_name)
-                                        .call_method(dest_account, "deposit", args![Workspace(
-                                            sub_bucket_name
-                                        )])
+                                        .call_method(dest_account, "deposit", args![Workspace(sub_bucket_name)])
                                 }
                             } else if need_to_create_account {
                                 builder
-                                    .create_account_with_bucket(
-                                        *output.address.account_public_key(),
-                                        "output_bucket"
-                                    )
+                                    .create_account_with_bucket(*output.address.account_public_key(), "output_bucket")
                             } else {
-                                builder
-                                    .call_method(dest_account, "deposit", args![Workspace(
-                                        "output_bucket"
-                                    )])
+                                builder.call_method(dest_account, "deposit", args![Workspace("output_bucket")])
                             }
                         })
                     })
@@ -819,8 +805,6 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 }
             })
             .with_inputs(inputs)
-            // TODO: remove the need to add this input
-            .add_input(XTR)
             .build_unsigned_transaction();
 
         Ok(transaction)

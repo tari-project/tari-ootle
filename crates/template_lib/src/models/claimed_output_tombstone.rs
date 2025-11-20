@@ -23,7 +23,7 @@ const TAG: u64 = BinaryTag::ClaimedOutputTombstoneAddress.as_u64();
 pub struct ClaimedOutputTombstoneAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl ClaimedOutputTombstoneAddress {
-    pub fn new(key: ObjectKey) -> Self {
+    pub const fn new(key: ObjectKey) -> Self {
         Self(BorTag::new(key))
     }
 
@@ -31,20 +31,20 @@ impl ClaimedOutputTombstoneAddress {
         Ok(Self(BorTag::new(ObjectKey::from_hex(hex)?)))
     }
 
-    pub fn from_commitment(commitment_bytes: PedersenCommitmentBytes) -> Self {
+    pub const fn from_commitment(commitment_bytes: PedersenCommitmentBytes) -> Self {
         Self(BorTag::new(ObjectKey::from_array(commitment_bytes.into_array())))
     }
 
-    pub fn as_object_key(&self) -> &ObjectKey {
-        &self.0
+    pub const fn as_object_key(&self) -> &ObjectKey {
+        self.0.inner()
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, KeyParseError> {
         Ok(Self(BorTag::new(ObjectKey::try_from(bytes)?)))
     }
 
-    pub fn as_bytes(&self) -> &[u8] {
-        self.0.inner()
+    pub const fn as_bytes(&self) -> &[u8] {
+        self.0.inner().array()
     }
 }
 

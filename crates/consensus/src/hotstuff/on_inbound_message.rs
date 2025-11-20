@@ -187,19 +187,32 @@ fn msg_relative_view(
             let next_height = current_height + NodeHeight(1);
             let epoch = msg.block.epoch();
             let block_height = msg.block.height();
-            // let max_justify_height = msg.block.max_certificate_height();
             let pc_height = msg.block.justify().height();
 
             if epoch < current_epoch {
-                //|| (epoch == current_epoch && max_justify_height < current_height) {
                 return MessageRelativeView::Past {
                     epoch: msg.block.epoch(),
                     height: pc_height,
                 };
             }
 
+            if epoch == current_epoch + Epoch(1) {
+                return MessageRelativeView::Future {
+                    epoch,
+                    height: pc_height,
+                };
+            }
+
             if epoch > current_epoch {
                 return MessageRelativeView::Discard;
+            }
+
+            if pc_height <= current_height &&
+                msg.block
+                    .timeout_certificate()
+                    .is_some_and(|tc| tc.height() > current_height)
+            {
+                return MessageRelativeView::Current;
             }
 
             if pc_height < current_height || (pc_height == current_height && block_height <= current_height) {

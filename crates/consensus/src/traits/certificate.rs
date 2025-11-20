@@ -4,7 +4,7 @@
 use std::ops::Deref;
 
 use log::info;
-use tari_consensus_types::{HighPc, HighTc, ProposalCertificate, QcId, TcId, TimeoutCertificate};
+use tari_consensus_types::{HighPc, HighTc, PcId, ProposalCertificate, TcId, TimeoutCertificate};
 use tari_ootle_common_types::{displayable::Displayable, optional::Optional, Epoch};
 use tari_ootle_storage::{
     consensus_models::BookkeepingModel,
@@ -36,7 +36,7 @@ pub trait CertificateStore: Sized {
 
 impl CertificateStore for ProposalCertificate {
     type HighCertificate = HighPc;
-    type Id = QcId;
+    type Id = PcId;
 
     fn get<TTx: StateStoreReadTransaction>(tx: &TTx, epoch: Epoch, id: &Self::Id) -> Result<Self, StorageError> {
         tx.proposal_certificates_get(epoch, id)

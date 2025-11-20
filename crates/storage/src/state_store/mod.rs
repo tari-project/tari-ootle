@@ -18,8 +18,8 @@ use tari_consensus_types::{
     LastVoted,
     LeafBlock,
     LockedBlock,
+    PcId,
     ProposalCertificate,
-    QcId,
     TcId,
     TimeoutCertificate,
 };
@@ -202,10 +202,10 @@ pub trait StateStoreReadTransaction: Sized {
     ) -> Result<SubstateChange, StorageError>;
 
     // -------------------------------- ProposalCertificate -------------------------------- //
-    fn proposal_certificates_get(&self, epoch: Epoch, qc_id: &QcId) -> Result<ProposalCertificate, StorageError>;
+    fn proposal_certificates_get(&self, epoch: Epoch, qc_id: &PcId) -> Result<ProposalCertificate, StorageError>;
     fn proposal_certificates_get_many<'a, I>(&self, qc_ids: I) -> Result<Vec<ProposalCertificate>, StorageError>
     where
-        I: IntoIterator<Item = &'a (Epoch, QcId)>,
+        I: IntoIterator<Item = &'a (Epoch, PcId)>,
         I::IntoIter: ExactSizeIterator;
 
     // -------------------------------- TimeoutCertificate -------------------------------- //
@@ -364,8 +364,8 @@ pub trait StateStoreWriteTransaction {
     fn blocks_set_qcs(
         &mut self,
         block_id: &BlockId,
-        commit_qc_id: Option<&QcId>,
-        justify_qc_id: Option<&QcId>,
+        commit_qc_id: Option<&PcId>,
+        justify_qc_id: Option<&PcId>,
     ) -> Result<(), StorageError>;
 
     // -------------------------------- BlockDiff -------------------------------- //

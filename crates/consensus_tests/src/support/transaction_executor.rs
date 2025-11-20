@@ -10,11 +10,19 @@ use tari_engine_types::{
     transaction_receipt::TransactionReceiptAddress,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
-use tari_ootle_common_types::{displayable::Displayable, Epoch, LockIntent, SubstateRequirement, VersionedSubstateId};
+use tari_ootle_common_types::{
+    displayable::Displayable,
+    Epoch,
+    LockIntent,
+    SubstateLockType,
+    SubstateRequirement,
+    VersionedSubstateId,
+};
 use tari_ootle_storage::{
     consensus_models::{TransactionExecution, VersionedSubstateIdLockIntent},
     StateStore,
 };
+use tari_template_lib::prelude::XTR;
 use tari_transaction::Transaction;
 
 use crate::support::{create_execution_result_for_transaction, executions_store::TestExecutionSpecStore, TestAddress};
@@ -90,6 +98,8 @@ impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBloc
         let resolved_inputs = spec
             .input_locks
             .into_iter()
+            // Implicitly add XTR as read lock for all transactions
+            .chain(iter::once((SubstateId::from(XTR), SubstateLockType::Read)))
             .map(|(substate_id, lock_type)| {
                 let substate = resolved_inputs.get(&substate_id).unwrap_or_else(|| {
                     panic!(

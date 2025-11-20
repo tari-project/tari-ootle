@@ -44,12 +44,12 @@ impl ValidatorFeePoolAddress {
         Self(BorTag::new(key))
     }
 
-    pub fn as_object_key(&self) -> &ObjectKey {
+    pub const fn as_object_key(&self) -> &ObjectKey {
         self.0.inner()
     }
 
-    pub fn as_slice(&self) -> &[u8] {
-        self.0.inner()
+    pub const fn as_slice(&self) -> &[u8] {
+        self.0.inner().array()
     }
 
     pub fn from_hex(hex: &str) -> Result<Self, KeyParseError> {

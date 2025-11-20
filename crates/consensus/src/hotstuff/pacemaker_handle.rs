@@ -101,7 +101,6 @@ impl PaceMakerHandle {
     }
 
     pub async fn reset_leader_timeout(&self, high_pc: &HighPc) -> Result<(), HotStuffError> {
-        // if self.current_view.enter(high_pc.epoch(), high_pc.height()) {
         self.sender
             .send(PacemakerRequest::Reset {
                 high_pc_height: Some(high_pc.height()),
@@ -109,7 +108,6 @@ impl PaceMakerHandle {
             })
             .await
             .map_err(|e| HotStuffError::PacemakerChannelDropped { details: e.to_string() })?;
-        // }
         Ok(())
     }
 

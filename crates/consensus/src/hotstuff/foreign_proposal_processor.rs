@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_consensus_types::{BlockId, Decision, LeafBlock, ProposalCertificate, QcId, ValidatorSignatureBytes};
+use tari_consensus_types::{BlockId, Decision, LeafBlock, PcId, ProposalCertificate, ValidatorSignatureBytes};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::commit_result::RejectReason;
 use tari_ootle_common_types::{
@@ -788,7 +788,7 @@ fn get_or_sequence_transaction<TTx: StateStoreReadTransaction>(
     }
 }
 
-fn calculate_qc_id_from_sidechain_qc(qc: &tari_sidechain::QuorumCertificate) -> QcId {
+fn calculate_qc_id_from_sidechain_qc(qc: &tari_sidechain::QuorumCertificate) -> PcId {
     let signatures = qc
         .signatures
         .iter()

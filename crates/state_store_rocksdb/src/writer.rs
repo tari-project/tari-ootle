@@ -38,8 +38,8 @@ use tari_consensus_types::{
     LastVoted,
     LeafBlock,
     LockedBlock,
+    PcId,
     ProposalCertificate,
-    QcId,
     TimeoutCertificate,
 };
 use tari_engine_types::substate::SubstateId;
@@ -332,8 +332,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     fn blocks_set_qcs(
         &mut self,
         block_id: &BlockId,
-        commit_qc_id: Option<&QcId>,
-        justify_qc_id: Option<&QcId>,
+        commit_qc_id: Option<&PcId>,
+        justify_qc_id: Option<&PcId>,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "blocks_set_qcs";
         if commit_qc_id.is_none() && justify_qc_id.is_none() {

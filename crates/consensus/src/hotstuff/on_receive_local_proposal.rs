@@ -9,9 +9,9 @@ use tari_consensus_types::{
     HighPc,
     HighestSeenBlock,
     LastSentVote,
+    PcId,
     ProposalCertificate,
     ProposalVote,
-    QcId,
     TimeoutVote,
     TimeoutVoteMessage,
     ValidatorSignatureBytes,
@@ -506,7 +506,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     info!(target: LOG_TARGET, "⭐️ Creating new genesis block {genesis}");
                     genesis.justify().save(tx)?;
                     genesis.insert(tx)?;
-                    genesis.add_justify_qc(tx, &QcId::zero())?;
+                    genesis.add_justify_qc(tx, &PcId::zero())?;
                     // We'll propose using the new genesis as parent
                     genesis.as_locked().set(tx)?;
                     genesis.as_highest_seen().set(tx)?;

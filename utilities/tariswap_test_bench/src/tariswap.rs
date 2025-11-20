@@ -98,11 +98,13 @@ impl Runner {
         let mut tx_ids = Vec::with_capacity(200);
         let primary_account_pk = primary_account_key.public_key().to_byte_type();
 
-        for i in 0..5 {
-            let _timer = TraceTimer::info("tariswap", "add_liquidity")
-                .with_iterations(200usize.min(tariswaps.len().saturating_sub(i * 200)));
+        const BATCH_SIZE: usize = 100;
 
-            for (i, tariswap) in tariswaps.iter().enumerate().skip(i * 200).take(200) {
+        for i in 0..(1000 / BATCH_SIZE) {
+            let _timer = TraceTimer::info("tariswap", "add_liquidity")
+                .with_iterations(BATCH_SIZE.min(tariswaps.len().saturating_sub(i * BATCH_SIZE)));
+
+            for (i, tariswap) in tariswaps.iter().enumerate().skip(i * BATCH_SIZE).take(BATCH_SIZE) {
                 let account = &accounts[i % accounts.len()];
                 let xtr_vault = self
                     .sdk
@@ -171,7 +173,11 @@ impl Runner {
                 ));
             }
 
-            info!("⏳️ Added liquidity to pools {}-{}", i * 200, (i + 1) * 200);
+            info!(
+                "⏳️ Added liquidity to pools {}-{}",
+                i * BATCH_SIZE,
+                (i + 1) * BATCH_SIZE
+            );
         }
 
         info!("⏳️ Waiting for {} transactions to finalize", tariswaps.len());

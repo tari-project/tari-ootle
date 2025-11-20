@@ -25,7 +25,7 @@ use std::{io::Write, ops::Deref};
 use rand::{rngs::OsRng, Rng, RngCore};
 use tari_bor::cbor;
 use tari_common_types::types::FixedHash;
-use tari_consensus_types::{BlockId, Decision, LeafBlock, ProposalCertificate, QcId, ShardGroupAccumulatedData};
+use tari_consensus_types::{BlockId, Decision, LeafBlock, PcId, ProposalCertificate, ShardGroupAccumulatedData};
 use tari_engine_types::{
     component::{ComponentBody, ComponentHeader},
     substate::{hash_substate, SubstateId, SubstateValue},
@@ -376,7 +376,7 @@ where
     chain[len - 3].as_locked().set(tx).unwrap();
 
     for block in &chain[..len - 3] {
-        tx.blocks_set_qcs(block.id(), Some(&QcId::zero()), Some(&QcId::zero()))
+        tx.blocks_set_qcs(block.id(), Some(&PcId::zero()), Some(&PcId::zero()))
             .unwrap();
     }
 

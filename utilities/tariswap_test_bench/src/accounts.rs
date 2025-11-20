@@ -165,7 +165,7 @@ impl Runner {
             .accounts_api()
             .get_vault_by_resource(&fee_account.component_address, &XTR)?;
 
-        for accounts in all_accounts.chunks(100) {
+        for accounts in all_accounts.chunks(25) {
             let transaction = self
                 .new_transaction_builder()
                 .fee_transaction_pay_from_component(fee_account.component_address, 1000 * accounts.len())
@@ -182,7 +182,6 @@ impl Runner {
                     })
                 })
                 .with_inputs([
-                    SubstateRequirement::unversioned(XTR),
                     SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
                     SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
                     SubstateRequirement::unversioned(faucet.component_address),
@@ -238,7 +237,7 @@ impl Runner {
                     )?;
                 }
             }
-            info!("✅ Funded 100 accounts");
+            info!("✅ Funded 25 accounts");
         }
 
         Ok(())

@@ -4,7 +4,7 @@
 use std::num::NonZeroU64;
 
 use log::*;
-use tari_consensus_types::{Decision, LastVoted, LeafBlock, QcId};
+use tari_consensus_types::{Decision, LastVoted, LeafBlock, PcId};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::commit_result::{AbortReason, RejectReason};
 use tari_ootle_common_types::{committee::CommitteeInfo, optional::Optional, Epoch, ShardGroup};
@@ -1477,7 +1477,7 @@ where TConsensusSpec: ConsensusSpec
     fn on_commit(
         &self,
         tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
-        commit_qc_id: &QcId,
+        commit_qc_id: &PcId,
         block: &Block,
     ) -> Result<Vec<TransactionPoolRecord>, HotStuffError> {
         let committed_transactions = self.finalize_block(tx, commit_qc_id, block)?;
@@ -1531,7 +1531,7 @@ where TConsensusSpec: ConsensusSpec
     fn finalize_block(
         &self,
         tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
-        commit_qc_id: &QcId,
+        commit_qc_id: &PcId,
         block: &Block,
     ) -> Result<Vec<TransactionPoolRecord>, HotStuffError> {
         if block.is_dummy() {

@@ -1,16 +1,12 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{ops::Add, time::Duration};
-
-use anyhow::anyhow;
 use log::*;
-use tari_ootle_common_types::{optional::Optional, substate_type::SubstateType};
-use tari_ootle_wallet_sdk::{models::WalletEvent, network::WalletNetworkInterface, WalletSdk, WalletSdkSpec};
+use tari_engine::wasm::WasmModule;
+use tari_ootle_common_types::substate_type::SubstateType;
+use tari_ootle_wallet_sdk::{models::WalletEvent, WalletSdk, WalletSdkSpec};
 use tari_ootle_wallet_sdk_services::notify::Notify;
 use tari_shutdown::ShutdownSignal;
-use tari_template_abi::TemplateDef;
-use tari_template_lib::types::TemplateAddress;
 
 const LOG_TARGET: &str = "tari::ootle_wallet_daemon::services::template_monitor";
 
@@ -28,37 +24,6 @@ where TSpec: WalletSdkSpec
             notify,
             wallet_sdk,
             shutdown_signal,
-        }
-    }
-
-    /// Fetching template definition with retry.
-    async fn fetch_template_definition(&self, template_address: TemplateAddress) -> anyhow::Result<TemplateDef> {
-        let min_wait_time = Duration::from_millis(100);
-        let max_wait_time = Duration::from_secs(5);
-        let wait_step = Duration::from_millis(500);
-        let mut current_wait_time = min_wait_time;
-        let network_interface = self.wallet_sdk.get_network_interface();
-        loop {
-            match network_interface
-                .fetch_template_definition(template_address)
-                .await
-                .optional()?
-            {
-                Some(template_def) => {
-                    info!(target: LOG_TARGET, "Fetched template definition for {template_address}");
-                    return Ok(template_def);
-                },
-                None => {
-                    info!(target: LOG_TARGET, "Template definition not found yet. retry after {:.2?}...", current_wait_time);
-                    if self.shutdown_signal.is_triggered() {
-                        return Err(anyhow!("shutdown during fetch template definition"));
-                    }
-                    tokio::time::sleep(current_wait_time).await;
-                    if current_wait_time < max_wait_time {
-                        current_wait_time = current_wait_time.add(wait_step);
-                    }
-                },
-            };
         }
     }
 
@@ -86,18 +51,20 @@ where TSpec: WalletSdkSpec
                     error!(target: LOG_TARGET, "Diff contained a template substate ID {id} but the substate was type {}. This should not be possible", SubstateType::from(substate.substate_value()));
                     continue;
                 };
-                let template_definition = match self.fetch_template_definition(template_address.as_hash()).await {
-                    Ok(template_definition) => template_definition,
-                    Err(error) => {
-                        error!(target: LOG_TARGET, "Failed to fetch template definition: {}", error);
+
+                match WasmModule::load_template_from_code(&template.binary) {
+                    Ok(loaded) => {
+                        self.wallet_sdk.template_api().add_authored_template(
+                            template.author,
+                            template_address.as_hash(),
+                            loaded.template_def().clone(),
+                        )?;
+                    },
+                    Err(err) => {
+                        error!(target: LOG_TARGET, "Failed to load template {id} from transaction diff: {}", err);
                         continue;
                     },
-                };
-                self.wallet_sdk.template_api().add_authored_template(
-                    template.author,
-                    template_address.as_hash(),
-                    template_definition,
-                )?;
+                }
             }
         }
         Ok(())

@@ -3,7 +3,7 @@ import type { FinalizeResult } from "./FinalizeResult";
 import type { ProposalCertificate } from "./ProposalCertificate";
 import type { Transaction } from "./Transaction";
 import type { TransactionStatus } from "./TransactionStatus";
-import type { NewAccountData } from "./wallet-daemon-client/NewAccountData";
+import type { NewAccountData } from "./wallet-types/NewAccountData";
 
 export type WalletTransaction = {
   id: string;

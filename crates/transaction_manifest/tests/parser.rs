@@ -62,24 +62,24 @@ fn manifest_smoke_test() {
     let expected = vec![
         Instruction::CallFunction {
             address: picture_seller_template,
-            function: "new".to_string(),
+            function: "new".try_into().unwrap(),
             args: call_args![1_000u64],
         },
         Instruction::PutLastInstructionOutputOnWorkspace { key: 0 },
         Instruction::CallMethod {
             call: test_faucet_component.into(),
-            method: "take_free_coins".to_string(),
+            method: "take_free_coins".try_into().unwrap(),
             args: call_args![1000],
         },
         Instruction::PutLastInstructionOutputOnWorkspace { key: 1 },
         Instruction::CallMethod {
             call: account_component.into(),
-            method: "deposit".to_string(),
+            method: "deposit".try_into().unwrap(),
             args: call_args![Workspace(1)],
         },
         Instruction::CallMethod {
             call: account_component.into(),
-            method: "set_public_key".to_string(),
+            method: "set_public_key".try_into().unwrap(),
             args: call_args![
                 RistrettoPublicKeyBytes::from_hex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
                     .unwrap(),
@@ -92,19 +92,19 @@ fn manifest_smoke_test() {
         },
         Instruction::CallMethod {
             call: account_component.into(),
-            method: "withdraw".to_string(),
+            method: "withdraw".try_into().unwrap(),
             args: call_args![XTR, 1_000],
         },
         Instruction::PutLastInstructionOutputOnWorkspace { key: 2 },
         Instruction::CallMethod {
             call: picture_seller_component.into(),
-            method: "buy".to_string(),
+            method: "buy".try_into().unwrap(),
             args: call_args![Workspace(2)],
         },
         Instruction::PutLastInstructionOutputOnWorkspace { key: 3 },
         Instruction::CallMethod {
             call: account_component.into(),
-            method: "deposit".to_string(),
+            method: "deposit".try_into().unwrap(),
             args: call_args![Workspace(3)],
         },
     ];

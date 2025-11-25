@@ -11,7 +11,7 @@ use tari_ootle_wallet_crypto::{
     ConfidentialProofError,
     DecryptedData,
     MaskAndValue,
-    UnblindedOutputWitness,
+    OutputWitness,
     WalletCryptoError,
 };
 use tari_template_lib::{
@@ -39,9 +39,9 @@ impl ConfidentialCryptoApi {
         &self,
         inputs: &[MaskAndValue],
         input_revealed_amount: A,
-        output_statement: Option<&UnblindedOutputWitness>,
+        output_statement: Option<&OutputWitness>,
         output_revealed_amount: A,
-        change_statement: Option<&UnblindedOutputWitness>,
+        change_statement: Option<&OutputWitness>,
         change_revealed_amount: A,
     ) -> Result<ConfidentialWithdrawProof, ConfidentialCryptoApiError> {
         let proof = confidential::create_withdraw_proof(
@@ -90,7 +90,7 @@ impl ConfidentialCryptoApi {
 
     pub fn generate_output_proof<A: Into<Amount>>(
         &self,
-        statement: &UnblindedOutputWitness,
+        statement: &OutputWitness,
         revealed_amount: A,
     ) -> Result<ConfidentialOutputStatement, ConfidentialCryptoApiError> {
         let proof = confidential::create_output_statement(

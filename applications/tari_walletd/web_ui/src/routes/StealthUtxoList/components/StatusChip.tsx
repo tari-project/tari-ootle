@@ -15,6 +15,7 @@ import type { OutputStatus } from "@tari-project/typescript-bindings";
 interface StatusChipProps {
   status: OutputStatus;
   showTitle?: boolean;
+  tooltip?: string;
 }
 
 const colorList: Record<string, string> = {
@@ -25,7 +26,7 @@ const colorList: Record<string, string> = {
   Invalid: "#DB7E7E",
 };
 
-export default function StatusChip({ status, showTitle = true }: StatusChipProps) {
+export default function StatusChip({ status, showTitle = true, tooltip }: StatusChipProps) {
   const theme = useTheme();
 
   const iconList: Record<string, JSX.Element> = {
@@ -44,6 +45,7 @@ export default function StatusChip({ status, showTitle = true }: StatusChipProps
   } else {
     return (
       <Chip
+        title={tooltip}
         avatar={<Avatar sx={{ bgcolor: bgColor, background: background }}>{iconList[status]}</Avatar>}
         label={status}
         style={{ color: colorList[status], borderColor: colorList[status] }}

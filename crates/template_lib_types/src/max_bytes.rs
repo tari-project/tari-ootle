@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::ops::{Deref, DerefMut};
+use tari_template_abi::rust::ops::{Deref, DerefMut};
 
 use crate::{
     hex::{bytes_from_hex, bytes_to_hex},

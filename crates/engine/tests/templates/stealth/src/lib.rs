@@ -68,6 +68,11 @@ mod template {
             self.supply_vault.deposit(bucket);
         }
 
+        pub fn static_programmatic_transfer(resource: ResourceAddress, transfer: StealthTransferStatement) {
+            let manager = ResourceManager::get(resource);
+            manager.stealth_transfer(transfer);
+        }
+
         pub fn mint(&self, amount: Amount) {
             let bucket = self.manager.mint_stealth(amount);
             self.supply_vault.deposit(bucket);

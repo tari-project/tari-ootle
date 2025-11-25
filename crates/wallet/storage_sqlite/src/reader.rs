@@ -986,6 +986,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             )
             .filter(stealth_outputs::owner_key_id.is_not_null())
             .filter(stealth_outputs::is_burnt.eq(false))
+            .filter(stealth_outputs::is_condition_spendable.eq(true))
             .filter(stealth_outputs::is_frozen.eq(false))
             .load_iter::<models::StealthOutput, _>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;

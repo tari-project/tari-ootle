@@ -10,7 +10,7 @@ use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine_types::{FromByteType, ToByteType};
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{optional::IsNotFoundError, SubstateRequirement};
-use tari_ootle_wallet_crypto::{memo::Memo, MaskAndValue, UnblindedOutputWitness};
+use tari_ootle_wallet_crypto::{memo::Memo, MaskAndValue, OutputWitness};
 use tari_template_lib::{
     models::{ComponentAddress, ResourceAddress, VaultId},
     types::Amount,
@@ -427,7 +427,7 @@ where TSpec: WalletSdkSpec
         confidential_amount: Amount,
         resource_view_key: Option<RistrettoPublicKey>,
         memo: Option<&Memo>,
-    ) -> Result<UnblindedOutputWitness, ConfidentialTransferApiError> {
+    ) -> Result<OutputWitness, ConfidentialTransferApiError> {
         if !confidential_amount.is_positive() {
             return Err(ConfidentialTransferApiError::InvalidParameter {
                 param: "confidential_amount",
@@ -451,7 +451,7 @@ where TSpec: WalletSdkSpec
             self.crypto_api
                 .encrypt_value_and_mask(amount, &mask.key, dest_public_key, &nonce, memo)?;
 
-        Ok(UnblindedOutputWitness {
+        Ok(OutputWitness {
             amount,
             mask: mask.key,
             sender_public_nonce: public_nonce,

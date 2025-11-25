@@ -16,7 +16,7 @@ use tari_template_lib::{
     auth::OwnerRule,
     models::{ResourceAddress, StealthTransferStatement},
     prelude::{AccessRules, Amount},
-    types::{crypto::RistrettoPublicKeyBytes, MaxString, TemplateAddress},
+    types::{crypto::RistrettoPublicKeyBytes, FunctionName, MaxString, TemplateAddress},
 };
 
 use crate::{
@@ -37,14 +37,16 @@ pub enum Instruction {
     },
     CallFunction {
         address: TemplateAddress,
-        function: String,
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        function: FunctionName,
         #[serde(deserialize_with = "crate::special_json_arg_syntax::json_deserialize")]
         #[cfg_attr(feature = "ts", ts(type = "Array<any>"))]
         args: Vec<InstructionArg>,
     },
     CallMethod {
         call: ComponentCall,
-        method: String,
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        method: FunctionName,
         // TODO: remove this as it causes tricky issues that are hard to track down (typically Signature errors).
         // Rather have clients provide raw arguments using CBOR.
         #[serde(deserialize_with = "crate::special_json_arg_syntax::json_deserialize")]
@@ -259,7 +261,7 @@ mod tests {
     fn decode_encode() {
         let instruction = Instruction::CallFunction {
             address: Default::default(),
-            function: "test".to_string(),
+            function: "test".try_into().unwrap(),
             args: call_args![("A", "B"), 123u64, true, vec![1, 2, 3]],
         };
         let json = serde_json::to_string(&instruction).unwrap();

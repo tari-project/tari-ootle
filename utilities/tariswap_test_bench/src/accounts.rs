@@ -43,7 +43,7 @@ impl Runner {
                 SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
                 SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
             ])
-            .build();
+            .finish();
 
         let transaction = self.sdk.signer_api().sign(owner_key.key_id, transaction)?;
 
@@ -115,7 +115,7 @@ impl Runner {
                 SubstateRequirement::unversioned(pay_fee_vault.id),
                 SubstateRequirement::unversioned(pay_fee_vault.resource_address),
             ])
-            .build();
+            .finish();
 
         let transaction = self.sdk.signer_api().sign(key.key_id, transaction)?;
 

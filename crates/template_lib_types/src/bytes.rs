@@ -12,11 +12,24 @@ use crate::serde_helpers::BytesVisitor;
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 #[serde(transparent)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, type = "Uint8Array"))]
 pub struct Bytes(#[serde(with = "self")] Box<[u8]>);
 
 impl Bytes {
     pub fn from_vec(data: Vec<u8>) -> Self {
         Self(data.into_boxed_slice())
+    }
+
+    pub fn into_vec(self) -> Vec<u8> {
+        self.0.into_vec()
+    }
+
+    pub fn into_boxed(self) -> Box<[u8]> {
+        self.0
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
     }
 }
 
@@ -52,6 +65,7 @@ impl AsRef<[u8]> for Bytes {
     }
 }
 
+/// Serialize using the optimal byte format. i.e. `Bytes` in ciborium instead of `Array(Integer(u8), ....])`
 pub fn serialize<S: serde::Serializer, T: AsRef<[u8]>>(v: &T, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_bytes(v.as_ref())
 }

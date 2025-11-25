@@ -45,7 +45,6 @@ use tari_template_lib::{
         ResourceAddress,
         VaultId,
     },
-    prelude::RistrettoPublicKeyBytes,
     types::{Amount, TemplateAddress},
 };
 use tari_transaction::args::{WorkspaceId, WorkspaceOffsetId};
@@ -174,8 +173,6 @@ pub enum RuntimeError {
     AccessDeniedAuthHook { action_ident: ActionIdent, details: String },
     #[error("Access Denied: You must be the owner to perform this action: {action}")]
     AccessDeniedOwnerRequired { action: ActionIdent },
-    #[error("Access Denied: Stealth transfer requires a signer with public key {required_signer}")]
-    AccessDeniedStealthTransferSigner { required_signer: RistrettoPublicKeyBytes },
     #[error("Invalid method address rule for {template_name}: {details}")]
     InvalidMethodAccessRule { template_name: String, details: String },
     #[error("Runtime module error: {0}")]

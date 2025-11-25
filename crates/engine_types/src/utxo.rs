@@ -2,7 +2,10 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use tari_bor::{Deserialize, Serialize};
-use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, UtxoTag};
+use tari_template_lib::{
+    models::SpendCondition,
+    types::crypto::{RistrettoPublicKeyBytes, UtxoTag},
+};
 
 use crate::crypto::PrivateOutput;
 
@@ -17,9 +20,7 @@ pub struct Utxo {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UtxoOutput {
     pub output: PrivateOutput,
-    /// The public key that must prove ownership of this UTXO. This is typically a one time "stealth" public key but is
-    /// selected by the client.
-    pub owner_public_key: RistrettoPublicKeyBytes,
+    pub spend_condition: SpendCondition,
     pub tag: UtxoTag,
 }
 
@@ -39,8 +40,8 @@ impl Utxo {
         self.output
     }
 
-    pub fn owner_public_key(&self) -> Option<&RistrettoPublicKeyBytes> {
-        self.output().map(|o| &o.owner_public_key)
+    pub fn spender_public_key(&self) -> Option<&RistrettoPublicKeyBytes> {
+        self.output().and_then(|o| o.spend_condition.signed_by())
     }
 
     pub fn freeze(&mut self) {

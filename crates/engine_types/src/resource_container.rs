@@ -18,6 +18,7 @@ use tari_template_lib::{
         ResourceAddress,
         UtxoId,
     },
+    prelude::RistrettoPublicKeyBytes,
     types::{crypto::PedersenCommitmentBytes, Amount, ResourceType},
 };
 
@@ -903,6 +904,14 @@ pub enum ResourceError {
     InvalidConfidentialMintWithChange,
     #[error("Invalid spend: {details}")]
     InvalidSpend { details: String },
+    #[error(
+        "The transaction signature with public key {public_key} required to spend the input with commitment \
+         {commitment} was not provided or is not in scope"
+    )]
+    RequiredSignatureMissingForStealthUtxo {
+        commitment: PedersenCommitmentBytes,
+        public_key: RistrettoPublicKeyBytes,
+    },
     #[error("UTXO {id} failed to burn: {details}")]
     UtxoBurnFailed { id: UtxoId, details: String },
 }

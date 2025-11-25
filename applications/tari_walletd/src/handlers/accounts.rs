@@ -5,7 +5,7 @@ use std::{collections::HashSet, iter, time::Duration};
 
 use anyhow::{anyhow, Context};
 use axum_extra::headers::authorization::Bearer;
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use log::*;
 use rand::rngs::OsRng;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
@@ -17,12 +17,7 @@ use tari_engine_types::{
     ToByteType,
 };
 use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
-use tari_ootle_wallet_crypto::{
-    memo::Memo,
-    UnblindedOutputWitness,
-    UnblindedStealthInputWitness,
-    UnblindedStealthOutputWitness,
-};
+use tari_ootle_wallet_crypto::{memo::Memo, OutputWitness, SecretStealthOutputStatement, StealthInputWitness};
 use tari_ootle_wallet_sdk::{
     apis::{
         confidential_transfer::ConfidentialTransferParams,
@@ -30,14 +25,15 @@ use tari_ootle_wallet_sdk::{
         stealth_transfer::{StealthTransferParams, TransferOutput},
         substate::ValidatorScanResult,
     },
-    models::{KeyBranch, NewAccountData, TransactionSubmittedEvent},
+    models::{KeyBranch, KeyId, NewAccountData, StealthUtxoSpendKeyId, TransactionSubmittedEvent},
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
+    models::SpendCondition,
     types::{Amount, ResourceType},
 };
-use tari_transaction::{args, TransactionSignature};
+use tari_transaction::args;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{
@@ -436,16 +432,17 @@ pub async fn handle_claim_burn(
     let network = sdk.config_api().get_network()?;
     // We derive secrets directly here because claim burn is a unique case, making it difficult to use the higher
     // level stealth output api that takes care of keys but assumes that this is a regular transfer.
-    let claim_nonce_keypair = sdk
+    let claim_nonce_key = sdk
         .key_manager_api()
-        .derive_keypair(KeyBranch::Nonce, owner_nonce_key_index)?;
+        .get_key(KeyId::derived(KeyBranch::Nonce, owner_nonce_key_index))?;
+    let claim_public_key = claim_nonce_key.to_public_key();
 
     if !sdk.stealth_crypto_api().validate_burn_claim_ownership_proof(
         network,
         &claim_proof.ownership_proof,
         &claim_proof.commitment,
         claim_proof.value,
-        &claim_nonce_keypair.public_key.to_byte_type(),
+        &claim_public_key.to_byte_type(),
     ) {
         return Err(invalid_params(
             "claim_proof.ownership_proof",
@@ -456,7 +453,7 @@ pub async fn handle_claim_burn(
     info!(
         target: LOG_TARGET,
         "ℹ️ Signing claim burn with key {}. NOTE: This must be the same as the claiming key (owner_nonce_key_index) used in the burn transaction for this to succeed.",
-        claim_nonce_keypair.public_key
+        claim_public_key
     );
 
     let reciprocal_claim_public_key_expanded = claim_proof
@@ -466,7 +463,7 @@ pub async fn handle_claim_burn(
     let decrypted = sdk.stealth_crypto_api().decrypt_value_and_mask(
         &claimed_encrypted_data,
         &claim_proof.commitment,
-        claim_nonce_keypair.secret_key(),
+        claim_nonce_key.secret(),
         &reciprocal_claim_public_key_expanded,
         true,
     )?;
@@ -511,8 +508,8 @@ pub async fn handle_claim_burn(
         sdk.stealth_crypto_api()
             .derive_stealth_owner_public_key(network, &account_owner_public_key, &nonce);
 
-    let output_statement = UnblindedStealthOutputWitness {
-        witness: UnblindedOutputWitness {
+    let output_statement = SecretStealthOutputStatement {
+        witness: OutputWitness {
             amount: final_amount,
             mask: mask.key,
             sender_public_nonce: output_public_nonce.clone(),
@@ -520,25 +517,22 @@ pub async fn handle_claim_burn(
             encrypted_data,
             resource_view_key: None,
         },
-        output_owner_public_key: stealth_output_owner_public_key,
+        spend_condition: SpendCondition::Signed(stealth_output_owner_public_key.to_byte_type()),
         tag,
     };
 
-    // Generate the correct secret to spend the claimed output
-    let input = UnblindedStealthInputWitness {
+    // Package the secrets required to spend the claimed output
+    let input = StealthInputWitness {
         mask_and_value: decrypted.into_mask_and_value(),
-        owner_secret: claim_nonce_keypair.secret_key().clone(),
         public_nonce: reciprocal_claim_public_key_expanded,
     };
 
-    let public_signer_key = sdk.key_manager_api().next_public_key(KeyBranch::Nonce)?;
-
     let pay_fee_and_mint_output = sdk.stealth_crypto_api().generate_transfer_statement(
-        iter::once(&input),
+        iter::once(input),
         0,
         iter::once(&output_statement),
         max_fee,
-        public_signer_key.public_key.to_byte_type(),
+        // public_signer_key.public_key.to_byte_type(),
     )?;
     // We'll create an output with the same encrypted data that was used on L1 burn. Note that this is not strictly
     // necessary. The engine will create the output with whatever you give it, so we could reencrypt.
@@ -553,9 +547,10 @@ pub async fn handle_claim_burn(
                 .claim_burn(claim_proof, output_data)
                 .pay_fee_stealth(pay_fee_and_mint_output)
         })
-        .build();
+        .finish();
 
-    let transaction = sdk.signer_api().sign(public_signer_key.key_id, transaction)?;
+    // Add the required spend signature to the transaction
+    let transaction = sdk.signer_api().sign(*claim_nonce_key.key_id(), transaction)?;
 
     let tx_id = context.transaction_service().submit_transaction(transaction).await?;
 
@@ -656,7 +651,7 @@ pub async fn handle_create_free_test_coins(
                 .call_method(*account.component_address(), "pay_fee", args![max_fee])
         })
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
-        .build();
+        .finish();
 
     let transaction = sdk.signer_api().sign(account_owner_key_id, transaction)?;
 
@@ -846,7 +841,7 @@ pub async fn handle_transfer(
             }
         })
         .with_inputs(inputs.into_iter().map(|req| req.into_unversioned()))
-        .build();
+        .finish();
 
     let transaction = sdk.signer_api().sign(account_owner_key_id, transaction)?;
 
@@ -985,6 +980,7 @@ pub async fn handle_stealth_transfer(
                     blinded_amount: transfer.blinded_output_amount,
                     revealed_amount: transfer.revealed_output_amount,
                     memo: Some(memo),
+                    pay_to: transfer.pay_to,
                 })
             },
             None => Ok(TransferOutput {
@@ -992,6 +988,7 @@ pub async fn handle_stealth_transfer(
                 blinded_amount: transfer.blinded_output_amount,
                 revealed_amount: transfer.revealed_output_amount,
                 memo: transfer.output_memo,
+                pay_to: transfer.pay_to,
             }),
         })
         .collect::<anyhow::Result<_>>()?;
@@ -1019,15 +1016,19 @@ pub async fn handle_stealth_transfer(
         let transaction = transfer.transaction.authorized_sealed_signer();
         let main_pk = transfer.main_signer.public_key().to_byte_type();
 
+        // Signer api which sign transaction types that require the seal signer public key
+        let main_signer = sdk.signer_api().with_context(&main_pk);
         // Add additional signature if needed
-        let additional_sig = transfer
-            .additional_signer
-            .as_ref()
-            .map(|s| sdk.signer_api().get_signature(s.key_id, &main_pk, &transaction))
-            .transpose()?
-            .map(|sig| TransactionSignature::new(sig.public_key.to_byte_type(), sig.signature.to_byte_type()));
+        let transaction = match transfer.additional_signer.as_ref() {
+            Some(s) => main_signer.sign(s.key_id, transaction)?,
+            None => transaction.finish(),
+        };
 
-        let transaction = transaction.build_with_signatures(additional_sig.into_iter().collect());
+        // Add required UTXO spend key signatures
+        let transaction = transfer
+            .utxo_spend_keys
+            .iter()
+            .try_fold(transaction, |tx, key| main_signer.sign_with_stealth_key(key, tx))?;
 
         // Sign and seal the final transaction
         let transaction = sdk.signer_api().sign(transfer.main_signer.key_id, transaction)?;
@@ -1087,6 +1088,7 @@ pub async fn handle_create_stealth_transfer_statement(
     }
 
     let mut required_signers = HashSet::new();
+    let mut utxo_signers = IndexSet::new();
     let lock = sdk.locks_api().create_lock_with_timeout(Duration::from_secs(5 * 60))?;
     let mut statements = Vec::with_capacity(req.requests.len());
     for req in req.requests {
@@ -1133,9 +1135,7 @@ pub async fn handle_create_stealth_transfer_statement(
             sdk.key_manager_api().next_derived_key_id(KeyBranch::Nonce)?.into()
         };
 
-        let required_signer = sdk.key_manager_api().get_public_key(signing_key_id)?;
-        let required_signer = required_signer.public_key.to_byte_type();
-
+        let output_revealed_amount = req.outputs.iter().map(|o| o.revealed_amount).sum();
         let outputs = req
             .outputs
             .iter()
@@ -1146,7 +1146,6 @@ pub async fn handle_create_stealth_transfer_statement(
         let statement = sdk
             .stealth_outputs_api()
             .generate_transfer_statement(TransferStatementParams {
-                spend_key_id: sender_key_id,
                 view_only_key_id: sender_account.view_only_key_id(),
                 resource_address: &req.resource_address,
                 resource_view_key: resource
@@ -1165,9 +1164,13 @@ pub async fn handle_create_stealth_transfer_statement(
                         )
                     })?,
                 outputs,
-                output_revealed_amount: req.outputs.iter().map(|o| o.revealed_amount).sum(),
-                required_signer,
+                output_revealed_amount,
             })?;
+
+        utxo_signers.extend(inputs.iter().flat_map(|i| &i.inputs).map(|i| StealthUtxoSpendKeyId {
+            account_key_id: sender_key_id,
+            public_nonce: i.public_nonce,
+        }));
 
         required_signers.insert(signing_key_id);
         statements.push(statement);
@@ -1180,6 +1183,7 @@ pub async fn handle_create_stealth_transfer_statement(
         statements,
         lock_id,
         signing_keys: required_signers.into_iter().collect(),
+        utxo_signers: utxo_signers.into_iter().collect(),
     })
 }
 

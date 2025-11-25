@@ -16,7 +16,7 @@ fn basic_emit_event() {
         .execute_and_commit(
             vec![Instruction::CallFunction {
                 address: event_emitter_template,
-                function: "test_function".to_string(),
+                function: "test_function".try_into().unwrap(),
                 args: call_args![topic],
             }],
             vec![],
@@ -62,7 +62,7 @@ fn builtin_vault_events() {
         .execute_and_commit(
             vec![Instruction::CallFunction {
                 address: faucet_template,
-                function: "mint".to_string(),
+                function: "mint".try_into().unwrap(),
                 args: call_args![initial_supply],
             }],
             vec![template_test.owner_proof()],

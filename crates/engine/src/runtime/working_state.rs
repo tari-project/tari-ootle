@@ -14,7 +14,6 @@ use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_engine_types::{
     bucket::Bucket,
     component::ComponentHeader,
-    crypto::messages,
     events::Event,
     fees::FeeReceipt,
     id_provider::{IdProvider, ObjectIds},
@@ -35,6 +34,7 @@ use tari_engine_types::{
     ConvertFromByteType,
     ToByteType,
     Utxo,
+    UtxoOutput,
     ValidatorFeePoolAddress,
     ValidatorFeeWithdrawal,
 };
@@ -50,6 +50,8 @@ use tari_template_lib::{
         NonFungibleAddress,
         ProofId,
         ResourceAddress,
+        SpendCondition,
+        StealthInput,
         StealthTransferStatement,
         UtxoAddress,
         VaultId,
@@ -272,21 +274,6 @@ impl WorkingState {
         stmt: &StealthTransferStatement,
         view_key: Option<&RistrettoPublicKey>,
     ) -> Result<ValidatedStealthTransfer, RuntimeError> {
-        let required_signer = &stmt.inputs_statement.required_signer;
-
-        // Check that the required_signed is in scope
-        let proofs = self.base_call_scope().auth_scope().virtual_proofs();
-        if proofs
-            .iter()
-            .filter(|p| *p.resource_address() == PUBLIC_IDENTITY_RESOURCE_ADDRESS)
-            .all(|p| p.id().as_u256().map(|b| b.as_slice()) != Some(required_signer.as_bytes()))
-        {
-            return Err(RuntimeError::AccessDeniedStealthTransferSigner {
-                required_signer: *required_signer,
-            });
-        }
-
-        let metadata_hash = messages::stealth_statement_metadata64(&stmt.outputs_statement);
         for input in &stmt.inputs_statement.inputs {
             let address = UtxoAddress::new(resource_address, input.commitment.into());
             let lock_id = self.store.try_lock(&address.clone().into(), LockFlag::Write)?;
@@ -303,11 +290,41 @@ impl WorkingState {
                 details: format!("Utxo {} is burnt", address),
             })?;
 
-            stealth::validate_ownership_proof(output, input, required_signer, &metadata_hash)?;
+            self.validate_spend_condition(output, input)?;
         }
 
         let valid_transfer = stealth::validate_transfer_balance(stmt, view_key)?;
         Ok(valid_transfer)
+    }
+
+    fn validate_spend_condition(&self, output: &UtxoOutput, input: &StealthInput) -> Result<(), RuntimeError> {
+        match &output.spend_condition {
+            SpendCondition::Signed(pk) => {
+                if !self
+                    .base_call_scope()
+                    .auth_scope()
+                    .contains_badge(&NonFungibleAddress::from_public_key(*pk))
+                {
+                    return Err(RuntimeError::ResourceError(
+                        ResourceError::RequiredSignatureMissingForStealthUtxo {
+                            commitment: input.commitment,
+                            public_key: *pk,
+                        },
+                    ));
+                }
+
+                Ok(())
+            },
+            SpendCondition::AccessRule(access_rule) => {
+                if !self.authorization().check_access_rule(access_rule)? {
+                    return Err(RuntimeError::AccessDenied {
+                        action_ident: ActionIdent::Native(NativeAction::StealthUtxoSpend),
+                    });
+                }
+
+                Ok(())
+            },
+        }
     }
 
     pub fn get_non_fungible(&self, locked: &LockedSubstate) -> Result<&NonFungibleContainer, RuntimeError> {
@@ -521,7 +538,7 @@ impl WorkingState {
     pub fn drop_proof(&mut self, proof_id: ProofId) -> Result<(), RuntimeError> {
         // Remove it from the auth scope if is in scope
         let call_frame_mut = self.current_call_scope_mut()?;
-        if !call_frame_mut.is_proof_in_scope(proof_id) {
+        if !call_frame_mut.is_proof_in_scope(&proof_id) {
             return Err(RuntimeError::ProofNotFound { proof_id });
         }
         call_frame_mut.auth_scope_mut().remove_proof(&proof_id);
@@ -1248,7 +1265,7 @@ impl WorkingState {
             }
         }
         for proof_id in value.proof_ids() {
-            if !scope.is_proof_in_scope(*proof_id) {
+            if !scope.is_proof_in_scope(proof_id) {
                 return Err(RuntimeError::ValidationFailedProofNotInScope { proof_id: *proof_id });
             }
         }

@@ -1229,6 +1229,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .filter(stealth_outputs::owner_key_id.is_not_null())
             .filter(stealth_outputs::is_burnt.eq(false))
             .filter(stealth_outputs::is_frozen.eq(false))
+            .filter(stealth_outputs::is_condition_spendable.eq(true))
             .order_by(stealth_outputs::value.asc())
             .first::<models::StealthOutput>(self.connection())
             .optional()
@@ -1314,11 +1315,13 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 stealth_outputs::encrypted_data.eq(output.encrypted_data.as_ref()),
                 stealth_outputs::tag_byte.eq(output.tag_byte.value() as i32),
                 stealth_outputs::memo_json.eq(output.memo.as_ref().map(serialize_json).transpose()?),
+                stealth_outputs::spend_condition.eq(serialize_json(&output.spend_condition)?),
                 stealth_outputs::minimum_value_promise.eq(output.minimum_value_promise as i64),
                 stealth_outputs::is_on_chain.eq(output.is_on_chain),
                 stealth_outputs::status.eq(output.status.as_key_str()),
                 stealth_outputs::is_burnt.eq(output.is_burnt),
                 stealth_outputs::is_frozen.eq(output.is_frozen),
+                stealth_outputs::is_condition_spendable.eq(output.is_condition_spendable),
                 stealth_outputs::lock_id.eq(output.lock_id),
             ))
             .execute(self.connection())

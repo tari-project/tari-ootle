@@ -43,8 +43,8 @@ pub struct ComponentAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] Bor
 
 impl ComponentAddress {
     /// Creates a new `ComponentAddress` from an `ObjectKey`. For internal use only.
-    pub const fn new(substate_key: ObjectKey) -> Self {
-        Self(BorTag::new(substate_key))
+    pub const fn new(object_key: ObjectKey) -> Self {
+        Self(BorTag::new(object_key))
     }
 
     /// Returns the underlying `ObjectKey` of this `ComponentAddress`.
@@ -71,6 +71,11 @@ impl ComponentAddress {
     /// Returns the `EntityId` associated with this component address.
     pub fn entity_id(&self) -> EntityId {
         self.0.inner().as_entity_id()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, KeyParseError> {
+        let key = ObjectKey::try_from(bytes)?;
+        Ok(Self::new(key))
     }
 }
 

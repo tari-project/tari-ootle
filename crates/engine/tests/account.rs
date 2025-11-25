@@ -72,7 +72,7 @@ fn withdraw_from_account_prevented() {
         .execute_and_commit(
             vec![Instruction::CallFunction {
                 address: faucet_template,
-                function: "mint".to_string(),
+                function: "mint".try_into().unwrap(),
                 args: call_args![initial_supply],
             }],
             vec![template_test.owner_proof()],

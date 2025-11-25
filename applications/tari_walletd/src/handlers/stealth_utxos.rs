@@ -50,6 +50,7 @@ pub async fn handle_list(
                 value: o.value.into(),
                 status: o.status,
                 memo: o.memo,
+                spend_condition: o.spend_condition,
                 is_burnt: o.is_burnt,
                 is_frozen: o.is_frozen,
                 is_on_chain: o.is_on_chain,

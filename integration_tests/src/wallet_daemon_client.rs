@@ -28,7 +28,10 @@ use tari_engine_types::substate::SubstateId;
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_ootle_wallet_sdk::{
-    apis::{confidential_transfer::UtxoInputSelection, stealth_transfer::BadgeUsage},
+    apis::{
+        confidential_transfer::UtxoInputSelection,
+        stealth_transfer::{BadgeUsage, PayTo},
+    },
     models::{Account, AccountWithAddress, NonFungibleToken},
 };
 use tari_template_lib::{
@@ -130,6 +133,7 @@ pub async fn transfer_stealth(
                 blinded_output_amount: amount,
                 revealed_output_amount: Default::default(),
                 output_memo: None,
+                pay_to: PayTo::StealthPublicKey,
             }],
             max_fee: 2000,
             dry_run: false,
@@ -651,7 +655,7 @@ pub async fn create_component(
 
     let transaction = transaction_builder()
         .fee_transaction_pay_from_component(account.component_address, 5000)
-        .call_function(template_address, &function_call, args)
+        .call_function(template_address, function_call, args)
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
         .build_unsigned_transaction();

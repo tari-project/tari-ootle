@@ -8,7 +8,7 @@ use tari_crypto::{
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey},
 };
 use tari_engine_types::crypto::commit_amount_checked;
-use tari_ootle_wallet_crypto::{confidential, MaskAndValue, UnblindedOutputWitness};
+use tari_ootle_wallet_crypto::{confidential, MaskAndValue, OutputWitness};
 use tari_template_lib::{
     models::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
     types::{Amount, EncryptedData},
@@ -35,7 +35,7 @@ fn generate_confidential_proof_internal(
     view_key: Option<RistrettoPublicKey>,
 ) -> (ConfidentialOutputStatement, PrivateKey, Option<PrivateKey>) {
     let mask = PrivateKey::random(&mut OsRng);
-    let output_statement = UnblindedOutputWitness {
+    let output_statement = OutputWitness {
         amount: output_amount,
         mask: mask.clone(),
         sender_public_nonce: Default::default(),
@@ -45,7 +45,7 @@ fn generate_confidential_proof_internal(
     };
 
     let change_mask = PrivateKey::random(&mut OsRng);
-    let change_statement = change.map(|amount| UnblindedOutputWitness {
+    let change_statement = change.map(|amount| OutputWitness {
         amount,
         mask: change_mask.clone(),
         sender_public_nonce: Default::default(),
@@ -152,7 +152,7 @@ fn generate_withdraw_proof_internal(
     };
     let change_mask = change_amount.map(|_| PrivateKey::random(&mut OsRng));
 
-    let output_proof = UnblindedOutputWitness {
+    let output_proof = OutputWitness {
         amount: output_amount,
         mask: output_mask.clone(),
         sender_public_nonce: Default::default(),
@@ -160,7 +160,7 @@ fn generate_withdraw_proof_internal(
         encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
         resource_view_key: view_key.clone(),
     };
-    let change_proof = change_amount.map(|amount| UnblindedOutputWitness {
+    let change_proof = change_amount.map(|amount| OutputWitness {
         amount,
         mask: change_mask.clone().unwrap(),
         sender_public_nonce: Default::default(),

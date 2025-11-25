@@ -352,7 +352,7 @@ impl TemplateTest {
             .execute_and_commit(
                 vec![Instruction::CallFunction {
                     address: self.get_template_address(template_name),
-                    function: func_name.to_owned(),
+                    function: func_name.to_string().try_into().unwrap(),
                     args,
                 }],
                 proofs,
@@ -382,7 +382,7 @@ impl TemplateTest {
             .execute_and_commit(
                 vec![Instruction::CallMethod {
                     call: component_address.into(),
-                    method: method_name.to_owned(),
+                    method: method_name.try_into().unwrap(),
                     args,
                 }],
                 proofs,
@@ -588,7 +588,7 @@ impl TemplateTest {
         }
 
         let auth_params = AuthParams {
-            initial_ownership_proofs: proofs,
+            initial_ownership_proofs: Arc::new(proofs.into_iter().collect()),
         };
 
         let processor = TransactionProcessor::new(

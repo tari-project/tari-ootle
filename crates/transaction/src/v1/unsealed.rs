@@ -8,7 +8,11 @@ use serde::{Deserialize, Serialize};
 use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey};
 use tari_engine_types::{indexed_value::IndexedValueError, substate::SubstateId, ToByteType};
 use tari_ootle_common_types::{Epoch, IntoSigned, Signable, SubstateRequirement};
-use tari_template_lib::{models::ComponentAddress, types::crypto::RistrettoPublicKeyBytes};
+use tari_template_lib::{
+    models::ComponentAddress,
+    prelude::SchnorrSignatureBytes,
+    types::crypto::RistrettoPublicKeyBytes,
+};
 
 use crate::{
     v1::{signature::TransactionSignature, transaction::TransactionV1, unsigned::UnsignedTransactionV1},
@@ -47,9 +51,14 @@ impl UnsealedTransactionV1 {
         TransactionV1::new(self, signature).into()
     }
 
-    pub fn add_signature(mut self, seal_signer: &RistrettoPublicKeyBytes, secret: &RistrettoSecretKey) -> Self {
+    pub fn add_signer(mut self, seal_signer: &RistrettoPublicKeyBytes, secret: &RistrettoSecretKey) -> Self {
         let sig = TransactionSignature::sign_v1(secret, seal_signer, &self.transaction);
         self.signatures.push(sig);
+        self
+    }
+
+    pub fn add_signature(mut self, public_key: RistrettoPublicKeyBytes, signature: SchnorrSignatureBytes) -> Self {
+        self.signatures.push(TransactionSignature::new(public_key, signature));
         self
     }
 
@@ -122,8 +131,16 @@ impl UnsealedTransactionV1 {
 impl Signable for UnsealedTransactionV1 {
     type MessageOutput = [u8; 64];
 
-    fn as_signing_message(&self, _context: ()) -> Self::MessageOutput {
+    fn to_signing_message(&self, _context: ()) -> Self::MessageOutput {
         TransactionSealSignature::create_message(self)
+    }
+}
+
+impl Signable<&RistrettoPublicKeyBytes> for UnsealedTransactionV1 {
+    type MessageOutput = [u8; 64];
+
+    fn to_signing_message(&self, context: &RistrettoPublicKeyBytes) -> Self::MessageOutput {
+        TransactionSignature::create_message_v1(1, context, &self.transaction)
     }
 }
 
@@ -135,5 +152,13 @@ impl IntoSigned for UnsealedTransactionV1 {
             public_key.to_byte_type(),
             signature.to_byte_type(),
         ))
+    }
+}
+
+impl IntoSigned<&RistrettoPublicKeyBytes> for UnsealedTransactionV1 {
+    type SignedOutput = Self;
+
+    fn into_signed(self, public_key: RistrettoPublicKey, signature: RistrettoSchnorr) -> Self::SignedOutput {
+        self.add_signature(public_key.to_byte_type(), signature.to_byte_type())
     }
 }

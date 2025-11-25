@@ -2,27 +2,29 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
-use tari_template_lib::{models::StealthOutputsStatement, types::crypto::UtxoTag};
+use tari_template_lib::{
+    models::{SpendCondition, StealthOutputsStatement},
+    types::crypto::UtxoTag,
+};
 
 use crate::{
     crypto::{range_proof::validate_bullet_proof, validate_elgamal_verifiable_balance_proof, ValidatedPrivateOutput},
     resource_container::ResourceError,
     ConvertFromByteType,
-    ToByteType,
     UtxoOutput,
 };
 
 #[derive(Debug, Clone)]
 pub struct ValidatedStealthOutput {
     pub output: ValidatedPrivateOutput,
-    pub owner_public_key: RistrettoPublicKey,
+    pub spend_condition: SpendCondition,
     pub tag: UtxoTag,
 }
 
 impl ValidatedStealthOutput {
     pub fn to_utxo_output(&self) -> UtxoOutput {
         UtxoOutput {
-            owner_public_key: self.owner_public_key.to_byte_type(),
+            spend_condition: self.spend_condition.clone(),
             output: self.output.to_private_output(),
             tag: self.tag,
         }
@@ -71,11 +73,7 @@ pub fn validate_stealth_outputs_statement(
 
                 Ok(ValidatedStealthOutput {
                     output,
-                    owner_public_key: RistrettoPublicKey::convert_from_byte_type(&statement.owner_public_key).map_err(
-                        |_| ResourceError::InvalidConfidentialProof {
-                            details: "Invalid owner public key".to_string(),
-                        },
-                    )?,
+                    spend_condition: statement.spend_condition.clone(),
                     tag: statement.tag,
                 })
             })

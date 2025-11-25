@@ -12,4 +12,4 @@ mod message_spec;
 pub use message_spec::*;
 
 mod encoding;
-mod utils;
+// mod utils;

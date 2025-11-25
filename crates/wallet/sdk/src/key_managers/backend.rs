@@ -30,7 +30,7 @@ pub trait WalletKeyStore {
         message: &M,
     ) -> Result<SignatureOutput, Self::Error> {
         let secret = self.derive_secret(key_branch, index)?;
-        let signature = RistrettoSchnorr::sign(&secret, message.as_signing_message(context), &mut OsRng)
+        let signature = RistrettoSchnorr::sign(&secret, message.to_signing_message(context), &mut OsRng)
             .expect("RistrettoSchnorr::sign is infallible as it internally hashes the message into canonical form");
         Ok(SignatureOutput {
             signature,

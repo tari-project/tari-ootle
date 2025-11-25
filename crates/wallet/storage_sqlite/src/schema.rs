@@ -163,10 +163,12 @@ diesel::table! {
         encrypted_data -> Binary,
         tag_byte -> Integer,
         memo_json -> Nullable<Text>,
+        spend_condition -> Text,
         minimum_value_promise -> BigInt,
         is_burnt -> Bool,
         is_frozen -> Bool,
         is_on_chain -> Bool,
+        is_condition_spendable -> Bool,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }

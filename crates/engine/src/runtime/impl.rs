@@ -105,6 +105,7 @@ use tari_template_lib::{
         NotAuthorized,
         ResourceAddress,
         ResourceAddressAllocation,
+        SpendCondition,
         StealthTransferStatement,
         UtxoAddress,
         VaultRef,
@@ -300,7 +301,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             auth_caller.with_component_state(caller.into_component().state);
         }
 
-        // The signature of a call back is (action: ResourceAuthAction, auth_caller: AuthCaller)
+        // The signature of a call back is (action: ResourceAuthAction, auth_caller: AuthHookCaller)
         let ret = self
             .invoke_component_method(auth_hook.component_address, &auth_hook.method, invoke_args![
                 action,
@@ -1691,9 +1692,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         container.deposit(withdrawn)?;
                     }
                     if let Some(statement) = arg.statement {
-                        if let Some(revealed) =
-                            state_mut.execute_stealth_transfer(STEALTH_TARI_RESOURCE_ADDRESS.into(), statement, None)?
-                        {
+                        if let Some(revealed) = state_mut.execute_stealth_transfer(XTR.into(), statement, None)? {
                             container.deposit(revealed)?;
                         }
                     }
@@ -2497,7 +2496,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     minimum_value_promise: 0,
                     viewable_balance: None,
                 },
-                owner_public_key: self.seal_signer_public_key,
+                spend_condition: SpendCondition::Signed(self.seal_signer_public_key),
                 tag: UtxoTag::new(0),
             });
 

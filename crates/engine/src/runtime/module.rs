@@ -12,6 +12,10 @@ pub trait RuntimeModule: Send + Sync {
         Ok(())
     }
 
+    fn on_template_loaded(&self, _track: &StateTracker, _bytes_loaded: usize) -> Result<(), RuntimeModuleError> {
+        Ok(())
+    }
+
     fn on_before_finalize(&self, _track: &StateTracker) -> Result<(), RuntimeModuleError> {
         Ok(())
     }

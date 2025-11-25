@@ -545,9 +545,13 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
                 address: *template_address,
                 details: e.to_string(),
             })?
-            .ok_or(TransactionError::TemplateNotFound {
+            .ok_or_else(|| TransactionError::TemplateNotFound {
                 address: *template_address,
             })?;
+
+        runtime
+            .interface()
+            .track_template_loaded(template_address, template.code_size())?;
 
         let function_def = template.template_def().get_function(function).cloned().ok_or_else(|| {
             TransactionError::FunctionNotFound {
@@ -596,6 +600,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
             .ok_or(TransactionError::TemplateNotFound {
                 address: template_address,
             })?;
+
+        runtime
+            .interface()
+            .track_template_loaded(&template_address, template.code_size())?;
 
         let function_def = template.template_def().get_function(method).cloned().ok_or_else(|| {
             TransactionError::FunctionNotFound {

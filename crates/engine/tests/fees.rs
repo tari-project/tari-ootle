@@ -243,7 +243,7 @@ fn fail_pay_less_fees_than_fee_transaction() {
                         .call_method(
                             account,
                             "pay_fee".to_string(),
-                            args![100],
+                            args![127],
                         )
 
                 })
@@ -267,7 +267,7 @@ fn fail_pay_less_fees_than_fee_transaction() {
     let (_, s) = diff.up_iter().find(|(id, _)| id.is_vault()).expect("Account not found");
     assert_eq!(
         s.substate_value().as_vault().unwrap().balance(),
-        orig_balance - Amount::from(100)
+        orig_balance - Amount::from(127)
     );
 
     // Fee was not deducted

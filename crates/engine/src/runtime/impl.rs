@@ -49,7 +49,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{services::template_provider::TemplateProvider, GetVerifier};
 use tari_template_abi::{TemplateDef, Type};
-use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
+use tari_template_builtin::{is_builtin_template_address, ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     args::{
         AddressAllocationInvokeArg,
@@ -2844,6 +2844,22 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             state_mut.pay_fee(container, None)?;
             Ok(())
         })
+    }
+
+    fn track_template_loaded(
+        &self,
+        template_address: &TemplateAddress,
+        bytes_loaded: usize,
+    ) -> Result<(), RuntimeError> {
+        // Built-in templates are zero-cost
+        if is_builtin_template_address(template_address) {
+            return Ok(());
+        }
+
+        for module in &self.modules {
+            module.on_template_loaded(&self.tracker, bytes_loaded)?;
+        }
+        Ok(())
     }
 }
 

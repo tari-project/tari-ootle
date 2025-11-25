@@ -7,4 +7,5 @@ export type FeeSource =
   | "Events"
   | "Logs"
   | "TransactionWeight"
-  | "SignatureVerification";
+  | "SignatureVerification"
+  | "TemplateLoad";

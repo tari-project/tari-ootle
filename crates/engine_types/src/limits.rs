@@ -48,11 +48,9 @@ pub const MAX_DIVISIBILITY: u8 = 18;
 pub struct StealthLimits {
     pub max_inputs: usize,
     pub max_outputs: usize,
-    pub max_m_of_n_signatures: usize,
 }
 
 pub const STEALTH_LIMITS: StealthLimits = StealthLimits {
     max_inputs: 1000,
     max_outputs: 8,
-    max_m_of_n_signatures: 1024, // 32 KiB
 };

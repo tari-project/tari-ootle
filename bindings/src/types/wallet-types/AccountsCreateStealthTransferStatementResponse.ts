@@ -7,5 +7,8 @@ export type AccountsCreateStealthTransferStatementResponse = {
   statements: Array<StealthTransferStatement>;
   lock_id: number;
   signing_keys: Array<KeyId>;
+  /**
+   * Any signatures using a stealth spend key required to spend inputs provided in the statements.
+   */
   utxo_signers: Array<StealthUtxoSpendKeyId>;
 };

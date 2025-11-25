@@ -33,7 +33,7 @@ impl<const N: usize, T> MaxVec<N, T> {
     /// NOTE: this exists for testing purposes and should not be used in general.
     ///
     /// # Safety
-    /// The caller must ensure that the length of `bytes` is less than or equal to `N`.
+    /// The caller must ensure that the length of `elems` is less than or equal to `N`.
     pub unsafe fn new_unchecked(elems: impl Into<Box<[T]>>) -> Self {
         Self { elems: elems.into() }
     }

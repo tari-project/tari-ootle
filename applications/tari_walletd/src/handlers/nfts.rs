@@ -306,7 +306,7 @@ pub async fn handle_transfer(
         })?
         .finish();
 
-    let transaction = sdk.signer_api().sign(account_owner_key_id, transaction)?;
+    let transaction = sdk.signer_api().sign(fee_payer_key_id, transaction)?;
 
     // if dry run, we can return the result immediately
     if req.dry_run {

@@ -6,4 +6,4 @@
  * `Array(vec![Integer(u8), ....])` instead of `Bytes(vec![u8, ...])`. which results in a significant bloat in size.
  * This wrapper uses of the `Bytes` variant in ciborium (similar to `serde_as(as = "Bytes")`).
  */
-export type Bytes = string;
+export type Bytes = Uint8Array;

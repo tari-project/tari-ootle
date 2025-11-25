@@ -12,7 +12,7 @@ use crate::serde_helpers::BytesVisitor;
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 #[serde(transparent)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, type = "string"))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, type = "Uint8Array"))]
 pub struct Bytes(#[serde(with = "self")] Box<[u8]>);
 
 impl Bytes {

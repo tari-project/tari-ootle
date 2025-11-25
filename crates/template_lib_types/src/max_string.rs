@@ -8,6 +8,7 @@ use tari_template_abi::rust::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct MaxString<const N: usize> {
     s: Box<str>,
 }
@@ -123,33 +124,6 @@ mod std_impl {
         }
     }
     impl<const N: usize> std::error::Error for MaxStringError<N> {}
-}
-
-#[cfg(feature = "borsh")]
-mod borsh_impl {
-    use borsh::io::{Error, ErrorKind, Read, Result, Write};
-
-    use super::*;
-
-    impl<const N: usize> borsh::BorshSerialize for MaxString<N> {
-        fn serialize<W: Write>(&self, writer: &mut W) -> Result<()> {
-            self.s.serialize(writer)
-        }
-    }
-
-    impl<const N: usize> borsh::BorshDeserialize for MaxString<N> {
-        fn deserialize_reader<R: Read>(reader: &mut R) -> Result<Self> {
-            let s = Box::<str>::deserialize_reader(reader)?;
-            if s.len() <= N {
-                Ok(Self { s })
-            } else {
-                Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!("string length exceeds maximum of {}: got {}", N, s.len()),
-                ))
-            }
-        }
-    }
 }
 
 #[cfg(test)]

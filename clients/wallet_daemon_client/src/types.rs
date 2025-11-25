@@ -1112,6 +1112,7 @@ pub struct AccountsCreateStealthTransferStatementResponse {
     pub statements: Vec<StealthTransferStatement>,
     pub lock_id: WalletLockId,
     pub signing_keys: Vec<KeyId>,
+    /// Any signatures using a stealth spend key required to spend inputs provided in the statements.
     pub utxo_signers: Vec<StealthUtxoSpendKeyId>,
 }
 

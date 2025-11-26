@@ -59,6 +59,11 @@ impl TransactionBuilder {
         }
     }
 
+    pub(crate) fn with_workspace_ids(mut self, workspace_ids: WorkspaceIds) -> Self {
+        self.workspace_ids = workspace_ids;
+        self
+    }
+
     pub fn with_unsigned_transaction<T: Into<UnsignedTransaction>>(self, unsigned_transaction: T) -> Self {
         Self {
             unsigned_transaction: unsigned_transaction.into(),
@@ -339,10 +344,11 @@ impl TransactionBuilder {
 
     pub fn with_fee_instructions_builder<F: FnOnce(TransactionBuilder) -> TransactionBuilder>(mut self, f: F) -> Self {
         // TODO: pass in a fee builder type (probably TransactionBuilder<FeeBuilder> which has applicable methods)
-        let builder = f(TransactionBuilder::new());
+        let builder = f(TransactionBuilder::new().with_workspace_ids(self.workspace_ids));
         self.unsigned_transaction
             .fee_instructions_mut()
             .extend(builder.unsigned_transaction.into_instructions());
+        self.workspace_ids = builder.workspace_ids;
         self.panic_if_signed();
         self
     }

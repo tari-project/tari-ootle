@@ -114,7 +114,7 @@ impl TransactionBuilder {
         self.add_fee_instruction(Instruction::CallMethod {
             call: call.into(),
             method: "pay_fee".try_into().expect("Method name is longer than the limit"),
-            args: call_args![max_fee.into().non_negative_checked().expect("Negative fee not allowed")],
+            args: call_args![max_fee.into()],
         })
     }
 

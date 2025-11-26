@@ -191,16 +191,16 @@ fn fail_partial_paid_fees() {
 
     let result = test.execute_expect_commit(
         Transaction::builder()
-                // Pay less fees than the cost of the main transaction
-                .fee_transaction_pay_from_component(account, Amount::ONE_HUNDRED)
-                // These instructions should not be applied
-                .call_method(account2, "withdraw", args![
+            // Pay less fees than the cost of the main transaction
+            .fee_transaction_pay_from_component(account, Amount::ONE_HUNDRED)
+            // These instructions should not be applied
+            .call_method(account2, "withdraw", args![
                     STEALTH_TARI_RESOURCE_ADDRESS,
                     Amount(500)
                 ])
-                .put_last_instruction_output_on_workspace("bucket")
-                .call_method(account, "deposit", args![Workspace("bucket")])
-                .build_and_seal(&private_key),
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(account, "deposit", args![Workspace("bucket")])
+            .build_and_seal(&private_key),
         vec![owner_token, owner_token2],
     );
 
@@ -217,6 +217,29 @@ fn fail_partial_paid_fees() {
     assert!(!payment.is_paid_in_full());
     let new_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
     assert_eq!(new_balance, orig_balance - Amount::ONE_HUNDRED);
+}
+
+#[test]
+fn fail_pay_negative_fee() {
+    let mut test = TemplateTest::new(["tests/templates/state"]);
+
+    let (account, owner_token, private_key) = test.create_funded_account();
+    test.enable_fees();
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+                // Pay less fees than the cost of the main transaction
+                .fee_transaction_pay_from_component(account, -100)
+                .build_and_seal(&private_key),
+        vec![owner_token],
+    );
+
+    test.disable_fees();
+
+    assert!(
+        matches!(reason, RejectReason::ExecutionFailure(_)),
+        "actual reason: {reason}"
+    );
 }
 
 #[test]

@@ -70,6 +70,7 @@ pub enum FeeSource {
     Logs,
     TransactionWeight,
     SignatureVerification,
+    TemplateLoad,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, borsh::BorshSerialize)]

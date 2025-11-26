@@ -11,6 +11,7 @@ const TESTNET_FEE_TABLE: FeeTable = FeeTable {
     per_event_cost: 1,
     per_log_cost: 1,
     per_signature_verification_cost: 10,
+    per_template_load_cost_unit: 1,
 };
 
 // TODO: finalize these values
@@ -21,6 +22,7 @@ const MAINNET_FEE_TABLE: FeeTable = FeeTable {
     per_event_cost: 1,
     per_log_cost: 1,
     per_signature_verification_cost: 10,
+    per_template_load_cost_unit: 1,
 };
 
 pub const fn get_fee_table_by_network(network: Network) -> &'static FeeTable {

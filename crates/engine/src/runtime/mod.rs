@@ -89,7 +89,7 @@ use tari_template_lib::{
     },
     invoke_args,
     models::{BucketId, ComponentAddress, Metadata, NonFungibleAddress, StealthTransferStatement, VaultRef},
-    types::{engine_args::SignatureAction, EntityId},
+    types::{engine_args::SignatureAction, EntityId, TemplateAddress},
 };
 use tari_transaction::{
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
@@ -212,6 +212,12 @@ pub trait RuntimeInterface: Send + Sync {
         &self,
         statement: StealthTransferStatement,
         revealed_funds_bucket: Option<BucketId>,
+    ) -> Result<(), RuntimeError>;
+
+    fn track_template_loaded(
+        &self,
+        template_address: &TemplateAddress,
+        bytes_loaded: usize,
     ) -> Result<(), RuntimeError>;
 }
 

@@ -72,3 +72,7 @@ pub const fn all_builtin_templates() -> &'static [(TemplateAddress, &'static [u8
         // ),
     ]
 }
+
+pub fn is_builtin_template_address(addr: &TemplateAddress) -> bool {
+    *addr == ACCOUNT_TEMPLATE_ADDRESS || *addr == NFT_FAUCET_TEMPLATE_ADDRESS || *addr == XTR_FAUCET_TEMPLATE_ADDRESS
+}

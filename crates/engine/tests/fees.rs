@@ -40,13 +40,14 @@ fn deducts_fees_when_transaction_fails() {
     let mut test = TemplateTest::new(["tests/templates/state"]);
 
     let (account, owner_token, private_key) = test.create_funded_account();
-    let orig_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
+    let vaults = test.read_only_state_store().get_vaults_for_account(account).unwrap();
+    let orig_balance = vaults.get(&STEALTH_TARI_RESOURCE_ADDRESS).unwrap().balance();
 
     test.enable_fees();
 
     let result = test.execute_and_commit_on_success(
         Transaction::builder()
-            .fee_transaction_pay_from_component(account, Amount::from(1000))
+            .fee_transaction_pay_from_component(account, 1000)
             .call_function(test.get_template_address("State"), "this_doesnt_exist", args![])
             .build_and_seal(&private_key),
         vec![owner_token],
@@ -55,12 +56,12 @@ fn deducts_fees_when_transaction_fails() {
     let reason = result.expect_transaction_failure();
     result.expect_finalization_success();
     assert!(matches!(reason, RejectReason::ExecutionFailure(_)));
-    test.disable_fees();
 
     // Check the fee was still paid
     let payment = result.finalize.fee_receipt;
-    let new_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
-    assert_ne!(payment.total_fees_paid(), 0);
+    let vaults = test.read_only_state_store().get_vaults_for_account(account).unwrap();
+    let new_balance = vaults.get(&STEALTH_TARI_RESOURCE_ADDRESS).unwrap().balance();
+    assert!(payment.total_fees_paid() > 0);
     assert_eq!(orig_balance - new_balance, payment.total_fees_paid());
 }
 
@@ -319,38 +320,26 @@ fn fail_pay_too_little_no_fee_instruction() {
 }
 
 #[test]
-fn success_pay_fee_in_main_instructions() {
+fn failure_pay_fee_in_main_instructions() {
     let mut test = TemplateTest::new(iter::empty::<&str>());
 
     let (account, owner_token, private_key) = test.create_funded_account();
-    let (account2, owner_token2, _) = test.create_funded_account();
-    let orig_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
 
     test.enable_fees();
 
-    let result = test.execute_expect_success(
+    let reason = test.execute_expect_failure(
         Transaction::builder()
-            .with_fee_instructions_builder(|builder| {
-                builder
-                    .call_method(account2, "withdraw", args![STEALTH_TARI_RESOURCE_ADDRESS, Amount(500)])
-                    .put_last_instruction_output_on_workspace("bucket")
-                    .call_method(account, "deposit", args![Workspace("bucket")])
-                    .call_method(account, "pay_fee", args![Amount(1000)])
-            })
+            // Pay in fee intent, enough to pass this step
+            .pay_fee_using_account(account, 20)
+            // Call pay_fee in main instructions (outside fee instructions) not permitted
+            .call_method(account, "pay_fee", args![100])
+            .call_method(account, "balance", args![STEALTH_TARI_RESOURCE_ADDRESS])
+            .call_method(account, "balance", args![STEALTH_TARI_RESOURCE_ADDRESS])
             .build_and_seal(&private_key),
-        vec![owner_token, owner_token2],
+        vec![owner_token],
     );
 
-    test.disable_fees();
-
-    let fees = result.expect_fees_paid_in_full();
-
-    // Fee was deducted
-    let new_balance: Amount = test.call_method(account, "balance", call_args![STEALTH_TARI_RESOURCE_ADDRESS], vec![]);
-    assert_eq!(
-        new_balance,
-        orig_balance + Amount::from(500) - fees.total_fees_charged().into()
-    );
+    assert_reject_reason(reason, RejectReason::FeePaymentInMainIntent);
 }
 
 #[test]

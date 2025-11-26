@@ -44,6 +44,8 @@ pub enum TransactionValidationError {
     UnknownNetwork { byte: u8, details: String },
     #[error("Network mismatch! Current network: {actual}, Transaction network: {expected}")]
     NetworkMismatch { actual: Network, expected: Network },
+    #[error("Transaction {transaction_id} contains a pay fee instruction, which is not allowed")]
+    ContainsPayFeeInstruction { transaction_id: TransactionId },
     #[error("Dry run transactions are not allowed")]
     DryRunNotAllowed,
 }

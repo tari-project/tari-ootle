@@ -184,6 +184,12 @@ loggers:
     appenders:
       - network
 
+  tari::ootle::p2p:
+    level: debug
+    appenders:
+      - network
+      - ootle
+
   tari::ootle::engine:
     level: debug
     appenders:

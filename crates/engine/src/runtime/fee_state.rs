@@ -83,11 +83,21 @@ impl FeeState {
         std::mem::take(&mut self.fee_charges)
     }
 
+    pub fn is_paid_in_full(&self) -> bool {
+        self.total_payments() >= self.total_charges()
+    }
+
     pub fn total_charges(&self) -> u64 {
         self.fee_charges.get_total()
     }
 
     pub fn total_payments(&self) -> u64 {
         self.running_total
+    }
+
+    pub fn merge_charges(&mut self, other: &Self) {
+        for (source, amount) in other.fee_charges.iter() {
+            self.add_charge(*source, *amount);
+        }
     }
 }

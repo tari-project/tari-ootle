@@ -55,7 +55,7 @@ use std::{fmt::Debug, sync::Arc};
 
 use tari_bor::decode_exact;
 use tari_engine_types::{
-    commit_result::FinalizeResult,
+    commit_result::{FinalizeResult, RejectReason},
     component::ComponentHeader,
     confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
     indexed_value::IndexedValue,
@@ -166,9 +166,9 @@ pub trait RuntimeInterface: Send + Sync {
 
     fn claim_validator_fees(&self, address: ValidatorFeePoolAddress) -> Result<(), RuntimeError>;
 
-    fn set_fee_checkpoint(&self) -> Result<(), RuntimeError>;
-    fn reset_to_fee_checkpoint(&self) -> Result<(), RuntimeError>;
+    fn checkpoint_fee_intent(&self) -> Result<(), RuntimeError>;
     fn finalize(&self) -> Result<FinalizeResult, RuntimeError>;
+    fn finalize_failure(&self, reason: RejectReason) -> Result<FinalizeResult, RuntimeError>;
     fn validate_finalized(&self) -> Result<(), RuntimeError>;
 
     fn caller_context_invoke(

@@ -16,10 +16,13 @@ use tari_ootle_storage::global::GlobalDb;
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
+use tokio::sync::broadcast;
 
 use crate::{
     bootstrap::Services,
     dry_run::processor::DryRunTransactionProcessor,
+    event::IndexerEvent,
+    notify::Subscriber,
     rest_api::cache::HttpCacheConfig,
     storage_sqlite::SqliteIndexerStore,
     store::ReadOnlyStore,
@@ -47,6 +50,7 @@ impl HandlerContext {
                 transaction_manager: services.transaction_manager.clone(),
                 template_manager: services.template_manager.clone(),
                 dry_run_transaction_processor: services.dry_run_transaction_processor.clone(),
+                subscriber: services.event_notifier.to_subscriber(),
             }),
         }
     }
@@ -106,6 +110,10 @@ impl HandlerContext {
             config.apply(headers);
         }
     }
+
+    pub fn subscribe_events(&self) -> broadcast::Receiver<IndexerEvent> {
+        self.inner.subscriber.subscribe()
+    }
 }
 
 struct InnerContext {
@@ -120,4 +128,5 @@ struct InnerContext {
     read_only_store: ReadOnlyStore<SqliteIndexerStore>,
     template_manager: TemplateManager<PeerAddress>,
     dry_run_transaction_processor: DryRunTransactionProcessor,
+    subscriber: Subscriber<IndexerEvent>,
 }

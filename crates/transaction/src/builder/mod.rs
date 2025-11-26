@@ -184,9 +184,9 @@ impl TransactionBuilder {
         })
     }
 
-    pub fn call_method<A, T>(self, call: A, method: T, args: Vec<NamedArg>) -> Self
+    pub fn call_method<C, T>(self, call: C, method: T, args: Vec<NamedArg>) -> Self
     where
-        A: Into<NamedComponentCall>,
+        C: Into<NamedComponentCall>,
         T: TryInto<FunctionName>,
         <T as TryInto<FunctionName>>::Error: std::fmt::Debug,
     {
@@ -231,6 +231,18 @@ impl TransactionBuilder {
 
     pub fn pay_fee_stealth(self, statement: StealthTransferStatement) -> Self {
         self.pay_fee_stealth_with_opt_input_bucket(statement, None::<String>)
+    }
+
+    pub fn pay_fee_using_account<C, A>(self, account: C, amount: A) -> Self
+    where
+        C: Into<NamedComponentCall>,
+        A: Into<Amount>,
+    {
+        self.with_fee_instructions_builder(|builder| {
+            builder.call_method(account, "pay_fee", vec![
+                NamedArg::from_type(&amount.into()).expect("Failed to encode amount")
+            ])
+        })
     }
 
     pub fn pay_fee_stealth_with_input_bucket<B: Into<String>>(

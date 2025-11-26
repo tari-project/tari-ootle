@@ -121,6 +121,10 @@ impl Instruction {
             _ => None,
         }
     }
+
+    pub fn is_pay_fee(&self) -> bool {
+        matches!(self, Self::PayFee { .. })
+    }
 }
 
 impl Display for Instruction {

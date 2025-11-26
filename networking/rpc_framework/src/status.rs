@@ -9,7 +9,7 @@ use thiserror::Error;
 use super::RpcError;
 use crate::{optional::OrOptional, proto};
 
-const LOG_TARGET: &str = "comms::rpc::status";
+const LOG_TARGET: &str = "libp2p::rpc::status";
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub struct RpcStatus {
@@ -91,7 +91,7 @@ impl RpcStatus {
     /// potentially sensitive error information. Use this function with map_err to catch "miscellaneous" errors.
     pub fn log_internal_error<'a, E: std::error::Error + 'a>(target: &'a str) -> impl Fn(E) -> Self + 'a {
         move |err| {
-            log::error!(target: target, "Internal error: {}", err);
+            log::error!(target: target, "🚨 Internal error: {}", err);
             Self::general_default()
         }
     }

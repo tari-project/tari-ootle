@@ -28,7 +28,7 @@ use tari_engine_types::{
     stealth,
     stealth::ValidatedStealthTransfer,
     substate::{Substate, SubstateDiff, SubstateId, SubstateValue},
-    transaction_receipt::TransactionReceipt,
+    transaction_receipt::{FinalizeOutcome, TransactionReceipt},
     vault::Vault,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
     ConvertFromByteType,
@@ -1011,10 +1011,12 @@ impl WorkingState {
 
     pub fn finalize_transaction_receipt(
         &mut self,
+        outcome: FinalizeOutcome,
         diff: &SubstateDiff,
         fee_receipt: FeeReceipt,
     ) -> Result<TransactionReceipt, RuntimeError> {
         Ok(TransactionReceipt {
+            outcome,
             diff_summary: diff.into(),
             fee_withdrawals: diff.validator_fee_withdrawals().to_vec().into_boxed_slice(),
             events: self.events.clone().into_boxed_slice(),
@@ -1334,7 +1336,7 @@ impl WorkingState {
         &self.logs
     }
 
-    pub fn finalize_fee_receipt(
+    pub fn finalize_fees_and_refunds(
         &mut self,
         substates_to_persist: &mut IndexMap<SubstateId, SubstateValue>,
     ) -> Result<FeeReceipt, RuntimeError> {

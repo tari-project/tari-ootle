@@ -371,7 +371,7 @@ impl Display for TransactionResult {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum RejectReason {
     ExecutionFailure(String),
-    OneOrMoreInputsNotFound(String),
+    OneOrMoreSubstatesNotFound(String),
     FailedToLockInputs(String),
     FailedToLockOutputs(String),
     ForeignPledgeInputConflict,
@@ -381,6 +381,7 @@ pub enum RejectReason {
         abort_reason: AbortReason,
     },
     InsufficientFeesPaid(String),
+    FeePaymentInMainIntent,
     Abort {
         reason: AbortReason,
     },
@@ -389,14 +390,14 @@ pub enum RejectReason {
 impl Display for RejectReason {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            RejectReason::ExecutionFailure(msg) => write!(f, "Execution failure: {}", msg),
-            RejectReason::OneOrMoreInputsNotFound(msg) => write!(f, "One or more inputs not found: {}", msg),
-            RejectReason::FailedToLockInputs(msg) => write!(f, "Failed to lock inputs: {}", msg),
-            RejectReason::FailedToLockOutputs(msg) => write!(f, "Failed to lock outputs: {}", msg),
-            RejectReason::ForeignPledgeInputConflict => {
+            Self::ExecutionFailure(msg) => write!(f, "Execution failure: {}", msg),
+            Self::OneOrMoreSubstatesNotFound(msg) => write!(f, "One or more substates not found: {}", msg),
+            Self::FailedToLockInputs(msg) => write!(f, "Failed to lock inputs: {}", msg),
+            Self::FailedToLockOutputs(msg) => write!(f, "Failed to lock outputs: {}", msg),
+            Self::ForeignPledgeInputConflict => {
                 write!(f, "Transaction conflicts with an existing foreign pledge",)
             },
-            RejectReason::ForeignShardGroupDecidedToAbort {
+            Self::ForeignShardGroupDecidedToAbort {
                 start_shard,
                 end_shard,
                 abort_reason,
@@ -406,8 +407,11 @@ impl Display for RejectReason {
                     "Foreign shard group ({start_shard}-{end_shard}) decided to abort: {abort_reason}"
                 )
             },
-            RejectReason::InsufficientFeesPaid(msg) => write!(f, "Insufficient fees paid: {}", msg),
-            RejectReason::Abort { reason } => write!(f, "Abnormal abort: {reason}"),
+            Self::InsufficientFeesPaid(msg) => write!(f, "Insufficient fees paid: {}", msg),
+            Self::FeePaymentInMainIntent => {
+                write!(f, "Fee payment found in main intent instead of fee intent")
+            },
+            Self::Abort { reason } => write!(f, "Abnormal abort: {reason}"),
         }
     }
 }
@@ -422,6 +426,7 @@ pub enum AbortReason {
     ExecutionFailure,
     OneOrMoreInputsNotFound,
     InsufficientFeesPaid,
+    FeePaymentInMainIntent,
 }
 
 impl Display for AbortReason {
@@ -435,12 +440,13 @@ impl From<&RejectReason> for AbortReason {
         match reject_reason {
             RejectReason::Abort { reason } => *reason,
             RejectReason::ExecutionFailure(_) => Self::ExecutionFailure,
-            RejectReason::OneOrMoreInputsNotFound(_) => Self::OneOrMoreInputsNotFound,
+            RejectReason::OneOrMoreSubstatesNotFound(_) => Self::OneOrMoreInputsNotFound,
             RejectReason::ForeignPledgeInputConflict => Self::ForeignPledgeInputConflict,
             RejectReason::FailedToLockInputs(_) => Self::LockInputsFailed,
             RejectReason::FailedToLockOutputs(_) => Self::LockOutputsFailed,
             RejectReason::ForeignShardGroupDecidedToAbort { abort_reason, .. } => *abort_reason,
             RejectReason::InsufficientFeesPaid(_) => Self::InsufficientFeesPaid,
+            RejectReason::FeePaymentInMainIntent => Self::FeePaymentInMainIntent,
         }
     }
 }

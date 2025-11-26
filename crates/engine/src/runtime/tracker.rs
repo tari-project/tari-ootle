@@ -22,10 +22,10 @@
 
 use std::sync::{Arc, Mutex, RwLock};
 
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexMap;
 use log::*;
 use tari_engine_types::{
-    commit_result::{FinalizeResult, TransactionResult},
+    commit_result::{FinalizeResult, RejectReason, TransactionResult},
     component::{ComponentBody, ComponentHeader},
     events::Event,
     fees::FeeSource,
@@ -33,12 +33,13 @@ use tari_engine_types::{
     lock::LockFlag,
     logs::LogEntry,
     substate::{Substate, SubstateId, SubstateValue},
+    transaction_receipt::FinalizeOutcome,
     virtual_substate::VirtualSubstates,
 };
 use tari_ootle_common_types::Epoch;
 use tari_template_lib::{
     auth::{ComponentAccessRules, OwnerRule},
-    models::{ComponentAddress, ComponentAddressAllocation, Metadata, UtxoAddress},
+    models::{ComponentAddress, ComponentAddressAllocation, Metadata},
     prelude::{RistrettoPublicKeyBytes, TemplateAddress},
     types::Hash,
 };
@@ -248,25 +249,62 @@ impl StateTracker {
         })
     }
 
-    pub fn finalize(
-        &self,
-        mut substates_to_persist: IndexMap<SubstateId, SubstateValue>,
-        downed_utxos: IndexSet<UtxoAddress>,
-    ) -> Result<FinalizeResult, RuntimeError> {
-        // Finalise will always reset the state
-        let mut state = self.take_working_state();
-        if state.call_frame_depth() > 0 {
-            return Err(RuntimeError::CallFrameRemainingOnStack {
-                remaining: state.call_frame_depth(),
-            });
+    pub fn finalize(&self, failure: Option<RejectReason>) -> Result<FinalizeResult, RuntimeError> {
+        let failure = failure.or_else(|| {
+            self.read_with(|state| {
+                let fee_state = state.fee_state();
+                if fee_state.is_paid_in_full() {
+                    None
+                } else {
+                    Some(RejectReason::InsufficientFeesPaid(format!(
+                        "Required fees {} but {} paid",
+                        fee_state.total_charges(),
+                        fee_state.total_payments()
+                    )))
+                }
+            })
+        });
+
+        if let Some(reason) = failure {
+            let mut checkpoint_state = self.take_fee_checkpoint().ok_or(RuntimeError::NoFeeCheckpoint)?;
+            let mut substates_to_persist = checkpoint_state.take_mutated_substates();
+            // Process fees and refunds based on the fee checkpoint state
+            let fee_receipt = checkpoint_state.finalize_fees_and_refunds(&mut substates_to_persist)?;
+
+            let downed_utxos = checkpoint_state.take_downed_utxos();
+            let fee_withdrawals = checkpoint_state.take_validator_fee_withdrawals();
+
+            let mut diff =
+                checkpoint_state.generate_substate_diff(substates_to_persist, downed_utxos, fee_withdrawals)?;
+            let transaction_receipt = checkpoint_state.finalize_transaction_receipt(
+                FinalizeOutcome::FeeIntentCommit,
+                &diff,
+                fee_receipt.clone(),
+            )?;
+            diff.up(
+                SubstateId::TransactionReceipt(checkpoint_state.transaction_hash().into()),
+                Substate::new(0, transaction_receipt),
+            );
+
+            return Ok(FinalizeResult::new(
+                checkpoint_state.transaction_hash(),
+                checkpoint_state.take_logs(),
+                checkpoint_state.take_events(),
+                TransactionResult::AcceptFeeRejectRest(diff, reason),
+                fee_receipt,
+            ));
         }
 
-        let fee_withdrawals = state.take_validator_fee_withdrawals();
-
+        // Finalise will always reset the state
+        let mut state = self.take_working_state();
         // Resolve the transfers to the fee pool resource and vault refunds
-        let fee_receipt = state.finalize_fee_receipt(&mut substates_to_persist)?;
+        let mut substates_to_persist = state.take_mutated_substates();
+        let fee_receipt = state.finalize_fees_and_refunds(&mut substates_to_persist)?;
+        let downed_utxos = state.take_downed_utxos();
+        let fee_withdrawals = state.take_validator_fee_withdrawals();
         let mut diff = state.generate_substate_diff(substates_to_persist, downed_utxos, fee_withdrawals)?;
-        let transaction_receipt = state.finalize_transaction_receipt(&diff, fee_receipt.clone())?;
+        let transaction_receipt =
+            state.finalize_transaction_receipt(FinalizeOutcome::Commit, &diff, fee_receipt.clone())?;
         diff.up(
             SubstateId::TransactionReceipt(state.transaction_hash().into()),
             Substate::new(0, transaction_receipt),
@@ -293,20 +331,15 @@ impl StateTracker {
         })
     }
 
-    pub fn reset_to_fee_checkpoint(&self) -> Result<(), RuntimeError> {
+    fn take_fee_checkpoint(&self) -> Option<WorkingState> {
         let mut checkpoint = self.fee_checkpoint.lock().unwrap();
-        if let Some(checkpoint) = checkpoint.take() {
-            self.write_with(|state| {
-                let fee_state = state.fee_state().clone();
-                *state = checkpoint;
-                // Preserve fee state across resets so that we can charge for fees incurred during execution before the
-                // failure
-                *state.fee_state_mut() = fee_state;
-            });
-            Ok(())
-        } else {
-            Err(RuntimeError::NoFeeCheckpoint)
-        }
+        let mut fee_cp = checkpoint.take()?;
+        // Preserve fee state across resets so that we can charge for fees incurred during execution before the
+        // failure
+        self.read_with(|state| {
+            fee_cp.fee_state_mut().merge_charges(state.fee_state());
+        });
+        Some(fee_cp)
     }
 
     fn take_working_state(&self) -> WorkingState {
@@ -339,5 +372,10 @@ impl StateTracker {
 
     pub(super) fn write_with<R, F: FnOnce(&mut WorkingState) -> R>(&self, f: F) -> R {
         f(&mut self.working_state.write().unwrap())
+    }
+
+    pub(super) fn is_fee_intent_checkpointed(&self) -> bool {
+        let checkpoint = self.fee_checkpoint.lock().unwrap();
+        checkpoint.is_some()
     }
 }

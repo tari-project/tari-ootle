@@ -816,6 +816,7 @@ impl From<AbortReason> for proto::consensus::AbortReason {
             AbortReason::OneOrMoreInputsNotFound => Self::OneOrMoreInputsNotFound,
             AbortReason::ForeignPledgeInputConflict => Self::ForeignPledgeInputConflict,
             AbortReason::InsufficientFeesPaid => Self::InsufficientFeesPaid,
+            AbortReason::FeePaymentInMainIntent => Self::FeePaymentInMainIntent,
         }
     }
 }
@@ -833,6 +834,7 @@ impl TryFrom<proto::consensus::AbortReason> for AbortReason {
             proto::consensus::AbortReason::OneOrMoreInputsNotFound => Ok(Self::OneOrMoreInputsNotFound),
             proto::consensus::AbortReason::ForeignPledgeInputConflict => Ok(Self::ForeignPledgeInputConflict),
             proto::consensus::AbortReason::InsufficientFeesPaid => Ok(Self::InsufficientFeesPaid),
+            proto::consensus::AbortReason::FeePaymentInMainIntent => Ok(Self::FeePaymentInMainIntent),
         }
     }
 }

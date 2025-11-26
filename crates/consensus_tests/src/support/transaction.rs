@@ -11,7 +11,7 @@ use tari_engine_types::{
     fees::{FeeBreakdown, FeeReceipt},
     published_template::PublishedTemplate,
     substate::{Substate, SubstateDiff, SubstateId},
-    transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
+    transaction_receipt::{FinalizeOutcome, TransactionReceipt, TransactionReceiptAddress},
     ValidatorFeePool,
     ValidatorFeeWithdrawal,
 };
@@ -106,6 +106,7 @@ pub fn create_execution_result_for_transaction(
         diff.up(
             SubstateId::TransactionReceipt(TransactionReceiptAddress::from(transaction.calculate_id())),
             Substate::new(0, TransactionReceipt {
+                outcome: FinalizeOutcome::Commit,
                 diff_summary: Default::default(),
                 fee_withdrawals: Default::default(),
                 events: Default::default(),

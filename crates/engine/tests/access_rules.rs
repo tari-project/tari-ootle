@@ -50,7 +50,7 @@ mod component_access_rules {
             .add_method_rule("set_value", owner_rule.clone())
             .default(AccessRule::DenyAll);
 
-        let result = test.execute_expect_success(
+        test.execute_expect_success(
             Transaction::builder()
                 .call_function(access_rules_template, "with_configured_rules", args![
                     // Owner
@@ -68,9 +68,13 @@ mod component_access_rules {
             vec![owner1_proof.clone()],
         );
 
-        let component_address = result.finalize.execution_results[0]
-            .decode::<ComponentAddress>()
-            .unwrap();
+        let (component_address, _) = test
+            .read_only_state_store()
+            .get_components_by_template_address(access_rules_template)
+            .unwrap()
+            .first()
+            .unwrap()
+            .clone();
 
         test.execute_expect_success(
             Transaction::builder()

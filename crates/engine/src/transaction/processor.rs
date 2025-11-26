@@ -25,7 +25,7 @@ use std::{sync::Arc, time::Instant};
 use log::*;
 use tari_bor::to_value;
 use tari_engine_types::{
-    commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
+    commit_result::{ExecuteResult, FinalizeResult},
     component::derive_component_address_from_public_key,
     entity_id_provider::EntityIdProvider,
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
@@ -173,7 +173,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
             Ok(execution_results) => {
                 // Checkpoint the tracker state after the fee instructions have been executed in case of transaction
                 // failure.
-                if let Err(err) = runtime.interface().set_fee_checkpoint() {
+                if let Err(err) = runtime.interface().checkpoint_fee_intent() {
                     let mut finalize = FinalizeResult::new_rejected(transaction_hash, err.to_reject_reason());
                     finalize.execution_results = execution_results;
                     return Ok(ExecuteResult {
@@ -184,11 +184,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
                 execution_results
             },
             Err(err) => {
+                warn!(
+                    target: LOG_TARGET,
+                    "Fee payment failed for transaction {}: {}",
+                    transaction_hash,
+                    err
+                );
                 return Ok(ExecuteResult {
-                    finalize: FinalizeResult::new_rejected(
-                        transaction_hash,
-                        RejectReason::ExecutionFailure(err.to_string()),
-                    ),
+                    finalize: FinalizeResult::new_rejected(transaction_hash, err.to_reject_reason()),
                     execution_time: timer.elapsed(),
                 });
             },
@@ -199,11 +202,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
         match instruction_result {
             Ok(execution_results) => {
                 let mut finalize = runtime.interface().finalize()?;
-                if finalize.fee_receipt.is_paid_in_full() {
-                    finalize.execution_results = execution_results;
-                } else {
-                    finalize.execution_results = fee_exec_result;
-                }
+                finalize.execution_results = execution_results;
                 Ok(ExecuteResult {
                     finalize,
                     execution_time: timer.elapsed(),
@@ -213,18 +212,9 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
             Err(err) => {
                 // Reset the state to when the state at the end of the fee instructions. The fee charges for the
                 // successful instructions are still charged even though the transaction failed.
-                runtime.interface().reset_to_fee_checkpoint()?;
                 // Finalize will now contain the fee payments and vault refunds only
-                let mut finalize = runtime.interface().finalize()?;
+                let mut finalize = runtime.interface().finalize_failure(err.to_reject_reason())?;
                 finalize.execution_results = fee_exec_result;
-                finalize.result = TransactionResult::AcceptFeeRejectRest(
-                    finalize
-                        .result
-                        .any_accept()
-                        .cloned()
-                        .expect("The fee transaction should be there"),
-                    RejectReason::ExecutionFailure(err.to_string()),
-                );
                 Ok(ExecuteResult {
                     finalize,
                     execution_time: timer.elapsed(),

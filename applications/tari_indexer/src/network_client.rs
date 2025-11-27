@@ -3,15 +3,18 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    fmt::Display,
     future::Future,
 };
 
+use indexmap::IndexMap;
 use log::{info, warn};
 use tari_epoch_manager::{EpochManagerError, EpochManagerReader};
-use tari_ootle_common_types::{optional::IsNotFoundError, NodeAddressable, NumPreshards, ShardGroup, SubstateAddress};
+use tari_ootle_common_types::{displayable::Displayable, NodeAddressable, NumPreshards, ShardGroup, SubstateAddress};
 use tari_transaction::{Transaction, TransactionId};
-use tari_validator_node_rpc::client::{ValidatorNodeClientFactory, ValidatorNodeRpcClient};
+use tari_validator_node_rpc::{
+    client::{ValidatorNodeClientFactory, ValidatorNodeRpcClient},
+    ValidatorNodeRpcClientError,
+};
 
 const LOG_TARGET: &str = "tari::indexer::network_client";
 
@@ -27,7 +30,6 @@ where
     TAddr: NodeAddressable + 'static,
     TEpochManager: EpochManagerReader<Addr = TAddr> + 'static,
     TClientFactory: ValidatorNodeClientFactory<TAddr> + 'static,
-    <TClientFactory::Client as ValidatorNodeRpcClient<TAddr>>::Error: IsNotFoundError + 'static,
 {
     pub fn new(epoch_manager: TEpochManager, client_provider: TClientFactory, num_preshards: NumPreshards) -> Self {
         Self {
@@ -88,17 +90,16 @@ where
         Ok(tx_id)
     }
 
-    pub async fn try_single_with_committee<'a, F, T, E, TFut>(
+    pub async fn try_single_with_committee<'a, F, T, TFut>(
         &self,
         substate_address: SubstateAddress,
         callback: F,
     ) -> Result<T, NetworkClientError>
     where
         F: FnMut(TClientFactory::Client) -> TFut,
-        TFut: Future<Output = Result<T, E>> + 'a,
+        TFut: Future<Output = Result<T, ValidatorNodeRpcClientError>> + 'a,
         TClientFactory::Client: 'a,
         T: 'static,
-        E: Display,
     {
         let results = self
             .try_with_committee(std::iter::once(substate_address), callback)
@@ -110,24 +111,23 @@ where
             .expect("Expected exactly one result for single substate address")
             .map_err(|e| NetworkClientError::AllValidatorsFailed {
                 committee_size: 1,
-                last_error: Some(e.to_string()),
+                last_error: Some(e),
             })
     }
 
     /// Fetches the committee members for the given shard and calls the given callback with each member until
     /// the callback returns a `Ok` with results for each shard group. If an Ok is returned, the hashmap is guaranteed
     /// to be the same size as the number of unique shard groups queried.
-    pub async fn try_with_committee<'a, F, T, E, TFut, ISubstateAddr>(
+    pub async fn try_with_committee<'a, F, T, TFut, ISubstateAddr>(
         &self,
         substate_addresses: ISubstateAddr,
         mut callback: F,
-    ) -> Result<HashMap<ShardGroup, Result<T, E>>, NetworkClientError>
+    ) -> Result<IndexMap<ShardGroup, Result<T, ValidatorNodeRpcClientError>>, NetworkClientError>
     where
         F: FnMut(TClientFactory::Client) -> TFut,
-        TFut: Future<Output = Result<T, E>> + 'a,
+        TFut: Future<Output = Result<T, ValidatorNodeRpcClientError>> + 'a,
         TClientFactory::Client: 'a,
         T: 'static,
-        E: Display,
         ISubstateAddr: IntoIterator<Item = SubstateAddress>,
     {
         let epoch = self.epoch_manager.current_epoch().await?;
@@ -161,8 +161,8 @@ where
         }
 
         let mut num_succeeded = 0;
-        let mut results = HashMap::with_capacity(committee_size);
-        let mut last_error = None;
+        let mut results = IndexMap::with_capacity(committee_size);
+        let mut last_error_pos = None;
         for (shard_group, committee) in all_members {
             for member in committee.shuffled() {
                 let client = self.client_provider.create_client(&member.address);
@@ -177,7 +177,7 @@ where
                             target: LOG_TARGET,
                             "Request failed for validator '{}': {}", member, err
                         );
-                        last_error = Some(err.to_string());
+                        last_error_pos = Some(results.len());
                         results.insert(shard_group, Err(err));
                     },
                 }
@@ -185,6 +185,16 @@ where
         }
 
         if num_succeeded == 0 {
+            let mut last_error = None;
+
+            if let Some(pos) = last_error_pos {
+                let (_, last) = results.swap_remove_index(pos).expect("position must exist");
+                // Avoid unwrap_err, because that requires T: Debug
+                match last {
+                    Ok(_) => unreachable!("last_error_pos points to an Err result"),
+                    Err(e) => last_error = Some(e),
+                }
+            }
             return Err(NetworkClientError::AllValidatorsFailed {
                 committee_size,
                 last_error,
@@ -199,10 +209,10 @@ where
 pub enum NetworkClientError {
     #[error("Epoch manager error: {0}")]
     EpochManagerError(#[from] EpochManagerError),
-    #[error("Rpc call failed for all ({committee_size}) validators: {}", .last_error.as_deref().unwrap_or("unknown"))]
+    #[error("Rpc call failed for all ({committee_size}) validators: {}", .last_error.display())]
     AllValidatorsFailed {
         committee_size: usize,
-        last_error: Option<String>,
+        last_error: Option<ValidatorNodeRpcClientError>,
     },
     #[error("No committee at present. Try again later")]
     NoCommitteeMembers,

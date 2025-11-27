@@ -147,7 +147,12 @@ impl Signable<&RistrettoPublicKeyBytes> for UnsealedTransactionV1 {
 impl IntoSigned for UnsealedTransactionV1 {
     type SignedOutput = Transaction;
 
-    fn into_signed(self, public_key: RistrettoPublicKey, signature: RistrettoSchnorr) -> Self::SignedOutput {
+    fn into_signed(mut self, public_key: RistrettoPublicKey, signature: RistrettoSchnorr) -> Self::SignedOutput {
+        if self.signatures.is_empty() {
+            // Mark that the seal signer is authorized if there are no other signers
+            self.transaction.is_seal_signer_authorized = true;
+        }
+
         self.set_seal_signature(TransactionSealSignature::new(
             public_key.to_byte_type(),
             signature.to_byte_type(),

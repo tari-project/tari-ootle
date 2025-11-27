@@ -563,6 +563,7 @@ impl TemplateTest {
         let transaction = Transaction::builder()
             .with_fee_instructions(fee_instructions)
             .with_instructions(instructions)
+            .with_authorized_seal_signer()
             .build_and_seal(&self.secret_key);
 
         self.try_execute(transaction, proofs)

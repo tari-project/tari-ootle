@@ -24,12 +24,7 @@ pub(crate) mod error;
 
 use tari_epoch_manager::EpochManagerReader;
 use tari_indexer_client::types::TransactionEntry;
-use tari_ootle_common_types::{
-    optional::{IsNotFoundError, Optional},
-    NodeAddressable,
-    SubstateRequirementRef,
-    ToSubstateAddress,
-};
+use tari_ootle_common_types::{optional::Optional, NodeAddressable, SubstateRequirementRef, ToSubstateAddress};
 use tari_transaction::{Transaction, TransactionId};
 use tari_validator_node_rpc::client::{
     SubstateResult,
@@ -55,7 +50,6 @@ where
     TAddr: NodeAddressable + 'static,
     TEpochManager: EpochManagerReader<Addr = TAddr> + 'static,
     TClientFactory: ValidatorNodeClientFactory<TAddr> + 'static,
-    <TClientFactory::Client as ValidatorNodeRpcClient<TAddr>>::Error: IsNotFoundError + 'static,
     TStore: IndexerStore,
 {
     pub fn new(network_client: TariNetworkClient<TEpochManager, TClientFactory>, store: TStore) -> Self {
@@ -64,7 +58,7 @@ where
 
     pub async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, TransactionManagerError> {
         if !transaction.verify_all_signatures() {
-            // DEV note: If signatures are invalid here (but they should be valid), this probably indicates an issue
+            // DEV note: If signatures are invalid here, this is probably an issue
             // with the JSON decoding (crates/engine_types/src/argument_parser.rs)
             return Err(TransactionManagerError::InvalidTransaction {
                 transaction_id: transaction.calculate_id(),

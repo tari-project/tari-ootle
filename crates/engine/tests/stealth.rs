@@ -107,8 +107,9 @@ fn basic_transfer() {
     let result = test.execute_expect_success(
         Transaction::builder()
             .stealth_transfer(faucet_resx, transfer.statement)
+            .finish()
             .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
-            .build_and_seal(test.secret_key()),
+            .seal(test.secret_key()),
         vec![],
     );
 
@@ -145,8 +146,9 @@ fn programmatic_transfer() {
     let result = test.execute_expect_success(
         Transaction::builder()
             .call_method(faucet, "programmatic_transfer", args![transfer.statement])
+            .finish()
             .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
-            .build_and_seal(test.secret_key()),
+            .seal(test.secret_key()),
         vec![],
     );
 
@@ -183,8 +185,9 @@ fn transfer_with_revealed_outputs() {
             .stealth_transfer(faucet_resx, transfer.statement)
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(account, "deposit", args![Workspace("bucket")])
+            .finish()
             .add_signer(&test.to_public_key_bytes(), &mint.output_masks[1])
-            .build_and_seal(test.secret_key()),
+            .seal(test.secret_key()),
         vec![],
     );
 
@@ -238,9 +241,10 @@ fn transfer_revealed_between_accounts() {
             .stealth_transfer_with_input_bucket(faucet_resx, transfer_from_alice_to_bob.statement, "alice_to_bob")
             .put_last_instruction_output_on_workspace("transfer_to_bob")
             .call_method(bob, "deposit", args![Workspace("transfer_to_bob")])
+            .finish()
             .add_signer(&test.to_public_key_bytes(), &mint.output_masks[1])
             .add_signer(&test.to_public_key_bytes(), &mint.output_masks[2])
-            .build_and_seal(&alice_sk),
+            .seal(&alice_sk),
         vec![alice_proof],
     );
 
@@ -282,8 +286,9 @@ fn transfer_invalid_balance_in_statement() {
             .stealth_transfer(faucet_resx, transfer_from_faucet.statement)
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(alice, "deposit", args![Workspace("bucket")])
+            .finish()
             .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
-            .build_and_seal(test.secret_key()),
+            .seal(test.secret_key()),
         vec![],
     );
 
@@ -354,8 +359,9 @@ fn transfer_invalid_range_proof_in_statement() {
             .stealth_transfer(faucet_resx, transfer_from_faucet.statement)
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(alice, "deposit", args![Workspace("bucket")])
+            .finish()
             .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
-            .build_and_seal(test.secret_key()),
+            .seal(test.secret_key()),
         vec![],
     );
 
@@ -401,8 +407,9 @@ fn many_outputs_in_one_transfer() {
     let result = test.execute_expect_success(
         Transaction::builder()
             .stealth_transfer(faucet_resx, transfer_from_faucet.statement)
+            .finish()
             .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
-            .build_and_seal(test.secret_key()),
+            .seal(test.secret_key()),
         vec![],
     );
 
@@ -460,8 +467,9 @@ fn mint_with_view_key() {
     let result = test.execute_expect_success(
         Transaction::builder()
             .stealth_transfer(faucet_resx, withdraw_proof.statement)
+            .finish()
             .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
-            .build_and_seal(test.secret_key()),
+            .seal(test.secret_key()),
         vec![],
     );
 
@@ -527,9 +535,10 @@ fn freeze_then_attempt_spend() {
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .stealth_transfer(faucet_resx, transfer.statement.clone())
+            .finish()
             .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
             .add_signer(&test.to_public_key_bytes(), &mint.output_masks[1])
-            .build_and_seal(test.secret_key()),
+            .seal(test.secret_key()),
         vec![],
     );
 
@@ -546,9 +555,10 @@ fn freeze_then_attempt_spend() {
     let result = test.execute_expect_success(
         Transaction::builder()
             .stealth_transfer(faucet_resx, transfer.statement)
+            .finish()
             .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
             .add_signer(&test.to_public_key_bytes(), &mint.output_masks[1])
-            .build_and_seal(test.secret_key()),
+            .seal(test.secret_key()),
         vec![],
     );
 

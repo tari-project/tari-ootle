@@ -46,7 +46,6 @@ use crate::{
 #[derive(Debug, Clone, Default)]
 pub struct TransactionBuilder {
     unsigned_transaction: UnsignedTransaction,
-    signatures: Vec<TransactionSignature>,
     workspace_ids: WorkspaceIds,
     fee_instruction_builder: Option<Box<TransactionBuilder>>,
 }
@@ -55,7 +54,6 @@ impl TransactionBuilder {
     pub fn new() -> Self {
         Self {
             unsigned_transaction: UnsignedTransaction::default(),
-            signatures: vec![],
             workspace_ids: WorkspaceIds::new(),
             fee_instruction_builder: Some(Box::new(Self::new_fee_builder())),
         }
@@ -64,7 +62,6 @@ impl TransactionBuilder {
     fn new_fee_builder() -> Self {
         Self {
             unsigned_transaction: UnsignedTransaction::default(),
-            signatures: vec![],
             workspace_ids: WorkspaceIds::new(),
             fee_instruction_builder: None,
         }
@@ -73,7 +70,6 @@ impl TransactionBuilder {
     pub fn with_unsigned_transaction<T: Into<UnsignedTransaction>>(self, unsigned_transaction: T) -> Self {
         Self {
             unsigned_transaction: unsigned_transaction.into(),
-            signatures: vec![],
             workspace_ids: WorkspaceIds::new(),
             fee_instruction_builder: Some(Box::new(Self::new_fee_builder())),
         }
@@ -99,7 +95,6 @@ impl TransactionBuilder {
 
     pub fn with_authorized_seal_signer(mut self) -> Self {
         self.unsigned_transaction = self.unsigned_transaction.authorized_sealed_signer();
-        self.panic_if_signed();
         self
     }
 
@@ -245,6 +240,10 @@ impl TransactionBuilder {
         self.pay_fee_stealth_with_opt_input_bucket(statement, None::<String>)
     }
 
+    fn is_in_fee_builder(&self) -> bool {
+        self.fee_instruction_builder.is_none()
+    }
+
     pub fn pay_fee_using_account<C, A>(self, account: C, amount: A) -> Self
     where
         C: Into<NamedComponentCall>,
@@ -270,10 +269,13 @@ impl TransactionBuilder {
         statement: StealthTransferStatement,
         input_bucket: Option<B>,
     ) -> Self {
-        let revealed_input_bucket = input_bucket.map(|bucket| self.get_workspace_offset_id_from_named_arg(bucket));
-        self.add_instruction(Instruction::PayFee {
-            statement,
-            revealed_input_bucket,
+        self.with_fee_instructions_builder(|builder| {
+            let revealed_input_bucket =
+                input_bucket.map(|bucket| builder.get_workspace_offset_id_from_named_arg(bucket));
+            builder.add_instruction(Instruction::PayFee {
+                statement,
+                revealed_input_bucket,
+            })
         })
     }
 
@@ -344,53 +346,42 @@ impl TransactionBuilder {
 
     pub fn with_fee_instructions<I: IntoIterator<Item = Instruction>>(mut self, instructions: I) -> Self {
         self.unsigned_transaction.fee_instructions_mut().extend(instructions);
-        self.panic_if_signed();
         self
     }
 
     pub fn with_fee_instructions_builder<F: FnOnce(TransactionBuilder) -> TransactionBuilder>(mut self, f: F) -> Self {
-        // TODO: pass in a fee builder type (probably TransactionBuilder<FeeBuilder> which has applicable methods)
+        if self.is_in_fee_builder() {
+            let builder = f(self);
+            return builder;
+        }
         let builder = f(*self.fee_instruction_builder.take().unwrap());
         self.fee_instruction_builder = Some(Box::new(builder));
-        // self.unsigned_transaction
-        //     .fee_instructions_mut()
-        //     .extend(builder.unsigned_transaction.into_instructions());
-        self.panic_if_signed();
         self
     }
 
     pub fn add_fee_instruction(mut self, instruction: Instruction) -> Self {
         self.unsigned_transaction.fee_instructions_mut().push(instruction);
-        self.panic_if_signed();
         self
     }
 
     pub fn add_instruction(mut self, instruction: Instruction) -> Self {
         self.unsigned_transaction.instructions_mut().push(instruction);
-        // Reset the signatures as they are no longer valid
-        self.panic_if_signed();
         self
     }
 
     pub fn with_instructions<I: IntoIterator<Item = Instruction>>(mut self, instructions: I) -> Self {
         self.unsigned_transaction.instructions_mut().extend(instructions);
-        // Reset the signatures as they are no longer valid
-        self.panic_if_signed();
         self
     }
 
     /// Add an input to use in the transaction
     pub fn add_input<I: Into<SubstateRequirement>>(mut self, input_object: I) -> Self {
         self.unsigned_transaction.inputs_mut().insert(input_object.into());
-        // Reset the signatures as they are no longer valid
-        self.panic_if_signed();
         self
     }
 
     pub fn with_inputs<I: IntoIterator<Item = SubstateRequirement>>(mut self, inputs: I) -> Self {
         self.unsigned_transaction = self.unsigned_transaction.with_inputs(inputs);
-        // Reset the signatures as they are no longer valid
-        self.panic_if_signed();
         self
     }
 
@@ -400,15 +391,11 @@ impl TransactionBuilder {
 
     pub fn with_min_epoch(mut self, min_epoch: Option<Epoch>) -> Self {
         self.unsigned_transaction.set_min_epoch(min_epoch);
-        // Reset the signatures as they are no longer valid
-        self.panic_if_signed();
         self
     }
 
     pub fn with_max_epoch(mut self, max_epoch: Option<Epoch>) -> Self {
         self.unsigned_transaction.set_max_epoch(max_epoch);
-        // Reset the signatures as they are no longer valid
-        self.panic_if_signed();
         self
     }
 
@@ -436,36 +423,26 @@ impl TransactionBuilder {
         })
     }
 
-    pub fn build_unsigned_transaction(self) -> UnsignedTransaction {
+    pub fn build_unsigned_transaction(mut self) -> UnsignedTransaction {
+        self.apply_fee_instructions();
         self.unsigned_transaction
     }
 
-    pub fn add_signer(self, sealed_signer: &RistrettoPublicKeyBytes, secret_key: &RistrettoSecretKey) -> Self {
-        let signature = match &self.unsigned_transaction {
-            UnsignedTransaction::V1(tx) => TransactionSignature::sign_v1(secret_key, sealed_signer, tx),
-        };
-        self.add_signature(signature)
+    pub fn add_signer(
+        self,
+        sealed_signer: &RistrettoPublicKeyBytes,
+        secret_key: &RistrettoSecretKey,
+    ) -> UnsealedTransactionV1 {
+        let unsigned = self.build_unsigned_transaction();
+        let signature = TransactionSignature::sign(secret_key, sealed_signer, &unsigned);
+        unsigned.add_signature(signature)
     }
 
-    pub fn add_signature(mut self, signature: TransactionSignature) -> Self {
-        self.signatures.push(signature);
-        self
+    pub fn add_signature(self, signature: TransactionSignature) -> UnsealedTransactionV1 {
+        self.build_unsigned_transaction().add_signature(signature)
     }
 
-    pub fn signatures(&self) -> &[TransactionSignature] {
-        &self.signatures
-    }
-
-    #[track_caller]
-    fn panic_if_signed(&mut self) {
-        // TODO: use the type system to prevent this. Right now, IMO (debatable) it's better to panic than to allow the
-        // builder to potentially produce invalid transactions or unexpected results.
-        if !self.signatures.is_empty() {
-            panic!("Cannot modify a TransactionBuilder after signatures have been added");
-        }
-    }
-
-    pub fn finish(mut self) -> UnsealedTransactionV1 {
+    fn apply_fee_instructions(&mut self) {
         let fee_builder = self
             .fee_instruction_builder
             .take()
@@ -473,22 +450,15 @@ impl TransactionBuilder {
         self.unsigned_transaction
             .fee_instructions_mut()
             .extend(fee_builder.unsigned_transaction.into_instructions());
+    }
 
-        let builder = self.then(|builder| {
-            // This is so that we dont have to add this in a lot of places - TODO: this is an assumption that may not
-            // apply to all transactions
-            if builder.signatures.is_empty() {
-                builder.with_authorized_seal_signer()
-            } else {
-                builder
-            }
-        });
-
-        builder.unsigned_transaction.with_signatures(builder.signatures)
+    pub fn finish(mut self) -> UnsealedTransactionV1 {
+        self.apply_fee_instructions();
+        self.unsigned_transaction.finish()
     }
 
     pub fn build_and_seal(self, secret_key: &RistrettoSecretKey) -> Transaction {
-        self.finish().seal(secret_key)
+        self.with_authorized_seal_signer().finish().seal(secret_key)
     }
 
     fn resolve_call(&self, call: NamedComponentCall) -> ComponentCall {
@@ -553,12 +523,10 @@ impl Signable<&RistrettoPublicKeyBytes> for TransactionBuilder {
 }
 
 impl IntoSigned<&RistrettoPublicKeyBytes> for TransactionBuilder {
-    type SignedOutput = Self;
+    type SignedOutput = UnsealedTransactionV1;
 
     fn into_signed(self, public_key: RistrettoPublicKey, signature: RistrettoSchnorr) -> Self::SignedOutput {
-        self.add_signature(TransactionSignature::new(
-            public_key.to_byte_type(),
-            signature.to_byte_type(),
-        ))
+        self.finish()
+            .add_signature(public_key.to_byte_type(), signature.to_byte_type())
     }
 }

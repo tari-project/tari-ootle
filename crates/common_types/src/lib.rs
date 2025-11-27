@@ -23,6 +23,7 @@ mod node_height;
 mod num_preshards;
 pub mod optional;
 mod peer_address;
+pub mod response_status;
 pub mod services;
 pub mod shard;
 mod shard_group;

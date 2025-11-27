@@ -7,6 +7,7 @@ use log::*;
 use tari_engine_types::UtxoOutput;
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
+    response_status::TransactionStatusResponseError,
     Network,
 };
 use tari_ootle_wallet_sdk::{
@@ -17,7 +18,7 @@ use tari_ootle_wallet_sdk::{
         UtxoRecoveryStartedEvent,
         WalletEvent,
     },
-    network::{StatusResponseError, WalletNetworkInterface},
+    network::WalletNetworkInterface,
     storage::{ReadableWalletStore, WalletStorageError, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
     WalletSdk,
     WalletSdkSpec,
@@ -38,7 +39,7 @@ pub struct UtxoRecovery<TSpec: WalletSdkSpec> {
 impl<TSpec> UtxoRecovery<TSpec>
 where
     TSpec: WalletSdkSpec,
-    <TSpec::NetworkInterface as WalletNetworkInterface>::Error: IsNotFoundError + StatusResponseError,
+    <TSpec::NetworkInterface as WalletNetworkInterface>::Error: IsNotFoundError + TransactionStatusResponseError,
 {
     pub fn new(sdk: WalletSdk<TSpec>) -> Self {
         Self {

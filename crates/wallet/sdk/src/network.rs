@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, convert::Infallible, future::Future, pin::Pin, time::Duration};
+use std::{collections::HashMap, future::Future, pin::Pin, time::Duration};
 
 use futures::Stream;
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,13 @@ use tari_engine_types::{
     substate::{Substate, SubstateId, SubstateValue},
     Utxo,
 };
-use tari_ootle_common_types::{optional::IsNotFoundError, shard::Shard, Epoch, StateVersion};
+use tari_ootle_common_types::{
+    optional::IsNotFoundError,
+    response_status::TransactionStatusResponseError,
+    shard::Shard,
+    Epoch,
+    StateVersion,
+};
 use tari_template_abi::TemplateDef;
 use tari_template_lib::{
     models::{ResourceAddress, UtxoId},
@@ -27,7 +33,7 @@ use crate::models::UtxoUpdatePayload;
 pub type UtxoUpdateStream<E> = Pin<Box<dyn Stream<Item = Result<UtxoUpdatePayload, E>> + Send + 'static>>;
 
 pub trait WalletNetworkInterface {
-    type Error: IsNotFoundError + StatusResponseError + std::error::Error + Send + Sync + 'static;
+    type Error: IsNotFoundError + TransactionStatusResponseError + std::error::Error + Send + Sync + 'static;
 
     fn query_substate(
         &self,
@@ -76,33 +82,6 @@ pub trait WalletNetworkInterface {
     ) -> impl Future<Output = Result<Vec<(UtxoId, Utxo)>, Self::Error>> + Send;
 
     fn wait_until_ready(&self) -> impl Future<Output = Result<(), Self::Error>> + Send;
-}
-
-/// A trait for responses that can provide a [WalletQueryErrorStatus]
-pub trait StatusResponseError {
-    fn get_status(&self) -> WalletQueryErrorStatus;
-    fn get_error_message(&self) -> String;
-}
-
-// This is required for tests (PanicInterface) - in general, if a type is `Infallible` it should never reach the error.
-impl StatusResponseError for Infallible {
-    fn get_status(&self) -> WalletQueryErrorStatus {
-        unreachable!("Infallible should never be used as an error type in this context")
-    }
-
-    fn get_error_message(&self) -> String {
-        unreachable!("Infallible should never be used as an error type in this context")
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum WalletQueryErrorStatus {
-    #[error("Not found: {message}")]
-    NotFound { message: String },
-    #[error("Transaction rejected: {message}")]
-    TransactionRejected { message: String },
-    #[error("Internal error: {message}")]
-    InternalError { message: String },
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

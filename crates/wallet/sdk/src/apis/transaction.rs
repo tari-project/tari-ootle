@@ -10,6 +10,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
+    response_status::{ResponseErrorStatus, TransactionStatusResponseError},
     VersionedSubstateIdRef,
 };
 use tari_template_lib::{
@@ -20,7 +21,7 @@ use tari_transaction::{Transaction, TransactionId};
 
 use crate::{
     models::{NewAccountData, TransactionStatus, WalletLockId, WalletTransaction, WalletTransactionUpdate},
-    network::{StatusResponseError, TransactionFinalizedResult, WalletNetworkInterface, WalletQueryErrorStatus},
+    network::{TransactionFinalizedResult, WalletNetworkInterface},
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
 
@@ -35,7 +36,7 @@ impl<'a, TStore, TNetworkInterface> TransactionApi<'a, TStore, TNetworkInterface
 where
     TStore: WalletStore,
     TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
+    TNetworkInterface::Error: IsNotFoundError + TransactionStatusResponseError,
 {
     pub fn new(store: &'a TStore, network_interface: &'a TNetworkInterface) -> Self {
         Self {
@@ -91,7 +92,7 @@ where
             },
             Err(err) => {
                 return match err.get_status() {
-                    WalletQueryErrorStatus::TransactionRejected { message } => {
+                    ResponseErrorStatus::TransactionRejected { message } => {
                         warn!(target: LOG_TARGET, "Invalid transaction submission: {transaction_id} {message}");
                         self.store.with_write_tx(|tx| {
                             tx.transactions_update(
@@ -343,7 +344,8 @@ where
 
         for (component_addr, substate) in components {
             let component = substate.substate_value().component().unwrap();
-            let indexed = IndexedWellKnownTypes::from_value(component.state())?;
+            let indexed =
+                IndexedWellKnownTypes::from_value(component.state()).map_err(TransactionApiError::IndexedValueError)?;
 
             debug!(target: LOG_TARGET, "Substate {} up", component_addr);
             tx.substates_upsert_root(
@@ -477,13 +479,15 @@ where
                         .non_fungible()
                         .and_then(|s| s.contents())
                         .map(|c| IndexedWellKnownTypes::from_value(c.data()))
-                        .transpose()?;
+                        .transpose()
+                        .map_err(TransactionApiError::IndexedValueError)?;
                     let referenced_mdata = substate
                         .substate_value()
                         .non_fungible()
                         .and_then(|s| s.contents())
                         .map(|c| IndexedWellKnownTypes::from_value(c.mutable_data()))
-                        .transpose()?;
+                        .transpose()
+                        .map_err(TransactionApiError::IndexedValueError)?;
                     tx.substates_upsert_child(
                         &SubstateId::Resource(*resource_address),
                         VersionedSubstateIdRef::new(id, substate.version()),
@@ -523,11 +527,11 @@ pub enum TransactionApiError {
     StoreError(#[from] WalletStorageError),
     #[error("Network interface error: {status} {message}")]
     NetworkInterfaceError {
-        status: WalletQueryErrorStatus,
+        status: ResponseErrorStatus,
         message: String,
     },
     #[error("Failed to extract known type data from value: {0}")]
-    IndexedValueError(#[from] IndexedValueError),
+    IndexedValueError(IndexedValueError),
     #[error("Invalid transaction query response: {details}")]
     InvalidTransactionQueryResponse { details: String },
 }
@@ -538,7 +542,7 @@ impl IsNotFoundError for TransactionApiError {
     }
 }
 
-impl<T: StatusResponseError> From<T> for TransactionApiError {
+impl<T: TransactionStatusResponseError> From<T> for TransactionApiError {
     fn from(value: T) -> Self {
         TransactionApiError::NetworkInterfaceError {
             status: value.get_status(),

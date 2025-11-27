@@ -12,6 +12,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
+    response_status::{ResponseErrorStatus, TransactionStatusResponseError},
     shard::Shard,
     Epoch,
     Network,
@@ -30,14 +31,7 @@ use tari_ootle_wallet_sdk::{
         WalletLockDropGuard,
         WalletLockId,
     },
-    network::{
-        StatusResponseError,
-        SubstateQueryResult,
-        TransactionQueryResult,
-        UtxoUpdateStream,
-        WalletNetworkInterface,
-        WalletQueryErrorStatus,
-    },
+    network::{SubstateQueryResult, TransactionQueryResult, UtxoUpdateStream, WalletNetworkInterface},
     storage::TagAndPublicNoncePair,
     WalletSdk,
     WalletSdkConfig,
@@ -245,7 +239,7 @@ impl WalletNetworkInterface for PanicNetworkInterface {
 }
 
 #[derive(Debug)]
-pub struct PanicError;
+pub enum PanicError {}
 
 impl std::fmt::Display for PanicError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -255,8 +249,8 @@ impl std::fmt::Display for PanicError {
 
 impl std::error::Error for PanicError {}
 
-impl StatusResponseError for PanicError {
-    fn get_status(&self) -> WalletQueryErrorStatus {
+impl TransactionStatusResponseError for PanicError {
+    fn get_status(&self) -> ResponseErrorStatus {
         panic!("get_status called on PanicError")
     }
 

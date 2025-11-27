@@ -59,7 +59,8 @@ impl ProcessDefinition for Indexer {
             .arg(format!("-pindexer.web_ui_address={web_ui_listener_address}"))
             .arg(format!("-pindexer.web_ui_public_api_url={api_public_url}"))
             .arg(format!("-pindexer.web_ui_public_graphql_url={graphql_public_url}"))
-            .arg("-pepoch_oracle.base_layer.scanning_interval=1");
+            .arg("-pepoch_oracle.base_layer.scanning_interval=1")
+            .env("API_DEBUG", "1"); // Enable detailed API error messages
 
         // mDNS is not guaranteed to work, so we'll explicitly set the seed peers for the indexer.
         let seed_peers = context.validator_nodes().filter_map(|vn| {

@@ -9,13 +9,14 @@ use tari_engine_types::{component::derive_component_address_from_public_key, ToB
 use tari_ootle_common_types::{
     displayable::Displayable,
     optional::{IsNotFoundError, Optional},
+    response_status::TransactionStatusResponseError,
     substate_type::SubstateType,
     Epoch,
 };
 use tari_ootle_wallet_sdk::{
     apis::config::ConfigKey,
     models::{DerivedWalletKey, KeyBranch, KeyId},
-    network::{StatusResponseError, WalletNetworkInterface},
+    network::WalletNetworkInterface,
     WalletSdk,
     WalletSdkSpec,
 };
@@ -37,7 +38,7 @@ pub struct AccountRecoveryService<TSpec: WalletSdkSpec> {
 impl<TSpec> AccountRecoveryService<TSpec>
 where
     TSpec: WalletSdkSpec,
-    <TSpec::NetworkInterface as WalletNetworkInterface>::Error: IsNotFoundError + StatusResponseError,
+    <TSpec::NetworkInterface as WalletNetworkInterface>::Error: IsNotFoundError + TransactionStatusResponseError,
 {
     pub fn new(
         wallet_sdk: WalletSdk<TSpec>,

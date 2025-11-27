@@ -147,14 +147,14 @@ impl Runner {
                     .put_last_instruction_output_on_workspace("lp")
                     .call_method(account.component_address, "deposit", args![Workspace("lp")])
                     .with_authorized_seal_signer()
-                    .map(|builder| {
-                        // First sign with the account key to authorize the use of the account component
-                        self.sdk
-                            .signer_api()
-                            .with_context(&primary_account_pk)
-                            .sign(account.owner_key_id.expect("no owner key id"), builder)
-                    })?
                     .finish();
+
+                // First sign with the account key to authorize the use of the account component
+                let transaction = self
+                    .sdk
+                    .signer_api()
+                    .with_context(&primary_account_pk)
+                    .sign(account.owner_key_id.expect("no owner key id"), transaction)?;
 
                 // Then sign with the primary account key to pay the fee
                 let transaction = self.sdk.signer_api().sign(primary_account_key.key_id(), transaction)?;
@@ -274,7 +274,8 @@ impl Runner {
                     ])
                     .put_last_instruction_output_on_workspace("swapped")
                     .call_method(account.component_address, "deposit", args![Workspace("swapped")])
-                    .with_authorized_seal_signer();
+                    .with_authorized_seal_signer()
+                    .finish();
 
                 let transaction = self
                     .sdk
@@ -282,10 +283,7 @@ impl Runner {
                     .with_context(&primary_account_pk)
                     .sign(account.owner_key_id.expect("no owner key id"), transaction)?;
 
-                let transaction = self
-                    .sdk
-                    .signer_api()
-                    .sign(primary_account_key.key_id(), transaction.finish())?;
+                let transaction = self.sdk.signer_api().sign(primary_account_key.key_id(), transaction)?;
 
                 tx_ids.push(self.submit_transaction(transaction).await?);
             }

@@ -179,21 +179,20 @@ pub async fn handle_claim_validator_fees(
         .map(|builder| {
             if let Some(index) = req.claim_key_index {
                 if claim_public_key == *account.address.account_public_key() {
-                    Ok(builder)
+                    Ok(builder.finish())
                 } else {
                     // If the claim key is different from the account secret, we need to sign with both
                     sdk.signer_api()
                         .with_context(account.address.account_public_key())
                         .sign(
                             KeyId::derived(KeyBranch::Account, index),
-                            builder.with_authorized_seal_signer(),
+                            builder.with_authorized_seal_signer().finish(),
                         )
                 }
             } else {
-                Ok(builder)
+                Ok(builder.finish())
             }
-        })?
-        .finish();
+        })?;
 
     let transaction = sdk.signer_api().sign(account_key_id, unsigned_transaction)?;
 

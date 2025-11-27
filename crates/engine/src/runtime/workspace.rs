@@ -57,6 +57,10 @@ impl Workspace {
         mem::take(&mut self.proofs)
     }
 
+    pub fn clear_items(&mut self) {
+        self.items.clear();
+    }
+
     pub fn all_ids_iter(&self) -> impl Iterator<Item = WorkspaceId> + '_ {
         self.items.keys().copied()
     }

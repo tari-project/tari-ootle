@@ -2382,6 +2382,20 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     Ok(InvokeResult::unit())
                 })
             },
+            WorkspaceAction::DropAll => {
+                args.assert_no_args("WorkspaceAction::DropAll")?;
+                let proofs = self.tracker.with_workspace_mut(|workspace| {
+                    workspace.clear_items();
+                    workspace.drain_all_proofs()
+                });
+
+                self.tracker.write_with(|state| {
+                    for proof_id in proofs {
+                        state.drop_proof(proof_id)?;
+                    }
+                    Ok(InvokeResult::unit())
+                })
+            },
         }
     }
 

@@ -504,16 +504,17 @@ pub enum BucketGetAmountArg {
 // -------------------------------- Workspace -------------------------------- //
 
 /// The possible actions that can be performed on workspace variables
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug)]
 pub enum WorkspaceAction {
     PutLastInstructionOutput,
     Get,
     DropAllProofs,
     AssertBucketContains,
+    DropAll,
 }
 
 /// A workspace operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct WorkspaceInvokeArg {
     pub action: WorkspaceAction,
     pub args: Vec<Bytes>,

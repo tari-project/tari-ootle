@@ -197,6 +197,11 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
             },
         };
 
+        // Clear the workspace before executing the main instructions
+        runtime
+            .interface()
+            .workspace_invoke(WorkspaceAction::DropAll, invoke_args![].into())?;
+
         let instruction_result = Self::process_instructions(&template_provider, &runtime, instructions.main);
 
         match instruction_result {

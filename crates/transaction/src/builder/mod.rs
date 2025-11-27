@@ -48,6 +48,7 @@ pub struct TransactionBuilder {
     unsigned_transaction: UnsignedTransaction,
     signatures: Vec<TransactionSignature>,
     workspace_ids: WorkspaceIds,
+    fee_instruction_builder: Option<Box<TransactionBuilder>>,
 }
 
 impl TransactionBuilder {
@@ -56,12 +57,17 @@ impl TransactionBuilder {
             unsigned_transaction: UnsignedTransaction::default(),
             signatures: vec![],
             workspace_ids: WorkspaceIds::new(),
+            fee_instruction_builder: Some(Box::new(Self::new_fee_builder())),
         }
     }
 
-    pub(crate) fn with_workspace_ids(mut self, workspace_ids: WorkspaceIds) -> Self {
-        self.workspace_ids = workspace_ids;
-        self
+    fn new_fee_builder() -> Self {
+        Self {
+            unsigned_transaction: UnsignedTransaction::default(),
+            signatures: vec![],
+            workspace_ids: WorkspaceIds::new(),
+            fee_instruction_builder: None,
+        }
     }
 
     pub fn with_unsigned_transaction<T: Into<UnsignedTransaction>>(self, unsigned_transaction: T) -> Self {
@@ -69,6 +75,7 @@ impl TransactionBuilder {
             unsigned_transaction: unsigned_transaction.into(),
             signatures: vec![],
             workspace_ids: WorkspaceIds::new(),
+            fee_instruction_builder: Some(Box::new(Self::new_fee_builder())),
         }
     }
 
@@ -337,25 +344,23 @@ impl TransactionBuilder {
 
     pub fn with_fee_instructions<I: IntoIterator<Item = Instruction>>(mut self, instructions: I) -> Self {
         self.unsigned_transaction.fee_instructions_mut().extend(instructions);
-        // Reset the signatures as they are no longer valid
         self.panic_if_signed();
         self
     }
 
     pub fn with_fee_instructions_builder<F: FnOnce(TransactionBuilder) -> TransactionBuilder>(mut self, f: F) -> Self {
         // TODO: pass in a fee builder type (probably TransactionBuilder<FeeBuilder> which has applicable methods)
-        let builder = f(TransactionBuilder::new().with_workspace_ids(self.workspace_ids));
-        self.unsigned_transaction
-            .fee_instructions_mut()
-            .extend(builder.unsigned_transaction.into_instructions());
-        self.workspace_ids = builder.workspace_ids;
+        let builder = f(*self.fee_instruction_builder.take().unwrap());
+        self.fee_instruction_builder = Some(Box::new(builder));
+        // self.unsigned_transaction
+        //     .fee_instructions_mut()
+        //     .extend(builder.unsigned_transaction.into_instructions());
         self.panic_if_signed();
         self
     }
 
     pub fn add_fee_instruction(mut self, instruction: Instruction) -> Self {
         self.unsigned_transaction.fee_instructions_mut().push(instruction);
-        // Reset the signatures as they are no longer valid
         self.panic_if_signed();
         self
     }
@@ -460,7 +465,15 @@ impl TransactionBuilder {
         }
     }
 
-    pub fn finish(self) -> UnsealedTransactionV1 {
+    pub fn finish(mut self) -> UnsealedTransactionV1 {
+        let fee_builder = self
+            .fee_instruction_builder
+            .take()
+            .expect("Fee instruction builder is None");
+        self.unsigned_transaction
+            .fee_instructions_mut()
+            .extend(fee_builder.unsigned_transaction.into_instructions());
+
         let builder = self.then(|builder| {
             // This is so that we dont have to add this in a lot of places - TODO: this is an assumption that may not
             // apply to all transactions

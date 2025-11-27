@@ -49,7 +49,6 @@ use tari_template_lib::{
         ProofInvokeArg,
         ResourceInvokeArg,
         VaultInvokeArg,
-        WorkspaceInvokeArg,
     },
     types::engine_args::SignatureInvokeArg,
     AbiContext,
@@ -181,9 +180,6 @@ impl WasmProcess {
             EngineOp::BucketInvoke => Self::handle(store, env_mut, arg, |env, arg: BucketInvokeArg| {
                 env.interface()
                     .bucket_invoke(arg.bucket_ref, arg.action, arg.args.into())
-            }),
-            EngineOp::WorkspaceInvoke => Self::handle(store, env_mut, arg, |env, arg: WorkspaceInvokeArg| {
-                env.interface().workspace_invoke(arg.action, arg.args.into())
             }),
             EngineOp::NonFungibleInvoke => Self::handle(store, env_mut, arg, |env, arg: NonFungibleInvokeArg| {
                 env.interface()

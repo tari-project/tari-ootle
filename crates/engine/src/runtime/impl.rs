@@ -25,7 +25,7 @@ use std::sync::Arc;
 use log::{warn, *};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_engine_types::{
-    commit_result::{FinalizeResult, RejectReason, TransactionResult},
+    commit_result::{FinalizeResult, RejectReason},
     component::ComponentHeader,
     confidential::{ClaimBurnOutputData, ClaimedOutputTombstone, MinotariBurnClaimProof},
     crypto::PrivateOutput,
@@ -1655,6 +1655,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     });
                 }
 
+                if self.tracker.is_fee_intent_checkpointed() {
+                    return Err(RuntimeError::FeePaymentInMainIntent);
+                }
+
                 self.tracker.write_with(|state_mut| {
                     let vault_lock = state_mut.write_lock_substate(&SubstateId::Vault(vault_id))?;
 
@@ -2518,7 +2522,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         })
     }
 
-    fn set_fee_checkpoint(&self) -> Result<(), RuntimeError> {
+    fn checkpoint_fee_intent(&self) -> Result<(), RuntimeError> {
         if self.tracker.total_fee_payments() < self.tracker.total_fee_charges() {
             return Err(RuntimeError::InsufficientFeesPaid {
                 required_fee: self.tracker.total_fee_charges(),
@@ -2528,42 +2532,19 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         self.tracker.fee_checkpoint()
     }
 
-    fn reset_to_fee_checkpoint(&self) -> Result<(), RuntimeError> {
-        warn!(target: LOG_TARGET, "Resetting to fee checkpoint");
-        self.tracker.reset_to_fee_checkpoint()
-    }
-
     fn finalize(&self) -> Result<FinalizeResult, RuntimeError> {
         self.invoke_modules_on_runtime_call("finalize")?;
-
         // If the fee module is present, this will add substate storage fees
         self.invoke_modules_on_before_finalize()?;
+        let finalized = self.tracker.finalize(None)?;
+        Ok(finalized)
+    }
 
-        if !self.tracker.are_fees_paid_in_full() {
-            self.reset_to_fee_checkpoint()?;
-        }
-
-        let (substates_to_persist, downed_utxos) = self.tracker.write_with(|state_mut| {
-            let mutated_substates = state_mut.take_mutated_substates();
-            let downed_utxos = state_mut.take_downed_utxos();
-            (mutated_substates, downed_utxos)
-        });
-
-        let mut finalized = self.tracker.finalize(substates_to_persist, downed_utxos)?;
-
-        if !finalized.fee_receipt.is_paid_in_full() {
-            let reason = RejectReason::InsufficientFeesPaid(format!(
-                "Required fees {} but {} paid",
-                finalized.fee_receipt.total_fees_charged(),
-                finalized.fee_receipt.total_fees_paid()
-            ));
-            finalized.result = if let Some(accept) = finalized.result.any_accept() {
-                TransactionResult::AcceptFeeRejectRest(accept.clone(), reason)
-            } else {
-                TransactionResult::Reject(reason)
-            };
-        }
-
+    fn finalize_failure(&self, reason: RejectReason) -> Result<FinalizeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("finalize_failure")?;
+        // If the fee module is present, this will add substate storage fees
+        self.invoke_modules_on_before_finalize()?;
+        let finalized = self.tracker.finalize(Some(reason))?;
         Ok(finalized)
     }
 
@@ -2829,6 +2810,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         statement: StealthTransferStatement,
         revealed_funds_bucket: Option<BucketId>,
     ) -> Result<(), RuntimeError> {
+        if self.tracker.is_fee_intent_checkpointed() {
+            return Err(RuntimeError::FeePaymentInMainIntent);
+        }
+
         self.tracker.write_with(|state_mut| {
             let Some(container) = state_mut.execute_stealth_transfer(
                 STEALTH_TARI_RESOURCE_ADDRESS.into(),

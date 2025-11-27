@@ -235,28 +235,20 @@ fn test_engine_errors() {
     let mut test = TemplateTest::new(vec!["tests/templates/errors"]);
 
     // check that public methods can still internally call private ones
-    let result = test
-        .try_execute(
-            Transaction::builder()
-                .call_function(test.get_template_address("Errors"), "invalid_engine_call", args![])
-                .build_and_seal(&Default::default()),
-            vec![],
-        )
-        .unwrap();
-
-    let RejectReason::ExecutionFailure(reason) = result.finalize.result.any_reject().unwrap() else {
-        panic!(
-            "Unexpected transaction reject reason: {}",
-            result.finalize.result.fee_reject().unwrap()
-        );
-    };
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .call_function(test.get_template_address("Errors"), "invalid_engine_call", args![])
+            .build_and_seal(&Default::default()),
+        vec![],
+    );
 
     // Check that the engine error is captured in the execution result rather than the WASM panic message (Panic! Engine
     // call returned null for op VaultInvoke)
-    assert_eq!(
+    assert_reject_reason(
         reason,
-        "Runtime error: Substate 'resource_7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b' not \
-         found or is not a transaction input"
+        RejectReason::OneOrMoreSubstatesNotFound(
+            "resource_7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b not found".to_string(),
+        ),
     );
 }
 

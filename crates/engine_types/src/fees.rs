@@ -54,7 +54,7 @@ impl FeeReceipt {
             .unwrap_or_default()
     }
 
-    /// Returns true if the total fees charged is equal to the total fees paid, otherwise false
+    /// Returns true if the total fees charged is less than or equal to the total fees paid, otherwise false
     pub fn is_paid_in_full(&self) -> bool {
         self.unpaid_debt() == 0
     }

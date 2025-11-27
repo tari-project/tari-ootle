@@ -34,9 +34,11 @@ pub mod graphql;
 mod http_ui;
 mod rest_api;
 
+mod event;
 mod event_manager;
 mod network_client;
 mod network_state_sync;
+mod notify;
 mod storage_sqlite;
 mod store;
 mod substate_file_cache;
@@ -104,16 +106,15 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
     )
     .await?;
 
-    let mut epoch_manager_events = services.epoch_manager.subscribe();
-
-    // Run the event manager
-    let event_manager = EventManager::new(services.store.clone());
-
     // Run the GraphQL API
     let graphql_address = config.indexer.graphql_address;
     if let Some(address) = graphql_address {
         info!(target: LOG_TARGET, "🌐 Started GraphQL server on {}", address);
-        task::spawn(run_graphql(address, services.substate_manager.clone(), event_manager));
+        task::spawn(run_graphql(
+            address,
+            services.substate_manager.clone(),
+            services.store.clone(),
+        ));
     }
 
     // Run the REST API
@@ -166,7 +167,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         }
     }
     #[cfg(not(feature = "web_ui"))]
-    info!(target: LOG_TARGET, "🕸️ Web UI not enabled. Run with --features web_ui to enable it.");
+    info!(target: LOG_TARGET, "🕸️ Web UI not enabled. Compile with --features web_ui to enable it.");
 
     // Run the event scanner
     let event_scanner = BlockScanner::new(
@@ -182,6 +183,8 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
     let mut scanning_interval = time::interval(config.indexer.block_scanning_interval);
     // Skip - because we assume that the reason we missed it is because of scanning
     scanning_interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+
+    let mut epoch_manager_events = services.epoch_manager.subscribe();
 
     loop {
         tokio::select! {

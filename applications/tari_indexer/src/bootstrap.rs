@@ -61,9 +61,11 @@ use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
 use crate::{
     dry_run::processor::DryRunTransactionProcessor,
+    event::IndexerEvent,
     network_client::TariNetworkClient,
     network_state_sync,
     network_state_sync::NetworkWideStateSyncConfig,
+    notify::Notify,
     storage_sqlite::{models::Key, SqliteIndexerStore},
     store::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreWriteTransaction},
     substate_file_cache::SubstateFileCache,
@@ -199,6 +201,8 @@ pub async fn spawn_services(
         consensus_constants.num_preshards,
     );
 
+    let event_notifier = Notify::new(1000);
+
     // Template manager
     let template_manager = TemplateManager::initialize(global_db.clone(), config.indexer.templates.clone())?;
     network_state_sync::NetworkWideStateSync::new(
@@ -209,6 +213,7 @@ pub async fn spawn_services(
             event_filters: Arc::from(config.indexer.event_filters.clone()),
             work_interval: config.indexer.state_scanning_interval,
         },
+        event_notifier.clone(),
     )
     .spawn(shutdown.clone());
 
@@ -248,6 +253,7 @@ pub async fn spawn_services(
         substate_manager,
         transaction_manager,
         dry_run_transaction_processor,
+        event_notifier,
     })
 }
 
@@ -263,6 +269,7 @@ pub struct Services {
     pub transaction_manager:
         TransactionManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SqliteIndexerStore>,
     pub dry_run_transaction_processor: DryRunTransactionProcessor,
+    pub event_notifier: Notify<IndexerEvent>,
 }
 
 fn ensure_directories_exist(config: &ApplicationConfig) -> io::Result<()> {

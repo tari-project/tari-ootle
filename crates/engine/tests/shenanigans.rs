@@ -2,11 +2,15 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine::runtime::{ActionIdent, NativeAction, RuntimeError};
-use tari_engine_types::{indexed_value::IndexedWellKnownTypes, resource_container::ResourceError};
+use tari_engine_types::{
+    commit_result::RejectReason,
+    indexed_value::IndexedWellKnownTypes,
+    resource_container::ResourceError,
+};
 use tari_template_lib::{
     args::VaultAction,
     constants::XTR,
-    models::{ComponentAddress, ResourceAddress},
+    models::ComponentAddress,
     types::{Amount, ResourceType},
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
@@ -93,7 +97,7 @@ fn it_rejects_dangling_resources() {
 }
 
 #[test]
-fn it_rejects_unknown_substate_addresses() {
+fn it_rejects_unknown_substate_ids() {
     let mut test = TemplateTest::new(["tests/templates/shenanigans"]);
     let template_addr = test.get_template_address("Shenanigans");
 
@@ -104,11 +108,14 @@ fn it_rejects_unknown_substate_addresses() {
         vec![],
     );
 
-    assert_reject_reason(reason, RuntimeError::ReferencedSubstateNotFound {
-        id: ResourceAddress::from_hex("abababababababababababababababababababababababababababababababab")
-            .unwrap()
-            .into(),
-    })
+    assert_reject_reason(
+        reason,
+        RejectReason::OneOrMoreSubstatesNotFound(
+            "Template referenced substate but it was not found: \
+             resource_abababababababababababababababababababababababababababababababab"
+                .to_string(),
+        ),
+    )
 }
 
 #[test]

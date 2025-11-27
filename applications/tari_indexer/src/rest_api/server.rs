@@ -130,6 +130,7 @@ impl Server {
                 // Convenience Shortcut
                 .route("/xtr" , get(handlers::resources::get_xtr))
                 .route("/{resource_address}" , get(handlers::resources::get_resource)))
+            .route("/events", get(handlers::events::sse_events))
             .layer(CorsLayer::permissive())
             .layer(RequestBodyLimitLayer::new(REQUEST_BODY_LIMIT))
             .merge(SwaggerUi::new("/swagger-ui").url("/openapi.json", ApiDoc::openapi()))

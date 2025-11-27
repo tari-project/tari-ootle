@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_engine_types::indexed_value::IndexedValueError;
+use tari_engine_types::{commit_result::RejectReason, indexed_value::IndexedValueError};
 use tari_template_lib::types::{HashParseError, TemplateAddress};
 
 use crate::{runtime::RuntimeError, template::TemplateLoaderError, wasm::WasmExecutionError};
@@ -51,4 +51,14 @@ pub enum TransactionError {
     TemplateProvider(String),
     #[error("Converting to hash error: {0}")]
     HashConversion(#[from] HashParseError),
+}
+
+impl TransactionError {
+    pub fn to_reject_reason(&self) -> RejectReason {
+        match self {
+            Self::RuntimeError(err) => err.to_reject_reason(),
+            Self::WasmExecutionError(WasmExecutionError::RuntimeError(err)) => err.to_reject_reason(),
+            _ => RejectReason::ExecutionFailure(self.to_string()),
+        }
+    }
 }

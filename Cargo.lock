@@ -11071,6 +11071,7 @@ dependencies = [
  "thiserror 2.0.17",
  "time",
  "tokio",
+ "tokio-stream",
  "tower-http",
  "url",
  "utoipa",

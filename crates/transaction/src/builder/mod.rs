@@ -59,6 +59,11 @@ impl TransactionBuilder {
         }
     }
 
+    pub(crate) fn with_workspace_ids(mut self, workspace_ids: WorkspaceIds) -> Self {
+        self.workspace_ids = workspace_ids;
+        self
+    }
+
     pub fn with_unsigned_transaction<T: Into<UnsignedTransaction>>(self, unsigned_transaction: T) -> Self {
         Self {
             unsigned_transaction: unsigned_transaction.into(),
@@ -109,7 +114,7 @@ impl TransactionBuilder {
         self.add_fee_instruction(Instruction::CallMethod {
             call: call.into(),
             method: "pay_fee".try_into().expect("Method name is longer than the limit"),
-            args: call_args![max_fee.into().non_negative_checked().expect("Negative fee not allowed")],
+            args: call_args![max_fee.into()],
         })
     }
 
@@ -184,9 +189,9 @@ impl TransactionBuilder {
         })
     }
 
-    pub fn call_method<A, T>(self, call: A, method: T, args: Vec<NamedArg>) -> Self
+    pub fn call_method<C, T>(self, call: C, method: T, args: Vec<NamedArg>) -> Self
     where
-        A: Into<NamedComponentCall>,
+        C: Into<NamedComponentCall>,
         T: TryInto<FunctionName>,
         <T as TryInto<FunctionName>>::Error: std::fmt::Debug,
     {
@@ -231,6 +236,18 @@ impl TransactionBuilder {
 
     pub fn pay_fee_stealth(self, statement: StealthTransferStatement) -> Self {
         self.pay_fee_stealth_with_opt_input_bucket(statement, None::<String>)
+    }
+
+    pub fn pay_fee_using_account<C, A>(self, account: C, amount: A) -> Self
+    where
+        C: Into<NamedComponentCall>,
+        A: Into<Amount>,
+    {
+        self.with_fee_instructions_builder(|builder| {
+            builder.call_method(account, "pay_fee", vec![
+                NamedArg::from_type(&amount.into()).expect("Failed to encode amount")
+            ])
+        })
     }
 
     pub fn pay_fee_stealth_with_input_bucket<B: Into<String>>(
@@ -327,10 +344,11 @@ impl TransactionBuilder {
 
     pub fn with_fee_instructions_builder<F: FnOnce(TransactionBuilder) -> TransactionBuilder>(mut self, f: F) -> Self {
         // TODO: pass in a fee builder type (probably TransactionBuilder<FeeBuilder> which has applicable methods)
-        let builder = f(TransactionBuilder::new());
+        let builder = f(TransactionBuilder::new().with_workspace_ids(self.workspace_ids));
         self.unsigned_transaction
             .fee_instructions_mut()
             .extend(builder.unsigned_transaction.into_instructions());
+        self.workspace_ids = builder.workspace_ids;
         self.panic_if_signed();
         self
     }

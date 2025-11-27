@@ -28,9 +28,11 @@ use tari_ootle_storage::{
 use tari_rpc_framework::__macro_reexports::future::Either;
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib::prelude::Amount;
-use tokio::time;
+use tari_transaction::TransactionId;
+use tokio::{sync::broadcast, time};
 
 use crate::{
+    event::{IndexerEvent, NewEpochEvent, TransactionFinalizedEvent},
     network_state_sync::{
         committee_client::{ValidatorCommitteeRpcPool, ValidatorRpcSession},
         config::NetworkWideStateSyncConfig,
@@ -39,6 +41,7 @@ use crate::{
         sync_plan::SyncPlan,
         sync_progress::SyncProgress,
     },
+    notify::Notify,
     storage_sqlite::{
         models::{Key, UtxoSpent, UtxoUnspent, UtxoUpdateRecord},
         SqliteIndexerStore,
@@ -56,6 +59,7 @@ pub struct NetworkWideStateSync {
     store: SqliteIndexerStore,
     stats: SyncStats,
     config: NetworkWideStateSyncConfig,
+    notify: Notify<IndexerEvent>,
 }
 
 impl NetworkWideStateSync {
@@ -64,6 +68,7 @@ impl NetworkWideStateSync {
         networking: NetworkingHandle<TariMessagingSpec>,
         storage: SqliteIndexerStore,
         config: NetworkWideStateSyncConfig,
+        notify: Notify<IndexerEvent>,
     ) -> Self {
         Self {
             epoch_manager,
@@ -71,14 +76,16 @@ impl NetworkWideStateSync {
             store: storage,
             stats: SyncStats::new(),
             config,
+            notify,
         }
     }
 
     pub fn spawn(mut self, shutdown_signal: ShutdownSignal) -> tokio::task::JoinHandle<()> {
+        let mut epoch_events = self.epoch_manager.subscribe();
         tokio::spawn(async move {
             loop {
                 let config = self.config.clone();
-                let task = self.start();
+                let task = self.start(&mut epoch_events);
                 let task = pin!(task);
                 match shutdown_signal.clone().select(task).await {
                     Either::Left(_) => {
@@ -98,11 +105,12 @@ impl NetworkWideStateSync {
         })
     }
 
-    async fn start(&mut self) -> Result<(), NetworkStateSyncError> {
+    async fn start(
+        &mut self,
+        epoch_events: &mut broadcast::Receiver<EpochManagerEvent>,
+    ) -> Result<(), NetworkStateSyncError> {
         self.epoch_manager.wait_for_initial_scanning_to_complete().await?;
-        let mut epoch_events = self.epoch_manager.subscribe();
 
-        // TODO: configurable
         let mut interval = time::interval(self.config.work_interval);
         interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
 
@@ -136,6 +144,7 @@ impl NetworkWideStateSync {
         match event {
             EpochManagerEvent::EpochChanged { epoch, .. } => {
                 info!(target: LOG_TARGET, "🌍️ Epoch changed to {}.", epoch);
+                self.notify.notify(NewEpochEvent { epoch });
                 self.start_sync_round().await?;
             },
         }
@@ -390,6 +399,7 @@ impl NetworkWideStateSync {
                     })?;
 
                 extend_bufs_from_substate_update(
+                    &self.notify,
                     shard,
                     state_version,
                     update,
@@ -448,6 +458,7 @@ impl NetworkWideStateSync {
 }
 
 fn extend_bufs_from_substate_update(
+    notify: &Notify<IndexerEvent>,
     shard: Shard,
     state_version: StateVersion,
     update: SubstateUpdateProof,
@@ -479,7 +490,13 @@ fn extend_bufs_from_substate_update(
             },
             Some(SubstateValue::TransactionReceipt(receipt)) => {
                 if let Some(address) = update.substate_id().as_transaction_receipt_address() {
+                    notify.notify(TransactionFinalizedEvent {
+                        transaction_id: TransactionId::from_receipt_address(address),
+                        outcome: receipt.outcome,
+                    });
                     transactions_buf.push((address, receipt.clone()));
+                } else {
+                    warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received Transaction Receipt substate with invalid address: {}", create.substate.substate_id());
                 }
             },
             Some(SubstateValue::ValidatorFeePool(_)) => {

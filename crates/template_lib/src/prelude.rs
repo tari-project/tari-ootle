@@ -55,12 +55,8 @@ pub use crate::{
     component::{Component, ComponentManager},
     consensus::Consensus,
     constants::{PUBLIC_IDENTITY_RESOURCE_ADDRESS, STEALTH_TARI_RESOURCE_ADDRESS, XTR},
-    debug,
-    error,
     events::emit_event,
-    info,
     invoke_args as args,
-    log,
     metadata,
     models::{
         Account,
@@ -94,5 +90,6 @@ pub use crate::{
     template::{BuiltinTemplate, TemplateManager},
     types,
     types::{amount, crypto, Amount},
-    warn,
 };
+#[cfg(target_arch = "wasm32")]
+pub use crate::{debug, error, info, log, warn};

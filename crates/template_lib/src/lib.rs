@@ -85,4 +85,5 @@ pub mod constants;
 #[macro_use]
 mod newtype_serde_macros;
 #[macro_use]
+#[cfg(target_arch = "wasm32")]
 pub mod macros;

@@ -86,12 +86,21 @@ impl FromStr for TransactionReceiptAddress {
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionReceipt {
+    pub outcome: FinalizeOutcome,
     pub diff_summary: DiffSummary,
     pub fee_withdrawals: Box<[ValidatorFeeWithdrawal]>,
     pub events: Box<[Event]>,
     pub logs: Box<[LogEntry]>,
     pub fee_receipt: FeeReceipt,
 }
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, borsh::BorshSerialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum FinalizeOutcome {
+    Commit,
+    FeeIntentCommit,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct DiffSummary {

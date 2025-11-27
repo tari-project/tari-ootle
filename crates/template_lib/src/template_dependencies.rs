@@ -25,4 +25,6 @@
 pub use tari_bor::{decode, decode_exact, encode_with_len, from_value, serde};
 pub use tari_template_abi::{rust, wrap_ptr, CallInfo};
 
-pub use crate::{args::LogLevel, debug, engine, get_context as context, init_context, panic_hook::register_panic_hook};
+#[cfg(target_arch = "wasm32")]
+pub use crate::debug;
+pub use crate::{args::LogLevel, engine, get_context as context, init_context, panic_hook::register_panic_hook};

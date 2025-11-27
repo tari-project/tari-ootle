@@ -44,6 +44,7 @@ use tower_http::cors::CorsLayer;
 
 use crate::{
     graphql::model::events::{EventQuery, EventSchema},
+    storage_sqlite::SqliteIndexerStore,
     substate_manager::SubstateManager,
     EventManager,
 };
@@ -53,8 +54,9 @@ const LOG_TARGET: &str = "tari::indexer::graphql";
 pub async fn run_graphql(
     preferred_address: SocketAddr,
     substate_manager: SubstateManager,
-    event_manager: EventManager,
+    store: SqliteIndexerStore,
 ) -> Result<(), anyhow::Error> {
+    let event_manager = EventManager::new(store);
     let schema = Schema::build(EventQuery, EmptyMutation, EmptySubscription)
         .data(substate_manager)
         .data(event_manager)

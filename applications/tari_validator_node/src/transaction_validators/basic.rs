@@ -31,6 +31,13 @@ impl Validator<Transaction> for BasicValidations {
             });
         }
 
+        if transaction.instructions().iter().any(|instr| instr.is_pay_fee()) {
+            warn!(target: LOG_TARGET, "BasicValidations - FAIL: Transaction contains pay fee instruction");
+            return Err(TransactionValidationError::ContainsPayFeeInstruction {
+                transaction_id: transaction.calculate_id(),
+            });
+        }
+
         // TODO: additional checks?
 
         debug!(target: LOG_TARGET, "BasicValidations - OK");

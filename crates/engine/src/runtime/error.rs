@@ -231,6 +231,8 @@ pub enum RuntimeError {
     DuplicateReference { address: SubstateId },
     #[error("Invalid argument: {0}")]
     ArgumentValidationError(#[from] ArgumentValidationError),
+    #[error("Fee payment found in main intent, which is not allowed")]
+    FeePaymentInMainIntent,
 
     #[error("BUG: [{function}] Invariant error {details}")]
     InvariantError { function: &'static str, details: String },
@@ -279,11 +281,11 @@ pub enum RuntimeError {
 impl RuntimeError {
     pub fn to_reject_reason(&self) -> RejectReason {
         match self {
-            Self::SubstateNotFound { id } => RejectReason::OneOrMoreInputsNotFound(format!("Substate {id} not found",)),
-            Self::RootSubstateNotFound { id } => RejectReason::OneOrMoreInputsNotFound(format!(
+            Self::SubstateNotFound { id } => RejectReason::OneOrMoreSubstatesNotFound(format!("{id} not found",)),
+            Self::RootSubstateNotFound { id } => RejectReason::OneOrMoreSubstatesNotFound(format!(
                 "Template referenced root substate but it was not found: {id}"
             )),
-            Self::ReferencedSubstateNotFound { id } => RejectReason::OneOrMoreInputsNotFound(format!(
+            Self::ReferencedSubstateNotFound { id } => RejectReason::OneOrMoreSubstatesNotFound(format!(
                 "Template referenced substate but it was not found: {id}"
             )),
             Self::InsufficientFeesPaid {
@@ -292,6 +294,7 @@ impl RuntimeError {
             } => RejectReason::InsufficientFeesPaid(format!(
                 "Insufficient fees paid: {fees_paid}, required fees: {required_fee}"
             )),
+            Self::FeePaymentInMainIntent => RejectReason::FeePaymentInMainIntent,
             err => RejectReason::ExecutionFailure(err.to_string()),
         }
     }

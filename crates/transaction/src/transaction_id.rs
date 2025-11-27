@@ -43,6 +43,10 @@ impl TransactionId {
         Ok(Self(bytes))
     }
 
+    pub fn from_receipt_address(address: TransactionReceiptAddress) -> Self {
+        Self::new(address.as_object_key().into_array())
+    }
+
     pub const fn byte_size() -> usize {
         32
     }

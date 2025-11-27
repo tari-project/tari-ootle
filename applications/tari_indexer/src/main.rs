@@ -20,13 +20,16 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{fs, panic, process};
+use std::{fs, panic, path::PathBuf, process};
 
+use anyhow::Context;
 use log::*;
-use tari_common::initialize_logging;
+use logroller::{Rotation, RotationSize};
 use tari_indexer::{cli::Cli, config::ApplicationConfig, run_indexer};
 use tari_ootle_app_utilities::configuration::load_configuration;
 use tari_shutdown::Shutdown;
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::{filter, fmt, layer::SubscriberExt, util::SubscriberInitExt, Layer};
 
 const LOG_TARGET: &str = "tari::indexer::app";
 
@@ -55,16 +58,50 @@ async fn main_inner() -> anyhow::Result<()> {
     // Remove the file if it was left behind by a previous run
     let _file = fs::remove_file(config.common.base_path.join("pid"));
     let mut shutdown = Shutdown::new();
-    if let Err(e) = initialize_logging(
-        &cli.common.log_config_path("indexer"),
-        &cli.common.get_base_path(),
-        include_str!("../log4rs_sample.yml"),
-    ) {
-        eprintln!("{}", e);
-    }
+    let _guard = init_tracing_subscriber(&cli)?;
 
     run_indexer(config, shutdown.to_signal()).await?;
     shutdown.trigger();
 
     Ok(())
+}
+
+fn init_tracing_subscriber(cli: &Cli) -> anyhow::Result<WorkerGuard> {
+    let log_dir = cli.common.get_base_path().join("log").join("indexer");
+    if !log_dir.exists() {
+        fs::create_dir_all(&log_dir).context("Could not create parent directory for log file")?;
+    }
+
+    let appender = logroller::LogRollerBuilder::new(&log_dir, &PathBuf::from("indexer.log"))
+        .rotation(Rotation::SizeBased(RotationSize::MB(200)))
+        .max_keep_files(4)
+        .compression(logroller::Compression::Gzip)
+        .build()?;
+    let (ootle_log, guard) = tracing_appender::non_blocking(appender);
+
+    tracing_subscriber::registry()
+        .with(
+            fmt::Layer::new()
+                .with_writer(ootle_log)
+                .with_filter(filter::Targets::new().with_targets([
+                    ("tari::application", tracing::Level::DEBUG),
+                    ("tari::indexer", tracing::Level::DEBUG),
+                    ("tari::ootle", tracing::Level::DEBUG),
+                    ("tower_http", tracing::Level::DEBUG),
+                ])),
+        )
+        .with(
+            fmt::Layer::new()
+                .without_time()
+                .with_target(false)
+                .with_writer(std::io::stdout)
+                .with_filter(filter::Targets::new().with_targets([
+                    ("tari::application", tracing::Level::INFO),
+                    ("tari::indexer", tracing::Level::INFO),
+                    ("tari::ootle", tracing::Level::INFO),
+                ])),
+        )
+        .try_init()?;
+
+    Ok(guard)
 }

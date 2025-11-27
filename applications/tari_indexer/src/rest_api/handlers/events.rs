@@ -14,7 +14,7 @@ use crate::{
     rest_api::{context::HandlerContext, handlers::HandlerResult},
 };
 
-const LOG_TARGET: &str = "tari::ootle::indexer::rest_api::handlers::events";
+const LOG_TARGET: &str = "tari::indexer::rest_api::handlers::events";
 
 #[utoipa::path(get, path = "/events", description = "SSE events")]
 pub async fn sse_events(

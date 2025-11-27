@@ -8,11 +8,10 @@ use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use futures::{future, future::Either};
 use log::*;
 use tari_engine_types::ToByteType;
-use tari_ootle_common_types::{optional::Optional, Epoch, Network};
+use tari_ootle_common_types::{optional::Optional, response_status::ResponseErrorStatus, Epoch, Network};
 use tari_ootle_wallet_sdk::{
     apis::{config::ConfigKey, transaction::TransactionApiError},
     models::WalletEvent,
-    network::WalletQueryErrorStatus,
 };
 use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceError;
 use tari_transaction::{args, Transaction};
@@ -148,19 +147,20 @@ pub async fn handle_submit(
         req.detect_inputs_use_unversioned,
     );
 
-    let mut builder = context
+    let mut transaction = context
         .transaction_builder()
         .with_unsigned_transaction(req.transaction)
-        .with_inputs(detected_inputs);
+        .with_inputs(detected_inputs)
+        .finish();
 
     let main_signer = sdk.key_manager_api().get_public_key(req.seal_signer)?;
     let main_signer_pk = main_signer.public_key.to_byte_type();
     let local_signer = sdk.signer_api().with_context(&main_signer_pk);
     for key in req.other_signers {
-        builder = local_signer.sign(key, builder)?;
+        transaction = local_signer.sign(key, transaction)?;
     }
 
-    let transaction = sdk.signer_api().sign(req.seal_signer, builder.finish())?;
+    let transaction = sdk.signer_api().sign(req.seal_signer, transaction)?;
 
     let tx_id = transaction.calculate_id();
     for lock_id in req.lock_ids {
@@ -186,8 +186,8 @@ pub async fn handle_submit(
                     status,
                     message,
                 }) => match &status {
-                    WalletQueryErrorStatus::TransactionRejected { .. } => transaction_rejected(message),
-                    WalletQueryErrorStatus::NotFound { message } => not_found(message),
+                    ResponseErrorStatus::TransactionRejected { .. } => transaction_rejected(message),
+                    ResponseErrorStatus::NotFound { message } => not_found(message),
                     _ => JsonRpcError::new(
                         JsonRpcErrorReason::ApplicationError(1),
                         format!("Failed to submit transaction: {}", e),
@@ -309,14 +309,14 @@ pub async fn handle_submit_manifest(
     })?;
 
     let signing_key_id = req.signing_key_id.unwrap_or(account_owner_key_id);
-    let key = sdk.key_manager_api().get_key(signing_key_id)?;
 
     let network = context.wallet_sdk().config_api().get::<Network>(ConfigKey::Network)?;
 
     let fee_amount = req.max_fee;
 
-    let builder = Transaction::builder()
+    let transaction = Transaction::builder()
         .for_network(network.as_byte())
+        .with_dry_run(req.dry_run)
         .with_fee_instructions_builder(|builder| {
             if instructions.fee_instructions.is_empty() {
                 builder.call_method(*default_account.component_address(), "pay_fee", args![fee_amount])
@@ -325,29 +325,24 @@ pub async fn handle_submit_manifest(
             }
         })
         .with_instructions(instructions.instructions)
-        .map(|builder| {
-            if signing_key_id == account_owner_key_id {
-                Ok(builder)
-            } else {
-                sdk.signer_api()
-                    .with_context(&key.to_public_key().to_byte_type())
-                    .sign(signing_key_id, builder)
-            }
-        })?;
-    let signatures = builder.signatures().to_vec();
-    let transaction = builder.with_dry_run(req.dry_run).build_unsigned_transaction();
+        .build_unsigned_transaction();
 
     // Detect inputs
     let substates = transaction.to_referenced_substates()?.into_iter().collect::<Vec<_>>();
     let dependencies = sdk.substate_api().locate_dependent_substates(&substates, true).await?;
     let inputs = dependencies.into_iter().map(|input| input.into_unversioned());
 
-    let transaction = transaction
-        .with_inputs(inputs)
-        .authorized_sealed_signer()
-        .with_signatures(signatures);
+    let transaction = transaction.with_inputs(inputs).authorized_sealed_signer();
 
-    let transaction = sdk.signer_api().sign(key.key_id, transaction)?;
+    let transaction = if signing_key_id == account_owner_key_id {
+        transaction.finish()
+    } else {
+        sdk.signer_api()
+            .with_context(default_account.owner_public_key())
+            .sign(signing_key_id, transaction)?
+    };
+
+    let transaction = sdk.signer_api().sign(account_owner_key_id, transaction)?;
 
     if req.dry_run {
         let exec_result = context

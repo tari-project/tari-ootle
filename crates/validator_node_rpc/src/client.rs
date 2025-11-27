@@ -31,21 +31,19 @@ pub trait ValidatorNodeClientFactory<TAddr: NodeAddressable>: Send + Sync {
 }
 
 pub trait ValidatorNodeRpcClient<TAddr: NodeAddressable>: Send + Sync {
-    type Error: std::error::Error + Send + Sync + 'static;
-
     fn submit_transaction(
         &mut self,
         transaction: Transaction,
-    ) -> impl Future<Output = Result<TransactionId, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<TransactionId, ValidatorNodeRpcClientError>> + Send;
     fn get_finalized_transaction_result(
         &mut self,
         transaction_id: TransactionId,
-    ) -> impl Future<Output = Result<TransactionResultStatus, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<TransactionResultStatus, ValidatorNodeRpcClientError>> + Send;
 
     fn get_substate(
         &mut self,
         substate_req: SubstateRequirementRef<'_>,
-    ) -> impl Future<Output = Result<SubstateResult, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<SubstateResult, ValidatorNodeRpcClientError>> + Send;
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -113,8 +111,6 @@ impl<TAddr: ToPeerId, TMsg: MessageSpec> TariValidatorNodeRpcClient<TAddr, TMsg>
 impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClient<TAddr>
     for TariValidatorNodeRpcClient<TAddr, TMsg>
 {
-    type Error = ValidatorNodeRpcClientError;
-
     async fn submit_transaction(
         &mut self,
         transaction: Transaction,
@@ -185,7 +181,10 @@ impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClien
         }
     }
 
-    async fn get_substate(&mut self, substate_req: SubstateRequirementRef<'_>) -> Result<SubstateResult, Self::Error> {
+    async fn get_substate(
+        &mut self,
+        substate_req: SubstateRequirementRef<'_>,
+    ) -> Result<SubstateResult, ValidatorNodeRpcClientError> {
         let mut client = self.client_connection().await?;
 
         let request = proto::rpc::GetSubstateRequest {

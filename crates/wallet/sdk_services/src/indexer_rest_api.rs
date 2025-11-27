@@ -30,6 +30,7 @@ use tari_ootle_common_types::{
     array_utils::copy_fixed_checked,
     displayable::Displayable,
     optional::IsNotFoundError,
+    response_status::{ResponseErrorStatus, TransactionStatusResponseError},
     shard::Shard,
     Epoch,
     StateVersion,
@@ -37,13 +38,11 @@ use tari_ootle_common_types::{
 use tari_ootle_wallet_sdk::{
     models::{EndOfShard, StartOfShard, UtxoBurnt, UtxoSpent, UtxoUnspent, UtxoUpdatePayload, WalletUtxoUpdate},
     network::{
-        StatusResponseError,
         SubstateQueryResult,
         TransactionFinalizedResult,
         TransactionQueryResult,
         UtxoUpdateStream,
         WalletNetworkInterface,
-        WalletQueryErrorStatus,
     },
 };
 use tari_template_lib::{
@@ -289,12 +288,12 @@ impl IsNotFoundError for IndexerRestApiNetworkInterfaceError {
     }
 }
 
-impl StatusResponseError for IndexerRestApiNetworkInterfaceError {
-    fn get_status(&self) -> WalletQueryErrorStatus {
+impl TransactionStatusResponseError for IndexerRestApiNetworkInterfaceError {
+    fn get_status(&self) -> ResponseErrorStatus {
         match self {
             IndexerRestApiNetworkInterfaceError::IndexerClientError(err) => {
                 if err.is_not_found_error() {
-                    return WalletQueryErrorStatus::NotFound {
+                    return ResponseErrorStatus::NotFound {
                         message: "The requested resource was not found".to_string(),
                     };
                 }
@@ -302,35 +301,35 @@ impl StatusResponseError for IndexerRestApiNetworkInterfaceError {
                     IndexerRestClientError::RequestFailedWithStatus { code, message }
                         if *code == INVALID_REQUEST_CODE =>
                     {
-                        WalletQueryErrorStatus::TransactionRejected {
+                        ResponseErrorStatus::TransactionRejected {
                             message: message.clone(),
                         }
                     },
                     IndexerRestClientError::RequestFailedWithStatus { code, message } => {
-                        WalletQueryErrorStatus::InternalError {
+                        ResponseErrorStatus::InternalError {
                             message: format!("Indexer request failed with status {code}: {message}"),
                         }
                     },
                     IndexerRestClientError::ErrorResponse { source, details } => {
                         if source.status().map(|s| s.as_u16()) == Some(INVALID_REQUEST_CODE as u16) {
-                            WalletQueryErrorStatus::TransactionRejected {
+                            ResponseErrorStatus::TransactionRejected {
                                 message: format!("Indexer error response: {}. Details: {}", source, details.display()),
                             }
                         } else {
-                            WalletQueryErrorStatus::InternalError {
+                            ResponseErrorStatus::InternalError {
                                 message: format!("Indexer error response: {}", source),
                             }
                         }
                     },
-                    _ => WalletQueryErrorStatus::InternalError {
+                    _ => ResponseErrorStatus::InternalError {
                         message: format!("Indexer client error: {err}"),
                     },
                 }
             },
-            IndexerRestApiNetworkInterfaceError::IndexerParseError(e) => WalletQueryErrorStatus::InternalError {
+            IndexerRestApiNetworkInterfaceError::IndexerParseError(e) => ResponseErrorStatus::InternalError {
                 message: format!("Indexer parse error: {e}"),
             },
-            IndexerRestApiNetworkInterfaceError::StreamDecodeError(e) => WalletQueryErrorStatus::InternalError {
+            IndexerRestApiNetworkInterfaceError::StreamDecodeError(e) => ResponseErrorStatus::InternalError {
                 message: format!("Indexer stream decode error: {e}"),
             },
         }

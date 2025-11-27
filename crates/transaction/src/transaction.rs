@@ -352,8 +352,9 @@ mod tests {
 
         let secret2 = RistrettoSecretKey::random(&mut OsRng);
         let subject = create_transaction()
+            .finish()
             .add_signer(&public_key.to_byte_type(), &secret2)
-            .build_and_seal(&secret);
+            .seal(&secret);
         assert!(subject.verify_all_signatures());
     }
 }

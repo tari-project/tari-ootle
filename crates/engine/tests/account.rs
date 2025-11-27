@@ -200,8 +200,9 @@ fn gasless() {
             .call_method(user_account, "withdraw", args![XTR, Amount(100)])
             .put_last_instruction_output_on_workspace("b")
             .call_method(user2_account, "deposit", args![Workspace("b")])
+            .finish()
             .add_signer(&fee_account_pk.to_byte_type(), &user_account_sk)
-            .build_and_seal(&fee_account_sk),
+            .seal(&fee_account_sk),
         vec![fee_account_proof, user_account_proof],
     );
 

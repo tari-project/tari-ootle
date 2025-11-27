@@ -462,12 +462,19 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         const OPERATION: &str = "get_transaction_receipt";
         use crate::storage_sqlite::schema::transaction_receipts;
 
+        let receipt_addr_hex = serialize_hex(address.as_object_key());
+
         let receipt_entry = transaction_receipts::table
             .select(transaction_receipts::data)
-            .filter(transaction_receipts::address.eq(address.to_string()))
+            .filter(transaction_receipts::address.eq(receipt_addr_hex))
             .first::<String>(self.connection())
+            .optional()
             .map_err(|e| StorageError::QueryError {
                 reason: format!("{OPERATION}: {}", e),
+            })?
+            .ok_or_else(|| StorageError::NotFound {
+                item: "transaction_receipt",
+                key: address.to_string(),
             })?;
 
         deserialize_json(&receipt_entry)

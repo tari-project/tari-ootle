@@ -5,7 +5,7 @@ use std::{sync::Arc, time::Duration};
 
 use log::*;
 use tari_engine_types::commit_result::ExecuteResult;
-use tari_ootle_common_types::optional::IsNotFoundError;
+use tari_ootle_common_types::{optional::IsNotFoundError, response_status::TransactionStatusResponseError};
 use tari_ootle_wallet_sdk::{
     models::{
         NewAccountData,
@@ -16,7 +16,7 @@ use tari_ootle_wallet_sdk::{
         WalletEvent,
         WalletLockId,
     },
-    network::{StatusResponseError, WalletNetworkInterface},
+    network::WalletNetworkInterface,
     WalletSdk,
     WalletSdkSpec,
 };
@@ -52,7 +52,7 @@ where
     TSpec::Store: Clone + Send + Sync + 'static,
     TSpec::NetworkInterface: Clone + Send + Sync + 'static,
     TSpec::KeyStore: Clone + Send + Sync + 'static,
-    <TSpec::NetworkInterface as WalletNetworkInterface>::Error: IsNotFoundError + StatusResponseError,
+    <TSpec::NetworkInterface as WalletNetworkInterface>::Error: IsNotFoundError + TransactionStatusResponseError,
 {
     pub fn new(
         notify: Notify<WalletEvent>,

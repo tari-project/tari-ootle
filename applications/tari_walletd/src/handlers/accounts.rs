@@ -29,7 +29,7 @@ use tari_ootle_wallet_sdk::{
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
+    constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
     models::SpendCondition,
     types::{Amount, ResourceType},
 };
@@ -596,7 +596,6 @@ pub async fn handle_create_free_test_coins(
     );
 
     let mut inputs = vec![
-        SubstateRequirement::unversioned(XTR),
         SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
         SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
     ];
@@ -651,6 +650,7 @@ pub async fn handle_create_free_test_coins(
                 .call_method(*account.component_address(), "pay_fee", args![max_fee])
         })
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
+        .with_authorized_seal_signer()
         .finish();
 
     let transaction = sdk.signer_api().sign(account_owner_key_id, transaction)?;

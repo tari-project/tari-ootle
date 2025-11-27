@@ -14,7 +14,13 @@ use tari_engine_types::{ConvertFromByteType, FromByteType, ToByteType};
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
-use crate::{hashing::transaction_hasher_v1, Instruction, UnsealedTransactionV1, UnsignedTransactionV1};
+use crate::{
+    hashing::transaction_hasher_v1,
+    Instruction,
+    UnsealedTransactionV1,
+    UnsignedTransaction,
+    UnsignedTransactionV1,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -81,6 +87,16 @@ pub struct TransactionSignature {
 impl TransactionSignature {
     pub fn new(public_key: RistrettoPublicKeyBytes, signature: SchnorrSignatureBytes) -> Self {
         Self { public_key, signature }
+    }
+
+    pub fn sign(
+        secret_key: &RistrettoSecretKey,
+        seal_signer: &RistrettoPublicKeyBytes,
+        transaction: &UnsignedTransaction,
+    ) -> Self {
+        match transaction {
+            UnsignedTransaction::V1(v1) => Self::sign_v1(secret_key, seal_signer, v1),
+        }
     }
 
     pub fn sign_v1(

@@ -22,11 +22,21 @@ pub enum ValidatorNodeRpcClientError {
     BorError(#[from] BorError),
 }
 
+impl ValidatorNodeRpcClientError {
+    pub fn status(&self) -> Option<&RpcStatus> {
+        match self {
+            Self::RpcStatusError(status) => Some(status),
+            Self::RpcError(RpcError::RequestFailed(status)) => Some(status),
+            _ => None,
+        }
+    }
+}
+
 impl IsNotFoundError for ValidatorNodeRpcClientError {
     fn is_not_found_error(&self) -> bool {
         match self {
-            ValidatorNodeRpcClientError::RpcStatusError(status) => status.is_not_found(),
-            ValidatorNodeRpcClientError::RpcError(RpcError::RequestFailed(status)) => status.is_not_found(),
+            Self::RpcStatusError(status) => status.is_not_found(),
+            Self::RpcError(RpcError::RequestFailed(status)) => status.is_not_found(),
             _ => false,
         }
     }

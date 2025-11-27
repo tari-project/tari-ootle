@@ -299,12 +299,12 @@ pub async fn handle_transfer(
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         // Seal signer is the fee payer account
         .with_authorized_seal_signer()
-        .map(|builder| {
-            sdk.signer_api()
-                .with_context(&fee_owner_key.public_key().to_byte_type())
-                .sign(account_owner_key_id, builder)
-        })?
         .finish();
+
+    let transaction = sdk
+        .signer_api()
+        .with_context(&fee_owner_key.public_key().to_byte_type())
+        .sign(account_owner_key_id, transaction)?;
 
     let transaction = sdk.signer_api().sign(fee_payer_key_id, transaction)?;
 

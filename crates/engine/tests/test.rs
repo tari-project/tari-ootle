@@ -59,6 +59,7 @@ fn test_state() {
     // constructor
     let component_address1: ComponentAddress = template_test.call_function("State", "new", call_args![], vec![]);
     template_test.assert_calls(&[
+        "workspace_invoke",
         "emit_log",
         "component_invoke",
         "set_last_instruction_output",

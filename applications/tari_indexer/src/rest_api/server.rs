@@ -4,6 +4,7 @@
 use std::net::SocketAddr;
 
 use axum::{
+    middleware,
     routing::{get, post},
     Extension,
     Router,
@@ -11,7 +12,7 @@ use axum::{
 use log::*;
 use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
 use tari_shutdown::ShutdownSignal;
-use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer};
+use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer, trace::TraceLayer};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -70,7 +71,7 @@ impl Server {
     }
 
     pub async fn spawn(
-        self,
+        mut self,
         preferred_addr: SocketAddr,
         services: &Services,
         shutdown: ShutdownSignal,
@@ -134,9 +135,16 @@ impl Server {
             .layer(CorsLayer::permissive())
             .layer(RequestBodyLimitLayer::new(REQUEST_BODY_LIMIT))
             .merge(SwaggerUi::new("/swagger-ui").url("/openapi.json", ApiDoc::openapi()))
-            .layer(Extension(context));
+            .layer(Extension(context))
+            .layer(TraceLayer::new_for_http());
+
         #[cfg(feature = "metrics")]
-        let router = router.route("/_metrics", get(metrics::MetricsHandler::new(self.registry)));
+        let router = router
+            .layer(middleware::from_fn_with_state(
+                metrics::register(&mut self.registry),
+                metrics::layer,
+            ))
+            .route("/_metrics", get(metrics::MetricsHandler::new(self.registry)));
 
         let listener = try_bind_with_fallback(preferred_addr).await?;
 

@@ -36,6 +36,8 @@ mod rest_api;
 
 mod event;
 mod event_manager;
+#[cfg(feature = "metrics")]
+mod metrics;
 mod network_client;
 mod network_state_sync;
 mod notify;

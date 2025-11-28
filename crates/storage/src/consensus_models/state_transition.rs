@@ -65,10 +65,16 @@ bitflags! {
         const VALIDATOR_FEE_POOL = 0x0000_0040;
         const UTXO = 0x0000_0080;
         const CLAIMED_OUTPUT_TOMBSTONE = 0x0000_0100;
+        /// Include all hashes for substates even if filtered out
+        const ALL_HASHES = 0x1000_0000;
     }
 }
 
 impl SubstateValueFilterFlags {
+    pub fn include_filtered_hashes(&self) -> bool {
+        self.contains(SubstateValueFilterFlags::ALL_HASHES)
+    }
+
     pub fn contains_substate(&self, substate_id: &SubstateId) -> bool {
         match substate_id {
             SubstateId::Component(_) => self.contains(SubstateValueFilterFlags::COMPONENT),

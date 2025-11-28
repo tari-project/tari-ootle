@@ -16,7 +16,7 @@ pub fn builder(network: Network) -> impl Fn(u64) -> Transaction {
 
         let account_address = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &signer_public_key);
 
-        Transaction::builder()
+        Transaction::builder_localnet()
             .for_network(network.as_byte())
             .with_fee_instructions_builder(|builder| {
                 builder
@@ -30,7 +30,6 @@ pub fn builder(network: Network) -> impl Fn(u64) -> Transaction {
                 SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
                 SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
             ])
-            .with_authorized_seal_signer()
             .build_and_seal(&signer_secret_key)
     }
 }

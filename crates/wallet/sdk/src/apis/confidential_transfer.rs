@@ -373,11 +373,11 @@ where TSpec: WalletSdkSpec
         )?;
 
         let network = self.config_api.get_network()?;
-        let transaction = Transaction::builder()
+        let transaction = Transaction::builder_localnet()
             .for_network(network.as_byte())
             .with_dry_run(params.is_dry_run)
             // TODO: we assume that from_account has XTR
-            .fee_transaction_pay_from_component(*from_account.component_address(), max_fee)
+            .pay_fee_from_component(*from_account.component_address(), max_fee)
             .then(|builder| {
                 if dest_account_exists {
                     builder

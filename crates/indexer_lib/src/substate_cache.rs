@@ -29,20 +29,26 @@ use tari_validator_node_rpc::client::SubstateResult;
 #[error("Failed substate cache operation {0}")]
 pub struct SubstateCacheError(pub String);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct SubstateCacheEntry {
     pub version: u32,
     pub substate_result: SubstateResult,
 }
 
+#[derive(Debug, Serialize, Clone, Copy)]
+pub struct SubstateCacheEntryRef<'a> {
+    pub version: u32,
+    pub substate_result: &'a SubstateResult,
+}
+
 pub trait SubstateCache: Send + Sync {
-    fn read(
+    fn read<K: AsRef<str> + Send>(
         &self,
-        address: String,
+        address: K,
     ) -> impl Future<Output = Result<Option<SubstateCacheEntry>, SubstateCacheError>> + Send;
-    fn write(
+    fn write<K: AsRef<str> + Send>(
         &self,
-        address: String,
-        entry: &SubstateCacheEntry,
+        address: K,
+        entry: SubstateCacheEntryRef<'_>,
     ) -> impl Future<Output = Result<(), SubstateCacheError>> + Send;
 }

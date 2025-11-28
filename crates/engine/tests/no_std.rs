@@ -13,7 +13,7 @@ fn it_compiles_when_using_no_std() {
     let access_rules_template = test.get_template_address("NoStdCounter");
 
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .allocate_component_address("no_std_counter")
             .call_function(access_rules_template, "with_address", args![Workspace(
                 "no_std_counter"

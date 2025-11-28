@@ -12,7 +12,7 @@ fn it_allocates_addresses_in_template_code() {
     let mut test = TemplateTest::new(["tests/templates/address_allocation"]);
 
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(test.get_template_address("AddressAllocationTest"), "create", args![])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -66,7 +66,7 @@ fn it_fails_if_address_allocation_is_not_used() {
     let template_addr = test.get_template_address("AddressAllocationTest");
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(template_addr, "drop_component_allocation", args![])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -74,7 +74,7 @@ fn it_fails_if_address_allocation_is_not_used() {
 
     assert_reject_reason(reason, TransactionCommitError::DanglingAddressAllocations { count: 1 });
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(template_addr, "drop_resource_allocation", args![])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -88,7 +88,7 @@ fn it_fails_if_instruction_allocated_addresses_are_not_used() {
     let mut test = TemplateTest::new(["tests/templates/address_allocation"]);
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .allocate_component_address("my_addr")
             .allocate_resource_address("my_res")
             .build_and_seal(test.secret_key()),
@@ -105,7 +105,7 @@ fn it_allocates_an_address_using_instructions() {
     let template_addr = test.get_template_address("AddressAllocationTest");
 
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .allocate_component_address("my_addr")
             .allocate_resource_address("my_res")
             .call_function(template_addr, "get_component_allocation_address", args![Workspace(
@@ -154,7 +154,7 @@ fn it_allows_calls_to_component_using_the_allocated_address() {
     let template_addr = test.get_template_address("AddressAllocationTest");
 
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .allocate_component_address("my_addr")
             .allocate_resource_address("my_res")
             .call_function(template_addr, "create_from_allocations", args![

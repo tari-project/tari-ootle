@@ -138,7 +138,7 @@ pub async fn fetch_substates(
 
     let substates = context
         .substate_manager()
-        .get_substates(requests.as_slice())
+        .get_cached_substates(requests.as_slice())
         .map_err(|e| ErrorResponse::internal_error(format!("Error getting substate: {}", e)))?;
 
     Ok(Json(GetSubstatesResponse { substates }))

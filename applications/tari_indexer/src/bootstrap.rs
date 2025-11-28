@@ -226,7 +226,7 @@ pub async fn spawn_services(
         substate_cache,
     );
 
-    let substate_manager = SubstateManager::new(substate_scanner.clone(), store.clone());
+    let substate_manager = SubstateManager::new(substate_scanner, store.clone());
     let transaction_manager = TransactionManager::new(network_client.clone(), store.clone());
 
     // dry run

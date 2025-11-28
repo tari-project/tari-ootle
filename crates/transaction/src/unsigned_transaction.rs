@@ -19,6 +19,10 @@ pub enum UnsignedTransaction {
 }
 
 impl UnsignedTransaction {
+    pub fn new<N: Into<u8>>(network: N) -> Self {
+        Self::V1(UnsignedTransactionV1::new_default(network))
+    }
+
     pub fn schema_version(&self) -> u16 {
         match self {
             Self::V1(_) => 1,
@@ -32,6 +36,12 @@ impl UnsignedTransaction {
         self
     }
 
+    pub fn network(&self) -> u8 {
+        match self {
+            Self::V1(tx) => tx.network,
+        }
+    }
+
     pub(crate) fn set_dry_run(&mut self, dry_run: bool) -> &mut Self {
         match self {
             Self::V1(tx) => tx.set_dry_run(dry_run),
@@ -39,9 +49,9 @@ impl UnsignedTransaction {
         self
     }
 
-    pub fn authorized_sealed_signer(mut self) -> Self {
+    pub fn disabled_authorized_sealed_signer(mut self) -> Self {
         match self {
-            Self::V1(ref mut tx) => tx.is_seal_signer_authorized = true,
+            Self::V1(ref mut tx) => tx.is_seal_signer_authorized = false,
         }
         self
     }
@@ -167,12 +177,6 @@ impl UnsignedTransaction {
 impl From<UnsignedTransactionV1> for UnsignedTransaction {
     fn from(tx: UnsignedTransactionV1) -> Self {
         Self::V1(tx)
-    }
-}
-
-impl Default for UnsignedTransaction {
-    fn default() -> Self {
-        Self::V1(UnsignedTransactionV1::default())
     }
 }
 

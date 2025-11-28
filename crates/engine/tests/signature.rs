@@ -54,7 +54,7 @@ fn setup(allow_list: Vec<PublicKey>) -> (TemplateTest, ComponentAddress) {
     let mut test = TemplateTest::new(TEMPLATE_PATHS);
     let template_addr = test.get_template_address(TEMPLATE_NAME);
 
-    let transaction = Transaction::builder()
+    let transaction = Transaction::builder_localnet()
         .call_function(template_addr, "new", args![allow_list])
         .build_and_seal(test.secret_key());
 
@@ -79,7 +79,7 @@ fn claim_with_valid_signature() {
     let transfer = stealth::generate_transfer_data(NO_INPUTS, 1_000_000_000_000u64, Some(1_000_000_000_000), 0);
     let signature = sign_it(&s1);
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(faucet, "claim_funds", args![p1, signature, transfer.statement])
             .build_and_seal(test.secret_key()),
         vec![test.owner_proof()],
@@ -109,7 +109,7 @@ fn multi_claim() {
     let sig1 = sign_it(&s1);
     let sig2 = sign_it(&s2);
     test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(faucet, "claim_funds", args![p1, sig1, transfer1.statement])
             .call_method(faucet, "claim_funds", args![p2, sig2, transfer2.statement])
             .build_and_seal(test.secret_key()),
@@ -126,7 +126,7 @@ fn bad_signature() {
     let transfer = stealth::generate_transfer_data(NO_INPUTS, 1000, Some(1000), 0);
     let sig1 = sign_it_with(&s1, b"A different message");
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(faucet, "claim_funds", args![p1, sig1, transfer.statement])
             .build_and_seal(test.secret_key()),
         vec![test.owner_proof()],
@@ -147,7 +147,7 @@ fn check_signature_api() {
     let good_sig = sign_it(&s1);
     let bad_sig = sign_it_with(&s1, b"A different message");
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(template_addr, "check_sig", args![p1, bad_sig])
             .call_function(template_addr, "check_sig", args![p1, good_sig])
             // Bad public key

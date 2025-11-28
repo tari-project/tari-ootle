@@ -120,6 +120,7 @@ where
     }
 
     pub async fn run(&mut self, mut context: ConsensusWorkerContext<TSpec>) {
+        info!(target: LOG_TARGET, "🚀 Starting Consensus state machine worker");
         // When starting up we will wait a bit.
         // Context: in swarm, we start on epoch 2, then quickly go to epoch 3. This causes some nodes to start consensus
         // on epoch 2 and some on epoch 3.

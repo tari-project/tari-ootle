@@ -38,7 +38,7 @@ impl Runner {
 
         let transaction = self
             .new_transaction_builder()
-            .fee_transaction_pay_from_component(in_account.component_address, 1000 * num_tariswaps)
+            .pay_fee_from_component(in_account.component_address, 1000 * num_tariswaps)
             .then(|mut builder| {
                 for _ in 0..num_tariswaps {
                     builder = builder.call_function(self.tariswap_template, "new", args![
@@ -132,7 +132,7 @@ impl Runner {
                         SubstateRequirement::unversioned(faucet.resource_address),
                     ])
                     .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
-                    .fee_transaction_pay_from_component(account.component_address, 2000)
+                    .pay_fee_from_component(account.component_address, 2000)
                     .call_method(account.component_address, "withdraw", args![XTR, amount_a])
                     .put_last_instruction_output_on_workspace("a")
                     .call_method(account.component_address, "withdraw", args![
@@ -146,7 +146,6 @@ impl Runner {
                     ])
                     .put_last_instruction_output_on_workspace("lp")
                     .call_method(account.component_address, "deposit", args![Workspace("lp")])
-                    .with_authorized_seal_signer()
                     .finish();
 
                 // First sign with the account key to authorize the use of the account component
@@ -256,7 +255,7 @@ impl Runner {
                         SubstateRequirement::unversioned(tariswap.lp_resource_address),
                     ])
                     .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
-                    .fee_transaction_pay_from_component(account.component_address, 1000)
+                    .pay_fee_from_component(account.component_address, 1000)
                     .call_method(tariswap.component_address, "get_pool_balance", args![XTR])
                     .call_method(tariswap.component_address, "get_pool_balance", args![
                         faucet.resource_address,
@@ -274,7 +273,6 @@ impl Runner {
                     ])
                     .put_last_instruction_output_on_workspace("swapped")
                     .call_method(account.component_address, "deposit", args![Workspace("swapped")])
-                    .with_authorized_seal_signer()
                     .finish();
 
                 let transaction = self
@@ -328,7 +326,7 @@ impl Runner {
                         SubstateRequirement::unversioned(tariswap.lp_resource_address),
                     ])
                     .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
-                    .fee_transaction_pay_from_component(account.component_address, 1000)
+                    .pay_fee_from_component(account.component_address, 1000)
                     .call_method(tariswap.component_address, "get_pool_balance", args![XTR])
                     .call_method(tariswap.component_address, "get_pool_balance", args![
                         faucet.resource_address
@@ -346,7 +344,6 @@ impl Runner {
                     .call_method(tariswap.component_address, "swap", args![Workspace("b"), XTR,])
                     .put_last_instruction_output_on_workspace("swapped")
                     .call_method(account.component_address, "deposit", args![Workspace("swapped")])
-                    .with_authorized_seal_signer()
                     .finish();
 
                 let transaction = self

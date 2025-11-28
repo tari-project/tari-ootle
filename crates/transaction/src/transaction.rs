@@ -15,6 +15,7 @@ use tari_engine_types::{
 use tari_ootle_common_types::{
     committee::CommitteeInfo,
     Epoch,
+    Network,
     SubstateAddress,
     SubstateRequirement,
     SubstateRequirementRef,
@@ -44,8 +45,15 @@ pub enum Transaction {
 }
 
 impl Transaction {
-    pub fn builder() -> TransactionBuilder {
-        TransactionBuilder::new()
+    /// Creates a new transaction builder.
+    /// NOTE: The network is set to LocalNet. Be sure to set the correct network using for_network.
+    /// NOTE: this method will likely be deprecated in the future
+    pub fn builder_localnet() -> TransactionBuilder {
+        Self::builder(Network::LocalNet)
+    }
+
+    pub fn builder<N: Into<u8>>(network: N) -> TransactionBuilder {
+        TransactionBuilder::new(network)
     }
 
     pub fn new(unsigned_transaction: UnsealedTransactionV1, seal_signature: TransactionSealSignature) -> Self {
@@ -308,8 +316,7 @@ mod tests {
     use crate::{args, call_args};
 
     fn create_transaction() -> TransactionBuilder {
-        Transaction::builder()
-            .for_network(123u8)
+        Transaction::builder(123u8)
             .create_account(Default::default())
             .call_method(ComponentAddress::from_array([1; 32]), "method", args![
                 1,

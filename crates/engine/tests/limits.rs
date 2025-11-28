@@ -15,14 +15,14 @@ fn practical_limit() {
     let template = test.get_template_address(TEMPLATE_NAME);
 
     test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(template, "new", args!(Bytes::from(vec![123u8; 64 * 1024])))
             .build_and_seal(test.secret_key()),
         vec![],
     );
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(template, "new", args!(Bytes::from(vec![123u8; 1024 * 1024 + 1])))
             .build_and_seal(test.secret_key()),
         vec![],

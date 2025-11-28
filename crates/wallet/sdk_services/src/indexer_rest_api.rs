@@ -122,10 +122,7 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
     async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, Self::Error> {
         let mut client = self.get_client()?;
         let result = client
-            .submit_transaction(SubmitTransactionRequest {
-                transaction,
-                is_dry_run: false,
-            })
+            .submit_transaction(SubmitTransactionRequest { transaction })
             .await?;
         Ok(result.transaction_id)
     }
@@ -136,10 +133,7 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
     ) -> Result<TransactionQueryResult, Self::Error> {
         let mut client = self.get_client()?;
         let resp = client
-            .submit_transaction(SubmitTransactionRequest {
-                transaction,
-                is_dry_run: true,
-            })
+            .submit_transaction(SubmitTransactionRequest { transaction })
             .await?;
 
         Ok(TransactionQueryResult {

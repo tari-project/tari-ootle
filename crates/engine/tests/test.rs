@@ -237,7 +237,7 @@ fn test_engine_errors() {
 
     // check that public methods can still internally call private ones
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(test.get_template_address("Errors"), "invalid_engine_call", args![])
             .build_and_seal(&Default::default()),
         vec![],
@@ -334,7 +334,7 @@ fn test_random() {
 fn test_errors_on_infinite_loop() {
     let mut test = TemplateTest::new(vec!["tests/templates/infinity_loop"]);
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(test.get_template_address("InfinityLoopTest"), "infinity_loop", args![])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -461,7 +461,7 @@ mod fungible {
 
         let owner_proof = template_test.owner_proof();
         let result = template_test.build_and_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(faucet_component, "burn_coins", args![500])
                 .call_method(faucet_component, "total_supply", args![]),
             vec![owner_proof.clone()],
@@ -474,7 +474,7 @@ mod fungible {
         );
 
         let result = template_test.build_and_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(faucet_component, "burn_coins", args![
                     initial_supply - Amount::from(500)
                 ])
@@ -490,7 +490,7 @@ mod fungible {
 
         template_test
             .build_and_execute(
-                Transaction::builder().call_method(faucet_component, "burn_coins", args![1]),
+                Transaction::builder_localnet().call_method(faucet_component, "burn_coins", args![1]),
                 vec![],
             )
             .expect_failure();
@@ -910,7 +910,7 @@ mod emoji_id {
         price: Amount,
         owner_proof: NonFungibleAddress,
     ) -> Result<FinalizeResult, String> {
-        let transaction = Transaction::builder()
+        let transaction = Transaction::builder_localnet()
             .call_method(account_address, "withdraw", args![faucet_resource, price])
             .put_last_instruction_output_on_workspace("payment")
             .call_method(emoji_id_minter, "mint", args![emoji_id, Workspace("payment")])
@@ -939,7 +939,11 @@ mod emoji_id {
         let price = Amount::from(20);
         let result = test
             .build_and_execute(
-                Transaction::builder().call_function(emoji_id_template, "new", args![XTR, max_emoji_id_len, price]),
+                Transaction::builder_localnet().call_function(emoji_id_template, "new", args![
+                    XTR,
+                    max_emoji_id_len,
+                    price
+                ]),
                 vec![owner_proof.clone()],
             )
             .unwrap_success();
@@ -1034,7 +1038,7 @@ mod tickets {
         let price = Amount::from(20);
         let event_description = "My music festival".to_string();
         let result = test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_function(ticket_template, "new", args![initial_supply, price, event_description])
                 .build_and_seal(&secret),
             vec![owner_proof.clone()],
@@ -1054,7 +1058,7 @@ mod tickets {
 
         // buy a ticket
         test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(account_address, "withdraw", args![XTR, Amount(20)])
                 .put_last_instruction_output_on_workspace("payment")
                 .call_method(ticket_seller, "buy_ticket", args![Workspace("payment")])

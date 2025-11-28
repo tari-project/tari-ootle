@@ -91,7 +91,7 @@ fn mint_more_later() {
 
     let withdraw_proof = generate_withdraw_proof(&mask, 100, None, 0);
     template_test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(faucet, "take_free_coins", args![withdraw_proof.proof])
             .put_last_instruction_output_on_workspace("coins")
             .call_method(user_account, "deposit", args![Workspace("coins")])
@@ -435,7 +435,7 @@ fn mint_and_transfer_revealed() {
     let withdraw = generate_withdraw_proof_with_inputs(&[], 123, 100, None, 23);
 
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(faucet, "take_free_coins", args![withdraw.proof])
             .put_last_instruction_output_on_workspace("b")
             .call_method(user_account, "deposit", args![Workspace("b")])
@@ -455,7 +455,7 @@ fn mint_revealed_with_invalid_proof() {
     let (mut test, faucet, _faucet_resx) = setup(confidential_proof, None);
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(faucet, "mint_revealed_with_bad_range_proof", args![Amount(123)])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -507,7 +507,7 @@ fn mint_with_view_key() {
 
     let withdraw_proof = generate_withdraw_proof_with_view_key(&mask, 100, 55, Some(100 - 55), 0, view_key);
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(faucet, "take_free_coins", args![withdraw_proof.proof])
             .put_last_instruction_output_on_workspace("coins")
             .call_method(user_account, "deposit", args![Workspace("coins")])

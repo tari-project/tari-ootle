@@ -95,7 +95,7 @@ fn create_resource_and_fund_account(test: &mut TemplateTest, account: ComponentA
     // take free coins into the account
     let _result = test
         .build_and_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(faucet_component, "take_free_coins", args![])
                 .put_last_instruction_output_on_workspace("free_coins")
                 .call_method(account, "deposit", args![Workspace("free_coins")]),
@@ -233,7 +233,7 @@ fn it_fails_on_invalid_calls() {
     let result = test
         .template_test
         .try_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(components.composability_component, "invalid_state_call", args![])
                 .build_and_seal(&private_key),
             vec![],
@@ -264,7 +264,7 @@ fn it_does_not_propagate_permissions() {
     let result = test
         .template_test
         .try_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(components.composability_component, "malicious_withdraw", args![
                     victim_account,
                     fungible_resource,
@@ -338,7 +338,7 @@ fn it_fails_when_surpassing_recursion_limit() {
     let result = test
         .template_test
         .try_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(last_composability_component, "get_nested_value", args![])
                 .build_and_seal(&private_key),
             vec![],

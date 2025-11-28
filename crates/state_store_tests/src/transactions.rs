@@ -173,21 +173,21 @@ mod transaction_operations {
 
         // transactions_insert
         let tx1 = TransactionRecord::new(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .add_instruction(Instruction::DropAllProofsInWorkspace)
                 .add_input(SubstateRequirement::new(create_random_substate_id(), Some(0)))
                 .build_and_seal(&PrivateKey::default()),
         );
         tx.transactions_insert(&tx1).unwrap();
         let tx2 = TransactionRecord::new(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .add_instruction(Instruction::DropAllProofsInWorkspace)
                 .add_input(SubstateRequirement::new(create_random_substate_id(), Some(1)))
                 .build_and_seal(&PrivateKey::default()),
         );
         tx.transactions_insert(&tx2).unwrap();
         let unexisting_tx = TransactionRecord::new(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .add_instruction(Instruction::DropAllProofsInWorkspace)
                 .add_input(SubstateRequirement::new(create_random_substate_id(), Some(2)))
                 .build_and_seal(&PrivateKey::default()),
@@ -210,7 +210,7 @@ mod transaction_operations {
 
         // transactions_update
         let updated_tx = TransactionRecord::new(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .add_instruction(Instruction::DropAllProofsInWorkspace)
                 .add_input(SubstateRequirement::new(create_random_substate_id(), Some(3)))
                 .build_and_seal(&PrivateKey::default()),
@@ -249,14 +249,14 @@ mod transaction_execution_operations {
 
         // insert some transactions
         let tx1 = TransactionRecord::new(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .add_instruction(Instruction::DropAllProofsInWorkspace)
                 .add_input(SubstateRequirement::new(create_random_substate_id(), Some(0)))
                 .build_and_seal(&PrivateKey::default()),
         );
         tx.transactions_insert(&tx1).unwrap();
         let tx2 = TransactionRecord::new(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .add_instruction(Instruction::DropAllProofsInWorkspace)
                 .add_input(SubstateRequirement::new(create_random_substate_id(), Some(1)))
                 .build_and_seal(&PrivateKey::default()),

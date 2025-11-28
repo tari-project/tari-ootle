@@ -142,7 +142,7 @@ use crate::{
             StateTransitionType,
         },
         state_tree,
-        state_tree::{StateTreeCf, StateTreeStaleNodesModel},
+        state_tree::{StateTreeCf, StateTreeStaleNodesCf},
         state_tree_shard_versions::StateTreeShardVersionCf,
         substate,
         substate::{SubstateCf, SubstateHeadData},
@@ -1418,7 +1418,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         const OPERATION: &str = "state_tree_nodes_record_stale_tree_nodes";
 
         self.db()
-            .cf(StateTreeStaleNodesModel)?
+            .cf(StateTreeStaleNodesCf)?
             .put(&(shard, version), &nodes, OPERATION)?;
 
         Ok(())
@@ -1442,6 +1442,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 trace!(target: LOG_TARGET, "Shard {shard} is at version {max_version}, skipping stale node deletion due to history length {}", self.options.state_history_length);
                 continue;
             };
+            let mut delete_buffer = vec![];
             for result in stale_iter {
                 let ((shard, version), nodes) = result?;
                 // Only delete up to history length back from the max version
@@ -1449,7 +1450,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                     break;
                 }
 
-                let mut delete_buffer = vec![];
                 for node in nodes {
                     // Deletes are buffered to ensure that we delete entire subtrees at once.
                     if delete_buffer.len() >= DELETE_BUFFER_FLUSH_THRESHOLD {
@@ -1502,7 +1502,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
                 // Finally delete the stale node record
                 self.db()
-                    .cf(StateTreeStaleNodesModel)?
+                    .cf(StateTreeStaleNodesCf)?
                     .delete(&(shard, version), OPERATION)?;
             }
 

@@ -252,9 +252,9 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
 
     let SettingsGetResponse { network, .. } = client.get_settings().await?;
 
-    let mut builder = Transaction::builder()
+    let mut builder = Transaction::builder_localnet()
         .for_network(network.byte)
-        .fee_transaction_pay_from_component(fee_account.component_address, common.max_fee.unwrap_or(1000))
+        .pay_fee_from_component(fee_account.component_address, common.max_fee.unwrap_or(1000))
         .add_instruction(instruction)
         .with_inputs(common.inputs)
         .with_min_epoch(common.min_epoch.map(Epoch))
@@ -324,7 +324,7 @@ async fn handle_submit_manifest(
 
     let SettingsGetResponse { network, .. } = client.get_settings().await?;
 
-    let builder = Transaction::builder()
+    let builder = Transaction::builder_localnet()
         .for_network(network.byte)
         .with_fee_instructions_builder(|builder| {
             builder.with_instructions(instructions.fee_instructions).call_method(

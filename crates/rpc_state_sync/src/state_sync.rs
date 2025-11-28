@@ -49,7 +49,7 @@ use tari_validator_node_rpc::{
 
 use crate::{error::RpcStateSyncError, stats::StateSyncStats};
 
-const LOG_TARGET: &str = "tari::ootle::comms_rpc_state_sync";
+const LOG_TARGET: &str = "tari::ootle::rpc_state_sync";
 
 pub struct RpcStateSyncClientProtocol<TConsensusSpec: ConsensusSpec> {
     epoch_manager: TConsensusSpec::EpochManager,
@@ -226,7 +226,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             info!(target: LOG_TARGET, "🛜 Buffering {} state update(s) (state version: v{})", updates_for_state_version.len(), state_version);
             for result in updates_for_state_version {
                 let update = result?;
-                let tree_change = extract_tree_changes(&update)?;
+                let tree_change = extract_tree_change(&update)?;
 
                 debug!(target: LOG_TARGET, "🛜 -> state update (v{}) {}", state_version, update);
                 tree_changes.push(tree_change);
@@ -645,7 +645,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
     }
 }
 
-fn extract_tree_changes(update: &SubstateUpdateProof) -> Result<SubstateTreeChange, RpcStateSyncError> {
+fn extract_tree_change(update: &SubstateUpdateProof) -> Result<SubstateTreeChange, RpcStateSyncError> {
     match update {
         SubstateUpdateProof::Create(create) => {
             let id = create.substate.as_versioned_substate_id_ref();

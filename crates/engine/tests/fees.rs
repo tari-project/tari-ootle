@@ -18,8 +18,8 @@ fn deducts_fees_from_payments_and_refunds_the_rest() {
     test.enable_fees();
 
     let result = test.execute_expect_success(
-        Transaction::builder()
-            .fee_transaction_pay_from_component(account, Amount::from(1000))
+        Transaction::builder_localnet()
+            .pay_fee_from_component(account, Amount::from(1000))
             .call_function(test.get_template_address("State"), "new", args![])
             .build_and_seal(&private_key),
         vec![owner_token],
@@ -46,8 +46,8 @@ fn deducts_fees_when_transaction_fails() {
     test.enable_fees();
 
     let result = test.execute_and_commit_on_success(
-        Transaction::builder()
-            .fee_transaction_pay_from_component(account, 1000)
+        Transaction::builder_localnet()
+            .pay_fee_from_component(account, 1000)
             .call_function(test.get_template_address("State"), "this_doesnt_exist", args![])
             .build_and_seal(&private_key),
         vec![owner_token],
@@ -74,7 +74,7 @@ fn deposit_from_faucet_then_pay() {
     test.enable_fees();
 
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .with_fee_instructions_builder(|builder| {
                 builder
                     // Faucet deposits free coins into the account
@@ -112,11 +112,11 @@ fn another_account_pays_partially_for_fees() {
     test.enable_fees();
 
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             // Faucet pays a little
-            .fee_transaction_pay_from_component(account_fee, Amount::from(200))
+            .pay_fee_from_component(account_fee, Amount::from(200))
             // Account pays the rest
-            .fee_transaction_pay_from_component(account_fee2, Amount::from(1000))
+            .pay_fee_from_component(account_fee2, Amount::from(1000))
             .call_method(xtr_faucet_component(), "take", args![1000])
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(account, "deposit", args![Workspace("bucket")])
@@ -158,7 +158,7 @@ fn failed_fee_transaction() {
     test.enable_fees();
     let result = test
         .try_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .with_fee_instructions_builder(|builder| {
                     builder
                         // This instruction will fail
@@ -190,9 +190,9 @@ fn fail_partial_paid_fees() {
     test.enable_fees();
 
     let result = test.execute_expect_commit(
-        Transaction::builder()
+        Transaction::builder_localnet()
             // Pay less fees than the cost of the main transaction
-            .fee_transaction_pay_from_component(account, Amount::ONE_HUNDRED)
+            .pay_fee_from_component(account, Amount::ONE_HUNDRED)
             // These instructions should not be applied
             .call_method(account2, "withdraw", args![
                     STEALTH_TARI_RESOURCE_ADDRESS,
@@ -227,9 +227,9 @@ fn fail_pay_negative_fee() {
     test.enable_fees();
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
                 // Pay less fees than the cost of the main transaction
-                .fee_transaction_pay_from_component(account, -100)
+                .pay_fee_from_component(account, -100)
                 .build_and_seal(&private_key),
         vec![owner_token],
     );
@@ -255,7 +255,7 @@ fn fail_pay_less_fees_than_fee_transaction() {
 
     let result = test
         .try_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .with_fee_instructions_builder(|builder| {
                     (0u32..=0).fold(builder, |builder, i| {
                         builder.call_method(
@@ -314,7 +314,7 @@ fn fail_pay_too_little_no_fee_instruction() {
     test.enable_fees();
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .with_fee_instructions_builder(|builder| {
                 builder
                     // These instructions should not be applied
@@ -351,9 +351,9 @@ fn failure_pay_fee_in_main_instructions() {
     test.enable_fees();
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             // Pay in fee intent, enough to pass this step
-            .pay_fee_using_account(account, 20)
+            .pay_fee_from_component(account, 20)
             // Call pay_fee in main instructions (outside fee instructions) not permitted
             .call_method(account, "pay_fee", args![100])
             .call_method(account, "balance", args![STEALTH_TARI_RESOURCE_ADDRESS])
@@ -375,8 +375,8 @@ fn dangling_bucket_pay_fees() {
     test.enable_fees();
 
     let result = test.execute_and_commit_on_success(
-        Transaction::builder()
-            .fee_transaction_pay_from_component(account, Amount::from(500))
+        Transaction::builder_localnet()
+            .pay_fee_from_component(account, Amount::from(500))
             .call_method(account, "withdraw", args![STEALTH_TARI_RESOURCE_ADDRESS, Amount(10)])
             .put_last_instruction_output_on_workspace("dangling_bucket")
             .build_and_seal(&private_key),

@@ -30,7 +30,7 @@ fn basic_faucet_transfer() {
 
     let _result = template_test
         .build_and_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(faucet_component, "take_free_coins", args![])
                 .put_last_instruction_output_on_workspace("free_coins")
                 .call_method(sender_address, "deposit", args![Workspace("free_coins")]),
@@ -40,7 +40,7 @@ fn basic_faucet_transfer() {
 
     let result = template_test
         .build_and_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(sender_address, "withdraw", args![faucet_resource, Amount(100)])
                 .put_last_instruction_output_on_workspace("foo_bucket")
                 .call_method(receiver_address, "deposit", args![Workspace("foo_bucket")])
@@ -110,7 +110,7 @@ fn withdraw_from_account_prevented() {
     let (dest_address, non_owning_token, non_owning_key) = template_test.create_funded_account();
 
     let reason = template_test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(source_account, "withdraw", args![faucet_resource, Amount(100)])
             .put_last_instruction_output_on_workspace("stolen_coins")
             .call_method(source_account, "deposit", args![Workspace("stolen_coins")])
@@ -154,7 +154,7 @@ fn attempt_to_overwrite_account() {
     let source_account_pk = RistrettoPublicKey::from_secret_key(&source_account_sk);
 
     let overwriting_tx = template_test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             // Create component with the same ID
             .create_account(source_account_pk.to_byte_type())
             // Signed by source account so that it can pay the fees for the new account creation
@@ -168,7 +168,7 @@ fn attempt_to_overwrite_account() {
     });
 
     let result = template_test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(source_account, "get_balances", call_args![])
             .build_and_seal(&source_account_sk),
         vec![],
@@ -195,8 +195,8 @@ fn gasless() {
     let fee_account_pk = RistrettoPublicKey::from_secret_key(&fee_account_sk);
 
     test.execute_expect_success(
-        Transaction::builder()
-            .fee_transaction_pay_from_component(fee_account, 1000)
+        Transaction::builder_localnet()
+            .pay_fee_from_component(fee_account, 1000)
             .call_method(user_account, "withdraw", args![XTR, Amount(100)])
             .put_last_instruction_output_on_workspace("b")
             .call_method(user2_account, "deposit", args![Workspace("b")])
@@ -229,7 +229,7 @@ fn custom_access_rules() {
         .default(rule!(allow_all));
 
     let result = template_test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(xtr_faucet_component(), "take", args![1000])
             .put_last_instruction_output_on_workspace("bucket")
             // Create component with the same ID
@@ -250,7 +250,7 @@ fn custom_access_rules() {
     // We create another account and we we will withdraw from the custom one
     let (user2_account, user2_account_proof, user2_secret_key) = template_test.create_funded_account();
     template_test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(user_account, "withdraw", args![XTR, Amount(100)])
             .put_last_instruction_output_on_workspace("b")
             .call_method(user2_account, "deposit", args![Workspace("b")])
@@ -269,7 +269,7 @@ fn take_from_bucket() {
 
     let initial_supply = Amount::from(1_000_000_000_000u64);
     test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .allocate_component_address("faucet")
             .call_function(faucet_template, "mint_with_opts", args![
                 initial_supply,

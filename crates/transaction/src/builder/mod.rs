@@ -26,6 +26,7 @@ use tari_template_lib::{
 };
 
 use crate::{
+    args,
     args::{InstructionArg, WorkspaceOffsetId},
     builder::{
         named_args::{parse_workspace_key, BuilderWorkspaceKey, NamedArg, ParseWorkspaceKeyError},
@@ -43,44 +44,38 @@ use crate::{
     UnsealedTransactionV1,
 };
 
-#[derive(Debug, Clone, Default)]
-pub struct TransactionBuilder {
+#[derive(Debug, Clone)]
+pub enum MainIntent {}
+#[derive(Debug, Clone)]
+pub enum FeeIntent {}
+
+#[derive(Debug, Clone)]
+pub struct TransactionBuilder<D = MainIntent> {
     unsigned_transaction: UnsignedTransaction,
     workspace_ids: WorkspaceIds,
-    fee_instruction_builder: Option<Box<TransactionBuilder>>,
+    fee_instruction_builder: Option<Box<TransactionBuilder<FeeIntent>>>,
+    _discriminator: std::marker::PhantomData<D>,
 }
 
-impl TransactionBuilder {
-    pub fn new() -> Self {
+impl TransactionBuilder<MainIntent> {
+    pub fn new<N: Into<u8>>(network: N) -> Self {
+        let network = network.into();
         Self {
-            unsigned_transaction: UnsignedTransaction::default(),
+            unsigned_transaction: UnsignedTransaction::new(network),
             workspace_ids: WorkspaceIds::new(),
-            fee_instruction_builder: Some(Box::new(Self::new_fee_builder())),
-        }
-    }
-
-    fn new_fee_builder() -> Self {
-        Self {
-            unsigned_transaction: UnsignedTransaction::default(),
-            workspace_ids: WorkspaceIds::new(),
-            fee_instruction_builder: None,
+            fee_instruction_builder: Some(Box::new(Self::new_fee_builder(network))),
+            _discriminator: std::marker::PhantomData,
         }
     }
 
     pub fn with_unsigned_transaction<T: Into<UnsignedTransaction>>(self, unsigned_transaction: T) -> Self {
+        let unsigned_transaction = unsigned_transaction.into();
         Self {
-            unsigned_transaction: unsigned_transaction.into(),
+            fee_instruction_builder: Some(Box::new(Self::new_fee_builder(unsigned_transaction.network()))),
+            unsigned_transaction,
             workspace_ids: WorkspaceIds::new(),
-            fee_instruction_builder: Some(Box::new(Self::new_fee_builder())),
+            _discriminator: std::marker::PhantomData,
         }
-    }
-
-    pub fn then<F: FnOnce(Self) -> Self>(self, f: F) -> Self {
-        f(self)
-    }
-
-    pub fn map<F: FnOnce(Self) -> T, T>(self, f: F) -> T {
-        f(self)
     }
 
     pub fn for_network<N: Into<u8>>(mut self, network: N) -> Self {
@@ -88,19 +83,18 @@ impl TransactionBuilder {
         self
     }
 
-    pub fn with_dry_run(mut self, dry_run: bool) -> Self {
-        self.unsigned_transaction.set_dry_run(dry_run);
-        self
-    }
-
-    pub fn with_authorized_seal_signer(mut self) -> Self {
-        self.unsigned_transaction = self.unsigned_transaction.authorized_sealed_signer();
-        self
+    fn new_fee_builder<N: Into<u8>>(network: N) -> TransactionBuilder<FeeIntent> {
+        TransactionBuilder {
+            unsigned_transaction: UnsignedTransaction::new(network),
+            workspace_ids: WorkspaceIds::new(),
+            fee_instruction_builder: None,
+            _discriminator: std::marker::PhantomData,
+        }
     }
 
     /// Pays fees using a stealth transfer statement. The statement must reveal sufficient funds to cover the fee.
     /// NOTE: fees paid are not refunded, so any overpayment is kept by validators.
-    pub fn fee_transaction_pay_fees_stealth(self, statement: StealthTransferStatement) -> Self {
+    pub fn pay_fee_stealth(self, statement: StealthTransferStatement) -> Self {
         self.with_fee_instructions_builder(|builder| builder.pay_fee_stealth(statement))
     }
 
@@ -108,33 +102,187 @@ impl TransactionBuilder {
     /// This method must exist and return a Bucket with containing revealed confidential XTR resource.
     /// This allows the fee to originate from sources other than the transaction sender's account.
     /// The fee instruction will lock up the "max_fee" amount for the duration of the transaction.
-    pub fn fee_transaction_pay_from_component<C: Into<ComponentCall>, A: Into<Amount>>(
-        self,
-        call: C,
-        max_fee: A,
-    ) -> Self {
-        self.add_fee_instruction(Instruction::CallMethod {
-            call: call.into(),
-            method: "pay_fee".try_into().expect("Method name is longer than the limit"),
-            args: call_args![max_fee.into()],
-        })
+    pub fn pay_fee_from_component<C: Into<NamedComponentCall>, A: Into<Amount>>(self, call: C, max_fee: A) -> Self {
+        self.with_fee_instructions_builder(|builder| builder.pay_fee_from_component(call, max_fee))
     }
 
     /// Adds a fee instruction that calls the "pay_fee_stealth" method on a component.
     /// This method should call either `Vault::pay_fee_stealth` or `ResourceManager::pay_fee_stealth` and result in a
     /// sufficient amount of revealed funds used to pay fees.
-    pub fn fee_transaction_pay_fees_stealth_from_component<A: Into<ComponentCall>>(
+    pub fn pay_fee_stealth_from_component<A: Into<NamedComponentCall>>(
         self,
         call: A,
         statement: StealthTransferStatement,
     ) -> Self {
-        self.add_fee_instruction(Instruction::CallMethod {
-            call: call.into(),
-            method: "pay_fee_stealth"
-                .try_into()
-                .expect("Method name is longer than the limit"),
-            args: call_args![statement],
+        self.with_fee_instructions_builder(|builder| builder.call_method(call, "pay_fee_stealth", args![statement]))
+    }
+
+    pub fn pay_fee_stealth_with_input_bucket<B: Into<String>>(
+        self,
+        statement: StealthTransferStatement,
+        input_bucket: B,
+    ) -> Self {
+        self.pay_fee_stealth_with_opt_input_bucket(statement, Some(input_bucket))
+    }
+
+    pub fn pay_fee_stealth_with_opt_input_bucket<B: Into<String>>(
+        self,
+        statement: StealthTransferStatement,
+        input_bucket: Option<B>,
+    ) -> Self {
+        self.with_fee_instructions_builder(|builder| {
+            builder.pay_fee_stealth_with_opt_input_bucket(statement, input_bucket)
         })
+    }
+
+    pub fn with_fee_instructions<I: IntoIterator<Item = Instruction>>(self, instructions: I) -> Self {
+        self.with_fee_instructions_builder(|builder| builder.with_instructions(instructions))
+    }
+
+    pub fn with_fee_instructions_builder<F: FnOnce(TransactionBuilder<FeeIntent>) -> TransactionBuilder<FeeIntent>>(
+        mut self,
+        f: F,
+    ) -> Self {
+        let builder = f(*self.fee_instruction_builder.take().unwrap());
+        self.fee_instruction_builder = Some(Box::new(builder));
+        self
+    }
+
+    pub fn add_fee_instruction(self, instruction: Instruction) -> Self {
+        self.with_fee_instructions_builder(|builder| builder.add_instruction(instruction))
+    }
+
+    /// Add an input to use in the transaction
+    pub fn add_input<I: Into<SubstateRequirement>>(mut self, input_object: I) -> Self {
+        self.unsigned_transaction.inputs_mut().insert(input_object.into());
+        self
+    }
+
+    pub fn with_inputs<I: IntoIterator<Item = SubstateRequirement>>(mut self, inputs: I) -> Self {
+        self.unsigned_transaction = self.unsigned_transaction.with_inputs(inputs);
+        self
+    }
+
+    pub fn with_unversioned_inputs<I: IntoIterator<Item = S>, S: Into<SubstateId>>(self, inputs: I) -> Self {
+        self.with_inputs(inputs.into_iter().map(|input| SubstateRequirement::unversioned(input)))
+    }
+
+    pub fn with_min_epoch(mut self, min_epoch: Option<Epoch>) -> Self {
+        self.unsigned_transaction.set_min_epoch(min_epoch);
+        self
+    }
+
+    pub fn with_max_epoch(mut self, max_epoch: Option<Epoch>) -> Self {
+        self.unsigned_transaction.set_max_epoch(max_epoch);
+        self
+    }
+
+    pub fn add_signer(
+        self,
+        sealed_signer: &RistrettoPublicKeyBytes,
+        secret_key: &RistrettoSecretKey,
+    ) -> UnsealedTransactionV1 {
+        let unsigned = self.build_unsigned_transaction();
+        let signature = TransactionSignature::sign(secret_key, sealed_signer, &unsigned);
+        unsigned.add_signature(signature)
+    }
+
+    pub fn add_signature(self, signature: TransactionSignature) -> UnsealedTransactionV1 {
+        self.build_unsigned_transaction().add_signature(signature)
+    }
+
+    fn apply_fee_instructions(&mut self) {
+        let fee_builder = self
+            .fee_instruction_builder
+            .take()
+            .expect("Fee instruction builder is None");
+        self.unsigned_transaction
+            .fee_instructions_mut()
+            .extend(fee_builder.unsigned_transaction.into_instructions());
+    }
+
+    pub fn finish(mut self) -> UnsealedTransactionV1 {
+        self.apply_fee_instructions();
+        self.unsigned_transaction.finish()
+    }
+
+    pub fn build_and_seal(self, secret_key: &RistrettoSecretKey) -> Transaction {
+        self.finish().seal(secret_key)
+    }
+
+    pub fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.unsigned_transaction.set_dry_run(dry_run);
+        self
+    }
+
+    pub fn with_disabled_seal_signer_authorization(mut self) -> Self {
+        self.unsigned_transaction = self.unsigned_transaction.disabled_authorized_sealed_signer();
+        self
+    }
+
+    pub fn build_unsigned_transaction(mut self) -> UnsignedTransaction {
+        self.apply_fee_instructions();
+        self.unsigned_transaction
+    }
+}
+
+impl TransactionBuilder<FeeIntent> {
+    /// Pays fees using a stealth transfer statement. The statement must reveal sufficient funds to cover the fee.
+    /// NOTE: fees paid are not refunded, so any overpayment is kept by validators.
+    pub fn pay_fee_stealth(self, statement: StealthTransferStatement) -> Self {
+        self.add_instruction(Instruction::PayFee {
+            statement,
+            revealed_input_bucket: None,
+        })
+    }
+
+    /// Adds a fee instruction that calls the "take_fee" method on a component.
+    /// This method must exist and return a Bucket with containing revealed confidential XTR resource.
+    /// This allows the fee to originate from sources other than the transaction sender's account.
+    /// The fee instruction will lock up the "max_fee" amount for the duration of the transaction.
+    pub fn pay_fee_from_component<C: Into<NamedComponentCall>, A: Into<Amount>>(self, call: C, max_fee: A) -> Self {
+        self.call_method(call, "pay_fee", args![max_fee.into()])
+    }
+
+    /// Adds a fee instruction that calls the "pay_fee_stealth" method on a component.
+    /// This method should call either `Vault::pay_fee_stealth` or `ResourceManager::pay_fee_stealth` and result in a
+    /// sufficient amount of revealed funds used to pay fees.
+    pub fn pay_fee_stealth_from_component<A: Into<NamedComponentCall>>(
+        self,
+        call: A,
+        statement: StealthTransferStatement,
+    ) -> Self {
+        self.call_method(call, "pay_fee_stealth", args![statement])
+    }
+
+    pub fn pay_fee_stealth_with_input_bucket<B: Into<String>>(
+        self,
+        statement: StealthTransferStatement,
+        input_bucket: B,
+    ) -> Self {
+        self.pay_fee_stealth_with_opt_input_bucket(statement, Some(input_bucket))
+    }
+
+    pub fn pay_fee_stealth_with_opt_input_bucket<B: Into<String>>(
+        self,
+        statement: StealthTransferStatement,
+        input_bucket: Option<B>,
+    ) -> Self {
+        let revealed_input_bucket = input_bucket.map(|bucket| self.get_workspace_offset_id_from_named_arg(bucket));
+        self.add_instruction(Instruction::PayFee {
+            statement,
+            revealed_input_bucket,
+        })
+    }
+}
+
+impl<D> TransactionBuilder<D> {
+    pub fn then<F: FnOnce(Self) -> Self>(self, f: F) -> Self {
+        f(self)
+    }
+
+    pub fn map<F: FnOnce(Self) -> T, T>(self, f: F) -> T {
+        f(self)
     }
 
     pub fn create_account(self, owner_public_key: RistrettoPublicKeyBytes) -> Self {
@@ -236,49 +384,6 @@ impl TransactionBuilder {
         })
     }
 
-    pub fn pay_fee_stealth(self, statement: StealthTransferStatement) -> Self {
-        self.pay_fee_stealth_with_opt_input_bucket(statement, None::<String>)
-    }
-
-    fn is_in_fee_builder(&self) -> bool {
-        self.fee_instruction_builder.is_none()
-    }
-
-    pub fn pay_fee_using_account<C, A>(self, account: C, amount: A) -> Self
-    where
-        C: Into<NamedComponentCall>,
-        A: Into<Amount>,
-    {
-        self.with_fee_instructions_builder(|builder| {
-            builder.call_method(account, "pay_fee", vec![
-                NamedArg::from_type(&amount.into()).expect("Failed to encode amount")
-            ])
-        })
-    }
-
-    pub fn pay_fee_stealth_with_input_bucket<B: Into<String>>(
-        self,
-        statement: StealthTransferStatement,
-        input_bucket: B,
-    ) -> Self {
-        self.pay_fee_stealth_with_opt_input_bucket(statement, Some(input_bucket))
-    }
-
-    pub fn pay_fee_stealth_with_opt_input_bucket<B: Into<String>>(
-        self,
-        statement: StealthTransferStatement,
-        input_bucket: Option<B>,
-    ) -> Self {
-        self.with_fee_instructions_builder(|builder| {
-            let revealed_input_bucket =
-                input_bucket.map(|bucket| builder.get_workspace_offset_id_from_named_arg(bucket));
-            builder.add_instruction(Instruction::PayFee {
-                statement,
-                revealed_input_bucket,
-            })
-        })
-    }
-
     pub fn drop_all_proofs_in_workspace(self) -> Self {
         self.add_instruction(Instruction::DropAllProofsInWorkspace)
     }
@@ -344,26 +449,6 @@ impl TransactionBuilder {
         })
     }
 
-    pub fn with_fee_instructions<I: IntoIterator<Item = Instruction>>(mut self, instructions: I) -> Self {
-        self.unsigned_transaction.fee_instructions_mut().extend(instructions);
-        self
-    }
-
-    pub fn with_fee_instructions_builder<F: FnOnce(TransactionBuilder) -> TransactionBuilder>(mut self, f: F) -> Self {
-        if self.is_in_fee_builder() {
-            let builder = f(self);
-            return builder;
-        }
-        let builder = f(*self.fee_instruction_builder.take().unwrap());
-        self.fee_instruction_builder = Some(Box::new(builder));
-        self
-    }
-
-    pub fn add_fee_instruction(mut self, instruction: Instruction) -> Self {
-        self.unsigned_transaction.fee_instructions_mut().push(instruction);
-        self
-    }
-
     pub fn add_instruction(mut self, instruction: Instruction) -> Self {
         self.unsigned_transaction.instructions_mut().push(instruction);
         self
@@ -371,31 +456,6 @@ impl TransactionBuilder {
 
     pub fn with_instructions<I: IntoIterator<Item = Instruction>>(mut self, instructions: I) -> Self {
         self.unsigned_transaction.instructions_mut().extend(instructions);
-        self
-    }
-
-    /// Add an input to use in the transaction
-    pub fn add_input<I: Into<SubstateRequirement>>(mut self, input_object: I) -> Self {
-        self.unsigned_transaction.inputs_mut().insert(input_object.into());
-        self
-    }
-
-    pub fn with_inputs<I: IntoIterator<Item = SubstateRequirement>>(mut self, inputs: I) -> Self {
-        self.unsigned_transaction = self.unsigned_transaction.with_inputs(inputs);
-        self
-    }
-
-    pub fn with_unversioned_inputs<I: IntoIterator<Item = S>, S: Into<SubstateId>>(self, inputs: I) -> Self {
-        self.with_inputs(inputs.into_iter().map(|input| SubstateRequirement::unversioned(input)))
-    }
-
-    pub fn with_min_epoch(mut self, min_epoch: Option<Epoch>) -> Self {
-        self.unsigned_transaction.set_min_epoch(min_epoch);
-        self
-    }
-
-    pub fn with_max_epoch(mut self, max_epoch: Option<Epoch>) -> Self {
-        self.unsigned_transaction.set_max_epoch(max_epoch);
         self
     }
 
@@ -421,44 +481,6 @@ impl TransactionBuilder {
             allocatable_type: AllocatableAddressType::Resource,
             workspace_id,
         })
-    }
-
-    pub fn build_unsigned_transaction(mut self) -> UnsignedTransaction {
-        self.apply_fee_instructions();
-        self.unsigned_transaction
-    }
-
-    pub fn add_signer(
-        self,
-        sealed_signer: &RistrettoPublicKeyBytes,
-        secret_key: &RistrettoSecretKey,
-    ) -> UnsealedTransactionV1 {
-        let unsigned = self.build_unsigned_transaction();
-        let signature = TransactionSignature::sign(secret_key, sealed_signer, &unsigned);
-        unsigned.add_signature(signature)
-    }
-
-    pub fn add_signature(self, signature: TransactionSignature) -> UnsealedTransactionV1 {
-        self.build_unsigned_transaction().add_signature(signature)
-    }
-
-    fn apply_fee_instructions(&mut self) {
-        let fee_builder = self
-            .fee_instruction_builder
-            .take()
-            .expect("Fee instruction builder is None");
-        self.unsigned_transaction
-            .fee_instructions_mut()
-            .extend(fee_builder.unsigned_transaction.into_instructions());
-    }
-
-    pub fn finish(mut self) -> UnsealedTransactionV1 {
-        self.apply_fee_instructions();
-        self.unsigned_transaction.finish()
-    }
-
-    pub fn build_and_seal(self, secret_key: &RistrettoSecretKey) -> Transaction {
-        self.with_authorized_seal_signer().finish().seal(secret_key)
     }
 
     fn resolve_call(&self, call: NamedComponentCall) -> ComponentCall {
@@ -514,7 +536,7 @@ impl TransactionBuilder {
     }
 }
 
-impl Signable<&RistrettoPublicKeyBytes> for TransactionBuilder {
+impl Signable<&RistrettoPublicKeyBytes> for TransactionBuilder<MainIntent> {
     type MessageOutput = [u8; 64];
 
     fn to_signing_message(&self, sealed_signer: &RistrettoPublicKeyBytes) -> Self::MessageOutput {
@@ -522,7 +544,7 @@ impl Signable<&RistrettoPublicKeyBytes> for TransactionBuilder {
     }
 }
 
-impl IntoSigned<&RistrettoPublicKeyBytes> for TransactionBuilder {
+impl IntoSigned<&RistrettoPublicKeyBytes> for TransactionBuilder<MainIntent> {
     type SignedOutput = UnsealedTransactionV1;
 
     fn into_signed(self, public_key: RistrettoPublicKey, signature: RistrettoSchnorr) -> Self::SignedOutput {

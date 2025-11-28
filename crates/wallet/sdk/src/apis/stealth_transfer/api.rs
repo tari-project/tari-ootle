@@ -719,7 +719,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         let revealed_input_amount = transfer_statement.inputs_statement.revealed_amount;
         let revealed_output_amount = transfer_statement.outputs_statement.revealed_output_amount;
 
-        let transaction = Transaction::builder()
+        let transaction = Transaction::builder_localnet()
             .for_network(network.as_byte())
             .with_dry_run(params.is_dry_run)
             .with_fee_instructions_builder(|builder| {

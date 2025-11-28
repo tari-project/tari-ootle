@@ -258,7 +258,7 @@ pub async fn submit_transaction(
     summarize_request(&instructions, &inputs);
     println!();
 
-    let transaction = Transaction::builder()
+    let transaction = Transaction::builder_localnet()
         .with_instructions(instructions)
         .with_inputs(inputs)
         .build_and_seal(&key.secret_key);

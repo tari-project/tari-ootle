@@ -43,7 +43,7 @@ pub async fn submit_transaction(
 ) -> HandlerResult<Json<SubmitTransactionResponse>> {
     let request: SubmitTransactionRequest = req;
 
-    if request.is_dry_run {
+    if request.transaction.is_dry_run() {
         let transaction_id = request.transaction.calculate_id();
         let exec_result = context
             .dry_run_transaction_processor()

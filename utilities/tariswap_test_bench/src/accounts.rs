@@ -4,14 +4,9 @@
 use std::ops::RangeInclusive;
 
 use log::info;
-use tari_engine_types::{
-    component::derive_component_address_from_public_key,
-    indexed_value::IndexedWellKnownTypes,
-    ToByteType,
-};
+use tari_engine_types::{indexed_value::IndexedWellKnownTypes, ToByteType};
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_ootle_wallet_sdk::models::{Account, KeyBranch, KeyId};
-use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
     prelude::ResourceType,
@@ -27,8 +22,10 @@ impl Runner {
             .key_manager_api()
             .get_public_key(KeyId::derived(KeyBranch::Account, 0))?;
         let owner_public_key = owner_key.public_key.to_byte_type();
-
-        let account_address = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &owner_public_key);
+        let account_address = self
+            .sdk
+            .accounts_api()
+            .derive_account_address_from_public_key(&owner_public_key);
 
         let transaction = self
             .new_transaction_builder()
@@ -37,7 +34,7 @@ impl Runner {
                     .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![1_000_000_000])
                     .put_last_instruction_output_on_workspace("coins")
                     .create_account_with_bucket(owner_public_key, "coins")
-                    .call_method(account_address, "pay_fee", args![1000])
+                    .pay_fee_from_component(account_address, 1000)
             })
             .with_inputs([
                 SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
@@ -45,7 +42,7 @@ impl Runner {
             ])
             .finish();
 
-        let transaction = self.sdk.signer_api().sign(owner_key.key_id, transaction)?;
+        let transaction = self.sdk.signer_api().sign(owner_key.key_id(), transaction)?;
 
         let finalize = self.submit_transaction_and_wait(transaction).await?;
         let diff = finalize.result.any_accept().unwrap();
@@ -104,7 +101,7 @@ impl Runner {
 
         let transaction = self
             .new_transaction_builder()
-            .fee_transaction_pay_from_component(pay_fee_account.component_address, 1000 * owners.len())
+            .pay_fee_from_component(pay_fee_account.component_address, 1000 * owners.len())
             .then(|builder| {
                 owners.iter().fold(builder, |builder, owner| {
                     builder.create_account(owner.public_key.to_byte_type())
@@ -130,10 +127,10 @@ impl Runner {
                 .filter_map(|addr| addr.as_component_address())
                 .filter(|addr| *addr != pay_fee_account.component_address)
                 .find(|addr| {
-                    derive_component_address_from_public_key(
-                        &ACCOUNT_TEMPLATE_ADDRESS,
-                        &owner.public_key.to_byte_type(),
-                    ) == *addr
+                    self.sdk
+                        .accounts_api()
+                        .derive_account_address_from_public_key(&owner.public_key.to_byte_type()) ==
+                        *addr
                 })
                 .expect("New account not found in diff");
 
@@ -168,7 +165,7 @@ impl Runner {
         for accounts in all_accounts.chunks(25) {
             let transaction = self
                 .new_transaction_builder()
-                .fee_transaction_pay_from_component(fee_account.component_address, 1000 * accounts.len())
+                .pay_fee_from_component(fee_account.component_address, 1000 * accounts.len())
                 .then(|builder| {
                     accounts.iter().fold(builder, |builder, account| {
                         builder

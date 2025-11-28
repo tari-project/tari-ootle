@@ -108,6 +108,6 @@ impl HandlerContext {
 
     /// Returns a TransactionBuilder with the current network configured.
     pub fn transaction_builder(&self) -> TransactionBuilder {
-        Transaction::builder().for_network(self.config().network.as_byte())
+        Transaction::builder_localnet().for_network(self.config().network.as_byte())
     }
 }

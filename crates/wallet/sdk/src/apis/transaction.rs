@@ -72,6 +72,11 @@ where
     /// Returns `Ok(true)` if the transaction was successfully submitted, `Ok(false)` if it was rejected
     pub async fn submit_transaction(&self, transaction_id: TransactionId) -> Result<bool, TransactionApiError> {
         let transaction = self.store.with_read_tx(|tx| tx.transactions_get(transaction_id))?;
+        if transaction.is_dry_run {
+            return Err(TransactionApiError::DryRunMismatchError {
+                details: "Transaction is marked as dry run and cannot be submitted".to_string(),
+            });
+        }
 
         if !matches!(transaction.status, TransactionStatus::New) {
             return Err(TransactionApiError::StoreError(WalletStorageError::OperationError {
@@ -115,6 +120,12 @@ where
         &self,
         transaction: Transaction,
     ) -> Result<WalletTransaction, TransactionApiError> {
+        if !transaction.is_dry_run() {
+            return Err(TransactionApiError::DryRunMismatchError {
+                details: "Transaction is not marked as dry run but submitted to dry-run".to_string(),
+            });
+        }
+
         self.store
             .with_write_tx(|tx| tx.transactions_insert(&transaction, None, true))?;
 
@@ -534,6 +545,8 @@ pub enum TransactionApiError {
     IndexedValueError(IndexedValueError),
     #[error("Invalid transaction query response: {details}")]
     InvalidTransactionQueryResponse { details: String },
+    #[error("Dry run transaction mismatch error: {details}")]
+    DryRunMismatchError { details: String },
 }
 
 impl IsNotFoundError for TransactionApiError {

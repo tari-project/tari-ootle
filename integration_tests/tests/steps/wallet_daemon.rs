@@ -119,7 +119,7 @@ async fn when_i_run_up_fees(world: &mut TariWorld, amount: u64, wallet_daemon_na
         let payload = Bytes::from(vec![OsRng.gen::<u8>(); 64 * 1024]);
 
         let transaction = transaction_builder()
-            .fee_transaction_pay_from_component(*account.component_address(), 100_000)
+            .pay_fee_from_component(*account.component_address(), 100_000)
             .call_function(template.address, "new", args![payload])
             .add_input(*account.component_address())
             .build_unsigned_transaction();

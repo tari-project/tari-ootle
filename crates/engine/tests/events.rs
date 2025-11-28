@@ -40,7 +40,7 @@ fn cannot_use_standard_topic() {
     let (_, _, private_key) = template_test.create_funded_account();
     let invalid_topic = "std.mytopic";
     let reason = template_test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(event_emitter_template, "test_function", args![invalid_topic])
             .build_and_seal(&private_key),
         [].into(),
@@ -82,7 +82,7 @@ fn builtin_vault_events() {
     let (receiver_address, _, _) = template_test.create_funded_account();
     template_test
         .build_and_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(faucet_component, "take_free_coins", args![])
                 .put_last_instruction_output_on_workspace("free_coins")
                 .call_method(sender_address, "deposit", args![Workspace("free_coins")]),
@@ -93,7 +93,7 @@ fn builtin_vault_events() {
     // transfer some tokens between accounts
     let amount = Amount::from(100);
     let result = template_test.build_and_execute(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(sender_address, "withdraw", args![faucet_resource, amount])
             .put_last_instruction_output_on_workspace("foo_bucket")
             .call_method(receiver_address, "deposit", args![Workspace("foo_bucket")]),

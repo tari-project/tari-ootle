@@ -109,7 +109,7 @@ fn fund_account(
 ) {
     template_test
         .build_and_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(faucet_component, "take_free_coins", args![])
                 .put_last_instruction_output_on_workspace("free_coins")
                 .call_method(account_address, "deposit", args![Workspace("free_coins")]),
@@ -122,7 +122,7 @@ fn fund_account(
 fn swap(test: &mut TariSwapTest, input_resource: &ResourceAddress, output_resource: &ResourceAddress, amount: Amount) {
     test.template_test
         .build_and_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(test.account_address, "withdraw", args![input_resource, amount])
                 .put_last_instruction_output_on_workspace("input_bucket")
                 .call_method(test.tariswap, "swap", args![Workspace("input_bucket"), output_resource])
@@ -137,7 +137,7 @@ fn swap(test: &mut TariSwapTest, input_resource: &ResourceAddress, output_resour
 fn add_liquidity(test: &mut TariSwapTest, a_amount: Amount, b_amount: Amount) {
     test.template_test
         .build_and_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(test.account_address, "withdraw", args![test.a_resource, a_amount])
                 .put_last_instruction_output_on_workspace("a_bucket")
                 .call_method(test.account_address, "withdraw", args![test.b_resource, b_amount])
@@ -157,7 +157,7 @@ fn add_liquidity(test: &mut TariSwapTest, a_amount: Amount, b_amount: Amount) {
 fn remove_liquidity(test: &mut TariSwapTest, lp_amount: Amount) {
     test.template_test
         .build_and_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(test.account_address, "withdraw", args![test.lp_resource, lp_amount])
                 .put_last_instruction_output_on_workspace("lp_bucket")
                 .call_method(test.tariswap, "remove_liquidity", args![Workspace("lp_bucket")])

@@ -15,7 +15,7 @@ use crate::{
 
 #[test]
 fn it_converts_workspace_names_to_ids() {
-    let transaction = Transaction::builder()
+    let transaction = Transaction::builder_localnet()
         .put_last_instruction_output_on_workspace("thing1")
         .allocate_resource_address("thing2")
         .allocate_component_address("thing3")

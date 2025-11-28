@@ -353,6 +353,7 @@ pub async fn spawn_services(
         epoch_manager.clone(),
         state_store.clone(),
         mempool.clone(),
+        consensus_handle.clone(),
     )
     .await?;
     // Save final node identity after comms has initialized. This is required because the public_address can be
@@ -423,6 +424,7 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
     epoch_manager: EpochManagerHandle<PeerAddress>,
     shard_store_store: TStateStore,
     mempool: MempoolHandle,
+    consensus: ConsensusHandle,
 ) -> anyhow::Result<()> {
     let rpc_server = RpcServer::builder()
         .with_maximum_simultaneous_sessions(config.validator_node.rpc.max_simultaneous_sessions)
@@ -432,6 +434,7 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
             epoch_manager,
             shard_store_store,
             mempool,
+            consensus,
         ));
 
     let (notify_tx, notify_rx) = mpsc::unbounded_channel();

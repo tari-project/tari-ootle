@@ -109,7 +109,7 @@ pub async fn handle_mint_faucet(
     let fee = req.max_fee.unwrap_or(DEFAULT_FEE);
     let transaction = context
         .transaction_builder()
-        .fee_transaction_pay_from_component(account.component_address, fee)
+        .pay_fee_from_component(account.component_address, fee)
         .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![
             Amount(req.number_to_mint),
             mutable_data
@@ -295,10 +295,8 @@ pub async fn handle_transfer(
 
     let transaction = builder
         .with_dry_run(req.dry_run)
-        .fee_transaction_pay_from_component(fee_payer_account_address, req.max_fee)
+        .pay_fee_from_component(fee_payer_account_address, req.max_fee)
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
-        // Seal signer is the fee payer account
-        .with_authorized_seal_signer()
         .finish();
 
     let transaction = sdk

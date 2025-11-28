@@ -27,6 +27,7 @@ use std::{
 
 use log::*;
 use tari_bor::encode;
+use tari_consensus::hotstuff::ConsensusCurrentState;
 use tari_consensus_types::BlockId;
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_ootle_common_types::{
@@ -65,9 +66,12 @@ use tari_transaction::{Transaction, TransactionId};
 use tari_validator_node_rpc::{rpc_service::ValidatorNodeRpcService, STATE_SYNC_MAX_BATCH_SIZE};
 use tokio::{sync::mpsc, task};
 
-use crate::p2p::{
-    rpc::{block_sync_task::BlockSyncTask, state_sync_task::StateSyncTask},
-    services::mempool::MempoolHandle,
+use crate::{
+    consensus::ConsensusHandle,
+    p2p::{
+        rpc::{block_sync_task::BlockSyncTask, state_sync_task::StateSyncTask},
+        services::mempool::MempoolHandle,
+    },
 };
 
 const LOG_TARGET: &str = "tari::ootle::p2p::rpc";
@@ -76,6 +80,7 @@ pub struct ValidatorNodeRpcServiceImpl<TStateStore> {
     epoch_manager: EpochManagerHandle<PeerAddress>,
     state_store: TStateStore,
     mempool: MempoolHandle,
+    consensus: ConsensusHandle,
 }
 
 impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
@@ -83,11 +88,23 @@ impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
         epoch_manager: EpochManagerHandle<PeerAddress>,
         state_store: TStateStore,
         mempool: MempoolHandle,
+        consensus: ConsensusHandle,
     ) -> Self {
         Self {
             epoch_manager,
             state_store,
             mempool,
+            consensus,
+        }
+    }
+
+    fn check_consensus_state(&self) -> Result<(), RpcStatus> {
+        let state = self.consensus.get_current_state();
+        // If syncing, we do not want to serve state sync or block sync requests
+        if matches!(state, ConsensusCurrentState::Running | ConsensusCurrentState::Idle) {
+            Ok(())
+        } else {
+            Err(RpcStatus::general("Consensus is not running on this node"))
         }
     }
 }
@@ -252,6 +269,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         &self,
         request: Request<SyncBlocksRequest>,
     ) -> Result<Streaming<SyncBlocksResponse>, RpcStatus> {
+        self.check_consensus_state()?;
         let req = request.into_message();
         let store = self.state_store.clone();
 
@@ -382,6 +400,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
     }
 
     async fn sync_state(&self, request: Request<SyncStateRequest>) -> Result<Streaming<SyncStateResponse>, RpcStatus> {
+        self.check_consensus_state()?;
         let req = request.into_message();
 
         let (sender, receiver) = mpsc::channel(10);
@@ -401,6 +420,11 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         }
 
         let value_filter_flags = SubstateValueFilterFlags::from_bits_truncate(req.value_filters);
+        if value_filter_flags.is_empty() {
+            return Err(RpcStatus::bad_request(
+                "At least one SubstateValueFilterFlag must be set",
+            ));
+        }
 
         debug!(
             target: LOG_TARGET,

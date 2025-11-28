@@ -32,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use tari_bor::{decode, decode_exact, encode, BorError};
 use tari_common_types::types::FixedHash;
 use tari_template_lib::{
+    constants::STEALTH_TARI_RESOURCE_ADDRESS,
     models::{
         address_prefixes,
         ClaimedOutputTombstoneAddress,
@@ -229,7 +230,6 @@ impl SubstateId {
         }
     }
 
-    // TODO: look at using BECH32 standard
     pub fn to_address_string(&self) -> String {
         self.to_string()
     }
@@ -298,8 +298,11 @@ impl SubstateId {
         self.is_template()
     }
 
-    pub const fn is_read_only(&self) -> bool {
-        matches!(self, Self::TransactionReceipt(_) | Self::Template(_))
+    pub fn is_read_only(&self) -> bool {
+        matches!(self, Self::TransactionReceipt(_) | Self::Template(_)) || {
+            let addr = self.as_resource_address();
+            addr == Some(STEALTH_TARI_RESOURCE_ADDRESS) || addr == Some(PUBLIC_IDENTITY_RESOURCE_ADDRESS)
+        }
     }
 }
 

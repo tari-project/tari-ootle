@@ -104,7 +104,7 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         // column_families::foreign_substate_pledge::ForeignSubstatePledgeModel,
         column_families::pending_state_tree_diff::PendingStateTreeDiffCf,
         column_families::state_tree::StateTreeCf,
-        column_families::state_tree::StateTreeStaleNodesModel,
+        column_families::state_tree::StateTreeStaleNodesCf,
         column_families::state_tree_shard_versions::StateTreeShardVersionCf,
         column_families::epoch_checkpoint::EpochCheckpointCf,
         column_families::lock_conflict::LockConflictCf,

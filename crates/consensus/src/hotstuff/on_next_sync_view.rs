@@ -105,7 +105,7 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
 
         let message = NewViewMessage {
             high_pc,
-            last_vote: None, // last_sent_vote.map(|vote| vote.vote),
+            last_vote: last_sent_vote.map(|vote| vote.vote),
             timeout: TimeoutVote {
                 epoch,
                 height: timeout_height,

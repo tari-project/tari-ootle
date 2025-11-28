@@ -45,6 +45,7 @@ where TSpec: ConsensusSpec
         &self,
         context: &mut ConsensusWorkerContext<TSpec>,
     ) -> Result<ConsensusStateEvent, HotStuffError> {
+        debug!(target: LOG_TARGET, "Entered idle state with delay: {}", self.delay);
         if self.delay {
             time::sleep(Duration::from_secs(5)).await;
         }

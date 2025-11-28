@@ -650,7 +650,6 @@ pub async fn handle_create_free_test_coins(
                 .call_method(*account.component_address(), "pay_fee", args![max_fee])
         })
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
-        .with_authorized_seal_signer()
         .finish();
 
     let transaction = sdk.signer_api().sign(account_owner_key_id, transaction)?;
@@ -816,7 +815,7 @@ pub async fn handle_transfer(
 
     let transaction = builder
         .with_dry_run(req.dry_run)
-        .fee_transaction_pay_from_component(source_account_address, max_fee)
+        .pay_fee_from_component(source_account_address, max_fee)
         .then(|builder| {
             if let Some(ref badge) = req.proof_from_badge_resource {
                 // If we are creating a proof for a badge resource, we need to create the proof first
@@ -1013,7 +1012,7 @@ pub async fn handle_stealth_transfer(
     task::spawn(async move {
         let (lock, transfer) = sdk.stealth_transfer_api().transfer(owner_account, params).await?;
 
-        let transaction = transfer.transaction.authorized_sealed_signer();
+        let transaction = transfer.transaction;
         let main_pk = transfer.main_signer.public_key().to_byte_type();
 
         // Signer api which sign transaction types that require the seal signer public key

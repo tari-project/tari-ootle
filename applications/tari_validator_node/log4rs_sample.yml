@@ -164,6 +164,11 @@ loggers:
     appenders:
       - consensus
 
+  tari::ootle::rpc_state_sync:
+    level: debug
+    appenders:
+      - consensus
+
   tari::ootle::storage:
     level: debug
     appenders:

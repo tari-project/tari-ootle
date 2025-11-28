@@ -480,7 +480,7 @@ async fn multishard_local_inputs_foreign_outputs() {
     let outputs_2 = test.build_outputs_for_committee(2, 1);
 
     let tx1 = build_transaction_from(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .with_inputs(inputs.iter().cloned().map(|i| i.into()))
             .build_and_seal(&PrivateKey::default()),
     );
@@ -537,7 +537,7 @@ async fn multishard_local_inputs_foreign_outputs_abort() {
 
     let inputs = test.create_substates_on_vns(TestVnDestination::Committee(0), 2);
     let outputs = test.build_outputs_for_committee(1, 1);
-    let transaction = Transaction::builder()
+    let transaction = Transaction::builder_localnet()
         .with_inputs(inputs.iter().cloned().map(|i| i.into()))
         .build_and_seal(&PrivateKey::default());
 
@@ -616,7 +616,7 @@ async fn multishard_local_inputs_and_outputs_foreign_outputs() {
     let outputs_2 = test.build_outputs_for_committee(2, 5);
 
     let tx1 = build_transaction_from(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .with_inputs(inputs_0.iter().chain(&inputs_1).cloned().map(|i| i.into()))
             .build_and_seal(&PrivateKey::from_canonical_bytes(&[1; 32]).unwrap()),
     );
@@ -693,7 +693,7 @@ async fn multishard_output_conflict_abort() {
         .await;
 
     let inputs = test.create_substates_on_vns(TestVnDestination::All, 1);
-    let tx = Transaction::builder()
+    let tx = Transaction::builder_localnet()
         .with_inputs(inputs.iter().cloned().map(|i| i.into()))
         .build_and_seal(&Default::default());
     let tx2 = build_transaction_from(tx);
@@ -780,7 +780,7 @@ async fn single_shard_inputs_from_previous_outputs() {
         .map(|output| SubstateRequirement::versioned(output.clone(), 0))
         .collect::<Vec<_>>();
 
-    let tx2 = Transaction::builder()
+    let tx2 = Transaction::builder_localnet()
         .with_inputs(prev_outputs.clone())
         .build_and_seal(&Default::default());
     let tx2 = build_transaction_from(tx2.clone());
@@ -844,7 +844,7 @@ async fn multishard_inputs_from_previous_outputs() {
         .map(|output| SubstateRequirement::versioned(output.clone(), 0))
         .collect::<Vec<_>>();
 
-    let tx2 = Transaction::builder()
+    let tx2 = Transaction::builder_localnet()
         .with_inputs(prev_outputs.clone())
         .build_and_seal(&Default::default());
     let tx2 = build_transaction_from(tx2.clone());
@@ -901,12 +901,12 @@ async fn single_shard_input_conflict() {
     let substate_id = test.create_substates_on_vns(TestVnDestination::All, 1).pop().unwrap();
     let secret = PrivateKey::from_canonical_bytes(&[1u8; 32]).unwrap();
 
-    let tx1 = Transaction::builder()
+    let tx1 = Transaction::builder_localnet()
         .add_input(substate_id.clone())
         .build_and_seal(&secret);
     let tx1 = TransactionRecord::new(tx1);
 
-    let tx2 = Transaction::builder()
+    let tx2 = Transaction::builder_localnet()
         .add_input(substate_id.clone())
         .build_and_seal(&secret);
     let tx2 = TransactionRecord::new(tx2);
@@ -1086,7 +1086,7 @@ async fn single_shard_unversioned_inputs() {
     let unversioned_inputs = inputs
         .iter()
         .map(|i| SubstateRequirement::new(i.substate_id().clone(), None));
-    let tx = Transaction::builder()
+    let tx = Transaction::builder_localnet()
         .with_inputs(unversioned_inputs)
         .build_and_seal(&PrivateKey::default());
     let tx = TransactionRecord::new(tx);
@@ -1166,13 +1166,13 @@ async fn multishard_unversioned_input_conflict() {
         .pop()
         .unwrap();
 
-    let tx1 = Transaction::builder()
+    let tx1 = Transaction::builder_localnet()
         .add_input(SubstateRequirement::unversioned(id0.substate_id().clone()))
         .add_input(SubstateRequirement::unversioned(id1.substate_id().clone()))
         .build_and_seal(&Default::default());
     let tx1 = TransactionRecord::new(tx1);
 
-    let tx2 = Transaction::builder()
+    let tx2 = Transaction::builder_localnet()
         .add_input(SubstateRequirement::unversioned(id0.substate_id().clone()))
         .add_input(SubstateRequirement::unversioned(id1.substate_id().clone()))
         .build_and_seal(&Default::default());
@@ -1270,13 +1270,13 @@ async fn multishard_unversioned_input_conflict_delay_prepare() {
         .pop()
         .unwrap();
 
-    let tx1 = Transaction::builder()
+    let tx1 = Transaction::builder_localnet()
         .add_input(SubstateRequirement::unversioned(id0.substate_id().clone()))
         .add_input(SubstateRequirement::unversioned(id1.substate_id().clone()))
         .build_and_seal(&Default::default());
     let tx1 = TransactionRecord::new(tx1);
 
-    let tx2 = Transaction::builder()
+    let tx2 = Transaction::builder_localnet()
         .add_input(SubstateRequirement::unversioned(id0.substate_id().clone()))
         .add_input(SubstateRequirement::unversioned(id2.substate_id().clone()))
         .build_and_seal(&Default::default());
@@ -1360,7 +1360,7 @@ async fn multishard_publish_template() {
     let (sk, pk) = create_key_pair();
     let wasm = load_binary_fixture("state.wasm");
     let expected_binary_hash = hash_template_code(&wasm);
-    let tx = Transaction::builder()
+    let tx = Transaction::builder_localnet()
         .publish_template(wasm.try_into().unwrap())
         .with_inputs(inputs.iter().cloned().map(Into::into))
         .build_and_seal(&sk);
@@ -1431,7 +1431,7 @@ async fn multishard_validator_fee_claim() {
         .await;
     // Create and send publish template transaction
     let address = derive_fee_pool_address(&claim_bytes, test.num_preshards(), Shard::first());
-    let claim_tx = Transaction::builder()
+    let claim_tx = Transaction::builder_localnet()
         .claim_validator_fees(address)
         .add_input(address)
         .build_and_seal(&claim_sk);

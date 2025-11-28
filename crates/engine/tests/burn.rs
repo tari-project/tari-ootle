@@ -14,7 +14,7 @@ fn it_burns_all_resource_types() {
     initial_supply.output_revealed_amount = Amount::from(1000);
 
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(recall_template, "new", args![initial_supply])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -47,7 +47,7 @@ fn it_burns_all_resource_types() {
     }
 
     test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(component, "burn_all", args![])
             .build_and_seal(test.secret_key()),
         vec![],

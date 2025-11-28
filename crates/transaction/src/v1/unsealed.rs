@@ -23,7 +23,7 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::transaction::transaction";
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, borsh::BorshSerialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UnsealedTransactionV1 {
     transaction: UnsignedTransactionV1,
@@ -42,7 +42,12 @@ impl UnsealedTransactionV1 {
         1
     }
 
-    pub fn seal(self, secret: &RistrettoSecretKey) -> Transaction {
+    pub fn seal(mut self, secret: &RistrettoSecretKey) -> Transaction {
+        if self.signatures.is_empty() {
+            // If there are no other signatures, we assume the seal signer is authorized
+            self.transaction.is_seal_signer_authorized = true;
+        }
+
         let sig = TransactionSealSignature::sign(secret, &self);
         self.set_seal_signature(sig)
     }
@@ -57,7 +62,11 @@ impl UnsealedTransactionV1 {
         self
     }
 
-    pub fn add_signature(mut self, public_key: RistrettoPublicKeyBytes, signature: SchnorrSignatureBytes) -> Self {
+    pub(crate) fn add_signature(
+        mut self,
+        public_key: RistrettoPublicKeyBytes,
+        signature: SchnorrSignatureBytes,
+    ) -> Self {
         self.signatures.push(TransactionSignature::new(public_key, signature));
         self
     }
@@ -147,12 +156,7 @@ impl Signable<&RistrettoPublicKeyBytes> for UnsealedTransactionV1 {
 impl IntoSigned for UnsealedTransactionV1 {
     type SignedOutput = Transaction;
 
-    fn into_signed(mut self, public_key: RistrettoPublicKey, signature: RistrettoSchnorr) -> Self::SignedOutput {
-        if self.signatures.is_empty() {
-            // Mark that the seal signer is authorized if there are no other signers
-            self.transaction.is_seal_signer_authorized = true;
-        }
-
+    fn into_signed(self, public_key: RistrettoPublicKey, signature: RistrettoSchnorr) -> Self::SignedOutput {
         self.set_seal_signature(TransactionSealSignature::new(
             public_key.to_byte_type(),
             signature.to_byte_type(),

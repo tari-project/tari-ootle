@@ -43,7 +43,7 @@ use tari_template_lib::{
 use tari_transaction::{
     args,
     args::InstructionArg,
-    builder::named_args::BuilderWorkspaceKey,
+    builder::{named_args::BuilderWorkspaceKey, MainIntent},
     Instruction,
     Transaction,
     TransactionBuilder,
@@ -325,7 +325,12 @@ impl TemplateTest {
     {
         let result = self
             .build_and_execute(
-                Transaction::builder().create_account_with_custom_rules(owner_public_key, None, None, workspace_id),
+                Transaction::builder_localnet().create_account_with_custom_rules(
+                    owner_public_key,
+                    None,
+                    None,
+                    workspace_id,
+                ),
                 proofs,
             )
             .unwrap_success();
@@ -443,7 +448,7 @@ impl TemplateTest {
         let old_fail_fees = self.enable_fees;
         self.enable_fees = false;
         let result = self.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(xtr_faucet_component(), "take", args![
                     Self::FUNDED_ACCOUNT_INITIAL_BALANCE
                 ])
@@ -479,7 +484,7 @@ impl TemplateTest {
         let old_fail_fees = self.enable_fees;
         self.enable_fees = false;
         let result = self.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(xtr_faucet_component(), "take", args![amount.into()])
                 .put_last_instruction_output_on_workspace("bucket")
                 .create_account_with_bucket(public_key.to_byte_type(), "bucket")
@@ -506,7 +511,7 @@ impl TemplateTest {
     ) -> (ComponentAddress, ResourceAddress) {
         let template_addr = self.get_template_address("TestFaucet");
         let result = self.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_function(template_addr, "mint", args![initial_supply.into()])
                 .build_and_seal(&self.secret_key),
             vec![],
@@ -560,10 +565,9 @@ impl TemplateTest {
         instructions: Vec<Instruction>,
         proofs: Vec<NonFungibleAddress>,
     ) -> Result<ExecuteResult, TransactionError> {
-        let transaction = Transaction::builder()
+        let transaction = Transaction::builder_localnet()
             .with_fee_instructions(fee_instructions)
             .with_instructions(instructions)
-            .with_authorized_seal_signer()
             .build_and_seal(&self.secret_key);
 
         self.try_execute(transaction, proofs)
@@ -664,7 +668,11 @@ impl TemplateTest {
     }
 
     /// Executes a transaction. Panics if the transaction fails.
-    pub fn build_and_execute(&mut self, builder: TransactionBuilder, proofs: Vec<NonFungibleAddress>) -> ExecuteResult {
+    pub fn build_and_execute(
+        &mut self,
+        builder: TransactionBuilder<MainIntent>,
+        proofs: Vec<NonFungibleAddress>,
+    ) -> ExecuteResult {
         let transaction = builder.build_and_seal(&self.secret_key);
         self.execute_expect_commit(transaction, proofs)
     }

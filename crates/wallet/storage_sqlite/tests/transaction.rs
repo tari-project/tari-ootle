@@ -12,7 +12,7 @@ use tari_transaction::{args, Transaction, TransactionId};
 
 fn build_transaction() -> Transaction {
     let key = RistrettoSecretKey::from(123);
-    Transaction::builder()
+    Transaction::builder_localnet()
         .allocate_component_address("component")
         .put_last_instruction_output_on_workspace("bucket")
         .call_method("component", "new", args!["bucket"])

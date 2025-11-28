@@ -29,14 +29,13 @@ impl Runner {
 
         let transaction = self
             .new_transaction_builder()
-            .fee_transaction_pay_from_component(in_account.component_address, 1000)
+            .pay_fee_from_component(in_account.component_address, 1000)
             .call_function(self.faucet_template, "mint", args![1_000_000_000])
             .with_inputs([
                 SubstateRequirement::unversioned(in_account.component_address),
                 SubstateRequirement::unversioned(fee_vault.id),
                 SubstateRequirement::unversioned(fee_vault.resource_address),
             ])
-            .with_authorized_seal_signer()
             .build_and_seal(&key.key);
 
         let finalize = self.submit_transaction_and_wait(transaction).await?;

@@ -98,12 +98,12 @@ where
     #[allow(clippy::too_many_lines)]
     pub async fn locate_dependent_substates(
         &self,
-        parents: &[SubstateId],
+        top_level_substates: &[SubstateId],
         unversioned: bool,
     ) -> Result<HashSet<SubstateRequirement>, SubstateApiError> {
-        let mut substate_ids = HashSet::with_capacity(parents.len());
+        let mut substate_ids = HashSet::with_capacity(top_level_substates.len());
 
-        for parent_id in parents {
+        for parent_id in top_level_substates {
             match self.store.with_read_tx(|tx| tx.substates_get(parent_id)).optional()? {
                 Some(parent) => {
                     debug!(

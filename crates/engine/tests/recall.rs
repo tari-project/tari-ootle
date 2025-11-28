@@ -25,7 +25,7 @@ fn it_recalls_all_resource_types() {
     initial_supply.output_revealed_amount = Amount::from(1000);
 
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(recall_template, "new", args![initial_supply])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -41,7 +41,7 @@ fn it_recalls_all_resource_types() {
 
     let withdraw = generate_withdraw_proof(&mask, 10, Some(980), 10);
     test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(recall_component, "withdraw_some", args![withdraw.proof])
             .put_last_instruction_output_on_workspace("buckets")
             .call_method(account, "deposit", args![Workspace("buckets.0")])
@@ -64,7 +64,7 @@ fn it_recalls_all_resource_types() {
         .to_byte_type();
 
     test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(recall_component, "recall_fungible", args![fungible_vault, Amount(6)])
             .call_method(recall_component, "recall_non_fungibles", args![non_fungible_vault, [
                 NonFungibleId::from_u32(1)

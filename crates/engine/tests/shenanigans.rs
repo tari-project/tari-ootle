@@ -22,7 +22,7 @@ fn it_rejects_dangling_vaults_in_constructor() {
     let template_addr = test.get_template_address("Shenanigans");
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(template_addr, "dangling_vault", args![])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -41,7 +41,7 @@ fn it_rejects_dangling_vault_that_has_been_returned() {
     let template_addr = test.get_template_address("Shenanigans");
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(template_addr, "return_vault", args![])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -57,7 +57,7 @@ fn it_rejects_dangling_vaults_in_component() {
 
     //  Create with vault
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(template_addr, "with_vault", args![])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -70,7 +70,7 @@ fn it_rejects_dangling_vaults_in_component() {
     let indexed = IndexedWellKnownTypes::from_value(component.state()).unwrap();
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(component_address, "drop_vault", args![])
             .build_and_seal(test.secret_key()),
         vec![test.owner_proof()],
@@ -87,7 +87,7 @@ fn it_rejects_dangling_resources() {
     let template_addr = test.get_template_address("Shenanigans");
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(template_addr, "dangling_resource", args![])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -102,7 +102,7 @@ fn it_rejects_unknown_substate_ids() {
     let template_addr = test.get_template_address("Shenanigans");
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(template_addr, "non_existent_id", args![])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -125,7 +125,7 @@ fn it_rejects_references_to_buckets_that_arent_in_scope() {
     let (account, owner_token, owner_key) = test.create_funded_account();
 
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(template_addr, "with_vault", args![])
             .build_and_seal(&owner_key),
         vec![owner_token.clone()],
@@ -136,7 +136,7 @@ fn it_rejects_references_to_buckets_that_arent_in_scope() {
         .unwrap();
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(account, "withdraw", args![XTR, Amount(1000)])
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(shenanigans, "take_bucket_zero", args![])
@@ -154,7 +154,7 @@ fn it_rejects_double_ownership_of_vault() {
     let template_addr = test.get_template_address("Shenanigans");
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(template_addr, "with_vault_copy", args![])
             .build_and_seal(test.secret_key()),
         vec![test.owner_proof()],
@@ -176,7 +176,7 @@ fn it_prevents_access_to_vault_id_in_component_context() {
     };
 
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(template_addr, "with_vault", args![])
             .build_and_seal(test.secret_key()),
         vec![test.owner_proof()],
@@ -187,7 +187,7 @@ fn it_prevents_access_to_vault_id_in_component_context() {
         .unwrap();
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(shenanigans, "take_from_a_vault", args![vault_id, Amount(1000)])
             .build_and_seal(test.secret_key()),
         vec![test.owner_proof()],
@@ -207,7 +207,7 @@ fn it_prevents_access_to_out_of_scope_component() {
     let (account, _, _) = test.create_funded_account();
 
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(template_addr, "new", args![])
             .build_and_seal(test.secret_key()),
         vec![test.owner_proof()],
@@ -218,7 +218,7 @@ fn it_prevents_access_to_out_of_scope_component() {
         .unwrap();
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(shenanigans, "empty_state_on_component", args![account])
             .build_and_seal(test.secret_key()),
         vec![test.owner_proof()],
@@ -245,7 +245,7 @@ fn it_disallows_calls_on_vaults_that_are_not_owned_by_current_component() {
     };
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(
                 template_addr,
                 "attempt_to_steal_funds_using_cross_template_call",
@@ -275,7 +275,7 @@ fn it_disallows_vault_access_if_vault_is_not_owned() {
     };
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(template_addr, "ref_stolen_vault", args![vault_id])
             .build_and_seal(test.secret_key()),
         vec![test.owner_proof()],
@@ -293,7 +293,7 @@ fn it_disallows_minting_different_resource_type() {
     let (account, _, _) = test.create_empty_account();
 
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(template_addr, "new", args![])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -304,7 +304,7 @@ fn it_disallows_minting_different_resource_type() {
         .unwrap();
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(component, "mint_different_resource_type", args![])
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(account, "deposit", args![Workspace("bucket")])
@@ -334,7 +334,7 @@ fn it_does_not_bring_non_owned_vault_id_into_scope() {
     };
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(template_addr, "with_stolen_vault", args![vault_id])
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(account, "deposit", args![Workspace("bucket")])
@@ -363,7 +363,7 @@ fn it_disallows_withdraws_from_vaults_outside_of_component_context() {
     )]);
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(template_addr, "take_from_hardcoded_vault", args![])
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(account, "deposit", args![Workspace("bucket")])
@@ -377,7 +377,7 @@ fn it_disallows_withdraws_from_vaults_outside_of_component_context() {
     });
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(template_addr, "take_from_vault_and_return_bucket", args![vault_id,])
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(account, "deposit", args![Workspace("bucket")])
@@ -408,7 +408,7 @@ fn it_disallows_withdraws_from_vaults_outside_of_owning_component() {
     )]);
 
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(template_addr, "new", args![])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -419,7 +419,7 @@ fn it_disallows_withdraws_from_vaults_outside_of_owning_component() {
         .unwrap();
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(component, "take_from_hardcoded_vault_in_component_context", args![])
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(account, "deposit", args![Workspace("bucket")])

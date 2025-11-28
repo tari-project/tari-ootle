@@ -29,7 +29,7 @@ fn initial_contribution_and_redeem() {
 
     // Fund
     test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             // Create the liquidity pool
             .allocate_component_address("pool")
             .call_function(template_addr, "instantiate", args![
@@ -86,7 +86,7 @@ fn initial_contribution_and_redeem() {
     drop(store);
 
     test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(account_address, "withdraw", args![lp_vault.resource_address(), expected_balance])
             .put_last_instruction_output_on_workspace("pool_tokens")
             .call_method(

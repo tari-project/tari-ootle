@@ -20,7 +20,7 @@ fn it_freezes_vaults_containing_a_freezable_resource() {
 
     // Create a new Freeze component and deposit some resources into the account
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .allocate_component_address("freeze_comp")
             .call_function(template, "new", args![Workspace("freeze_comp")])
             .call_method("freeze_comp", "withdraw", args![1000])
@@ -37,7 +37,7 @@ fn it_freezes_vaults_containing_a_freezable_resource() {
 
     // Freeze the account's vault
     test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(component, "freeze", args![vault_id])
             .build_and_seal(test.secret_key()),
         vec![test.owner_proof()],
@@ -45,7 +45,7 @@ fn it_freezes_vaults_containing_a_freezable_resource() {
 
     // Attempt to withdraw from the frozen vault - FAIL
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(account, "withdraw", args![resource, 10])
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(account, "deposit", args![Workspace("bucket")])
@@ -60,7 +60,7 @@ fn it_freezes_vaults_containing_a_freezable_resource() {
 
     // Unfreeze the vault
     test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(component, "unfreeze", args![vault_id])
             .build_and_seal(test.secret_key()),
         vec![test.owner_proof()],
@@ -68,7 +68,7 @@ fn it_freezes_vaults_containing_a_freezable_resource() {
 
     // Withdraw from the un-frozen vault - SUCCESS
     test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(account, "withdraw", args![resource, 10])
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(account, "deposit", args![Workspace("bucket")])

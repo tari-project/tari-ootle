@@ -296,9 +296,9 @@ impl TrafficSim {
             .create_specific_key(KeyBranch::ElgamalEncryptionViewKey, 0)
             .await?;
 
-        let transaction = Transaction::builder()
+        let transaction = Transaction::builder_localnet()
             .for_network(exchange_wallet.network.as_byte())
-            .fee_transaction_pay_from_component(*account.component_address(), 2000)
+            .pay_fee_from_component(*account.component_address(), 2000)
             .call_function(stablecoin_template, "instantiate", args![
                 amount!["10000000000000000000000000000"],
                 "SSC",
@@ -467,9 +467,9 @@ impl TrafficSim {
                 })
                 .await?;
 
-            let transaction = Transaction::builder()
+            let transaction = Transaction::builder_localnet()
                 .for_network(wallet.network.as_byte())
-                .fee_transaction_pay_from_component(*exchange_account.component_address(), 500)
+                .pay_fee_from_component(*exchange_account.component_address(), 500)
                 .call_method(*exchange_account.component_address(), "create_proof_by_amount", args![
                     admin_resource_address,
                     1
@@ -483,7 +483,6 @@ impl TrafficSim {
                     "funds",
                 )
                 .drop_all_proofs_in_workspace()
-                .with_authorized_seal_signer()
                 .build_unsigned_transaction();
 
             let resp = exchange_wallet

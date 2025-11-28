@@ -162,7 +162,7 @@ where
 
         let mut num_succeeded = 0;
         let mut results = IndexMap::with_capacity(committee_size);
-        let mut last_error_pos = None;
+        let mut last_error_sg = None;
         for (shard_group, committee) in all_members {
             for member in committee.shuffled() {
                 let client = self.client_provider.create_client(&member.address);
@@ -177,7 +177,7 @@ where
                             target: LOG_TARGET,
                             "Request failed for validator '{}': {}", member, err
                         );
-                        last_error_pos = Some(results.len());
+                        last_error_sg = Some(shard_group);
                         results.insert(shard_group, Err(err));
                     },
                 }
@@ -187,11 +187,10 @@ where
         if num_succeeded == 0 {
             let mut last_error = None;
 
-            if let Some(pos) = last_error_pos {
-                let (_, last) = results.swap_remove_index(pos).expect("position must exist");
-                // Avoid unwrap_err, because that requires T: Debug
+            if let Some(sg) = last_error_sg {
+                let last = results.swap_remove(&sg).expect("shard group must exist");
                 match last {
-                    Ok(_) => unreachable!("last_error_pos points to an Err result"),
+                    Ok(_) => {},
                     Err(e) => last_error = Some(e),
                 }
             }

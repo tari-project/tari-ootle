@@ -73,9 +73,9 @@ impl QueryCf for ByShardStateVersionQuery {
     type KeyCodec = (ShardCodec, NumberCodec<Version>);
 }
 
-pub struct StateTreeStaleNodesModel;
+pub struct StateTreeStaleNodesCf;
 
-impl Cf for StateTreeStaleNodesModel {
+impl Cf for StateTreeStaleNodesCf {
     type Key = (Shard, Version);
     type KeyCodec = (ShardCodec, NumberCodec<Version>);
     type Value = Vec<StaleTreeNode>;
@@ -89,7 +89,7 @@ impl Cf for StateTreeStaleNodesModel {
 pub struct ByStateTreeStaleShardQuery;
 
 impl QueryCf for ByStateTreeStaleShardQuery {
-    type Cf = StateTreeStaleNodesModel;
+    type Cf = StateTreeStaleNodesCf;
     type Key = Shard;
     type KeyCodec = ShardCodec;
 }

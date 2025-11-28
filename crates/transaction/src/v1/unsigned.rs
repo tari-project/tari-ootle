@@ -18,7 +18,7 @@ use tari_template_lib::{
 
 use crate::{builder::TransactionBuilder, ComponentCall, Instruction, ResourceAddressRef, TransactionSignature};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, borsh::BorshSerialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UnsignedTransactionV1 {
     pub network: u8,
@@ -34,8 +34,21 @@ pub struct UnsignedTransactionV1 {
 }
 
 impl UnsignedTransactionV1 {
-    pub fn builder() -> TransactionBuilder {
-        TransactionBuilder::new()
+    pub fn builder<N: Into<u8>>(network: N) -> TransactionBuilder {
+        TransactionBuilder::new(network)
+    }
+
+    pub(crate) fn new_default<N: Into<u8>>(network: N) -> Self {
+        Self {
+            network: network.into(),
+            fee_instructions: vec![],
+            instructions: vec![],
+            inputs: IndexSet::new(),
+            min_epoch: None,
+            max_epoch: None,
+            is_seal_signer_authorized: true,
+            dry_run: false,
+        }
     }
 
     pub fn new<N: Into<u8>>(
@@ -54,7 +67,7 @@ impl UnsignedTransactionV1 {
             inputs,
             min_epoch,
             max_epoch,
-            is_seal_signer_authorized: false,
+            is_seal_signer_authorized: true,
             dry_run,
         }
     }

@@ -85,7 +85,7 @@ pub async fn handle_submit_instruction(
     })?;
 
     let transaction = builder
-        .fee_transaction_pay_from_component(*fee_account.component_address(), req.max_fee)
+        .pay_fee_from_component(*fee_account.component_address(), req.max_fee)
         .with_min_epoch(req.min_epoch.map(Epoch))
         .with_max_epoch(req.max_epoch.map(Epoch))
         .build_unsigned_transaction();
@@ -153,11 +153,13 @@ pub async fn handle_submit(
         .with_inputs(detected_inputs)
         .finish();
 
-    let main_signer = sdk.key_manager_api().get_public_key(req.seal_signer)?;
-    let main_signer_pk = main_signer.public_key.to_byte_type();
-    let local_signer = sdk.signer_api().with_context(&main_signer_pk);
-    for key in req.other_signers {
-        transaction = local_signer.sign(key, transaction)?;
+    if !req.other_signers.is_empty() {
+        let main_signer = sdk.key_manager_api().get_public_key(req.seal_signer)?;
+        let main_signer_pk = main_signer.public_key.to_byte_type();
+        let local_signer = sdk.signer_api().with_context(&main_signer_pk);
+        for key in req.other_signers {
+            transaction = local_signer.sign(key, transaction)?;
+        }
     }
 
     let transaction = sdk.signer_api().sign(req.seal_signer, transaction)?;
@@ -314,7 +316,7 @@ pub async fn handle_submit_manifest(
 
     let fee_amount = req.max_fee;
 
-    let transaction = Transaction::builder()
+    let transaction = Transaction::builder_localnet()
         .for_network(network.as_byte())
         .with_dry_run(req.dry_run)
         .with_fee_instructions_builder(|builder| {
@@ -332,7 +334,7 @@ pub async fn handle_submit_manifest(
     let dependencies = sdk.substate_api().locate_dependent_substates(&substates, true).await?;
     let inputs = dependencies.into_iter().map(|input| input.into_unversioned());
 
-    let transaction = transaction.with_inputs(inputs).authorized_sealed_signer();
+    let transaction = transaction.with_inputs(inputs);
 
     let transaction = if signing_key_id == account_owner_key_id {
         transaction.finish()
@@ -536,7 +538,7 @@ pub async fn handle_publish_template(
 
     let transaction = context
         .transaction_builder()
-        .fee_transaction_pay_from_component(*fee_account.component_address(), req.max_fee)
+        .pay_fee_from_component(*fee_account.component_address(), req.max_fee)
         .publish_template(wasm_binary)
         .build_unsigned_transaction();
 

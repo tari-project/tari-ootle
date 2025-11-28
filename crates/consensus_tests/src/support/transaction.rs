@@ -166,7 +166,7 @@ pub fn random_substates_ids_for_committee_generator(
 
 pub fn build_transaction(inputs: Vec<SubstateRequirement>) -> TransactionRecord {
     let k = PrivateKey::default();
-    let tx = Transaction::builder()
+    let tx = Transaction::builder_localnet()
         .call_function(Default::default(), "foo", args![])
         .with_inputs(inputs)
         .build_and_seal(&k);

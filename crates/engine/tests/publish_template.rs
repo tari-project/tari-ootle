@@ -26,8 +26,8 @@ fn publish_template_success() {
         PublishedTemplateAddress::from_author_and_binary_hash(&public_key.to_byte_type(), &expected_binary_hash);
 
     let result = test.execute_expect_success(
-        Transaction::builder()
-            .fee_transaction_pay_from_component(account_address, 200_000)
+        Transaction::builder_localnet()
+            .pay_fee_from_component(account_address, 200_000)
             .publish_template(template.into_code().try_into().unwrap())
             .build_and_seal(&account_key),
         vec![owner_proof],
@@ -57,8 +57,8 @@ fn publish_template_invalid_binary() {
     let mut test = TemplateTest::new(Vec::<String>::new());
     let (account_address, owner_proof, account_key, _) = test.create_custom_funded_account(250_000);
     let result = test.execute_expect_failure(
-        Transaction::builder()
-            .fee_transaction_pay_from_component(account_address, 200_000)
+        Transaction::builder_localnet()
+            .pay_fee_from_component(account_address, 200_000)
             .publish_template(vec![1, 2, 3].try_into().unwrap())
             .build_and_seal(&account_key),
         vec![owner_proof],
@@ -78,8 +78,8 @@ fn publish_template_too_big_binary() {
     let random_wasm_binary = generate_random_binary(limits::ENGINE_LIMITS.max_template_binary_size_bytes + 1);
     let wasm_binary_size = random_wasm_binary.len();
     let reason = test.execute_expect_failure(
-        Transaction::builder()
-            .fee_transaction_pay_from_component(account_address, 200_000)
+        Transaction::builder_localnet()
+            .pay_fee_from_component(account_address, 200_000)
             // SAFETY: We are intentionally publishing an oversized binary to test size limits.
             .publish_template(unsafe { TemplateBlob::new_unchecked(random_wasm_binary) })
             .build_and_seal(&account_key),

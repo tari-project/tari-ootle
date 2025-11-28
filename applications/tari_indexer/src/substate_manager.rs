@@ -184,9 +184,11 @@ impl SubstateManager {
         }
     }
 
-    pub fn get_substates(&self, substates: &[SubstateId]) -> Result<HashMap<SubstateId, Substate>, anyhow::Error> {
-        let mut tx = self.substate_store.create_read_tx()?;
-        let substates = tx.get_substates(substates)?;
+    pub fn get_cached_substates(
+        &self,
+        substates: &[SubstateId],
+    ) -> Result<HashMap<SubstateId, Substate>, anyhow::Error> {
+        let substates = self.substate_store.with_read_tx(|tx| tx.get_substates(substates))?;
         Ok(substates
             .into_iter()
             .map(|rec| (rec.address, Substate::new(rec.version, rec.substate)))

@@ -49,6 +49,7 @@ export * from "./types/FeeBreakdown";
 export * from "./types/FeeCostBreakdown";
 export * from "./types/FeeReceipt";
 export * from "./types/FeeSource";
+export * from "./types/FinalizeOutcome";
 export * from "./types/FinalizeResult";
 export * from "./types/ForeignProposalAtom";
 export * from "./types/FunctionDef";

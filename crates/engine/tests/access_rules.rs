@@ -51,7 +51,7 @@ mod component_access_rules {
             .default(AccessRule::DenyAll);
 
         test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_function(access_rules_template, "with_configured_rules", args![
                     // Owner
                     OwnerRule::ByAccessRule(owner_rule),
@@ -77,7 +77,7 @@ mod component_access_rules {
             .clone();
 
         test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "set_value", args![1])
                 .build_and_seal(&owner2_key),
             vec![owner2_proof],
@@ -86,7 +86,7 @@ mod component_access_rules {
         let (unauth_proof, _, unauth_key) = test.create_owner_proof();
 
         let reason = test.execute_expect_failure(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "set_value", args![1])
                 .build_and_seal(&unauth_key),
             vec![unauth_proof],
@@ -109,7 +109,7 @@ mod component_access_rules {
         let access_rules_template = test.get_template_address("AccessRulesTest");
 
         let result = test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_function(access_rules_template, "with_configured_rules", args![
                     // Owner
                     OwnerRule::OwnedBySigner,
@@ -130,7 +130,7 @@ mod component_access_rules {
 
         // Access Denied
         let reason = test.execute_expect_failure(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "set_value", args![1])
                 .build_and_seal(&user_key),
             vec![user_proof.clone()],
@@ -143,7 +143,7 @@ mod component_access_rules {
 
         // Allow user to call set_value
         test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "set_component_access_rules", args![
                     ComponentAccessRules::new()
                         .add_method_rule("set_value", rule!(non_fungible(user_proof.clone())))
@@ -154,14 +154,14 @@ mod component_access_rules {
         );
 
         test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "set_value", args![1])
                 .build_and_seal(&user_key),
             vec![user_proof.clone()],
         );
 
         test.execute_expect_failure(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "set_component_access_rules", args![
                     ComponentAccessRules::new().default(AccessRule::AllowAll)
                 ])
@@ -180,7 +180,7 @@ mod component_access_rules {
         let access_rules_template = test.get_template_address("AccessRulesTest");
 
         let result = test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_function(access_rules_template, "with_configured_rules", args![
                     // Owner
                     OwnerRule::None,
@@ -201,7 +201,7 @@ mod component_access_rules {
 
         // Owner cannot set access rules
         let reason = test.execute_expect_failure(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "set_component_access_rules", args![
                     ComponentAccessRules::new().default(AccessRule::AllowAll)
                 ])
@@ -231,7 +231,7 @@ mod resource_access_rules {
         let access_rules_template = test.get_template_address("AccessRulesTest");
 
         let result = test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_function(access_rules_template, "with_configured_rules", args![
                     // Owner
                     OwnerRule::OwnedBySigner,
@@ -252,7 +252,7 @@ mod resource_access_rules {
 
         // User cannot get tokens
         let reason = test.execute_expect_failure(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "take_tokens", args![10])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
@@ -264,7 +264,7 @@ mod resource_access_rules {
 
         // Owner can get tokens
         test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "take_tokens", args![Amount(10)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
@@ -274,7 +274,7 @@ mod resource_access_rules {
 
         // Owner gives user permission to withdraw tokens
         test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "set_tokens_access_rules", args![
                     ResourceAccessRules::new().withdrawable(rule!(non_fungible(user_proof.clone())))
                 ])
@@ -284,7 +284,7 @@ mod resource_access_rules {
 
         // User can get tokens, and deposit them in the owners account (deposit is default allow)
         test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "take_tokens", args![Amount(10)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
@@ -305,7 +305,7 @@ mod resource_access_rules {
         let access_rules_template = test.get_template_address("AccessRulesTest");
 
         let result = test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_function(access_rules_template, "with_configured_rules", args![
                     // Owner - Everyone!
                     OwnerRule::ByAccessRule(AccessRule::AllowAll),
@@ -326,7 +326,7 @@ mod resource_access_rules {
 
         // Give the user a withdraw and deposit badge
         test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "take_badge_by_name", args!["withdraw"])
                 .put_last_instruction_output_on_workspace("withdraw_perm")
                 .call_method(component_address, "take_badge_by_name", args!["deposit"])
@@ -349,7 +349,7 @@ mod resource_access_rules {
         // Now try recall them. This won't succeed because recall only respects access rules not ownership, so the call
         // is denied for the owner.
         let reason = test.execute_expect_failure(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "recall_badge", args![
                     user_badge_vault_id,
                     "withdraw"
@@ -373,7 +373,7 @@ mod resource_access_rules {
         let access_rules_template = test.get_template_address("AccessRulesTest");
 
         let result = test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_function(access_rules_template, "using_badge_rules", args![])
                 .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
@@ -398,7 +398,7 @@ mod resource_access_rules {
 
         // User cannot get the tokens
         let reason = test.execute_expect_failure(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "take_tokens", args![Amount(10)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
@@ -410,7 +410,7 @@ mod resource_access_rules {
 
         // Give the user a withdraw and deposit badge
         test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "take_badge_by_name", args!["withdraw"])
                 .put_last_instruction_output_on_workspace("withdraw_perm")
                 .call_method(component_address, "take_badge_by_name", args!["deposit"])
@@ -423,7 +423,7 @@ mod resource_access_rules {
 
         // User can take tokens
         let result = test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(user_account, "create_proof_by_non_fungible_ids", args![
                     badge_resource,
                     vec![
@@ -452,7 +452,7 @@ mod resource_access_rules {
 
         // Recall badge
         test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "recall_badge", args![
                     user_badge_vault_id,
                     "withdraw"
@@ -463,7 +463,7 @@ mod resource_access_rules {
 
         // User can no longer withdraw tokens
         let reason = test.execute_expect_failure(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(user_account, "create_proof_for_resource", args![badge_resource])
                 .put_last_instruction_output_on_workspace("proof")
                 .call_method(user_account, "withdraw", args![token_resource, Amount(10)])
@@ -488,7 +488,7 @@ mod resource_access_rules {
         let access_rules_template = test.get_template_address("AccessRulesTest");
 
         let result = test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_function(access_rules_template, "using_resource_rules", args![])
                 .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
@@ -512,7 +512,7 @@ mod resource_access_rules {
 
         // User cannot get the tokens
         let reason = test.execute_expect_failure(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(access_rules_component, "take_tokens", args![Amount(10)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
@@ -524,7 +524,7 @@ mod resource_access_rules {
 
         // Give the user a badge
         test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(access_rules_component, "mint_new_badge", args![])
                 .put_last_instruction_output_on_workspace("permission")
                 .call_method(user_account, "deposit", args![Workspace("permission")])
@@ -534,7 +534,7 @@ mod resource_access_rules {
 
         // User can take tokens
         test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(user_account, "create_proof_by_amount", args![badge_resource, Amount(1)])
                 .put_last_instruction_output_on_workspace("proof")
                 .call_method(access_rules_component, "take_tokens_using_proof", args![
@@ -559,7 +559,7 @@ mod resource_access_rules {
         let access_rules_template = test.get_template_address("AccessRulesTest");
 
         let result = test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_function(access_rules_template, "with_configured_rules", args![
                     // Owner
                     OwnerRule::OwnedBySigner,
@@ -592,7 +592,7 @@ mod resource_access_rules {
 
         // Take some tokens, generate a proof from the bucket (locking them up), and then try withdrawing them
         let reason = test.execute_expect_failure(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "take_tokens", args![Amount(1000)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
@@ -612,7 +612,7 @@ mod resource_access_rules {
 
         // Drop the proof before withdraw/deposit
         test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "take_tokens", args![Amount(1000)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
@@ -640,7 +640,7 @@ mod resource_access_rules {
         let access_rules_template = test.get_template_address("AccessRulesTest");
 
         let result = test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_function(access_rules_template, "using_resource_rules", args![])
                 .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
@@ -666,7 +666,7 @@ mod resource_access_rules {
         // Try to take tokens without proof. Even though I'm the owner of the resource, the scope does not carry over
         // when cross-template calls are made.
         let reason = test.execute_expect_failure(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_function(cross_call_template, "call_component_with_args", args![
                     component_address,
                     "take_tokens",
@@ -683,7 +683,7 @@ mod resource_access_rules {
 
         // Do a cross template call using a proof
         test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "mint_new_badge", args![])
                 .put_last_instruction_output_on_workspace("badge")
                 .call_method(owner_account, "deposit", args![Workspace("badge")])
@@ -715,7 +715,7 @@ mod resource_access_rules {
         let access_rules_template = test.get_template_address("AccessRulesTest");
 
         let result = test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_function(access_rules_template, "using_badge_rules", args![])
                 .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
@@ -739,7 +739,7 @@ mod resource_access_rules {
 
         // User cannot get the tokens
         let reason = test.execute_expect_failure(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "take_tokens", args![Amount(10)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
@@ -751,7 +751,7 @@ mod resource_access_rules {
 
         // Give the user a withdraw and deposit badge
         test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "take_badge_by_name", args!["withdraw"])
                 .put_last_instruction_output_on_workspace("withdraw_perm")
                 .call_method(component_address, "take_badge_by_name", args!["deposit"])
@@ -764,7 +764,7 @@ mod resource_access_rules {
 
         // Side case: we try deposit back the badges before we drop the proof. This is invalid.
         let reason = test.execute_expect_failure(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(
                     user_account,
                     "withdraw_many_non_fungibles",
@@ -806,7 +806,7 @@ mod resource_access_rules {
 
         // User can take tokens, using a proof obtained from a bucket
         test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(
                     user_account,
                     "withdraw_many_non_fungibles",
@@ -850,7 +850,7 @@ mod resource_access_rules {
         let access_rules_template = test.get_template_address("AccessRulesTest");
 
         let result = test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_function(
                     access_rules_template,
                     "resource_actions_restricted_to_component",
@@ -878,7 +878,7 @@ mod resource_access_rules {
 
         // Minting using a template function will fail
         let reason = test.execute_expect_failure(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_function(access_rules_template, "mint_resource", args![token_resource])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
@@ -890,7 +890,7 @@ mod resource_access_rules {
 
         // Minting in a component context will succeed
         test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "mint_more_tokens", args![Amount(1000)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
@@ -909,7 +909,7 @@ mod resource_access_rules {
         let access_rules_template = test.get_template_address("AccessRulesTest");
 
         let result = test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_function(access_rules_template, "with_auth_hook", args![true, "valid_auth_hook"])
                 .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
@@ -920,7 +920,7 @@ mod resource_access_rules {
             .unwrap();
 
         test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "take_tokens", args![Amount(10)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
@@ -938,7 +938,7 @@ mod resource_access_rules {
         let access_rules_template = test.get_template_address("AccessRulesTest");
 
         let result = test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_function(access_rules_template, "with_auth_hook", args![false, "valid_auth_hook"])
                 .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
@@ -949,7 +949,7 @@ mod resource_access_rules {
             .unwrap();
 
         let result = test.execute_expect_failure(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "take_tokens", args![Amount(10)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
@@ -973,7 +973,7 @@ mod resource_access_rules {
         let access_rules_template = test.get_template_address("AccessRulesTest");
 
         let result = test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_function(access_rules_template, "with_auth_hook", args![
                     true,
                     "malicious_auth_hook_set_state"
@@ -987,7 +987,7 @@ mod resource_access_rules {
             .unwrap();
 
         let result = test.execute_expect_failure(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "take_tokens", args![Amount(10)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
@@ -1011,7 +1011,7 @@ mod resource_access_rules {
         let access_rules_template = test.get_template_address("AccessRulesTest");
 
         let result = test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_function(access_rules_template, "with_auth_hook", args![
                     true,
                     "malicious_auth_hook_call_mut"
@@ -1025,7 +1025,7 @@ mod resource_access_rules {
             .unwrap();
 
         let result = test.execute_expect_failure(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "take_tokens", args![Amount(10)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
@@ -1051,7 +1051,7 @@ mod resource_access_rules {
         // User has a state component
         let state_template = test.get_template_address("State");
         let result = test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_function(state_template, "restricted", args![])
                 .build_and_seal(&user_key),
             vec![owner_proof.clone()],
@@ -1064,7 +1064,7 @@ mod resource_access_rules {
         let access_rules_template = test.get_template_address("AccessRulesTest");
 
         let result = test.execute_expect_success(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_function(access_rules_template, "with_auth_hook_attack_component", args![
                     state_component
                 ])
@@ -1077,7 +1077,7 @@ mod resource_access_rules {
             .unwrap();
 
         let result = test.execute_expect_failure(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(component_address, "take_tokens", args![Amount(10)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(state_component, "set", args![1])
@@ -1112,7 +1112,7 @@ mod resource_access_rules {
         .iter()
         .for_each(|hook| {
             let reason = test.execute_expect_failure(
-                Transaction::builder()
+                Transaction::builder_localnet()
                     .call_function(access_rules_template, "with_auth_hook", args![true, hook])
                     .build_and_seal(test.secret_key()),
                 vec![test.owner_proof()],

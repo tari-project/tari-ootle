@@ -17,3 +17,13 @@ use crate::webserver::error::WebError;
 pub async fn not_found() -> Result<impl axum::response::IntoResponse, WebError> {
     Ok(WebError::not_found("Endpoint not found"))
 }
+
+pub fn slugify_type_name<T>(_cf: T) -> String {
+    let type_name = std::any::type_name::<T>();
+    type_name
+        .rsplit("::")
+        .take(2)
+        .map(|s| s.to_lowercase())
+        .collect::<Vec<_>>()
+        .join("_")
+}

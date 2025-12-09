@@ -213,13 +213,9 @@ mod block_query_operations {
     use super::*;
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn block_query_operations_rocksdb() {
         let (db, _tmp) = create_rocksdb();
-        block_query_operations(&db);
-    }
-
-    #[allow(clippy::too_many_lines)]
-    fn block_query_operations(db: &impl StateStore) {
         let mut tx = db.create_write_tx().unwrap();
 
         // insert multiple blocks

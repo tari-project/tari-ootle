@@ -20,10 +20,7 @@ use crate::{
 #[test]
 fn rocksdb() {
     let (db, _tmp) = create_rocksdb();
-    operations(db);
-}
 
-fn operations(db: impl StateStore) {
     let num_transitions = 100; // Makes double
     const EPOCH: Epoch = Epoch::zero();
     let mut tx = db.create_write_tx().unwrap();

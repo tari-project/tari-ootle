@@ -168,8 +168,10 @@ impl SubstateManager {
     ) -> Result<Option<SubstateResponse>, anyhow::Error> {
         // we store the latest version of the substates related to the events
         // so we will return the substate directly from database if it's there
-        if let Some(substate) = self.get_substate_from_db(substate_id, version).await? {
-            return Ok(Some(substate));
+        if let Some(version) = version {
+            if let Some(substate) = self.get_substate_from_db(substate_id, Some(version)).await? {
+                return Ok(Some(substate));
+            }
         }
 
         // the substate is not in db (or is not the requested version) so we fetch it from the dan layer committee

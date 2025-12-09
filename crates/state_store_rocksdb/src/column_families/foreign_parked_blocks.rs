@@ -25,33 +25,43 @@ use tari_ootle_storage::consensus_models::ForeignParkedProposal;
 use tari_transaction::TransactionId;
 
 use crate::{
-    codecs::{BlockIdCodec, DefaultCodec, TransactionIdCodec, UnitCodec},
+    codecs::{BlockIdCodec, DefaultCodec, KeyPrefix, TransactionIdCodec, UnitCodec},
+    column_families::cf_names,
+    prefixed,
     traits::{Cf, QueryCf},
 };
 
+prefixed!(ForeignParkedBlockPrefix, KeyPrefix::ForeignParkedBlocks);
 pub struct ForeignParkedBlockCf;
 
 impl Cf for ForeignParkedBlockCf {
     type Key = BlockId;
     type KeyCodec = BlockIdCodec;
+    type Prefix = ForeignParkedBlockPrefix;
     type Value = ForeignParkedProposal;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "foreign_parked_blocks"
+        cf_names::FOREIGN_PROPOSALS
     }
 }
+
+prefixed!(
+    ForeignProposalMissingTransactionsPrefix,
+    KeyPrefix::ForeignProposalMissingTransactions
+);
 
 pub struct MissingTransactionsModel;
 
 impl Cf for MissingTransactionsModel {
     type Key = (TransactionId, BlockId);
     type KeyCodec = (TransactionIdCodec, BlockIdCodec);
+    type Prefix = ForeignProposalMissingTransactionsPrefix;
     type Value = ();
     type ValueCodec = UnitCodec;
 
     fn name() -> &'static str {
-        "foreign_missing_transactions"
+        cf_names::FOREIGN_PROPOSALS
     }
 }
 

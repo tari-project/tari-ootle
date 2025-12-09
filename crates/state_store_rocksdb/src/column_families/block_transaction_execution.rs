@@ -7,10 +7,14 @@ use tari_ootle_storage::consensus_models::BlockTransactionExecution;
 use tari_transaction::TransactionId;
 
 use crate::{
-    codecs::{BlockIdCodec, DefaultVersionedCodec, NumberCodec, TransactionIdCodec, UnitCodec},
+    codecs::{BlockIdCodec, DefaultVersionedCodec, KeyPrefix, NumberCodec, TransactionIdCodec, UnitCodec},
+    column_families::block::BlockCf,
+    prefixed,
     traits::{Cf, QueryCf},
     versioned_types::VersionedBlockTransactionExecution,
 };
+
+prefixed!(BlockTransactionExecutionPrefix, KeyPrefix::BlockTransactionExecutions);
 
 pub struct BlockTransactionExecutionCf;
 
@@ -19,11 +23,12 @@ impl Cf for BlockTransactionExecutionCf {
     // block_transaction_executions_get_pending_for_block.
     type Key = (TransactionId, BlockId, NodeHeight);
     type KeyCodec = (TransactionIdCodec, BlockIdCodec, NumberCodec<NodeHeight>);
+    type Prefix = BlockTransactionExecutionPrefix;
     type Value = BlockTransactionExecution;
     type ValueCodec = DefaultVersionedCodec<VersionedBlockTransactionExecution>;
 
     fn name() -> &'static str {
-        "block_transaction_exec"
+        BlockCf::name()
     }
 }
 
@@ -35,16 +40,22 @@ impl QueryCf for ByTransactionIdQuery {
     type KeyCodec = TransactionIdCodec;
 }
 
+prefixed!(
+    BlockTransactionExecutionIndexPrefix,
+    KeyPrefix::BlockTransactionExecutionByBlockIdIndex
+);
+
 pub struct BlockIndex;
 
 impl Cf for BlockIndex {
     type Key = (BlockId, TransactionId, NodeHeight);
     type KeyCodec = (BlockIdCodec, TransactionIdCodec, NumberCodec<NodeHeight>);
+    type Prefix = BlockTransactionExecutionIndexPrefix;
     type Value = ();
     type ValueCodec = UnitCodec;
 
     fn name() -> &'static str {
-        "block_transaction_exec_block_idx"
+        BlockCf::name()
     }
 }
 

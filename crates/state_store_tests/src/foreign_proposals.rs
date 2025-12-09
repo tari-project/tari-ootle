@@ -16,13 +16,9 @@ use tari_utilities::epoch_time::EpochTime;
 use crate::helpers::{assert_eq_debug, create_foreign_proposal, create_random_block_id, create_rocksdb};
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn foreign_proposals_rocksdb() {
     let (db, _tmp) = create_rocksdb();
-    foreign_proposals_operations(db);
-}
-
-#[allow(clippy::too_many_lines)]
-fn foreign_proposals_operations(db: impl StateStore) {
     let mut tx = db.create_write_tx().unwrap();
 
     let network = Network::LocalNet;

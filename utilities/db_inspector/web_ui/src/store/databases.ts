@@ -28,6 +28,7 @@ export const useDatabasesList = () => {
 };
 
 interface ListColumnFamiliesResponse {
+  cf_names: string[];
   cfs: {
     name: string;
     num_entries: number;

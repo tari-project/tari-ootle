@@ -1,7 +1,10 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{any::type_name, io::Read};
+use std::{
+    any::type_name,
+    io::{Read, Write},
+};
 
 use anyhow::anyhow;
 
@@ -22,6 +25,19 @@ where
     for<'a> T: TryFrom<&'a [u8]>,
     for<'a> <T as TryFrom<&'a [u8]>>::Error: std::error::Error,
 {
+    fn encode_len(&self, value: &T) -> Result<usize, RocksDbStorageError> {
+        Ok(value.as_ref().len())
+    }
+
+    fn encode_into<W: Write>(&self, value: &T, writer: &mut W) -> Result<(), RocksDbStorageError> {
+        writer
+            .write_all(value.as_ref())
+            .map_err(|e| RocksDbStorageError::EncodeError {
+                source: anyhow!("BytesCodec: Failed to write bytes: {}", e),
+            })?;
+        Ok(())
+    }
+
     fn encode(&self, value: &T) -> Result<EncodeVec, RocksDbStorageError> {
         Ok(EncodeVec::from_slice(value.as_ref()))
     }
@@ -52,6 +68,18 @@ where
     T: AsRef<[u8]>,
     T: From<[u8; LEN]>,
 {
+    fn encode_len(&self, _value: &T) -> Result<usize, RocksDbStorageError> {
+        Ok(LEN)
+    }
+
+    fn encode_into<W: Write>(&self, value: &T, writer: &mut W) -> Result<(), RocksDbStorageError> {
+        let bytes = value.as_ref();
+        writer.write_all(bytes).map_err(|e| RocksDbStorageError::EncodeError {
+            source: anyhow!("FixedBytesCodec: Failed to write bytes: {}", e),
+        })?;
+        Ok(())
+    }
+
     fn encode(&self, value: &T) -> Result<EncodeVec, RocksDbStorageError> {
         Ok(EncodeVec::from_slice(value.as_ref()))
     }

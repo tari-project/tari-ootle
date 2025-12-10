@@ -1,6 +1,44 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+//! Keypair management for Tari node identities.
+//!
+//! This module provides functionality for creating, loading, and securely storing cryptographic keypairs
+//! used for node identification in the Tari network.
+//!
+//! # Security Considerations
+//!
+//! ## File Permissions (CRITICAL)
+//!
+//! **On Unix-like systems (Linux, macOS):** Identity files containing private keys are protected with
+//! strict file permissions (0600 - read/write for owner only). These permissions are enforced both when
+//! creating new identity files and when loading existing ones.
+//!
+//! **On Windows systems:** File permission enforcement is **NOT IMPLEMENTED**. The Windows permission
+//! model differs significantly from Unix, and this module does not currently set or verify Windows ACLs.
+//!
+//! ### Security Implications for Windows Users
+//!
+//! - Identity files on Windows are created with default permissions, which may allow access by other
+//!   users on the system.
+//! - On shared or multi-user Windows systems, **private keys may be exposed** to unauthorized users.
+//! - Users running on Windows should manually secure their identity files using Windows File Explorer
+//!   or `icacls` command to restrict access to their user account only.
+//!
+//! ### Recommended Windows Security Steps
+//!
+//! To manually secure your identity file on Windows:
+//! 1. Right-click the identity file → Properties → Security tab
+//! 2. Click "Advanced" → Disable inheritance → Remove all users except your account
+//! 3. Ensure only your user account has "Full Control"
+//!
+//! Alternatively, use PowerShell:
+//! ```powershell
+//! $path = "path\to\identity_file.json"
+//! icacls $path /inheritance:r
+//! icacls $path /grant:r "$env:USERNAME:(F)"
+//! ```
+
 use std::{fs, io, path::Path, sync::Arc};
 
 use log::*;
@@ -175,8 +213,11 @@ pub fn load_from_json<P: AsRef<Path>, T: DeserializeOwned>(path: P) -> Result<Op
     Ok(Some(object))
 }
 
-/// Saves the identity as json at a given path with 0600 file permissions (UNIX-only), creating it if it does not
+/// Saves the identity as json at a given path with restricted file permissions, creating it if it does not
 /// already exist.
+///
+/// **Security Note:** On Unix-like systems, this sets file permissions to 0600 (read/write for owner only).
+/// On Windows, no permission restrictions are applied - see module-level documentation for security implications.
 ///
 /// ## Parameters
 /// `path` - Path to save the file
@@ -200,7 +241,10 @@ pub fn save_as_json<P: AsRef<Path>, T: Serialize>(path: P, object: &T) -> Result
     Ok(())
 }
 
-/// Check that the given path exists, is a file and has the correct file permissions (mac/linux only)
+/// Check that the given path exists, is a file and has the correct file permissions.
+///
+/// **Security Note:** Permission checks are only enforced on Unix-like systems. On Windows, this function
+/// verifies file existence and type but does not check permissions. See module-level documentation.
 fn check_identity_file<P: AsRef<Path>>(path: P) -> Result<(), IdentityError> {
     if !path.as_ref().exists() {
         return Err(IdentityError::NotFound);
@@ -216,6 +260,12 @@ fn check_identity_file<P: AsRef<Path>>(path: P) -> Result<(), IdentityError> {
     Ok(())
 }
 
+/// Sets file permissions on Unix-like systems (Linux, macOS).
+///
+/// This function sets the file mode to the specified permissions value (e.g., 0600 for owner read/write only).
+///
+/// # Security
+/// This is a critical security function that protects private keys from unauthorized access on Unix systems.
 #[cfg(target_family = "unix")]
 fn set_permissions<P: AsRef<Path>>(path: P, new_perms: u32) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -226,12 +276,41 @@ fn set_permissions<P: AsRef<Path>>(path: P, new_perms: u32) -> io::Result<()> {
     Ok(())
 }
 
+/// Windows stub for setting file permissions.
+///
+/// # ⚠️ SECURITY WARNING ⚠️
+///
+/// This function does **NOT** apply any permission restrictions on Windows systems. Identity files
+/// containing private keys will be created with default Windows permissions, which may allow access
+/// by other users on the system.
+///
+/// **This is a known security limitation.** Windows users should manually restrict access to identity
+/// files using Windows File Explorer or the `icacls` command. See module-level documentation for
+/// detailed instructions.
+///
+/// # Why Not Implemented?
+///
+/// Windows uses Access Control Lists (ACLs) which are significantly more complex than Unix permissions.
+/// Proper implementation would require:
+/// - Using Windows Security APIs (via winapi or windows-sys crate)
+/// - Setting DACLs (Discretionary Access Control Lists)
+/// - Handling inheritance and propagation correctly
+/// - Different approaches for different Windows versions
+///
+/// This has not been implemented due to complexity and the need for extensive Windows-specific testing.
 #[cfg(target_family = "windows")]
-fn set_permissions<P: AsRef<Path>>(_: P, _: u32) -> io::Result<()> {
-    // Windows permissions are very different and are not supported
+fn set_permissions<P: AsRef<Path>>(_path: P, _new_perms: u32) -> io::Result<()> {
+    // IMPORTANT: No permissions are set on Windows. See function documentation above.
+    warn!(
+        target: LOG_TARGET,
+        "Identity file permissions are not enforced on Windows. Please manually restrict access to this file."
+    );
     Ok(())
 }
 
+/// Checks if a file has the specified Unix permissions.
+///
+/// Returns `true` if the file's permission mode exactly matches the specified value.
 #[cfg(target_family = "unix")]
 fn has_permissions<P: AsRef<Path>>(path: P, perms: u32) -> io::Result<bool> {
     use std::os::unix::fs::PermissionsExt;
@@ -239,8 +318,19 @@ fn has_permissions<P: AsRef<Path>>(path: P, perms: u32) -> io::Result<bool> {
     Ok(metadata.permissions().mode() == perms)
 }
 
+/// Windows stub for checking file permissions.
+///
+/// # ⚠️ SECURITY WARNING ⚠️
+///
+/// This function always returns `true` on Windows, effectively disabling permission checks.
+/// This means that identity files with incorrect or overly permissive access rights will **not**
+/// be detected or rejected on Windows systems.
+///
+/// See the `set_permissions` function documentation and module-level documentation for more information
+/// about this security limitation.
 #[cfg(target_family = "windows")]
-fn has_permissions<P: AsRef<Path>>(_: P, _: u32) -> io::Result<bool> {
+fn has_permissions<P: AsRef<Path>>(_path: P, _perms: u32) -> io::Result<bool> {
+    // Always return true on Windows - permissions are not checked
     Ok(true)
 }
 

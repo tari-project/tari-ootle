@@ -4,6 +4,7 @@
 use std::{fs, path::PathBuf};
 
 use tari_bor::{decode, encode};
+use tari_engine_types::substate::SubstateId;
 use tari_indexer_lib::substate_cache::{SubstateCache, SubstateCacheEntry, SubstateCacheEntryRef, SubstateCacheError};
 
 #[derive(Debug, Clone)]
@@ -21,8 +22,8 @@ impl SubstateFileCache {
 }
 
 impl SubstateCache for SubstateFileCache {
-    async fn read<K: AsRef<str> + Send>(&self, address: K) -> Result<Option<SubstateCacheEntry>, SubstateCacheError> {
-        let res = cacache::read(&self.cache_dir_path, address).await;
+    async fn read(&self, id: &SubstateId) -> Result<Option<SubstateCacheEntry>, SubstateCacheError> {
+        let res = cacache::read(&self.cache_dir_path, id.to_address_string()).await;
         match res {
             Ok(value) => {
                 // cache hit
@@ -41,13 +42,9 @@ impl SubstateCache for SubstateFileCache {
         }
     }
 
-    async fn write<K: AsRef<str> + Send>(
-        &self,
-        address: K,
-        entry: SubstateCacheEntryRef<'_>,
-    ) -> Result<(), SubstateCacheError> {
+    async fn write(&self, id: &SubstateId, entry: SubstateCacheEntryRef<'_>) -> Result<(), SubstateCacheError> {
         let encoded_entry = encode(&entry).map_err(|e| SubstateCacheError(e.to_string()))?;
-        cacache::write(&self.cache_dir_path, address, encoded_entry)
+        cacache::write(&self.cache_dir_path, id.to_address_string(), encoded_entry)
             .await
             .map_err(|e| SubstateCacheError(format!("{}", e)))?;
         Ok(())

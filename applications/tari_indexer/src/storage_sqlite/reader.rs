@@ -5,9 +5,7 @@ use std::{collections::HashMap, fmt::Write, str::FromStr};
 
 use diesel::{
     dsl,
-    sql_query,
     sql_types,
-    BoolExpressionMethods,
     ExpressionMethods,
     NullableExpressionMethods,
     OptionalExtension,
@@ -18,10 +16,9 @@ use diesel::{
 };
 use log::info;
 use serde::de::DeserializeOwned;
-use tari_consensus_types::BlockId;
 use tari_engine_types::{
     events::Event,
-    substate::{SubstateId, SubstateValue},
+    substate::{Substate, SubstateId, SubstateValue},
     transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
     Utxo,
 };
@@ -34,7 +31,7 @@ use tari_ootle_common_types::{
     ShardGroup,
     StateVersion,
 };
-use tari_ootle_storage::{consensus_models::BlockHeader, time::PrimitiveDateTime, Ordering, StorageError};
+use tari_ootle_storage::{time::PrimitiveDateTime, Ordering, StorageError};
 use tari_ootle_storage_sqlite::SqliteTransaction;
 use tari_ootle_wallet_sdk::models::UtxoStateUpdateSet;
 use tari_template_lib::{
@@ -47,7 +44,7 @@ use tari_transaction::{Transaction, TransactionId};
 use crate::{
     storage_sqlite::{
         models,
-        models::{EventRecord, KeyValue, ScannedBlockId, SubstateRecord},
+        models::{EventRecord, KeyValue, SubstateRecord},
         serialization::{deserialize_hex_try_from, deserialize_json, serialize_hex},
     },
     store::IndexerStoreReadTransaction,
@@ -73,6 +70,7 @@ impl<'a> SqliteStoreReadTransaction<'a> {
 impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
     fn list_substates(
         &mut self,
+        by_id: Option<&SubstateId>,
         by_type: Option<SubstateType>,
         by_template_address: Option<TemplateAddress>,
         limit: Option<u64>,
@@ -81,6 +79,10 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         use crate::storage_sqlite::schema::substates;
 
         let mut query = substates::table.into_boxed();
+
+        if let Some(substate_id) = by_id {
+            query = query.filter(substates::address.eq(substate_id.to_string()));
+        }
 
         if let Some(template_address) = by_template_address {
             query = query.filter(substates::template_address.eq(template_address.to_string()));
@@ -125,7 +127,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                     timestamp,
                 })
             })
-            .collect::<Result<Vec<ListSubstateItem>, StorageError>>()
+            .collect::<Result<_, StorageError>>()
             .map_err(|e| StorageError::QueryError {
                 reason: format!("list_substates: invalid substate items: {}", e),
             })?;
@@ -158,7 +160,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             })
     }
 
-    fn get_substates(&mut self, ids: &[SubstateId]) -> Result<Vec<SubstateResponse>, StorageError> {
+    fn get_substates(&mut self, ids: &[SubstateId]) -> Result<HashMap<SubstateId, Substate>, StorageError> {
         use crate::storage_sqlite::schema::substates;
 
         let str_ids = ids.iter().map(|id| id.to_string());
@@ -176,23 +178,17 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                 res.map_err(|e| StorageError::QueryError {
                     reason: format!("get_substates: {e}"),
                 })
-                .and_then(TryInto::try_into)
+                .and_then(SubstateResponse::try_from)
+            })
+            .map(|res| {
+                res.map(|substate_resp| {
+                    (
+                        substate_resp.id,
+                        Substate::new(substate_resp.version, substate_resp.substate),
+                    )
+                })
             })
             .collect()
-    }
-
-    fn get_non_fungible_count(&mut self, resource_address: String) -> Result<i64, StorageError> {
-        use crate::storage_sqlite::schema::non_fungible_indexes;
-
-        let count = non_fungible_indexes::table
-            .filter(non_fungible_indexes::resource_address.eq(resource_address))
-            .count()
-            .get_result::<i64>(self.connection())
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("get_non_fungible_count: {}", e),
-            })?;
-
-        Ok(count)
     }
 
     fn get_non_fungibles_by_resource_address(
@@ -308,50 +304,6 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                 })
             })
             .collect()
-    }
-
-    fn get_oldest_scanned_epoch(&mut self) -> Result<Option<Epoch>, StorageError> {
-        use crate::storage_sqlite::schema::scanned_block_ids;
-
-        let res: Option<i64> = scanned_block_ids::table
-            .select(diesel::dsl::min(scanned_block_ids::epoch))
-            .first(self.connection())
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("get_oldest_scanned_epoch: {}", e),
-            })?;
-
-        let oldest_epoch = res
-            .map(|r| {
-                let epoch_as_u64 = r as u64;
-                Ok::<Epoch, StorageError>(Epoch(epoch_as_u64))
-            })
-            .transpose()?;
-
-        Ok(oldest_epoch)
-    }
-
-    fn get_last_scanned_block_id(
-        &mut self,
-        epoch: Epoch,
-        shard_group: ShardGroup,
-    ) -> Result<Option<BlockId>, StorageError> {
-        use crate::storage_sqlite::schema::scanned_block_ids;
-
-        let row: Option<ScannedBlockId> = scanned_block_ids::table
-            .filter(
-                scanned_block_ids::epoch
-                    .eq(epoch.0 as i64)
-                    .and(scanned_block_ids::shard_group.eq(shard_group.encode_as_u32() as i32)),
-            )
-            .first(self.connection())
-            .optional()
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("get_last_scanned_block_id: {}", e),
-            })?;
-
-        let block_id_option = row.map(|r| BlockId::try_from(r.last_block_id)).transpose()?;
-
-        Ok(block_id_option)
     }
 
     fn list_recent_transactions(
@@ -685,45 +637,5 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         }
 
         Ok(utxos)
-    }
-
-    fn get_tip_blocks(&mut self, epoch: Epoch) -> Result<HashMap<ShardGroup, BlockHeader>, StorageError> {
-        const OPERATION: &str = "get_tip_blocks";
-        use crate::storage_sqlite::schema::blocks;
-
-        #[derive(QueryableByName)]
-        #[diesel(table_name = blocks)]
-        struct QueryResult {
-            header: String,
-        }
-
-        let rows = sql_query(
-            r#"
-            SELECT b.header
-            FROM blocks b
-            JOIN (
-                SELECT shard_group, MAX(height) AS max_height
-                FROM blocks
-                WHERE epoch = ?
-                GROUP BY shard_group
-            ) t ON b.shard_group = t.shard_group AND b.height = t.max_height
-            WHERE b.epoch = ?"#,
-        )
-        .bind::<sql_types::BigInt, _>(epoch.as_u64() as i64)
-        .bind::<sql_types::BigInt, _>(epoch.as_u64() as i64)
-        .load_iter::<QueryResult, _>(self.connection())
-        .map_err(|e| StorageError::QueryError {
-            reason: format!("{OPERATION}: {}", e),
-        })?;
-
-        let mut tip_blocks = HashMap::new();
-        for row in rows {
-            let result = row.map_err(|e| StorageError::QueryError {
-                reason: format!("{OPERATION}: {}", e),
-            })?;
-            let header: BlockHeader = deserialize_json(&result.header)?;
-            tip_blocks.insert(header.shard_group(), header);
-        }
-        Ok(tip_blocks)
     }
 }

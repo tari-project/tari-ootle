@@ -525,8 +525,7 @@ where TSpec: WalletSdkSpec
             // Try and get the account address from the vault
             let maybe_vault_substate = substate_api.get_substate(&vault_addr).optional()?;
             let Some(vault_substate) = maybe_vault_substate else {
-                // This should be impossible.
-                error!(target: LOG_TARGET, "🏦 Vault {} is not a known substate.", vault_addr);
+                debug!(target: LOG_TARGET, "🏦 Vault {} is not known and therefore does not belong to us.", vault_addr);
                 continue;
             };
 

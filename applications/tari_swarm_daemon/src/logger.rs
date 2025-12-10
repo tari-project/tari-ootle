@@ -1,9 +1,9 @@
 //    Copyright 2024 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
-use fern::{DateBased, FormatCallback};
+use fern::FormatCallback;
 
 pub fn init_logger(log_to_file: Option<PathBuf>) -> Result<(), log::SetLoggerError> {
     fn should_skip(target: &str) -> bool {
@@ -75,7 +75,15 @@ pub fn init_logger(log_to_file: Option<PathBuf>) -> Result<(), log::SetLoggerErr
         .level(log::LevelFilter::Debug)
         .chain(std::io::stdout());
     if let Some(log) = log_to_file {
-        logger = logger.chain(DateBased::new(log, "swarm-%Y-%m-%d.log"));
+        logger = logger.chain(
+            fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                // Files get massive, so we truncate on each start
+                .truncate(true)
+                .open(log.join("swarm.log"))
+                .expect("Failed to open log file"),
+        );
     }
     logger.apply()
 }

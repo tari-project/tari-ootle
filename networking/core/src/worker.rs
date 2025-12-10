@@ -554,7 +554,7 @@ where
                 }
             },
             e => {
-                debug!(target: LOG_TARGET, "🌎️ Swarm event: {:?}", e);
+                trace!(target: LOG_TARGET, "🌎️ Swarm event: {:?}", e);
             },
         }
 
@@ -583,7 +583,11 @@ where
                     {
                         c.ping_latency = Some(*t);
                     }
-                    debug!(target: LOG_TARGET, "🏓 Ping: peer={}, connection={}, t={:.2?}", peer, connection, t);
+                    if self.config.high_ping_warning_threshold.is_some_and(|th| th < *t) {
+                        warn!(target: LOG_TARGET, "🏓 Slow ping: peer={}, connection={}, t={:.2?}", peer, connection, t);
+                    } else {
+                        trace!(target: LOG_TARGET, "🏓 Ping: peer={}, connection={}, t={:.2?}", peer, connection, t);
+                    }
                 },
                 Err(err) => {
                     warn!(target: LOG_TARGET, "🏓 Ping failed: peer={}, connection={}, error={}", peer, connection, err);

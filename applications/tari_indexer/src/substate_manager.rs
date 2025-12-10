@@ -20,25 +20,18 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashMap, convert::TryInto};
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
-use tari_consensus::hotstuff::substate_store::SubstateStoreError;
 use tari_engine_types::{
     substate::{Substate, SubstateId, SubstateValue},
     Utxo,
 };
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate};
-use tari_indexer_lib::substate_scanner::SubstateScanner;
-use tari_ootle_common_types::{
-    shard::Shard,
-    substate_type::SubstateType,
-    Epoch,
-    PeerAddress,
-    StateVersion,
-    VersionedSubstateIdRef,
-};
+use tari_indexer_lib::{cached_substate_manager::CachedSubstateManager, error::IndexerError};
+use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, PeerAddress, StateVersion};
+use tari_ootle_storage::StorageError;
 use tari_ootle_wallet_sdk::models::UtxoStateUpdateSet;
 use tari_template_lib::{
     models::{ResourceAddress, UtxoId},
@@ -50,29 +43,28 @@ use tari_template_lib::{
 use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClientFactory};
 
 use crate::{
-    network_state_sync::SyncProgress,
-    storage_sqlite::{models::Key, SqliteIndexerStore},
+    storage_sqlite::SqliteIndexerStore,
     store::{IndexerStoreReadTransaction, IndexerStoreReader},
     substate_file_cache::SubstateFileCache,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SubstateResponse {
-    pub address: SubstateId,
+    pub id: SubstateId,
     pub version: u32,
     pub substate: SubstateValue,
 }
 
 #[derive(Debug, Clone)]
 pub struct SubstateManager {
-    substate_scanner:
-        SubstateScanner<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SubstateFileCache>,
+    cached_substate:
+        CachedSubstateManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SubstateFileCache>,
     substate_store: SqliteIndexerStore,
 }
 
 impl SubstateManager {
     pub fn new(
-        substate_scanner: SubstateScanner<
+        cached_substate: CachedSubstateManager<
             EpochManagerHandle<PeerAddress>,
             TariValidatorNodeRpcClientFactory,
             SubstateFileCache,
@@ -80,28 +72,22 @@ impl SubstateManager {
         substate_store: SqliteIndexerStore,
     ) -> Self {
         Self {
-            substate_scanner,
+            cached_substate,
             substate_store,
         }
     }
 
-    pub fn get_sync_progress(&self) -> Result<SyncProgress, SubstateStoreError> {
-        let progress = self
-            .substate_store
-            .with_read_tx(|tx| tx.key_value_get_value(Key::SyncProgress))?;
-        Ok(progress)
-    }
-
     pub fn get_stored_substates_by_filters(
         &self,
+        by_id: Option<&SubstateId>,
         filter_by_type: Option<SubstateType>,
         filter_by_template: Option<TemplateAddress>,
         limit: Option<u64>,
         offset: Option<u64>,
-    ) -> Result<Vec<ListSubstateItem>, anyhow::Error> {
+    ) -> Result<Vec<ListSubstateItem>, SubstateManagerError> {
         let substates = self
             .substate_store
-            .with_read_tx(|tx| tx.list_substates(filter_by_type, filter_by_template, limit, offset))?;
+            .with_read_tx(|tx| tx.list_substates(by_id, filter_by_type, filter_by_template, limit, offset))?;
         Ok(substates)
     }
 
@@ -113,7 +99,7 @@ impl SubstateManager {
         from_state_version: StateVersion,
         unspent_only: bool,
         limit: u32,
-    ) -> Result<UtxoStateUpdateSet, anyhow::Error> {
+    ) -> Result<UtxoStateUpdateSet, SubstateManagerError> {
         let updates = self.substate_store.with_read_tx(|tx| {
             tx.utxos_get_updates(
                 resource_address,
@@ -131,7 +117,7 @@ impl SubstateManager {
         &self,
         resource_address: &ResourceAddress,
         shard: Shard,
-    ) -> Result<StateVersion, anyhow::Error> {
+    ) -> Result<StateVersion, SubstateManagerError> {
         let max_version = self
             .substate_store
             .with_read_tx(|tx| tx.utxos_get_max_state_version(*resource_address, shard))?;
@@ -142,7 +128,7 @@ impl SubstateManager {
         &self,
         resource_address: &ResourceAddress,
         public_nonce_and_tag: &[(UtxoTag, RistrettoPublicKeyBytes)],
-    ) -> Result<Vec<(UtxoId, Utxo)>, anyhow::Error> {
+    ) -> Result<Vec<(UtxoId, Utxo)>, SubstateManagerError> {
         let utxos = self
             .substate_store
             .with_read_tx(|tx| tx.utxos_get_unspent_by_public_nonce_and_tag(resource_address, public_nonce_and_tag))?;
@@ -154,7 +140,7 @@ impl SubstateManager {
         resource_address: &ResourceAddress,
         from_id: Option<UtxoId>,
         limit: u32,
-    ) -> Result<Vec<(UtxoId, Utxo)>, anyhow::Error> {
+    ) -> Result<Vec<(UtxoId, Utxo)>, SubstateManagerError> {
         let utxos = self
             .substate_store
             .with_read_tx(|tx| tx.utxos_list(resource_address, from_id, limit))?;
@@ -165,20 +151,17 @@ impl SubstateManager {
         &self,
         substate_id: &SubstateId,
         version: Option<u32>,
-    ) -> Result<Option<SubstateResponse>, anyhow::Error> {
-        // we store the latest version of the substates related to the events
-        // so we will return the substate directly from database if it's there
+    ) -> Result<Option<SubstateResponse>, SubstateManagerError> {
         if let Some(version) = version {
-            if let Some(substate) = self.get_substate_from_db(substate_id, Some(version)).await? {
+            if let Some(substate) = self.get_substate_from_db(substate_id, Some(version))? {
                 return Ok(Some(substate));
             }
         }
 
-        // the substate is not in db (or is not the requested version) so we fetch it from the dan layer committee
-        let substate_result = self.substate_scanner.get_substate(substate_id, version).await?;
+        let substate_result = self.cached_substate.get_substate(substate_id, version).await?;
         match substate_result {
-            SubstateResult::Up { id, substate } => Ok(Some(SubstateResponse {
-                address: id,
+            SubstateResult::Up { substate } => Ok(Some(SubstateResponse {
+                id: substate_id.clone(),
                 version: substate.version(),
                 substate: substate.into_substate_value(),
             })),
@@ -186,22 +169,40 @@ impl SubstateManager {
         }
     }
 
-    pub fn get_cached_substates(
+    pub async fn get_cached_substates(
         &self,
         substates: &[SubstateId],
-    ) -> Result<HashMap<SubstateId, Substate>, anyhow::Error> {
-        let substates = self.substate_store.with_read_tx(|tx| tx.get_substates(substates))?;
-        Ok(substates
-            .into_iter()
-            .map(|rec| (rec.address, Substate::new(rec.version, rec.substate)))
-            .collect())
+    ) -> Result<HashMap<SubstateId, Substate>, SubstateManagerError> {
+        let mut substate_set = substates.iter().collect::<HashSet<_>>();
+
+        let mut substates = self.substate_store.with_read_tx(|tx| tx.get_substates(substates))?;
+
+        for k in substates.keys() {
+            substate_set.remove(k);
+        }
+
+        let cached = self
+            .cached_substate
+            .get_cached_substates(substate_set.into_iter())
+            .await?;
+        for (id, substate) in cached {
+            let Some(substate) = substate else {
+                continue;
+            };
+            let Some(substate) = substate.substate_result.into_up() else {
+                continue;
+            };
+            substates.insert(id.clone(), substate);
+        }
+
+        Ok(substates)
     }
 
-    async fn get_substate_from_db(
+    fn get_substate_from_db(
         &self,
         substate_address: &SubstateId,
         version: Option<u32>,
-    ) -> Result<Option<SubstateResponse>, anyhow::Error> {
+    ) -> Result<Option<SubstateResponse>, SubstateManagerError> {
         let mut tx = self.substate_store.create_read_tx()?;
         if let Some(row) = tx.get_substate(substate_address, version)? {
             // the substate is present in db and the version matches the requested version
@@ -213,38 +214,22 @@ impl SubstateManager {
         Ok(None)
     }
 
-    pub async fn get_specific_substate(
-        &self,
-        versioned_id: VersionedSubstateIdRef<'_>,
-    ) -> Result<SubstateResult, anyhow::Error> {
-        let substate_result = self
-            .substate_scanner
-            .get_specific_substate_from_committee(versioned_id.into())
-            .await?;
-        Ok(substate_result)
-    }
-
     pub fn get_non_fungibles_by_resource_address(
         &self,
         address: ResourceAddress,
         limit: usize,
         offset: usize,
-    ) -> Result<Vec<NonFungibleSubstate>, anyhow::Error> {
+    ) -> Result<Vec<NonFungibleSubstate>, SubstateManagerError> {
         let mut tx = self.substate_store.create_read_tx()?;
         let nfts = tx.get_non_fungibles_by_resource_address(address, limit, offset)?;
         Ok(nfts)
     }
+}
 
-    pub async fn get_non_fungible_count(&self, substate_id: &SubstateId) -> Result<u64, anyhow::Error> {
-        if !substate_id.is_resource() {
-            return Err(anyhow::anyhow!(
-                "get_non_fungible_count must be called with resource address, got {substate_id}"
-            ));
-        }
-
-        let address_str = substate_id.to_address_string();
-        let mut tx = self.substate_store.create_read_tx()?;
-        let count = tx.get_non_fungible_count(address_str)?;
-        Ok(count as u64)
-    }
+#[derive(thiserror::Error, Debug)]
+pub enum SubstateManagerError {
+    #[error("Indexer error: {0}")]
+    IndexerError(#[from] IndexerError),
+    #[error("Storage error: {0}")]
+    StorageError(#[from] StorageError),
 }

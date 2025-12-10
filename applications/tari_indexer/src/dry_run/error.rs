@@ -21,38 +21,25 @@
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tari_engine::state_store::StateStoreError;
-use tari_engine_types::substate::SubstateId;
 use tari_epoch_manager::EpochManagerError;
 use tari_indexer_lib::error::IndexerError;
 use tari_ootle_app_utilities::transaction_executor::TransactionProcessorError;
-use tari_ootle_common_types::{optional::IsNotFoundError, Epoch, SubstateRequirement};
+use tari_ootle_common_types::{optional::IsNotFoundError, SubstateRequirement};
 use tari_rpc_framework::RpcStatus;
 use thiserror::Error;
 
-use crate::template_manager::TemplateManagerError;
+use crate::{substate_manager::SubstateManagerError, template_manager::TemplateManagerError};
 
 #[derive(Error, Debug)]
 pub enum DryRunTransactionProcessorError {
-    #[error("Substate {id} v{version} is DOWN")]
-    SubstateDowned { id: SubstateId, version: u32 },
+    #[error("Substate {requirement} not found")]
+    SubstateNotFound { requirement: SubstateRequirement },
     #[error("EpochManager error: {0}")]
     EpochManager(#[from] EpochManagerError),
     #[error("Rpc error: {0}")]
     RpcRequestFailed(#[from] RpcStatus),
     #[error("TransactionProcessor error: {0}")]
     PayloadProcessor(#[from] TransactionProcessorError),
-    #[error(
-        "All validators for epoch {epoch} substate {substate_requirement} failed to return substate. does_not_exist: \
-         {nexist_count}/{max_failures}, errored: {err_count}/{max_failures} (committee_size: {committee_size})"
-    )]
-    AllValidatorsFailedToReturnSubstate {
-        substate_requirement: SubstateRequirement,
-        epoch: Epoch,
-        nexist_count: usize,
-        err_count: usize,
-        max_failures: usize,
-        committee_size: usize,
-    },
     #[error("Indexer error : {0}")]
     IndexerError(#[from] IndexerError),
     #[error("StateStore error: {0}")]
@@ -65,6 +52,8 @@ pub enum DryRunTransactionProcessorError {
     InvariantViolation { details: String },
     #[error("TemplateManager error: {0}")]
     TemplateManagerError(#[from] TemplateManagerError),
+    #[error("SubstateManager error: {0}")]
+    SubstateManagerError(#[from] SubstateManagerError),
 }
 
 impl IsNotFoundError for DryRunTransactionProcessorError {

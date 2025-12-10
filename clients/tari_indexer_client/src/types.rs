@@ -38,6 +38,8 @@ use tari_transaction::{Transaction, TransactionId};
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "tari-indexer-client/"))]
 pub struct ListSubstatesRequest {
+    #[serde(default)]
+    pub by_id: Option<SubstateId>,
     pub filter_by_template: Option<TemplateAddress>,
     pub filter_by_type: Option<SubstateType>,
     pub limit: Option<u64>,

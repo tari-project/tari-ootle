@@ -281,13 +281,13 @@ pub enum RuntimeError {
 impl RuntimeError {
     pub fn to_reject_reason(&self) -> RejectReason {
         match self {
-            Self::SubstateNotFound { id } => RejectReason::OneOrMoreSubstatesNotFound(format!("{id} not found",)),
-            Self::RootSubstateNotFound { id } => RejectReason::OneOrMoreSubstatesNotFound(format!(
-                "Template referenced root substate but it was not found: {id}"
-            )),
-            Self::ReferencedSubstateNotFound { id } => RejectReason::OneOrMoreSubstatesNotFound(format!(
-                "Template referenced substate but it was not found: {id}"
-            )),
+            Self::SubstateNotFound { id } => RejectReason::SubstateNotFound(format!("{id} not found",)),
+            Self::RootSubstateNotFound { id } => {
+                RejectReason::SubstateNotFound(format!("Template referenced root substate but it was not found: {id}"))
+            },
+            Self::ReferencedSubstateNotFound { id } => {
+                RejectReason::SubstateNotFound(format!("Template referenced substate but it was not found: {id}"))
+            },
             Self::InsufficientFeesPaid {
                 fees_paid,
                 required_fee,

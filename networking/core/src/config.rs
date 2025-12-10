@@ -17,6 +17,7 @@ pub struct Config {
     /// This MUST be less than 255 characters.
     pub rendezvous_namespace: String,
     pub rendezvous_peer_limit: Option<u64>,
+    pub high_ping_warning_threshold: Option<Duration>,
 }
 
 impl Default for Config {
@@ -33,6 +34,7 @@ impl Default for Config {
             known_local_public_address: vec![],
             rendezvous_namespace: "tari".to_string(),
             rendezvous_peer_limit: Some(1000),
+            high_ping_warning_threshold: Some(Duration::from_secs(2)),
         }
     }
 }

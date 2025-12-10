@@ -111,10 +111,8 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             ResolvedTransactionInputs::OneOrMoreLocalInputsNotFound { is_local_only, err } => {
                 // Currently, this message will differ depending on which involved shard is asked.
                 // e.g. local nodes will say "failed to lock inputs", foreign nodes will say "foreign shard abort"
-                let execution = TransactionExecution::abort(
-                    &transaction_id,
-                    RejectReason::OneOrMoreSubstatesNotFound(err.to_string()),
-                );
+                let execution =
+                    TransactionExecution::abort(&transaction_id, RejectReason::SubstateNotFound(err.to_string()));
                 if is_local_only {
                     warn!(target: LOG_TARGET, "⚠️ PREPARE: OneOrMoreInputsNotFound transaction {} local ABORT", transaction_id);
                     Ok(PreparedTransaction::new_local_early_abort(execution))

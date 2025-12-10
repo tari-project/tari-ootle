@@ -1636,35 +1636,43 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let mut updates = Vec::with_capacity(data.transitions.len());
         let all_hashes = value_filter.include_filtered_hashes();
+        let up_only = value_filter.is_up_only();
         // multi_get returns the substates in the same order as queried, so ordered by transitions
         for (rec, substate) in data.transitions.iter().zip(substates) {
             let update = match rec.transition {
-                StateTransitionType::Up => value_filter
-                    .contains_substate(&substate.substate_id)
-                    // filter includes substate, return full value if available, otherwise return hash
+                StateTransitionType::Up => {
+                    let exclude = up_only && substate.substate_value.is_none();
+                    value_filter
+                        .contains_substate(&substate.substate_id)
+                        // filter includes substate, return full value if available, otherwise return hash
+                        .then(|| {
+                            substate
+                                .substate_value
+                                .map(|v| SubstateValueOrHash::Value(Box::new(v)))
+                                .unwrap_or_else(|| SubstateValueOrHash::Hash(substate.state_hash))
+                        })
+                        // Otherwise if the client still wants all hashes for filtered out substates
+                        .or_else(|| all_hashes.then_some(SubstateValueOrHash::Hash(substate.state_hash)))
+                        .map(|value| {
+                            SubstateUpdateProof::Create(SubstateCreate {
+                                substate: SubstateData {
+                                    substate_id: substate.substate_id,
+                                    version: substate.version,
+                                    value,
+                                },
+                            })
+                        }).filter(|_| !exclude)
+                },
+                StateTransitionType::Down => (!up_only)
                     .then(|| {
-                        substate
-                            .substate_value
-                            .map(|v| SubstateValueOrHash::Value(Box::new(v)))
-                            .unwrap_or_else(|| SubstateValueOrHash::Hash(substate.state_hash))
-                    })
-                    // Otherwise if the client still wants all hashes for filtered out substates
-                    .or_else(|| all_hashes.then_some(SubstateValueOrHash::Hash(substate.state_hash)))
-                    .map(|value| {
-                        SubstateUpdateProof::Create(SubstateCreate {
-                            substate: SubstateData {
+                        value_filter.contains_substate(&substate.substate_id).then(|| {
+                            SubstateUpdateProof::Destroy(SubstateDestroy {
                                 substate_id: substate.substate_id,
                                 version: substate.version,
-                                value,
-                            },
+                            })
                         })
-                    }),
-                StateTransitionType::Down => value_filter.contains_substate(&substate.substate_id).then(|| {
-                    SubstateUpdateProof::Destroy(SubstateDestroy {
-                        substate_id: substate.substate_id,
-                        version: substate.version,
                     })
-                }),
+                    .flatten(),
             };
 
             if let Some(update) = update {

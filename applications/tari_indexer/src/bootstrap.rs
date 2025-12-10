@@ -39,7 +39,7 @@ use tari_epoch_oracles::{
     store::EpochOracleStore,
     EpochOracle,
 };
-use tari_indexer_lib::substate_scanner::SubstateScanner;
+use tari_indexer_lib::cached_substate_manager::CachedSubstateManager;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_ootle_app_utilities::{
     claim_burn_proof_verifier::TariClaimBurnProofVerifier,
@@ -107,8 +107,7 @@ pub async fn spawn_services(
         })
         .collect();
 
-    #[allow(unused_mut)]
-    let mut network_builder = tari_networking::Builder::<TariMessagingSpec>::new(identity)
+    let network_builder = tari_networking::Builder::<TariMessagingSpec>::new(identity)
         .with_messaging_mode(MessagingMode::Disabled)
         .with_config(tari_networking::Config {
             // TODO: configurable
@@ -156,9 +155,8 @@ pub async fn spawn_services(
             }
         });
     #[cfg(feature = "metrics")]
-    {
-        network_builder = network_builder.with_metrics_registry(metrics_registry);
-    }
+    let network_builder = network_builder.with_metrics(metrics_registry);
+
     let (networking, _) = network_builder.spawn(shutdown.clone())?;
 
     // Connect to substate db
@@ -220,11 +218,14 @@ pub async fn spawn_services(
     let substate_cache_dir = config.to_data_dir().join("substate_cache");
     let substate_cache = SubstateFileCache::new(substate_cache_dir).context("Failed to create substate cache")?;
 
-    let substate_scanner = SubstateScanner::new(
+    let substate_scanner = CachedSubstateManager::new(
         epoch_manager.clone(),
         validator_node_client_factory.clone(),
         substate_cache,
     );
+
+    #[cfg(feature = "metrics")]
+    let substate_scanner = substate_scanner.with_metrics(metrics_registry);
 
     let substate_manager = SubstateManager::new(substate_scanner, store.clone());
     let transaction_manager = TransactionManager::new(network_client.clone(), store.clone());
@@ -234,8 +235,8 @@ pub async fn spawn_services(
     let dry_run_transaction_processor = DryRunTransactionProcessor::new(
         fee_table.clone(),
         epoch_manager.clone(),
-        validator_node_client_factory.clone(),
         template_manager.clone(),
+        substate_manager.clone(),
         TariClaimBurnProofVerifier::new(config.network, global_db.clone()),
     );
 
@@ -246,7 +247,7 @@ pub async fn spawn_services(
         keypair,
         networking,
         epoch_manager,
-        validator_node_client_factory,
+        _validator_node_client_factory: validator_node_client_factory,
         store,
         global_db,
         template_manager,
@@ -261,7 +262,7 @@ pub struct Services {
     pub keypair: RistrettoKeypair,
     pub networking: NetworkingHandle<TariMessagingSpec>,
     pub epoch_manager: EpochManagerHandle<PeerAddress>,
-    pub validator_node_client_factory: TariValidatorNodeRpcClientFactory,
+    pub _validator_node_client_factory: TariValidatorNodeRpcClientFactory,
     pub store: SqliteIndexerStore,
     pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     pub template_manager: TemplateManager<PeerAddress>,

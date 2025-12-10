@@ -51,7 +51,6 @@ mod transaction_manager;
 use std::{convert::Infallible, fs, future, future::Future};
 
 use log::*;
-use network_state_sync::BlockScanner;
 use serde::Serialize;
 use tari_common::exit_codes::{ExitCode, ExitError};
 use tari_consensus::consensus_constants::ConsensusConstants;
@@ -68,14 +67,13 @@ use tari_ootle_common_types::{layer_one_transaction::LayerOneTransactionDef, Pee
 use tari_ootle_storage::global::{DbFactory, GlobalDb};
 use tari_ootle_storage_sqlite::{global::SqliteGlobalDbAdapter, SqliteDbFactory};
 use tari_shutdown::ShutdownSignal;
-use tokio::{task, time};
+use tokio::task;
 
 use crate::{
     bootstrap::{spawn_services, Services},
     config::ApplicationConfig,
     event_manager::EventManager,
     graphql::server::run_graphql,
-    store::{IndexerStore, IndexerStoreWriteTransaction},
 };
 
 const LOG_TARGET: &str = "tari::indexer::app";
@@ -171,35 +169,18 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
     #[cfg(not(feature = "web_ui"))]
     info!(target: LOG_TARGET, "🕸️ Web UI not enabled. Compile with --features web_ui to enable it.");
 
-    // Run the event scanner
-    let event_scanner = BlockScanner::new(
-        services.epoch_manager.clone(),
-        services.validator_node_client_factory.clone(),
-        services.store.clone(),
-    );
-
     // Create pid to allow watchers to know that the process has started
     fs::write(config.common.base_path.join("pid"), std::process::id().to_string())
         .map_err(|e| ExitError::new(ExitCode::IOError, e))?;
 
-    let mut scanning_interval = time::interval(config.indexer.block_scanning_interval);
+    // let mut scanning_interval = time::interval(config.indexer.block_scanning_interval);
     // Skip - because we assume that the reason we missed it is because of scanning
-    scanning_interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+    // scanning_interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
 
     let mut epoch_manager_events = services.epoch_manager.subscribe();
 
     loop {
         tokio::select! {
-            // keep scanning the dan layer for new events
-            _ = scanning_interval.tick() => {
-                // TODO: shutdown while scanning
-                match event_scanner.scan().await {
-                    Ok(0) => {},
-                    Ok(cnt) => info!(target: LOG_TARGET, "Scanned {} block(s) successfully", cnt),
-                    Err(e) =>  error!(target: LOG_TARGET, "Event auto-scan failed: {}", e),
-                };
-            },
-
             Ok(event) = epoch_manager_events.recv() => {
                 if let Err(err) = handle_epoch_manager_event(&services, event).await {
                     error!(target: LOG_TARGET, "Error handling epoch manager event: {}", err);
@@ -225,12 +206,6 @@ async fn handle_epoch_manager_event(services: &Services, event: EpochManagerEven
         .networking
         .set_want_peers(all_vns.into_iter().map(|vn| vn.address.as_peer_id()))
         .await?;
-
-    if let Some(two_epoch_ago) = epoch.checked_sub(2u64) {
-        services
-            .store
-            .with_write_tx(|tx| tx.delete_blocks_by_epoch(two_epoch_ago))?;
-    }
 
     Ok(())
 }

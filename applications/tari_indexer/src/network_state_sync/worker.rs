@@ -360,6 +360,15 @@ impl NetworkWideStateSync {
             .map(|(v, e)| (v.as_u64(), *e))
             .unwrap_or_else(|| (0, Epoch::zero()));
         let from_version = prev_version + 1;
+        let mut value_filters = SubstateValueFilterFlags::UTXO |
+            SubstateValueFilterFlags::VALIDATOR_FEE_POOL |
+            SubstateValueFilterFlags::CLAIMED_OUTPUT_TOMBSTONE |
+            SubstateValueFilterFlags::TRANSACTION_RECEIPT;
+
+        if prev_version == 0 {
+            // If we are syncing from scratch, only get up states to reduce initial sync size
+            value_filters |= SubstateValueFilterFlags::UP_ONLY;
+        }
 
         let mut stream = session
             .sync_state(rpc::SyncStateRequest {
@@ -367,11 +376,7 @@ impl NetworkWideStateSync {
                 shard: shard.as_u32(),
                 // Sync to latest epoch
                 until_epoch: None,
-                value_filters: (SubstateValueFilterFlags::UTXO |
-                    SubstateValueFilterFlags::VALIDATOR_FEE_POOL |
-                    SubstateValueFilterFlags::CLAIMED_OUTPUT_TOMBSTONE |
-                    SubstateValueFilterFlags::TRANSACTION_RECEIPT)
-                    .bits(),
+                value_filters: value_filters.bits(),
             })
             .await?;
 
@@ -379,7 +384,7 @@ impl NetworkWideStateSync {
         let mut xtr_claimed = Amount::zero();
         while let Some(result) = stream.next().await {
             if is_first_iter {
-                // Avoid log spam, only log if we actually get something from the stream
+                // Avoid log spam, only log once per stream
                 debug!(target: LOG_TARGET, "🌍️ Established stream for {shard} in shard group {shard_group} from peer {} (last sync: {prev_epoch} {prev_version})", session.peer_address());
                 is_first_iter = false;
             }
@@ -426,14 +431,12 @@ impl NetworkWideStateSync {
                 tx.batch_insert_substate_transitions(shard, state_version, update_buf.drain(..))?;
                 debug!(target: LOG_TARGET, "✅ Committing {} UTXOs for shard {shard} (epoch: {msg_epoch})", utxos_buf.len());
                 tx.batch_insert_utxo_updates(msg_epoch, utxos_buf.drain(..))?;
-                // TODO: there are many ways to do this. This is probably not the best way. But this allows wallet to query for validator fee pool values since
-                // block sync does not sync validator fee pools (due to block diffs being removed on block commit).
+                // TODO: there are many ways to do this. This is probably not the best way. This allows wallet to query for validator fee pool values.
                 for substate_data in validator_fee_pools_buf.drain(..) {
                     tx.upsert_substate(&substate_data)?;
                 }
-                // TODO: transaction events and templates
                 debug!(target: LOG_TARGET, "✅ Committing {} transactions for shard {shard} (epoch: {msg_epoch})", transactions_buf.len());
-                self.stats.increase_events(transactions_buf.len());
+                self.stats.increase_events(transactions_buf.iter().map(|(_, t)| t.events.len()).sum());
                 self.persist_transaction_receipts(tx, transactions_buf.drain(..))?;
 
                 // All done - write the sync progress

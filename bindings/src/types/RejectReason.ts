@@ -3,7 +3,7 @@ import type { AbortReason } from "./AbortReason";
 
 export type RejectReason =
   | { ExecutionFailure: string }
-  | { OneOrMoreSubstatesNotFound: string }
+  | { SubstateNotFound: string }
   | { FailedToLockInputs: string }
   | { FailedToLockOutputs: string }
   | "ForeignPledgeInputConflict"

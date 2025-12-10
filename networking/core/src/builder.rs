@@ -72,7 +72,7 @@ where
     }
 
     #[cfg(feature = "metrics")]
-    pub fn with_metrics_registry(mut self, registry: &'a mut libp2p::metrics::Registry) -> Self {
+    pub fn with_metrics(mut self, registry: &'a mut libp2p::metrics::Registry) -> Self {
         self.registry = Some(registry);
         self
     }

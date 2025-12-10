@@ -29,7 +29,6 @@ pub async fn get_resource(
             "Indexer is still syncing. Please try again later.",
         ));
     }
-    let current_epoch = context.epoch_manager().get_current_epoch();
 
     let is_xtr = resource_address == XTR;
 
@@ -51,7 +50,7 @@ pub async fn get_resource(
         // XTR total supply is handled differently.
         let amount = context
             .read_only_store()
-            .get_xtr_total_supply(current_epoch)
+            .get_xtr_total_supply()
             .map_err(ErrorResponse::anyhow)?;
         Some(amount)
     } else {

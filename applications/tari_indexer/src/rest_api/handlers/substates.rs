@@ -38,6 +38,7 @@ pub async fn list_substates(
     Query(req): Query<ListSubstatesRequest>,
 ) -> HandlerResult<Response> {
     let ListSubstatesRequest {
+        by_id,
         filter_by_template,
         filter_by_type,
         limit,
@@ -46,7 +47,7 @@ pub async fn list_substates(
 
     let substates = context
         .substate_manager()
-        .get_stored_substates_by_filters(filter_by_type, filter_by_template, limit, offset)
+        .get_stored_substates_by_filters(by_id.as_ref(), filter_by_type, filter_by_template, limit, offset)
         .map_err(|e| ErrorResponse::anyhow(anyhow!("Error getting substate: {}", e)))?;
 
     Ok(context.apply_cache_control(Json(ListSubstatesResponse { substates }), 100))
@@ -139,6 +140,7 @@ pub async fn fetch_substates(
     let substates = context
         .substate_manager()
         .get_cached_substates(requests.as_slice())
+        .await
         .map_err(|e| ErrorResponse::internal_error(format!("Error getting substate: {}", e)))?;
 
     Ok(Json(GetSubstatesResponse { substates }))

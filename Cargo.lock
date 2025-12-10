@@ -11150,6 +11150,7 @@ name = "tari_indexer_lib"
 version = "0.16.0"
 dependencies = [
  "log",
+ "prometheus-client",
  "serde",
  "tari_engine_types",
  "tari_epoch_manager",

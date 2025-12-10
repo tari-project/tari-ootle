@@ -61,7 +61,6 @@ members = [
     "networking/sqlite_message_logger",
     "utilities/tariswap_test_bench",
     "utilities/transaction_submitter",
-    "utilities/transaction_submitter",
     "utilities/generate_ristretto_value_lookup",
     "utilities/db_inspector",
     "utilities/traffic-sim",

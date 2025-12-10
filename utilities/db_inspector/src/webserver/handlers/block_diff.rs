@@ -35,16 +35,16 @@ pub async fn list(
     let tx = db.read_only_context();
 
     let cf = tx.cf(cfs::block_diff::BlockDiffCf)?;
-    let ordering = if req.asc {
-        Ordering::Ascending
-    } else {
+    let ordering = if req.desc {
         Ordering::Descending
+    } else {
+        Ordering::Ascending
     };
     type Key = <cfs::block_diff::BlockDiffCf as Cf>::Key;
     type Value = <cfs::block_diff::BlockDiffCf as Cf>::Value;
     let iter: Box<dyn Iterator<Item = Result<(Key, Value), RocksDbStorageError>>> =
         if let Some(prefix_hex) = req.query.as_ref() {
-            let key_prefix = decode_hex_prefix(prefix_hex)?;
+            let key_prefix = decode_hex_prefix::<cfs::block_diff::BlockDiffCf>(prefix_hex)?;
             Box::new(cf.prefix_range_iterator_raw_key(ordering, key_prefix))
         } else {
             Box::new(cf.iterator(ordering, OPERATION))

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 import { useListTemplatesAuthored } from "@api/hooks/useTemplatesAuthored";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useAccountsList } from "@api/hooks/useAccounts";
 import PageHeading from "@components/PageHeading";
 import {
@@ -73,14 +73,15 @@ function Templates() {
   const [open, setOpen] = useState<boolean[]>([]);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const theme = useTheme();
-  const address = decodeOotleAddress(account?.address || accountStore.address);
+  const a = account?.address || accountStore.address;
+  const address = a ? decodeOotleAddress(a) : null;
   const {
     data: templatesResponse,
     isLoading,
     isError,
     error,
   } = useListTemplatesAuthored({
-    author_public_key: address.accountPublicKey,
+    author_public_key: address?.accountPublicKey || "",
     page: page,
     page_size: rowsPerPage,
   });
@@ -156,10 +157,10 @@ function Templates() {
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {templatesResponse?.templates.map((template: AuthoredTemplate, index: number) => {
+                      {templatesResponse?.templates.map((template: AuthoredTemplate, i: number) => {
                         return (
-                          <>
-                            <TableRow key={`template-${index}-1`}>
+                          <Fragment key={i}>
+                            <TableRow>
                               <DataTableCell>
                                 <CopyAddress address={`template_${template.address}`} />
                               </DataTableCell>
@@ -171,17 +172,17 @@ function Templates() {
                                   size="small"
                                   onClick={() => {
                                     if (open) {
-                                      const newOpen = open.map((value, idx) => (idx === index ? !value : value));
+                                      const newOpen = open.map((value, idx) => (idx === i ? !value : value));
                                       setOpen(newOpen);
                                     }
                                   }}
                                 >
-                                  {open[index] ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+                                  {open[i] ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
                                 </AccordionIconButton>
                               </TableCell>
                             </TableRow>
-                            {open[index] ? (
-                              <TableRow key={`template-${index}-open`}>
+                            {open[i] ? (
+                              <TableRow>
                                 <DataTableCell
                                   style={{
                                     paddingBottom: theme.spacing(1),
@@ -190,7 +191,7 @@ function Templates() {
                                   }}
                                   colSpan={2}
                                 >
-                                  <Collapse in={open[index]} timeout="auto" unmountOnExit>
+                                  <Collapse in={open[i]} timeout="auto" unmountOnExit>
                                     <h3>Functions</h3>
                                     {template.functions ? (
                                       <TableContainer>
@@ -253,7 +254,7 @@ function Templates() {
                                 </DataTableCell>
                               </TableRow>
                             ) : null}
-                          </>
+                          </Fragment>
                         );
                       })}
                     </TableBody>

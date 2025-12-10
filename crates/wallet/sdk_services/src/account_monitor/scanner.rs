@@ -114,7 +114,7 @@ where TSpec: WalletSdkSpec
             if let Some(vault_version) = maybe_vault_version {
                 // The first time a vault is found, know about the vault substate from the tx result but never added
                 // it to the database.
-                if versioned_vault_substate_id.version() == vault_version && accounts_api.has_vault(vault_id)? {
+                if versioned_vault_substate_id.version() <= vault_version && accounts_api.has_vault(vault_id)? {
                     info!(target: LOG_TARGET, "Vault {} is up to date", versioned_vault_substate_id.substate_id());
                     continue;
                 }

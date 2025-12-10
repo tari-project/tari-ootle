@@ -25,6 +25,7 @@ hex = { workspace = true }
 log = { workspace = true }
 rocksdb = { workspace = true }
 serde = { workspace = true, default-features = true }
+strum_macros = { workspace = true }
 smallvec = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
 

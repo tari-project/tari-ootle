@@ -25,20 +25,25 @@ use tari_ootle_storage::consensus_models::ValidatorConsensusStats;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
-    codecs::{DefaultCodec, EpochCodec, PublicKeyCodec},
+    codecs::{DefaultCodec, EpochCodec, KeyPrefix, PublicKeyCodec},
+    column_families::cf_names,
+    prefixed,
     traits::{Cf, QueryCf},
 };
+
+prefixed!(ValidatorNodeEpochStatsPrefix, KeyPrefix::ValidatorNodeEpochStats);
 
 pub struct ValidatorNodeEpochStatsCf;
 
 impl Cf for ValidatorNodeEpochStatsCf {
     type Key = (Epoch, RistrettoPublicKeyBytes);
     type KeyCodec = (EpochCodec, PublicKeyCodec);
+    type Prefix = ValidatorNodeEpochStatsPrefix;
     type Value = ValidatorConsensusStats;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "vn_epoch_stats"
+        cf_names::CHAIN_METADATA
     }
 }
 

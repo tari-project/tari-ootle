@@ -25,7 +25,9 @@ use tari_ootle_common_types::{shard::Shard, Epoch, SubstateAddress};
 use tari_state_tree::Version;
 
 use crate::{
-    codecs::{DefaultVersionedCodec, NumberCodec, ShardCodec},
+    codecs::{DefaultVersionedCodec, KeyPrefix, NumberCodec, ShardCodec},
+    column_families::cf_names,
+    prefixed,
     traits::{Cf, QueryCf, Versioned},
 };
 
@@ -74,16 +76,19 @@ pub enum StateTransitionType {
     Down,
 }
 
+prefixed!(StateTransitionPrefix, KeyPrefix::StateTransitions);
+
 pub struct StateTransitionCf;
 
 impl Cf for StateTransitionCf {
     type Key = (Shard, Version);
     type KeyCodec = (ShardCodec, NumberCodec<Version>);
+    type Prefix = StateTransitionPrefix;
     type Value = StateTransitionModelDataV1;
     type ValueCodec = DefaultVersionedCodec<VersionedStateTransitionModelData>;
 
     fn name() -> &'static str {
-        "state_transitions"
+        cf_names::CHAIN_METADATA
     }
 }
 

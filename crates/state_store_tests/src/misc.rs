@@ -31,13 +31,9 @@ use crate::{
 };
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn miscellaneous_rocksdb() {
     let (db, _tmp) = create_rocksdb();
-    miscellaneous_operations(db);
-}
-
-#[allow(clippy::too_many_lines)]
-fn miscellaneous_operations(db: impl StateStore) {
     let mut tx = db.create_write_tx().unwrap();
 
     // last voted

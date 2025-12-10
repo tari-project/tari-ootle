@@ -48,10 +48,10 @@ pub async fn list(
     let cf = tx.cf(cfs::block::BlockCf)?;
     let query_cf = tx.cf(cfs::block::ByEpochQuery)?;
     let height_query_cf = tx.cf(cfs::block::ByEpochHeightQuery)?;
-    let ordering = if req.asc {
-        Ordering::Ascending
-    } else {
+    let ordering = if req.desc {
         Ordering::Descending
+    } else {
+        Ordering::Ascending
     };
 
     let locked_cf = tx.cf(cfs::bookkeeping::LockedBlockCf)?;
@@ -152,7 +152,7 @@ fn parse_query(query: &str) -> Result<Option<BlockQuery>, WebError> {
         }
     }
 
-    let prefix = decode_hex_prefix(query)?;
+    let prefix = decode_hex_prefix::<cfs::block::BlockCf>(query)?;
     Ok(Some(BlockQuery::ByBlockIdPrefix(prefix)))
 }
 

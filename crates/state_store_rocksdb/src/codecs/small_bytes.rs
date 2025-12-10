@@ -46,12 +46,12 @@ impl<const L: usize> SmallBytes<L> {
         [0; L]
     }
 
-    pub fn new_stack(buf: [u8; L], length: usize) -> Self {
+    pub fn from_buf_and_len(buf: [u8; L], length: usize) -> Self {
         let inner = SmallVec::from_buf_and_len(buf, length);
         Self { inner }
     }
 
-    pub fn new_heap(v: Vec<u8>) -> Self {
+    pub fn from_vec(v: Vec<u8>) -> Self {
         let inner = SmallVec::from_vec(v);
         Self { inner }
     }
@@ -103,7 +103,7 @@ impl<const L: usize> From<[u8; L]> for SmallBytes<L> {
 
 impl<const L: usize> From<Vec<u8>> for SmallBytes<L> {
     fn from(b: Vec<u8>) -> Self {
-        SmallBytes::new_heap(b)
+        SmallBytes::from_vec(b)
     }
 }
 impl<const L: usize> From<SmallBytes<L>> for Vec<u8> {

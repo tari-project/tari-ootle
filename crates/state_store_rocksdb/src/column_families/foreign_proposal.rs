@@ -26,20 +26,24 @@ use tari_ootle_common_types::Epoch;
 use tari_ootle_storage::consensus_models::ForeignProposalRecord;
 
 use crate::{
-    codecs::{BlockIdCodec, DefaultCodec, EpochCodec, UnitCodec},
+    codecs::{BlockIdCodec, DefaultCodec, EpochCodec, KeyPrefix, UnitCodec},
+    column_families::cf_names,
+    prefixed,
     traits::{Cf, QueryCf},
 };
 
+prefixed!(ForeignProposalPrefix, KeyPrefix::ForeignProposals);
 pub struct ForeignProposalCf;
 
 impl Cf for ForeignProposalCf {
     type Key = BlockId;
     type KeyCodec = BlockIdCodec;
+    type Prefix = ForeignProposalPrefix;
     type Value = ForeignProposalRecord;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "foreign_proposals"
+        cf_names::FOREIGN_PROPOSALS
     }
 }
 
@@ -49,17 +53,20 @@ pub struct ForeignProposalEpochIndexData {
     pub proposed_in_block: Option<BlockId>,
 }
 
+prefixed!(ForeignProposalEpochIndexPrefix, KeyPrefix::ForeignProposalsEpochIndex);
+
 // CF to query proposals by block epoch and status
 pub struct EpochIndex;
 
 impl Cf for EpochIndex {
     type Key = (Epoch, BlockId);
     type KeyCodec = (EpochCodec, BlockIdCodec);
+    type Prefix = ForeignProposalEpochIndexPrefix;
     type Value = ForeignProposalEpochIndexData;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "foreignproposals_epoch_idx"
+        cf_names::FOREIGN_PROPOSALS
     }
 }
 
@@ -74,6 +81,11 @@ impl QueryCf for ByEpochQuery {
     type KeyCodec = EpochCodec;
 }
 
+prefixed!(
+    ProposedInBlockIndexPrefix,
+    KeyPrefix::ForeignProposalsProposedInBlockIndex
+);
+
 /// CF to query proposals by the block_id they were proposed by
 pub struct ProposedInBlockIndex;
 
@@ -81,11 +93,12 @@ impl Cf for ProposedInBlockIndex {
     // (proposed_in_block, block_id)
     type Key = (BlockId, BlockId);
     type KeyCodec = (BlockIdCodec, BlockIdCodec);
+    type Prefix = ProposedInBlockIndexPrefix;
     type Value = ();
     type ValueCodec = UnitCodec;
 
     fn name() -> &'static str {
-        "foreignproposals_proposed_idx"
+        cf_names::FOREIGN_PROPOSALS
     }
 }
 
@@ -98,17 +111,20 @@ impl QueryCf for ByProposedInBlockIndexQuery {
     type KeyCodec = BlockIdCodec;
 }
 
+prefixed!(UnconfirmedIndexPrefix, KeyPrefix::ForeignProposalsUnconfirmedIndex);
+
 /// CF that indexes unconfirmed foreign proposals
 pub struct UnconfirmedIndex;
 
 impl Cf for UnconfirmedIndex {
     type Key = (Epoch, BlockId);
     type KeyCodec = (EpochCodec, BlockIdCodec);
+    type Prefix = UnconfirmedIndexPrefix;
     type Value = ();
     type ValueCodec = UnitCodec;
 
     fn name() -> &'static str {
-        "foreignproposals_unconfirmed_idx"
+        cf_names::FOREIGN_PROPOSALS
     }
 }
 

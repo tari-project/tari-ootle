@@ -10343,6 +10343,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "strum_macros"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.110",
+]
+
+[[package]]
 name = "stun"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11782,6 +11794,7 @@ dependencies = [
  "rocksdb",
  "serde",
  "smallvec 2.0.0-alpha.11",
+ "strum_macros 0.27.2",
  "tari_common_types",
  "tari_consensus_types",
  "tari_engine_types",

@@ -47,3 +47,15 @@ pub mod transaction;
 pub mod transaction_pool;
 pub mod transaction_pool_state_update;
 pub mod validator_node_epoch_stats;
+
+pub(crate) mod cf_names {
+    pub(crate) const CHAIN_METADATA: &str = "chain";
+    pub(crate) const CERTIFICATES: &str = "certificates";
+    pub(crate) const BLOCK: &str = "block";
+    pub(crate) const TRANSACTIONS: &str = "transactions";
+    pub(crate) const BOOKKEEPING: &str = "bookkeeping";
+    pub(crate) const FOREIGN_PROPOSALS: &str = "foreign_proposals";
+    pub(crate) const DIAGNOSTICS: &str = "diagnostics";
+    pub(crate) const SUBSTATES: &str = "substates";
+    pub(crate) const STATE_TREE: &str = "state_tree";
+}

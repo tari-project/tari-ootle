@@ -6,33 +6,41 @@ use tari_ootle_common_types::{Epoch, NodeHeight};
 use tari_ootle_storage::consensus_models::Block;
 
 use crate::{
-    codecs::{BlockIdCodec, DefaultCodec, EpochCodec, NodeHeightCodec, UnitCodec},
+    codecs::{BlockIdCodec, DefaultCodec, EpochCodec, KeyPrefix, NodeHeightCodec, UnitCodec},
+    column_families::cf_names,
+    prefixed,
     traits::{Cf, QueryCf},
 };
+
+prefixed!(BlockPrefix, KeyPrefix::Blocks);
 
 pub struct BlockCf;
 
 impl Cf for BlockCf {
     type Key = BlockId;
     type KeyCodec = BlockIdCodec;
+    type Prefix = BlockPrefix;
     type Value = Block;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "blocks"
+        cf_names::BLOCK
     }
 }
+
+prefixed!(BlockEpochHeightPrefix, KeyPrefix::BlockEpochHeightIndex);
 
 pub struct EpochHeightIndex;
 
 impl Cf for EpochHeightIndex {
     type Key = (Epoch, NodeHeight, BlockId);
     type KeyCodec = (EpochCodec, NodeHeightCodec, BlockIdCodec);
+    type Prefix = BlockEpochHeightPrefix;
     type Value = ();
     type ValueCodec = UnitCodec;
 
     fn name() -> &'static str {
-        "block_height_idx"
+        BlockCf::name()
     }
 }
 

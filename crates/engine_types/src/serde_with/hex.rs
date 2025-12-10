@@ -38,14 +38,25 @@ pub fn deserialize<'de, D, T>(d: D) -> Result<T, D::Error>
 where
     D: Deserializer<'de>,
     T: for<'a> TryFrom<&'a [u8]>,
+    for<'a> <T as TryFrom<&'a [u8]>>::Error: std::fmt::Display,
 {
     let value = if d.is_human_readable() {
         let hex = <Cow<'_, str> as Deserialize>::deserialize(d)?;
         let bytes = hex::decode(&*hex).map_err(serde::de::Error::custom)?;
-        T::try_from(&bytes).map_err(|_| serde::de::Error::custom("Failed to convert bytes to T"))?
+        T::try_from(&bytes).map_err(|e| {
+            serde::de::Error::custom(format!(
+                "Failed to convert bytes to {}: {e}",
+                std::any::type_name::<T>()
+            ))
+        })?
     } else {
         let bytes = d.deserialize_byte_buf(BytesVisitor::new())?;
-        T::try_from(bytes.as_ref()).map_err(|_| serde::de::Error::custom("Failed to convert bytes to T"))?
+        T::try_from(bytes.as_ref()).map_err(|e| {
+            serde::de::Error::custom(format!(
+                "Failed to convert bytes to {}: {e}",
+                std::any::type_name::<T>()
+            ))
+        })?
     };
 
     Ok(value)
@@ -56,14 +67,25 @@ pub fn deserialize_from_vec<'de, D, T>(d: D) -> Result<T, D::Error>
 where
     D: Deserializer<'de>,
     T: TryFrom<Vec<u8>>,
+    T::Error: std::fmt::Display,
 {
     let value = if d.is_human_readable() {
         let hex = <Cow<'_, str> as Deserialize>::deserialize(d)?;
         let bytes = hex::decode(&*hex).map_err(serde::de::Error::custom)?;
-        T::try_from(bytes).map_err(|_| serde::de::Error::custom("Failed to convert bytes to T"))?
+        T::try_from(bytes).map_err(|e| {
+            serde::de::Error::custom(format!(
+                "Failed to convert bytes to {}: {e}",
+                std::any::type_name::<T>()
+            ))
+        })?
     } else {
         let bytes = d.deserialize_byte_buf(BytesVisitor::new())?;
-        T::try_from(bytes.into()).map_err(|_| serde::de::Error::custom("Failed to convert bytes to T"))?
+        T::try_from(bytes.into()).map_err(|e| {
+            serde::de::Error::custom(format!(
+                "Failed to convert bytes to {}: {e}",
+                std::any::type_name::<T>()
+            ))
+        })?
     };
 
     Ok(value)
@@ -93,6 +115,7 @@ pub mod option {
     where
         D: Deserializer<'de>,
         T: for<'a> TryFrom<&'a [u8]>,
+        for<'a> <T as TryFrom<&'a [u8]>>::Error: std::fmt::Display,
     {
         let bytes = if d.is_human_readable() {
             let hex = <Option<String> as Deserialize>::deserialize(d)?;
@@ -108,7 +131,12 @@ pub mod option {
             .as_ref()
             .map(|b| T::try_from(b.as_slice()))
             .transpose()
-            .map_err(|_| serde::de::Error::custom("Failed to convert bytes to T"))?;
+            .map_err(|e| {
+                serde::de::Error::custom(format!(
+                    "Failed to convert bytes to {}: {e}",
+                    std::any::type_name::<T>()
+                ))
+            })?;
         Ok(value)
     }
 }

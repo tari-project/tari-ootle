@@ -505,10 +505,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn foreign_proposals_has_unconfirmed(&self, epoch: Epoch) -> Result<bool, StorageError> {
-        let exists = self
-            .db()
-            .cf(foreign_proposal::UnconfirmedIndexEpochQuery)?
-            .any_exists_within_range(..(epoch.as_u64() + 1).to_be_bytes())?;
+        let cf = self.db().cf(foreign_proposal::UnconfirmedIndexEpochQuery)?;
+        let start = cf.encode_key(&Epoch::zero());
+        let end = cf.encode_key(&(epoch + Epoch(1)));
+        let exists = cf.any_exists_within_range(start..end)?;
 
         Ok(exists)
     }
@@ -1609,7 +1609,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         const OPERATION: &str = "state_transitions_get_n_after";
 
         let query = self.db().cf(state_transition::ByShardAndStateVersionQuery)?;
-        let mut iter = query.query_range_iterator(Ordering::Ascending, (req_shard, state_version)..);
+        let mut iter = query.query_range_iterator(
+            Ordering::Ascending,
+            (req_shard, state_version)..(Shard::max(), Version::MAX),
+        );
         let substate_cf = self.db().cf(SubstateCf)?;
 
         // NOTE: The state version may not have any transitions
@@ -1749,7 +1752,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     ) -> Result<Vec<EpochCheckpoint>, StorageError> {
         // const OPERATION: &str = "epoch_checkpoint_get_all";
         let query = self.db().cf(epoch_checkpoint::ByEpochQuery)?;
-        let iter = query.query_range_iterator(Ordering::Ascending, from_epoch..);
+        let iter = query.query_range_iterator(Ordering::Ascending, from_epoch..Epoch::max());
         let epoch_checkpoints = iter
             .map(|result| result.map(|(_, checkpoint)| checkpoint))
             .take(limit)

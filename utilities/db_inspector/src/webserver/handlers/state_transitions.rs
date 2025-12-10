@@ -39,13 +39,13 @@ pub async fn list(
     let cf = tx.cf(column_families::state_transition::StateTransitionCf)?;
 
     let substate_cf = tx.cf(column_families::substate::SubstateCf)?;
-    let ordering = if req.asc {
-        Ordering::Ascending
-    } else {
+    let ordering = if req.desc {
         Ordering::Descending
+    } else {
+        Ordering::Ascending
     };
     let iter = if let Some(prefix_hex) = req.query.as_ref() {
-        let key_prefix = decode_hex_prefix(prefix_hex)?;
+        let key_prefix = decode_hex_prefix::<column_families::state_transition::StateTransitionCf>(prefix_hex)?;
         cf.range_iterator(ordering, key_prefix.as_slice()..)
     } else {
         let empty = Vec::<u8>::new();

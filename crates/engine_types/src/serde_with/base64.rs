@@ -44,5 +44,6 @@ where
         Vec::<u8>::deserialize(d)?
     };
 
-    T::try_from(bytes).map_err(|_| serde::de::Error::custom("Failed to convert bytes to T"))
+    T::try_from(bytes)
+        .map_err(|_| serde::de::Error::custom(format!("Failed to convert bytes to {}", std::any::type_name::<T>())))
 }

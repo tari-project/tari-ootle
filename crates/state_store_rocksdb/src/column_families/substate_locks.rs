@@ -30,7 +30,17 @@ use tari_ootle_storage::consensus_models::SubstateLock;
 use tari_transaction::TransactionId;
 
 use crate::{
-    codecs::{BlockIdCodec, DefaultCodec, SubstateIdCodec, SubstateLockKeyCodec, TransactionIdCodec, UnitCodec},
+    codecs::{
+        BlockIdCodec,
+        DefaultCodec,
+        KeyPrefix,
+        SubstateIdCodec,
+        SubstateLockKeyCodec,
+        TransactionIdCodec,
+        UnitCodec,
+    },
+    column_families::cf_names,
+    prefixed,
     traits::{Cf, QueryCf},
 };
 
@@ -52,29 +62,35 @@ impl Display for SubstateLockKey {
     }
 }
 
+prefixed!(SubstateLockPrefix, KeyPrefix::SubstateLocks);
+
 pub struct SubstateLockModel;
 
 impl Cf for SubstateLockModel {
     type Key = SubstateLockKey;
     type KeyCodec = SubstateLockKeyCodec<(TransactionId, SubstateId, BlockId, NodeHeight)>;
+    type Prefix = SubstateLockPrefix;
     type Value = SubstateLock;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "locks"
+        cf_names::SUBSTATES
     }
 }
+
+prefixed!(SubstateLockHeadIndexPrefix, KeyPrefix::SubstateLockHeadIndex);
 
 pub struct HeadIndex;
 
 impl Cf for HeadIndex {
     type Key = SubstateId;
     type KeyCodec = SubstateIdCodec;
+    type Prefix = SubstateLockHeadIndexPrefix;
     type Value = SubstateLockKey;
     type ValueCodec = SubstateLockKeyCodec<(TransactionId, SubstateId, BlockId, NodeHeight)>;
 
     fn name() -> &'static str {
-        "locks_head_idx"
+        cf_names::SUBSTATES
     }
 }
 
@@ -86,16 +102,19 @@ impl QueryCf for ByTransactionIdQuery {
     type KeyCodec = TransactionIdCodec;
 }
 
+prefixed!(SubstatesBlockIdIndexPrefix, KeyPrefix::SubstateLocksBlockIdIndex);
+
 pub struct BlockIdIndex;
 
 impl Cf for BlockIdIndex {
     type Key = SubstateLockKey;
     type KeyCodec = SubstateLockKeyCodec<(BlockId, SubstateId, TransactionId, NodeHeight)>;
+    type Prefix = SubstatesBlockIdIndexPrefix;
     type Value = ();
     type ValueCodec = UnitCodec;
 
     fn name() -> &'static str {
-        "locks_block_id_idx"
+        cf_names::SUBSTATES
     }
 }
 
@@ -116,16 +135,19 @@ impl<'a> QueryCf for ByBlockIdSubstateIdQuery<'a> {
     type KeyCodec = (BlockIdCodec, SubstateIdCodec);
 }
 
+prefixed!(SubstateIdIndexPrefix, KeyPrefix::SubstateLockSubstateIdIndex);
+
 pub struct SubstateIdIndex;
 
 impl Cf for SubstateIdIndex {
     type Key = SubstateLockKey;
     type KeyCodec = SubstateLockKeyCodec<(SubstateId, TransactionId, BlockId, NodeHeight)>;
+    type Prefix = ();
     type Value = SubstateLockType;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "locks_substate_id_idx"
+        cf_names::SUBSTATES
     }
 }
 

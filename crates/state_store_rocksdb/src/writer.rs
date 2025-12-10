@@ -1428,11 +1428,12 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         const OPERATION: &str = "state_tree_nodes_clear_all_stale";
         /// We buffer deletes to ensure that we delete entire subtrees at once. The number of buffered deletes may
         /// exceed this threshold when flushed, due to whole subtrees being added.
-        const DELETE_BUFFER_FLUSH_THRESHOLD: usize = 1_000_000;
+        const DELETE_BUFFER_FLUSH_THRESHOLD: usize = 100_000;
 
         let cf = self.db().cf(StateTreeCf)?;
         let versions_cf = self.db().cf(StateTreeShardVersionCf)?;
         let stale_cf = self.db().cf(state_tree::ByStateTreeStaleShardQuery)?;
+        let mut delete_buffer = Vec::with_capacity(DELETE_BUFFER_FLUSH_THRESHOLD); // ~3.3 MB for 100k entries (excl. nibble path vec)
         for shard in ShardGroup::all_shards(num_preshards).shard_iter() {
             let timer = Instant::now();
             let mut num_deleted = 0;
@@ -1442,7 +1443,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 trace!(target: LOG_TARGET, "Shard {shard} is at version {max_version}, skipping stale node deletion due to history length {}", self.options.state_history_length);
                 continue;
             };
-            let mut delete_buffer = vec![];
             for result in stale_iter {
                 let ((shard, version), nodes) = result?;
                 // Only delete up to history length back from the max version
@@ -1493,11 +1493,12 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 }
 
                 if !delete_buffer.is_empty() {
-                    debug!(target: LOG_TARGET, "Deleting final {} stale nodes from shard {}", delete_buffer.len(), shard);
+                    debug!(target: LOG_TARGET, "Deleting last {} stale nodes from shard {}", delete_buffer.len(), shard);
                     for key in &delete_buffer {
                         cf.delete(key, OPERATION)?;
                     }
                     num_deleted += delete_buffer.len();
+                    delete_buffer.clear();
                 }
 
                 // Finally delete the stale node record

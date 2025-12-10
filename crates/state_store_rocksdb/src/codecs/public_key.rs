@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::io::Read;
+use std::io::{Read, Write};
 
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
@@ -16,6 +16,18 @@ pub struct PublicKeyCodec {
 }
 
 impl DbCodec<RistrettoPublicKeyBytes> for PublicKeyCodec {
+    fn encode_len(&self, value: &RistrettoPublicKeyBytes) -> Result<usize, RocksDbStorageError> {
+        self.inner.encode_len(value)
+    }
+
+    fn encode_into<W: Write>(
+        &self,
+        value: &RistrettoPublicKeyBytes,
+        writer: &mut W,
+    ) -> Result<(), RocksDbStorageError> {
+        self.inner.encode_into(value, writer)
+    }
+
     fn encode(&self, value: &RistrettoPublicKeyBytes) -> Result<EncodeVec, RocksDbStorageError> {
         self.inner.encode(value)
     }

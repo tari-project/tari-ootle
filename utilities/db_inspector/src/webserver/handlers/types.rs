@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json as json;
+use tari_state_store_rocksdb::traits::Cf;
 
 use crate::webserver::error::WebError;
 
@@ -12,7 +13,7 @@ pub struct TableRequest {
     pub page: Option<usize>,
     pub limit: Option<usize>,
     #[serde(default)]
-    pub asc: bool,
+    pub desc: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -101,14 +102,22 @@ macro_rules! row {
     }
 }
 
-pub fn decode_hex_prefix(prefix_hex: &str) -> Result<Vec<u8>, WebError> {
+pub fn decode_hex_prefix<CF: Cf>(prefix_hex: &str) -> Result<Vec<u8>, WebError> {
+    let mut prefix = vec![0u8; prefix_hex.len().div_ceil(2) + 1];
     if prefix_hex.len().is_multiple_of(2) {
-        hex::decode(prefix_hex)
-            .map_err(|e| WebError::bad_request(format!("Failed to decode hex prefix: {}. Error: {}", prefix_hex, e)))
+        hex::decode_to_slice(prefix_hex, &mut prefix[1..])
+            .map_err(|e| WebError::bad_request(format!("Failed to decode hex prefix: {}. Error: {}", prefix_hex, e)))?;
     } else {
         let mut p = prefix_hex.to_string();
         p.push('0');
-        hex::decode(p)
-            .map_err(|e| WebError::bad_request(format!("Failed to decode hex prefix: {}. Error: {}", prefix_hex, e)))
+        hex::decode_to_slice(p, &mut prefix[1..])
+            .map_err(|e| WebError::bad_request(format!("Failed to decode hex prefix: {}. Error: {}", prefix_hex, e)))?;
     }
+
+    if let Some(p) = CF::key_prefix() {
+        prefix[0] = p;
+    } else {
+        prefix.remove(0);
+    }
+    Ok(prefix)
 }

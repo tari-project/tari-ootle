@@ -25,20 +25,25 @@ use tari_ootle_common_types::shard::Shard;
 use tari_ootle_storage::consensus_models::PendingShardStateTreeDiff;
 
 use crate::{
-    codecs::{BlockIdCodec, DefaultCodec, ShardCodec},
+    codecs::{BlockIdCodec, DefaultCodec, KeyPrefix, ShardCodec},
+    column_families::cf_names,
+    prefixed,
     traits::{Cf, QueryCf},
 };
+
+prefixed!(PendingStateTreeDiffPrefix, KeyPrefix::PendingStateTreeDiff);
 
 pub struct PendingStateTreeDiffCf;
 
 impl Cf for PendingStateTreeDiffCf {
     type Key = (BlockId, Shard);
     type KeyCodec = (BlockIdCodec, ShardCodec);
+    type Prefix = PendingStateTreeDiffPrefix;
     type Value = PendingShardStateTreeDiff;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "pending_state_tree_diff"
+        cf_names::STATE_TREE
     }
 }
 

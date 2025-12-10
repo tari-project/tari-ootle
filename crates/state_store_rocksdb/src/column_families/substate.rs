@@ -31,27 +31,33 @@ use crate::{
         DefaultVersionedCodec,
         EpochCodec,
         FixedBytesCodec,
+        KeyPrefix,
         NumberCodec,
         ShardCodec,
         SubstateIdCodec,
     },
+    column_families::cf_names,
+    prefixed,
     traits::{Cf, QueryCf},
     versioned_types::{LatestSubstateRecord, VersionedSubstateRecord},
 };
 
+prefixed!(SubstatePrefix, KeyPrefix::Substates);
 pub struct SubstateCf;
 
 impl Cf for SubstateCf {
     type Key = SubstateAddress;
     type KeyCodec = FixedBytesCodec<{ SubstateAddress::LENGTH }>;
+    type Prefix = SubstatePrefix;
     type Value = LatestSubstateRecord;
     type ValueCodec = DefaultVersionedCodec<VersionedSubstateRecord>;
 
     fn name() -> &'static str {
-        "substates"
+        cf_names::SUBSTATES
     }
 }
 
+prefixed!(SubstatesHeadIndexPrefix, KeyPrefix::SubstatesHeadIndex);
 pub struct HeadIndex;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,24 +69,31 @@ pub struct SubstateHeadData {
 impl Cf for HeadIndex {
     type Key = SubstateId;
     type KeyCodec = SubstateIdCodec;
+    type Prefix = SubstatesHeadIndexPrefix;
     type Value = SubstateHeadData;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "substate_head_idx"
+        cf_names::SUBSTATES
     }
 }
+
+prefixed!(
+    SubstatesUnprunedDownedValuesIndexPrefix,
+    KeyPrefix::SubstatesUnprunedDownedValuesIndex
+);
 
 pub struct UnprunedDownedValuesIndex;
 
 impl Cf for UnprunedDownedValuesIndex {
     type Key = (Epoch, Shard, Version);
     type KeyCodec = (EpochCodec, ShardCodec, NumberCodec<Version>);
+    type Prefix = SubstatesUnprunedDownedValuesIndexPrefix;
     type Value = Vec<SubstateAddress>;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "substates_unpruned_idx"
+        cf_names::SUBSTATES
     }
 }
 

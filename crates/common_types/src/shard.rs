@@ -30,6 +30,10 @@ impl Shard {
         Shard(0)
     }
 
+    pub const fn max() -> Shard {
+        NumPreshards::MAX_SHARD
+    }
+
     pub const fn is_global(&self) -> bool {
         self.0 == 0
     }

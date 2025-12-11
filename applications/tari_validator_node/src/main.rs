@@ -64,10 +64,12 @@ async fn main() -> anyhow::Result<()> {
 
     // Remove the pid file if it exists
     let _file = fs::remove_file(config.common.base_path.join("pid")).inspect_err(|e| {
-        warn!(
-            target: LOG_TARGET,
-            "Failed to remove existing pid file: {}", e
-        )
+        if e.kind() != std::io::ErrorKind::NotFound {
+            warn!(
+                target: LOG_TARGET,
+                "Failed to remove existing pid file: {}", e
+            );
+        }
     });
     if let Err(e) = initialize_logging(
         &cli.common.log_config_path("validator"),

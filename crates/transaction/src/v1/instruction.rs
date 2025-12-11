@@ -11,6 +11,7 @@ use tari_engine_types::{
     serde_with,
     ValidatorFeePoolAddress,
 };
+use tari_ootle_common_types::displayable::Displayable;
 use tari_template_lib::{
     args::LogLevel,
     auth::OwnerRule,
@@ -22,7 +23,7 @@ use tari_template_lib::{
 use crate::{
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
     AllocatableAddressType,
-    ComponentCall,
+    ComponentReference,
     ResourceAddressRef,
 };
 
@@ -44,7 +45,7 @@ pub enum Instruction {
         args: Vec<InstructionArg>,
     },
     CallMethod {
-        call: ComponentCall,
+        call: ComponentReference,
         #[cfg_attr(feature = "ts", ts(type = "string"))]
         method: FunctionName,
         // TODO: remove this as it causes tricky issues that are hard to track down (typically Signature errors).
@@ -97,6 +98,11 @@ pub enum Instruction {
     PayFee {
         statement: StealthTransferStatement,
         revealed_input_bucket: Option<WorkspaceOffsetId>,
+    },
+    UpdateComponentTemplate {
+        component: ComponentReference,
+        migrate: Option<MigrateFunction>,
+        new_template: TemplateAddress,
     },
 }
 
@@ -252,7 +258,34 @@ impl Display for Instruction {
                     None => write!(f, ", revealed_input_bucket: None }}"),
                 }
             },
+            Self::UpdateComponentTemplate {
+                component,
+                migrate,
+                new_template,
+            } => {
+                write!(
+                    f,
+                    "UpdateComponentTemplate {{ component: {}, migrate: {}, new_template: {} }}",
+                    component,
+                    migrate.display(),
+                    new_template
+                )
+            },
         }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, borsh::BorshSerialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct MigrateFunction {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub name: FunctionName,
+    pub args: Vec<InstructionArg>,
+}
+
+impl Display for MigrateFunction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Migrate {{ name: {}, num_args: {} }}", self.name, self.args.len())
     }
 }
 

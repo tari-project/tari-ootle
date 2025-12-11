@@ -8,7 +8,7 @@ use crate::{
     args::{InstructionArg, WorkspaceOffsetId},
     builder::named_component_call::CallFromWorkspace,
     AllocatableAddressType,
-    ComponentCall,
+    ComponentReference,
     Instruction,
     Transaction,
 };
@@ -53,7 +53,7 @@ fn it_converts_workspace_names_to_ids() {
         ]
     });
     assert_eq!(transaction.instructions()[4], Instruction::CallMethod {
-        call: ComponentCall::Workspace(2),
+        call: ComponentReference::Workspace(2),
         method: "do_something_else".try_into().unwrap(),
         args: vec![InstructionArg::Workspace(WorkspaceOffsetId::new(0))]
     });

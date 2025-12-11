@@ -33,6 +33,13 @@ use tari_shutdown::Shutdown;
 use crate::{Services, ValidatorNodeStateStore};
 
 const LOG_TARGET: &str = "tari::validator_node";
+lazy_static::lazy_static! {
+    static ref PANIC_NOTIFIER: tokio::sync::Notify = tokio::sync::Notify::new();
+}
+
+pub fn trigger_panic_notifier() {
+    PANIC_NOTIFIER.notify_waiters();
+}
 
 pub struct ValidatorNode {
     services: Services<ValidatorNodeStateStore>,
@@ -50,6 +57,7 @@ impl ValidatorNode {
         // if let Err(err) = self.dial_local_shard_peers().await {
         //     error!(target: LOG_TARGET, "Failed to dial local shard peers: {}", err);
         // }
+        let mut panic_notify = false;
 
         loop {
             let metrics = tokio::runtime::Handle::current().metrics();
@@ -62,6 +70,12 @@ impl ValidatorNode {
             );
 
             tokio::select! {
+                _ = PANIC_NOTIFIER.notified() => {
+                    error!(target: LOG_TARGET, "💤 Panic detected in another task. Shutting down...");
+                    panic_notify = true;
+                    shutdown.trigger();
+                    break;
+                },
                 _ = tokio::signal::ctrl_c() => {
                     info!(target: LOG_TARGET, "💤 Received SIGINT");
                     shutdown.trigger();
@@ -94,17 +108,19 @@ impl ValidatorNode {
             }
         }
 
-        info!(target: LOG_TARGET, "💤 Waiting for all services to shut down... ctrl+c to force shutdown");
-
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
-                // Second SIGINT forces shutdown
-                warn!(target: LOG_TARGET, "💤 Shutdown NOW");
-                process::exit(1);
-            },
-            res = self.services.join_all() => {
-                res?;
-                info!(target: LOG_TARGET, "🏁 All services have exited cleanly");
+        // Just exit ASAP on panic
+        if !panic_notify {
+            info!(target: LOG_TARGET, "💤 Waiting for all services to shut down... ctrl+c to force shutdown");
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    // Second SIGINT forces shutdown
+                    warn!(target: LOG_TARGET, "💤 Shutdown NOW");
+                    process::exit(1);
+                },
+                res = self.services.join_all() => {
+                    res?;
+                    info!(target: LOG_TARGET, "🏁 All services have exited cleanly");
+                }
             }
         }
 

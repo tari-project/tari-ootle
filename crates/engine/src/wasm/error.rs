@@ -93,6 +93,11 @@ pub enum WasmValidationError {
     },
     #[error("Too many functions in the module, maximum is {max_functions}")]
     TooManyFunctions { max_functions: usize },
+    #[error("Function {function_name} has invalid return type: {return_type:?}")]
+    InvalidMigrationReturnType {
+        function_name: String,
+        return_type: tari_template_abi::Type,
+    },
 }
 
 impl From<wasmer::InstantiationError> for WasmExecutionError {

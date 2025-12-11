@@ -94,6 +94,7 @@ use tari_template_lib::{
     auth::{AuthHook, AuthHookCaller, ComponentAccessRules, OwnerRule, ResourceAccessRules, ResourceAuthAction},
     constants::{STEALTH_TARI_RESOURCE_ADDRESS, XTR},
     invoke_args,
+    metadata,
     models::{
         BucketId,
         ClaimedOutputTombstoneAddress,
@@ -126,11 +127,11 @@ use tari_template_lib::{
 use tari_transaction::{
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
     AllocatableAddressType,
-    ComponentCall,
+    ComponentReference,
     ResourceAddressRef,
 };
 
-use super::{working_state::WorkingState, Runtime, RuntimeEvent};
+use super::{working_state::WorkingState, ActionIdent, Runtime, RuntimeEvent};
 use crate::{
     runtime::{
         engine_args::EngineArgs,
@@ -475,16 +476,16 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         Ok(())
     }
 
-    fn load_component(&self, call: ComponentCall) -> Result<(ComponentAddress, ComponentHeader), RuntimeError> {
+    fn load_component(&self, call: ComponentReference) -> Result<(ComponentAddress, ComponentHeader), RuntimeError> {
         self.invoke_modules_on_runtime_call("load_component")?;
         match call {
-            ComponentCall::Address(address) => self.tracker.write_with(|state_mut| {
+            ComponentReference::Address(address) => self.tracker.write_with(|state_mut| {
                 state_mut
                     .load_and_cache_component(&address)
                     .cloned()
                     .map(|c| (address, c))
             }),
-            ComponentCall::Workspace(id) => self.tracker.write_with(|state_mut| {
+            ComponentReference::Workspace(id) => self.tracker.write_with(|state_mut| {
                 let id = WorkspaceOffsetId::new(id);
                 let value = state_mut
                     .workspace()
@@ -2640,6 +2641,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
     fn call_invoke(&self, action: CallAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError> {
         self.invoke_modules_on_runtime_call("call_invoke")?;
+        self.tracker.read_with(|state| {
+            let frame = state.current_call_frame()?;
+            if !frame.is_cross_template_calls_allowed() {
+                return Err(RuntimeError::CrossTemplateCallNotAllowed { action });
+            }
+            Ok(())
+        })?;
+
         debug!(
             target: LOG_TARGET,
             "Call invoke: {:?} {:?}",
@@ -2684,9 +2693,52 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         Ok(InvokeResult::encode(&address)?)
     }
 
-    fn check_component_access_rules(&self, method: &str, locked: &LockedSubstate) -> Result<(), RuntimeError> {
+    fn check_component_access_rules(&self, method: &str) -> Result<(), RuntimeError> {
         self.tracker
-            .read_with(|state| state.authorization().check_component_access_rules(method, locked))
+            .read_with(|state| state.authorization().check_current_component_access_rules(method))
+    }
+
+    fn check_component_ownership(&self, action: ActionIdent) -> Result<(), RuntimeError> {
+        self.tracker.read_with(|state| {
+            let locked = state
+                .current_call_scope()?
+                .get_current_component_lock()
+                .ok_or_else(|| RuntimeError::InvariantError {
+                    function: "check_component_ownership",
+                    details: "No current component lock in call scope".to_string(),
+                })?;
+
+            let component = state.get_component(locked)?;
+            state
+                .authorization()
+                .require_ownership(action, component.as_ownership())
+        })
+    }
+
+    fn update_component_template(&self, new_template: TemplateAddress) -> Result<(), RuntimeError> {
+        self.tracker.write_with(|state_mut| {
+            let locked = state_mut
+                .current_call_scope()?
+                .get_current_component_lock()
+                .cloned()
+                .ok_or_else(|| RuntimeError::InvariantError {
+                    function: "update_component_template",
+                    details: "No current component lock in call scope".to_string(),
+                })?;
+
+            let component_mut = state_mut.get_component_mut(&locked)?;
+            let prev_template = component_mut.template_address;
+            component_mut.set_template_address(new_template);
+
+            state_mut.push_event(Event::std(
+                Some(locked.substate_id().clone()),
+                new_template,
+                "component",
+                "template_update",
+                metadata!["prev_template" => prev_template.to_string()],
+            ))?;
+            Ok(())
+        })
     }
 
     fn validate_return_value(&self, value: &IndexedValue) -> Result<(), RuntimeError> {

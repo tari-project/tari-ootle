@@ -610,7 +610,7 @@ pub struct CallInvokeArg {
 }
 
 /// All the possible call operation types
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum CallAction {
     /// Call to a template's function
     CallFunction,

@@ -281,6 +281,31 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
                         _ => {},
                     }
                 }
+                if func.is_migration {
+                    // Note that we are checking the TemplateDef, not the actual return type of the function in Wasm.
+                    match &func.output {
+                        Type::Other { name } => {
+                            if name != "Self" &&
+                                name != template_def.template_name() &&
+                                name != "Component<Self>" &&
+                                *name != format!("Component<{}>", template_def.template_name())
+                            {
+                                return Err(WasmValidationError::InvalidMigrationReturnType {
+                                    function_name: func.name.clone(),
+                                    return_type: func.output.clone(),
+                                }
+                                .into());
+                            }
+                        },
+                        _ => {
+                            return Err(WasmValidationError::InvalidMigrationReturnType {
+                                function_name: func.name.clone(),
+                                return_type: func.output.clone(),
+                            }
+                            .into());
+                        },
+                    }
+                }
             }
         },
     }

@@ -4,6 +4,7 @@
 use std::{
     fmt::{Debug, Formatter},
     iter,
+    time::Instant,
 };
 
 use log::*;
@@ -104,6 +105,8 @@ pub struct HotstuffWorker<TConsensusSpec: ConsensusSpec> {
     leader_strategy: TConsensusSpec::LeaderStrategy,
     transaction_pool: TransactionPool<TConsensusSpec::StateStore>,
 
+    /// Epoch to switch to (Epoch, activated_at)
+    next_epoch: Option<(Epoch, Instant)>,
     epoch_manager: TConsensusSpec::EpochManager,
     pacemaker_worker: Option<PaceMaker>,
     pacemaker: PaceMakerHandle,
@@ -231,6 +234,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             epoch_manager,
             transaction_pool,
 
+            next_epoch: None,
             pacemaker: pacemaker.clone_handle(),
             pacemaker_worker: Some(pacemaker),
             hooks,
@@ -326,6 +330,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     .get_our_validator_node(current_epoch)
                     .await?
                     .fee_claim_public_key;
+                self.next_epoch = None;
             }
 
             if current_height != prev_height {
@@ -572,6 +577,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             EpochManagerEvent::EpochChanged {
                 epoch,
                 registered_shard_group,
+                activated_at,
             } => {
                 if registered_shard_group.is_none() {
                     let current_epoch = self.pacemaker.current_view().get_epoch();
@@ -593,6 +599,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     target: LOG_TARGET,
                     "🌟 This validator is registered for epoch {}.", epoch
                 );
+                self.next_epoch = Some((epoch, activated_at));
             },
         }
 
@@ -738,19 +745,32 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             Ok::<_, HotStuffError>(propose_now)
         })?;
 
-        if !propose_now {
-            let current_epoch = self.epoch_manager.current_epoch().await?;
-            // Propose quickly if we should end the epoch (i.e base layer epoch > pacemaker epoch)
-            if current_epoch == epoch_state.epoch() {
-                info!(target: LOG_TARGET, "[on_beat] No transactions to propose. Waiting for a timeout.");
-                return Ok(());
-            }
+        let propose_epoch_end = self.can_propose_epoch_end(epoch_state);
+        // Propose quickly if we should end the epoch (i.e base layer epoch > pacemaker epoch)
+        if !propose_now && !propose_epoch_end {
+            info!(target: LOG_TARGET, "[on_beat] No transactions to propose. Waiting for a timeout.");
+            return Ok(());
         }
 
-        self.propose_now(epoch_state, next_height, false, *local_claim_public_key)
-            .await?;
+        self.propose_now(
+            epoch_state,
+            next_height,
+            false,
+            *local_claim_public_key,
+            propose_epoch_end,
+        )
+        .await?;
 
         Ok(())
+    }
+
+    fn can_propose_epoch_end(&self, epoch_state: &EpochState<TConsensusSpec::Addr>) -> bool {
+        // Allow some time for the network to recognise the new epoch. Currently, we get leader failures
+        // due to quick end epoch proposals and some nodes have not quite detected it yet.
+        self.next_epoch.is_some_and(|(e, at)| {
+            e > epoch_state.epoch() &&
+                Instant::now().saturating_duration_since(at) >= self.config.epoch_end_grace_period
+        })
     }
 
     /// Called when the block time expires (forced_height == None) or when NEWVIEW quorum (TimeoutCertificate) is
@@ -816,11 +836,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 .len(),
         );
 
+        let propose_epoch_end = self.can_propose_epoch_end(epoch_state);
         self.propose_now(
             epoch_state,
             next_height_to_propose,
             forced_height.is_some(),
             *local_claim_public_key,
+            propose_epoch_end,
         )
         .await?;
 
@@ -833,6 +855,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         next_height: NodeHeight,
         is_timeout: bool,
         local_claim_public_key: RistrettoPublicKeyBytes,
+        propose_epoch_end: bool,
     ) -> Result<(), HotStuffError> {
         // If we're catching up, we don't propose
         if self.worker_state.is_catching_up() {
@@ -919,17 +942,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             // Nothing to do
         }
 
-        // TODO: suggest adding self.epoch_manager.did_epoch_change_recently() and only propose when that is not the
-        // case - allow some arb time for the network to recognise the new epoch. Currently we often get leader failures
-        // due to quick end epoch proposals
-        let current_epoch = self.epoch_manager.current_epoch().await?;
-        let propose_epoch_end = current_epoch > epoch_state.epoch();
         if propose_epoch_end {
             info!(
                 target: LOG_TARGET,
                 "🌟 Can propose end of epoch {}->{}",
                 epoch_state.epoch(),
-                current_epoch
+                self.next_epoch.as_ref().map(|(e, _)| e).display()
             );
         }
 

@@ -34,7 +34,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{displayable::Displayable, optional::IsNotFoundError};
 use tari_template_lib::{
-    args::VaultFreezeFlag,
+    args::{CallAction, VaultFreezeFlag},
     models::{
         AddressAllocationId,
         BucketId,
@@ -221,8 +221,8 @@ pub enum RuntimeError {
     InvalidOpDepositLockedBucket { bucket_id: BucketId, locked_amount: Amount },
     #[error("Duplicate substate {address}")]
     DuplicateSubstate { address: SubstateId },
-    #[error("Substate {address} is orphaned")]
-    OrphanedSubstate { address: SubstateId },
+    #[error("Substate {id} is orphaned")]
+    OrphanedSubstate { id: SubstateId },
     #[error("{} orphaned substate(s) detected: {}", .substates.len(), .substates.join(", "))]
     OrphanedSubstates { substates: Vec<String> },
     #[error("Attempted to finalise state but {remaining} call frame(s) remain on the stack")]
@@ -276,6 +276,9 @@ pub enum RuntimeError {
 
     #[error("Limit error: {details}")]
     LimitError { details: String },
+
+    #[error("Cross-template calls are not allowed in this context: {action:?}")]
+    CrossTemplateCallNotAllowed { action: CallAction },
 }
 
 impl RuntimeError {

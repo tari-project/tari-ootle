@@ -23,6 +23,7 @@
 use std::{
     mem,
     sync::{atomic::AtomicU64, Arc},
+    time::Instant,
 };
 
 use log::*;
@@ -291,6 +292,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
             self.publish_event(EpochManagerEvent::EpochChanged {
                 epoch: current_epoch,
                 registered_shard_group: shard_group,
+                activated_at: Instant::now(),
             });
             self.has_epoch_changed = false;
         }

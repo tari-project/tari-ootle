@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 
 use rand::seq::IteratorRandom;
 use tari_common_types::types::FixedHash;
@@ -56,6 +56,7 @@ impl TestEpochManager {
         let _ = self.tx_epoch_events.send(EpochManagerEvent::EpochChanged {
             epoch: current_epoch,
             registered_shard_group: Some(shard_group),
+            activated_at: Instant::now(),
         });
 
         self

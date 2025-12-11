@@ -19,6 +19,10 @@ use crate::support::{logging::setup_logger, Test, TestAddress, TEST_NUM_PRESHARD
 async fn check_state_transitions() {
     setup_logger();
     let mut test = Test::builder()
+        .modify_config(|config_mut| {
+            // Epoch change ASAP
+            config_mut.epoch_end_grace_period = Duration::from_secs(0);
+        })
         .modify_consensus_constants(|config| {
             config.pacemaker_block_time = Duration::from_millis(500);
         })

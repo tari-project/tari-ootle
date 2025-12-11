@@ -46,7 +46,7 @@ pub fn generate_abi(ast: &TemplateAst) -> Result<TokenStream> {
             .map(|func| {
                 let is_mut = func.is_mut();
                 Ok::<_, syn::Error>(FunctionDef {
-                    name: func.name,
+                    name: func.name.clone(),
                     arguments: func
                         .input_types
                         .iter()
@@ -58,6 +58,7 @@ pub fn generate_abi(ast: &TemplateAst) -> Result<TokenStream> {
                         .map(|ty| convert_to_arg_type(&template_name_as_str, ty))
                         .unwrap_or(ArgType::Unit),
                     is_mut,
+                    is_migration: func.is_migration,
                 })
             })
             .collect::<Result<_>>()?,

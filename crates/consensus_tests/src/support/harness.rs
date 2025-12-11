@@ -653,6 +653,7 @@ impl TestBuilder {
                 state_tree_cleanup_interval: Duration::from_secs(1000),
                 epoch_gc_interval: Duration::from_secs(1000),
                 enable_eviction_proposal: true,
+                epoch_end_grace_period: Duration::from_secs(1),
             },
         }
     }

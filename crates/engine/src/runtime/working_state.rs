@@ -209,6 +209,18 @@ impl WorkingState {
         Ok(component)
     }
 
+    pub fn get_component_mut(&mut self, locked: &LockedSubstate) -> Result<&mut ComponentHeader, RuntimeError> {
+        let (address, substate) = self.store.get_locked_substate_mut(locked.lock_id())?;
+        let component_mut = substate
+            .component_mut()
+            .ok_or_else(|| RuntimeError::LockSubstateMismatch {
+                lock_id: locked.lock_id(),
+                id: address,
+                expected_type: "Component",
+            })?;
+        Ok(component_mut)
+    }
+
     pub fn modify_component_with<F: FnOnce(&mut ComponentHeader) -> bool>(
         &mut self,
         locked: &LockedSubstate,
@@ -944,7 +956,7 @@ impl WorkingState {
                 // Vaults can never be removed from components
                 if !next_state.vault_ids().contains(existing_vault) {
                     return Err(RuntimeError::OrphanedSubstate {
-                        address: (*existing_vault).into(),
+                        id: (*existing_vault).into(),
                     });
                 }
             }
@@ -1033,6 +1045,10 @@ impl WorkingState {
             .unwrap_or(&mut self.initial_call_scope))
     }
 
+    pub fn current_call_frame(&self) -> Result<&CallFrame, RuntimeError> {
+        self.call_frames.last().ok_or(RuntimeError::NoActiveCallFrame)
+    }
+
     pub fn current_call_scope(&self) -> Result<&CallScope, RuntimeError> {
         Ok(self
             .call_frames
@@ -1047,10 +1063,8 @@ impl WorkingState {
 
     /// Returns template address and module name
     pub fn current_template(&self) -> Result<(&TemplateAddress, &str), RuntimeError> {
-        self.call_frames
-            .last()
-            .map(|frame| frame.current_template())
-            .ok_or(RuntimeError::NoActiveCallFrame)
+        let frame = self.current_call_frame()?;
+        Ok(frame.current_template())
     }
 
     pub fn id_provider(&self) -> Result<IdProvider<'_>, RuntimeError> {
@@ -1113,10 +1127,10 @@ impl WorkingState {
     pub fn pop_frame(&mut self) -> Result<(), RuntimeError> {
         let current_frame = self.call_frames.pop().ok_or(RuntimeError::NoActiveCallFrame)?;
 
-        let scope = current_frame.into_scope();
+        let mut scope = current_frame.into_scope();
         // Unlock the component
-        if let Some(component_lock) = scope.get_current_component_lock() {
-            self.unlock_substate(component_lock.clone())?;
+        if let Some(component_lock) = scope.take_current_component_lock() {
+            self.unlock_substate(component_lock)?;
         }
 
         if !scope.lock_scope().is_empty() {

@@ -203,6 +203,9 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::AllocateAddress { .. } => 1,
         Instruction::StealthTransfer { statement, .. } => calc_stealth_statement_weight(statement),
         Instruction::PayFee { statement, .. } => calc_stealth_statement_weight(statement),
+        Instruction::UpdateComponentTemplate { migrate, .. } => {
+            1 + migrate.as_ref().map(|m| calc_args_weight(&m.args)).unwrap_or(0)
+        },
     }
 }
 

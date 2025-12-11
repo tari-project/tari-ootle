@@ -77,7 +77,7 @@ fn it_rejects_dangling_vaults_in_component() {
     );
 
     assert_reject_reason(reason, RuntimeError::OrphanedSubstate {
-        address: indexed.vault_ids()[0].into(),
+        id: indexed.vault_ids()[0].into(),
     });
 }
 

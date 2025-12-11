@@ -58,6 +58,7 @@ use crate::{
     },
     mocks::AlwaysPassesProofVerifier,
     read_only_state_store::ReadOnlyStateStore,
+    template_spec::TemplateSpec,
     track_calls::TrackCallsModule,
     wrapped_transaction::WrappedTransaction,
     Package,
@@ -90,14 +91,14 @@ impl TemplateTest {
     /// The initial balance of a funded account created by `create_funded_account`.
     pub const FUNDED_ACCOUNT_INITIAL_BALANCE: u64 = 1_000_000_000;
 
-    pub fn new<I: IntoIterator<Item = P>, P: Clone + AsRef<Path>>(template_paths: I) -> Self {
+    pub fn new<I: IntoIterator<Item = T>, T: Into<TemplateSpec>>(template_paths: I) -> Self {
         Self::new_internal(template_paths, None::<(String, String)>)
     }
 
-    pub fn new_with_compile_envs<I, P, TEnvs, K, V>(template_paths: I, envs: TEnvs) -> Self
+    pub fn new_with_compile_envs<I, T, TEnvs, K, V>(template_paths: I, envs: TEnvs) -> Self
     where
-        I: IntoIterator<Item = P>,
-        P: Clone + AsRef<Path>,
+        I: IntoIterator<Item = T>,
+        T: Into<TemplateSpec>,
         TEnvs: IntoIterator<Item = (K, V)>,
         TEnvs::IntoIter: Clone,
         K: AsRef<OsStr>,
@@ -106,10 +107,10 @@ impl TemplateTest {
         Self::new_internal(template_paths, envs)
     }
 
-    fn new_internal<I, P, TEnvs, K, V>(template_paths: I, envs: TEnvs) -> Self
+    fn new_internal<I, T, TEnvs, K, V>(templates: I, envs: TEnvs) -> Self
     where
-        I: IntoIterator<Item = P>,
-        P: Clone + AsRef<Path>,
+        I: IntoIterator<Item = T>,
+        T: Into<TemplateSpec>,
         TEnvs: IntoIterator<Item = (K, V)>,
         TEnvs::IntoIter: Clone,
         K: AsRef<OsStr>,
@@ -127,8 +128,9 @@ impl TemplateTest {
 
         // Add all of the templates specified in the argument
         let envs_iter = envs.into_iter();
-        for path in template_paths {
-            builder.add_template_with_envs(path, envs_iter.clone());
+        for template in templates {
+            let spec = template.into();
+            builder.add_template_opts(spec.path, &spec.features, envs_iter.clone());
         }
 
         let package = builder.build();

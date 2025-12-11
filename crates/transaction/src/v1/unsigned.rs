@@ -16,7 +16,7 @@ use tari_template_lib::{
     prelude::RistrettoPublicKeyBytes,
 };
 
-use crate::{builder::TransactionBuilder, ComponentCall, Instruction, ResourceAddressRef, TransactionSignature};
+use crate::{builder::TransactionBuilder, ComponentReference, Instruction, ResourceAddressRef, TransactionSignature};
 
 #[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -111,16 +111,16 @@ impl UnsignedTransactionV1 {
         self.instructions()
             .iter()
             .chain(self.fee_instructions())
-            .filter_map(|instruction| {
-                if let Instruction::CallMethod {
-                    call: ComponentCall::Address(component_address),
+            .filter_map(|instruction| match instruction {
+                Instruction::CallMethod {
+                    call: ComponentReference::Address(address),
                     ..
-                } = instruction
-                {
-                    Some(component_address)
-                } else {
-                    None
-                }
+                } => Some(address),
+                Instruction::UpdateComponentTemplate {
+                    component: ComponentReference::Address(address),
+                    ..
+                } => Some(address),
+                _ => None,
             })
     }
 
@@ -137,12 +137,10 @@ impl UnsignedTransactionV1 {
                         substates.extend(value.referenced_substates().filter(|id| !id.is_virtual()));
                     }
                 },
-                Instruction::CallMethod {
-                    call: ComponentCall::Address(component_address),
-                    args,
-                    ..
-                } => {
-                    substates.insert(SubstateId::Component(*component_address));
+                Instruction::CallMethod { call, args, .. } => {
+                    if let Some(component_address) = call.address() {
+                        substates.insert(SubstateId::Component(*component_address));
+                    }
                     for arg in args.iter().filter_map(|a| a.as_literal_bytes()) {
                         let value = IndexedValue::from_raw(arg)?;
                         substates.extend(value.referenced_substates().filter(|id| !id.is_virtual()));
@@ -176,6 +174,20 @@ impl UnsignedTransactionV1 {
                             .map(|i| UtxoAddress::new(XTR, i.commitment.into()))
                             .map(SubstateId::Utxo),
                     );
+                },
+                Instruction::UpdateComponentTemplate { component, migrate, .. } => {
+                    if let Some(component_address) = component.address() {
+                        substates.insert(SubstateId::Component(*component_address));
+                    }
+                    for arg in migrate
+                        .as_ref()
+                        .iter()
+                        .flat_map(|m| &m.args)
+                        .filter_map(|a| a.as_literal_bytes())
+                    {
+                        let value = IndexedValue::from_raw(arg)?;
+                        substates.extend(value.referenced_substates().filter(|id| !id.is_virtual()));
+                    }
                 },
                 _ => {},
             }

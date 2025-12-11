@@ -92,7 +92,7 @@ where
     }
 
     pub async fn run(mut self) -> anyhow::Result<()> {
-        let mut consensus_events = self.consensus_handle.subscribe_to_hotstuff_events();
+        let mut consensus_events = self.consensus_handle.subscribe_to_hotstuff_events()?;
 
         loop {
             tokio::select! {

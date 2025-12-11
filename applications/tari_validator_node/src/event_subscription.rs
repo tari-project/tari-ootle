@@ -22,6 +22,12 @@
 
 use tokio::sync::broadcast;
 
+#[derive(Debug, thiserror::Error)]
+pub enum EventSubscriptionError {
+    #[error("All event senders have dropped on initialzation. This indicates a bug in the node.")]
+    SenderDropped,
+}
+
 /// Wraps a broadcast sender, allowing a subscription (Receiver) to be obtained but removing the ability to send an
 /// event.
 ///
@@ -35,9 +41,9 @@ impl<T> EventSubscription<T> {
         Self(sender)
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<T> {
-        let sender = self.0.upgrade().unwrap_or_else(|| broadcast::Sender::new(1));
-        sender.subscribe()
+    pub fn try_subscribe(&self) -> Result<broadcast::Receiver<T>, EventSubscriptionError> {
+        let sender = self.0.upgrade().ok_or(EventSubscriptionError::SenderDropped)?;
+        Ok(sender.subscribe())
     }
 }
 

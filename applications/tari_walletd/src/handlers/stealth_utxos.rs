@@ -8,7 +8,7 @@ use axum_extra::headers::authorization::Bearer;
 use indexmap::IndexMap;
 use log::{info, warn};
 use tari_engine_types::crypto::ValueLookupTable;
-use tari_ootle_wallet_crypto::{GenerateValueLookup, IoReaderValueLookup};
+use tari_ootle_wallet_crypto::{GenerateValueLookup, MMapValueLookup};
 use tari_template_lib::models::UtxoAddress;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
@@ -112,9 +112,9 @@ pub async fn handle_decrypt_value(
     let sdk = sdk.clone();
     let handle = match context.config().value_lookup_table_file.clone() {
         Some(path) => spawn_blocking(move || {
-            let mut file = fs::File::open(&path)
+            let file = fs::File::open(&path)
                 .map_err(|e| anyhow!("Unable to load value lookup file '{}': {e}", path.display()))?;
-            let lookup = IoReaderValueLookup::load(&mut file)?;
+            let lookup = MMapValueLookup::load(&file)?;
 
             info!(
                 target: LOG_TARGET,

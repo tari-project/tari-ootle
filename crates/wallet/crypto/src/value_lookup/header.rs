@@ -13,9 +13,17 @@ pub struct LookupHeader {
 impl LookupHeader {
     pub const SIZE: usize = size_of::<u64>() * 2 + LOOKUP_HEADER_LEADING_BYTES.len();
 
+    pub fn new(min: u64, max: u64) -> Self {
+        Self { min, max }
+    }
+
     pub fn read<R: io::Read>(reader: &mut R) -> io::Result<Self> {
         let mut buf = [0u8; Self::SIZE];
         reader.read_exact(&mut buf)?;
+        Self::from_buf(&buf)
+    }
+
+    pub fn from_buf(buf: &[u8]) -> io::Result<Self> {
         if &buf[0..4] != LOOKUP_HEADER_LEADING_BYTES {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -38,6 +46,14 @@ impl LookupHeader {
         u64_buf.copy_from_slice(body.get(8..16).expect("slice length checked before"));
         let max = u64::from_be_bytes(u64_buf);
         Ok(Self { min, max })
+    }
+
+    pub fn encode_into<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        // Write header VLKP || min_value (8 bytes) || max_value (8 bytes)
+        writer.write_all(LOOKUP_HEADER_LEADING_BYTES)?;
+        writer.write_all(&self.min.to_be_bytes())?;
+        writer.write_all(&self.max.to_be_bytes())?;
+        Ok(())
     }
 
     pub fn is_in_range(&self, value: u64) -> bool {

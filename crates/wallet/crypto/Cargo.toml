@@ -25,6 +25,7 @@ subtle = "2.6.1"
 thiserror = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 zeroize = { workspace = true, features = ["simd"] }
+memmap2 = { version = "0.9.9", optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
@@ -33,3 +34,4 @@ serde_json = { workspace = true }
 default = []
 serde = ["dep:serde"]
 ts = ["dep:ts-rs"]
+mmap-value-lookup = ["dep:memmap2"]

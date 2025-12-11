@@ -75,6 +75,11 @@ notice = "warn"
 # output a note when they are encountered.
 ignore = [
     #"RUSTSEC-0000-0000",
+    # rustls-pemfile is unmaintained, but we cannot remove it until the upstream
+    # tari dependency (v5.2.0-pre.5) updates from reqwest 0.11 to 0.12.
+    # We have already updated our workspace to use reqwest 0.12 which uses
+    # rustls-pki-types instead. This can be removed once tari updates.
+    "RUSTSEC-2025-0134",
 ]
 # Threshold for security vulnerabilities, any vulnerability with a CVSS score
 # lower than the range specified will be ignored. Note that ignored advisories

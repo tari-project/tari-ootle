@@ -11,16 +11,16 @@
 //!
 //! ## Transaction-Level Fees
 //!
-//! - **`per_transaction_weight_cost`**: Cost per unit of transaction weight. Transaction weight is calculated
-//!   based on the transaction size and complexity.
+//! - **`per_transaction_weight_cost`**: Cost per unit of transaction weight. Transaction weight is calculated based on
+//!   the transaction size and complexity.
 //!
-//! - **`per_module_call_cost`**: Cost charged for each runtime module call (e.g., component method invocations).
-//!   This fee applies each time a WASM template function is called during transaction execution.
+//! - **`per_module_call_cost`**: Cost charged for each runtime module call (e.g., component method invocations). This
+//!   fee applies each time a WASM template function is called during transaction execution.
 //!
 //! ## Template Loading Fees
 //!
-//! - **`per_template_load_cost_unit`**: Cost per "load unit" when a template (smart contract WASM code) is
-//!   loaded from storage into the execution environment.
+//! - **`per_template_load_cost_unit`**: Cost per "load unit" when a template (smart contract WASM code) is loaded from
+//!   storage into the execution environment.
 //!
 //!   **How it's calculated:**
 //!   - Template load units = `(bytes_loaded / 3000)` (i.e., 3 KB = 1 unit)
@@ -34,22 +34,22 @@
 //!
 //! ## Storage Fees
 //!
-//! - **`per_byte_storage_cost`**: Cost per byte of data written to persistent storage (substates).
-//!   Note: The actual cost is reduced by a factor of 4 (cost × 0.25) to make storage more affordable.
+//! - **`per_byte_storage_cost`**: Cost per byte of data written to persistent storage (substates). Note: The actual
+//!   cost is reduced by a factor of 4 (cost × 0.25) to make storage more affordable.
 //!
 //! ## Event and Logging Fees
 //!
-//! - **`per_event_cost`**: Cost for each event emitted during transaction execution. Events are used to
-//!   notify external systems of state changes.
+//! - **`per_event_cost`**: Cost for each event emitted during transaction execution. Events are used to notify external
+//!   systems of state changes.
 //!
-//! - **`per_log_cost`**: Cost for each log entry produced during transaction execution. Logs are primarily
-//!   used for debugging and monitoring.
+//! - **`per_log_cost`**: Cost for each log entry produced during transaction execution. Logs are primarily used for
+//!   debugging and monitoring.
 //!
 //! ## Cryptographic Operation Fees
 //!
-//! - **`per_signature_verification_cost`**: Cost for each cryptographic signature verification performed
-//!   during transaction execution. Signature verification is computationally expensive and thus has a
-//!   higher relative cost (10x on testnet).
+//! - **`per_signature_verification_cost`**: Cost for each cryptographic signature verification performed during
+//!   transaction execution. Signature verification is computationally expensive and thus has a higher relative cost
+//!   (10x on testnet).
 //!
 //! # Fee Timing
 //!
@@ -109,11 +109,14 @@ const MAINNET_FEE_TABLE: FeeTable = FeeTable {
 /// # Example
 ///
 /// ```no_run
-/// use tari_ootle_common_types::Network;
 /// use tari_ootle_app_utilities::fee_tables::get_fee_table_by_network;
+/// use tari_ootle_common_types::Network;
 ///
 /// let fee_table = get_fee_table_by_network(Network::Igor);
-/// println!("Template load cost per unit: {}", fee_table.per_template_load_cost_unit());
+/// println!(
+///     "Template load cost per unit: {}",
+///     fee_table.per_template_load_cost_unit()
+/// );
 /// ```
 pub const fn get_fee_table_by_network(network: Network) -> &'static FeeTable {
     match network {

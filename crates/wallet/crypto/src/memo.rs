@@ -426,11 +426,10 @@ mod tests {
     #[test]
     fn it_fails_to_decode_if_length_is_too_big() {
         // THis is valid encoding but the length exceeds the max allowed length
-        let encoded = [vec![MemoTag::Bytes as u8, (Memo::MAX_BYTES_LENGTH + 1) as u8], vec![
-            1u8;
-            Memo::MAX_BYTES_LENGTH +
-                1
-        ]]
+        let encoded = [
+            vec![MemoTag::Bytes as u8, (Memo::MAX_BYTES_LENGTH + 1) as u8],
+            vec![1u8; Memo::MAX_BYTES_LENGTH + 1],
+        ]
         .concat();
         let _err = Memo::decode_from(&mut encoded.as_slice()).unwrap_err();
     }

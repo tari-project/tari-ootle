@@ -63,7 +63,12 @@ async fn main() -> anyhow::Result<()> {
     let config = ApplicationConfig::load_from(&cfg)?;
 
     // Remove the pid file if it exists
-    let _file = fs::remove_file(config.common.base_path.join("pid"));
+    let _file = fs::remove_file(config.common.base_path.join("pid")).inspect_err(|e| {
+        warn!(
+            target: LOG_TARGET,
+            "Failed to remove existing pid file: {}", e
+        )
+    });
     if let Err(e) = initialize_logging(
         &cli.common.log_config_path("validator"),
         &cli.common.get_base_path(),

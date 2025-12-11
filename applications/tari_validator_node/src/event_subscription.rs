@@ -24,7 +24,7 @@ use tokio::sync::broadcast;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EventSubscriptionError {
-    #[error("The sender has been dropped")]
+    #[error("All event senders have dropped on initialzation. This indicates a bug in the node.")]
     SenderDropped,
 }
 

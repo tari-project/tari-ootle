@@ -371,7 +371,7 @@ impl Display for TransactionResult {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum RejectReason {
     ExecutionFailure(String),
-    OneOrMoreSubstatesNotFound(String),
+    SubstateNotFound(String),
     FailedToLockInputs(String),
     FailedToLockOutputs(String),
     ForeignPledgeInputConflict,
@@ -391,7 +391,7 @@ impl Display for RejectReason {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
             Self::ExecutionFailure(msg) => write!(f, "Execution failure: {}", msg),
-            Self::OneOrMoreSubstatesNotFound(msg) => write!(f, "One or more substates not found: {}", msg),
+            Self::SubstateNotFound(msg) => write!(f, "Substates not found: {}", msg),
             Self::FailedToLockInputs(msg) => write!(f, "Failed to lock inputs: {}", msg),
             Self::FailedToLockOutputs(msg) => write!(f, "Failed to lock outputs: {}", msg),
             Self::ForeignPledgeInputConflict => {
@@ -440,7 +440,7 @@ impl From<&RejectReason> for AbortReason {
         match reject_reason {
             RejectReason::Abort { reason } => *reason,
             RejectReason::ExecutionFailure(_) => Self::ExecutionFailure,
-            RejectReason::OneOrMoreSubstatesNotFound(_) => Self::OneOrMoreInputsNotFound,
+            RejectReason::SubstateNotFound(_) => Self::OneOrMoreInputsNotFound,
             RejectReason::ForeignPledgeInputConflict => Self::ForeignPledgeInputConflict,
             RejectReason::FailedToLockInputs(_) => Self::LockInputsFailed,
             RejectReason::FailedToLockOutputs(_) => Self::LockOutputsFailed,

@@ -52,7 +52,7 @@ impl TryFrom<SubstateRecord> for SubstateResponse {
 
     fn try_from(row: SubstateRow) -> Result<Self, Self::Error> {
         Ok(SubstateResponse {
-            address: row.address.parse().map_err(|e| StorageError::DecodingError {
+            id: row.address.parse().map_err(|e| StorageError::DecodingError {
                 operation: "TryFrom<SubstateRecord> for SubstateResponse",
                 item: "Substate",
                 details: format!("Invalid substate address {}: {}", row.address, e),

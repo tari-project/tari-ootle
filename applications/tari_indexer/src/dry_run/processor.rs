@@ -44,16 +44,11 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_storage::global::TemplateStatus;
 use tari_transaction::Transaction;
-use tari_validator_node_rpc::client::{
-    SubstateResult,
-    TariValidatorNodeRpcClientFactory,
-    ValidatorNodeClientFactory,
-    ValidatorNodeRpcClient,
-};
 use tokio::task;
 
 use crate::{
     dry_run::{error::DryRunTransactionProcessorError, package::Package},
+    substate_manager::SubstateManager,
     template_manager::{TemplateCode, TemplateManager, TemplateManagerError},
 };
 
@@ -63,8 +58,8 @@ const LOG_TARGET: &str = "tari::indexer::dry_run_transaction_processor";
 pub struct DryRunTransactionProcessor {
     fee_table: FeeTable,
     epoch_manager: EpochManagerHandle<PeerAddress>,
-    client_provider: TariValidatorNodeRpcClientFactory,
     template_manager: TemplateManager<PeerAddress>,
+    substate_manager: SubstateManager,
     claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
 }
 
@@ -72,15 +67,15 @@ impl DryRunTransactionProcessor {
     pub fn new(
         fee_table: FeeTable,
         epoch_manager: EpochManagerHandle<PeerAddress>,
-        client_provider: TariValidatorNodeRpcClientFactory,
         template_manager: TemplateManager<PeerAddress>,
+        substate_manager: SubstateManager,
         claim_burn_proof_verifier: impl ClaimProofVerifier + Send + Sync + 'static,
     ) -> Self {
         Self {
             fee_table,
             epoch_manager,
-            client_provider,
             template_manager,
+            substate_manager,
             claim_burn_proof_verifier: Arc::new(claim_burn_proof_verifier),
         }
     }
@@ -96,10 +91,8 @@ impl DryRunTransactionProcessor {
         info!(target: LOG_TARGET, "process_transaction: {}", transaction.calculate_id());
 
         let epoch = self.epoch_manager.current_epoch().await?;
-        let found_substates = self.fetch_input_substates(&transaction, epoch).await?;
-        let package = self
-            .construct_template_package(&transaction, &found_substates, epoch)
-            .await?;
+        let found_substates = self.fetch_input_substates(&transaction).await?;
+        let package = self.construct_template_package(&transaction, &found_substates).await?;
 
         let virtual_substates = self.get_virtual_substates(&transaction, epoch).await?;
 
@@ -121,7 +114,6 @@ impl DryRunTransactionProcessor {
         &self,
         transaction: &Transaction,
         inputs: &HashMap<SubstateId, Substate>,
-        epoch: Epoch,
     ) -> Result<Package, DryRunTransactionProcessorError> {
         let component_templates = inputs.values().filter_map(|substate| {
             substate
@@ -163,7 +155,7 @@ impl DryRunTransactionProcessor {
                     let substate_id = PublishedTemplateAddress::from_template_address(*address);
                     // TODO: batch missing and fetch templates in one/a few requests
                     let substate = self
-                        .fetch_substate(&SubstateRequirement::unversioned(substate_id), epoch)
+                        .fetch_substate(&SubstateRequirement::unversioned(substate_id))
                         .await
                         .optional()?
                         .ok_or_else(|| {
@@ -197,77 +189,31 @@ impl DryRunTransactionProcessor {
     async fn fetch_input_substates(
         &self,
         transaction: &Transaction,
-        epoch: Epoch,
     ) -> Result<HashMap<SubstateId, Substate>, DryRunTransactionProcessorError> {
         let mut substates = HashMap::with_capacity(transaction.inputs().len());
 
         // Fetch explicit inputs that may not have been resolved by the autofiller
         for requirement in transaction.inputs() {
-            let substate = self.fetch_substate(requirement, epoch).await?;
+            let substate = self.fetch_substate(requirement).await?;
             substates.insert(requirement.substate_id.clone(), substate);
         }
 
         Ok(substates)
     }
 
-    pub async fn fetch_substate(
+    async fn fetch_substate(
         &self,
         substate_requirement: &SubstateRequirement,
-        epoch: Epoch,
     ) -> Result<Substate, DryRunTransactionProcessorError> {
-        let address = substate_requirement.to_substate_address_zero_version();
-        let mut committee = self.epoch_manager.get_committee_for_substate(epoch, address).await?;
-        committee.shuffle();
+        let response = self
+            .substate_manager
+            .get_substate(substate_requirement.substate_id(), substate_requirement.version())
+            .await?
+            .ok_or_else(|| DryRunTransactionProcessorError::SubstateNotFound {
+                requirement: substate_requirement.clone(),
+            })?;
 
-        let max_failures = committee.max_node_failures() + 1;
-
-        let mut nexist_count = 0;
-        let mut err_count = 0;
-
-        for vn_addr in committee.address_iter() {
-            // build a client with the VN
-            let mut client = self.client_provider.create_client(vn_addr);
-
-            match client.get_substate(substate_requirement.as_ref()).await {
-                Ok(SubstateResult::Up { substate, .. }) => {
-                    return Ok(*substate);
-                },
-                Ok(SubstateResult::Down { id, version, .. }) => {
-                    // TODO: we should seek proof of this.
-                    return Err(DryRunTransactionProcessorError::SubstateDowned { id, version });
-                },
-                Ok(SubstateResult::DoesNotExist) => {
-                    debug!(
-                        target: LOG_TARGET,
-                        "Substate {} does not exist on validator node {}",
-                        substate_requirement,
-                        vn_addr
-                    );
-                    // we do not stop when an individual claims DoesNotExist, we try $f + 1$ Vns
-                    nexist_count += 1;
-                    if nexist_count >= max_failures {
-                        break;
-                    }
-                    continue;
-                },
-                Err(e) => {
-                    info!(target: LOG_TARGET, "Unable to get substate from peer: {} ", e);
-                    // we do not stop when an individual request errors, we try all Vns
-                    err_count += 1;
-                    continue;
-                },
-            };
-        }
-
-        // The substate does not exist on any VN or all validator nodes are offline, we return an error
-        Err(DryRunTransactionProcessorError::AllValidatorsFailedToReturnSubstate {
-            substate_requirement: substate_requirement.clone(),
-            epoch,
-            nexist_count,
-            err_count,
-            max_failures,
-            committee_size: committee.len(),
-        })
+        Ok(Substate::new(response.version, response.substate))
     }
 
     async fn get_virtual_substates(

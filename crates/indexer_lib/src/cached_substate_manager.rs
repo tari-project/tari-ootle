@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, time::SystemTime};
 
 use log::*;
 use tari_engine_types::substate::SubstateId;
@@ -36,13 +36,15 @@ use crate::{
 const LOG_TARGET: &str = "tari::indexer::scanner";
 
 #[derive(Debug, Clone)]
-pub struct SubstateScanner<TEpochManager, TVnClient, TSubstateCache> {
+pub struct CachedSubstateManager<TEpochManager, TVnClient, TSubstateCache> {
     committee_provider: TEpochManager,
     validator_node_client_factory: TVnClient,
     substate_cache: TSubstateCache,
+    #[cfg(feature = "metrics")]
+    metrics: Option<crate::metrics::Metrics>,
 }
 
-impl<TEpochManager, TVnClient, TAddr, TSubstateCache> SubstateScanner<TEpochManager, TVnClient, TSubstateCache>
+impl<TEpochManager, TVnClient, TAddr, TSubstateCache> CachedSubstateManager<TEpochManager, TVnClient, TSubstateCache>
 where
     TAddr: NodeAddressable,
     TEpochManager: EpochManagerReader<Addr = TAddr>,
@@ -58,7 +60,15 @@ where
             committee_provider,
             validator_node_client_factory,
             substate_cache,
+            #[cfg(feature = "metrics")]
+            metrics: None,
         }
+    }
+
+    #[cfg(feature = "metrics")]
+    pub fn with_metrics(mut self, registry: &mut prometheus_client::registry::Registry) -> Self {
+        self.metrics = Some(crate::metrics::Metrics::register(registry));
+        self
     }
 
     /// Attempts to find the latest substate for the given address. If the lowest possible version is known, it can be
@@ -71,16 +81,32 @@ where
         debug!(target: LOG_TARGET, "get_substate: {}v{}", substate_id, specific_version.display());
         let mut cached_version = None;
         // start from the latest cached version of the substate (if cached previously)
-        if let Some(version) = specific_version {
-            let cache_res = self.substate_cache.read(substate_id.to_address_string()).await?;
-            if let Some(entry) = cache_res {
+        let cache_res = self.substate_cache.read(substate_id).await?;
+        if let Some(entry) = cache_res {
+            if let Some(version) = specific_version {
                 if entry.version == version {
                     debug!(target: LOG_TARGET, "Substate cache hit for {} with version {}", entry.version, substate_id);
+                    #[cfg(feature = "metrics")]
+                    self.metrics.as_ref().inspect(|m| m.inc_cache_hits());
                     return Ok(entry.substate_result);
                 }
-                cached_version = Some(entry.version);
+            } else {
+                let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs();
+                const CACHE_STALE_SECS: u64 = 300; // 5 minutes
+                if now.saturating_sub(entry.cached_at) > CACHE_STALE_SECS {
+                    debug!(target: LOG_TARGET, "Cached substate {} is stale. Fetching fresh copy.", substate_id);
+                } else {
+                    debug!(target: LOG_TARGET, "Substate cache hit for {} with version {}", substate_id, entry.version);
+                    #[cfg(feature = "metrics")]
+                    self.metrics.as_ref().inspect(|m| m.inc_cache_hits());
+                    return Ok(entry.substate_result.clone());
+                }
             }
+
+            cached_version = Some(entry.version);
         }
+        #[cfg(feature = "metrics")]
+        self.metrics.as_ref().inspect(|m| m.inc_cache_misses());
 
         let substate_result = self
             .fetch_substate_from_committee(substate_id, specific_version)
@@ -93,23 +119,22 @@ where
                 let entry = SubstateCacheEntryRef {
                     version,
                     substate_result: &substate_result,
+                    cached_at: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs(),
                 };
-                self.substate_cache
-                    .write(substate_id.to_address_string(), entry)
-                    .await?;
+                self.substate_cache.write(substate_id, entry).await?;
             }
         }
 
         Ok(substate_result)
     }
 
-    pub async fn get_cached_substates<'a>(
+    pub async fn get_cached_substates<'a, I: Iterator<Item = &'a SubstateId> + ExactSizeIterator>(
         &self,
-        substate_ids: &'a [SubstateId],
+        substate_ids: I,
     ) -> Result<HashMap<&'a SubstateId, Option<SubstateCacheEntry>>, IndexerError> {
         let mut results = HashMap::with_capacity(substate_ids.len());
         for substate_id in substate_ids {
-            let cache_res = self.substate_cache.read(substate_id.to_address_string()).await?;
+            let cache_res = self.substate_cache.read(substate_id).await?;
             results.insert(substate_id, cache_res);
         }
         Ok(results)
@@ -122,12 +147,12 @@ where
     ) -> Result<SubstateResult, IndexerError> {
         let requirement = SubstateRequirementRef::new(substate_id, specific_version);
         let substate_result = self.get_specific_substate_from_committee(requirement).await?;
-        debug!(target: LOG_TARGET, "Substate result for {} with version {}: {:?}", substate_id.to_address_string(), specific_version.display(), substate_result);
+        debug!(target: LOG_TARGET, "Substate result for {} with version {}: {:?}", substate_id, specific_version.display(), substate_result);
         Ok(substate_result)
     }
 
     /// Returns a specific version. If this is not found an error is returned.
-    pub async fn get_specific_substate_from_committee(
+    async fn get_specific_substate_from_committee(
         &self,
         substate_req: SubstateRequirementRef<'_>,
     ) -> Result<SubstateResult, IndexerError> {

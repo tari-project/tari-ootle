@@ -9,7 +9,7 @@ use serde::Serialize;
 use tari_engine_types::transaction_receipt::{TransactionReceipt, TransactionReceiptAddress};
 use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, StateVersion};
 use tari_ootle_storage::{
-    consensus_models::{Block, EpochCheckpoint, SubstateData, SubstateUpdateProof},
+    consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof},
     StorageError,
 };
 use tari_ootle_storage_sqlite::SqliteTransaction;
@@ -19,15 +19,7 @@ use crate::{
     diesel::ExpressionMethods,
     network_state_sync::EventFilter,
     storage_sqlite::{
-        models::{
-            NewEvent,
-            NewScannedBlockId,
-            NewSubstate,
-            SubstateRecord,
-            UtxoRecordInsert,
-            UtxoRecordUpdate,
-            UtxoUpdateRecord,
-        },
+        models::{NewEvent, NewSubstate, SubstateRecord, UtxoRecordInsert, UtxoRecordUpdate, UtxoUpdateRecord},
         reader::SqliteStoreReadTransaction,
         serialization::{serialize_bincode, serialize_hex, serialize_json},
     },
@@ -291,40 +283,6 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         Ok(())
     }
 
-    fn save_scanned_block_id(&mut self, new: NewScannedBlockId) -> Result<(), StorageError> {
-        use crate::storage_sqlite::schema::scanned_block_ids;
-
-        diesel::insert_into(scanned_block_ids::table)
-            .values(&new)
-            .on_conflict((scanned_block_ids::epoch, scanned_block_ids::shard_group))
-            .do_update()
-            .set(&new)
-            .execute(&mut *self.connection())
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("save_scanned_block_id error: {}", e),
-            })?;
-
-        debug!(
-            target: LOG_TARGET,
-            "Added new scanned block id {} for epoch {} and shard {:?}", hex::encode(&new.last_block_id), new.epoch, new.shard_group
-        );
-
-        Ok(())
-    }
-
-    fn delete_scanned_epochs_older_than(&mut self, epoch: Epoch) -> Result<(), StorageError> {
-        use crate::storage_sqlite::schema::scanned_block_ids;
-
-        diesel::delete(scanned_block_ids::table)
-            .filter(scanned_block_ids::epoch.lt(epoch.as_u64() as i64))
-            .execute(&mut *self.connection())
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("delete_scanned_epochs_older_than: {}", e),
-            })?;
-
-        Ok(())
-    }
-
     fn insert_or_ignore_transaction(&mut self, transaction: &Transaction) -> Result<(), StorageError> {
         use crate::storage_sqlite::schema::transactions;
 
@@ -357,37 +315,6 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
             ))
             .on_conflict((epoch_checkpoints::epoch, epoch_checkpoints::shard_group))
             .do_nothing()
-            .execute(self.connection())
-            .map_err(|e| StorageError::general(OPERATION, e))?;
-
-        Ok(())
-    }
-
-    fn insert_block_or_ignore(&mut self, block: &Block) -> Result<(), StorageError> {
-        const OPERATION: &str = "insert_block_or_ignore";
-        use crate::storage_sqlite::schema::blocks;
-
-        diesel::insert_into(blocks::table)
-            .values((
-                blocks::epoch.eq(block.epoch().as_u64() as i64),
-                blocks::shard_group.eq(block.shard_group().to_parsable_string()),
-                blocks::block_id.eq(serialize_hex(block.id())),
-                blocks::height.eq(block.height().as_u64() as i64),
-                blocks::header.eq(serialize_json(block.header())?),
-            ))
-            .on_conflict_do_nothing()
-            .execute(self.connection())
-            .map_err(|e| StorageError::general(OPERATION, e))?;
-
-        Ok(())
-    }
-
-    fn delete_blocks_by_epoch(&mut self, epoch: Epoch) -> Result<(), StorageError> {
-        const OPERATION: &str = "delete_blocks_by_epoch";
-        use crate::storage_sqlite::schema::blocks;
-
-        diesel::delete(blocks::table)
-            .filter(blocks::epoch.eq(epoch.as_u64() as i64))
             .execute(self.connection())
             .map_err(|e| StorageError::general(OPERATION, e))?;
 

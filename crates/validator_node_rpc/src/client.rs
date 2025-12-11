@@ -9,7 +9,7 @@ use tari_bor::decode;
 use tari_consensus_types::Decision;
 use tari_engine_types::{
     commit_result::ExecuteResult,
-    substate::{Substate, SubstateId, SubstateValue},
+    substate::{Substate, SubstateValue},
 };
 use tari_networking::{MessageSpec, NetworkingHandle, PeerId};
 use tari_ootle_common_types::{NodeAddressable, SubstateRequirementRef, ToPeerId};
@@ -64,8 +64,8 @@ pub struct FinalizedResult {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum SubstateResult {
     DoesNotExist,
-    Up { id: SubstateId, substate: Box<Substate> },
-    Down { id: SubstateId, version: u32 },
+    Up { substate: Box<Substate> },
+    Down { version: u32 },
 }
 
 impl SubstateResult {
@@ -80,6 +80,13 @@ impl SubstateResult {
     pub fn up(&self) -> Option<&Substate> {
         match self {
             SubstateResult::Up { substate, .. } => Some(substate),
+            _ => None,
+        }
+    }
+
+    pub fn into_up(self) -> Option<Substate> {
+        match self {
+            SubstateResult::Up { substate } => Some(*substate),
             _ => None,
         }
     }
@@ -210,15 +217,9 @@ impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClien
                     .map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!(e)))?;
                 Ok(SubstateResult::Up {
                     substate: Box::new(Substate::new(resp.version, substate)),
-                    id: SubstateId::from_bytes(&resp.address)
-                        .map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!(e)))?,
                 })
             },
-            SubstateStatus::Down => Ok(SubstateResult::Down {
-                id: SubstateId::from_bytes(&resp.address)
-                    .map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!(e)))?,
-                version: resp.version,
-            }),
+            SubstateStatus::Down => Ok(SubstateResult::Down { version: resp.version }),
             SubstateStatus::DoesNotExist => Ok(SubstateResult::DoesNotExist),
         }
     }

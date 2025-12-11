@@ -131,6 +131,15 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
         &self,
         transaction: Transaction,
     ) -> Result<TransactionQueryResult, Self::Error> {
+        if !transaction.is_dry_run() {
+            return Err(IndexerRestApiNetworkInterfaceError::IndexerClientError(
+                IndexerRestClientError::RequestFailedWithStatus {
+                    code: INVALID_REQUEST_CODE,
+                    message: "Transaction must be marked as dry-run".to_string(),
+                },
+            ));
+        }
+
         let mut client = self.get_client()?;
         let resp = client
             .submit_transaction(SubmitTransactionRequest { transaction })

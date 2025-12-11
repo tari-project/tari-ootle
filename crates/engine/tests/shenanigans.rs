@@ -110,7 +110,7 @@ fn it_rejects_unknown_substate_ids() {
 
     assert_reject_reason(
         reason,
-        RejectReason::OneOrMoreSubstatesNotFound(
+        RejectReason::SubstateNotFound(
             "Template referenced substate but it was not found: \
              resource_abababababababababababababababababababababababababababababababab"
                 .to_string(),

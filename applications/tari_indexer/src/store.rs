@@ -7,16 +7,14 @@ use std::{
 };
 
 use serde::{de::DeserializeOwned, Serialize};
-use tari_consensus_types::BlockId;
 use tari_engine_types::{
     events::Event,
-    substate::SubstateId,
+    substate::{Substate, SubstateId},
     transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
     Utxo,
 };
 use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate, TransactionEntry};
 use tari_ootle_common_types::{
-    displayable::Displayable,
     optional::Optional,
     shard::Shard,
     substate_type::SubstateType,
@@ -25,7 +23,7 @@ use tari_ootle_common_types::{
     StateVersion,
 };
 use tari_ootle_storage::{
-    consensus_models::{Block, BlockHeader, EpochCheckpoint, SubstateData, SubstateUpdateProof},
+    consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof},
     Ordering,
     StorageError,
 };
@@ -38,9 +36,8 @@ use tari_template_lib::{
 use tari_transaction::{Transaction, TransactionId};
 
 use crate::{
-    network_state_sync::EventFilter,
-    storage_sqlite::models::{Key, KeyValue, NewScannedBlockId, SubstateRecord, UtxoUpdateRecord},
-    substate_manager::SubstateResponse,
+    network_state_sync::{EventFilter, SyncProgress},
+    storage_sqlite::models::{Key, KeyValue, SubstateRecord, UtxoUpdateRecord},
 };
 
 const LOG_TARGET: &str = "tari::indexer::store";
@@ -86,6 +83,7 @@ pub trait IndexerStoreReader {
 pub trait IndexerStoreReadTransaction {
     fn list_substates(
         &mut self,
+        by_id: Option<&SubstateId>,
         filter_by_type: Option<SubstateType>,
         filter_by_template: Option<TemplateAddress>,
         limit: Option<u64>,
@@ -97,8 +95,7 @@ pub trait IndexerStoreReadTransaction {
         version: Option<u32>,
     ) -> Result<Option<SubstateRecord>, StorageError>;
 
-    fn get_substates(&mut self, ids: &[SubstateId]) -> Result<Vec<SubstateResponse>, StorageError>;
-    fn get_non_fungible_count(&mut self, resource_address: String) -> Result<i64, StorageError>;
+    fn get_substates(&mut self, ids: &[SubstateId]) -> Result<HashMap<SubstateId, Substate>, StorageError>;
     fn get_non_fungibles_by_resource_address(
         &mut self,
         resource_address: ResourceAddress,
@@ -113,12 +110,6 @@ pub trait IndexerStoreReadTransaction {
         offset: u32,
         limit: u32,
     ) -> Result<Vec<(TransactionId, Event)>, StorageError>;
-    fn get_oldest_scanned_epoch(&mut self) -> Result<Option<Epoch>, StorageError>;
-    fn get_last_scanned_block_id(
-        &mut self,
-        epoch: Epoch,
-        shard_group: ShardGroup,
-    ) -> Result<Option<BlockId>, StorageError>;
     fn list_recent_transactions(
         &mut self,
         last_transaction_id: Option<TransactionId>,
@@ -176,9 +167,6 @@ pub trait IndexerStoreReadTransaction {
         resource_address: &ResourceAddress,
         public_nonce_and_tag: &[(UtxoTag, RistrettoPublicKeyBytes)],
     ) -> Result<Vec<(UtxoId, Utxo)>, StorageError>;
-
-    // -------------------------------- Blocks -------------------------------- //
-    fn get_tip_blocks(&mut self, epoch: Epoch) -> Result<HashMap<ShardGroup, BlockHeader>, StorageError>;
 }
 
 pub trait IndexerStoreWriteTransaction {
@@ -202,14 +190,8 @@ pub trait IndexerStoreWriteTransaction {
         receipts: I,
         event_filters: &[EventFilter],
     ) -> Result<(), StorageError>;
-    fn save_scanned_block_id(&mut self, new_scanned_block_id: NewScannedBlockId) -> Result<(), StorageError>;
-    fn delete_scanned_epochs_older_than(&mut self, epoch: Epoch) -> Result<(), StorageError>;
     fn insert_or_ignore_transaction(&mut self, transaction: &Transaction) -> Result<(), StorageError>;
     fn insert_or_ignore_epoch_checkpoint(&mut self, epoch_checkpoint: &EpochCheckpoint) -> Result<(), StorageError>;
-
-    // -------------------------------- Blocks -------------------------------- //
-    fn insert_block_or_ignore(&mut self, block: &Block) -> Result<(), StorageError>;
-    fn delete_blocks_by_epoch(&mut self, epoch: Epoch) -> Result<(), StorageError>;
 }
 
 pub struct ReadOnlyStore<T: IndexerStoreReader> {
@@ -238,32 +220,32 @@ impl<T: IndexerStoreReader> ReadOnlyStore<T> {
         self.inner.with_read_tx(|tx| tx.get_transaction_receipt(address))
     }
 
-    pub fn get_xtr_total_supply(&self, epoch: Epoch) -> Result<Amount, StorageError> {
+    pub fn get_xtr_total_supply(&self) -> Result<Amount, StorageError> {
         self.inner.with_read_tx(|tx| {
             let claimed = tx
                 .key_value_get_value::<_, Amount>(Key::XtrAccumulatedClaimed)
-                .optional()?;
+                .optional()?
+                .unwrap_or_default();
             let burnt = tx
                 .key_value_get_value::<_, Amount>(Key::XtrAccumulatedExhaustBurn)
-                .optional()?;
-
-            let tips = tx.get_tip_blocks(epoch)?;
-            let total_exhaust = tips
-                .values()
-                .map(|header| header.accumulated_data().total_exhaust_burn)
-                .fold(Amount::zero(), |acc, x| acc.saturating_add(x.into())) +
-                burnt.unwrap_or_default();
+                .optional()?
+                .unwrap_or_default();
 
             claimed
-                .unwrap_or_default()
-                .checked_sub(total_exhaust)
+                .checked_sub(burnt)
                 .ok_or_else(|| StorageError::DataInconsistency {
                     details: format!(
                         "XTR total supply underflow: claimed {} < total exhaust {}",
-                        claimed.display(),
-                        total_exhaust
+                        claimed, burnt
                     ),
                 })
         })
+    }
+
+    pub fn get_sync_progress(&self) -> Result<SyncProgress, StorageError> {
+        let progress = self
+            .inner
+            .with_read_tx(|tx| tx.key_value_get_value(Key::SyncProgress))?;
+        Ok(progress)
     }
 }

@@ -247,7 +247,7 @@ fn test_engine_errors() {
     // call returned null for op VaultInvoke)
     assert_reject_reason(
         reason,
-        RejectReason::OneOrMoreSubstatesNotFound(
+        RejectReason::SubstateNotFound(
             "resource_7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b not found".to_string(),
         ),
     );

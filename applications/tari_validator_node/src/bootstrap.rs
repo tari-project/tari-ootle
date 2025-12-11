@@ -204,7 +204,7 @@ pub async fn spawn_services(
 
     #[cfg(feature = "metrics")]
     {
-        network_builder = network_builder.with_metrics_registry(metrics_registry);
+        network_builder = network_builder.with_metrics(metrics_registry);
     }
     let (mut networking, join_handle) = network_builder.spawn(shutdown.clone())?;
     handles.push(join_handle);

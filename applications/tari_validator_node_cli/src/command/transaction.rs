@@ -52,7 +52,7 @@ use tari_transaction::{
     arg,
     args::InstructionArg,
     builder::named_args::NamedArg,
-    ComponentCall,
+    ComponentReference,
     Instruction,
     Transaction,
     TransactionId,
@@ -600,7 +600,7 @@ fn load_inputs(
     let mut inputs = Vec::new();
     for instruction in instructions {
         if let Instruction::CallMethod {
-            call: ComponentCall::Address(component_address),
+            call: ComponentReference::Address(component_address),
             ..
         } = instruction
         {

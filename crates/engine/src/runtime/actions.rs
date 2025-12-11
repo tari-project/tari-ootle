@@ -63,6 +63,7 @@ pub enum NativeAction {
     Resource(ResourceAuthAction),
     Vault(VaultAction),
     StealthUtxoSpend,
+    UpdateComponentTemplate,
 }
 
 impl Display for NativeAction {
@@ -73,6 +74,7 @@ impl Display for NativeAction {
             Self::Resource(action) => write!(f, "resource.{:?}", action),
             Self::Vault(action) => write!(f, "vault.{:?}", action),
             Self::StealthUtxoSpend => write!(f, "stealth_utxo.spend"),
+            Self::UpdateComponentTemplate => write!(f, "component.update_template"),
         }
     }
 }

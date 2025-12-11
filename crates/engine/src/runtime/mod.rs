@@ -94,7 +94,7 @@ use tari_template_lib::{
 use tari_transaction::{
     args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
     AllocatableAddressType,
-    ComponentCall,
+    ComponentReference,
     ResourceAddressRef,
 };
 pub use tracker::StateTracker;
@@ -107,7 +107,7 @@ pub trait RuntimeInterface: Send + Sync {
 
     fn emit_log(&self, level: LogLevel, message: String) -> Result<(), RuntimeError>;
 
-    fn load_component(&self, call: ComponentCall) -> Result<(ComponentAddress, ComponentHeader), RuntimeError>;
+    fn load_component(&self, call: ComponentReference) -> Result<(ComponentAddress, ComponentHeader), RuntimeError>;
 
     fn lock_component(&self, address: ComponentAddress, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError>;
 
@@ -183,7 +183,10 @@ pub trait RuntimeInterface: Send + Sync {
 
     fn builtin_template_invoke(&self, action: BuiltinTemplateAction) -> Result<InvokeResult, RuntimeError>;
 
-    fn check_component_access_rules(&self, method: &str, locked: &LockedSubstate) -> Result<(), RuntimeError>;
+    fn check_component_access_rules(&self, method: &str) -> Result<(), RuntimeError>;
+    fn check_component_ownership(&self, action: ActionIdent) -> Result<(), RuntimeError>;
+
+    fn update_component_template(&self, new_template: TemplateAddress) -> Result<(), RuntimeError>;
 
     fn validate_return_value(&self, value: &IndexedValue) -> Result<(), RuntimeError>;
 

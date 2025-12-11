@@ -26,7 +26,7 @@ use tari_template_lib::prelude::*;
 mod state_template {
     use super::*;
 
-    #[derive(Default)]
+    #[derive(Debug, Default)]
     pub enum State {
         #[default]
         Zero,

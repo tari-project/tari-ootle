@@ -22,14 +22,15 @@
 
 mod cli;
 
-use std::{fs, panic, process};
+use std::{fs, fs::OpenOptions, panic, time::SystemTime};
 
 use clap::Parser;
 use log::*;
+use tari_bor::Write;
 use tari_common::initialize_logging;
 use tari_ootle_app_utilities::{configuration::load_configuration, keypair::setup_keypair_prompt};
 use tari_shutdown::Shutdown;
-use tari_validator_node::{run_validator_node, ApplicationConfig};
+use tari_validator_node::{node, run_validator_node, ApplicationConfig};
 
 use crate::cli::Cli;
 
@@ -44,8 +45,9 @@ async fn main() -> anyhow::Result<()> {
     // any thread "crash" the system instead of silently continuing.
     let default_hook = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
+        handle_panic(info);
         default_hook(info);
-        process::exit(1);
+        node::trigger_panic_notifier();
     }));
 
     let cli = Cli::parse();
@@ -127,4 +129,42 @@ async fn main() -> anyhow::Result<()> {
     );
 
     Ok(())
+}
+
+fn handle_panic(panic_info: &panic::PanicHookInfo) {
+    fn format_current_time() -> String {
+        let now = SystemTime::now();
+        ::time::OffsetDateTime::from(now)
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|e| format!("format time fail: {e}"))
+    }
+
+    let location = panic_info
+        .location()
+        .map(|loc| format!("file: '{}', line: {}", loc.file(), loc.line()))
+        .unwrap_or_else(|| "unknown location".to_string());
+
+    let message = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+        *s
+    } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
+        s.as_str()
+    } else {
+        "Unknown panic message"
+    };
+
+    error!(target: LOG_TARGET, "Panic occurred at {location}: {message}");
+
+    if let Err(err) = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open("ootle-node-panic.log")
+        .and_then(|mut file| {
+            file.write_all(b"---\n")?;
+            file.write_all(format!("Timestamp: {}\n", format_current_time()).as_bytes())?;
+            file.write_all(format!("Panic at {}: {}\n", location, message).as_bytes())?;
+            file.write_all(b"---\n")
+        })
+    {
+        warn!(target: LOG_TARGET, "Failed to write panic log file: {}", err);
+    }
 }

@@ -67,7 +67,7 @@ impl ConsensusGossipService {
     }
 
     pub async fn run(mut self) -> anyhow::Result<()> {
-        let mut initial_subscription = false;
+        let mut initial_subscription_complete = false;
         loop {
             tokio::select! {
                 Ok(HotstuffEvent::EpochChanged{ registered_shard_group, .. }) = self.consensus_events.recv() => {
@@ -81,10 +81,10 @@ impl ConsensusGossipService {
                     }
                 },
                 Ok(EpochManagerEvent::EpochChanged{ registered_shard_group, .. }) = self.epoch_manager_events.recv() => {
-                    if !initial_subscription {
+                    if !initial_subscription_complete {
                         if let Some(shard_group) = registered_shard_group {
                             self.subscribe(shard_group).await?;
-                            initial_subscription = true;
+                            initial_subscription_complete = true;
                         }
                     }
                 },

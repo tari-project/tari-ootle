@@ -106,6 +106,22 @@ impl<'de, const N: usize, T: serde::Deserialize<'de>> serde::Deserialize<'de> fo
     }
 }
 
+impl<const N: usize, T> IntoIterator for MaxVec<N, T> {
+    type IntoIter = std::vec::IntoIter<T>;
+    type Item = T;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.into_vec().into_iter()
+    }
+}
+
+impl<const N: usize, T> FromIterator<T> for MaxVec<N, T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let elems: Vec<T> = iter.into_iter().collect();
+        Self::new_checked(elems).expect("collected iterator exceeds maximum length")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -94,6 +94,11 @@ impl ComponentHeader {
         self
     }
 
+    pub fn set_template_address(&mut self, template_address: TemplateAddress) -> &mut Self {
+        self.template_address = template_address;
+        self
+    }
+
     pub fn contains_substate(&self, address: &SubstateId) -> Result<bool, IndexedValueError> {
         let found = IndexedWellKnownTypes::value_contains_substate(self.state(), address)?;
         Ok(found)

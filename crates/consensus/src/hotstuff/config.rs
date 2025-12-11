@@ -16,4 +16,5 @@ pub struct HotstuffConfig {
     pub state_tree_cleanup_interval: Duration,
     pub epoch_gc_interval: Duration,
     pub enable_eviction_proposal: bool,
+    pub epoch_end_grace_period: Duration,
 }

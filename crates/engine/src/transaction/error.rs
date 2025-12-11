@@ -51,6 +51,10 @@ pub enum TransactionError {
     TemplateProvider(String),
     #[error("Converting to hash error: {0}")]
     HashConversion(#[from] HashParseError),
+    #[error("Function specified for component update is not marked as a migration function: {name}")]
+    NotAMigrationFunction { name: String },
+    #[error("Migration functions cannot be called directly: {name}")]
+    CannotCallMigrationFunctionDirectly { name: String },
 }
 
 impl TransactionError {

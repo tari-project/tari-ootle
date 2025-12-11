@@ -25,6 +25,7 @@ use std::fmt::{Debug, Formatter};
 use syn::{
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
+    spanned::Spanned,
     token::Comma,
     Error,
     FnArg,
@@ -36,19 +37,23 @@ use syn::{
     ItemUse,
     Result,
     ReturnType,
+    Type,
     TypePath,
     TypeTuple,
     UseTree,
+    Visibility,
 };
 
 #[allow(dead_code)]
 pub struct TemplateAst {
     pub template_name: Ident,
     pub module_content: Vec<Item>,
+    pub functions: Vec<FunctionAst>,
     pub uses: Vec<ItemUse>,
 }
 
 impl Parse for TemplateAst {
+    #[allow(clippy::too_many_lines)]
     fn parse(input: ParseStream) -> Result<Self> {
         // parse the "mod" block
         let mut module: ItemMod = input.parse()?;
@@ -59,6 +64,8 @@ impl Parse for TemplateAst {
             None => return Err(Error::new(module.ident.span(), "empty module")),
         };
 
+        let mut functions = Vec::with_capacity(5);
+
         // add derive macros to all structs
         let mut template_name = None;
         let mut has_impl = false;
@@ -67,27 +74,85 @@ impl Parse for TemplateAst {
         for item in items {
             match item {
                 Item::Struct(ref mut item) => {
+                    if !matches!(item.vis, Visibility::Public(_)) {
+                        return Err(Error::new(item.ident.span(), "template structs must be public"));
+                    }
                     item.attrs
-                        .push(syn::parse_quote!(#[derive(Debug, serde::Serialize, serde::Deserialize)]));
+                        .push(syn::parse_quote!(#[derive(serde::Serialize, serde::Deserialize)]));
                     item.attrs.push(syn::parse_quote!(#[serde(crate = "self::serde")]));
                     // Use the first struct name as the template name
-                    // TODO: remove this assumption in favor of "marking" the struct as a template struct
-                    // #[template(Component)]
                     if template_name.is_none() {
                         template_name = Some(item.ident.clone());
                     }
                 },
                 Item::Enum(ref mut item) => {
+                    if !matches!(item.vis, Visibility::Public(_)) {
+                        return Err(Error::new(item.ident.span(), "template structs must be public"));
+                    }
                     item.attrs
-                        .push(syn::parse_quote!(#[derive(Debug, serde::Serialize, serde::Deserialize)]));
+                        .push(syn::parse_quote!(#[derive(serde::Serialize, serde::Deserialize)]));
                     item.attrs.push(syn::parse_quote!(#[serde(crate = "self::serde")]));
                     if template_name.is_none() {
                         template_name = Some(item.ident.clone());
                     }
                 },
-                // TODO: check name matches template name
-                Item::Impl(_) => {
-                    has_impl = true;
+                Item::Impl(impl_item) => {
+                    if let Type::Path(path) = &*impl_item.self_ty {
+                        let template_name_ref = template_name.as_ref().expect("struct not defined before impl");
+                        if path.path.is_ident(template_name_ref) {
+                            for impl_item_mut in &mut impl_item.items {
+                                if let Some(func) = Self::get_function_from_item(impl_item_mut) {
+                                    functions.push(func);
+                                    if let ImplItem::Fn(fn_item) = impl_item_mut {
+                                        let migration_pos =
+                                            fn_item.attrs.iter().position(|attr| attr.path().is_ident("migration"));
+
+                                        if let Some(migration_index) = migration_pos {
+                                            match &fn_item.sig.output {
+                                                ReturnType::Default => {
+                                                    return Err(Error::new(
+                                                        fn_item.sig.ident.span(),
+                                                        "migration functions must return the new template struct. \
+                                                         Found: unit",
+                                                    ))
+                                                },
+                                                ReturnType::Type(_, ty) => match &**ty {
+                                                    Type::Path(pth) => {
+                                                        if !pth.path.is_ident(template_name_ref) &&
+                                                            !pth.path.is_ident("Self")
+                                                        {
+                                                            return Err(Error::new(
+                                                                ty.span(),
+                                                                format!(
+                                                                    "migration functions must return the new template \
+                                                                     struct. Found: {}",
+                                                                    pth.path.segments.last().unwrap().ident
+                                                                ),
+                                                            ));
+                                                        }
+                                                    },
+
+                                                    ty => {
+                                                        return Err(Error::new(
+                                                            ty.span(),
+                                                            format!(
+                                                                "migration functions must return the new template \
+                                                                 struct. Found: {:?}",
+                                                                ty
+                                                            ),
+                                                        ));
+                                                    },
+                                                },
+                                            }
+                                            // Remove migration attribute from functions/methods
+                                            fn_item.attrs.remove(migration_index);
+                                        }
+                                    }
+                                }
+                            }
+                            has_impl = true;
+                        }
+                    }
                 },
                 Item::Use(item) => {
                     // Exclude super imports
@@ -115,6 +180,7 @@ impl Parse for TemplateAst {
 
         Ok(Self {
             template_name: template_name.unwrap(),
+            functions,
             module_content: module
                 .content
                 .map(|(_, c)| c)
@@ -125,15 +191,8 @@ impl Parse for TemplateAst {
 }
 
 impl TemplateAst {
-    pub fn get_functions(&self) -> impl Iterator<Item = FunctionAst> + '_ {
-        self.module_content
-            .iter()
-            .filter_map(|i| match i {
-                Item::Impl(impl_item) => Some(&impl_item.items),
-                _ => None,
-            })
-            .flatten()
-            .filter_map(Self::get_function_from_item)
+    pub fn get_functions(&self) -> impl Iterator<Item = &FunctionAst> + '_ {
+        self.functions.iter()
     }
 
     fn get_function_from_item(item: &ImplItem) -> Option<FunctionAst> {
@@ -146,9 +205,7 @@ impl TemplateAst {
                     name: m.sig.ident.to_string(),
                     input_types: Self::get_input_types(&m.sig.inputs),
                     output_type: Self::get_output_type_token(&m.sig.output),
-                    // statements: Self::get_statements(m),
-                    // is_constructor: Self::is_constructor(&m.sig),
-                    // is_public: true,
+                    is_migration: m.attrs.iter().any(|attr| attr.path().is_ident("migration")),
                 })
             },
             _ => todo!("get_function_from_item does not support anything other than functions/methods"),
@@ -159,7 +216,6 @@ impl TemplateAst {
         inputs
             .iter()
             .map(|arg| match arg {
-                // TODO: handle the "self" case
                 syn::FnArg::Receiver(r) => {
                     if r.reference.is_none() {
                         panic!("Consuming methods are not supported")
@@ -220,6 +276,7 @@ pub struct FunctionAst {
     pub name: String,
     pub input_types: Vec<TypeAst>,
     pub output_type: Option<TypeAst>,
+    pub is_migration: bool,
     // pub statements: Vec<Stmt>,
     // pub is_constructor: bool,
     // pub is_public: bool,

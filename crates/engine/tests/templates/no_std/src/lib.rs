@@ -9,7 +9,7 @@ use tari_template_lib::prelude::*;
 mod template {
     use super::*;
 
-    #[derive(Default)]
+    #[derive(Debug, Default)]
     pub struct NoStdCounter {
         value: u128,
     }

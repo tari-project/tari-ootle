@@ -973,7 +973,13 @@ async fn single_shard_input_conflict() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn epoch_change() {
     setup_logger();
-    let mut test = Test::builder().add_committee(0, vec!["1", "2"]).start().await;
+    let mut test = Test::builder()
+        .modify_config(|config_mut| {
+            config_mut.epoch_end_grace_period = Duration::from_millis(10);
+        })
+        .add_committee(0, vec!["1", "2"])
+        .start()
+        .await;
 
     test.start_epoch(Epoch(1)).await;
     let mut remaining_txs = 10;

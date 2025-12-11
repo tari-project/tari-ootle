@@ -22,7 +22,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::rust::{boxed::Box, string::String, vec::Vec};
+use crate::rust::{boxed::Box, ops, string::String, vec::Vec};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -77,6 +77,8 @@ pub struct FunctionDef {
     pub arguments: Vec<ArgDef>,
     pub output: Type,
     pub is_mut: bool,
+    #[serde(default, skip_serializing_if = "ops::Not::not")]
+    pub is_migration: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

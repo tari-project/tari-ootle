@@ -6,6 +6,7 @@ mod mocks;
 mod package_builder;
 mod read_only_state_store;
 pub mod support;
+mod template_spec;
 mod template_test;
 mod track_calls;
 mod wrapped_transaction;

@@ -36,8 +36,9 @@ use crate::{
     call_args,
     unsigned_transaction::UnsignedTransaction,
     AllocatableAddressType,
-    ComponentCall,
+    ComponentReference,
     Instruction,
+    MigrateFunction,
     ResourceAddressRef,
     Transaction,
     TransactionSignature,
@@ -150,6 +151,45 @@ impl TransactionBuilder<MainIntent> {
 
     pub fn add_fee_instruction(self, instruction: Instruction) -> Self {
         self.with_fee_instructions_builder(|builder| builder.add_instruction(instruction))
+    }
+
+    pub fn update_component_template_address_with_migrate<C, T>(
+        self,
+        component: C,
+        new_template: TemplateAddress,
+        migrate_name: T,
+        migrate_args: Vec<NamedArg>,
+    ) -> Self
+    where
+        C: Into<NamedComponentCall>,
+        T: TryInto<FunctionName>,
+        <T as TryInto<FunctionName>>::Error: std::fmt::Debug,
+    {
+        let component = self.resolve_call(component.into());
+        let migrate_args = self.resolve_args(migrate_args).expect("Invalid named arguments");
+        self.add_instruction(Instruction::UpdateComponentTemplate {
+            component,
+            migrate: Some(MigrateFunction {
+                name: migrate_name
+                    .try_into()
+                    .expect("Oops! The provided migrate function name is longer than the limit"),
+                args: migrate_args,
+            }),
+            new_template,
+        })
+    }
+
+    pub fn update_component_template_address<C: Into<NamedComponentCall>>(
+        self,
+        component: C,
+        new_template: TemplateAddress,
+    ) -> Self {
+        let component = self.resolve_call(component.into());
+        self.add_instruction(Instruction::UpdateComponentTemplate {
+            component,
+            migrate: None,
+            new_template,
+        })
     }
 
     /// Add an input to use in the transaction
@@ -438,7 +478,7 @@ impl<D> TransactionBuilder<D> {
         self.add_instruction(Instruction::ClaimValidatorFees { address })
     }
 
-    pub fn create_proof<A: Into<ComponentCall>>(self, account: A, resource_addr: ResourceAddress) -> Self {
+    pub fn create_proof<A: Into<ComponentReference>>(self, account: A, resource_addr: ResourceAddress) -> Self {
         // We may want to make this a native instruction
         self.add_instruction(Instruction::CallMethod {
             call: account.into(),
@@ -483,14 +523,14 @@ impl<D> TransactionBuilder<D> {
         })
     }
 
-    fn resolve_call(&self, call: NamedComponentCall) -> ComponentCall {
+    fn resolve_call(&self, call: NamedComponentCall) -> ComponentReference {
         match call {
             NamedComponentCall::Address(call) => call.into(),
             NamedComponentCall::Workspace(call) => {
                 let id = self.workspace_ids.get(call.name()).unwrap_or_else(|| {
                     panic!("Workspace key '{}' not found", call.name());
                 });
-                ComponentCall::Workspace(id)
+                ComponentReference::Workspace(id)
             },
         }
     }

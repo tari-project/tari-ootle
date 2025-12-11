@@ -51,8 +51,9 @@ use tari_transaction::{
     call_arg,
     call_args,
     AllocatableAddressType,
-    ComponentCall,
+    ComponentReference,
     Instruction,
+    MigrateFunction,
     ResourceAddressRef,
 };
 
@@ -62,6 +63,7 @@ use crate::{
         scope::{CallScope, PushCallFrame},
         AuthParams,
         AuthorizationScope,
+        NativeAction,
         Runtime,
         RuntimeError,
         RuntimeInterfaceImpl,
@@ -246,6 +248,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
         result
     }
 
+    #[allow(clippy::too_many_lines)]
     fn process_instruction(
         template_provider: &TTemplateProvider,
         runtime: &Runtime,
@@ -355,7 +358,99 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
                 statement,
                 revealed_input_bucket,
             } => Self::pay_fee(runtime, statement, revealed_input_bucket),
+            Instruction::UpdateComponentTemplate {
+                component,
+                migrate,
+                new_template,
+            } => Self::update_component_template(template_provider, runtime, component, new_template, migrate),
         }
+    }
+
+    fn update_component_template(
+        template_provider: &TTemplateProvider,
+        runtime: &Runtime,
+        component: ComponentReference,
+        new_template: TemplateAddress,
+        migrate: Option<MigrateFunction>,
+    ) -> Result<InstructionResult, TransactionError> {
+        let (component_address, component) = runtime.interface().load_component(component)?;
+        // let template_address = component.template_address;
+
+        let template = template_provider
+            .get_template(&new_template)
+            .map_err(|e| TransactionError::FailedToLoadTemplate {
+                address: new_template,
+                details: e.to_string(),
+            })?
+            .ok_or(TransactionError::TemplateNotFound { address: new_template })?;
+
+        runtime
+            .interface()
+            .track_template_loaded(&new_template, template.code_size())?;
+
+        let component_lock = runtime.interface().lock_component(component_address, LockFlag::Write)?;
+
+        let resolved_args = migrate
+            .as_ref()
+            .map(|f| runtime.resolve_args(&f.args))
+            .transpose()?
+            .unwrap_or_default();
+        let arg_scope = resolved_args
+            .iter()
+            .map(IndexedWellKnownTypes::from_value)
+            .collect::<Result<_, _>>()?;
+
+        let function_def = migrate
+            .as_ref()
+            .map(|f| {
+                template
+                    .template_def()
+                    .get_function(&f.name)
+                    .cloned()
+                    .ok_or_else(|| TransactionError::FunctionNotFound {
+                        name: f.name.to_string(),
+                    })
+                    .and_then(|f| {
+                        if f.is_migration {
+                            Ok(f)
+                        } else {
+                            Err(TransactionError::NotAMigrationFunction { name: f.name })
+                        }
+                    })
+            })
+            .transpose()?;
+
+        let component_scope = IndexedWellKnownTypes::from_value(component.state())?;
+
+        runtime.interface().push_call_frame(PushCallFrame::MigrationContext {
+            template_address: new_template,
+            module_name: template.template_name().to_string(),
+            component_scope,
+            component_lock,
+            arg_scope: Box::new(arg_scope),
+            entity_id: component.entity_id,
+        })?;
+
+        // This must come after the call frame as that defines the authorization scope
+        runtime
+            .interface()
+            .check_component_ownership(NativeAction::UpdateComponentTemplate.into())?;
+
+        runtime.interface().update_component_template(new_template)?;
+
+        if let Some(function_def) = function_def {
+            // Migrate function is defined, so we need to call it
+            let mut final_args = Vec::with_capacity(resolved_args.len() + 1);
+            final_args.push(to_value(&component_address)?);
+            final_args.extend(resolved_args);
+
+            let result = Self::invoke_template(template, runtime.clone(), function_def, final_args)?;
+
+            runtime.interface().validate_return_value(&result.indexed)?;
+        }
+        runtime.interface().pop_call_frame()?;
+
+        Ok(InstructionResult::empty())
     }
 
     fn pay_fee(
@@ -554,6 +649,12 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
             }
         })?;
 
+        if function_def.is_migration {
+            return Err(TransactionError::CannotCallMigrationFunctionDirectly {
+                name: function_def.name,
+            });
+        }
+
         let resolved_args = runtime.resolve_args(&args)?;
         let arg_scope = resolved_args
             .iter()
@@ -579,7 +680,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
     pub(crate) fn call_method(
         template_provider: &TTemplateProvider,
         runtime: &Runtime,
-        call: ComponentCall,
+        call: ComponentReference,
         method: &str,
         args: Vec<InstructionArg>,
     ) -> Result<InstructionResult, TransactionError> {
@@ -606,6 +707,12 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
             }
         })?;
 
+        if function_def.is_migration {
+            return Err(TransactionError::CannotCallMigrationFunctionDirectly {
+                name: function_def.name,
+            });
+        }
+
         let lock_flag = if function_def.is_mut {
             LockFlag::Write
         } else {
@@ -626,15 +733,13 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> Transaction
             template_address,
             module_name: template.template_name().to_string(),
             component_scope,
-            component_lock: component_lock.clone(),
+            component_lock,
             arg_scope: Box::new(arg_scope),
             entity_id: component.entity_id,
         })?;
 
         // This must come after the call frame as that defines the authorization scope
-        runtime
-            .interface()
-            .check_component_access_rules(method, &component_lock)?;
+        runtime.interface().check_component_access_rules(method)?;
 
         let mut final_args = Vec::with_capacity(resolved_args.len() + 1);
         final_args.push(to_value(&component_address)?);

@@ -20,8 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::process;
+use std::{process, time::Duration};
 
+use anyhow::Context;
 use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
@@ -33,6 +34,13 @@ use tari_shutdown::Shutdown;
 use crate::{Services, ValidatorNodeStateStore};
 
 const LOG_TARGET: &str = "tari::validator_node";
+lazy_static::lazy_static! {
+    static ref PANIC_NOTIFIER: tokio::sync::Notify = tokio::sync::Notify::new();
+}
+
+pub fn trigger_panic_notifier() {
+    PANIC_NOTIFIER.notify_waiters();
+}
 
 pub struct ValidatorNode {
     services: Services<ValidatorNodeStateStore>,
@@ -47,10 +55,6 @@ impl ValidatorNode {
         let mut hotstuff_events = self.services.consensus_handle.subscribe_to_hotstuff_events()?;
         let mut epoch_manager_events = self.services.epoch_manager.subscribe();
 
-        // if let Err(err) = self.dial_local_shard_peers().await {
-        //     error!(target: LOG_TARGET, "Failed to dial local shard peers: {}", err);
-        // }
-
         loop {
             let metrics = tokio::runtime::Handle::current().metrics();
             info!(
@@ -62,6 +66,11 @@ impl ValidatorNode {
             );
 
             tokio::select! {
+                _ = PANIC_NOTIFIER.notified() => {
+                    error!(target: LOG_TARGET, "💤 Panic detected in another task. Shutting down...");
+                    shutdown.trigger();
+                    break;
+                },
                 _ = tokio::signal::ctrl_c() => {
                     info!(target: LOG_TARGET, "💤 Received SIGINT");
                     shutdown.trigger();
@@ -94,16 +103,16 @@ impl ValidatorNode {
             }
         }
 
+        // Just exit ASAP on panic
         info!(target: LOG_TARGET, "💤 Waiting for all services to shut down... ctrl+c to force shutdown");
-
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
                 // Second SIGINT forces shutdown
                 warn!(target: LOG_TARGET, "💤 Shutdown NOW");
                 process::exit(1);
             },
-            res = self.services.join_all() => {
-                res?;
+            res = tokio::time::timeout(Duration::from_secs(20), self.services.join_all()) => {
+                res.context("Timeout waiting for all workers to end")??;
                 info!(target: LOG_TARGET, "🏁 All services have exited cleanly");
             }
         }
@@ -151,45 +160,4 @@ impl ValidatorNode {
 
         Ok(())
     }
-
-    // async fn dial_local_shard_peers(&mut self) -> Result<(), anyhow::Error> {
-    //     let epoch = self.services.epoch_manager.current_epoch().await?;
-    //     let res = self
-    //         .services
-    //         .epoch_manager
-    //         .get_validator_node(epoch, &self.services.networking.local_peer_id().into())
-    //         .await;
-    //
-    //     let shard_id = match res {
-    //         Ok(vn) => vn.shard_key,
-    //         Err(EpochManagerError::ValidatorNodeNotRegistered { address, epoch }) => {
-    //             info!(target: LOG_TARGET, "Validator node {address} not registered for current epoch {epoch}");
-    //             return Ok(());
-    //         },
-    //         Err(EpochManagerError::BaseLayerConsensusConstantsNotSet) => {
-    //             info!(target: LOG_TARGET, "Epoch manager has not synced with base layer yet");
-    //             return Ok(());
-    //         },
-    //         Err(err) => {
-    //             return Err(err.into());
-    //         },
-    //     };
-    //
-    //     let local_shard_peers = self.services.epoch_manager.get_committee(epoch, shard_id).await?;
-    //     info!(
-    //         target: LOG_TARGET,
-    //         "Dialing {} local shard peers",
-    //         local_shard_peers.members.len()
-    //     );
-    //     let local_peer_id = *self.services.networking.local_peer_id();
-    //     let local_shard_peers = local_shard_peers.addresses().filter(|addr| **addr != local_peer_id);
-    //
-    //     for peer in local_shard_peers {
-    //         if let Err(err) = self.services.networking.dial_peer(peer.to_peer_id()).await {
-    //             debug!(target: LOG_TARGET, "Failed to dial peer: {}", err);
-    //         }
-    //     }
-    //
-    //     Ok(())
-    // }
 }

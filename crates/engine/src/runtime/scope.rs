@@ -115,6 +115,10 @@ impl CallScope {
         self.component_lock.as_ref()
     }
 
+    pub fn take_current_component_lock(&mut self) -> Option<LockedSubstate> {
+        self.component_lock.take()
+    }
+
     pub fn owned_nodes(&self) -> &IndexSet<SubstateId> {
         &self.owned
     }
@@ -276,6 +280,8 @@ pub struct CallFrame {
     current_template: TemplateAddress,
     current_module: String,
     entity_id: EntityId,
+    allow_cross_template_calls: bool,
+    allow_migration_calls: bool,
 }
 
 impl CallFrame {
@@ -285,6 +291,8 @@ impl CallFrame {
             current_template,
             current_module,
             entity_id,
+            allow_cross_template_calls: true,
+            allow_migration_calls: false,
         }
     }
 
@@ -299,6 +307,24 @@ impl CallFrame {
             current_template,
             current_module,
             entity_id,
+            allow_cross_template_calls: true,
+            allow_migration_calls: false,
+        }
+    }
+
+    pub fn migration_context(
+        current_template: TemplateAddress,
+        current_module: String,
+        component_lock: LockedSubstate,
+        entity_id: EntityId,
+    ) -> Self {
+        Self {
+            scope: CallScope::for_component(component_lock),
+            current_template,
+            current_module,
+            entity_id,
+            allow_cross_template_calls: false,
+            allow_migration_calls: true,
         }
     }
 
@@ -325,11 +351,27 @@ impl CallFrame {
     pub fn current_template(&self) -> (&TemplateAddress, &str) {
         (&self.current_template, &self.current_module)
     }
+
+    pub fn is_cross_template_calls_allowed(&self) -> bool {
+        self.allow_cross_template_calls
+    }
+
+    pub fn are_migration_calls_allowed(&self) -> bool {
+        self.allow_migration_calls
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum PushCallFrame {
     ForComponent {
+        template_address: TemplateAddress,
+        module_name: String,
+        component_scope: IndexedWellKnownTypes,
+        component_lock: LockedSubstate,
+        arg_scope: Box<IndexedWellKnownTypes>,
+        entity_id: EntityId,
+    },
+    MigrationContext {
         template_address: TemplateAddress,
         module_name: String,
         component_scope: IndexedWellKnownTypes,
@@ -349,6 +391,7 @@ impl PushCallFrame {
     pub fn component_lock(&self) -> Option<&LockedSubstate> {
         match self {
             Self::ForComponent { component_lock, .. } => Some(component_lock),
+            Self::MigrationContext { component_lock, .. } => Some(component_lock),
             Self::Static { .. } => None,
         }
     }
@@ -356,6 +399,7 @@ impl PushCallFrame {
     pub fn arg_scope(&self) -> &IndexedWellKnownTypes {
         match self {
             Self::ForComponent { arg_scope, .. } => arg_scope,
+            Self::MigrationContext { arg_scope, .. } => arg_scope,
             Self::Static { arg_scope, .. } => arg_scope,
         }
     }
@@ -371,6 +415,19 @@ impl PushCallFrame {
                 entity_id,
             } => {
                 let mut frame = CallFrame::for_component(template_address, module_name, component_lock, entity_id);
+                frame.scope_mut().include_owned_in_scope(&component_scope);
+                frame.scope_mut().include_refs_in_scope(&arg_scope);
+                frame
+            },
+            Self::MigrationContext {
+                template_address,
+                module_name,
+                component_scope,
+                component_lock,
+                arg_scope,
+                entity_id,
+            } => {
+                let mut frame = CallFrame::migration_context(template_address, module_name, component_lock, entity_id);
                 frame.scope_mut().include_owned_in_scope(&component_scope);
                 frame.scope_mut().include_refs_in_scope(&arg_scope);
                 frame
@@ -391,6 +448,7 @@ impl PushCallFrame {
     pub fn entity_id(&self) -> Option<EntityId> {
         match self {
             Self::ForComponent { entity_id, .. } => Some(*entity_id),
+            Self::MigrationContext { entity_id, .. } => Some(*entity_id),
             Self::Static { .. } => None,
         }
     }

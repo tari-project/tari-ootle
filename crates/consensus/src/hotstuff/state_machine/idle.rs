@@ -103,6 +103,7 @@ where TSpec: ConsensusSpec
             EpochManagerEvent::EpochChanged {
                 epoch,
                 registered_shard_group,
+                ..
             } => {
                 if registered_shard_group.is_some() {
                     Ok(Some(ConsensusStateEvent::RegisteredForEpoch { epoch }))

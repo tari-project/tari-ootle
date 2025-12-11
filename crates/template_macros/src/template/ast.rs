@@ -74,10 +74,9 @@ impl Parse for TemplateAst {
         for item in items {
             match item {
                 Item::Struct(ref mut item) => {
-                    assert!(
-                        matches!(item.vis, Visibility::Public(_)),
-                        "template structs must be public"
-                    );
+                    if !matches!(item.vis, Visibility::Public(_)) {
+                        return Err(Error::new(item.ident.span(), "template structs must be public"));
+                    }
                     item.attrs
                         .push(syn::parse_quote!(#[derive(serde::Serialize, serde::Deserialize)]));
                     item.attrs.push(syn::parse_quote!(#[serde(crate = "self::serde")]));
@@ -87,10 +86,9 @@ impl Parse for TemplateAst {
                     }
                 },
                 Item::Enum(ref mut item) => {
-                    assert!(
-                        matches!(item.vis, Visibility::Public(_)),
-                        "template structs must be public"
-                    );
+                    if !matches!(item.vis, Visibility::Public(_)) {
+                        return Err(Error::new(item.ident.span(), "template structs must be public"));
+                    }
                     item.attrs
                         .push(syn::parse_quote!(#[derive(serde::Serialize, serde::Deserialize)]));
                     item.attrs.push(syn::parse_quote!(#[serde(crate = "self::serde")]));

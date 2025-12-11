@@ -141,7 +141,7 @@ fn handle_panic(panic_info: &panic::PanicHookInfo) {
 
     let location = panic_info
         .location()
-        .map(|loc| format!("{} file: '{}', line: {}", format_current_time(), loc.file(), loc.line()))
+        .map(|loc| format!("file: '{}', line: {}", loc.file(), loc.line()))
         .unwrap_or_else(|| "unknown location".to_string());
 
     let message = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
@@ -154,18 +154,17 @@ fn handle_panic(panic_info: &panic::PanicHookInfo) {
 
     error!(target: LOG_TARGET, "Panic occurred at {location}: {message}");
 
-    match OpenOptions::new()
+    if let Err(err) = OpenOptions::new()
         .append(true)
         .create(true)
         .open("ootle-node-panic.log")
+        .and_then(|mut file| {
+            file.write_all(b"---\n")?;
+            file.write_all(format!("Timestamp: {}\n", format_current_time()).as_bytes())?;
+            file.write_all(format!("Panic at {}: {}\n", location, message).as_bytes())?;
+            file.write_all(b"---\n")
+        })
     {
-        Ok(mut file) => {
-            if let Err(err) = file.write_all(format!("Panic at {location}: {message}").as_bytes()) {
-                warn!(target: LOG_TARGET, "Failed to write panic log file: {}", err);
-            }
-        },
-        Err(err) => {
-            warn!(target: LOG_TARGET, "Failed to write panic log file: {}", err);
-        },
+        warn!(target: LOG_TARGET, "Failed to write panic log file: {}", err);
     }
 }

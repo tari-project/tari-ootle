@@ -48,8 +48,10 @@ impl<T: Send + Sync, C: Send + Sync, E> Validator<T> for BoxedValidator<C, T, E>
 impl<C, T, E> Debug for BoxedValidator<C, T, E> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BoxedValidator")
-            .field("inner", &"Box<dyn Validator....>")
-            .finish()
+            .field("context_type", &std::any::type_name::<C>())
+            .field("input_type", &std::any::type_name::<T>())
+            .field("error_type", &std::any::type_name::<E>())
+            .finish_non_exhaustive()
     }
 }
 

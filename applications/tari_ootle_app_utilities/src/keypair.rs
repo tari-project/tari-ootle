@@ -19,11 +19,11 @@
 //!
 //! ### Security Implications for Windows Users
 //!
-//! - Identity files on Windows are created with default permissions, which may allow access by other
-//!   users on the system.
+//! - Identity files on Windows are created with default permissions, which may allow access by other users on the
+//!   system.
 //! - On shared or multi-user Windows systems, **private keys may be exposed** to unauthorized users.
-//! - Users running on Windows should manually secure their identity files using Windows File Explorer
-//!   or `icacls` command to restrict access to their user account only.
+//! - Users running on Windows should manually secure their identity files using Windows File Explorer or `icacls`
+//!   command to restrict access to their user account only.
 //!
 //! ### Recommended Windows Security Steps
 //!

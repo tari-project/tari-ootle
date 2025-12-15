@@ -75,7 +75,7 @@ where TConsensusSpec: ConsensusSpec
             block_id
         );
         let sender_leaf_hash = sender_vn.get_node_hash(self.network);
-        let Some((quorum_votes, quorum_decision)) = self
+        let result = self
             .vote_collector
             .collect_vote(
                 current_epoch,
@@ -84,29 +84,43 @@ where TConsensusSpec: ConsensusSpec
                 vote,
                 epoch_state.local_committee(),
             )
-            .await
-        else {
-            return Ok(None);
-        };
+            .await;
 
-        let Some(block) = self.store.with_read_tx(|tx| Block::get(tx, &block_id).optional())? else {
-            warn!(
-                target: LOG_TARGET,
-                "❓️ Received vote for unknown block {}. Possible race condition where a quorum of votes arrived before the block.",
-                block_id
-            );
-            return Ok(None);
-        };
-        let signatures = quorum_votes.into_iter().map(|vote| vote.signature).collect();
-        let new_qc = create_proposal_certificate(signatures, quorum_decision, block);
-        let high_qc = self.store.with_write_tx(|tx| new_qc.update_highest(tx))?;
-        if new_qc.calculate_id() == *high_qc.id() {
-            info!(target: LOG_TARGET, "🔥 New HIGH {}", new_qc);
-        } else {
-            info!(target: LOG_TARGET, "❓️ New QC from votes {} but it is not the high qc {}", new_qc, high_qc);
+        match result {
+            Ok(Some((quorum_votes, quorum_decision))) => {
+                let Some(block) = self.store.with_read_tx(|tx| Block::get(tx, &block_id).optional())? else {
+                    warn!(
+                        target: LOG_TARGET,
+                        "❓️ Received vote for unknown block {}. Possible race condition where a quorum of votes arrived before the block.",
+                        block_id
+                    );
+                    return Ok(None);
+                };
+                let signatures = quorum_votes.into_iter().map(|vote| vote.signature).collect();
+                let new_qc = create_proposal_certificate(signatures, quorum_decision, block);
+                let high_qc = self.store.with_write_tx(|tx| new_qc.update_highest(tx))?;
+                if new_qc.calculate_id() == *high_qc.id() {
+                    info!(target: LOG_TARGET, "🔥 New HIGH {}", new_qc);
+                } else {
+                    warn!(target: LOG_TARGET, "❓️ New QC from votes {} but it is not the high qc {}", new_qc, high_qc);
+                }
+
+                Ok(Some((new_qc, high_qc)))
+            },
+            Ok(None) => {
+                debug!(
+                    target: LOG_TARGET,
+                    "🟡 No quorum reached yet for ProposalVote at height {}",
+                    current_height
+                );
+                Ok(None)
+            },
+            Err(err) => {
+                warn!(target: LOG_TARGET, "❌ {}", err);
+                // TODO: store equivocation evidence and punish
+                Ok(None)
+            },
         }
-
-        Ok(Some((new_qc, high_qc)))
     }
 
     fn validate_vote(&self, current_epoch: Epoch, vote: &ProposalVote) -> Result<(), HotStuffError> {

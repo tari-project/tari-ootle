@@ -1,8 +1,6 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::hash::Hash;
-
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{Epoch, NodeHeight};
 use tari_sidechain::QuorumDecision;
@@ -18,10 +16,6 @@ pub trait SignedMessage: ToSignatureMessage {
 }
 
 pub trait Vote: SignedMessage {
-    type Key: Hash + Eq + 'static;
-
-    fn key(&self) -> Self::Key;
-
     fn epoch(&self) -> Epoch;
     fn height(&self) -> NodeHeight;
     fn decision(&self) -> QuorumDecision;

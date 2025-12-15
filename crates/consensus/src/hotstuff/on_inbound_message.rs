@@ -112,12 +112,15 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
         while let Some(result) = self.inbound_messaging.next_message().await {
             let (from, msg) = result?;
 
-            // If we receive an FP that is greater than our current epoch, we buffer it. The height is not relevant.
-            if let HotstuffMessage::ForeignProposal(ref m) = msg {
-                if m.proposal.epoch() > current_epoch {
-                    self.push_to_buffer(m.proposal.epoch(), NodeHeight::zero(), from, msg);
-                    continue;
-                }
+            if msg.epoch() > current_epoch + Epoch(1) {
+                warn!(
+                    target: LOG_TARGET,
+                    "🗑️ Discard non-applicable message {} for epoch {}. Current epoch is {}",
+                    msg,
+                    msg.epoch(),
+                    current_epoch
+                );
+                continue;
             }
 
             match msg_relative_view(&msg, current_epoch, current_height, has_processed_first_block) {
@@ -160,7 +163,33 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
     }
 
     fn push_to_buffer(&mut self, epoch: Epoch, height: NodeHeight, from: TConsensusSpec::Addr, msg: HotstuffMessage) {
-        self.buffer.entry((epoch, height)).or_default().push_back((from, msg));
+        const MAX_BUFFERED_MESSAGES_PER_VIEW: usize = 1000;
+        const MAX_BUFFERED_VIEWS: usize = 100_000;
+        if self.buffer.len() >= MAX_BUFFERED_VIEWS {
+            warn!(
+                target: LOG_TARGET,
+                "🗑️ Discarding message {} for view {}/{} as buffer view limit of {} reached",
+                msg,
+                epoch,
+                height,
+                MAX_BUFFERED_VIEWS
+            );
+            return;
+        }
+
+        let messages_mut = self.buffer.entry((epoch, height)).or_default();
+        if messages_mut.len() > MAX_BUFFERED_MESSAGES_PER_VIEW {
+            warn!(
+                target: LOG_TARGET,
+                "🗑️ Discarding message {} for view {}/{} as buffer limit of {} reached",
+                msg,
+                epoch,
+                height,
+                MAX_BUFFERED_MESSAGES_PER_VIEW
+            );
+            return;
+        }
+        messages_mut.push_back((from, msg));
     }
 }
 
@@ -338,6 +367,7 @@ fn msg_relative_view(
             if msg.epoch() > current_epoch {
                 return MessageRelativeView::Future {
                     epoch: msg.epoch(),
+                    // Foreign height is not locally relevant, we can process it when we reach the epoch
                     height: NodeHeight::zero(),
                 };
             }

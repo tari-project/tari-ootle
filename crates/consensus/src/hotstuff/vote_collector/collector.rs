@@ -12,6 +12,7 @@ use tari_common_types::types::FixedHash;
 use tari_consensus_types::Vote;
 use tari_ootle_common_types::{committee::Committee, Epoch, NodeAddressable, NodeHeight, VotePower};
 use tari_sidechain::QuorumDecision;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::sync::RwLock;
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::vote_collector";
@@ -35,24 +36,15 @@ impl<V: Vote + Display> VoteCollector<V> {
         sender_hash: FixedHash,
         vote: V,
         committee: &Committee<TAddr>,
-    ) -> Option<(Vec<V>, QuorumDecision)> {
+    ) -> Result<Option<(Vec<V>, QuorumDecision)>, VoteEquivocationDetected<V>> {
         let mut access_mut = self.store.write().await;
         access_mut.clear_votes_before(current_epoch, current_height);
         let epoch = vote.epoch();
         let height = vote.height();
-        let key = vote.key();
         let vote_display = vote.to_string();
-        if !access_mut.save_vote(sender_hash, vote) {
-            debug!(
-                target: LOG_TARGET,
-                "❓️ Received duplicate vote for {}. This could be malicious because a validator should only vote once for the same block.",
-                vote_display,
-            );
-            // We already have a vote for this block from this sender
-            return None;
-        }
+        access_mut.save_vote(vote)?;
 
-        let threshold_decision = access_mut.calculate_threshold_decision(epoch, height, &key, committee);
+        let threshold_decision = access_mut.calculate_threshold_decision(epoch, height, committee);
 
         let quorum_threshold = committee.quorum_threshold();
         let Some(quorum_decision) = threshold_decision.decision else {
@@ -64,7 +56,7 @@ impl<V: Vote + Display> VoteCollector<V> {
                 threshold_decision.total_power,
                 quorum_threshold
             );
-            return None;
+            return Ok(None);
         };
 
         // We only generate the next qc once when we have a quorum of votes. Any votes received after this
@@ -78,7 +70,7 @@ impl<V: Vote + Display> VoteCollector<V> {
                 threshold_decision.total_power,
                 quorum_threshold
             );
-            return None;
+            return Ok(None);
         }
 
         debug!(
@@ -90,25 +82,24 @@ impl<V: Vote + Display> VoteCollector<V> {
             quorum_threshold
         );
 
-        let votes = access_mut.take_votes_with_decision_for_key(epoch, height, &key, quorum_decision)?;
+        let votes = access_mut.take_votes_with_decision(epoch, height, quorum_decision);
 
-        Some((votes, quorum_decision))
+        Ok(votes.map(|v| (v, quorum_decision)))
     }
 }
 
 /// Collection of votes indexed by sender leaf hash
-type SenderVotesCollection<V> = HashMap<FixedHash, V>;
+type SenderVotesCollection<V> = HashMap<RistrettoPublicKeyBytes, V>;
 
 #[derive(Debug, Default)]
 struct VoteStoreInner<V: Vote> {
     /// Maps (Epoch,Height) -> map (key -> map (sender leaf hash -> vote))
     /// The key is some type that uniquely keys the vote e.g BlockId or (Epoch,Height)
-    store: BTreeMap<(Epoch, NodeHeight), HashMap<V::Key, SenderVotesCollection<V>>>,
+    store: BTreeMap<(Epoch, NodeHeight), SenderVotesCollection<V>>,
 }
 
 impl<V: Vote + Display> VoteStoreInner<V> {
-    const VOTE_BYTE_SIZE: usize = size_of::<V>() + size_of::<FixedHash>();
-    const VOTE_KEY_SIZE: usize = size_of::<V::Key>();
+    const VOTE_BYTE_SIZE: usize = size_of::<V>() + size_of::<RistrettoPublicKeyBytes>();
 
     pub fn new() -> Self {
         Self { store: BTreeMap::new() }
@@ -119,50 +110,57 @@ impl<V: Vote + Display> VoteStoreInner<V> {
         self.log_buffer_size();
     }
 
-    /// Save a vote to the store. Returns false if a previous vote for the block by the sender was already present,
-    /// otherwise true. Even if the vote is different, it is not considered a duplicate/invalid and does not
-    /// overwrite the previous vote.
-    pub fn save_vote(&mut self, sender_hash: FixedHash, vote: V) -> bool {
+    /// Save a vote to the store. Returns VoteEquivocationDetected if a previous vote for the block by the sender was
+    /// already present.
+    pub fn save_vote(&mut self, vote: V) -> Result<(), VoteEquivocationDetected<V>> {
         let epoch_height = (vote.epoch(), vote.height());
         let view_votes_mut = self.store.entry(epoch_height).or_default();
-        let votes_mut = view_votes_mut.entry(vote.key()).or_default();
-        if votes_mut.contains_key(&sender_hash) {
+        if let Some(prev_vote) = view_votes_mut.get(vote.public_key()) {
+            let is_same_vote = prev_vote.signature() == vote.signature();
+            if is_same_vote {
+                debug!(
+                    target: LOG_TARGET,
+                    "ℹ️  Received identical duplicate vote {}. Ignoring.",
+                    vote,
+                );
+                return Ok(());
+            }
+
             warn!(
                 target: LOG_TARGET,
-                "❓️ Received duplicate vote for {} from {} (sender hash). This could be malicious because a validator should only vote once for the same block.",
+                "❓️ Received duplicate vote for {}. This could be malicious because a validator should only vote once for the same block.",
                 vote,
-                sender_hash
             );
+            let prev_vote = view_votes_mut.remove(vote.public_key()).expect("Vote is present");
             // We already have a vote for this block from this sender
-            return false;
+            return Err(VoteEquivocationDetected {
+                epoch: vote.epoch(),
+                height: vote.height(),
+                public_key: *vote.public_key(),
+                previous_vote: prev_vote,
+                new_vote: vote,
+            });
         }
 
-        votes_mut.insert(sender_hash, vote);
-        true
+        view_votes_mut.insert(*vote.public_key(), vote);
+        Ok(())
     }
 
-    pub fn take_votes_with_decision_for_key(
+    pub fn take_votes_with_decision(
         &mut self,
         epoch: Epoch,
         height: NodeHeight,
-        key: &V::Key,
         decision: QuorumDecision,
     ) -> Option<Vec<V>> {
         let epoch_height = (epoch, height);
-        let mut keyed_votes = self.store.remove(&epoch_height)?;
-        // Discard any other votes for this epoch/height that are not for the key
-        let votes = keyed_votes.remove(key)?;
-        if keyed_votes.is_empty() {
-            // Remove the empty map
-            self.store.remove(&epoch_height);
-        }
+        // Take all votes, discarding any other votes for this epoch/height that do not match the decision
+        let votes = self.store.remove(&epoch_height)?;
         Some(votes.into_values().filter(|vote| vote.decision() == decision).collect())
     }
 
-    fn votes_for_key_iter(&self, epoch: Epoch, height: NodeHeight, key: &V::Key) -> Option<impl Iterator<Item = &V>> {
+    fn votes_for_key_iter(&self, epoch: Epoch, height: NodeHeight) -> Option<impl Iterator<Item = &V>> {
         let epoch_height = (epoch, height);
-        let epoch_height_votes = self.store.get(&epoch_height)?;
-        let votes = epoch_height_votes.get(key)?;
+        let votes = self.store.get(&epoch_height)?;
         Some(votes.values())
     }
 
@@ -170,10 +168,9 @@ impl<V: Vote + Display> VoteStoreInner<V> {
         &self,
         epoch: Epoch,
         height: NodeHeight,
-        key: &V::Key,
         committee: &Committee<TAddr>,
     ) -> ThresholdDecision {
-        let Some(votes_iter) = self.votes_for_key_iter(epoch, height, key) else {
+        let Some(votes_iter) = self.votes_for_key_iter(epoch, height) else {
             // Soft invariant protection - technically, this should not happen but the correct ThresholdDecision is
             // returned regardless i.e. 0 votes
             error!(
@@ -220,11 +217,10 @@ impl<V: Vote + Display> VoteStoreInner<V> {
     fn log_buffer_size(&self) {
         debug!(
             target: LOG_TARGET,
-            "Vote store size: used: {:.2?}KiB ({} entries)",
-            self.store.values() .map(|v|
-                v.len() * Self::VOTE_KEY_SIZE +
-                v.values().map(|v| v.len()).sum::<usize>() * Self::VOTE_BYTE_SIZE
-            ).sum::<usize>() as f32 / 1024f32,
+            "Vote store size: used: >{:.2?}KiB ({} entries)",
+            self.store.values()
+                .map(|v| v.len() * Self::VOTE_BYTE_SIZE)
+                .sum::<usize>() as f32 / 1024f32,
             self.store.len(),
         );
     }
@@ -236,10 +232,20 @@ pub struct ThresholdDecision {
     pub total_power: VotePower,
 }
 
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("Vote equivocation detected at epoch {epoch}, height {height} from {public_key}")]
+pub struct VoteEquivocationDetected<V: Vote> {
+    pub epoch: Epoch,
+    pub height: NodeHeight,
+    pub public_key: RistrettoPublicKeyBytes,
+    pub previous_vote: V,
+    pub new_vote: V,
+}
+
 #[cfg(test)]
 mod tests {
     use tari_consensus_types::{SignedMessage, ToSignatureMessage};
-    use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
+    use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
 
     use super::*;
 
@@ -250,7 +256,8 @@ mod tests {
     struct TestVote {
         epoch: Epoch,
         height: NodeHeight,
-        key: u32,
+        sig: SchnorrSignatureBytes,
+        public_key: RistrettoPublicKeyBytes,
     }
 
     impl Display for TestVote {
@@ -267,27 +274,21 @@ mod tests {
 
     impl SignedMessage for TestVote {
         fn signature(&self) -> &SchnorrSignatureBytes {
-            &ZERO_SIG
+            &self.sig
         }
 
         fn public_key(&self) -> &RistrettoPublicKeyBytes {
-            &ZERO_PUBKEY
+            &self.public_key
         }
     }
 
     impl Vote for TestVote {
-        type Key = u32;
-
         fn epoch(&self) -> Epoch {
             self.epoch
         }
 
         fn height(&self) -> NodeHeight {
             self.height
-        }
-
-        fn key(&self) -> Self::Key {
-            self.key
         }
 
         fn decision(&self) -> QuorumDecision {
@@ -301,10 +302,12 @@ mod tests {
         let vote = TestVote {
             epoch: Epoch(1),
             height: NodeHeight(1),
-            key: 42,
+            sig: ZERO_SIG,
+            public_key: ZERO_PUBKEY,
         };
-        let result = store.save_vote(FixedHash::zero(), vote.clone());
-        assert!(result, "Expected to save a new vote successfully");
+        store
+            .save_vote(vote.clone())
+            .expect("Expected to save a new vote successfully");
     }
 
     #[test]
@@ -313,13 +316,24 @@ mod tests {
         let vote = TestVote {
             epoch: Epoch(1),
             height: NodeHeight(1),
-            key: 42,
+            sig: ZERO_SIG,
+            public_key: ZERO_PUBKEY,
         };
-        let result = store.save_vote(FixedHash::zero(), vote.clone());
-        assert!(result, "Expected to save a new vote successfully");
+        store
+            .save_vote(vote.clone())
+            .expect("Expected to save a new vote successfully");
 
-        // Try to save the same vote again
-        let result_duplicate = store.save_vote(FixedHash::zero(), vote);
-        assert!(!result_duplicate, "Expected duplicate vote to be rejected");
+        // Try to save the same vote again - exact same vote is OK
+        store.save_vote(vote).unwrap();
+
+        let vote = TestVote {
+            epoch: Epoch(1),
+            height: NodeHeight(1),
+            public_key: ZERO_PUBKEY,
+            sig: SchnorrSignatureBytes::new([1u8; 32].into(), Scalar32Bytes::zero()),
+        };
+
+        // Try to save the a different vote from the same public key and epoch/height - should error
+        store.save_vote(vote).unwrap_err();
     }
 }

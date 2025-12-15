@@ -775,7 +775,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 let (tx_id, block_id, height) = result?;
                 // Don't remove for this block or any later blocks (higher height)
                 if height > locked_height {
-                    debug!(
+                    trace!(
                         target: LOG_TARGET,
                         "Skip deleting transaction execution for transaction {} in block {} ({} > {})",
                         tx_id,

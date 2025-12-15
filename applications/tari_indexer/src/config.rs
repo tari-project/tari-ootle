@@ -37,7 +37,7 @@ use tari_ootle_app_utilities::{
 };
 use tari_ootle_common_types::Network;
 
-use crate::{network_state_sync::EventFilter, template_manager::TemplateConfig};
+use crate::network_state_sync::EventFilter;
 
 #[derive(Debug, Clone)]
 pub struct ApplicationConfig {
@@ -113,8 +113,6 @@ pub struct IndexerConfig {
     pub block_scanning_interval: Duration,
     #[serde(with = "serializers::seconds")]
     pub state_scanning_interval: Duration,
-    /// Template config
-    pub templates: TemplateConfig,
     /// The sidechain to listen on.
     pub sidechain_id: Option<RistrettoPublicKey>,
     /// The templates sidechain id
@@ -139,7 +137,6 @@ impl Default for IndexerConfig {
             web_ui_public_graphql_url: None,
             block_scanning_interval: Duration::from_secs(10),
             state_scanning_interval: Duration::from_secs(60),
-            templates: TemplateConfig::default(),
             sidechain_id: None,
             templates_sidechain_id: None,
             burnt_utxo_sidechain_id: None,

@@ -29,27 +29,19 @@ use log::{debug, info};
 use tari_engine::{fees::FeeTable, state_store::new_memory_store, traits::ClaimProofVerifier};
 use tari_engine_types::{
     commit_result::ExecuteResult,
-    published_template::{PublishedTemplate, PublishedTemplateAddress},
     substate::{Substate, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_ootle_app_utilities::transaction_executor::{TariTransactionProcessor, TransactionExecutor as _};
-use tari_ootle_common_types::{
-    optional::Optional,
-    services::template_provider::TemplateProvider,
-    Epoch,
-    PeerAddress,
-    SubstateRequirement,
-};
-use tari_ootle_storage::global::TemplateStatus;
+use tari_ootle_common_types::{Epoch, PeerAddress};
 use tari_transaction::Transaction;
 use tokio::task;
 
 use crate::{
     dry_run::{error::DryRunTransactionProcessorError, package::Package},
     substate_manager::SubstateManager,
-    template_manager::{TemplateCode, TemplateManager, TemplateManagerError},
+    template_manager::TemplateManager,
 };
 
 const LOG_TARGET: &str = "tari::indexer::dry_run_transaction_processor";
@@ -58,7 +50,7 @@ const LOG_TARGET: &str = "tari::indexer::dry_run_transaction_processor";
 pub struct DryRunTransactionProcessor {
     fee_table: FeeTable,
     epoch_manager: EpochManagerHandle<PeerAddress>,
-    template_manager: TemplateManager<PeerAddress>,
+    template_manager: TemplateManager,
     substate_manager: SubstateManager,
     claim_burn_proof_verifier: Arc<dyn ClaimProofVerifier + Send + Sync + 'static>,
 }
@@ -67,7 +59,7 @@ impl DryRunTransactionProcessor {
     pub fn new(
         fee_table: FeeTable,
         epoch_manager: EpochManagerHandle<PeerAddress>,
-        template_manager: TemplateManager<PeerAddress>,
+        template_manager: TemplateManager,
         substate_manager: SubstateManager,
         claim_burn_proof_verifier: impl ClaimProofVerifier + Send + Sync + 'static,
     ) -> Self {
@@ -127,7 +119,6 @@ impl DryRunTransactionProcessor {
             .chain(component_templates)
             .collect::<HashSet<_>>();
 
-        let mut package = Package::builder(req_templates.len());
         debug!(
             target: LOG_TARGET,
             "Fetching {} required templates for transaction {}",
@@ -135,85 +126,19 @@ impl DryRunTransactionProcessor {
             transaction.calculate_id()
         );
 
-        for address in req_templates {
-            match self.template_manager.get_template(address)? {
-                Some(template) => {
-                    debug!(
-                        target: LOG_TARGET,
-                        "Template {} found in local template manager cache",
-                        address
-                    );
-                    package.add_template(*address, template);
-                },
-                None => {
-                    debug!(
-                        target: LOG_TARGET,
-                        "Template {} not found in local cache. Fetching from validator nodes...",
-                        address
-                    );
-                    // Fetch and cache
-                    let substate_id = PublishedTemplateAddress::from_template_address(*address);
-                    // TODO: batch missing and fetch templates in one/a few requests
-                    let substate = self
-                        .fetch_substate(&SubstateRequirement::unversioned(substate_id))
-                        .await
-                        .optional()?
-                        .ok_or_else(|| {
-                            DryRunTransactionProcessorError::TemplateManagerError(
-                                TemplateManagerError::TemplateNotFound { address: *address },
-                            )
-                        })?;
-
-                    let template: PublishedTemplate = substate.into_substate_value().into_template().ok_or(
-                        DryRunTransactionProcessorError::InvariantViolation {
-                            details: format!("Expected template substate at address {}", substate_id),
-                        },
-                    )?;
-
-                    let loaded = self.template_manager.add_and_load_template(
-                        template.author,
-                        substate_id.as_template_address(),
-                        TemplateCode::CompiledWasm(template.binary.into_bytes()),
-                        TemplateStatus::Active,
-                        Epoch(template.at_epoch),
-                    )?;
-
-                    package.add_template(substate_id.as_template_address(), loaded);
-                },
-            }
-        }
-
-        Ok(package.build())
+        let templates = self.template_manager.fetch_and_load_templates(req_templates).await?;
+        Ok(Package::new(templates))
     }
 
     async fn fetch_input_substates(
         &self,
         transaction: &Transaction,
     ) -> Result<HashMap<SubstateId, Substate>, DryRunTransactionProcessorError> {
-        let mut substates = HashMap::with_capacity(transaction.inputs().len());
-
-        // Fetch explicit inputs that may not have been resolved by the autofiller
-        for requirement in transaction.inputs() {
-            let substate = self.fetch_substate(requirement).await?;
-            substates.insert(requirement.substate_id.clone(), substate);
-        }
-
-        Ok(substates)
-    }
-
-    async fn fetch_substate(
-        &self,
-        substate_requirement: &SubstateRequirement,
-    ) -> Result<Substate, DryRunTransactionProcessorError> {
-        let response = self
+        let susbtates = self
             .substate_manager
-            .get_substate(substate_requirement.substate_id(), substate_requirement.version())
-            .await?
-            .ok_or_else(|| DryRunTransactionProcessorError::SubstateNotFound {
-                requirement: substate_requirement.clone(),
-            })?;
-
-        Ok(Substate::new(response.version, response.substate))
+            .get_substates(transaction.inputs().iter().map(|req| req.as_ref()))
+            .await?;
+        Ok(susbtates)
     }
 
     async fn get_virtual_substates(

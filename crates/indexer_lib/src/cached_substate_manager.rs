@@ -73,7 +73,7 @@ where
 
     /// Attempts to find the latest substate for the given address. If the lowest possible version is known, it can be
     /// provided to reduce effort/time required to scan.
-    pub async fn get_substate(
+    pub async fn get_substates(
         &self,
         substate_id: &SubstateId,
         specific_version: Option<u32>,

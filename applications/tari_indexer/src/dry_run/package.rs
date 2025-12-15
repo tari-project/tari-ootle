@@ -13,9 +13,9 @@ pub struct Package {
 }
 
 impl Package {
-    pub fn builder(capacity: usize) -> PackageBuilder {
-        PackageBuilder {
-            templates: HashMap::with_capacity(capacity),
+    pub fn new(templates: HashMap<TemplateAddress, LoadedTemplate>) -> Self {
+        Self {
+            templates: Arc::new(templates),
         }
     }
 }
@@ -26,22 +26,5 @@ impl TemplateProvider for Package {
 
     fn get_template(&self, address: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error> {
         Ok(self.templates.get(address).cloned())
-    }
-}
-
-pub struct PackageBuilder {
-    templates: HashMap<TemplateAddress, LoadedTemplate>,
-}
-
-impl PackageBuilder {
-    pub fn add_template(&mut self, address: TemplateAddress, template: LoadedTemplate) -> &mut Self {
-        self.templates.insert(address, template);
-        self
-    }
-
-    pub fn build(self) -> Package {
-        Package {
-            templates: Arc::new(self.templates),
-        }
     }
 }

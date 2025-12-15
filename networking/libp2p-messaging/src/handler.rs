@@ -146,10 +146,12 @@ where TCodec: Codec + Send + Clone + 'static
 
                 match codec.encode_to(&mut peer_stream, msg).await {
                     Ok(()) => {
-                        events
-                            .send(Event::MessageSent { message_id, stream_id })
-                            .await
-                            .expect("Can never be closed because receiver is held in this instance");
+                        if events.send(Event::MessageSent { message_id, stream_id }).await.is_err() {
+                            // This should never happen. If the handler is dropped, the tasks are dropped too and
+                            // therefore cannot be polled.
+                            tracing::warn!("BUG: Internal event mpsc channel closed, closing outbound stream");
+                            break Event::StreamClosed { peer_id, stream_id };
+                        }
                     },
                     Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
                         break Event::StreamClosed { peer_id, stream_id };
@@ -179,13 +181,18 @@ where TCodec: Codec + Send + Clone + 'static
                 // TODO: read timeout
                 match codec.decode_from(&mut stream).await {
                     Ok((length, msg)) => {
-                        let _ = events
+                        if events
                             .send(Event::ReceivedMessage {
                                 peer_id,
                                 message: msg,
                                 length,
                             })
-                            .await;
+                            .await
+                            .is_err()
+                        {
+                            tracing::warn!("BUG: Internal event mpsc channel closed, closing inbound stream");
+                            break Event::InboundStreamClosed { peer_id };
+                        }
                     },
                     Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
                         break Event::InboundStreamClosed { peer_id };

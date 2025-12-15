@@ -121,6 +121,13 @@ impl IndexerRestApiClient {
         self.send_post("transactions", req).await
     }
 
+    pub async fn submit_transaction_dry_run(
+        &mut self,
+        req: SubmitTransactionRequest,
+    ) -> Result<SubmitTransactionResponse, IndexerRestClientError> {
+        self.send_post("transactions/dry-run", req).await
+    }
+
     pub async fn get_transaction_result(
         &mut self,
         req: GetTransactionResultRequest,

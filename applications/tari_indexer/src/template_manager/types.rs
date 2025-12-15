@@ -1,6 +1,8 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::borrow::Cow;
+
 use tari_common_types::types::FixedHash;
 use tari_engine::{abi::TemplateDef, template::LoadedTemplate};
 use tari_ootle_common_types::Epoch;
@@ -50,6 +52,13 @@ impl TemplateCode {
         match self {
             TemplateCode::StaticWasm(code) => code,
             TemplateCode::CompiledWasm(code) => code,
+        }
+    }
+
+    pub fn into_raw_bytes(self) -> Cow<'static, [u8]> {
+        match self {
+            TemplateCode::StaticWasm(code) => Cow::Borrowed(code),
+            TemplateCode::CompiledWasm(code) => Cow::Owned(code.into_vec()),
         }
     }
 }

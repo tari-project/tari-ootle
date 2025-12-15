@@ -142,7 +142,7 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
 
         let mut client = self.get_client()?;
         let resp = client
-            .submit_transaction(SubmitTransactionRequest { transaction })
+            .submit_transaction_dry_run(SubmitTransactionRequest { transaction })
             .await?;
 
         Ok(TransactionQueryResult {

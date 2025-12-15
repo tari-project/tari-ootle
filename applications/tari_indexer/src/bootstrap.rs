@@ -39,7 +39,6 @@ use tari_epoch_oracles::{
     store::EpochOracleStore,
     EpochOracle,
 };
-use tari_indexer_lib::cached_substate_manager::CachedSubstateManager;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_ootle_app_utilities::{
     claim_burn_proof_verifier::TariClaimBurnProofVerifier,
@@ -201,8 +200,6 @@ pub async fn spawn_services(
 
     let event_notifier = Notify::new(1000);
 
-    // Template manager
-    let template_manager = TemplateManager::initialize(global_db.clone(), config.indexer.templates.clone())?;
     network_state_sync::NetworkWideStateSync::new(
         epoch_manager.clone(),
         networking.clone(),
@@ -215,20 +212,20 @@ pub async fn spawn_services(
     )
     .spawn(shutdown.clone());
 
+    // Substate manager
     let substate_cache_dir = config.to_data_dir().join("substate_cache");
     let substate_cache = SubstateFileCache::new(substate_cache_dir).context("Failed to create substate cache")?;
-
-    let substate_scanner = CachedSubstateManager::new(
+    let substate_manager = SubstateManager::new(
+        store.clone(),
         epoch_manager.clone(),
         validator_node_client_factory.clone(),
         substate_cache,
     );
-
     #[cfg(feature = "metrics")]
-    let substate_scanner = substate_scanner.with_metrics(metrics_registry);
+    let substate_manager = substate_manager.with_metrics(metrics_registry);
 
-    let substate_manager = SubstateManager::new(substate_scanner, store.clone());
-    let transaction_manager = TransactionManager::new(network_client.clone(), store.clone());
+    // Template manager
+    let template_manager = TemplateManager::initialize(global_db.clone(), substate_manager.clone())?;
 
     // dry run
     let fee_table = get_fee_table_by_network(config.network);
@@ -239,6 +236,8 @@ pub async fn spawn_services(
         substate_manager.clone(),
         TariClaimBurnProofVerifier::new(config.network, global_db.clone()),
     );
+
+    let transaction_manager = TransactionManager::new(network_client.clone(), store.clone());
 
     // Save final node identity after comms has initialized. This is required because the public_address can be
     // changed by comms during initialization when using tor.
@@ -265,7 +264,7 @@ pub struct Services {
     pub _validator_node_client_factory: TariValidatorNodeRpcClientFactory,
     pub store: SqliteIndexerStore,
     pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
-    pub template_manager: TemplateManager<PeerAddress>,
+    pub template_manager: TemplateManager,
     pub substate_manager: SubstateManager,
     pub transaction_manager:
         TransactionManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SqliteIndexerStore>,

@@ -20,16 +20,24 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::collections::{HashMap, HashSet};
+
 use tari_engine::{
     template::{LoadedTemplate, TemplateModuleLoader},
     wasm::WasmModule,
 };
-use tari_engine_types::{calculate_template_binary_hash, hashing::hash_template_code};
+use tari_engine_types::{
+    calculate_template_binary_hash,
+    hashing::hash_template_code,
+    published_template::PublishedTemplateAddress,
+    substate::SubstateId,
+};
 use tari_ootle_common_types::{
     optional::Optional,
     services::template_provider::TemplateProvider,
     Epoch,
-    NodeAddressable,
+    PeerAddress,
+    SubstateRequirementRef,
 };
 use tari_ootle_storage::{
     global::{DbTemplate, DbTemplateType, GlobalDb, TemplateStatus},
@@ -45,19 +53,19 @@ use tari_template_builtin::{
 };
 use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 
-use super::{LoadedTemplateWithMetadata, Template, TemplateCode, TemplateConfig, TemplateMetadata};
-use crate::template_manager::error::TemplateManagerError;
+use super::{LoadedTemplateWithMetadata, Template, TemplateCode, TemplateMetadata};
+use crate::{substate_manager::SubstateManager, template_manager::error::TemplateManagerError};
 
-#[derive(Debug)]
-pub struct TemplateManager<TAddr> {
-    global_db: GlobalDb<SqliteGlobalDbAdapter<TAddr>>,
-    config: TemplateConfig,
+#[derive(Debug, Clone)]
+pub struct TemplateManager {
+    global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
+    substate_manager: SubstateManager,
 }
 
-impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
+impl TemplateManager {
     pub fn initialize(
-        global_db: GlobalDb<SqliteGlobalDbAdapter<TAddr>>,
-        config: TemplateConfig,
+        global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
+        substate_manager: SubstateManager,
     ) -> Result<Self, TemplateManagerError> {
         // load the builtin templates
         let builtin_templates = Self::builtin_templates();
@@ -85,7 +93,10 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
 
         tx.commit()?;
 
-        Ok(Self { global_db, config })
+        Ok(Self {
+            global_db,
+            substate_manager,
+        })
     }
 
     fn builtin_templates() -> impl Iterator<Item = (TemplateAddress, Template)> {
@@ -123,7 +134,7 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
         Ok(exists)
     }
 
-    pub fn fetch_template(&self, address: &TemplateAddress) -> Result<Template, TemplateManagerError> {
+    pub fn fetch_cached_template(&self, address: &TemplateAddress) -> Result<Template, TemplateManagerError> {
         let mut tx = self.global_db.create_transaction()?;
         let template = self
             .global_db
@@ -144,7 +155,7 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
         &self,
         address: &TemplateAddress,
     ) -> Result<LoadedTemplateWithMetadata, TemplateManagerError> {
-        let template = self.fetch_template(address)?;
+        let template = self.fetch_cached_template(address)?;
         let wasm = template
             .code
             .as_wasm_code()
@@ -166,26 +177,25 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
         Ok(templates)
     }
 
-    pub fn add_and_load_template(
+    fn add_template(
         &self,
+        template_name: String,
         author_public_key: RistrettoPublicKeyBytes,
         template_address: TemplateAddress,
         code: TemplateCode,
         template_status: TemplateStatus,
         epoch: Epoch,
-    ) -> Result<LoadedTemplate, TemplateManagerError> {
+    ) -> Result<(), TemplateManagerError> {
         let mut tx = self.global_db.create_transaction()?;
         let mut templates_db = self.global_db.templates(&mut tx);
-        let binary = code.as_raw_bytes();
-        let loaded_template = WasmModule::load_template_from_code(binary)?;
-
+        let code_bytes = code.into_raw_bytes();
         let template = DbTemplate {
             author_public_key,
-            template_name: loaded_template.template_name().to_string(),
+            template_name,
             template_address,
-            binary_hash: hash_template_code(binary).into_array().into(),
+            binary_hash: hash_template_code(&code_bytes).into_array().into(),
             status: template_status,
-            code: Some(binary.to_vec()),
+            code: Some(code_bytes.into_owned()),
             added_at: now(),
             template_type: DbTemplateType::Wasm,
             url: None,
@@ -194,16 +204,101 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
 
         templates_db.insert_template(template)?;
         tx.commit()?;
+        Ok(())
+    }
+
+    pub fn add_and_load_template(
+        &self,
+        author_public_key: RistrettoPublicKeyBytes,
+        template_address: TemplateAddress,
+        code: TemplateCode,
+        template_status: TemplateStatus,
+        epoch: Epoch,
+    ) -> Result<LoadedTemplate, TemplateManagerError> {
+        let loaded_template = load_template_from_code(&code)?;
+
+        self.add_template(
+            loaded_template.template_name().to_string(),
+            author_public_key,
+            template_address,
+            code,
+            template_status,
+            epoch,
+        )?;
+
         Ok(loaded_template)
+    }
+
+    pub async fn fetch_and_load_templates<'a, I: IntoIterator<Item = &'a TemplateAddress>>(
+        &self,
+        addresses: I,
+    ) -> Result<HashMap<TemplateAddress, LoadedTemplate>, TemplateManagerError> {
+        let template_addrs = addresses.into_iter().collect::<HashSet<_>>();
+
+        let mut loaded_templates = HashMap::with_capacity(template_addrs.len());
+
+        for template_addr in &template_addrs {
+            if let Some(template) = self.fetch_cached_template(template_addr).optional()? {
+                loaded_templates.insert(**template_addr, load_template_from_code(&template.code)?);
+            }
+        }
+
+        let substate_ids = template_addrs
+            .into_iter()
+            .filter(|addr| !loaded_templates.contains_key(addr))
+            .map(|addr| SubstateId::from(PublishedTemplateAddress::from_template_address(*addr)))
+            .collect::<Vec<_>>();
+        let fetched_templates = self
+            .substate_manager
+            .get_substates(substate_ids.iter().map(SubstateRequirementRef::unversioned))
+            .await?;
+        if fetched_templates.len() != substate_ids.len() {
+            let missing_ids = substate_ids
+                .iter()
+                .find(|id| !fetched_templates.contains_key(id))
+                .cloned()
+                .expect("There is at least one missing id");
+            return Err(TemplateManagerError::TemplateNotFound {
+                address: missing_ids
+                    .as_template()
+                    .expect("substate_ids are all PublishedTemplateAddress")
+                    .as_template_address(),
+            });
+        }
+
+        for (substate_id, substate) in fetched_templates {
+            let template =
+                substate
+                    .into_substate_value()
+                    .into_template()
+                    .ok_or(TemplateManagerError::InvariantViolation {
+                        details: format!("Expected template substate at address {}", substate_id),
+                    })?;
+            let template_addr = substate_id
+                .as_template()
+                .expect("fetched_templates are all templates")
+                .as_template_address();
+
+            let loaded = self.add_and_load_template(
+                template.author,
+                template_addr,
+                TemplateCode::CompiledWasm(template.binary.into_bytes()),
+                TemplateStatus::Active,
+                Epoch(template.at_epoch),
+            )?;
+            loaded_templates.insert(template_addr, loaded);
+        }
+
+        Ok(loaded_templates)
     }
 }
 
-impl<TAddr: NodeAddressable + Send + Sync + 'static> TemplateProvider for TemplateManager<TAddr> {
+impl TemplateProvider for TemplateManager {
     type Error = TemplateManagerError;
     type Template = LoadedTemplate;
 
     fn get_template(&self, address: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error> {
-        let Some(template) = self.fetch_template(address).optional()? else {
+        let Some(template) = self.fetch_cached_template(address).optional()? else {
             return Ok(None);
         };
         let wasm = template
@@ -219,15 +314,6 @@ impl<TAddr: NodeAddressable + Send + Sync + 'static> TemplateProvider for Templa
     fn has_template(&self, address: &TemplateAddress) -> Result<bool, Self::Error> {
         Ok(self.template_exists(address, Some(TemplateStatus::Active))? ||
             self.template_exists(address, Some(TemplateStatus::Deprecated))?)
-    }
-}
-
-impl<TAddr> Clone for TemplateManager<TAddr> {
-    fn clone(&self) -> Self {
-        Self {
-            global_db: self.global_db.clone(),
-            config: self.config.clone(),
-        }
     }
 }
 
@@ -250,4 +336,10 @@ fn convert_builtin_template(name: &str, address: TemplateAddress) -> Template {
         },
         code: TemplateCode::StaticWasm(code),
     }
+}
+
+fn load_template_from_code(code: &TemplateCode) -> Result<LoadedTemplate, TemplateManagerError> {
+    let binary = code.as_raw_bytes();
+    let loaded_template = WasmModule::load_template_from_code(binary)?;
+    Ok(loaded_template)
 }

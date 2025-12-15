@@ -174,10 +174,13 @@ where TCodec: Codec + Send + Clone + 'static
             ..
         }: ConnectionClosed,
     ) {
-        let connections = self
-            .connected
-            .get_mut(&peer_id)
-            .expect("Expected connection entry for peer before closing.");
+        let Some(connections) = self.connected.get_mut(&peer_id) else {
+            tracing::warn!(
+                "Expected peer entry for peer ID ({peer_id}) before closing connection with connection ID \
+                 {connection_id}."
+            );
+            return;
+        };
 
         let Some(connection) = connections
             .connections

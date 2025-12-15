@@ -74,13 +74,39 @@ use crate::{command::manifest, component_manager::ComponentManager, from_hex::Fr
 
 #[derive(Debug, Subcommand, Clone)]
 pub enum TransactionSubcommand {
+    /// Retrieve transaction results by hash
+    ///
+    /// Queries the validator node for the execution result of a finalized transaction.
+    /// Shows substates created/destroyed, return values, logs, and overall decision.
+    ///
+    /// Example:
+    ///   tari_validator_node_cli transactions get 0xabc123...
     Get(GetArgs),
+
+    /// Submit a single instruction transaction
+    ///
+    /// Creates and submits a transaction containing a single instruction (CallFunction or CallMethod).
+    /// The transaction is automatically signed with the active key.
+    /// Use --wait-for-result to block until the transaction is finalized.
+    ///
+    /// Example:
+    ///   tari_validator_node_cli transactions submit call-function <template_address> <function> -a arg1 -a arg2 -w
     Submit(SubmitArgs),
+
+    /// Submit a transaction from a manifest file
+    ///
+    /// Parses and executes a transaction manifest file containing multiple instructions.
+    /// Manifests support variables that can be provided via the -g flag.
+    /// The transaction is signed with the active key.
+    ///
+    /// Example:
+    ///   tari_validator_node_cli transactions submit-manifest my_manifest.txt -g var1=value1 -w
     SubmitManifest(SubmitManifestArgs),
 }
 
 #[derive(Debug, Args, Clone)]
 pub struct GetArgs {
+    /// Transaction hash in hexadecimal format
     transaction_hash: FromHex<TransactionId>,
 }
 
@@ -94,42 +120,113 @@ pub struct SubmitArgs {
 
 #[derive(Debug, Args, Clone)]
 pub struct CommonSubmitArgs {
+    /// Wait for the transaction to be finalized before returning
+    ///
+    /// When enabled, the CLI will poll the validator node until the transaction
+    /// is finalized and display the complete execution result.
     #[clap(long, short = 'w')]
     pub wait_for_result: bool,
-    /// Timeout in seconds
+
+    /// Timeout in seconds when waiting for result (default: no timeout)
+    ///
+    /// Maximum time to wait for transaction finalization when --wait-for-result is enabled.
+    /// The command will error if the timeout is exceeded.
     #[clap(long, short = 't')]
     pub wait_for_result_timeout: Option<u64>,
+
+    /// Explicit input substates with versions
+    ///
+    /// Manually specify which substates the transaction will read.
+    /// Format: <substate_id> or <substate_id>:<version>
+    /// If not specified, inputs are automatically detected from CallMethod instructions.
     #[clap(long, short = 'i')]
     pub inputs: Vec<SubstateRequirement>,
+
+    /// Transaction format version (for advanced use)
     #[clap(long, short = 'v')]
     pub version: Option<u8>,
+
+    /// Component output tracking key (for advanced use)
+    ///
+    /// Used to track and store component outputs for future transactions.
     #[clap(long, short = 'd')]
     pub dump_outputs_into: Option<String>,
+
+    /// Account template address override (for advanced use)
     #[clap(long, short = 'a')]
     pub account_template_address: Option<String>,
 }
 
 #[derive(Debug, Args, Clone)]
 pub struct SubmitManifestArgs {
+    /// Path to the manifest file
+    ///
+    /// A text file containing transaction instructions in manifest syntax.
+    /// Use 'manifests new' to create a template.
     manifest: PathBuf,
-    /// A list of globals to be used by the manifest in the format `name=value`
+
+    /// Global variables for the manifest in format name=value
+    ///
+    /// Manifests can reference variables that are substituted at runtime.
+    /// Provide values using -g key=value format (can be specified multiple times).
+    ///
+    /// Example: -g component_addr=component_1234 -g amount=amount_100
     #[clap(long, short = 'g')]
     input_variables: Vec<String>,
+
     #[clap(flatten)]
     common: CommonSubmitArgs,
 }
 
 #[derive(Debug, Subcommand, Clone)]
 pub enum CliInstruction {
+    /// Call a template function
+    ///
+    /// Invokes a function on a template, typically to instantiate a new component.
+    /// Template functions are stateless and don't operate on existing components.
+    ///
+    /// Arguments:
+    ///   template_address - Hex address of the template
+    ///   function_name - Name of the function to call
+    ///   -a, --args - Function arguments (can be specified multiple times)
+    ///
+    /// Argument formats:
+    ///   - Primitives: true, false, 123, -456
+    ///   - Strings: hello_world
+    ///   - Amounts: amount_1000
+    ///   - NFT IDs: nft_u32:123
+    ///   - Addresses: component_abc123, resource_def456
+    ///
+    /// Example:
+    ///   call-function 0xabc123... new -a "MyToken" -a amount_1000000
     CallFunction {
+        /// Template address in hexadecimal format
         template_address: FromHex<TemplateAddress>,
+        /// Function name to invoke
         function_name: String,
+        /// Function arguments (can be specified multiple times)
         #[clap(long, short = 'a')]
         args: Vec<CliArg>,
     },
+
+    /// Call a method on a component
+    ///
+    /// Invokes a method on an existing component instance.
+    /// The component state may be modified based on the method logic.
+    ///
+    /// Arguments:
+    ///   component_address - Address of the component instance
+    ///   method_name - Name of the method to call
+    ///   -a, --args - Method arguments (can be specified multiple times)
+    ///
+    /// Example:
+    ///   call-method component_abc123 transfer -a resource_def456 -a amount_100
     CallMethod {
+        /// Component address (e.g., component_abc123...)
         component_address: SubstateId,
+        /// Method name to invoke
         method_name: String,
+        /// Method arguments (can be specified multiple times)
         #[clap(long, short = 'a')]
         args: Vec<CliArg>,
     },

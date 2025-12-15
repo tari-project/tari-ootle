@@ -27,14 +27,33 @@ use multiaddr::Multiaddr;
 
 use crate::command::Command;
 
+/// Tari Validator Node CLI
+///
+/// A command-line interface for interacting with the Tari validator node daemon.
+/// This tool allows you to manage templates, keys, transactions, accounts, manifests, and peers.
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 #[clap(propagate_version = true)]
 pub struct Cli {
+    /// JSON-RPC endpoint for the validator node daemon
+    ///
+    /// Specifies the network address where the validator node daemon is listening.
+    /// Defaults to /ip4/127.0.0.1/tcp/18200 if not specified.
+    /// Can also be set via the JRPC_ENDPOINT environment variable.
+    ///
+    /// Example: /ip4/127.0.0.1/tcp/18200
     #[clap(long, short = 'e', alias = "endpoint", env = "JRPC_ENDPOINT")]
     pub vn_daemon_jrpc_endpoint: Option<Multiaddr>,
+
+    /// Base directory for storing CLI data
+    ///
+    /// Specifies where keys and other CLI data are stored.
+    /// Defaults to ~/.tari/vncli if not specified.
+    ///
+    /// Example: /path/to/custom/directory
     #[clap(long, short = 'b', alias = "basedir")]
     pub base_dir: Option<PathBuf>,
+
     #[clap(subcommand)]
     pub command: Command,
 }

@@ -34,10 +34,21 @@ use crate::{
 
 #[derive(Debug, Subcommand, Clone)]
 pub enum AccountsSubcommand {
+    /// Create a new account component
+    ///
+    /// Creates a new account owned by the active key pair. Accounts are special components
+    /// that can own resources and authorize transactions. The account is automatically
+    /// associated with the public key of the currently active key.
+    ///
+    /// The command will wait for the transaction to finalize and display the new account address.
+    ///
+    /// Example:
+    ///   tari_validator_node_cli accounts create
     #[clap(alias = "new")]
     Create(CreateArgs),
 }
 
+/// Arguments for creating a new account (currently none required)
 #[derive(Debug, Args, Clone)]
 pub struct CreateArgs {}
 

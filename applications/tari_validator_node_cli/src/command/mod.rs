@@ -44,16 +44,45 @@ pub mod transaction;
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand, Clone)]
 pub enum Command {
+    /// Manage and query templates
+    ///
+    /// Templates define the code and structure for smart contracts on the Tari network.
+    /// Use this command to retrieve template information including ABI details.
     #[clap(subcommand, alias = "template")]
     Templates(TemplateSubcommand),
+
+    /// Manage cryptographic key pairs
+    ///
+    /// Key pairs are used to sign transactions. You can create new keys,
+    /// list existing keys, and switch between different key pairs.
     #[clap(subcommand, alias = "key")]
     Keys(KeysSubcommand),
+
+    /// Submit and query transactions
+    ///
+    /// Transactions execute instructions on the Tari network. Use this command
+    /// to submit new transactions or check the status of existing ones.
     #[clap(subcommand, alias = "transaction")]
     Transactions(TransactionSubcommand),
+
+    /// Manage accounts
+    ///
+    /// Accounts are components that own resources and can execute transactions.
+    /// Use this command to create and manage accounts on the network.
     #[clap(subcommand, alias = "accounts")]
     Accounts(AccountsSubcommand),
+
+    /// Work with transaction manifests
+    ///
+    /// Manifests are human-readable transaction descriptions that can be
+    /// compiled into executable transactions. Create and validate manifests here.
     #[clap(subcommand, alias = "manifest")]
     Manifests(ManifestSubcommand),
+
+    /// Manage network peer connections
+    ///
+    /// Connect to other validator nodes on the network to enable
+    /// communication and consensus participation.
     #[clap(subcommand, alias = "peer")]
     Peers(PeersSubcommand),
 }

@@ -179,16 +179,13 @@ where TCodec: Codec + Send + Clone + 'static
                 // TODO: read timeout
                 match codec.decode_from(&mut stream).await {
                     Ok((length, msg)) => {
-                        events
+                        let _ = events
                             .send(Event::ReceivedMessage {
                                 peer_id,
                                 message: msg,
                                 length,
                             })
-                            .await
-                            .expect("Can never be closed because receiver is held in this instance");
-                        // TODO
-                        // Event::ReceivedMessage { peer_id, message }
+                            .await;
                     },
                     Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
                         break Event::InboundStreamClosed { peer_id };

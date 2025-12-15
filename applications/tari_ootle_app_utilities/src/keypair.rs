@@ -115,17 +115,18 @@ pub fn setup_keypair_prompt<P: AsRef<Path>>(identity_file: P, create_id: bool) -
         )),
         Err(e) => {
             if create_id {
+                let identity_file_path = identity_file.as_ref().to_string_lossy();
                 if matches!(e, IdentityError::NotFound) {
                     debug!(
                         target: LOG_TARGET,
                         "Node identity file not found at {}. Creating new ID",
-                        identity_file.as_ref().to_string_lossy()
+                        identity_file_path
                     );
                 } else {
                     warn!(
                         target: LOG_TARGET,
                         "Existing node identity file at {} is invalid ({}). Creating new ID",
-                        identity_file.as_ref().to_string_lossy(),
+                        identity_file_path,
                         e
                     );
                 }

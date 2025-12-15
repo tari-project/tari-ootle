@@ -190,6 +190,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 epoch_manager.clone(),
                 pacemaker.clone_handle(),
                 outbound_messaging.clone(),
+                &config,
             ),
             on_receive_vote: OnReceiveVoteHandler::new(
                 pacemaker.clone_handle(),

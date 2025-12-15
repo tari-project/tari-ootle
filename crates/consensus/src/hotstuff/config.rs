@@ -17,4 +17,6 @@ pub struct HotstuffConfig {
     pub epoch_gc_interval: Duration,
     pub enable_eviction_proposal: bool,
     pub epoch_end_grace_period: Duration,
+    /// Maximum number of concurrent foreign proposal request tasks
+    pub max_foreign_proposal_tasks: usize,
 }

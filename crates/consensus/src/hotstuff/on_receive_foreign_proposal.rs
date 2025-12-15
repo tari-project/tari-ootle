@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use anyhow::anyhow;
 use log::*;
@@ -20,11 +20,12 @@ use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
 };
-use tokio::task;
+use tokio::{sync::Semaphore, task};
 
 use crate::{
     hotstuff::{
         commit_proofs::generate_block_commit_proof,
+        config::HotstuffConfig,
         error::HotStuffError,
         pacemaker_handle::PaceMakerHandle,
         ProposalValidationError,
@@ -48,6 +49,7 @@ pub struct OnReceiveForeignProposalHandler<TConsensusSpec: ConsensusSpec> {
     pacemaker: PaceMakerHandle,
     outbound_messaging: TConsensusSpec::OutboundMessaging,
     recently_requested: HashSet<BlockId>,
+    foreign_proposal_semaphore: Arc<Semaphore>,
 }
 
 impl<TConsensusSpec> OnReceiveForeignProposalHandler<TConsensusSpec>
@@ -58,6 +60,7 @@ where TConsensusSpec: ConsensusSpec
         epoch_manager: TConsensusSpec::EpochManager,
         pacemaker: PaceMakerHandle,
         outbound_messaging: TConsensusSpec::OutboundMessaging,
+        config: &HotstuffConfig,
     ) -> Self {
         Self {
             store,
@@ -65,6 +68,7 @@ where TConsensusSpec: ConsensusSpec
             pacemaker,
             outbound_messaging,
             recently_requested: HashSet::new(),
+            foreign_proposal_semaphore: Arc::new(Semaphore::new(config.max_foreign_proposal_tasks)),
         }
     }
 
@@ -216,10 +220,12 @@ where TConsensusSpec: ConsensusSpec
     ) -> Result<(), HotStuffError> {
         let store = self.store.clone();
         let outbound_messaging = self.outbound_messaging.clone();
+        let semaphore = self.foreign_proposal_semaphore.clone();
 
         // No need for consensus to wait for the task to complete
-        // TODO: bounded spawn to limit the number of concurrent tasks created by possibly malicious requests
+        // Use semaphore to limit the number of concurrent tasks created by possibly malicious requests
         task::spawn(async move {
+            let _permit = semaphore.acquire().await.expect("Semaphore should not be closed");
             let _timer = TraceTimer::debug(LOG_TARGET, "OnReceiveForeignProposalRequest");
             if let Err(err) = Self::handle_requested_task(store, outbound_messaging, from, message).await {
                 error!(target: LOG_TARGET, "Error handling requested foreign proposal: {}", err);

@@ -114,6 +114,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 epoch_manager,
                 pacemaker,
                 outbound_messaging,
+                &config,
             ),
             on_ready_to_vote_on_local_block: OnReadyToVoteOnLocalBlock::new(
                 local_validator_pk,

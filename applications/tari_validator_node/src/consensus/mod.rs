@@ -85,6 +85,7 @@ pub async fn spawn(
         epoch_gc_interval: Duration::from_secs(60 * 60),
         enable_eviction_proposal: consensus_config.enable_eviction_proposal,
         epoch_end_grace_period: Duration::from_secs(15),
+        max_foreign_proposal_tasks: 100,
     };
 
     let hotstuff_worker = HotstuffWorker::<TariConsensusSpec>::new(

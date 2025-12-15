@@ -12,6 +12,7 @@ use tari_common_types::types::FixedHash;
 use tari_consensus_types::Vote;
 use tari_ootle_common_types::{committee::Committee, Epoch, NodeAddressable, NodeHeight, VotePower};
 use tari_sidechain::QuorumDecision;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::sync::RwLock;
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::vote_collector";
@@ -41,7 +42,7 @@ impl<V: Vote + Display> VoteCollector<V> {
         let epoch = vote.epoch();
         let height = vote.height();
         let vote_display = vote.to_string();
-        access_mut.save_vote(sender_hash, vote)?;
+        access_mut.save_vote(vote)?;
 
         let threshold_decision = access_mut.calculate_threshold_decision(epoch, height, committee);
 
@@ -88,7 +89,7 @@ impl<V: Vote + Display> VoteCollector<V> {
 }
 
 /// Collection of votes indexed by sender leaf hash
-type SenderVotesCollection<V> = HashMap<FixedHash, V>;
+type SenderVotesCollection<V> = HashMap<RistrettoPublicKeyBytes, V>;
 
 #[derive(Debug, Default)]
 struct VoteStoreInner<V: Vote> {
@@ -98,7 +99,7 @@ struct VoteStoreInner<V: Vote> {
 }
 
 impl<V: Vote + Display> VoteStoreInner<V> {
-    const VOTE_BYTE_SIZE: usize = size_of::<V>() + size_of::<FixedHash>();
+    const VOTE_BYTE_SIZE: usize = size_of::<V>() + size_of::<RistrettoPublicKeyBytes>();
 
     pub fn new() -> Self {
         Self { store: BTreeMap::new() }
@@ -111,27 +112,37 @@ impl<V: Vote + Display> VoteStoreInner<V> {
 
     /// Save a vote to the store. Returns VoteEquivocationDetected if a previous vote for the block by the sender was
     /// already present.
-    pub fn save_vote(&mut self, sender_hash: FixedHash, vote: V) -> Result<(), VoteEquivocationDetected<V>> {
+    pub fn save_vote(&mut self, vote: V) -> Result<(), VoteEquivocationDetected<V>> {
         let epoch_height = (vote.epoch(), vote.height());
         let view_votes_mut = self.store.entry(epoch_height).or_default();
-        if let Some(prev_vote) = view_votes_mut.remove(&sender_hash) {
+        if let Some(prev_vote) = view_votes_mut.get(vote.public_key()) {
+            let is_same_vote = prev_vote.signature() == vote.signature();
+            if is_same_vote {
+                debug!(
+                    target: LOG_TARGET,
+                    "ℹ️  Received identical duplicate vote {}. Ignoring.",
+                    vote,
+                );
+                return Ok(());
+            }
+
             warn!(
                 target: LOG_TARGET,
-                "❓️ Received duplicate vote for {} from {} (sender hash). This could be malicious because a validator should only vote once for the same block.",
+                "❓️ Received duplicate vote for {}. This could be malicious because a validator should only vote once for the same block.",
                 vote,
-                sender_hash
             );
+            let prev_vote = view_votes_mut.remove(vote.public_key()).expect("Vote is present");
             // We already have a vote for this block from this sender
             return Err(VoteEquivocationDetected {
                 epoch: vote.epoch(),
                 height: vote.height(),
-                sender_hash,
+                public_key: *vote.public_key(),
                 previous_vote: prev_vote,
                 new_vote: vote,
             });
         }
 
-        view_votes_mut.insert(sender_hash, vote);
+        view_votes_mut.insert(*vote.public_key(), vote);
         Ok(())
     }
 
@@ -207,10 +218,9 @@ impl<V: Vote + Display> VoteStoreInner<V> {
         debug!(
             target: LOG_TARGET,
             "Vote store size: used: >{:.2?}KiB ({} entries)",
-            self.store.values() .map(|v|
-                v.len() * FixedHash::byte_size() +
-                v.len() * Self::VOTE_BYTE_SIZE
-            ).sum::<usize>() as f32 / 1024f32,
+            self.store.values()
+                .map(|v| v.len() * Self::VOTE_BYTE_SIZE)
+                .sum::<usize>() as f32 / 1024f32,
             self.store.len(),
         );
     }
@@ -223,11 +233,11 @@ pub struct ThresholdDecision {
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
-#[error("Vote equivocation detected at epoch {epoch}, height {height} from sender hash {sender_hash}")]
+#[error("Vote equivocation detected at epoch {epoch}, height {height} from {public_key}")]
 pub struct VoteEquivocationDetected<V: Vote> {
     pub epoch: Epoch,
     pub height: NodeHeight,
-    pub sender_hash: FixedHash,
+    pub public_key: RistrettoPublicKeyBytes,
     pub previous_vote: V,
     pub new_vote: V,
 }
@@ -235,7 +245,7 @@ pub struct VoteEquivocationDetected<V: Vote> {
 #[cfg(test)]
 mod tests {
     use tari_consensus_types::{SignedMessage, ToSignatureMessage};
-    use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
+    use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
 
     use super::*;
 
@@ -246,6 +256,8 @@ mod tests {
     struct TestVote {
         epoch: Epoch,
         height: NodeHeight,
+        sig: SchnorrSignatureBytes,
+        public_key: RistrettoPublicKeyBytes,
     }
 
     impl Display for TestVote {
@@ -262,11 +274,11 @@ mod tests {
 
     impl SignedMessage for TestVote {
         fn signature(&self) -> &SchnorrSignatureBytes {
-            &ZERO_SIG
+            &self.sig
         }
 
         fn public_key(&self) -> &RistrettoPublicKeyBytes {
-            &ZERO_PUBKEY
+            &self.public_key
         }
     }
 
@@ -290,9 +302,11 @@ mod tests {
         let vote = TestVote {
             epoch: Epoch(1),
             height: NodeHeight(1),
+            sig: ZERO_SIG,
+            public_key: ZERO_PUBKEY,
         };
         store
-            .save_vote(FixedHash::zero(), vote.clone())
+            .save_vote(vote.clone())
             .expect("Expected to save a new vote successfully");
     }
 
@@ -302,12 +316,24 @@ mod tests {
         let vote = TestVote {
             epoch: Epoch(1),
             height: NodeHeight(1),
+            sig: ZERO_SIG,
+            public_key: ZERO_PUBKEY,
         };
         store
-            .save_vote(FixedHash::zero(), vote.clone())
+            .save_vote(vote.clone())
             .expect("Expected to save a new vote successfully");
 
-        // Try to save the same vote again
-        store.save_vote(FixedHash::zero(), vote).unwrap_err();
+        // Try to save the same vote again - exact same vote is OK
+        store.save_vote(vote).unwrap();
+
+        let vote = TestVote {
+            epoch: Epoch(1),
+            height: NodeHeight(1),
+            public_key: ZERO_PUBKEY,
+            sig: SchnorrSignatureBytes::new([1u8; 32].into(), Scalar32Bytes::zero()),
+        };
+
+        // Try to save the a different vote from the same public key and epoch/height - should error
+        store.save_vote(vote).unwrap_err();
     }
 }

@@ -15,14 +15,19 @@ pub struct MMapValueLookup {
 }
 
 impl MMapValueLookup {
-    pub fn load(file: &File) -> io::Result<Self> {
-        let mmap = unsafe { memmap2::Mmap::map(file) }?;
+    /// Loads a memory-mapped value lookup table from the specified file.
+    ///
+    /// # Safety
+    /// This function uses unsafe code to create a memory-mapped file. The caller must ensure that the file is not
+    /// modified while it is being used.
+    pub unsafe fn load(file: &File) -> io::Result<Self> {
+        let mmap = memmap2::Mmap::map(file)?;
         let header = LookupHeader::from_buf(&mmap)?;
         #[cfg(unix)]
         mmap.advise_range(
             memmap2::Advice::Sequential,
             LookupHeader::SIZE,
-            header.max as usize + LookupHeader::SIZE,
+            mmap.len() - LookupHeader::SIZE,
         )?;
 
         Ok(Self {
@@ -60,14 +65,29 @@ impl MMapValueLookup {
         // Seek to the position of the value. Value must be in range.
         assert!(self.header.is_in_range(value));
         let offset_val = value - self.header.min;
-        self.pos = offset_val as usize;
+        self.pos = usize::try_from(offset_val)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Value offset too large"))?;
         Ok(())
     }
 
     fn read_next(&mut self) -> io::Result<Option<[u8; 32]>> {
         let mut buf = [0u8; 32];
-        let start = self.pos * 32 + LookupHeader::SIZE;
-        let end = start + 32;
+        let start = self
+            .pos
+            .checked_mul(32)
+            .and_then(|v| v.checked_add(LookupHeader::SIZE))
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Position overflow when calculating read offset",
+                )
+            })?;
+        let end = start.checked_add(32).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Position overflow when calculating read end offset",
+            )
+        })?;
         let data = self.mmap.get(start..end).ok_or(io::ErrorKind::UnexpectedEof)?;
         buf.copy_from_slice(data);
         self.pos += 1;

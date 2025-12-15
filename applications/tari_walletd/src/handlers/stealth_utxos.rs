@@ -114,7 +114,9 @@ pub async fn handle_decrypt_value(
         Some(path) => spawn_blocking(move || {
             let file = fs::File::open(&path)
                 .map_err(|e| anyhow!("Unable to load value lookup file '{}': {e}", path.display()))?;
-            let lookup = MMapValueLookup::load(&file)?;
+            // SAFETY: We assume the file will not be modified while mapped. Although not enforced (e.g. locks,
+            // permissions and other platform specific mechanisms), this is a reasonable assumption for most scenarios.
+            let lookup = unsafe { MMapValueLookup::load(&file) }?;
 
             info!(
                 target: LOG_TARGET,

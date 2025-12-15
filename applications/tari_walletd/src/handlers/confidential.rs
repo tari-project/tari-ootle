@@ -332,7 +332,9 @@ pub async fn handle_view_vault_balance(
             let file = fs::File::open(file)
                 .map_err(|e| anyhow!("Unable to load value lookup file '{}': {e}", file.display()))?;
             let mut is_logged = false;
-            let mut lookup = MMapValueLookup::load(&file)?.with_fallback(move |v| {
+            // SAFETY: We assume the file will not be modified while mapped. Although not enforced (e.g. locks,
+            // permissions and other platform specific mechanisms), this is a reasonable assumption for most scenarios.
+            let mut lookup = unsafe { MMapValueLookup::load(&file) }?.with_fallback(move |v| {
                 if !is_logged {
                     is_logged = true;
                     warn!("Using value lookup fallback. This will likely result in very slow lookups.");

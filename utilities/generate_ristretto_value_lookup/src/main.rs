@@ -34,7 +34,9 @@ async fn main() -> io::Result<()> {
         let timer = Instant::now();
         let metadata = fs::metadata(&dest_file)?;
         let file = fs::File::open(&dest_file)?;
-        let mut lookup = tari_ootle_wallet_crypto::MMapValueLookup::load(&file)?;
+        // SAFETY: We assume the file will not be modified while mapped. Although not enforced (e.g. locks,
+        // permissions and other platform specific mechanisms), this is a reasonable assumption for most scenarios.
+        let mut lookup = unsafe { tari_ootle_wallet_crypto::MMapValueLookup::load(&file) }?;
 
         let expected_size = (lookup.range().end() - lookup.range().start() + 1) * 32 + LookupHeader::SIZE as u64;
         if metadata.len() != expected_size {

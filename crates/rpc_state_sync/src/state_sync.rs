@@ -159,7 +159,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                 start_state_version,
                 shard: shard.as_u32(),
                 until_epoch: Some(checkpoint.epoch().into()),
-                value_filters: SubstateValueFilterFlags::all().bits(),
+                value_filters: SubstateValueFilterFlags::all_substates().bits(),
             })
             .await?;
 
@@ -417,8 +417,10 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         our_vn_addr: &PeerAddress,
     ) -> Result<Option<Version>, RpcStateSyncError> {
         let mut remaining_members = prev_committee.len();
-
-        info!(target: LOG_TARGET, "🛜 Syncing state for shard {shard} and epoch {}", epoch.saturating_sub(Epoch(1)));
+        let prev_epoch = epoch
+            .checked_sub(Epoch(1))
+            .ok_or_else(|| RpcStateSyncError::InvalidResponse(anyhow!("Epoch is zero")))?;
+        info!(target: LOG_TARGET, "🛜 Syncing state for shard {shard} and epoch {}", prev_epoch);
         for member in prev_committee.shuffled() {
             remaining_members = remaining_members.saturating_sub(1);
             if *our_vn_addr == member.address {
@@ -439,9 +441,6 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             };
 
             // fetch checkpoint
-            let prev_epoch = epoch
-                .checked_sub(Epoch(1))
-                .ok_or_else(|| RpcStateSyncError::InvalidResponse(anyhow!("Epoch is zero")))?;
             let checkpoint = match self
                 .get_or_fetch_valid_epoch_checkpoint(&mut client, shard_group, prev_committee, prev_epoch)
                 .await

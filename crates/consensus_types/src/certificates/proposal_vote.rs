@@ -24,12 +24,6 @@ pub struct ProposalVote {
 }
 
 impl Vote for ProposalVote {
-    type Key = BlockId;
-
-    fn key(&self) -> Self::Key {
-        self.block_id
-    }
-
     fn epoch(&self) -> Epoch {
         self.epoch
     }

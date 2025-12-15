@@ -3,7 +3,6 @@
 
 use std::sync::Arc;
 
-use log::*;
 use tari_engine::{
     executables::Executable,
     fees::{FeeModule, FeeTable},

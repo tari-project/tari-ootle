@@ -15,7 +15,7 @@ use tari_engine_types::{
     ToByteType,
 };
 use tari_ootle_common_types::{displayable::Displayable, optional::Optional};
-use tari_ootle_wallet_crypto::{GenerateValueLookup, IoReaderValueLookup, OutputWitness};
+use tari_ootle_wallet_crypto::{GenerateValueLookup, MMapValueLookup, OutputWitness};
 use tari_ootle_wallet_sdk::models::{ConfidentialOutputModel, KeyBranch, OutputStatus};
 use tari_template_lib::types::Amount;
 use tari_wallet_daemon_client::{
@@ -329,10 +329,12 @@ pub async fn handle_view_vault_balance(
     let timer = Instant::now();
     let balances = match context.config().value_lookup_table_file.as_ref() {
         Some(file) => {
-            let mut file = fs::File::open(file)
+            let file = fs::File::open(file)
                 .map_err(|e| anyhow!("Unable to load value lookup file '{}': {e}", file.display()))?;
             let mut is_logged = false;
-            let mut lookup = IoReaderValueLookup::load(&mut file)?.with_fallback(move |v| {
+            // SAFETY: We assume the file will not be modified while mapped. Although not enforced (e.g. locks,
+            // permissions and other platform specific mechanisms), this is a reasonable assumption for most scenarios.
+            let mut lookup = unsafe { MMapValueLookup::load(&file) }?.with_fallback(move |v| {
                 if !is_logged {
                     is_logged = true;
                     warn!("Using value lookup fallback. This will likely result in very slow lookups.");

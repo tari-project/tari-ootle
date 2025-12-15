@@ -33,8 +33,10 @@ async fn main() -> io::Result<()> {
         );
         let timer = Instant::now();
         let metadata = fs::metadata(&dest_file)?;
-        let mut file = fs::File::open(&dest_file)?;
-        let mut lookup = tari_ootle_wallet_crypto::IoReaderValueLookup::load(&mut file)?;
+        let file = fs::File::open(&dest_file)?;
+        // SAFETY: We assume the file will not be modified while mapped. Although not enforced (e.g. locks,
+        // permissions and other platform specific mechanisms), this is a reasonable assumption for most scenarios.
+        let mut lookup = unsafe { tari_ootle_wallet_crypto::MMapValueLookup::load(&file) }?;
 
         let expected_size = (lookup.range().end() - lookup.range().start() + 1) * 32 + LookupHeader::SIZE as u64;
         if metadata.len() != expected_size {
@@ -110,10 +112,7 @@ async fn main() -> io::Result<()> {
 }
 
 async fn write_output_async<W: io::Write>(mut writer: W, min: u64, max: u64, num_threads: usize) -> io::Result<()> {
-    // Write header VLKP || min_value (8 bytes) || max_value (8 bytes)
-    writer.write_all(b"VLKP")?;
-    writer.write_all(&min.to_be_bytes())?;
-    writer.write_all(&max.to_be_bytes())?;
+    LookupHeader::new(min, max).encode_into(&mut writer)?;
 
     println!(
         "Using {} worker threads to generate Ristretto public keys.",

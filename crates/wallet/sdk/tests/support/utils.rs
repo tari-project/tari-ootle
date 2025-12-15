@@ -19,7 +19,5 @@ pub fn random_key() -> RistrettoSecretKey {
 }
 
 pub fn resource_address_from_seed(seed: u8) -> ResourceAddress {
-    let mut bytes = [0u8; 32];
-    bytes[0] = seed;
     ResourceAddress::new(ObjectKey::from_array([seed; ObjectKey::LENGTH]))
 }

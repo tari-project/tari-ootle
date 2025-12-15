@@ -115,7 +115,20 @@ pub fn setup_keypair_prompt<P: AsRef<Path>>(identity_file: P, create_id: bool) -
         )),
         Err(e) => {
             if create_id {
-                warn!(target: LOG_TARGET, "Failed to load node identity: {}", e);
+                if matches!(e, IdentityError::NotFound) {
+                    debug!(
+                        target: LOG_TARGET,
+                        "Node identity file not found at {}. Creating new ID",
+                        identity_file.as_ref().to_string_lossy()
+                    );
+                } else {
+                    warn!(
+                        target: LOG_TARGET,
+                        "Existing node identity file at {} is invalid ({}). Creating new ID",
+                        identity_file.as_ref().to_string_lossy(),
+                        e
+                    );
+                }
             } else {
                 let prompt = prompt("Node identity does not exist.\nWould you like to to create one (Y/n)?");
                 if !prompt {

@@ -83,10 +83,10 @@ where TCodec: Codec + Send + Clone + 'static
     }
 
     fn on_dial_upgrade_error(&mut self, error: DialUpgradeError<(), Protocol<StreamProtocol>>) {
-        let stream = self
-            .requested_stream
-            .take()
-            .expect("negotiated a stream without a requested stream");
+        let Some(stream) = self.requested_stream.take() else {
+            tracing::warn!("dial upgrade error without a requested stream: {:?}", error.error);
+            return;
+        };
 
         match error.error {
             StreamUpgradeError::Timeout => {
@@ -123,10 +123,10 @@ where TCodec: Codec + Send + Clone + 'static
         let codec = self.codec.clone();
         let (mut peer_stream, _protocol) = outbound.protocol;
 
-        let mut msg_stream = self
-            .requested_stream
-            .take()
-            .expect("negotiated outbound stream without a requested stream");
+        let Some(mut msg_stream) = self.requested_stream.take() else {
+            tracing::warn!("negotiated outbound stream without a requested stream");
+            return;
+        };
 
         let mut events = self.pending_events_sender.clone();
 

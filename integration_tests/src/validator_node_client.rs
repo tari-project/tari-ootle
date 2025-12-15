@@ -343,28 +343,28 @@ pub fn parse_arg(s: &str) -> Result<tari_transaction::builder::named_args::Named
     if let Ok(v) = s.parse::<bool>() {
         return Ok(arg!(v));
     }
-    if let Ok(v) = s.parse::<u64>() {
-        return Ok(arg!(v));
-    }
-    if let Ok(v) = s.parse::<u32>() {
+    if let Ok(v) = s.parse::<u8>() {
         return Ok(arg!(v));
     }
     if let Ok(v) = s.parse::<u16>() {
         return Ok(arg!(v));
     }
-    if let Ok(v) = s.parse::<u8>() {
+    if let Ok(v) = s.parse::<u32>() {
         return Ok(arg!(v));
     }
-    if let Ok(v) = s.parse::<i64>() {
+    if let Ok(v) = s.parse::<u64>() {
         return Ok(arg!(v));
     }
-    if let Ok(v) = s.parse::<i32>() {
+    if let Ok(v) = s.parse::<i8>() {
         return Ok(arg!(v));
     }
     if let Ok(v) = s.parse::<i16>() {
         return Ok(arg!(v));
     }
-    if let Ok(v) = s.parse::<i8>() {
+    if let Ok(v) = s.parse::<i32>() {
+        return Ok(arg!(v));
+    }
+    if let Ok(v) = s.parse::<i64>() {
         return Ok(arg!(v));
     }
 

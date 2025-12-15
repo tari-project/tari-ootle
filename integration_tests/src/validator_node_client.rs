@@ -1,22 +1,31 @@
 //  Copyright 2022 The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
-use std::{path::PathBuf, str::FromStr};
+use std::{str::FromStr, time::Duration};
 
+use tari_common::configuration::Network;
+use tari_common_types::types::PrivateKey;
 use tari_engine_types::{
     commit_result::RejectReason,
     substate::{SubstateDiff, SubstateId},
 };
-use tari_ootle_common_types::SubstateRequirement;
+use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_validator_node_cli::{
-    command::transaction::{handle_submit, CliArg, CliInstruction, CommonSubmitArgs, SubmitArgs},
-    from_hex::FromHex,
+use tari_template_lib::{
+    models::NonFungibleId,
+    types::{Amount, TemplateAddress},
 };
-use tari_validator_node_client::{types::SubmitTransactionResponse, ValidatorNodeClient};
+use tari_transaction::{builder::TransactionBuilder, Transaction};
+use tari_transaction_components::key_manager::{SecretTransactionKeyManagerInterface, TariKeyId};
+use tari_validator_node_client::{
+    types::{GetTransactionResultRequest, SubmitTransactionRequest, SubmitTransactionResponse},
+    ValidatorNodeClient,
+};
+use tokio::time::{interval, MissedTickBehavior};
 
-use crate::{helpers::get_component_from_namespace, logging::get_base_dir_for_scenario, TariWorld};
+use crate::{helpers::get_component_from_namespace, TariWorld};
 
+/// Creates a component by calling a template function
 pub async fn create_component(
     world: &mut TariWorld,
     outputs_name: String,
@@ -25,38 +34,37 @@ pub async fn create_component(
     function_call: String,
     args: Vec<String>,
 ) {
-    let data_dir = get_cli_data_dir(world);
-
     let template_address = world
         .templates
         .get(&template_name)
         .unwrap_or_else(|| panic!("Template not found with name {}", template_name))
         .address;
-    let args: Vec<CliArg> = args.iter().map(|a| CliArg::from_str(a).unwrap()).collect();
-    let instruction = CliInstruction::CallFunction {
-        template_address: FromHex(template_address),
-        function_name: function_call,
-        args,
-    };
 
-    let args = SubmitArgs {
-        instruction,
-        common: CommonSubmitArgs {
-            wait_for_result: true,
-            wait_for_result_timeout: Some(300),
-            inputs: vec![],
-            version: None,
-            dump_outputs_into: None,
-            account_template_address: None,
-        },
-    };
+    // Parse arguments from strings
+    let parsed_args: Result<Vec<_>, _> = args.iter().map(|a| parse_arg(a)).collect();
+
+    let parsed_args = parsed_args.expect("Failed to parse arguments");
+
+    // Get signing key from world's key manager
+    let secret_key = get_signing_key(world).await;
+
+    // Build and sign the transaction (Network::LocalNet == 0u8)
+    let transaction = TransactionBuilder::new(Network::LocalNet)
+        .call_function(template_address, function_call, parsed_args)
+        .with_inputs(vec![])
+        .build_and_seal(&secret_key);
+
+    // Submit transaction
     let mut client = world.get_validator_node(&vn_name).get_client();
-    let resp = handle_submit(args, data_dir, &mut client).await.unwrap();
+    let resp = submit_and_wait_for_result(&mut client, transaction, Duration::from_secs(300))
+        .await
+        .unwrap();
 
     if let Some(ref failure) = resp.dry_run_result.as_ref().unwrap().finalize.fee_reject() {
         panic!("Transaction failed: {:?}", failure);
     }
-    // store the account component address and other substate ids for later reference
+
+    // Store the account component address and other substate ids for later reference
     add_outputs_from_diff(
         world,
         outputs_name,
@@ -64,6 +72,7 @@ pub async fn create_component(
     );
 }
 
+/// Extracts outputs from a substate diff and stores them in the world for later reference
 pub(crate) fn add_outputs_from_diff(world: &mut TariWorld, outputs_name: String, diff: &SubstateDiff) {
     let outputs = world.outputs.entry(outputs_name).or_default();
     let mut counters = [0usize; 10];
@@ -164,6 +173,7 @@ pub(crate) fn add_outputs_from_diff(world: &mut TariWorld, outputs_name: String,
     }
 }
 
+/// Calls a method on a component concurrently multiple times
 pub async fn concurrent_call_method(
     world: &mut TariWorld,
     vn_name: String,
@@ -175,13 +185,14 @@ pub async fn concurrent_call_method(
     // For concurrent transactions we DO NOT specify the versions
     component.version = None;
 
-    let vn_data_dir = get_cli_data_dir(world);
     let vn_client = world.get_validator_node(&vn_name).get_client();
+    let secret_key = get_signing_key(world).await;
+
     let mut handles = Vec::new();
     for _ in 0..times {
         let handle = tokio::spawn(call_method_inner(
             vn_client.clone(),
-            vn_data_dir.clone(),
+            secret_key.clone(),
             component.clone(),
             method_call.clone(),
         ));
@@ -208,6 +219,7 @@ pub async fn concurrent_call_method(
     }
 }
 
+/// Calls a method on a component and stores the outputs
 pub async fn call_method(
     world: &mut TariWorld,
     vn_name: String,
@@ -215,12 +227,13 @@ pub async fn call_method(
     outputs_name: String,
     method_call: String,
 ) -> Result<SubmitTransactionResponse, RejectReason> {
-    let data_dir = get_cli_data_dir(world);
     let component = get_component_from_namespace(world, fq_component_name);
     let vn_client = world.get_validator_node(&vn_name).get_client();
-    let resp = call_method_inner(vn_client, data_dir, component, method_call).await?;
+    let secret_key = get_signing_key(world).await;
 
-    // store the account component address and other substate ids for later reference
+    let resp = call_method_inner(vn_client, secret_key, component, method_call).await?;
+
+    // Store the account component address and other substate ids for later reference
     add_outputs_from_diff(
         world,
         outputs_name,
@@ -235,32 +248,29 @@ pub async fn call_method(
     Ok(resp)
 }
 
+/// Internal helper to call a method on a component
 async fn call_method_inner(
-    vn_client: ValidatorNodeClient,
-    vn_data_dir: PathBuf,
+    mut vn_client: ValidatorNodeClient,
+    secret_key: PrivateKey,
     component: SubstateRequirement,
     method_call: String,
 ) -> Result<SubmitTransactionResponse, RejectReason> {
-    let instruction = CliInstruction::CallMethod {
-        component_address: component.substate_id.clone(),
-        // TODO: actually parse the method call for arguments
-        method_name: method_call,
-        args: vec![],
-    };
-
     println!("Inputs: {}", component);
-    let args = SubmitArgs {
-        instruction,
-        common: CommonSubmitArgs {
-            wait_for_result: true,
-            wait_for_result_timeout: Some(60),
-            inputs: vec![component],
-            version: None,
-            dump_outputs_into: None,
-            account_template_address: None,
-        },
-    };
-    let resp = handle_submit(args, vn_data_dir, &mut vn_client.clone()).await.unwrap();
+
+    let component_address = component.substate_id.as_component_address().ok_or_else(|| {
+        RejectReason::ExecutionFailure(format!("Invalid component address: {}", component.substate_id))
+    })?;
+
+    // Build transaction
+    let transaction = TransactionBuilder::new(Network::LocalNet)
+        .call_method(component_address, method_call, vec![])
+        .with_inputs(vec![component])
+        .build_and_seal(&secret_key);
+
+    // Submit and wait for result
+    let resp = submit_and_wait_for_result(&mut vn_client, transaction, Duration::from_secs(60))
+        .await
+        .map_err(|e| RejectReason::ExecutionFailure(e.to_string()))?;
 
     if let Some(failure) = resp.dry_run_result.as_ref().unwrap().finalize.fee_reject() {
         return Err(failure.clone());
@@ -269,6 +279,131 @@ async fn call_method_inner(
     Ok(resp)
 }
 
-pub(crate) fn get_cli_data_dir(world: &mut TariWorld) -> PathBuf {
-    get_base_dir_for_scenario("vn_cli", world.current_scenario_name.as_ref().unwrap(), "SHARED")
+/// Gets the signing key from the world's key manager
+async fn get_signing_key(world: &TariWorld) -> PrivateKey {
+    world
+        .key_manager
+        .get_private_key(&TariKeyId::default())
+        .expect("Failed to get private key from key manager")
+}
+
+/// Submits a transaction and waits for the result
+async fn submit_and_wait_for_result(
+    client: &mut ValidatorNodeClient,
+    transaction: Transaction,
+    timeout: Duration,
+) -> anyhow::Result<SubmitTransactionResponse> {
+    let request = SubmitTransactionRequest { transaction };
+    let mut resp = client.submit_transaction(request).await?;
+    let transaction_id = resp.transaction_id;
+
+    println!("✅ Transaction {} submitted.", transaction_id);
+
+    // Wait for transaction result
+    let mut poll_interval = interval(Duration::from_secs(1));
+    poll_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let deadline = tokio::time::Instant::now() + timeout;
+
+    loop {
+        if tokio::time::Instant::now() > deadline {
+            anyhow::bail!("Timeout waiting for transaction result");
+        }
+
+        if let Some(execution) = client
+            .get_transaction_result(GetTransactionResultRequest { transaction_id })
+            .await
+            .optional()?
+        {
+            // Populate the dry_run_result for compatibility with existing code
+            resp.dry_run_result = Some(tari_validator_node_client::types::DryRunTransactionFinalizeResult {
+                decision: if execution.transaction_execution.decision().is_commit() {
+                    tari_sidechain::QuorumDecision::Accept
+                } else {
+                    tari_sidechain::QuorumDecision::Reject
+                },
+                fee_breakdown: Some(
+                    execution
+                        .transaction_execution
+                        .result()
+                        .finalize
+                        .fee_receipt
+                        .to_cost_breakdown(),
+                ),
+                finalize: execution.transaction_execution.result().finalize.clone(),
+            });
+            return Ok(resp);
+        }
+
+        poll_interval.tick().await;
+    }
+}
+
+/// Parses a string argument into a NamedArg for transaction building
+pub fn parse_arg(s: &str) -> Result<tari_transaction::builder::named_args::NamedArg, String> {
+    use tari_transaction::arg;
+
+    // Try parsing as primitives first
+    if let Ok(v) = s.parse::<bool>() {
+        return Ok(arg!(v));
+    }
+    if let Ok(v) = s.parse::<u64>() {
+        return Ok(arg!(v));
+    }
+    if let Ok(v) = s.parse::<u32>() {
+        return Ok(arg!(v));
+    }
+    if let Ok(v) = s.parse::<u16>() {
+        return Ok(arg!(v));
+    }
+    if let Ok(v) = s.parse::<u8>() {
+        return Ok(arg!(v));
+    }
+    if let Ok(v) = s.parse::<i64>() {
+        return Ok(arg!(v));
+    }
+    if let Ok(v) = s.parse::<i32>() {
+        return Ok(arg!(v));
+    }
+    if let Ok(v) = s.parse::<i16>() {
+        return Ok(arg!(v));
+    }
+    if let Ok(v) = s.parse::<i8>() {
+        return Ok(arg!(v));
+    }
+
+    // Try parsing as SubstateId
+    if let Ok(v) = SubstateId::from_str(s) {
+        return Ok(match v {
+            SubstateId::Component(addr) => arg!(addr),
+            SubstateId::Resource(addr) => arg!(addr),
+            SubstateId::Vault(addr) => arg!(addr),
+            SubstateId::ClaimedOutputTombstone(addr) => arg!(addr),
+            SubstateId::NonFungible(addr) => arg!(addr),
+            SubstateId::TransactionReceipt(addr) => arg!(addr),
+            SubstateId::Template(addr) => arg!(addr),
+            SubstateId::ValidatorFeePool(addr) => arg!(addr),
+            SubstateId::Utxo(addr) => arg!(addr),
+        });
+    }
+
+    // Try parsing as template address
+    if let Ok(v) = TemplateAddress::from_hex(s) {
+        return Ok(arg!(v));
+    }
+
+    // Try parsing special prefixed types
+    if let Some(("nft", nft_id)) = s.split_once('_') {
+        if let Ok(v) = NonFungibleId::try_from_canonical_string(nft_id) {
+            return Ok(arg!(v));
+        }
+    }
+
+    if let Some(("amount", amount)) = s.split_once('_') {
+        if let Ok(number) = amount.parse::<i64>() {
+            return Ok(arg!(Amount(number)));
+        }
+    }
+
+    // Default to string
+    Ok(arg!(s.to_string()))
 }

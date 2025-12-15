@@ -16,7 +16,6 @@ members = [
     "applications/tari_scaffolder",
     "applications/tari_signaling_server",
     "applications/tari_swarm_daemon",
-    "applications/tari_validator_node_cli",
     "applications/tari_validator_node",
     "applications/tari_watcher",
     "clients/base_node_client",
@@ -74,7 +73,6 @@ resolver = "2"
 # apps
 tari_ootle_walletd = { path = "applications/tari_walletd", default-features = false }
 tari_validator_node = { path = "applications/tari_validator_node", default-features = false }
-tari_validator_node_cli = { path = "applications/tari_validator_node_cli" }
 tari_indexer = { path = "applications/tari_indexer", default-features = false }
 tari_ootle_app_utilities = { path = "applications/tari_ootle_app_utilities" }
 

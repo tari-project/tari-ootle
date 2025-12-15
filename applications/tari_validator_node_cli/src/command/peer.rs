@@ -26,8 +26,24 @@ use tari_validator_node_client::{types::AddPeerRequest, ValidatorNodeClient};
 
 #[derive(Debug, Subcommand, Clone)]
 pub enum PeersSubcommand {
+    /// Connect to a peer validator node
+    ///
+    /// Establishes a connection to another validator node on the network using its
+    /// public key and network addresses. This enables communication for consensus,
+    /// transaction propagation, and other network activities.
+    ///
+    /// The command will wait for the dial to complete before returning.
+    ///
+    /// Arguments:
+    ///   public_key - The peer's public key in hexadecimal format
+    ///   addresses - One or more multiaddr network addresses for reaching the peer
+    ///
+    /// Example:
+    ///   tari_validator_node_cli peers connect <public_key> /ip4/192.168.1.100/tcp/18189 /ip4/192.168.1.100/tcp/18189
     Connect {
+        /// Peer's public key in hexadecimal format
         public_key: String,
+        /// Network addresses (multiaddr format) where the peer can be reached
         addresses: Vec<Multiaddr>,
     },
 }

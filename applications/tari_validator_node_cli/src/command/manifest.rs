@@ -13,21 +13,44 @@ use tari_transaction_manifest::ManifestValue;
 
 #[derive(Debug, Subcommand, Clone)]
 pub enum ManifestSubcommand {
-    /// Creates a new manifest template
+    /// Create a new manifest template file
+    ///
+    /// Generates a template manifest file with example instructions and syntax.
+    /// Manifests provide a human-readable way to describe complex transactions
+    /// with multiple instructions.
+    ///
+    /// If no path is specified, the template is written to stdout.
+    ///
+    /// Example:
+    ///   tari_validator_node_cli manifests new my_transaction.manifest
     New(NewArgs),
-    /// Parses the manifest for errors
+
+    /// Validate and parse a manifest file
+    ///
+    /// Checks the manifest syntax for errors without executing it.
+    /// Displays the parsed instructions and fee instructions.
+    /// Useful for debugging manifest files before submission.
+    ///
+    /// If no path is specified, reads from stdin.
+    ///
+    /// Example:
+    ///   tari_validator_node_cli manifests check -p my_transaction.manifest
     Check(CheckArgs),
 }
 
 #[derive(Debug, Args, Clone)]
 pub struct NewArgs {
+    /// Output path for the manifest template (stdout if not specified)
     pub manifest: Option<PathBuf>,
 }
 
 #[derive(Debug, Args, Clone)]
 pub struct CheckArgs {
+    /// Path to the manifest file to check (stdin if not specified)
     #[clap(short = 'p', long)]
     pub manifest: Option<PathBuf>,
+
+    /// Global variables in format name=value (currently unused in check)
     #[clap(short = 'g', long)]
     pub globals: Vec<String>,
 }

@@ -31,7 +31,20 @@ use crate::{from_hex::FromHex, table::Table, table_row};
 
 #[derive(Debug, Subcommand, Clone)]
 pub enum TemplateSubcommand {
-    Get { template_address: FromHex<TemplateAddress> },
+    /// Retrieve template information by address
+    ///
+    /// Fetches the complete template details including metadata and ABI (Application Binary Interface).
+    /// The ABI shows all available functions, their arguments, and return types.
+    ///
+    /// Arguments:
+    ///   template_address - The hexadecimal address of the template to query
+    ///
+    /// Example:
+    ///   tari_validator_node_cli templates get 0x1234567890abcdef...
+    Get {
+        /// Template address in hexadecimal format
+        template_address: FromHex<TemplateAddress>,
+    },
 }
 
 impl TemplateSubcommand {

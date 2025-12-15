@@ -28,10 +28,39 @@ use crate::key_manager::KeyManager;
 
 #[derive(Debug, Subcommand, Clone)]
 pub enum KeysSubcommand {
+    /// Create a new cryptographic key pair
+    ///
+    /// Generates a new Ed25519 key pair for signing transactions.
+    /// The key is stored in the base directory and can be activated using the 'use' command.
+    /// A key is automatically created on first run if none exists.
+    ///
+    /// Example:
+    ///   tari_validator_node_cli keys new
     #[clap(alias = "create")]
     New,
+
+    /// List all stored key pairs
+    ///
+    /// Displays all key pairs stored in the base directory, showing their public keys
+    /// and indicating which one is currently active. The active key is used to sign
+    /// all transactions submitted through this CLI.
+    ///
+    /// Example:
+    ///   tari_validator_node_cli keys list
     List,
+
+    /// Set a key pair as active
+    ///
+    /// Changes the active key pair used for signing transactions.
+    /// You must specify the public key (in hex format) of the key you want to activate.
+    ///
+    /// Arguments:
+    ///   name - The public key (hex string) of the key pair to activate
+    ///
+    /// Example:
+    ///   tari_validator_node_cli keys use 0x1234567890abcdef...
     Use {
+        /// Public key in hexadecimal format
         name: String,
     },
 }

@@ -84,7 +84,7 @@ where TCodec: Codec + Send + Clone + 'static
 
     fn on_dial_upgrade_error(&mut self, error: DialUpgradeError<(), Protocol<StreamProtocol>>) {
         let Some(stream) = self.requested_stream.take() else {
-            tracing::warn!("dial upgrade error without a requested stream: {:?}", error.error);
+            tracing::warn!(peer_id=%self.peer_id, "dial upgrade error without a requested stream: {:?}", error.error);
             return;
         };
 

@@ -14,6 +14,7 @@ use tari_indexer_client::types::{
     IndexerTransactionFinalizedResult,
     ListRecentTransactionsRequest,
     ListRecentTransactionsResponse,
+    SubmitTransactionDryRunResponse,
     SubmitTransactionRequest,
     SubmitTransactionResponse,
 };
@@ -84,10 +85,7 @@ pub async fn submit_transaction(
 
     info!(target: LOG_TARGET, "✅ Transaction submitted: {}", transaction_id);
 
-    Ok(Json(SubmitTransactionResponse {
-        result: IndexerTransactionFinalizedResult::Pending,
-        transaction_id,
-    }))
+    Ok(Json(SubmitTransactionResponse { transaction_id }))
 }
 
 #[utoipa::path(
@@ -98,7 +96,7 @@ pub async fn submit_transaction(
 pub async fn submit_transaction_dry_run(
     Extension(context): Extension<HandlerContext>,
     Json(req): Json<SubmitTransactionRequest>,
-) -> HandlerResult<Json<SubmitTransactionResponse>> {
+) -> HandlerResult<Json<SubmitTransactionDryRunResponse>> {
     let request: SubmitTransactionRequest = req;
 
     if !request.transaction.is_dry_run() {
@@ -113,7 +111,7 @@ pub async fn submit_transaction_dry_run(
         .await
         .map_err(ErrorResponse::anyhow)?;
 
-    Ok(Json(SubmitTransactionResponse {
+    Ok(Json(SubmitTransactionDryRunResponse {
         result: IndexerTransactionFinalizedResult::Finalized {
             execution_result: Some(Box::new(exec_result)),
             final_decision: Decision::Commit,

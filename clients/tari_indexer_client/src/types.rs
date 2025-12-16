@@ -140,6 +140,20 @@ pub struct SubmitTransactionRequest {
 )]
 pub struct SubmitTransactionResponse {
     pub transaction_id: TransactionId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "tari-indexer-client/",
+        rename = "IndexerSubmitTransactionResponse"
+    )
+)]
+pub struct SubmitTransactionDryRunResponse {
+    pub transaction_id: TransactionId,
     pub result: IndexerTransactionFinalizedResult,
 }
 

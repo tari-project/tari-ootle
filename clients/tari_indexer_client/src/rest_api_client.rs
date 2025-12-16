@@ -45,6 +45,7 @@ use crate::{
         ListTransactionReceiptsResponse,
         ListUtxosRequest,
         ListUtxosResponse,
+        SubmitTransactionDryRunResponse,
         SubmitTransactionRequest,
         SubmitTransactionResponse,
     },
@@ -124,7 +125,7 @@ impl IndexerRestApiClient {
     pub async fn submit_transaction_dry_run(
         &mut self,
         req: SubmitTransactionRequest,
-    ) -> Result<SubmitTransactionResponse, IndexerRestClientError> {
+    ) -> Result<SubmitTransactionDryRunResponse, IndexerRestClientError> {
         self.send_post("transactions/dry-run", req).await
     }
 

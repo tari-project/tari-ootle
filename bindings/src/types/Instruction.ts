@@ -3,9 +3,10 @@ import type { AllocatableAddressType } from "./AllocatableAddressType";
 import type { Amount } from "./Amount";
 import type { ClaimBurnOutputData } from "./ClaimBurnOutputData";
 import type { ComponentAccessRules } from "./ComponentAccessRules";
-import type { ComponentCall } from "./ComponentCall";
+import type { ComponentReference } from "./ComponentReference";
 import type { Hash } from "./Hash";
 import type { LogLevel } from "./LogLevel";
+import type { MigrateFunction } from "./MigrateFunction";
 import type { MinotariBurnClaimProof } from "./MinotariBurnClaimProof";
 import type { OwnerRule } from "./OwnerRule";
 import type { ResourceAddress } from "./ResourceAddress";
@@ -25,7 +26,7 @@ export type Instruction =
       };
     }
   | { CallFunction: { address: Hash; function: string; args: Array<any> } }
-  | { CallMethod: { call: ComponentCall; method: string; args: Array<any> } }
+  | { CallMethod: { call: ComponentReference; method: string; args: Array<any> } }
   | { PutLastInstructionOutputOnWorkspace: { key: number } }
   | { EmitLog: { level: LogLevel; message: string } }
   | { ClaimBurn: { claim: MinotariBurnClaimProof; output_data: ClaimBurnOutputData } }
@@ -42,4 +43,5 @@ export type Instruction =
         revealed_input_bucket: WorkspaceOffsetId | null;
       };
     }
-  | { PayFee: { statement: StealthTransferStatement; revealed_input_bucket: WorkspaceOffsetId | null } };
+  | { PayFee: { statement: StealthTransferStatement; revealed_input_bucket: WorkspaceOffsetId | null } }
+  | { UpdateComponentTemplate: { component: ComponentReference; migrate: MigrateFunction | null; new_template: Hash } };

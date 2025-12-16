@@ -24,7 +24,7 @@ use tari_engine::state_store::StateStoreError;
 use tari_epoch_manager::EpochManagerError;
 use tari_indexer_lib::error::IndexerError;
 use tari_ootle_app_utilities::transaction_executor::TransactionProcessorError;
-use tari_ootle_common_types::{optional::IsNotFoundError, SubstateRequirement};
+use tari_ootle_common_types::optional::IsNotFoundError;
 use tari_rpc_framework::RpcStatus;
 use thiserror::Error;
 
@@ -32,8 +32,6 @@ use crate::{substate_manager::SubstateManagerError, template_manager::TemplateMa
 
 #[derive(Error, Debug)]
 pub enum DryRunTransactionProcessorError {
-    #[error("Substate {requirement} not found")]
-    SubstateNotFound { requirement: SubstateRequirement },
     #[error("EpochManager error: {0}")]
     EpochManager(#[from] EpochManagerError),
     #[error("Rpc error: {0}")]
@@ -48,8 +46,6 @@ pub enum DryRunTransactionProcessorError {
     NonDryRunTransaction,
     #[error("Failed to spawn blocking task: {0}")]
     SpawnBlockingTaskError(#[from] tokio::task::JoinError),
-    #[error("Invariant violation: {details}")]
-    InvariantViolation { details: String },
     #[error("TemplateManager error: {0}")]
     TemplateManagerError(#[from] TemplateManagerError),
     #[error("SubstateManager error: {0}")]

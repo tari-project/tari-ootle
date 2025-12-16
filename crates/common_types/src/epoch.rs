@@ -61,6 +61,11 @@ impl Epoch {
         let other = other.into();
         self.0.checked_sub(other.as_u64()).map(Epoch)
     }
+
+    pub fn checked_add<T: Into<Self>>(&self, other: T) -> Option<Epoch> {
+        let other = other.into();
+        self.0.checked_add(other.as_u64()).map(Epoch)
+    }
 }
 
 impl From<u64> for Epoch {

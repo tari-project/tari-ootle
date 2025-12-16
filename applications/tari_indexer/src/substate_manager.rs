@@ -30,7 +30,14 @@ use tari_engine_types::{
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate};
 use tari_indexer_lib::{cached_substate_manager::CachedSubstateManager, error::IndexerError};
-use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, PeerAddress, StateVersion};
+use tari_ootle_common_types::{
+    shard::Shard,
+    substate_type::SubstateType,
+    Epoch,
+    PeerAddress,
+    StateVersion,
+    SubstateRequirementRef,
+};
 use tari_ootle_storage::StorageError;
 use tari_ootle_wallet_sdk::models::UtxoStateUpdateSet;
 use tari_template_lib::{
@@ -40,7 +47,7 @@ use tari_template_lib::{
         TemplateAddress,
     },
 };
-use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClientFactory};
+use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
 use crate::{
     storage_sqlite::SqliteIndexerStore,
@@ -57,23 +64,36 @@ pub struct SubstateResponse {
 
 #[derive(Debug, Clone)]
 pub struct SubstateManager {
-    cached_substate:
+    cached_substates:
         CachedSubstateManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SubstateFileCache>,
     substate_store: SqliteIndexerStore,
 }
 
 impl SubstateManager {
     pub fn new(
-        cached_substate: CachedSubstateManager<
-            EpochManagerHandle<PeerAddress>,
-            TariValidatorNodeRpcClientFactory,
-            SubstateFileCache,
-        >,
         substate_store: SqliteIndexerStore,
+        epoch_manager: EpochManagerHandle<PeerAddress>,
+        validator_node_client_factory: TariValidatorNodeRpcClientFactory,
+        substate_cache: SubstateFileCache,
     ) -> Self {
+        let cached_substates = CachedSubstateManager::new(
+            epoch_manager.clone(),
+            validator_node_client_factory.clone(),
+            substate_cache,
+        );
+
         Self {
-            cached_substate,
+            cached_substates,
             substate_store,
+        }
+    }
+
+    #[cfg(feature = "metrics")]
+    pub fn with_metrics(self, registry_mut: &mut prometheus_client::registry::Registry) -> Self {
+        let cached_substates = self.cached_substates.with_metrics(registry_mut);
+        Self {
+            cached_substates,
+            substate_store: self.substate_store,
         }
     }
 
@@ -147,26 +167,44 @@ impl SubstateManager {
         Ok(utxos)
     }
 
-    pub async fn get_substate(
+    pub async fn get_substates<'a, I: IntoIterator<Item = SubstateRequirementRef<'a>>>(
         &self,
-        substate_id: &SubstateId,
-        version: Option<u32>,
-    ) -> Result<Option<SubstateResponse>, SubstateManagerError> {
-        if let Some(version) = version {
-            if let Some(substate) = self.get_substate_from_db(substate_id, Some(version))? {
-                return Ok(Some(substate));
+        substate_req: I,
+    ) -> Result<HashMap<SubstateId, Substate>, SubstateManagerError> {
+        let substate_req = substate_req.into_iter().collect::<HashSet<_>>();
+        let mut results = HashMap::with_capacity(substate_req.len());
+
+        let mut found_in_cache = HashSet::new();
+
+        for req in &substate_req {
+            if let Some(version) = req.version() {
+                if let Some(substate) = self.get_substate_from_db(req.substate_id(), Some(version))? {
+                    found_in_cache.insert(*req);
+                    results.insert(
+                        req.substate_id().clone(),
+                        Substate::new(substate.version, substate.substate),
+                    );
+                }
             }
         }
 
-        let substate_result = self.cached_substate.get_substate(substate_id, version).await?;
-        match substate_result {
-            SubstateResult::Up { substate } => Ok(Some(SubstateResponse {
-                id: substate_id.clone(),
-                version: substate.version(),
-                substate: substate.into_substate_value(),
-            })),
-            _ => Ok(None),
+        // TODO(perf): consider batch fetching from cache and validator nodes
+        for req in substate_req {
+            if found_in_cache.contains(&req) {
+                continue;
+            }
+            let substate_result = self
+                .cached_substates
+                .get_substate(req.substate_id(), req.version())
+                .await?;
+            if let Some(substate) = substate_result.into_up() {
+                results.insert(
+                    req.substate_id().clone(),
+                    Substate::new(substate.version(), substate.into_substate_value()),
+                );
+            }
         }
+        Ok(results)
     }
 
     pub async fn get_cached_substates(
@@ -182,7 +220,7 @@ impl SubstateManager {
         }
 
         let cached = self
-            .cached_substate
+            .cached_substates
             .get_cached_substates(substate_set.into_iter())
             .await?;
         for (id, substate) in cached {

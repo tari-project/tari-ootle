@@ -24,14 +24,9 @@ pub(crate) mod error;
 
 use tari_epoch_manager::EpochManagerReader;
 use tari_indexer_client::types::TransactionEntry;
-use tari_ootle_common_types::{optional::Optional, NodeAddressable, SubstateRequirementRef, ToSubstateAddress};
+use tari_ootle_common_types::{optional::Optional, NodeAddressable, ToSubstateAddress};
 use tari_transaction::{Transaction, TransactionId};
-use tari_validator_node_rpc::client::{
-    SubstateResult,
-    TransactionResultStatus,
-    ValidatorNodeClientFactory,
-    ValidatorNodeRpcClient,
-};
+use tari_validator_node_rpc::client::{TransactionResultStatus, ValidatorNodeClientFactory, ValidatorNodeRpcClient};
 
 use crate::{
     network_client::TariNetworkClient,
@@ -85,20 +80,6 @@ where
                 entity: "Transaction result",
                 key: transaction_id.to_string(),
             })
-    }
-
-    pub async fn get_substate_from_network(
-        &self,
-        substate_requirement: SubstateRequirementRef<'_>,
-    ) -> Result<SubstateResult, TransactionManagerError> {
-        let address = substate_requirement.or_zero_version().to_substate_address();
-        let result = self
-            .network_client
-            .try_single_with_committee(address, |mut client| async move {
-                client.get_substate(substate_requirement).await
-            })
-            .await?;
-        Ok(result)
     }
 
     pub fn list_recent_transactions(

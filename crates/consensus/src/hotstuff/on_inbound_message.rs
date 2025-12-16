@@ -112,7 +112,10 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
         while let Some(result) = self.inbound_messaging.next_message().await {
             let (from, msg) = result?;
 
-            if msg.epoch() > current_epoch + Epoch(1) {
+            // If the message is for two epochs or more ahead or behind, discard it.
+            if msg.epoch() > current_epoch + Epoch(1) ||
+                current_epoch.checked_sub(Epoch(1)).is_some_and(|e| msg.epoch() < e)
+            {
                 warn!(
                     target: LOG_TARGET,
                     "🗑️ Discard non-applicable message {} for epoch {}. Current epoch is {}",
@@ -327,19 +330,8 @@ fn msg_relative_view(
                 MessageRelativeView::Current
             }
         },
-        HotstuffMessage::ForeignProposal(msg) => {
-            if msg.proposal.epoch() < current_epoch {
-                return MessageRelativeView::Past {
-                    epoch: msg.proposal.epoch(),
-                    height: msg.proposal.height(),
-                };
-            }
-            if msg.proposal.epoch() > current_epoch {
-                return MessageRelativeView::Future {
-                    epoch: msg.proposal.epoch(),
-                    height: msg.proposal.height(),
-                };
-            }
+        HotstuffMessage::ForeignProposal(_) => {
+            // Foreign proposals are always applicable
             MessageRelativeView::Current
         },
         HotstuffMessage::ForeignProposalNotification(msg) => {

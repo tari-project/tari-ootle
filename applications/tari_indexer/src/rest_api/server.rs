@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use axum::{
     middleware,
@@ -12,6 +12,7 @@ use axum::{
 use log::*;
 use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
 use tari_shutdown::ShutdownSignal;
+use tower::{buffer::BufferLayer, limit::RateLimitLayer, ServiceBuilder};
 use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer, trace::TraceLayer};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
@@ -42,6 +43,7 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
     handlers::nfts::get_non_fungibles,
     handlers::resources::get_resource,
     handlers::transactions::submit_transaction,
+    handlers::transactions::submit_transaction_dry_run,
     handlers::transactions::list_recent_transactions,
     handlers::transactions::get_transaction_result,
     handlers::templates::get_template_definition,
@@ -96,6 +98,17 @@ impl Server {
             )
             .nest("/transactions", Router::new()
                 .route("/", post(handlers::transactions::submit_transaction))
+                .route("/dry-run", post(handlers::transactions::submit_transaction_dry_run)
+                    .layer(ServiceBuilder::new()
+                        .layer(axum::error_handling::HandleErrorLayer::new(|err: axum::BoxError| async move {
+                            (
+                                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                                format!("Unhandled error: {}", err),
+                            )
+                        }))
+                        .layer(BufferLayer::new(1024))
+                        .layer(RateLimitLayer::new(10, Duration::from_secs(5)))
+                    ))
                 .route(
                     "/recent",
                     get(handlers::transactions::list_recent_transactions),

@@ -1,6 +1,8 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::{array, iter};
+
 use anyhow::anyhow;
 use axum::{
     extract::{Path, Query},
@@ -18,7 +20,6 @@ use tari_indexer_client::types::{
     ListSubstatesResponse,
 };
 use tari_ootle_common_types::SubstateRequirementRef;
-use tari_validator_node_rpc::client::SubstateResult;
 
 use crate::rest_api::{context::HandlerContext, error::ErrorResponse, handlers::HandlerResult};
 
@@ -78,43 +79,32 @@ pub async fn get_substate(
             "Indexer is still syncing. Please try again later.",
         ));
     }
-    let maybe_substate = context
-        .substate_manager()
-        .get_substate(&substate_id, req.version)
-        .await
-        .map_err(|e| ErrorResponse::internal_error(format!("Error getting substate: {}", e)))?;
+    let requirement = SubstateRequirementRef::new(&substate_id, req.version);
+    let maybe_substate = if req.local_search_only {
+        context
+            .substate_manager()
+            .get_cached_substates(array::from_ref(requirement.substate_id()))
+            .await
+            .map(|a| {
+                a.into_iter()
+                    .find(|(_, substate)| req.version.is_none_or(|v| substate.version() == v))
+            })
+            .map_err(|e| ErrorResponse::internal_error(format!("Error getting substate: {}", e)))?
+    } else {
+        context
+            .substate_manager()
+            .get_substates(iter::once(requirement))
+            .await
+            .map(|a| a.into_iter().next())
+            .map_err(|e| ErrorResponse::internal_error(format!("Error getting substate: {}", e)))?
+    };
 
     match maybe_substate {
-        Some(substate_resp) => Ok(Json(GetSubstateResponse {
-            version: substate_resp.version,
-            substate: substate_resp.substate,
+        Some((_, substate)) => Ok(Json(GetSubstateResponse {
+            version: substate.version(),
+            substate: substate.into_substate_value(),
         })),
-        None => {
-            if req.local_search_only {
-                Err(ErrorResponse::not_found(format!("Substate {} not found", substate_id)))
-            } else {
-                // Ask network
-                let substate = context
-                    .transaction_manager()
-                    .get_substate_from_network(SubstateRequirementRef::new(&substate_id, req.version))
-                    .await
-                    .map_err(ErrorResponse::anyhow)?;
-                match substate {
-                    SubstateResult::DoesNotExist => Err(ErrorResponse::not_found(format!(
-                        "Substate {} not found on network",
-                        substate_id
-                    ))),
-                    SubstateResult::Up { substate, .. } => Ok(Json(GetSubstateResponse {
-                        version: substate.version(),
-                        substate: substate.into_substate_value(),
-                    })),
-                    SubstateResult::Down { version, .. } => Err(ErrorResponse::not_found(format!(
-                        "Substate {}v{} is DOWN on network",
-                        substate_id, version
-                    ))),
-                }
-            }
-        },
+        None => Err(ErrorResponse::not_found(format!("Substate {} not found", substate_id))),
     }
 }
 

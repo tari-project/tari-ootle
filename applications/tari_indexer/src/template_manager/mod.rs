@@ -22,10 +22,8 @@
 
 pub use error::*;
 pub use manager::*;
-pub use template_config::*;
 pub use types::*;
 
 mod error;
 mod manager;
-mod template_config;
 mod types;

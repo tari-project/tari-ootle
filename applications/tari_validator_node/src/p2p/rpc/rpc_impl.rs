@@ -452,34 +452,4 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
 
         Ok(Streaming::new(receiver))
     }
-
-    // async fn get_chain_summary(
-    //     &self,
-    //     _req: Request<GetChainSummaryRequest>,
-    // ) -> Result<GetChainSummaryResponse, RpcStatus> {
-    //     let current_epoch = self.epoch_manager.get_current_epoch();
-    //     let committee_into = self
-    //         .epoch_manager
-    //         .get_local_committee_info(current_epoch)
-    //         .await
-    //         .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-    //
-    //     self.state_store
-    //         .with_read_tx(|tx| {
-    //             let mut sharded_state_versions = IndexMap::with_capacity(committee_into.shard_group().len());
-    //             for shard in committee_into.shard_group().shard_iter() {
-    //                 let state_version = tx.state_tree_versions_get_latest(shard)?.unwrap_or_default();
-    //                 sharded_state_versions.insert(shard, state_version);
-    //             }
-    //
-    //             let leaf = LeafBlock::get(tx, current_epoch)?;
-    //             Ok(GetChainSummaryResponse {
-    //                 epoch: Some(current_epoch.into()),
-    //                 committee_info: Some(committee_into.into()),
-    //                 sharded_state_versions,
-    //                 leaf_block: Some(leaf.into()),
-    //             })
-    //         })
-    //         .map_err(RpcStatus::log_internal_error(LOG_TARGET))
-    // }
 }

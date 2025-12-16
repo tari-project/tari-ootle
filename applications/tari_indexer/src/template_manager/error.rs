@@ -32,6 +32,8 @@ use tari_template_lib::types::TemplateAddress;
 use tari_validator_node_rpc::ValidatorNodeRpcClientError;
 use thiserror::Error;
 
+use crate::substate_manager::SubstateManagerError;
+
 #[derive(Error, Debug)]
 pub enum TemplateManagerError {
     #[error("Storage error: {0}")]
@@ -56,6 +58,10 @@ pub enum TemplateManagerError {
     EpochManager(#[from] EpochManagerError),
     #[error("Validator Node RPC client error: {0}")]
     ValidatorNodeRpcClient(#[from] ValidatorNodeRpcClientError),
+    #[error("Substate manager error: {0}")]
+    SubstateManagerError(#[from] SubstateManagerError),
+    #[error("Invariant violation: {details}")]
+    InvariantViolation { details: String },
 }
 
 impl IsNotFoundError for TemplateManagerError {

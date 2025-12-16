@@ -14,6 +14,7 @@ use tari_indexer_client::types::{
     IndexerTransactionFinalizedResult,
     ListRecentTransactionsRequest,
     ListRecentTransactionsResponse,
+    SubmitTransactionDryRunResponse,
     SubmitTransactionRequest,
     SubmitTransactionResponse,
 };
@@ -34,8 +35,7 @@ const LOG_TARGET: &str = "tari::indexer::rest_api::handlers::transactions";
 #[utoipa::path(
     post,
     path = "/transactions",
-    description = "Submit a transaction to validators responsible for the involved shards, or run the transaction as \
-                   a dry-run"
+    description = "Submit a transaction to validators responsible for the involved shards"
 )]
 pub async fn submit_transaction(
     Extension(context): Extension<HandlerContext>,
@@ -44,23 +44,9 @@ pub async fn submit_transaction(
     let request: SubmitTransactionRequest = req;
 
     if request.transaction.is_dry_run() {
-        let transaction_id = request.transaction.calculate_id();
-        let exec_result = context
-            .dry_run_transaction_processor()
-            .process_transaction(request.transaction)
-            .await
-            .map_err(ErrorResponse::anyhow)?;
-
-        return Ok(Json(SubmitTransactionResponse {
-            result: IndexerTransactionFinalizedResult::Finalized {
-                execution_result: Some(Box::new(exec_result)),
-                final_decision: Decision::Commit,
-                abort_details: None,
-                finalized_time: now(),
-                execution_time: Default::default(),
-            },
-            transaction_id,
-        }));
+        return Err(ErrorResponse::bad_request(
+            "Dry-run transactions must be submitted to the /transactions/dry-run endpoint".to_string(),
+        ));
     }
 
     let transaction = request.transaction;
@@ -99,8 +85,40 @@ pub async fn submit_transaction(
 
     info!(target: LOG_TARGET, "✅ Transaction submitted: {}", transaction_id);
 
-    Ok(Json(SubmitTransactionResponse {
-        result: IndexerTransactionFinalizedResult::Pending,
+    Ok(Json(SubmitTransactionResponse { transaction_id }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/transactions/dry-run",
+    description = "Submit a transaction as a dry-run"
+)]
+pub async fn submit_transaction_dry_run(
+    Extension(context): Extension<HandlerContext>,
+    Json(req): Json<SubmitTransactionRequest>,
+) -> HandlerResult<Json<SubmitTransactionDryRunResponse>> {
+    let request: SubmitTransactionRequest = req;
+
+    if !request.transaction.is_dry_run() {
+        return Err(ErrorResponse::bad_request(
+            "Non-dry-run transactions must be submitted to the /transactions endpoint".to_string(),
+        ));
+    }
+    let transaction_id = request.transaction.calculate_id();
+    let exec_result = context
+        .dry_run_transaction_processor()
+        .process_transaction(request.transaction)
+        .await
+        .map_err(ErrorResponse::anyhow)?;
+
+    Ok(Json(SubmitTransactionDryRunResponse {
+        result: IndexerTransactionFinalizedResult::Finalized {
+            execution_result: Some(Box::new(exec_result)),
+            final_decision: Decision::Commit,
+            abort_details: None,
+            finalized_time: now(),
+            execution_time: Default::default(),
+        },
         transaction_id,
     }))
 }

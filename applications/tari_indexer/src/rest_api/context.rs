@@ -90,7 +90,7 @@ impl HandlerContext {
         &self.inner.read_only_store
     }
 
-    pub fn template_manager(&self) -> &TemplateManager<PeerAddress> {
+    pub fn template_manager(&self) -> &TemplateManager {
         &self.inner.template_manager
     }
 
@@ -126,7 +126,7 @@ struct InnerContext {
     transaction_manager:
         TransactionManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SqliteIndexerStore>,
     read_only_store: ReadOnlyStore<SqliteIndexerStore>,
-    template_manager: TemplateManager<PeerAddress>,
+    template_manager: TemplateManager,
     dry_run_transaction_processor: DryRunTransactionProcessor,
     subscriber: Subscriber<IndexerEvent>,
 }

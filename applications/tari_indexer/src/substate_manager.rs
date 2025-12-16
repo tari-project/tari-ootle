@@ -195,7 +195,7 @@ impl SubstateManager {
             }
             let substate_result = self
                 .cached_substates
-                .get_substates(req.substate_id(), req.version())
+                .get_substate(req.substate_id(), req.version())
                 .await?;
             if let Some(substate) = substate_result.into_up() {
                 results.insert(

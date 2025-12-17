@@ -189,7 +189,6 @@ pub enum InstanceType {
     TariValidatorNode,
     TariIndexer,
     TariWalletDaemon,
-    TariSignalingServer,
     TariWalletDaemonCreateKey,
 }
 

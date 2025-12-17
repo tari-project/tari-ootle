@@ -89,21 +89,6 @@ impl ProcessDefinition for WalletDaemon {
             }
         }
 
-        // A signaling server is not required for startup of the wallet daemon,
-        // but if it is available we want to set it up
-        let maybe_signaling_server = context.signaling_servers().next();
-        if let Some(signaling_server) = maybe_signaling_server {
-            let signaling_server_url = format!(
-                "{listen_ip}:{}",
-                signaling_server
-                    .instance()
-                    .allocated_ports()
-                    .get("jrpc")
-                    .ok_or_else(|| anyhow!("Signaling server port not found"))?
-            );
-            command.arg(format!("--signaling-server-address={signaling_server_url}"));
-        }
-
         Ok(command)
     }
 

@@ -309,19 +309,6 @@ impl From<&ForeignProposalRequestMessage> for proto::consensus::ForeignProposalR
                     },
                 )),
             },
-            ForeignProposalRequestMessage::ByTransactionId {
-                transaction_id,
-                for_shard_group,
-                epoch,
-            } => Self {
-                request: Some(proto::consensus::foreign_proposal_request::Request::ByTransactionId(
-                    proto::consensus::ForeignProposalRequestByTransactionId {
-                        transaction_id: transaction_id.as_bytes().to_vec(),
-                        for_shard_group: for_shard_group.encode_as_u32(),
-                        epoch: epoch.as_u64(),
-                    },
-                )),
-            },
         }
     }
 }
@@ -338,14 +325,6 @@ impl TryFrom<proto::consensus::ForeignProposalRequest> for ForeignProposalReques
                     for_shard_group: ShardGroup::decode_from_u32(by_block_id.for_shard_group)
                         .ok_or_else(|| anyhow!("Invalid ShardGroup"))?,
                     epoch: Epoch(by_block_id.epoch),
-                }
-            },
-            proto::consensus::foreign_proposal_request::Request::ByTransactionId(by_transaction_id) => {
-                ForeignProposalRequestMessage::ByTransactionId {
-                    transaction_id: TransactionId::try_from(by_transaction_id.transaction_id)?,
-                    for_shard_group: ShardGroup::decode_from_u32(by_transaction_id.for_shard_group)
-                        .ok_or_else(|| anyhow!("Invalid ShardGroup"))?,
-                    epoch: Epoch(by_transaction_id.epoch),
                 }
             },
         })

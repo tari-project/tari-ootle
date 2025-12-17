@@ -1,7 +1,11 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Instant,
+};
 
 use rand::seq::IteratorRandom;
 use tari_common_types::types::FixedHash;
@@ -218,6 +222,14 @@ impl EpochManagerReader for TestEpochManager {
         Ok(self.inner.lock().await.last_epoch_hash)
     }
 
+    async fn get_epoch_hash(&self, epoch: Epoch) -> Result<FixedHash, EpochManagerError> {
+        let lock = self.inner.lock().await;
+        if epoch != lock.current_epoch {
+            panic!("TestEpochManager does not support fetching historical epoch hashes");
+        }
+        Ok(lock.last_epoch_hash)
+    }
+
     async fn get_num_committees(&self, _epoch: Epoch) -> Result<u32, EpochManagerError> {
         Ok(self.inner.lock().await.committees.len() as u32)
     }
@@ -262,11 +274,15 @@ impl EpochManagerReader for TestEpochManager {
         _epoch: Epoch,
         shard_group: ShardGroup,
         limit: Option<usize>,
+        shuffled: bool,
     ) -> Result<Committee<Self::Addr>, EpochManagerError> {
         let state = self.state_lock().await;
         let Some(mut committee) = state.committees.get(&shard_group).cloned() else {
             panic!("Committee not found for shard group {}", shard_group);
         };
+        if shuffled {
+            committee.shuffle();
+        }
 
         if let Some(limit) = limit {
             committee.members_mut().truncate(limit);
@@ -365,7 +381,7 @@ impl EpochManagerReader for TestEpochManager {
         &self,
         _epoch: Epoch,
         shard_group: Option<ShardGroup>,
-        excluding: Vec<Self::Addr>,
+        excluding: HashSet<Self::Addr>,
     ) -> Result<ValidatorNode<Self::Addr>, EpochManagerError> {
         let state = self.state_lock().await;
         let vn = match shard_group {

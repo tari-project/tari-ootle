@@ -92,8 +92,7 @@ export default function InspectCf() {
     setError(null);
     setIsLoading(true);
 
-    const desc = cfName == "blockcf_block";
-    const query = { limit: pagination.pageSize, page: pagination.page, query: pagination.query || "", desc };
+    const query = { limit: pagination.pageSize, page: pagination.page, query: pagination.query || "", desc: true };
     client.listCfItems(dbName!, cfName!, query as Params).then((res) => {
       setData(res);
     }).catch((err) => {

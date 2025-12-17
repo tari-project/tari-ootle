@@ -42,6 +42,13 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> BlockHeaderDb<'a, 'tx, TGlobalD
     pub fn get_by_hash(&mut self, epoch: Epoch, hash: &FixedHash) -> Result<BlockHeaderModel, TGlobalDbAdapter::Error> {
         self.backend.get_block_header_by_hash(self.tx, epoch, hash)
     }
+
+    pub fn get_first_block_header_in_epoch(
+        &mut self,
+        epoch: Epoch,
+    ) -> Result<BlockHeaderModel, TGlobalDbAdapter::Error> {
+        self.backend.get_first_block_header_by_epoch(self.tx, epoch)
+    }
 }
 
 #[derive(Debug, Clone)]

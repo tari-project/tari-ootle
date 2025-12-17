@@ -232,7 +232,7 @@ impl NetworkWideStateSync {
 
             let committee = self
                 .epoch_manager
-                .get_committee_by_shard_group(prev_epoch, shard_group, None)
+                .get_committee_by_shard_group(prev_epoch, shard_group, None, false)
                 .await?;
 
             // TODO: continue on failure

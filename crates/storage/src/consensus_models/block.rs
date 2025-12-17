@@ -901,6 +901,13 @@ impl Block {
         Ok(false)
     }
 
+    pub fn is_epoch_end_proposed_in_chain<TTx: StateStoreReadTransaction>(
+        &self,
+        tx: &TTx,
+    ) -> Result<bool, StorageError> {
+        tx.is_block_in_end_of_epoch_chain(self.id())
+    }
+
     pub fn get_block_pledge<TTx: StateStoreReadTransaction>(
         &self,
         tx: &TTx,

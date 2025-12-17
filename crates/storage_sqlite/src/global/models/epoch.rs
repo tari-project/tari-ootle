@@ -20,37 +20,28 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_ootle_storage::global::DbEpoch;
+use tari_ootle_storage::global::EpochData;
 
-use crate::global::schema::*;
+use crate::error::SqliteStorageError;
 
 #[derive(Queryable)]
-pub struct Epoch {
-    pub epoch: i64,
-    pub validator_node_mr: Vec<u8>,
-}
-
-impl From<Epoch> for DbEpoch {
-    fn from(e: Epoch) -> Self {
-        Self {
-            epoch: e.epoch as u64,
-            validator_node_mr: e.validator_node_mr,
-        }
-    }
-}
-
-#[derive(Insertable)]
 #[diesel(table_name = epochs)]
-pub struct NewEpoch {
+pub struct DbEpochData {
     pub epoch: i64,
-    pub validator_node_mr: Vec<u8>,
+    pub epoch_hash: Vec<u8>,
 }
 
-impl From<DbEpoch> for NewEpoch {
-    fn from(e: DbEpoch) -> Self {
-        Self {
-            epoch: e.epoch as i64,
-            validator_node_mr: e.validator_node_mr,
-        }
+impl TryFrom<DbEpochData> for EpochData {
+    type Error = SqliteStorageError;
+
+    fn try_from(e: DbEpochData) -> Result<Self, Self::Error> {
+        Ok(Self {
+            epoch: e.epoch as u64,
+            epoch_hash: e.epoch_hash.try_into().map_err(|e| SqliteStorageError::DecodingError {
+                operation: "TryFrom<DbEpochData> for EpochData",
+                item: "Epoch",
+                details: format!("epoch_hash incorrect length: {e}"),
+            })?,
+        })
     }
 }

@@ -323,7 +323,7 @@ impl JsonRpcHandlers {
         }
         let tx_pool = self
             .state_store
-            .with_read_tx(|tx| tx.transaction_pool_get_all())
+            .with_read_tx(|tx| tx.transaction_pool_get_all(1000))
             .map_err(internal_error(answer_id.clone()))?;
         let res = json!({ "tx_pool": tx_pool });
         Ok(JsonRpcResponse::success(answer_id, res))

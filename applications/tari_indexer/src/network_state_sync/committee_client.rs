@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
+    collections::HashSet,
     fmt::Display,
     future::Future,
     ops::{Deref, DerefMut},
@@ -21,7 +22,7 @@ pub struct ValidatorCommitteeRpcPool {
     shard_group: ShardGroup,
     pool: RpcMultiPool<TariMessagingSpec>,
     epoch_manager: EpochManagerHandle<PeerAddress>,
-    past_failed_nodes: Vec<PeerAddress>,
+    past_failed_nodes: HashSet<PeerAddress>,
 }
 
 impl ValidatorCommitteeRpcPool {
@@ -34,7 +35,7 @@ impl ValidatorCommitteeRpcPool {
             shard_group,
             pool: RpcMultiPool::new(networking),
             epoch_manager,
-            past_failed_nodes: vec![],
+            past_failed_nodes: HashSet::new(),
         }
     }
 
@@ -69,7 +70,7 @@ impl ValidatorCommitteeRpcPool {
                         "Failed to create new session for validator '{}': {}", member, err
                     );
                     last_error = Some(err);
-                    self.past_failed_nodes.push(member.address);
+                    self.past_failed_nodes.insert(member.address);
                 },
             }
         }
@@ -102,7 +103,7 @@ impl ValidatorCommitteeRpcPool {
     {
         let epoch = self.epoch_manager.get_current_epoch();
         let mut last_error = None;
-        let mut attempted = vec![];
+        let mut attempted = HashSet::new();
         loop {
             let Some(vn) = self
                 .epoch_manager
@@ -126,8 +127,8 @@ impl ValidatorCommitteeRpcPool {
                         "Failed to create session for validator '{}': {}", vn, err
                     );
                     last_error = Some(err.to_string());
-                    attempted.push(vn.address);
-                    self.past_failed_nodes.push(vn.address);
+                    attempted.insert(vn.address);
+                    self.past_failed_nodes.insert(vn.address);
                     continue; // Skip this member and try the next one
                 },
             };
@@ -145,7 +146,7 @@ impl ValidatorCommitteeRpcPool {
                 },
             }
 
-            attempted.push(vn.address);
+            attempted.insert(vn.address);
         }
 
         Err(ValidatorCommitteeClientError::AllValidatorsFailed {

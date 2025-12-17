@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{atomic::AtomicU64, Arc},
 };
 
@@ -289,9 +289,20 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
     }
 
     async fn get_current_epoch_hash(&self) -> Result<FixedHash, EpochManagerError> {
+        let epoch = self.get_current_epoch();
         let (tx, rx) = oneshot::channel();
         self.tx_request
-            .send(EpochManagerRequest::CurrentEpochHash { reply: tx })
+            .send(EpochManagerRequest::GetEpochHash { epoch, reply: tx })
+            .await
+            .map_err(|_| EpochManagerError::SendError)?;
+
+        rx.await.map_err(|_| EpochManagerError::ReceiveError)?
+    }
+
+    async fn get_epoch_hash(&self, epoch: Epoch) -> Result<FixedHash, EpochManagerError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx_request
+            .send(EpochManagerRequest::GetEpochHash { epoch, reply: tx })
             .await
             .map_err(|_| EpochManagerError::SendError)?;
 
@@ -313,12 +324,14 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
         epoch: Epoch,
         shard_group: ShardGroup,
         limit: Option<usize>,
+        shuffled: bool,
     ) -> Result<Committee<Self::Addr>, EpochManagerError> {
         let (tx, rx) = oneshot::channel();
         self.tx_request
             .send(EpochManagerRequest::GetCommitteeForShardGroup {
                 epoch,
                 shard_group,
+                shuffled,
                 limit,
                 reply: tx,
             })
@@ -362,7 +375,7 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
         &self,
         epoch: Epoch,
         shard_group: Option<ShardGroup>,
-        excluding: Vec<TAddr>,
+        excluding: HashSet<TAddr>,
     ) -> Result<ValidatorNode<TAddr>, EpochManagerError> {
         let (tx, rx) = oneshot::channel();
         self.tx_request

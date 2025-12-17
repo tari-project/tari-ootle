@@ -81,6 +81,7 @@ use tari_ootle_storage::{
         ValidatorConsensusStats,
         ValidatorStatsUpdate,
     },
+    time,
     Ordering,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
@@ -670,10 +671,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         // Add transactions to finalized CF
         let data = FinalizedTransactionLinkData { finalized_at: now() };
         for transaction in iter {
-            finalized_cf.put(transaction.transaction_id(), &data, OPERATION)?;
+            finalized_cf.put(transaction.id(), &data, OPERATION)?;
 
             // Delete from block index which is used for querying pending executions
-            let iter = exec_query.query_prefix_range_key_iterator(Ordering::default(), transaction.transaction_id());
+            let iter = exec_query.query_prefix_range_key_iterator(Ordering::default(), transaction.id());
             for result in iter {
                 let (tx_id, block_id, height) = result?;
                 exec_index_cf.delete(&(block_id, tx_id, height), OPERATION)?;
@@ -824,6 +825,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             None,
             None,
             is_ready,
+            time::OffsetDateTime::now_utc(),
+            None,
         );
 
         self.db()
@@ -874,6 +877,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         tx_pool_value.set_is_ready(update.is_ready_now());
         tx_pool_value.set_pending_stage(Some(update.stage()));
+        tx_pool_value.set_last_updated(*block.block_id(), time::OffsetDateTime::now_utc());
         cf.put(update.transaction_id(), &tx_pool_value, OPERATION)?;
 
         Ok(())
@@ -888,7 +892,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let cf = self.db().cf(TransactionPoolCf)?;
         let pool_recs = cf.multi_get(transaction_ids, OPERATION)?;
         for tx in &pool_recs {
-            cf.delete(tx.transaction_id(), OPERATION)?;
+            cf.delete(tx.id(), OPERATION)?;
         }
 
         Ok(pool_recs)

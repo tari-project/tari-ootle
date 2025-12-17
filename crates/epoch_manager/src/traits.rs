@@ -20,7 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashMap, future::Future};
+use std::{
+    collections::{HashMap, HashSet},
+    future::Future,
+};
 
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{
@@ -131,6 +134,7 @@ pub trait EpochManagerReader: Send + Sync {
 
     fn current_epoch(&self) -> impl Future<Output = Result<Epoch, EpochManagerError>> + Send;
     fn get_current_epoch_hash(&self) -> impl Future<Output = Result<FixedHash, EpochManagerError>> + Send;
+    fn get_epoch_hash(&self, epoch: Epoch) -> impl Future<Output = Result<FixedHash, EpochManagerError>> + Send;
 
     fn get_num_committees(&self, epoch: Epoch) -> impl Future<Output = Result<u32, EpochManagerError>> + Send;
 
@@ -139,6 +143,7 @@ pub trait EpochManagerReader: Send + Sync {
         epoch: Epoch,
         shards: ShardGroup,
         limit: Option<usize>,
+        shuffled: bool,
     ) -> impl Future<Output = Result<Committee<Self::Addr>, EpochManagerError>> + Send;
     fn get_committees_overlapping_shard_group(
         &self,
@@ -222,7 +227,7 @@ pub trait EpochManagerReader: Send + Sync {
         &self,
         epoch: Epoch,
         shard_group: Option<ShardGroup>,
-        excluding: Vec<Self::Addr>,
+        excluding: HashSet<Self::Addr>,
     ) -> impl Future<Output = Result<ValidatorNode<Self::Addr>, EpochManagerError>> + Send;
 }
 

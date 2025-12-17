@@ -334,37 +334,8 @@ fn msg_relative_view(
             // Foreign proposals are always applicable
             MessageRelativeView::Current
         },
-        HotstuffMessage::ForeignProposalNotification(msg) => {
-            if msg.epoch < current_epoch {
-                return MessageRelativeView::Past {
-                    epoch: msg.epoch,
-                    height: NodeHeight::zero(),
-                };
-            }
-            if msg.epoch > current_epoch {
-                return MessageRelativeView::Future {
-                    epoch: msg.epoch,
-                    height: NodeHeight::zero(),
-                };
-            }
-            MessageRelativeView::Current
-        },
-        HotstuffMessage::ForeignProposalRequest(msg) => {
-            if msg.epoch() < current_epoch {
-                return MessageRelativeView::Past {
-                    epoch: msg.epoch(),
-                    height: NodeHeight::zero(),
-                };
-            }
-            if msg.epoch() > current_epoch {
-                return MessageRelativeView::Future {
-                    epoch: msg.epoch(),
-                    // Foreign height is not locally relevant, we can process it when we reach the epoch
-                    height: NodeHeight::zero(),
-                };
-            }
-            MessageRelativeView::Current
-        },
+        HotstuffMessage::ForeignProposalNotification(_) => MessageRelativeView::Current,
+        HotstuffMessage::ForeignProposalRequest(_) => MessageRelativeView::Current,
         HotstuffMessage::MissingTransactionsRequest(msg) => {
             if msg.epoch < current_epoch {
                 return MessageRelativeView::Past {

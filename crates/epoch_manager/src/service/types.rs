@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{
@@ -25,7 +25,8 @@ pub enum EpochManagerRequest<TAddr> {
     CurrentEpoch {
         reply: Reply<Epoch>,
     },
-    CurrentEpochHash {
+    GetEpochHash {
+        epoch: Epoch,
         reply: Reply<FixedHash>,
     },
     GetValidatorNodeByPublicKey {
@@ -95,6 +96,7 @@ pub enum EpochManagerRequest<TAddr> {
     GetCommitteeForShardGroup {
         epoch: Epoch,
         shard_group: ShardGroup,
+        shuffled: bool,
         limit: Option<usize>,
         reply: Reply<Committee<TAddr>>,
     },
@@ -113,7 +115,7 @@ pub enum EpochManagerRequest<TAddr> {
     GetRandomCommitteeMemberFromShardGroup {
         epoch: Epoch,
         shard_group: Option<ShardGroup>,
-        excluding: Vec<TAddr>,
+        excluding: HashSet<TAddr>,
         reply: Reply<ValidatorNode<TAddr>>,
     },
     GetNetworkDescription {

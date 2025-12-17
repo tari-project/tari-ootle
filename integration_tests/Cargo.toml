@@ -27,7 +27,6 @@ tari_shutdown = { workspace = true }
 tari_sidechain = { workspace = true }
 
 tari_crypto = { workspace = true }
-tari_validator_node_cli = { workspace = true }
 tari_ootle_app_utilities = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 tari_engine = { workspace = true }
@@ -51,20 +50,36 @@ tari_p2p = { git = "https://github.com/tari-project/tari.git", tag = "v5.2.0-pre
 
 anyhow = { workspace = true }
 config = { workspace = true }
-cucumber = { version = "0.21.1", features = ["default", "libtest", "output-junit"] }
+cucumber = { version = "0.21.1", features = [
+    "default",
+    "libtest",
+    "output-junit",
+] }
 httpmock = { version = "0.8.0-alpha.1", features = ["remote"] }
 indexmap = { workspace = true }
 multiaddr = { workspace = true }
 libp2p = { workspace = true }
 log = { workspace = true, features = ["std"] }
-log4rs = { workspace = true, features = ["rolling_file_appender", "compound_policy", "size_trigger", "fixed_window_roller"] }
+log4rs = { workspace = true, features = [
+    "rolling_file_appender",
+    "compound_policy",
+    "size_trigger",
+    "fixed_window_roller",
+] }
 rand = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true, features = ["default", "derive"] }
 serde_json = { workspace = true }
 time = { workspace = true }
 serde_yaml = "0.9.33"
-tokio = { workspace = true, features = ["default", "macros", "time", "sync", "rt-multi-thread", "signal"] }
+tokio = { workspace = true, features = [
+    "default",
+    "macros",
+    "time",
+    "sync",
+    "rt-multi-thread",
+    "signal",
+] }
 tonic = { workspace = true }
 regex = "1.11.0"
 notify = "7.0.0"

@@ -4896,7 +4896,6 @@ dependencies = [
  "tari_transaction_components",
  "tari_transaction_manifest",
  "tari_validator_node",
- "tari_validator_node_cli",
  "tari_validator_node_client",
  "tari_wallet_daemon_client",
  "time",
@@ -5024,19 +5023,6 @@ name = "itoa"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
-
-[[package]]
-name = "jfs"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5729b963efee9fe03b00d90c42cb7e62de60af662a7a42c41f638b684d47210f"
-dependencies = [
- "fs2",
- "log",
- "serde",
- "serde_json",
- "uuid 0.8.2",
-]
 
 [[package]]
 name = "jiff"
@@ -6630,7 +6616,7 @@ dependencies = [
  "tokio",
  "tower 0.4.13",
  "url",
- "uuid 1.18.1",
+ "uuid",
  "zeroize",
 ]
 
@@ -6703,7 +6689,7 @@ dependencies = [
  "rustc_version",
  "smallvec 1.15.1",
  "tagptr",
- "uuid 1.18.1",
+ "uuid",
 ]
 
 [[package]]
@@ -8923,7 +8909,7 @@ dependencies = [
  "rend",
  "rkyv_derive",
  "tinyvec",
- "uuid 1.18.1",
+ "uuid",
 ]
 
 [[package]]
@@ -11537,7 +11523,7 @@ dependencies = [
  "tokio",
  "tower-http",
  "url",
- "uuid 1.18.1",
+ "uuid",
  "wasm-opt",
  "webauthn-rs",
  "webrtc",
@@ -11951,7 +11937,7 @@ dependencies = [
  "thiserror 2.0.17",
  "tokio",
  "utoipa",
- "uuid 1.18.1",
+ "uuid",
  "zeroize",
 ]
 
@@ -12085,34 +12071,6 @@ dependencies = [
  "tokio",
  "tower-http",
  "url",
-]
-
-[[package]]
-name = "tari_validator_node_cli"
-version = "0.16.0"
-dependencies = [
- "anyhow",
- "clap 3.2.25",
- "dirs",
- "jfs",
- "log",
- "multiaddr 0.18.1",
- "reqwest 0.11.27",
- "serde",
- "serde_json",
- "tari_common_types",
- "tari_crypto",
- "tari_engine",
- "tari_engine_types",
- "tari_ootle_common_types",
- "tari_sidechain",
- "tari_template_lib",
- "tari_transaction",
- "tari_transaction_manifest",
- "tari_validator_node_client",
- "thiserror 2.0.17",
- "time",
- "tokio",
 ]
 
 [[package]]
@@ -13277,15 +13235,6 @@ dependencies = [
 
 [[package]]
 name = "uuid"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
-dependencies = [
- "getrandom 0.2.16",
-]
-
-[[package]]
-name = "uuid"
 version = "1.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f87b8aa10b915a06587d0dec516c282ff295b475d94abf425d62b57710070a2"
@@ -13728,7 +13677,7 @@ dependencies = [
  "openssl-sys",
  "serde",
  "tracing",
- "uuid 1.18.1",
+ "uuid",
 ]
 
 [[package]]
@@ -13741,7 +13690,7 @@ dependencies = [
  "serde",
  "tracing",
  "url",
- "uuid 1.18.1",
+ "uuid",
  "webauthn-rs-core",
 ]
 
@@ -13766,7 +13715,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tracing",
  "url",
- "uuid 1.18.1",
+ "uuid",
  "webauthn-attestation-ca",
  "webauthn-rs-proto",
  "x509-parser 0.16.0",
@@ -13920,7 +13869,7 @@ dependencies = [
  "tokio",
  "turn",
  "url",
- "uuid 1.18.1",
+ "uuid",
  "waitgroup",
  "webrtc-mdns",
  "webrtc-util",

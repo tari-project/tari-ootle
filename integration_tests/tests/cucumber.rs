@@ -29,7 +29,7 @@ use integration_tests::{
     http_server::MockHttpServer,
     logging::{create_log_config_file, get_base_dir},
     miner::{mine_blocks, register_miner_process},
-    validator_node_cli,
+    validator_node_client,
     wallet::spawn_minotari_wallet,
     wallet_daemon::spawn_wallet_daemon,
     wallet_daemon_client,
@@ -223,7 +223,7 @@ async fn call_template_constructor(
     outputs_name: String,
 ) {
     let args = args.split(',').map(|a| a.trim().to_string()).collect();
-    validator_node_cli::create_component(world, outputs_name, template_name, vn_name, function_call, args).await;
+    validator_node_client::create_component(world, outputs_name, template_name, vn_name, function_call, args).await;
 
     // give it some time between transactions
     // tokio::time::sleep(Duration::from_secs(4)).await;
@@ -237,7 +237,7 @@ async fn call_template_constructor_with_no_args(
     vn_name: String,
     outputs_name: String,
 ) {
-    validator_node_cli::create_component(world, outputs_name, template_name, vn_name, function_call, vec![]).await;
+    validator_node_client::create_component(world, outputs_name, template_name, vn_name, function_call, vec![]).await;
 
     // give it some time between transactions
     // tokio::time::sleep(Duration::from_secs(4)).await;
@@ -251,7 +251,7 @@ async fn call_template_constructor_without_args(
     vn_name: String,
     function_call: String,
 ) {
-    validator_node_cli::create_component(world, component_name, template_name, vn_name, function_call, vec![]).await;
+    validator_node_client::create_component(world, component_name, template_name, vn_name, function_call, vec![]).await;
 
     // give it some time between transactions
     // tokio::time::sleep(Duration::from_secs(4)).await;
@@ -265,7 +265,7 @@ async fn call_component_method(
     method_call: String,
     output_name: String,
 ) {
-    let resp = validator_node_cli::call_method(world, vn_name, component_name, output_name, method_call)
+    let resp = validator_node_client::call_method(world, vn_name, component_name, output_name, method_call)
         .await
         .unwrap();
     assert_eq!(resp.dry_run_result.unwrap().decision, QuorumDecision::Accept);
@@ -282,7 +282,7 @@ async fn call_component_method_concurrently(
     method_call: String,
     times: usize,
 ) {
-    validator_node_cli::concurrent_call_method(world, vn_name, component_name, method_call, times)
+    validator_node_client::concurrent_call_method(world, vn_name, component_name, method_call, times)
         .await
         .unwrap();
 }
@@ -298,7 +298,7 @@ async fn call_component_method_must_error(
     output_name: String,
     error_msg: String,
 ) {
-    let res = validator_node_cli::call_method(world, vn_name, component_name, output_name, method_call).await;
+    let res = validator_node_client::call_method(world, vn_name, component_name, output_name, method_call).await;
     if let Err(reject) = res {
         assert!(reject.to_string().contains(&error_msg));
     } else {
@@ -315,7 +315,7 @@ async fn call_component_method_on_all_vns(
 ) {
     let vn_names = world.validator_nodes.iter().map(|(v, _)| v.clone()).collect::<Vec<_>>();
     for vn_name in vn_names {
-        let resp = validator_node_cli::call_method(
+        let resp = validator_node_client::call_method(
             world,
             vn_name,
             component_name.clone(),
@@ -339,7 +339,7 @@ async fn call_component_method_and_check_result(
     expected_result: String,
 ) {
     let resp =
-        validator_node_cli::call_method(world, vn_name, component_name, "dummy_outputs".to_string(), method_call)
+        validator_node_client::call_method(world, vn_name, component_name, "dummy_outputs".to_string(), method_call)
             .await
             .unwrap();
     let finalize_result = resp.dry_run_result.unwrap();
@@ -522,7 +522,7 @@ async fn call_component_method_on_all_vns_and_check_result(
 ) {
     let vn_names = world.validator_nodes.iter().map(|(v, _)| v.clone()).collect::<Vec<_>>();
     for vn_name in vn_names {
-        let resp = validator_node_cli::call_method(
+        let resp = validator_node_client::call_method(
             world,
             vn_name,
             component_name.clone(),

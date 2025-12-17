@@ -65,7 +65,7 @@ pub mod miner;
 pub mod template;
 pub mod util;
 pub mod validator_node;
-pub mod validator_node_cli;
+pub mod validator_node_client;
 pub mod wallet;
 pub mod wallet_daemon;
 pub mod wallet_daemon_client;

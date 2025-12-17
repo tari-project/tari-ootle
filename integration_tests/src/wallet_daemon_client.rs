@@ -20,7 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashMap, str::FromStr, time::Duration};
+use std::{collections::HashMap, time::Duration};
 
 use anyhow::{anyhow, bail};
 use serde_json::json;
@@ -41,7 +41,6 @@ use tari_template_lib::{
 };
 use tari_transaction::UnsignedTransaction;
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
-use tari_validator_node_cli::command::transaction::CliArg;
 use tari_wallet_daemon_client::{
     error::WalletDaemonClientError,
     types::{
@@ -69,7 +68,7 @@ use tokio::{task::JoinSet, time::timeout};
 use crate::{
     helpers::get_address_from_output,
     util::{cucumber_log, transaction_builder},
-    validator_node_cli::add_outputs_from_diff,
+    validator_node_client::{add_outputs_from_diff, parse_arg},
     TariWorld,
 };
 
@@ -642,10 +641,7 @@ pub async fn create_component(
             )
         })
         .address;
-    let args = args
-        .iter()
-        .map(|a| CliArg::from_str(a).unwrap().into_named_arg())
-        .collect();
+    let args = args.iter().map(|a| parse_arg(a).unwrap()).collect();
     let AccountGetResponse { account, .. } = client
         .accounts_get(ComponentAddressOrName::Name(account_name.clone()))
         .await

@@ -481,6 +481,19 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(high_tc)
     }
 
+    fn is_block_in_end_of_epoch_chain(&self, block_id: &BlockId) -> Result<bool, StorageError> {
+        const OPERATION: &str = "is_block_in_end_of_epoch_chain";
+        let block_cf = self.db().cf(BlockCf)?;
+        let chain = self.get_pending_chain_ordered(block_id)?;
+        for block in chain {
+            let block = block_cf.get(&block, OPERATION)?;
+            if block.is_epoch_end() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     fn foreign_proposals_get_any<'a, I: IntoIterator<Item = &'a BlockId>>(
         &self,
         block_ids: I,
@@ -1177,7 +1190,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         for block_id in pending_chain {
             let mut iter = query.prefix_range_value_iterator(Ordering::default(), &(block_id, *transaction_id));
             if let Some(update) = iter.next().transpose()? {
-                trace!(
+                debug!(
                     target: LOG_TARGET,
                     "{OPERATION}: found update {} for block {}: {:#} -> {:#}",
                     update.transaction_id, block_id,
@@ -1200,7 +1213,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(exists)
     }
 
-    fn transaction_pool_get_all(&self) -> Result<Vec<TransactionPoolRecord>, StorageError> {
+    fn transaction_pool_get_all(&self, limit: usize) -> Result<Vec<TransactionPoolRecord>, StorageError> {
         // TODO: Only used in tests
         const OPERATION: &str = "transaction_pool_get_all";
         let cf = self.db().cf(TransactionPoolCf)?;
@@ -1219,13 +1232,16 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let n = cf.count(OPERATION)?;
         let iter = cf.value_iterator(Ordering::Ascending, OPERATION);
-        let mut transactions = Vec::with_capacity(n);
+        let mut transactions = Vec::with_capacity(n.min(limit));
         for result in iter {
             let mut tx = result?;
-            if let Some(update) = updates.remove(tx.transaction_id()) {
+            if let Some(update) = updates.remove(tx.id()) {
                 update.merge_into(&mut tx);
             }
             transactions.push(tx);
+            if transactions.len() == limit {
+                break;
+            }
         }
         Ok(transactions)
     }
@@ -1269,14 +1285,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         for result in iter {
             let mut tx = result?;
-            if lock_conflicted.contains(tx.transaction_id()) {
+            if lock_conflicted.contains(tx.id()) {
                 continue;
             }
 
-            if lock_conflicts_cf.exists_prefix(tx.transaction_id())? {
+            if lock_conflicts_cf.exists_prefix(tx.id())? {
                 continue;
             }
-            if let Some(update) = updates.remove(tx.transaction_id()) {
+            if let Some(update) = updates.remove(tx.id()) {
                 update.merge_into(&mut tx);
             }
             if tx.is_ready() {
@@ -1321,10 +1337,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         for result in iter {
             let tx_id = result?;
-            // It's possible that the transaction has been removed from the pool in another thread 😱 - observed in
-            // consensus_tests
             if must_query {
                 let Some(tx_pool_rec) = cf.get(&tx_id, OPERATION).optional()? else {
+                    // It's possible that the transaction has been removed from the pool in another thread 😱 - observed
+                    // in consensus_tests
                     continue;
                 };
 
@@ -1340,14 +1356,15 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                     }
                 }
 
-                if skip_lock_conflicted {
-                    let iter = lock_conflict_query.query_prefix_range_iterator(Ordering::default(), &tx_id);
-                    for result in iter {
-                        let (_, value) = result?;
-                        if !value.is_local_only {
-                            continue;
-                        }
-                    }
+                if skip_lock_conflicted && lock_conflict_query.exists_prefix(&tx_id)? {
+                    continue;
+                    // let iter = lock_conflict_query.query_prefix_range_iterator(Ordering::default(), &tx_id);
+                    // for result in iter {
+                    //     let (_, value) = result?;
+                    //     if !value.is_local_only {
+                    //         continue;
+                    //     }
+                    // }
                 }
             }
 
@@ -1776,6 +1793,17 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         const OPERATION: &str = "epoch_checkpoint_get_by_shard_group";
         let cf = self.db().cf(EpochCheckpointCf)?;
         let checkpoint = cf.get(&(epoch, shard_group), OPERATION)?;
+        Ok(checkpoint)
+    }
+
+    fn epoch_checkpoint_get_last(&self) -> Result<EpochCheckpoint, StorageError> {
+        const OPERATION: &str = "epoch_checkpoint_get_last";
+        let cf = self.db().cf(EpochCheckpointCf)?;
+        let mut iter = cf.iterator(Ordering::Descending, OPERATION);
+        let (_, checkpoint) = iter.next().ok_or_else(|| StorageError::NotFound {
+            item: "EpochCheckpoint",
+            key: "last".to_string(),
+        })??;
         Ok(checkpoint)
     }
 

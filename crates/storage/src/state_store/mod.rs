@@ -124,6 +124,7 @@ pub trait StateStoreReadTransaction: Sized {
     fn last_sent_new_view_get(&self, epoch: Epoch) -> Result<LastSentNewView, StorageError>;
     fn high_pc_get(&self, epoch: Epoch) -> Result<HighPc, StorageError>;
     fn high_tc_get(&self, epoch: Epoch) -> Result<HighTc, StorageError>;
+    fn is_block_in_end_of_epoch_chain(&self, block_id: &BlockId) -> Result<bool, StorageError>;
     fn foreign_proposals_get_any<'a, I: IntoIterator<Item = &'a BlockId>>(
         &self,
         block_ids: I,
@@ -222,7 +223,7 @@ pub trait StateStoreReadTransaction: Sized {
         transaction_id: &TransactionId,
     ) -> Result<TransactionPoolRecord, StorageError>;
     fn transaction_pool_exists(&self, transaction_id: &TransactionId) -> Result<bool, StorageError>;
-    fn transaction_pool_get_all(&self) -> Result<Vec<TransactionPoolRecord>, StorageError>;
+    fn transaction_pool_get_all(&self, limit: usize) -> Result<Vec<TransactionPoolRecord>, StorageError>;
     fn transaction_pool_get_many_ready(
         &self,
         max_txs: usize,
@@ -308,6 +309,8 @@ pub trait StateStoreReadTransaction: Sized {
         epoch: Epoch,
         shard_group: ShardGroup,
     ) -> Result<EpochCheckpoint, StorageError>;
+
+    fn epoch_checkpoint_get_last(&self) -> Result<EpochCheckpoint, StorageError>;
 
     // -------------------------------- Foreign Substate Pledges -------------------------------- //
     fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(

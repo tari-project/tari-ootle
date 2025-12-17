@@ -56,10 +56,10 @@ use tari_ootle_storage::{
     global::{
         models::ValidatorNode,
         BlockHeaderModel,
-        DbEpoch,
         DbLayer1Transaction,
         DbTemplate,
         DbTemplateUpdate,
+        EpochData,
         GlobalDbAdapter,
         TemplateStatus,
     },
@@ -72,7 +72,7 @@ use super::{models, models::DbValidatorNode};
 use crate::{
     error::SqliteStorageError,
     global::{
-        models::{DbCommittee, MetadataModel, NewEpoch, NewTemplateModel, TemplateModel, TemplateUpdateModel},
+        models::{DbCommittee, MetadataModel, NewTemplateModel, TemplateModel, TemplateUpdateModel},
         serialization::serialize_json,
     },
     SqliteTransaction,
@@ -728,7 +728,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         tx: &mut Self::DbTransaction<'_>,
         epoch: Epoch,
         shard_group: Option<ShardGroup>,
-        excluding: Vec<Self::Addr>,
+        excluding: HashSet<Self::Addr>,
     ) -> Result<ValidatorNode<Self::Addr>, Self::Error> {
         use crate::global::schema::{committees, validator_nodes};
 
@@ -815,13 +815,19 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         Ok(committees)
     }
 
-    fn insert_epoch(&self, tx: &mut Self::DbTransaction<'_>, epoch: DbEpoch) -> Result<(), Self::Error> {
+    fn insert_epoch(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        epoch: Epoch,
+        epoch_hash: FixedHash,
+    ) -> Result<(), Self::Error> {
         use crate::global::schema::epochs;
 
-        let sqlite_epoch: NewEpoch = epoch.into();
-
         diesel::insert_into(epochs::table)
-            .values(&sqlite_epoch)
+            .values((
+                epochs::epoch.eq(epoch.as_u64() as i64),
+                epochs::epoch_hash.eq(epoch_hash.as_slice()),
+            ))
             .execute(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
@@ -831,11 +837,11 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         Ok(())
     }
 
-    fn get_epoch(&self, tx: &mut Self::DbTransaction<'_>, epoch: u64) -> Result<Option<DbEpoch>, Self::Error> {
+    fn get_epoch(&self, tx: &mut Self::DbTransaction<'_>, epoch: Epoch) -> Result<Option<EpochData>, Self::Error> {
         use crate::global::schema::epochs::dsl;
 
-        let query_res: Option<models::Epoch> = dsl::epochs
-            .find(epoch as i64)
+        let query_res: Option<models::DbEpochData> = dsl::epochs
+            .find(epoch.as_u64() as i64)
             .first(tx.connection())
             .optional()
             .map_err(|source| SqliteStorageError::DieselError {
@@ -843,10 +849,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 operation: "get::epoch",
             })?;
 
-        match query_res {
-            Some(e) => Ok(Some(e.into())),
-            None => Ok(None),
-        }
+        query_res.map(EpochData::try_from).transpose()
     }
 
     fn insert_bmt(
@@ -941,18 +944,37 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
     fn get_block_header_by_hash(
         &self,
         tx: &mut Self::DbTransaction<'_>,
-        epoch: Epoch,
+        max_epoch: Epoch,
         block_hash: &FixedHash,
     ) -> Result<BlockHeaderModel, Self::Error> {
         use crate::global::schema::block_headers;
 
         let header = block_headers::table
             .filter(block_headers::block_hash.eq(block_hash.as_bytes()))
-            .filter(block_headers::epoch.le(epoch.as_u64() as i64))
+            .filter(block_headers::epoch.le(max_epoch.as_u64() as i64))
             .first::<models::BlockHeaderModel>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
                 operation: "get::block_header_by_hash",
+            })?;
+
+        header.try_into()
+    }
+
+    fn get_first_block_header_by_epoch(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        epoch: Epoch,
+    ) -> Result<BlockHeaderModel, Self::Error> {
+        use crate::global::schema::block_headers;
+
+        let header = block_headers::table
+            .filter(block_headers::epoch.eq(epoch.as_u64() as i64))
+            .order_by(block_headers::height.asc())
+            .first::<models::BlockHeaderModel>(tx.connection())
+            .map_err(|source| SqliteStorageError::DieselError {
+                source,
+                operation: "get::first_block_header_by_epoch",
             })?;
 
         header.try_into()

@@ -22,7 +22,7 @@
 
 use std::{
     cmp,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     num::NonZeroU32,
     sync::{atomic, atomic::AtomicU64, Arc},
 };
@@ -42,7 +42,7 @@ use tari_ootle_common_types::{
     SubstateAddress,
     VotePower,
 };
-use tari_ootle_storage::global::{models::ValidatorNode, BlockHeaderModel, DbEpoch, GlobalDb, MetadataKey};
+use tari_ootle_storage::global::{models::ValidatorNode, BlockHeaderModel, GlobalDb, MetadataKey};
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_sidechain::EvictionProof;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
@@ -203,16 +203,9 @@ where TSpec: EpochManagerSpec
     }
 
     pub fn insert_current_epoch(&mut self, epoch: Epoch, epoch_hash: FixedHash) -> Result<(), EpochManagerError> {
-        let epoch_height = epoch.0;
-        let db_epoch = DbEpoch {
-            epoch: epoch_height,
-            // TODO: remove validator node mr from epoch db
-            validator_node_mr: FixedHash::default().as_slice().to_vec(),
-        };
-
         let mut tx = self.global_db.create_transaction()?;
 
-        self.global_db.epochs(&mut tx).insert_epoch(db_epoch)?;
+        self.global_db.epochs(&mut tx).insert_epoch(epoch, epoch_hash)?;
         let mut metadata = self.global_db.metadata(&mut tx);
         metadata.set_metadata(MetadataKey::EpochManagerCurrentEpoch.as_key_bytes(), &epoch)?;
         metadata.set_metadata(MetadataKey::EpochManagerLastEpochHash.as_key_bytes(), &epoch_hash)?;
@@ -231,8 +224,18 @@ where TSpec: EpochManagerSpec
         self.current_epoch.store(epoch.as_u64(), atomic::Ordering::SeqCst);
     }
 
-    pub fn current_epoch_hash(&self) -> FixedHash {
-        self.current_epoch_hash
+    pub fn get_epoch_hash(&self, epoch: Epoch) -> Result<FixedHash, EpochManagerError> {
+        if epoch == self.current_epoch() {
+            return Ok(self.current_epoch_hash);
+        }
+
+        let mut tx = self.global_db.create_transaction()?;
+        let data = self
+            .global_db
+            .epochs(&mut tx)
+            .get_epoch_data(epoch)?
+            .ok_or(EpochManagerError::NoEpochFound(epoch))?;
+        Ok(data.epoch_hash)
     }
 
     pub fn get_validator_node_by_public_key(
@@ -475,7 +478,7 @@ where TSpec: EpochManagerSpec
         &self,
         epoch: Epoch,
         shard_group: Option<ShardGroup>,
-        excluding: Vec<TSpec::Addr>,
+        excluding: HashSet<TSpec::Addr>,
     ) -> Result<ValidatorNode<TSpec::Addr>, EpochManagerError> {
         let mut tx = self.global_db.create_transaction()?;
         let mut validator_node_db = self.global_db.validator_nodes(&mut tx);

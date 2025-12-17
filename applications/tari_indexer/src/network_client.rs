@@ -150,7 +150,7 @@ where
 
             let committee = self
                 .epoch_manager
-                .get_committee_by_shard_group(epoch, shard_group, Some(100))
+                .get_committee_by_shard_group(epoch, shard_group, Some(100), true)
                 .await?;
             all_members.insert(shard_group, committee);
         }

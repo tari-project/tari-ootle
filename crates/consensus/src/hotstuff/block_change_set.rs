@@ -256,7 +256,7 @@ impl ProposedBlockChangeSet {
     }
 
     pub fn apply_transaction_update(&self, tx_rec_mut: &mut TransactionPoolRecord) {
-        if let Some(update) = self.transaction_changes.get(tx_rec_mut.transaction_id()) {
+        if let Some(update) = self.transaction_changes.get(tx_rec_mut.id()) {
             update.apply_update(tx_rec_mut);
         }
     }
@@ -402,10 +402,7 @@ impl ProposedBlockChangeSet {
         &mut self,
         transaction: TransactionPoolRecord,
     ) -> Result<&mut Self, TransactionPoolError> {
-        let change_mut = self
-            .transaction_changes
-            .entry(*transaction.transaction_id())
-            .or_default();
+        let change_mut = self.transaction_changes.entry(*transaction.id()).or_default();
 
         debug!(
             target: LOG_TARGET,
@@ -417,7 +414,7 @@ impl ProposedBlockChangeSet {
         debug!(
             target: LOG_TARGET,
             "📝 next transaction update ({} {} {} is_ready_now={}, {:#}) in block {}",
-            next_update.transaction().transaction_id(),
+            next_update.transaction().id(),
             next_update.transaction().current_stage(),
             next_update.decision(),
             next_update.is_ready_now(),
@@ -461,14 +458,14 @@ impl ProposedBlockChangeSet {
             debug!(
                 target: LOG_TARGET,
                 "📝 Sequencing new transaction {} {} {} is_ready_now={}",
-                pool_rec.transaction_id(),
+                pool_rec.id(),
                 pool_rec.current_stage(),
                 pool_rec.current_local_decision(),
                 pool_rec.is_ready()
             );
             // TODO: TransactionPool abstraction is not great, so calling the store method directly
             tx.transaction_pool_insert_new(
-                *pool_rec.transaction_id(),
+                *pool_rec.id(),
                 pool_rec.current_local_decision(),
                 pool_rec.evidence(),
                 pool_rec.is_ready(),
@@ -554,7 +551,7 @@ impl ProposedBlockChangeSet {
         }
 
         for transaction in &self.new_transactions_to_sequence {
-            debug!(target: LOG_TARGET, "[drop] Sequence new transaction: {}", transaction.transaction_id());
+            debug!(target: LOG_TARGET, "[drop] Sequence new transaction: {}", transaction.id());
         }
 
         for (transaction_id, change) in &self.transaction_changes {
@@ -652,7 +649,7 @@ mod tests {
     fn check_max_mem_usage() {
         let sz = size_of::<ProposedBlockChangeSet>();
         eprintln!("ProposedBlockChangeSet: {}", sz);
-        const TARGET_MAX_MEM_USAGE: usize = 13_240_000;
+        const TARGET_MAX_MEM_USAGE: usize = 13_336_000;
         let mem_block_diff = size_of::<SubstateChange>() * MEM_MAX_BLOCK_DIFF_CHANGES;
         eprintln!("mem_block_diff: {}KiB", mem_block_diff / 1024);
         let mem_state_tree_diffs =

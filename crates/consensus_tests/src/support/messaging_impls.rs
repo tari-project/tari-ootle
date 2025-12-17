@@ -88,7 +88,7 @@ impl OutboundMessaging for TestOutboundMessaging {
             .map_err(|e| OutboundMessagingError::UpstreamError(e.into()))?;
         let peers = self
             .epoch_manager
-            .get_committee_by_shard_group(epoch, shard_group, None)
+            .get_committee_by_shard_group(epoch, shard_group, None, false)
             .await
             .map_err(|e| OutboundMessagingError::UpstreamError(e.into()))?
             .into_addresses();

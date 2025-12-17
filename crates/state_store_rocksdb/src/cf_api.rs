@@ -147,6 +147,8 @@ impl<CF: Cf, DB: RocksReader> CfContext<'_, DB, CF> {
         self.any_exists_within_range(rocksdb::PrefixRange(self.encode_key(prefix)))
     }
 
+    /// Returns true if any key exists within the given range, otherwise false.
+    /// WARNING: the bounds must encode the prefix correctly according to the column family's key codec.
     pub fn any_exists_within_range(&self, range: impl IterateBounds) -> Result<bool, RocksDbStorageError> {
         let mut opts = rocksdb::ReadOptions::default();
         opts.set_iterate_range(range);

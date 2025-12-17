@@ -4,7 +4,7 @@
 use std::{
     fmt::{Debug, Formatter},
     iter,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use log::*;
@@ -26,6 +26,7 @@ use tari_ootle_storage::{
     consensus_models::{
         Block,
         BookkeepingModel,
+        EpochCheckpoint,
         ForeignProposalRecord,
         NoVoteReason,
         TransactionPool,
@@ -36,7 +37,10 @@ use tari_ootle_storage::{
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::{Transaction, TransactionId};
-use tokio::sync::{broadcast, mpsc};
+use tokio::{
+    sync::{broadcast, mpsc},
+    time,
+};
 
 use super::{
     calculate_last_dummy_block,
@@ -247,9 +251,31 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         &self.pacemaker
     }
 
+    async fn get_starting_epoch(&self) -> Result<(Epoch, FixedHash), HotStuffError> {
+        // NOTE: we assume the latest checkpoint has been synced already
+        let checkpoint = self
+            .state_store
+            .with_read_tx(|tx| EpochCheckpoint::get_last_checkpoint(tx))
+            .optional()?;
+
+        let last_finalised_epoch = checkpoint.map(|ch| ch.epoch());
+
+        let current_epoch = {
+            // Typically, the current epoch = last finalised epoch + 1. Unless, the epoch was not finalised yet at
+            // startup.
+            match last_finalised_epoch {
+                Some(epoch) => epoch + Epoch(1),
+                None => self.epoch_manager.current_epoch().await?,
+            }
+        };
+
+        let epoch_hash = self.epoch_manager.get_epoch_hash(current_epoch).await?;
+
+        Ok((current_epoch, epoch_hash))
+    }
+
     pub async fn start(&mut self) -> Result<(), HotStuffError> {
-        let current_epoch = self.epoch_manager.current_epoch().await?;
-        let current_epoch_hash = self.epoch_manager.get_current_epoch_hash().await?;
+        let (current_epoch, current_epoch_hash) = self.get_starting_epoch().await?;
         let local_committee_info = self.epoch_manager.get_local_committee_info(current_epoch).await?;
 
         self.create_genesis_block_if_required(current_epoch, current_epoch_hash, local_committee_info.shard_group())?;
@@ -315,6 +341,9 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             .fee_claim_public_key;
 
         self.request_catch_up_sync(&epoch_state).await?;
+
+        let mut periodic_tasks = time::interval(Duration::from_secs(10));
+        periodic_tasks.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
 
         loop {
             let current_height = self.pacemaker.current_view().get_height();
@@ -393,6 +422,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     if let Err(e) = self.on_leader_timeout(&epoch_state, current_height, Some(timeout)).await {
                         self.on_failure("on_leader_timeout", &e).await;
                         return Err(e);
+                    }
+                },
+
+                _ = periodic_tasks.tick() => {
+                    if let Err(e) = self.on_task_tick(&epoch_state).await {
+                        self.hooks.on_error(&e);
+                        error!(target: LOG_TARGET, "🚨Error during periodic task: {}", e);
                     }
                 },
 
@@ -681,6 +717,15 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         }
 
         self.publish_event(HotstuffEvent::LeaderTimeout { height: current_height });
+        Ok(())
+    }
+
+    async fn on_task_tick(&mut self, epoch_state: &EpochState<TConsensusSpec::Addr>) -> Result<(), HotStuffError> {
+        // Re-request foreign proposals that have had no response after a timeout
+        self.on_receive_foreign_proposal
+            .handle_timed_out_requests(epoch_state.local_committee_info())
+            .await?;
+
         Ok(())
     }
 
@@ -1146,7 +1191,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     .get_random_committee_member(
                         local_epoch_state.epoch(),
                         Some(local_epoch_state.local_committee_info.shard_group()),
-                        vec![self.local_validator_addr.clone()],
+                        [self.local_validator_addr.clone()].into_iter().collect(),
                     )
                     .await?
             },

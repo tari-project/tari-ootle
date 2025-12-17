@@ -82,8 +82,8 @@ create unique index templates_template_address_index on templates (template_addr
 
 create table epochs
 (
-    epoch             bigint primary key not null,
-    validator_node_mr blob               not null
+    epoch      bigint primary key not null,
+    epoch_hash blob               not null
 );
 
 create table bmt_cache

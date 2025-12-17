@@ -228,7 +228,7 @@ where TConsensusSpec: ConsensusSpec
         } else {
             let committee = self
                 .epoch_manager
-                .get_committee_by_shard_group(epoch, local_committee_info.shard_group(), None)
+                .get_committee_by_shard_group(epoch, local_committee_info.shard_group(), None, false)
                 .await?;
 
             info!(
@@ -317,8 +317,9 @@ where TConsensusSpec: ConsensusSpec
         let start_of_chain_block = highest_seen_block;
         let parent_block = dummy_block.unwrap_or_else(|| highest_seen_block.as_leaf());
         let highest_seen_block = Block::get(tx, highest_seen_block.block_id())?;
+        let is_end_of_epoch_in_chain = highest_seen_block.is_epoch_end_proposed_in_chain(tx)?;
 
-        let should_not_propose_commands = can_propose_epoch_end || {
+        let should_not_propose_commands = is_end_of_epoch_in_chain || can_propose_epoch_end || {
             // TODO: prevent proposers from proposing transactions after an epoch end command is in the justified
             // pending chain, regardless of whether we see the end of epoch or not (race condition).
             // If the last justified/parent block is an epoch end block, we dont propose commands since the block will
@@ -329,21 +330,24 @@ where TConsensusSpec: ConsensusSpec
         let mut total_leader_fee = 0u64;
         let mut accumulated_data = *highest_seen_block.header().accumulated_data();
 
-        let batch = if should_not_propose_commands {
-            ProposalBatch::default()
-        } else {
-            self.fetch_next_proposal_batch(tx, local_committee_info, start_of_chain_block)?
-        };
-
         let mut substate_store = PendingSubstateStore::new(
             tx,
             start_of_chain_block.as_leaf(),
             self.config.consensus_constants.num_preshards,
         );
 
-        debug!(target: LOG_TARGET, "🌿 PROPOSE: {} (justify: {}) {batch}", highest_seen_block.height(), justify_block.height());
         let mut executed_transactions = HashMap::new();
-        let mut commands = if can_propose_epoch_end {
+
+        let batch = if should_not_propose_commands {
+            ProposalBatch::default()
+        } else {
+            self.fetch_next_proposal_batch(tx, local_committee_info, start_of_chain_block)?
+        };
+        debug!(target: LOG_TARGET, "🌿 PROPOSE: {} (justify: {}) {batch}", highest_seen_block.height(), justify_block.height());
+
+        let mut commands = if is_end_of_epoch_in_chain {
+            BTreeSet::from_iter([])
+        } else if can_propose_epoch_end {
             BTreeSet::from_iter([Command::EndEpoch])
         } else {
             BTreeSet::from_iter(
@@ -597,7 +601,7 @@ where TConsensusSpec: ConsensusSpec
         info!(
             target: LOG_TARGET,
             "👨‍🔧 PROPOSE: PREPARE transaction {}",
-            pool_tx.transaction_id(),
+            pool_tx.id(),
         );
 
         let prepared = self
@@ -609,13 +613,10 @@ where TConsensusSpec: ConsensusSpec
             warn!(
                 target: LOG_TARGET,
                 "⚠️ Transaction {} has lock conflicts, but no hard conflicts. Skipping proposing this transaction...",
-                pool_tx.transaction_id(),
+                pool_tx.id(),
             );
 
-            lock_conflicts.add(
-                *pool_tx.transaction_id(),
-                prepared.into_lock_status().into_lock_conflicts(),
-            );
+            lock_conflicts.add(*pool_tx.id(), prepared.into_lock_status().into_lock_conflicts());
             return Ok(None);
         }
 
@@ -633,7 +634,7 @@ where TConsensusSpec: ConsensusSpec
                     info!(
                         target: LOG_TARGET,
                         "🏠️ Transaction {} is local only, proposing LocalOnly",
-                        pool_tx.transaction_id(),
+                        pool_tx.id(),
                     );
 
                     if pool_tx.current_decision().is_commit() {
@@ -648,7 +649,7 @@ where TConsensusSpec: ConsensusSpec
                             HotStuffError::InvariantError(format!(
                                 "prepare_transaction: Transaction {} has COMMIT decision but execution failed when \
                                  proposing",
-                                pool_tx.transaction_id(),
+                                pool_tx.id(),
                             ))
                         })?;
 
@@ -656,7 +657,7 @@ where TConsensusSpec: ConsensusSpec
                             error!(
                                 target: LOG_TARGET,
                                 "🔒 Failed to write to temporary state store for transaction {} for LocalOnly: {}. Skipping proposing this transaction...",
-                                pool_tx.transaction_id(),
+                                pool_tx.id(),
                                 err,
                             );
                             // Only error if it is not related to lock errors
@@ -665,7 +666,7 @@ where TConsensusSpec: ConsensusSpec
                         }
                     }
 
-                    executed_transactions.insert(*pool_tx.transaction_id(), execution);
+                    executed_transactions.insert(*pool_tx.id(), execution);
 
                     let atom = pool_tx.get_current_transaction_atom();
                     Ok(Some(Command::LocalOnly(atom)))
@@ -674,7 +675,7 @@ where TConsensusSpec: ConsensusSpec
                     info!(
                         target: LOG_TARGET,
                         "⚠️ Transaction is LOCAL-ONLY EARLY ABORT, proposing LocalOnly({}, ABORT)",
-                        pool_tx.transaction_id()
+                        pool_tx.id()
                     );
                     pool_tx
                         .set_local_decision(execution.decision())
@@ -685,7 +686,7 @@ where TConsensusSpec: ConsensusSpec
                             local_committee_info.num_committees(),
                         ));
 
-                    executed_transactions.insert(*pool_tx.transaction_id(), execution);
+                    executed_transactions.insert(*pool_tx.id(), execution);
                     let atom = pool_tx.get_current_transaction_atom();
                     Ok(Some(Command::LocalOnly(atom)))
                 },
@@ -726,7 +727,7 @@ where TConsensusSpec: ConsensusSpec
                             }
                         }
 
-                        executed_transactions.insert(*pool_tx.transaction_id(), *execution);
+                        executed_transactions.insert(*pool_tx.id(), *execution);
                     },
                     EvidenceOrExecution::Evidence { evidence, .. } => {
                         // CASE: All local inputs were resolved. We need to continue with consensus to get the
@@ -741,7 +742,7 @@ where TConsensusSpec: ConsensusSpec
                 info!(
                     target: LOG_TARGET,
                     "🌍 Transaction involves foreign shard groups, proposing Prepare({}, {})",
-                    pool_tx.transaction_id(),
+                    pool_tx.id(),
                     pool_tx.current_decision(),
                 );
 
@@ -758,7 +759,7 @@ where TConsensusSpec: ConsensusSpec
                     debug!(
                         target: LOG_TARGET,
                         "ℹ️ Transaction {} is output-only for {}, proposing LocalAccept",
-                        pool_tx.transaction_id(),
+                        pool_tx.id(),
                         local_committee_info.shard_group()
                     );
                     let atom = pool_tx.get_current_transaction_atom();
@@ -793,26 +794,24 @@ where TConsensusSpec: ConsensusSpec
             .resulting_outputs()
             .iter()
             .filter(|o| local_committee_info.includes_substate_id(o.substate_id()));
-        let lock_status = substate_store.try_lock_all(*tx_rec.transaction_id(), local_outputs, false)?;
+        let lock_status = substate_store.try_lock_all(*tx_rec.id(), local_outputs, false)?;
         if let Some(err) = lock_status.failures().first() {
             warn!(
                 target: LOG_TARGET,
                 "⚠️ Failed to lock outputs for transaction {}: {}",
-                tx_rec.transaction_id(),
+                tx_rec.id(),
                 err,
             );
             // If the transaction does not lock, we propose to abort it
-            let execution = TransactionExecution::abort(
-                tx_rec.transaction_id(),
-                RejectReason::FailedToLockOutputs(err.to_string()),
-            );
+            let execution =
+                TransactionExecution::abort(tx_rec.id(), RejectReason::FailedToLockOutputs(err.to_string()));
             tx_rec.update_from_execution(
                 local_committee_info.num_preshards(),
                 local_committee_info.num_committees(),
                 &execution,
             );
 
-            executed_transactions.insert(*tx_rec.transaction_id(), execution);
+            executed_transactions.insert(*tx_rec.id(), execution);
             return Ok(Some(Command::LocalAccept(tx_rec.get_current_transaction_atom())));
         }
 
@@ -821,7 +820,7 @@ where TConsensusSpec: ConsensusSpec
             local_committee_info.num_committees(),
             &execution,
         );
-        executed_transactions.insert(*tx_rec.transaction_id(), execution);
+        executed_transactions.insert(*tx_rec.id(), execution);
         // If we locally decided to ABORT, we are still saying that we think all prepared and, after execution decide to
         // ABORT. When we enter the acceptance phase, we will propose SomeAccept for this case.
         let atom = self.get_transaction_atom_with_leader_fee(&tx_rec)?;
@@ -846,13 +845,13 @@ where TConsensusSpec: ConsensusSpec
             .ok_or_else(|| {
                 HotStuffError::InvariantError(format!(
                     "accept_transaction: Transaction {} has COMMIT decision but execution is missing",
-                    tx_rec.transaction_id(),
+                    tx_rec.id(),
                 ))
             })?;
         let diff = execution.result().finalize.any_accept().ok_or_else(|| {
             HotStuffError::InvariantError(format!(
                 "local_accept_transaction: Transaction {} has COMMIT decision but execution failed when proposing",
-                tx_rec.transaction_id(),
+                tx_rec.id(),
             ))
         })?;
         let filtered_diff = filter_diff_for_committee(local_committee_info, diff);
@@ -860,7 +859,7 @@ where TConsensusSpec: ConsensusSpec
             error!(
                 target: LOG_TARGET,
                 "🔒 Failed to write to temporary state store for transaction {} for Accept: {}. Skipping proposing this transaction...",
-                tx_rec.transaction_id(),
+                tx_rec.id(),
                 err,
             );
             // Only error if it is not related to lock errors
@@ -881,7 +880,7 @@ where TConsensusSpec: ConsensusSpec
             let involved = NonZeroU64::new(num_involved_shard_groups as u64).ok_or_else(|| {
                 HotStuffError::InvariantError(format!(
                     "PROPOSE: Transaction {} involves zero shard groups",
-                    tx_rec.transaction_id(),
+                    tx_rec.id(),
                 ))
             })?;
             let leader_fee = tx_rec.calculate_leader_fee(involved, self.config.consensus_constants.fee_exhaust_divisor);

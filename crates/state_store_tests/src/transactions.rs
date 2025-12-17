@@ -92,22 +92,10 @@ mod confirm_all_transitions {
         tx.transaction_pool_insert_new(atom3.id, atom3.decision, &Evidence::empty(), true, false)
             .unwrap();
         let block_id = *block1.id();
-        let transactions = tx.transaction_pool_get_all().unwrap();
-        let mut tx_1 = transactions
-            .iter()
-            .find(|tx| *tx.transaction_id() == atom1.id)
-            .unwrap()
-            .clone();
-        let mut tx_2 = transactions
-            .iter()
-            .find(|tx| *tx.transaction_id() == atom2.id)
-            .unwrap()
-            .clone();
-        let mut tx_3 = transactions
-            .iter()
-            .find(|tx| *tx.transaction_id() == atom3.id)
-            .unwrap()
-            .clone();
+        let transactions = tx.transaction_pool_get_all(1000).unwrap();
+        let mut tx_1 = transactions.iter().find(|tx| *tx.id() == atom1.id).unwrap().clone();
+        let mut tx_2 = transactions.iter().find(|tx| *tx.id() == atom2.id).unwrap().clone();
+        let mut tx_3 = transactions.iter().find(|tx| *tx.id() == atom3.id).unwrap().clone();
 
         assert!(tx.transaction_pool_exists(&atom1.id).unwrap());
         assert!(tx.transaction_pool_exists(&atom2.id).unwrap());
@@ -326,7 +314,7 @@ mod transaction_execution_operations {
         // transactions_finalize_all
         tx.transaction_pool_insert_new(*tx1.id(), Decision::Commit, &Evidence::empty(), true, false)
             .unwrap();
-        let transactions = tx.transaction_pool_get_all().unwrap();
+        let transactions = tx.transaction_pool_get_all(1000).unwrap();
         assert_eq!(transactions.len(), 1);
         tx.transactions_finalize_all(transactions.iter()).unwrap();
 

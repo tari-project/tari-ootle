@@ -51,18 +51,11 @@ message ForeignProposalNotification {
 message ForeignProposalRequest {
   oneof request {
     ForeignProposalRequestByBlockId by_block_id = 1;
-    ForeignProposalRequestByTransactionId by_transaction_id = 2;
   }
 }
 
 message ForeignProposalRequestByBlockId {
   bytes block_id = 1;
-  uint32 for_shard_group = 2;
-  uint64 epoch = 3;
-}
-
-message ForeignProposalRequestByTransactionId {
-  bytes transaction_id = 1;
   uint32 for_shard_group = 2;
   uint64 epoch = 3;
 }

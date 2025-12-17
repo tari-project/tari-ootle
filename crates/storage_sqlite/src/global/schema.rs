@@ -32,7 +32,7 @@ diesel::table! {
 diesel::table! {
     epochs (epoch) {
         epoch -> BigInt,
-        validator_node_mr -> Binary,
+        epoch_hash -> Binary,
     }
 }
 

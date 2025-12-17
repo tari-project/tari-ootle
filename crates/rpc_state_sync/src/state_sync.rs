@@ -454,7 +454,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     // first epoch is not 0 but the first epoch where validators become active).
                     warn!(
                         target: LOG_TARGET,
-                        "❓No checkpoint for epoch {epoch}. This may mean that this is the first epoch in the network"
+                        "❓️ No checkpoint for epoch {prev_epoch}. This may mean that this is the first epoch in the network or the epoch has not yet been finalized.",
                     );
                     return Ok(None);
                 },

@@ -283,7 +283,10 @@ impl Test {
 
     pub fn dump_pool_info(&self) {
         for v in self.validators.values().sorted_unstable_by_key(|a| &a.address) {
-            let pool = v.state_store.with_read_tx(|tx| tx.transaction_pool_get_all()).unwrap();
+            let pool = v
+                .state_store
+                .with_read_tx(|tx| tx.transaction_pool_get_all(1000))
+                .unwrap();
             println!("Validator {}", v.address);
             let mut table = Table::new();
             table
@@ -302,7 +305,7 @@ impl Test {
                     v.address,
                     tx.current_stage(),
                     tx.pending_stage().display(),
-                    tx.transaction_id(),
+                    tx.id(),
                     tx.current_decision(),
                     tx.is_ready(),
                     format!(

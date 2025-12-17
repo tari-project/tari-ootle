@@ -318,8 +318,8 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
         let context = &format!("{:?}", req);
         match req {
             EpochManagerRequest::CurrentEpoch { reply } => handle(reply, Ok(self.inner.current_epoch()), context),
-            EpochManagerRequest::CurrentEpochHash { reply } => {
-                handle(reply, Ok(self.inner.current_epoch_hash()), context)
+            EpochManagerRequest::GetEpochHash { epoch, reply } => {
+                handle(reply, self.inner.get_epoch_hash(epoch), context)
             },
             EpochManagerRequest::GetValidatorNodeByPublicKey {
                 epoch,
@@ -419,12 +419,13 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
             EpochManagerRequest::GetCommitteeForShardGroup {
                 epoch,
                 shard_group,
+                shuffled,
                 limit,
                 reply,
             } => handle(
                 reply,
                 self.inner
-                    .get_committee_for_shard_group(epoch, shard_group, true, limit),
+                    .get_committee_for_shard_group(epoch, shard_group, shuffled, limit),
                 context,
             ),
             EpochManagerRequest::GetCommitteesOverlappingShardGroup {

@@ -199,6 +199,12 @@ impl Evidence {
         self.evidence.get(&shard_group).is_none_or(|e| e.inputs().is_empty())
     }
 
+    pub fn output_only_shard_groups_iter(&self) -> impl Iterator<Item = ShardGroup> + '_ {
+        self.evidence
+            .iter()
+            .filter_map(|(sg, e)| if e.inputs().is_empty() { Some(*sg) } else { None })
+    }
+
     pub fn is_committee_input_only(&self, shard_group: ShardGroup) -> bool {
         self.evidence.get(&shard_group).is_none_or(|e| e.outputs().is_empty())
     }

@@ -6,6 +6,7 @@ use tari_ootle_common_types::hashing;
 
 crate::create_hash_type!(
     /// The ID of a block in the Tari consensus protocol.
+    #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, type = "string"))]
     BlockId
 );
 

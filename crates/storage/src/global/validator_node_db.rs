@@ -20,7 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use tari_ootle_common_types::{committee::Committee, Epoch, ShardGroup, SubstateAddress, VotePower};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
@@ -139,7 +139,7 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
         &mut self,
         epoch: Epoch,
         shard_group: Option<ShardGroup>,
-        excluding: Vec<TGlobalDbAdapter::Addr>,
+        excluding: HashSet<TGlobalDbAdapter::Addr>,
     ) -> Result<ValidatorNode<TGlobalDbAdapter::Addr>, TGlobalDbAdapter::Error> {
         self.backend
             .validator_nodes_get_random_committee_member_from_shard_group(self.tx, epoch, shard_group, excluding)

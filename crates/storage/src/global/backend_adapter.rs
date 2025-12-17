@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{de::DeserializeOwned, Serialize};
 use tari_common_types::types::FixedHash;
@@ -35,7 +35,7 @@ use tari_ootle_common_types::{
 };
 use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 
-use super::{BlockHeaderModel, DbEpoch, TemplateStatus};
+use super::{BlockHeaderModel, EpochData, TemplateStatus};
 use crate::{
     atomic::AtomicDb,
     global::{
@@ -175,7 +175,7 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         tx: &mut Self::DbTransaction<'_>,
         epoch: Epoch,
         shard_group: Option<ShardGroup>,
-        excluding: Vec<Self::Addr>,
+        excluding: HashSet<Self::Addr>,
     ) -> Result<ValidatorNode<Self::Addr>, Self::Error>;
 
     fn validator_nodes_get_committees_for_epoch(
@@ -184,8 +184,13 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         epoch: Epoch,
     ) -> Result<HashMap<ShardGroup, Committee<Self::Addr>>, Self::Error>;
 
-    fn insert_epoch(&self, tx: &mut Self::DbTransaction<'_>, epoch: DbEpoch) -> Result<(), Self::Error>;
-    fn get_epoch(&self, tx: &mut Self::DbTransaction<'_>, epoch: u64) -> Result<Option<DbEpoch>, Self::Error>;
+    fn insert_epoch(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        epoch: Epoch,
+        epoch_hash: FixedHash,
+    ) -> Result<(), Self::Error>;
+    fn get_epoch(&self, tx: &mut Self::DbTransaction<'_>, epoch: Epoch) -> Result<Option<EpochData>, Self::Error>;
 
     fn insert_bmt(
         &self,
@@ -214,7 +219,12 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
     fn get_block_header_by_hash(
         &self,
         tx: &mut Self::DbTransaction<'_>,
-        epoch: Epoch,
+        max_epoch: Epoch,
         block_hash: &FixedHash,
+    ) -> Result<BlockHeaderModel, Self::Error>;
+    fn get_first_block_header_by_epoch(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        epoch: Epoch,
     ) -> Result<BlockHeaderModel, Self::Error>;
 }

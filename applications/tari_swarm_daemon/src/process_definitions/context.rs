@@ -13,7 +13,6 @@ use crate::process_manager::{
     InstanceManager,
     MinoTariNodeProcess,
     MinoTariWalletProcess,
-    SignalingServerProcess,
     ValidatorNodeProcess,
 };
 
@@ -175,9 +174,5 @@ impl<'a> ProcessContext<'a> {
 
     pub fn indexers(&self) -> impl Iterator<Item = &IndexerProcess> {
         self.instances.indexers()
-    }
-
-    pub fn signaling_servers(&self) -> impl Iterator<Item = &SignalingServerProcess> {
-        self.instances.signaling_servers()
     }
 }

@@ -34,7 +34,6 @@ use crate::{
         AllocatedPorts,
         IndexerProcess,
         Instance,
-        SignalingServerProcess,
         WalletDaemonProcess,
     },
 };
@@ -50,7 +49,6 @@ pub struct InstanceManager {
     validator_nodes: IndexMap<InstanceId, ValidatorNodeProcess>,
     indexers: IndexMap<InstanceId, IndexerProcess>,
     wallet_daemons: IndexMap<InstanceId, WalletDaemonProcess>,
-    signaling_servers: IndexMap<InstanceId, SignalingServerProcess>,
     port_allocator: PortAllocator,
     instance_id: InstanceId,
 }
@@ -75,7 +73,6 @@ impl InstanceManager {
             validator_nodes: IndexMap::new(),
             indexers: IndexMap::new(),
             wallet_daemons: IndexMap::new(),
-            signaling_servers: IndexMap::new(),
             instance_id: 0,
         }
     }
@@ -281,10 +278,6 @@ impl InstanceManager {
             InstanceType::TariIndexer => {
                 self.indexers.insert_sorted(instance_id, IndexerProcess::new(instance));
             },
-            InstanceType::TariSignalingServer => {
-                self.signaling_servers
-                    .insert_sorted(instance_id, SignalingServerProcess::new(instance));
-            },
             InstanceType::TariWalletDaemon => {
                 self.wallet_daemons
                     .insert_sorted(instance_id, WalletDaemonProcess::new(instance));
@@ -328,10 +321,6 @@ impl InstanceManager {
 
     pub fn indexers(&self) -> impl Iterator<Item = &IndexerProcess> + Sized {
         self.indexers.values()
-    }
-
-    pub fn signaling_servers(&self) -> impl Iterator<Item = &SignalingServerProcess> + Sized {
-        self.signaling_servers.values()
     }
 
     // pub fn wallet_daemons(&self) -> impl Iterator<Item = &WalletDaemonProcess> + Sized {
@@ -433,9 +422,6 @@ impl InstanceManager {
             InstanceType::TariIndexer => {
                 self.indexers.shift_remove(&id);
             },
-            InstanceType::TariSignalingServer => {
-                self.signaling_servers.shift_remove(&id);
-            },
             InstanceType::TariWalletDaemon => {
                 self.wallet_daemons.shift_remove(&id);
             },
@@ -458,7 +444,6 @@ impl InstanceManager {
             .chain(self.minotari_miners.values_mut().map(|x| x.instance_mut()))
             .chain(self.validator_nodes.values_mut().map(|x| x.instance_mut()))
             .chain(self.indexers.values_mut().map(|x| x.instance_mut()))
-            .chain(self.signaling_servers.values_mut().map(|x| x.instance_mut()))
             .chain(self.wallet_daemons.values_mut().map(|x| x.instance_mut()))
     }
 
@@ -470,7 +455,6 @@ impl InstanceManager {
             .chain(self.minotari_miners.values().map(|x| x.instance()))
             .chain(self.validator_nodes.values().map(|x| x.instance()))
             .chain(self.indexers.values().map(|x| x.instance()))
-            .chain(self.signaling_servers.values().map(|x| x.instance()))
             .chain(self.wallet_daemons.values().map(|x| x.instance()))
     }
 

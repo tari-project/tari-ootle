@@ -66,8 +66,8 @@ impl ProcessDefinition for ValidatorNode {
             ))
             .arg(format!("-pvalidator_node.p2p.listener_port={p2p_port}"))
             .arg(format!("-pvalidator_node.json_rpc_listener_address={json_rpc_address}"))
-            .arg(format!("-pvalidator_node.web_ui_listener_address={web_ui_address}"))
-            .arg("-pepoch_oracle.base_layer.scanning_interval=1");
+            .arg(format!("-pvalidator_node.web_ui_listener_address={web_ui_address}"));
+        // .arg("-pepoch_oracle.base_layer.scanning_interval=1");
 
         if let Some(console_port) = context.get_setting("tokio_console_port") {
             command.arg(format!("--tokio-console-port={console_port}"));

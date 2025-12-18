@@ -33,7 +33,7 @@ use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::ToByteType;
 use tari_epoch_manager::service::{EpochManagerConfig, EpochManagerHandle};
 use tari_epoch_oracles::{
-    base_layer::BaseLayerOracle,
+    base_layer::{BaseLayerEpochOracleConfig, BaseLayerOracle},
     configured::{ConfiguredEpochOracle, RealTimeEpochTicker},
     hybrid::{watch_ticker, HybridEpochOracle},
     store::EpochOracleStore,
@@ -335,15 +335,13 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + 'static>(
     Ok(BaseLayerOracle::new(
         store,
         base_node_client,
-        consensus_constants.base_layer_confirmations,
-        config.epoch_oracle.base_layer.scanning_interval,
-        config.indexer.sidechain_id.as_ref().map(|p| p.to_byte_type()),
-        config
-            .indexer
-            .burnt_utxo_sidechain_id
-            .as_ref()
-            .map(|p| p.to_byte_type()),
-        config.indexer.sidechain_id.as_ref().map(|p| p.to_byte_type()),
+        BaseLayerEpochOracleConfig {
+            start_height: 0,
+            height_lag: consensus_constants.base_layer_confirmations,
+            scanning_interval: config.epoch_oracle.base_layer.scanning_interval,
+            sidechain_id: config.indexer.sidechain_id.as_ref().map(|p| p.to_byte_type()),
+            sync_headers: false,
+        },
         config.network,
     ))
 }

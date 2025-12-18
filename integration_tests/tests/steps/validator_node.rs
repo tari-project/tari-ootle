@@ -39,6 +39,7 @@ use tari_validator_node_client::types::{
     ListBlocksRequest,
 };
 use tokio::{sync::mpsc, time::timeout};
+use tonic::codegen::tokio_stream::StreamExt;
 
 async fn spawn_seed_node(
     world: &mut TariWorld,
@@ -234,7 +235,13 @@ async fn assert_all_vns_are_registered(world: &mut TariWorld) {
 
         // get the list of registered vns from the base node
         let height = base_node_client.get_tip_info().await.unwrap().height_of_longest_chain;
-        let vns = base_node_client.get_validator_nodes(height).await.unwrap();
+        let vns = base_node_client
+            .get_validator_nodes(height)
+            .await
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .await
+            .unwrap();
         assert!(!vns.is_empty());
 
         // retrieve the VN's public key
@@ -254,7 +261,13 @@ pub async fn assert_vn_is_registered(world: &mut TariWorld, vn_name: String) {
 
     // get the list of registered vns from the base node
     let height = base_node_client.get_tip_info().await.unwrap().height_of_longest_chain;
-    let vns = base_node_client.get_validator_nodes(height).await.unwrap();
+    let vns = base_node_client
+        .get_validator_nodes(height)
+        .await
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .await
+        .unwrap();
     assert!(!vns.is_empty(), "vns are empty at height {}", height);
 
     // retrieve the VN's public key
@@ -678,8 +691,8 @@ async fn validator_not_member_of_network(world: &mut TariWorld, validator: Strin
     let vn = world.get_validator_node(&validator);
     let mut client = bn.create_client();
     let tip = client.get_tip_info().await.unwrap();
-    let vns = client.get_validator_nodes(tip.height_of_longest_chain).await.unwrap();
-    let has_vn = vns.iter().any(|v| v.public_key == vn.public_key);
+    let mut vns = client.get_validator_nodes(tip.height_of_longest_chain).await.unwrap();
+    let has_vn = vns.any(|v| v.unwrap().public_key == vn.public_key).await;
     if has_vn {
         // TODO: investigate why this is flaky
         warn!(

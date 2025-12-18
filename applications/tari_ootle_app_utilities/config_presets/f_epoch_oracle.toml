@@ -17,8 +17,8 @@
 # The Tari base node's GRPC URL. If none is specified, http://localhost:{port} will be used where {port} is the network-specific default.
 #base_node_grpc_url = "http://localhost:18142"
 
-# Interval between base layer scans in seconds. Default is 5 seconds.
-#scanning_interval = 5
+# Interval between base layer scans in seconds. Default is 30 seconds.
+#scanning_interval = 30
 
 [epoch_oracle.configured]
 

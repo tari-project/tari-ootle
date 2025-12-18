@@ -22,7 +22,7 @@
 
 use std::time::Duration;
 
-use tari_ootle_common_types::{Epoch, Network, NumPreshards};
+use tari_ootle_common_types::{Network, NumPreshards};
 
 #[derive(Clone, Debug)]
 pub struct ConsensusConstants {
@@ -44,7 +44,6 @@ pub struct ConsensusConstants {
     pub max_number_commands_in_block: usize,
     /// The value that fees are divided by to determine the amount of fees to burn. 0 means no fees are burned.
     pub fee_exhaust_divisor: u64,
-    pub epochs_per_era: Epoch,
 }
 
 impl ConsensusConstants {
@@ -60,8 +59,7 @@ impl ConsensusConstants {
             missed_proposal_evict_threshold: 10,
             missed_proposal_recovery_threshold: 5,
             max_number_commands_in_block: 500,
-            fee_exhaust_divisor: 20, // 5%
-            epochs_per_era: Epoch(10),
+            fee_exhaust_divisor: 20, // 1/20 = 5%
         }
     }
 }

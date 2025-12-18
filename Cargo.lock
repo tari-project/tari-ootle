@@ -10486,6 +10486,7 @@ dependencies = [
 name = "tari_base_node_client"
 version = "0.17.0"
 dependencies = [
+ "futures-util",
  "log",
  "minotari_app_grpc",
  "minotari_node_grpc_client",
@@ -10497,6 +10498,7 @@ dependencies = [
  "tari_transaction_components",
  "tari_utilities",
  "thiserror 2.0.17",
+ "tokio",
  "tonic 0.13.1",
  "ts-rs",
  "url",

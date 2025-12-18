@@ -221,8 +221,12 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                 );
             },
             EpochEvent::NewBlockHeader { epoch, header } => {
-                trace!(target: LOG_TARGET, "New block header at {epoch}: {header}");
-                self.inner.insert_block_header(epoch, header)?;
+                debug!(target: LOG_TARGET, "New block header at {epoch}: {header}");
+                let height = header.height;
+                if let Err(err) = self.inner.insert_block_header(epoch, header) {
+                    error!(target: LOG_TARGET, "Failed to insert block header {} for epoch {epoch}: {err}", height);
+                    return Err(err.into());
+                }
             },
             EpochEvent::NewEvictionProof { epoch, eviction_proof } => {
                 trace!(target: LOG_TARGET, "New Eviction proof for {epoch}: {eviction_proof:?}");

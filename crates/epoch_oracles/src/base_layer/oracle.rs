@@ -25,7 +25,7 @@ use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 use tokio::time;
 
 use crate::{
-    base_layer::{header_hasher::hash_header, BaseLayerEpochOracleConfig},
+    base_layer::{header_hasher::hash_header, BaseLayerEpochOracleConfig, BaseLayerEpochOracleFeatures},
     store::{EpochOracleStore, StoreKey},
 };
 
@@ -56,7 +56,7 @@ struct BaseLayerOracleInner<TStore> {
     start_height: u64,
     height_lag: u64,
     has_attempted_scan: bool,
-    sync_headers: bool,
+    features: BaseLayerEpochOracleFeatures,
     validator_node_sidechain_id: Option<RistrettoPublicKeyBytes>,
     pending_events: VecDeque<EpochEvent>,
     header_buf: Vec<(Epoch, FixedHash, BlockHeader)>,
@@ -83,7 +83,7 @@ impl<TStore: EpochOracleStore + 'static> BaseLayerOracle<TStore> {
                 height_lag: config.height_lag,
                 has_attempted_scan: false,
                 validator_node_sidechain_id: config.sidechain_id,
-                sync_headers: config.sync_headers,
+                features: config.features,
                 pending_events: VecDeque::new(),
                 header_buf: Vec::new(),
                 network,
@@ -263,7 +263,7 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
             // Note: Cant use header.hash() because it uses CURRENT_NETWORK global
             let header_hash = hash_header(self.network, &header);
             let current_validator_node_mr = header.validator_node_mr;
-            if self.sync_headers {
+            if self.features.sync_headers {
                 self.header_buf.push((current_epoch, header_hash, header));
             }
 
@@ -298,29 +298,32 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                     target: LOG_TARGET,
                     "⛓️ last_scanned_validator_node_mr = {} current = {}", self.last_scanned_validator_node_mr.display(), current_validator_node_mr
                 );
-                let node_changes = self
-                    .base_node_client
-                    .get_validator_node_changes(current_epoch, self.validator_node_sidechain_id.as_ref())
-                    .await
-                    .map_err(BaseLayerOracleError::BaseNodeError)?;
-                let node_changes = node_changes
-                    .into_iter()
-                    .map(TryInto::try_into)
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| {
-                        BaseLayerOracleError::InvalidBaseNodeResponse(format!(
-                            "Failed to convert validator node change: {}",
-                            e
-                        ))
-                    })?;
 
-                // This maybe empty if the MR changed as a result of other side chain IDs
-                if !node_changes.is_empty() {
-                    self.pending_events
-                        .push_back(EpochEvent::ActiveValidatorNodeSetChanged {
-                            epoch: current_epoch,
-                            node_changes,
-                        });
+                if self.features.sync_validator_node_changes {
+                    let node_changes = self
+                        .base_node_client
+                        .get_validator_node_changes(current_epoch, self.validator_node_sidechain_id.as_ref())
+                        .await
+                        .map_err(BaseLayerOracleError::BaseNodeError)?;
+                    let node_changes = node_changes
+                        .into_iter()
+                        .map(TryInto::try_into)
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|e| {
+                            BaseLayerOracleError::InvalidBaseNodeResponse(format!(
+                                "Failed to convert validator node change: {}",
+                                e
+                            ))
+                        })?;
+
+                    // This maybe empty if the MR changed as a result of other side chain IDs
+                    if !node_changes.is_empty() {
+                        self.pending_events
+                            .push_back(EpochEvent::ActiveValidatorNodeSetChanged {
+                                epoch: current_epoch,
+                                node_changes,
+                            });
+                    }
                 }
                 self.last_scanned_validator_node_mr = Some(current_validator_node_mr);
             }

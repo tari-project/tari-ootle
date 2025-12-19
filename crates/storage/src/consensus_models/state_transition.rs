@@ -64,22 +64,45 @@ bitflags! {
         const TEMPLATE = 0x0000_0020;
         const VALIDATOR_FEE_POOL = 0x0000_0040;
         const UTXO = 0x0000_0080;
+        const CLAIMED_OUTPUT_TOMBSTONE = 0x0000_0100;
+        /// Include all hashes for substates even if filtered out
+        const ALL_HASHES = 0x1000_0000;
+        const UP_ONLY = 0x0100_0000;
     }
 }
 
 impl SubstateValueFilterFlags {
+    pub fn all_substates() -> Self {
+        Self::COMPONENT |
+            Self::RESOURCE |
+            Self::VAULT |
+            Self::NON_FUNGIBLE |
+            Self::TRANSACTION_RECEIPT |
+            Self::TEMPLATE |
+            Self::VALIDATOR_FEE_POOL |
+            Self::UTXO |
+            Self::CLAIMED_OUTPUT_TOMBSTONE
+    }
+
+    pub fn include_filtered_hashes(&self) -> bool {
+        self.contains(Self::ALL_HASHES)
+    }
+
+    pub fn is_up_only(&self) -> bool {
+        self.contains(Self::UP_ONLY)
+    }
+
     pub fn contains_substate(&self, substate_id: &SubstateId) -> bool {
         match substate_id {
-            SubstateId::Component(_) => self.contains(SubstateValueFilterFlags::COMPONENT),
-            SubstateId::Resource(_) => self.contains(SubstateValueFilterFlags::RESOURCE),
-            SubstateId::Vault(_) => self.contains(SubstateValueFilterFlags::VAULT),
-            SubstateId::NonFungible(_) => self.contains(SubstateValueFilterFlags::NON_FUNGIBLE),
-            SubstateId::TransactionReceipt(_) => self.contains(SubstateValueFilterFlags::TRANSACTION_RECEIPT),
-            SubstateId::Template(_) => self.contains(SubstateValueFilterFlags::TEMPLATE),
-            SubstateId::ValidatorFeePool(_) => self.contains(SubstateValueFilterFlags::VALIDATOR_FEE_POOL),
-            SubstateId::Utxo(_) => self.contains(SubstateValueFilterFlags::UTXO),
-            // TODO: remove once UnclaimedConfidentialOutput is removed
-            SubstateId::UnclaimedConfidentialOutput(_) => false,
+            SubstateId::Component(_) => self.contains(Self::COMPONENT),
+            SubstateId::Resource(_) => self.contains(Self::RESOURCE),
+            SubstateId::Vault(_) => self.contains(Self::VAULT),
+            SubstateId::NonFungible(_) => self.contains(Self::NON_FUNGIBLE),
+            SubstateId::TransactionReceipt(_) => self.contains(Self::TRANSACTION_RECEIPT),
+            SubstateId::Template(_) => self.contains(Self::TEMPLATE),
+            SubstateId::ValidatorFeePool(_) => self.contains(Self::VALIDATOR_FEE_POOL),
+            SubstateId::Utxo(_) => self.contains(Self::UTXO),
+            SubstateId::ClaimedOutputTombstone(_) => self.contains(Self::CLAIMED_OUTPUT_TOMBSTONE),
         }
     }
 }

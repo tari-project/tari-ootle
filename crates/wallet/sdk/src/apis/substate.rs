@@ -1,14 +1,13 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use log::*;
 use tari_engine_types::{
     indexed_value::{IndexedValueError, IndexedWellKnownTypes},
     resource::Resource,
-    substate::{SubstateId, SubstateValue},
-    transaction_receipt::TransactionReceiptAddress,
+    substate::{Substate, SubstateId, SubstateValue},
 };
 use tari_ootle_common_types::{
     displayable::Displayable,
@@ -63,6 +62,26 @@ where
         Ok(substates)
     }
 
+    pub async fn get_substate_from_network(&self, id: SubstateId) -> Result<Substate, SubstateApiError> {
+        let mut map = self.get_substates_from_network(vec![id.clone()]).await?;
+        map.remove(&id)
+            .ok_or_else(|| SubstateApiError::SubstateDoesNotExist { address: id })
+    }
+
+    pub async fn get_substates_from_network(
+        &self,
+        ids: Vec<SubstateId>,
+    ) -> Result<HashMap<SubstateId, Substate>, SubstateApiError> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        self.network_interface
+            .get_substates(ids)
+            .await
+            .map_err(|e| SubstateApiError::NetworkInterfaceError(e.into()))
+    }
+
     pub fn load_dependent_substates(
         &self,
         parents: &[&SubstateId],
@@ -79,12 +98,12 @@ where
     #[allow(clippy::too_many_lines)]
     pub async fn locate_dependent_substates(
         &self,
-        parents: &[SubstateId],
+        top_level_substates: &[SubstateId],
         unversioned: bool,
     ) -> Result<HashSet<SubstateRequirement>, SubstateApiError> {
-        let mut substate_ids = HashSet::with_capacity(parents.len());
+        let mut substate_ids = HashSet::with_capacity(top_level_substates.len());
 
-        for parent_id in parents {
+        for parent_id in top_level_substates {
             match self.store.with_read_tx(|tx| tx.substates_get(parent_id)).optional()? {
                 Some(parent) => {
                     debug!(
@@ -125,10 +144,17 @@ where
                             }
                         },
                         SubstateValue::Resource(_) => {},
-                        SubstateValue::TransactionReceipt(tx_receipt) => {
-                            let tx_receipt_addr = SubstateId::TransactionReceipt(TransactionReceiptAddress::from_hash(
-                                tx_receipt.transaction_hash,
-                            ));
+                        SubstateValue::TransactionReceipt(_) => {
+                            let addr = substate_id
+                                .substate_id()
+                                .as_transaction_receipt_address()
+                                .ok_or_else(|| {
+                                    SubstateApiError::InvalidValidatorNodeResponse(format!(
+                                        "Transaction receipt substate and substate ID mismatch! Got {}",
+                                        substate_id
+                                    ))
+                                })?;
+                            let tx_receipt_addr = SubstateId::TransactionReceipt(addr);
                             if substate_ids.contains(&tx_receipt_addr) {
                                 continue;
                             }
@@ -179,7 +205,7 @@ where
                                 continue;
                             }
                         },
-                        SubstateValue::UnclaimedConfidentialOutput(_) => {},
+                        SubstateValue::ClaimedOutputTombstone(_) => {},
                         SubstateValue::Template(_) => {},
                         SubstateValue::Utxo(_) => {
                             let addr = substate_id.substate_id().as_utxo_address().ok_or_else(|| {

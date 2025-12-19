@@ -82,7 +82,7 @@ use crate::{
     server::early_close::EarlyClose,
 };
 
-const LOG_TARGET: &str = "comms::rpc::server";
+const LOG_TARGET: &str = "libp2p::rpc::server";
 
 pub trait NamedProtocolService {
     const PROTOCOL_NAME: &'static str;

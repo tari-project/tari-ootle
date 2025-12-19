@@ -11,7 +11,7 @@ export enum TariTypeTag {
   VaultId = 132,
   TransactionReceipt = 134,
   ProofId = 135,
-  UnclaimedConfidentialOutputAddress = 136,
+  ClaimedOutputTombstoneAddress = 136,
   TemplateAddress = 137,
   ValidatorNodeFeePool = 138,
   AllocatedComponentAddress = 139,

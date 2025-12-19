@@ -1,6 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::time;
+
 use tari_engine_types::substate::SubstateId;
 use tari_epoch_manager::EpochManagerError;
 
@@ -26,4 +28,8 @@ pub enum IndexerError {
     FailedToParseTransactionHash(String),
     #[error("Substate cache operation failed: {0}")]
     SubstateCacheError(#[from] SubstateCacheError),
+    #[error("No committee members available: {details}")]
+    NoCommitteeMembers { details: String },
+    #[error("System time error: {0}")]
+    SystemTimeError(#[from] time::SystemTimeError),
 }

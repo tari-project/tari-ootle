@@ -9,17 +9,16 @@ use tari_crypto::{
     ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSecretKey},
 };
 use tari_engine_types::crypto::validate_elgamal_verifiable_balance_proof;
-use tari_ootle_wallet_crypto::{confidential, AlwaysMissLookupTable, UnblindedOutputStatement};
+use tari_ootle_wallet_crypto::{confidential, GenerateValueLookup, OutputWitness};
 use tari_template_lib::{
-    models::EncryptedData,
     template_dependencies::{decode_exact, encode_with_len},
-    types::Amount,
+    types::{Amount, EncryptedData},
 };
 use tari_utilities::ByteArray;
 
-fn create_output_statement(value: Amount, view_key: &RistrettoPublicKey) -> UnblindedOutputStatement {
+fn create_output_statement(value: u64, view_key: &RistrettoPublicKey) -> OutputWitness {
     let mask = RistrettoSecretKey::random(&mut OsRng);
-    UnblindedOutputStatement {
+    OutputWitness {
         amount: value,
         mask,
         sender_public_nonce: Default::default(),
@@ -45,7 +44,7 @@ fn it_allows_no_balance_proof_for_no_view_key() {
 #[test]
 fn it_errors_no_balance_proof_with_view_key() {
     let (_, view_key) = keypair_from_seed(1);
-    let output_statement = create_output_statement(123.into(), &view_key);
+    let output_statement = create_output_statement(123, &view_key);
 
     let proof =
         confidential::create_output_statement(Some(&output_statement), Amount::zero(), None, Amount::zero()).unwrap();
@@ -64,7 +63,7 @@ fn it_errors_with_balance_proof_and_no_view_key() {
 #[test]
 fn it_generates_a_valid_proof() {
     let (view_key_secret, view_key) = keypair_from_seed(1);
-    let output_statement = create_output_statement(123.into(), &view_key);
+    let output_statement = create_output_statement(123, &view_key);
 
     let timer = Instant::now();
     let proof =
@@ -82,7 +81,7 @@ fn it_generates_a_valid_proof() {
 
     let timer = Instant::now();
     let balance = proof
-        .brute_force_balance(&view_key_secret, 0..=1000, &mut AlwaysMissLookupTable)
+        .brute_force_balance(&view_key_secret, 0..=1000, &mut GenerateValueLookup)
         .unwrap();
     let brute_force_time = timer.elapsed();
     assert_eq!(balance, Some(123));
@@ -95,8 +94,8 @@ fn it_generates_a_valid_proof() {
 #[test]
 fn serialize_deserialize() {
     let (_view_key_secret, view_key) = keypair_from_seed(1);
-    let output_statement = create_output_statement(123.into(), &view_key);
-    let change_statement = create_output_statement(123.into(), &view_key);
+    let output_statement = create_output_statement(123, &view_key);
+    let change_statement = create_output_statement(123, &view_key);
 
     let proof = confidential::create_withdraw_proof(
         &[],

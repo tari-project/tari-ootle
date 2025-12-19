@@ -7,16 +7,18 @@ use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{
     indexed_value::{IndexedValue, IndexedValueError},
-    instruction::Instruction,
     substate::SubstateId,
-    ComponentCall,
 };
-use tari_ootle_common_types::{Epoch, SubstateRequirement};
-use tari_template_lib::models::ComponentAddress;
+use tari_ootle_common_types::{Epoch, Signable, SubstateRequirement};
+use tari_template_lib::{
+    constants::XTR,
+    models::{ComponentAddress, UtxoAddress},
+    prelude::RistrettoPublicKeyBytes,
+};
 
-use crate::builder::TransactionBuilder;
+use crate::{builder::TransactionBuilder, ComponentReference, Instruction, ResourceAddressRef, TransactionSignature};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct UnsignedTransactionV1 {
     pub network: u8,
@@ -32,8 +34,21 @@ pub struct UnsignedTransactionV1 {
 }
 
 impl UnsignedTransactionV1 {
-    pub fn builder() -> TransactionBuilder {
-        TransactionBuilder::new()
+    pub fn builder<N: Into<u8>>(network: N) -> TransactionBuilder {
+        TransactionBuilder::new(network)
+    }
+
+    pub(crate) fn new_default<N: Into<u8>>(network: N) -> Self {
+        Self {
+            network: network.into(),
+            fee_instructions: vec![],
+            instructions: vec![],
+            inputs: IndexSet::new(),
+            min_epoch: None,
+            max_epoch: None,
+            is_seal_signer_authorized: true,
+            dry_run: false,
+        }
     }
 
     pub fn new<N: Into<u8>>(
@@ -52,7 +67,7 @@ impl UnsignedTransactionV1 {
             inputs,
             min_epoch,
             max_epoch,
-            is_seal_signer_authorized: false,
+            is_seal_signer_authorized: true,
             dry_run,
         }
     }
@@ -96,16 +111,16 @@ impl UnsignedTransactionV1 {
         self.instructions()
             .iter()
             .chain(self.fee_instructions())
-            .filter_map(|instruction| {
-                if let Instruction::CallMethod {
-                    call: ComponentCall::Address(component_address),
+            .filter_map(|instruction| match instruction {
+                Instruction::CallMethod {
+                    call: ComponentReference::Address(address),
                     ..
-                } = instruction
-                {
-                    Some(component_address)
-                } else {
-                    None
-                }
+                } => Some(address),
+                Instruction::UpdateComponentTemplate {
+                    component: ComponentReference::Address(address),
+                    ..
+                } => Some(address),
+                _ => None,
             })
     }
 
@@ -122,22 +137,57 @@ impl UnsignedTransactionV1 {
                         substates.extend(value.referenced_substates().filter(|id| !id.is_virtual()));
                     }
                 },
-                Instruction::CallMethod {
-                    call: ComponentCall::Address(component_address),
-                    args,
-                    ..
-                } => {
-                    substates.insert(SubstateId::Component(*component_address));
+                Instruction::CallMethod { call, args, .. } => {
+                    if let Some(component_address) = call.address() {
+                        substates.insert(SubstateId::Component(*component_address));
+                    }
                     for arg in args.iter().filter_map(|a| a.as_literal_bytes()) {
                         let value = IndexedValue::from_raw(arg)?;
                         substates.extend(value.referenced_substates().filter(|id| !id.is_virtual()));
                     }
                 },
-                Instruction::ClaimBurn { claim } => {
-                    substates.insert(SubstateId::UnclaimedConfidentialOutput(claim.output_address));
-                },
                 Instruction::ClaimValidatorFees { address, .. } => {
                     substates.insert(SubstateId::ValidatorFeePool(*address));
+                },
+                Instruction::StealthTransfer {
+                    resource_address_ref: ResourceAddressRef::Address(addr),
+                    statement,
+                    ..
+                } => {
+                    substates.insert(SubstateId::Resource(*addr));
+                    substates.extend(
+                        statement
+                            .inputs_statement
+                            .inputs
+                            .iter()
+                            .map(|i| UtxoAddress::new(*addr, i.commitment.into()))
+                            .map(SubstateId::Utxo),
+                    );
+                },
+                Instruction::PayFee { statement, .. } => {
+                    substates.insert(SubstateId::Resource(XTR));
+                    substates.extend(
+                        statement
+                            .inputs_statement
+                            .inputs
+                            .iter()
+                            .map(|i| UtxoAddress::new(XTR, i.commitment.into()))
+                            .map(SubstateId::Utxo),
+                    );
+                },
+                Instruction::UpdateComponentTemplate { component, migrate, .. } => {
+                    if let Some(component_address) = component.address() {
+                        substates.insert(SubstateId::Component(*component_address));
+                    }
+                    for arg in migrate
+                        .as_ref()
+                        .iter()
+                        .flat_map(|m| &m.args)
+                        .filter_map(|a| a.as_literal_bytes())
+                    {
+                        let value = IndexedValue::from_raw(arg)?;
+                        substates.extend(value.referenced_substates().filter(|id| !id.is_virtual()));
+                    }
                 },
                 _ => {},
             }
@@ -147,5 +197,13 @@ impl UnsignedTransactionV1 {
 
     pub fn has_inputs_without_version(&self) -> bool {
         self.inputs().iter().any(|i| i.version().is_none())
+    }
+}
+
+impl Signable<&RistrettoPublicKeyBytes> for UnsignedTransactionV1 {
+    type MessageOutput = [u8; 64];
+
+    fn to_signing_message(&self, seal_signer: &RistrettoPublicKeyBytes) -> Self::MessageOutput {
+        TransactionSignature::create_message_v1(1, seal_signer, self)
     }
 }

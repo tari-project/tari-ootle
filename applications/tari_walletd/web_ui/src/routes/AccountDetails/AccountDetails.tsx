@@ -23,30 +23,29 @@
 import { useState } from "react";
 import PageHeading from "@components/PageHeading";
 import Grid from "@mui/material/Grid";
-import { StyledPaper } from "@components/StyledComponents";
+import { StyledPaper, InnerHeading } from "@components/StyledComponents";
 import TableContainer from "@mui/material/TableContainer";
 import Table from "@mui/material/Table";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TableCell from "@mui/material/TableCell";
 import TableBody from "@mui/material/TableBody";
-import { useAccountsGetBalances, useAccountNFTsList, useAccountsGet } from "@api/hooks/useAccounts";
+import { useAccountsGetBalances, useAccountsGet } from "../../services/api/hooks/useAccounts";
+import AccountName from "@components/AccountName";
+import { useNFTsList } from "@api/hooks/useNfts";
 import { ApiError } from "@api/helpers/types";
 import { DataTableCell } from "@components/StyledComponents";
 import FetchStatusCheck from "@components/FetchStatusCheck";
-import { AccountGetResponse, BalanceEntry, substateIdToString } from "@tari-project/typescript-bindings";
+import { BalanceEntry, decodeOotleAddressOrNull, substateIdToString } from "@tari-project/typescript-bindings";
 import NftList from "@routes/AssetVault/NFTs/NFTList";
 import CopyAddress from "@components/CopyAddress";
-import useAccountStore from "@store/accountStore";
 import { Form, useParams } from "react-router-dom";
-import { accountsAssociateStealthResource, accountsGet } from "@utils/json_rpc";
+import { accountsAssociateStealthResource } from "@utils/json_rpc";
 import Loading from "@components/Loading";
-import Button from "@mui/material/Button";
 import { IoAdd } from "react-icons/io5";
-import Box from "@mui/material/Box";
-import Fade from "@mui/material/Fade";
-import TextField from "@mui/material/TextField/TextField";
+import { Box, Fade, TextField, Button } from "@mui/material";
 import { handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
+import { formatCurrency } from "@utils/helpers";
 
 function BalanceRow(props: BalanceEntry) {
   return (
@@ -55,8 +54,8 @@ function BalanceRow(props: BalanceEntry) {
         <CopyAddress address={props.resource_address} display={props.token_symbol || props.resource_address} />
       </DataTableCell>
       <DataTableCell>{props.resource_type}</DataTableCell>
-      <DataTableCell>{props.balance}</DataTableCell>
-      <DataTableCell>{props.confidential_balance}</DataTableCell>
+      <DataTableCell>{formatCurrency(props.balance)}</DataTableCell>
+      <DataTableCell>{formatCurrency(props.confidential_balance)}</DataTableCell>
     </TableRow>
   );
 }
@@ -88,7 +87,7 @@ function AccountDetailsLayout() {
     isLoading: nftsListIsFetching,
     isError: nftsListIsError,
     error: nftsListError,
-  } = useAccountNFTsList(substateIdToString(accountAddr!), offset, nftRowsPerPage);
+  } = useNFTsList(substateIdToString(accountAddr!), offset, nftRowsPerPage);
 
   const currentNfts = nftsListData?.nfts || [];
   const hasMore = currentNfts.length === nftRowsPerPage;
@@ -162,18 +161,30 @@ function AccountDetailsLayout() {
               <TableHead>
                 <TableRow>
                   <TableCell>Name</TableCell>
+                  <TableCell>Component</TableCell>
                   <TableCell>Address</TableCell>
-                  <TableCell>Public key</TableCell>
+                  <TableCell>Public Key</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 <TableRow>
-                  <DataTableCell>{accountsData?.account?.name || "<No Name>"}</DataTableCell>
                   <DataTableCell>
-                    <CopyAddress address={substateIdToString(accountsData?.account.address)} />
+                    <AccountName accountAddress={accountAddr!} currentName={accountsData?.account?.name} />
                   </DataTableCell>
                   <DataTableCell>
-                    {accountsData?.public_key && <CopyAddress address={accountsData?.account.address!} />}
+                    <CopyAddress address={substateIdToString(accountsData?.account.component_address)} />
+                  </DataTableCell>
+                  <DataTableCell>
+                    {" "}
+                    {accountsData?.address && <CopyAddress address={accountsData?.address!} />}{" "}
+                  </DataTableCell>
+                  <DataTableCell>
+                    {" "}
+                    {accountsData?.address && (
+                      <CopyAddress
+                        address={decodeOotleAddressOrNull(accountsData?.address!)?.accountPublicKey || "<decode error>"}
+                      />
+                    )}{" "}
                   </DataTableCell>
                 </TableRow>
               </TableBody>
@@ -183,7 +194,7 @@ function AccountDetailsLayout() {
       </Grid>
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
-          Balances
+          <InnerHeading>Balances</InnerHeading>
           <FetchStatusCheck
             isError={balancesIsError}
             errorMessage={balancesError?.message || "Error fetching data"}
@@ -207,7 +218,7 @@ function AccountDetailsLayout() {
       </Grid>
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
-          Account NFTs
+          <InnerHeading>Account NFTs</InnerHeading>
           <NftList
             nftsListIsError={nftsListIsError}
             nftsListIsFetching={nftsListIsFetching}

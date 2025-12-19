@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use async_graphql::indexmap::IndexMap;
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, Seq};
 use tari_ootle_common_types::{shard::Shard, Epoch, ShardGroup, StateVersion};

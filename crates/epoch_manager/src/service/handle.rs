@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{atomic::AtomicU64, Arc},
 };
 
@@ -31,13 +31,13 @@ use crate::{
 pub struct EpochManagerHandle<TAddr> {
     tx_request: mpsc::Sender<EpochManagerRequest<TAddr>>,
     current_epoch: Arc<AtomicU64>,
-    events: broadcast::Sender<EpochManagerEvent>,
+    events: broadcast::WeakSender<EpochManagerEvent>,
 }
 
 impl<TAddr: NodeAddressable> EpochManagerHandle<TAddr> {
     pub fn new(
         tx_request: mpsc::Sender<EpochManagerRequest<TAddr>>,
-        events: broadcast::Sender<EpochManagerEvent>,
+        events: broadcast::WeakSender<EpochManagerEvent>,
         current_epoch: Arc<AtomicU64>,
     ) -> Self {
         Self {
@@ -70,6 +70,10 @@ impl<TAddr: NodeAddressable> EpochManagerHandle<TAddr> {
     /// Non-async and infallible version of `current_epoch`. TODO: change the trait to be non-async and infallible
     pub fn get_current_epoch(&self) -> Epoch {
         Epoch(self.current_epoch.load(std::sync::atomic::Ordering::SeqCst))
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.tx_request.is_closed()
     }
 
     pub async fn get_network_description(&self) -> Result<NetworkDescription, EpochManagerError> {
@@ -123,26 +127,18 @@ impl<TAddr: NodeAddressable> EpochManagerWriter for EpochManagerHandle<TAddr> {
             .map_err(|_| EpochManagerError::SendError)?;
         rx.await.map_err(|_| EpochManagerError::ReceiveError)?
     }
-
-    async fn activate_epoch(&mut self, epoch: Epoch, epoch_hash: FixedHash) -> Result<(), EpochManagerError> {
-        let (tx, rx) = oneshot::channel();
-        self.tx_request
-            .send(EpochManagerRequest::ActivateEpoch {
-                epoch,
-                epoch_hash,
-                reply: tx,
-            })
-            .await
-            .map_err(|_| EpochManagerError::SendError)?;
-        rx.await.map_err(|_| EpochManagerError::ReceiveError)?
-    }
 }
 
 impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
     type Addr = TAddr;
 
     fn subscribe(&self) -> broadcast::Receiver<EpochManagerEvent> {
-        self.events.subscribe()
+        let sender = self.events.upgrade().unwrap_or_else(|| {
+            // Should the sender be closed (upgrade() returns None), create a "dummy" channel that will
+            // immediately close. This is more in-line with what you would expect from the api.
+            broadcast::Sender::new(1)
+        });
+        sender.subscribe()
     }
 
     async fn wait_for_initial_scanning_to_complete(&self) -> Result<(), EpochManagerError> {
@@ -293,9 +289,20 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
     }
 
     async fn get_current_epoch_hash(&self) -> Result<FixedHash, EpochManagerError> {
+        let epoch = self.get_current_epoch();
         let (tx, rx) = oneshot::channel();
         self.tx_request
-            .send(EpochManagerRequest::CurrentEpochHash { reply: tx })
+            .send(EpochManagerRequest::GetEpochHash { epoch, reply: tx })
+            .await
+            .map_err(|_| EpochManagerError::SendError)?;
+
+        rx.await.map_err(|_| EpochManagerError::ReceiveError)?
+    }
+
+    async fn get_epoch_hash(&self, epoch: Epoch) -> Result<FixedHash, EpochManagerError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx_request
+            .send(EpochManagerRequest::GetEpochHash { epoch, reply: tx })
             .await
             .map_err(|_| EpochManagerError::SendError)?;
 
@@ -317,12 +324,14 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
         epoch: Epoch,
         shard_group: ShardGroup,
         limit: Option<usize>,
+        shuffled: bool,
     ) -> Result<Committee<Self::Addr>, EpochManagerError> {
         let (tx, rx) = oneshot::channel();
         self.tx_request
             .send(EpochManagerRequest::GetCommitteeForShardGroup {
                 epoch,
                 shard_group,
+                shuffled,
                 limit,
                 reply: tx,
             })
@@ -366,7 +375,7 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
         &self,
         epoch: Epoch,
         shard_group: Option<ShardGroup>,
-        excluding: Vec<TAddr>,
+        excluding: HashSet<TAddr>,
     ) -> Result<ValidatorNode<TAddr>, EpochManagerError> {
         let (tx, rx) = oneshot::channel();
         self.tx_request

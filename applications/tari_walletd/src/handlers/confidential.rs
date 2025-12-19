@@ -1,21 +1,22 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::fs;
+use std::{fs, time::Duration};
 
 use anyhow::anyhow;
-use axum::headers::authorization::Bearer;
+use axum_extra::headers::authorization::Bearer;
 use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use log::*;
 use rand::rngs::OsRng;
 use serde_json::json;
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey as _, ristretto::RistrettoPublicKey};
-use tari_engine_types::{crypto::get_commitment_factory, ToByteType};
-use tari_ootle_wallet_crypto::{AlwaysMissLookupTable, IoReaderValueLookup, UnblindedOutputStatement};
-use tari_ootle_wallet_sdk::{
-    apis::key_manager::KeyBranch,
-    models::{ConfidentialOutputModel, OutputStatus},
+use tari_engine_types::{
+    crypto::{get_commitment_factory, ValueLookupTable},
+    ToByteType,
 };
+use tari_ootle_common_types::{displayable::Displayable, optional::Optional};
+use tari_ootle_wallet_crypto::{GenerateValueLookup, MMapValueLookup, OutputWitness};
+use tari_ootle_wallet_sdk::models::{ConfidentialOutputModel, KeyBranch, OutputStatus};
 use tari_template_lib::types::Amount;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
@@ -26,6 +27,8 @@ use tari_wallet_daemon_client::{
         ConfidentialViewVaultBalanceResponse,
         ProofsCancelRequest,
         ProofsCancelResponse,
+        ProofsFinalizeRequest,
+        ProofsFinalizeResponse,
         ProofsGenerateRequest,
         ProofsGenerateResponse,
     },
@@ -48,57 +51,61 @@ pub async fn handle_create_transfer_proof(
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
 
-    if req.amount.is_negative() || req.reveal_amount.is_negative() {
+    if req.reveal_amount.is_negative() {
         return Err(invalid_request(format!(
-            "Amount to send must be positive. Amount = {}, Revealed = {}",
-            req.amount, req.reveal_amount
+            "Amount to send must be positive. Revealed amount was {}",
+            req.reveal_amount
         )));
     }
 
     let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
+    let account_owner_key_id = account
+        .owner_key_id()
+        .ok_or_else(|| invalid_request("Account does not have an owner key"))?;
     let vault = sdk
         .accounts_api()
-        .get_vault_by_resource(account.address(), &req.resource_address)?;
-    let lock_id = sdk.confidential_outputs_api().create_lock()?;
+        .get_vault_by_resource(account.component_address(), &req.resource_address)?;
+    let lock = sdk.locks_api().create_lock_with_timeout(Duration::from_secs(5 * 60))?;
 
-    let amount_to_transfer = req.amount.checked_add_positive(req.reveal_amount).ok_or_else(|| {
+    let amount_to_transfer = req.confidential_amount.checked_add(req.reveal_amount).ok_or_else(|| {
         invalid_request(format!(
             "Amount to send must be greater than or equal to the amount to reveal. Amount = {}, Revealed = {}",
-            req.amount, req.reveal_amount
+            req.confidential_amount, req.reveal_amount
         ))
     })?;
     // Lock inputs we're going to spend
     let (inputs, total_input_value) =
         sdk.confidential_outputs_api()
-            .lock_outputs_by_amount(lock_id, &vault.id, amount_to_transfer)?;
+            .lock_outputs_by_amount(lock.id(), &vault.id, amount_to_transfer)?;
 
     info!(
         target: LOG_TARGET,
         "Locked {} inputs for proof {} worth {} µT",
         inputs.len(),
-        lock_id,
+        lock.id(),
         total_input_value
     );
 
     // TODO: Any errors from here need to unlock the outputs, ideally just roll back (refactor required but doable).
 
     // TODO: Wrap up key/encrypted data handling in the wallet SDK
-    let account_secret = sdk.key_manager_api().derive_account_key(account.key_index())?;
-    let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMasks)?;
+    let account_key = sdk.key_manager_api().get_key(account_owner_key_id)?;
+    let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask)?;
     let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
 
-    let amount_u64 = req.amount.to_u64_checked().ok_or_else(|| {
+    let confidential_amount = req.confidential_amount.to_u64_checked().ok_or_else(|| {
         invalid_request(format!(
-            "Amount to send must be a non-negative integer that does not exceed u64::MAX. Amount = {}",
-            req.amount
+            "Confidential amount exceeds the maximum value supported in a single UTXO. Amount: {}",
+            req.confidential_amount
         ))
     })?;
 
     let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
-        amount_u64,
+        confidential_amount,
         &output_mask.key,
         &public_nonce,
-        &account_secret.key,
+        &account_key.secret,
+        req.memo.as_ref(),
     )?;
 
     let resource = sdk.substate_api().fetch_resource(req.resource_address).await?;
@@ -110,27 +117,14 @@ pub async fn handle_create_transfer_proof(
         )
     })?;
 
-    let output_statement = UnblindedOutputStatement {
-        amount: req.amount,
-        mask: output_mask.key,
-        sender_public_nonce: public_nonce,
-        minimum_value_promise: 0,
-        encrypted_data,
-        resource_view_key: resource_view_key.clone(),
-    };
-
-    let spend_amount = req.amount.checked_sub_positive(req.reveal_amount).ok_or_else(|| {
-        invalid_request(format!(
-            "Amount to send must be greater than or equal to the amount to reveal. Amount = {}, Revealed = {}",
-            req.amount, req.reveal_amount
-        ))
-    })?;
-    let change_amount = total_input_value.checked_sub_positive(spend_amount).ok_or_else(|| {
-        invalid_request(format!(
-            "Insufficient funds to send {}. Total input value = {}",
-            req.amount, total_input_value
-        ))
-    })?;
+    let change_amount = total_input_value
+        .checked_sub_positive(req.confidential_amount)
+        .ok_or_else(|| {
+            invalid_request(format!(
+                "Insufficient funds to send {}. Total input value = {}",
+                req.confidential_amount, total_input_value
+            ))
+        })?;
     let change_amount_u64 = change_amount.to_u64_checked().ok_or_else(|| {
         invalid_request(format!(
             "Change value exceeds the maximum value supported in a single UTXO. Change: {}. Total input value = {}",
@@ -138,8 +132,17 @@ pub async fn handle_create_transfer_proof(
         ))
     })?;
 
+    let output_statement = OutputWitness {
+        amount: confidential_amount,
+        mask: output_mask.key,
+        sender_public_nonce: public_nonce,
+        minimum_value_promise: 0,
+        encrypted_data,
+        resource_view_key: resource_view_key.clone(),
+    };
+
     let maybe_change_statement = if change_amount_u64 > 0 {
-        let change_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMasks)?;
+        let change_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask)?;
         let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
 
         let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
@@ -147,25 +150,28 @@ pub async fn handle_create_transfer_proof(
             &change_mask.key,
             &public_nonce,
             &change_mask.key,
+            None,
         )?;
 
         sdk.confidential_outputs_api().add_output(ConfidentialOutputModel {
-            account_address: *account.address(),
+            account_address: *account.component_address(),
             vault_id: vault.id,
             commitment: get_commitment_factory()
                 .commit_value(&change_mask.key, change_amount_u64)
                 .to_byte_type(),
             value: change_amount,
             sender_public_nonce: Some(public_nonce.to_byte_type()),
-            encryption_secret_key_index: change_mask.key_index,
+            view_only_key_id: account.view_only_key_id(),
+            owner_key_id: account.owner_key_id(),
             encrypted_data: encrypted_data.clone(),
+            memo: None,
             public_asset_tag: None,
             status: OutputStatus::LockedUnconfirmed,
-            lock_id: Some(lock_id),
+            lock_id: Some(lock.id()),
         })?;
 
-        Some(UnblindedOutputStatement {
-            amount: change_amount,
+        Some(OutputWitness {
+            amount: change_amount_u64,
             mask: change_mask.key,
             sender_public_nonce: public_nonce,
             encrypted_data,
@@ -182,11 +188,13 @@ pub async fn handle_create_transfer_proof(
         &inputs,
         // TODO: support for using revealed funds as input for proof generation
         Amount::zero(),
-        Some(&output_statement).filter(|o| !o.amount.is_zero()),
+        Some(&output_statement).filter(|o| o.amount > 0),
         req.reveal_amount,
         maybe_change_statement.as_ref(),
         Amount::zero(),
     )?;
+
+    let lock_id = lock.keep_locked();
 
     Ok(ProofsGenerateResponse {
         proof_id: lock_id,
@@ -197,15 +205,54 @@ pub async fn handle_create_transfer_proof(
 pub async fn handle_finalize_transfer(
     context: &HandlerContext,
     token: Option<&Bearer>,
-    req: ProofsCancelRequest,
-) -> Result<ProofsCancelResponse, anyhow::Error> {
+    req: ProofsFinalizeRequest,
+) -> Result<ProofsFinalizeResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
+    let transaction = sdk
+        .transaction_api()
+        .get(req.transaction_id)
+        .optional()?
+        .ok_or_else(|| {
+            invalid_params(
+                "transaction_id",
+                Some("No such transaction in wallet to finalize proof for"),
+            )
+        })?;
+    let lock_id = sdk
+        .locks_api()
+        .get_lock_by_transaction_id(req.transaction_id)
+        .optional()?;
+    if lock_id != Some(req.lock_id) {
+        return Err(invalid_params(
+            "lock_id",
+            Some("Lock not associated with this transaction"),
+        ));
+    }
 
-    sdk.confidential_outputs_api()
-        .finalize_locked_revealed_funds(req.proof_id)?;
-    sdk.confidential_outputs_api().finalize_outputs_for_lock(req.proof_id)?;
-    Ok(ProofsCancelResponse {})
+    match transaction.finalized_diff() {
+        Some(diff) => {
+            info!(
+                target: LOG_TARGET,
+                "Finalizing locked proof {} for transaction {}",
+                req.lock_id,
+                req.transaction_id
+            );
+            sdk.locks_api().finalize_lock(req.lock_id, diff)?;
+        },
+        None => {
+            return Err(invalid_params(
+                "transaction_id",
+                Some(format!(
+                    "Transaction is not finalized (status = {}, reason = {})",
+                    transaction.status,
+                    transaction.failure_reason_as_string().display()
+                )),
+            ));
+        },
+    }
+
+    Ok(ProofsFinalizeResponse {})
 }
 
 pub async fn handle_cancel_transfer(
@@ -215,8 +262,7 @@ pub async fn handle_cancel_transfer(
 ) -> Result<ProofsCancelResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
-    sdk.confidential_outputs_api().release_revealed_funds(req.proof_id)?;
-    sdk.confidential_outputs_api().release_locked_outputs(req.proof_id)?;
+    sdk.locks_api().release_lock(req.proof_id)?;
     Ok(ProofsCancelResponse {})
 }
 
@@ -228,23 +274,18 @@ pub async fn handle_create_output_proof(
     let sdk = context.wallet_sdk();
     context.check_auth(token, &[JrpcPermission::Admin])?;
 
-    let Some(amount) = req.amount.to_u64_checked() else {
-        return Err(invalid_params(
-            "amount",
-            Some("must be positive and less than u64::MAX"),
-        ));
-    };
-
-    let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMasks)?;
+    let output_mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask)?;
     let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
     let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
-        amount,
+        req.amount,
         &output_mask.key,
         &public_nonce,
         &output_mask.key,
+        // TODO: Support memos
+        None,
     )?;
 
-    let statement = UnblindedOutputStatement {
+    let statement = OutputWitness {
         amount: req.amount,
         mask: output_mask.key,
         sender_public_nonce: public_nonce,
@@ -281,41 +322,58 @@ pub async fn handle_view_vault_balance(
         .ok_or_else(|| invalid_params("vault_id", Some("Vault does not contain a confidential resource")))?;
 
     // Get view secret key
-    let view_key = sdk
-        .key_manager_api()
-        .derive_key(KeyBranch::ElgamalEncryptionViewKey, req.view_key_id)?;
+    let view_key = sdk.key_manager_api().get_elgamal_encrypted_view_key(req.view_key_id)?;
 
     let value_range = req.minimum_expected_value.unwrap_or(0)..=req.maximum_expected_value.unwrap_or(10_000_000_000);
 
     let timer = Instant::now();
     let balances = match context.config().value_lookup_table_file.as_ref() {
         Some(file) => {
-            let mut file = fs::File::open(file)
+            let file = fs::File::open(file)
                 .map_err(|e| anyhow!("Unable to load value lookup file '{}': {e}", file.display()))?;
-            let mut lookup = IoReaderValueLookup::load(&mut file)?;
+            let mut is_logged = false;
+            // SAFETY: We assume the file will not be modified while mapped. Although not enforced (e.g. locks,
+            // permissions and other platform specific mechanisms), this is a reasonable assumption for most scenarios.
+            let mut lookup = unsafe { MMapValueLookup::load(&file) }?.with_fallback(move |v| {
+                if !is_logged {
+                    is_logged = true;
+                    warn!("Using value lookup fallback. This will likely result in very slow lookups.");
+                }
+                GenerateValueLookup.lookup(v)
+            });
 
             block_in_place(|| {
-                sdk.confidential_crypto_api().try_brute_force_commitment_balances(
+                sdk.viewable_balance_api().try_brute_force_commitment_balances(
                     &view_key.key,
-                    commitments.values(),
+                    commitments.values().filter_map(|o| o.viewable_balance.as_ref()),
                     value_range,
                     &mut lookup,
                 )
             })?
         },
-        None => block_in_place(|| {
-            sdk.confidential_crypto_api().try_brute_force_commitment_balances(
-                &view_key.key,
-                commitments.values(),
-                value_range,
-                &mut AlwaysMissLookupTable,
-            )
-        })?,
+        None => {
+            warn!(
+                target: LOG_TARGET,
+                "No value lookup table configured. This will likely result in very slow lookups."
+            );
+            block_in_place(|| {
+                sdk.viewable_balance_api().try_brute_force_commitment_balances(
+                    &view_key.key,
+                    commitments.values().filter_map(|o| o.viewable_balance.as_ref()),
+                    value_range,
+                    &mut GenerateValueLookup,
+                )
+            })?
+        },
     };
 
     info!(target: LOG_TARGET, "Brute force balance lookup took {:.2?}", timer.elapsed());
 
     Ok(ConfidentialViewVaultBalanceResponse {
-        balances: commitments.keys().copied().zip(balances).collect(),
+        balances: commitments
+            .iter()
+            .filter_map(|(id, o)| o.viewable_balance.as_ref().map(|_| *id))
+            .zip(balances)
+            .collect(),
     })
 }

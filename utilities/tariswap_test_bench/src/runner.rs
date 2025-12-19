@@ -7,22 +7,36 @@ use log::info;
 use tari_crypto::tari_utilities::SafePassword;
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_ootle_common_types::Network;
-use tari_ootle_wallet_sdk::{WalletSdk as Sdk, WalletSdkConfig};
-use tari_ootle_wallet_sdk_services::indexer_jrpc_impl::IndexerJsonRpcNetworkInterface;
+use tari_ootle_wallet_sdk::{
+    cipher_seed::CipherSeedRestore,
+    local_key_store::LocalKeyStore,
+    models::EpochBirthday,
+    WalletSdk as Sdk,
+    WalletSdkConfig,
+};
+use tari_ootle_wallet_sdk_services::indexer_rest_api::IndexerRestApiNetworkInterface;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
+use tari_template_lib::types::TemplateAddress;
 use tari_transaction::{Transaction, TransactionBuilder, TransactionId};
-use tari_validator_node_client::types::TemplateMetadata;
 use tokio::time::sleep;
 use url::Url;
 
 use crate::{cli::CommonArgs, stats::Stats, templates::get_templates};
 
-type WalletSdk = Sdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>;
+pub struct TariswapTestSdkSpec;
+
+impl tari_ootle_wallet_sdk::WalletSdkSpec for TariswapTestSdkSpec {
+    type KeyStore = LocalKeyStore;
+    type NetworkInterface = IndexerRestApiNetworkInterface;
+    type Store = SqliteWalletStore;
+}
+
+type WalletSdk = Sdk<TariswapTestSdkSpec>;
 pub struct Runner {
     pub(crate) sdk: WalletSdk,
     pub(crate) _cli: CommonArgs,
-    pub(crate) faucet_template: TemplateMetadata,
-    pub(crate) tariswap_template: TemplateMetadata,
+    pub(crate) faucet_template: TemplateAddress,
+    pub(crate) tariswap_template: TemplateAddress,
     pub(crate) stats: Stats,
 }
 
@@ -49,8 +63,7 @@ impl Runner {
         let tx_id = self
             .sdk
             .transaction_api()
-            .insert_new_transaction(transaction, None, false)
-            .await?;
+            .insert_new_transaction(transaction, None, false)?;
 
         self.sdk.transaction_api().submit_transaction(tx_id).await?;
 
@@ -107,7 +120,7 @@ impl Runner {
     pub fn new_transaction_builder(&self) -> TransactionBuilder {
         // 0x10 is LocalNet - avoiding having to include tari_common
         // Igor is 0x24
-        Transaction::builder().for_network(0x10)
+        Transaction::builder_localnet().for_network(0x10)
     }
 }
 
@@ -119,8 +132,8 @@ fn initialize_wallet_sdk<P: AsRef<Path>>(db_path: P, indexer_url: Url) -> Result
         network: Network::LocalNet,
         override_keyring_password: Some(SafePassword::from_str("N3Va g0nn4 gu355").unwrap()),
     };
-    let indexer = IndexerJsonRpcNetworkInterface::new(indexer_url);
-    let mut sdk = WalletSdk::initialize(store, indexer, sdk_config)?;
-    sdk.initialize_cipher_seed(None)?;
+    let indexer = IndexerRestApiNetworkInterface::new(indexer_url);
+    let mut sdk = WalletSdk::initialize_with_local_key_store(store, indexer, sdk_config, EpochBirthday::far_future())?;
+    sdk.initialize_cipher_seed(CipherSeedRestore::CreateNewIfRequired)?;
     Ok(sdk)
 }

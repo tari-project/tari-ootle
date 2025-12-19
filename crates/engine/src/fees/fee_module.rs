@@ -5,7 +5,7 @@ use tari_bor::{encode_into_writer, ByteCounter};
 use tari_engine_types::fees::FeeSource;
 
 use super::FeeTable;
-use crate::runtime::{RuntimeModule, RuntimeModuleError, StateTracker};
+use crate::runtime::{RuntimeEvent, RuntimeModule, RuntimeModuleError, StateTracker};
 
 pub struct FeeModule {
     initial_cost: u64,
@@ -33,6 +33,21 @@ impl RuntimeModule for FeeModule {
 
     fn on_runtime_call(&self, track: &StateTracker, _call: &'static str) -> Result<(), RuntimeModuleError> {
         track.add_fee_charge(FeeSource::RuntimeCall, self.fee_table.per_module_call_cost());
+        Ok(())
+    }
+
+    fn on_template_loaded(&self, track: &StateTracker, bytes_loaded: usize) -> Result<(), RuntimeModuleError> {
+        const TEMPLATE_BYTES_LOADED_COST_DIVISOR: u64 = 3000; // 3 KB = 1 cost unit
+        let template_load_cost_unit =
+            u64::try_from(bytes_loaded).unwrap_or(u64::MAX) / TEMPLATE_BYTES_LOADED_COST_DIVISOR;
+
+        let fee_charge = template_load_cost_unit
+            .checked_mul(self.fee_table.per_template_load_cost_unit())
+            .ok_or_else(|| {
+                RuntimeModuleError::Overflow("Overflow calculating template load weight cost".to_string())
+            })?;
+
+        track.add_fee_charge(FeeSource::TemplateLoad, fee_charge);
         Ok(())
     }
 
@@ -64,6 +79,19 @@ impl RuntimeModule for FeeModule {
             FeeSource::Events,
             track.num_events() as u64 * self.fee_table.per_event_cost(),
         );
+
+        Ok(())
+    }
+
+    fn on_runtime_event(&self, track: &StateTracker, call: &RuntimeEvent) -> Result<(), RuntimeModuleError> {
+        match call {
+            RuntimeEvent::SignatureVerified => {
+                track.add_fee_charge(
+                    FeeSource::SignatureVerification,
+                    self.fee_table.per_signature_verification_cost(),
+                );
+            },
+        }
 
         Ok(())
     }

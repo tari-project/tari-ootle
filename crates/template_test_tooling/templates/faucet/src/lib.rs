@@ -36,13 +36,22 @@ mod faucet_template {
         }
 
         pub fn mint_with_symbol(initial_supply: Amount, symbol: String) -> Component<Self> {
-            let coins = ResourceBuilder::fungible()
+            Self::mint_with_opts(initial_supply, symbol, None)
+        }
+
+        pub fn mint_with_opts(
+            initial_supply: Amount,
+            symbol: String,
+            address_alloc: Option<ComponentAddressAllocation>,
+        ) -> Component<Self> {
+            let coins = ResourceBuilder::public_fungible()
                 .with_token_symbol(symbol)
                 .initial_supply(initial_supply);
 
             Component::new(Self {
                 vault: Vault::from_bucket(coins),
             })
+            .with_address_allocation_opt(address_alloc)
             .with_access_rules(AccessRules::allow_all())
             .create()
         }

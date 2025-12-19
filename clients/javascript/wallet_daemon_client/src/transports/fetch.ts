@@ -29,8 +29,8 @@ export default class FetchRpcTransport implements RpcTransport {
 
     const timeoutId = options.timeout_millis
       ? setTimeout(() => {
-          controller.abort("Timeout");
-        }, options.timeout_millis)
+        controller.abort("Timeout");
+      }, options.timeout_millis)
       : null;
 
     const response = await fetch(this.url, {
@@ -41,6 +41,11 @@ export default class FetchRpcTransport implements RpcTransport {
     });
     if (timeoutId) {
       clearTimeout(timeoutId);
+    }
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`HTTP ${response.status}: ${response.statusText}${text ? ` - ${text}` : ""}`);
     }
     const json = await response.json();
     if (json.error) {

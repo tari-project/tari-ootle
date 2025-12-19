@@ -6,7 +6,7 @@ use std::{fmt::Display, str::FromStr, time::Duration};
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::ProposalCertificate;
-use tari_engine_types::commit_result::FinalizeResult;
+use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateDiff};
 use tari_transaction::{Transaction, TransactionId};
 use time::PrimitiveDateTime;
 
@@ -33,6 +33,26 @@ pub struct WalletTransaction {
     pub last_update_time: PrimitiveDateTime,
 }
 
+impl WalletTransaction {
+    pub fn is_accepted(&self) -> bool {
+        self.status.is_accepted()
+    }
+
+    pub fn finalized_diff(&self) -> Option<&SubstateDiff> {
+        self.finalize.as_ref().and_then(|f| f.any_accept())
+    }
+
+    pub fn failure_reason_as_string(&self) -> Option<String> {
+        if let Some(reason) = &self.invalid_reason {
+            return Some(reason.clone());
+        }
+        self.finalize
+            .as_ref()
+            .and_then(|finalize| finalize.any_reject())
+            .map(|reject| reject.to_string())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum TransactionStatus {
@@ -48,6 +68,14 @@ pub enum TransactionStatus {
 }
 
 impl TransactionStatus {
+    pub fn is_any_accept(&self) -> bool {
+        matches!(self, TransactionStatus::Accepted | TransactionStatus::OnlyFeeAccepted)
+    }
+
+    pub fn is_accepted(&self) -> bool {
+        matches!(self, TransactionStatus::Accepted)
+    }
+
     pub fn as_key_str(&self) -> &'static str {
         match self {
             TransactionStatus::New => "New",

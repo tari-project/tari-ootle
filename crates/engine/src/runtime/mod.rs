@@ -36,7 +36,7 @@ mod actions;
 pub use actions::*;
 
 mod module;
-pub use module::{RuntimeModule, RuntimeModuleError};
+pub use module::{RuntimeEvent, RuntimeModule, RuntimeModuleError};
 
 mod fee_state;
 mod tracker;
@@ -55,21 +55,18 @@ use std::{fmt::Debug, sync::Arc};
 
 use tari_bor::decode_exact;
 use tari_engine_types::{
-    commit_result::FinalizeResult,
+    commit_result::{FinalizeResult, RejectReason},
     component::ComponentHeader,
-    confidential::TariStealthClaim,
+    confidential::{ClaimBurnOutputData, MinotariBurnClaimProof},
     indexed_value::IndexedValue,
     limits,
     lock::LockFlag,
-    substate::SubstateValue,
-    ComponentCall,
-    ResourceAddressRef,
+    published_template::TemplateBlob,
     ValidatorFeePoolAddress,
 };
 use tari_template_lib::{
     args::{
         AddressAllocationInvokeArg,
-        AllocatableAddressType,
         AllocateAddressResult,
         BucketAction,
         BucketRef,
@@ -80,7 +77,6 @@ use tari_template_lib::{
         ComponentRef,
         ConsensusAction,
         GenerateRandomAction,
-        InstructionArg,
         InvokeResult,
         LogLevel,
         NonFungibleAction,
@@ -90,12 +86,16 @@ use tari_template_lib::{
         ResourceRef,
         VaultAction,
         WorkspaceAction,
-        WorkspaceId,
-        WorkspaceOffsetId,
     },
     invoke_args,
     models::{BucketId, ComponentAddress, Metadata, NonFungibleAddress, StealthTransferStatement, VaultRef},
-    types::EntityId,
+    types::{engine_args::SignatureAction, EntityId, TemplateAddress},
+};
+use tari_transaction::{
+    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
+    AllocatableAddressType,
+    ComponentReference,
+    ResourceAddressRef,
 };
 pub use tracker::StateTracker;
 
@@ -107,11 +107,10 @@ pub trait RuntimeInterface: Send + Sync {
 
     fn emit_log(&self, level: LogLevel, message: String) -> Result<(), RuntimeError>;
 
-    fn load_component(&self, call: ComponentCall) -> Result<(ComponentAddress, ComponentHeader), RuntimeError>;
+    fn load_component(&self, call: ComponentReference) -> Result<(ComponentAddress, ComponentHeader), RuntimeError>;
 
     fn lock_component(&self, address: ComponentAddress, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError>;
 
-    fn get_substate(&self, lock: &LockedSubstate) -> Result<SubstateValue, RuntimeError>;
     fn component_invoke(
         &self,
         component_ref: ComponentRef,
@@ -163,13 +162,13 @@ pub trait RuntimeInterface: Send + Sync {
 
     fn set_last_instruction_output(&self, value: IndexedValue) -> Result<(), RuntimeError>;
 
-    fn claim_burn(&self, claim: TariStealthClaim) -> Result<(), RuntimeError>;
+    fn claim_burn(&self, claim: MinotariBurnClaimProof, output_data: ClaimBurnOutputData) -> Result<(), RuntimeError>;
 
     fn claim_validator_fees(&self, address: ValidatorFeePoolAddress) -> Result<(), RuntimeError>;
 
-    fn set_fee_checkpoint(&self) -> Result<(), RuntimeError>;
-    fn reset_to_fee_checkpoint(&self) -> Result<(), RuntimeError>;
+    fn checkpoint_fee_intent(&self) -> Result<(), RuntimeError>;
     fn finalize(&self) -> Result<FinalizeResult, RuntimeError>;
+    fn finalize_failure(&self, reason: RejectReason) -> Result<FinalizeResult, RuntimeError>;
     fn validate_finalized(&self) -> Result<(), RuntimeError>;
 
     fn caller_context_invoke(
@@ -184,13 +183,19 @@ pub trait RuntimeInterface: Send + Sync {
 
     fn builtin_template_invoke(&self, action: BuiltinTemplateAction) -> Result<InvokeResult, RuntimeError>;
 
-    fn check_component_access_rules(&self, method: &str, locked: &LockedSubstate) -> Result<(), RuntimeError>;
+    fn check_component_access_rules(&self, method: &str) -> Result<(), RuntimeError>;
+    fn check_component_ownership(&self, action: ActionIdent) -> Result<(), RuntimeError>;
+
+    fn update_component_template(&self, new_template: TemplateAddress) -> Result<(), RuntimeError>;
 
     fn validate_return_value(&self, value: &IndexedValue) -> Result<(), RuntimeError>;
 
     fn push_call_frame(&self, frame: PushCallFrame) -> Result<(), RuntimeError>;
     fn pop_call_frame(&self) -> Result<(), RuntimeError>;
-    fn publish_template(&self, template: Vec<u8>) -> Result<(), RuntimeError>;
+    fn publish_template(&self, template: TemplateBlob) -> Result<(), RuntimeError>;
+    fn put_on_workspace(&self, id: WorkspaceId, value: IndexedValue) -> Result<(), RuntimeError>;
+
+    fn signature_invoke(&self, action: SignatureAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError>;
 
     fn allocate_address(
         &self,
@@ -210,6 +215,12 @@ pub trait RuntimeInterface: Send + Sync {
         &self,
         statement: StealthTransferStatement,
         revealed_funds_bucket: Option<BucketId>,
+    ) -> Result<(), RuntimeError>;
+
+    fn track_template_loaded(
+        &self,
+        template_address: &TemplateAddress,
+        bytes_loaded: usize,
     ) -> Result<(), RuntimeError>;
 }
 

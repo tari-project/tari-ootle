@@ -8,19 +8,28 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
+tari_bor = { workspace = true }
 tari_template_abi = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 tari_ootle_wallet_sdk = { workspace = true }
 tari_engine_types = { workspace = true }
 tari_template_lib = { workspace = true }
-tari_indexer_client = { workspace = true, features = ["client"] }
+tari_indexer_client = { workspace = true, features = ["client"], optional = true }
 tari_transaction = { workspace = true }
-tari_transaction_components = { workspace = true }
+tari_template_builtin = { workspace = true }
+
 tari_crypto = { workspace = true }
+tari_shutdown = { workspace = true }
 
 anyhow = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, optional = true }
+futures = { workspace = true }
+futures-bounded = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
 log = { workspace = true }
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "macros", "time"] }
+
+[features]
+default = []
+indexer_client = ["tari_indexer_client", "reqwest"]

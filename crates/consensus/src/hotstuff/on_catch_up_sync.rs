@@ -8,7 +8,7 @@ use tari_ootle_storage::{consensus_models::BookkeepingModel, StateStore};
 
 use crate::{
     hotstuff::{pacemaker_handle::PaceMakerHandle, HotStuffError},
-    messages::{HotstuffMessage, SyncRequestMessage},
+    messages::{CatchUpRequestMessage, HotstuffMessage},
     traits::{ConsensusSpec, OutboundMessaging},
 };
 
@@ -37,7 +37,7 @@ impl<TConsensusSpec: ConsensusSpec> OnCatchUpSync<TConsensusSpec> {
         let high_qc = self.store.with_read_tx(|tx| HighPc::get(tx, epoch))?;
 
         let block_height = if high_qc.epoch() == epoch {
-            high_qc.block_height()
+            high_qc.height()
         } else {
             NodeHeight(1)
         };
@@ -60,7 +60,7 @@ impl<TConsensusSpec: ConsensusSpec> OnCatchUpSync<TConsensusSpec> {
             .outbound_messaging
             .send(
                 from,
-                HotstuffMessage::CatchUpSyncRequest(SyncRequestMessage { epoch, block_height }),
+                HotstuffMessage::CatchUpSyncRequest(CatchUpRequestMessage { epoch, block_height }),
             )
             .await
             .is_err()

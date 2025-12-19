@@ -166,6 +166,8 @@ pub async fn spawn_base_node(world: &mut TariWorld, bn_name: String) {
         shutdown,
     };
 
+    cucumber_log(format!("Base node {} started", bn_name));
+
     world.base_nodes.insert(bn_name, node_process);
 }
 

@@ -22,22 +22,9 @@
 //
 
 use serde::{Deserialize, Serialize};
-use tari_template_lib::{
-    models::{EncryptedData, UnclaimedConfidentialOutputAddress},
-    prelude::PedersenCommitmentBytes,
-};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct UnclaimedConfidentialOutput {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub commitment: PedersenCommitmentBytes,
-    #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
-    pub encrypted_data: EncryptedData,
-}
-
-impl UnclaimedConfidentialOutput {
-    pub fn to_address(&self) -> UnclaimedConfidentialOutputAddress {
-        UnclaimedConfidentialOutputAddress::from_commitment(&self.commitment)
-    }
+pub struct ClaimedOutputTombstone {
+    pub value: u64,
 }

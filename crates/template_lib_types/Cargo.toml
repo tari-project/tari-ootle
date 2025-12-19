@@ -1,6 +1,6 @@
 [package]
 name = "tari_template_lib_types"
-version = "0.12.3"
+version = "0.14.0"
 edition.workspace = true
 authors.workspace = true
 description = "Tari template library types"
@@ -9,7 +9,8 @@ license.workspace = true
 
 [features]
 default = ["std"]
-std = ["serde/std", "tari_template_abi/std", "borsh?/std"]
+std = ["serde/std", "tari_template_abi/std", "borsh?/std", "num-integer?/std"]
+extra-arith = ["bnum/numtraits", "dep:num-integer"]
 borsh = ["dep:borsh", "bnum/borsh"]
 ts = ["ts-rs"]
 # This feature removes the ability to deserialize Amounts as an integer/string (using deserialize_any), as formats like bincode do not support this.
@@ -19,6 +20,7 @@ bincode-compat = []
 tari_template_abi = { workspace = true, default-features = false }
 
 bnum = { workspace = true }
+num-integer = { workspace = true, optional = true, default-features = false }
 newtype-ops = { workspace = true }
 borsh = { workspace = true, optional = true, default-features = false, features = ["derive"] }
 serde = { workspace = true, default-features = false, features = ["derive"] }

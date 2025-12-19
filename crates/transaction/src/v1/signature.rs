@@ -10,18 +10,19 @@ use tari_crypto::{
     tari_utilities,
     tari_utilities::ByteArray,
 };
-use tari_engine_types::{
-    hashing::{engine_hasher64, EngineHashDomainLabel},
-    instruction::Instruction,
-    FromByteType,
-    ToByteType,
-};
+use tari_engine_types::{ConvertFromByteType, FromByteType, ToByteType};
 use tari_ootle_common_types::{Epoch, SubstateRequirement};
 use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
-use crate::{UnsealedTransactionV1, UnsignedTransactionV1};
+use crate::{
+    hashing::transaction_hasher_v1,
+    Instruction,
+    UnsealedTransactionV1,
+    UnsignedTransaction,
+    UnsignedTransactionV1,
+};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionSealSignature {
     public_key: RistrettoPublicKeyBytes,
@@ -47,10 +48,10 @@ impl TransactionSealSignature {
 
     pub fn verify(&self, transaction: &UnsealedTransactionV1) -> bool {
         let message = Self::create_message(transaction);
-        let Ok(public_key) = RistrettoPublicKey::try_from_byte_type(&self.public_key) else {
+        let Ok(public_key) = self.public_key.try_from_byte_type() else {
             return false;
         };
-        let Ok(signature) = RistrettoSchnorr::try_from_byte_type(&self.signature) else {
+        let Ok(signature) = RistrettoSchnorr::convert_from_byte_type(&self.signature) else {
             return false;
         };
         signature.verify(&public_key, message)
@@ -68,15 +69,15 @@ impl TransactionSealSignature {
         RistrettoPublicKey::from_canonical_bytes(self.public_key.as_bytes())
     }
 
-    fn create_message(transaction: &UnsealedTransactionV1) -> [u8; 64] {
-        engine_hasher64(EngineHashDomainLabel::TransactionSignature)
+    pub fn create_message(transaction: &UnsealedTransactionV1) -> [u8; 64] {
+        transaction_hasher_v1("SealSignature")
             .chain(&transaction.schema_version())
             .chain(transaction)
             .result()
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct TransactionSignature {
     public_key: RistrettoPublicKeyBytes,
@@ -88,13 +89,23 @@ impl TransactionSignature {
         Self { public_key, signature }
     }
 
+    pub fn sign(
+        secret_key: &RistrettoSecretKey,
+        seal_signer: &RistrettoPublicKeyBytes,
+        transaction: &UnsignedTransaction,
+    ) -> Self {
+        match transaction {
+            UnsignedTransaction::V1(v1) => Self::sign_v1(secret_key, seal_signer, v1),
+        }
+    }
+
     pub fn sign_v1(
         secret_key: &RistrettoSecretKey,
         seal_signer: &RistrettoPublicKeyBytes,
         transaction: &UnsignedTransactionV1,
     ) -> Self {
         let public_key = RistrettoPublicKey::from_secret_key(secret_key);
-        let message = Self::create_message(seal_signer, transaction);
+        let message = Self::create_message_v1(1, seal_signer, transaction);
 
         Self {
             signature: RistrettoSchnorr::sign(secret_key, message, &mut OsRng)
@@ -104,12 +115,12 @@ impl TransactionSignature {
         }
     }
 
-    pub fn verify(&self, seal_signer: &RistrettoPublicKeyBytes, transaction: &UnsignedTransactionV1) -> bool {
-        let message = Self::create_message(seal_signer, transaction);
-        let Ok(public_key) = RistrettoPublicKey::try_from_byte_type(&self.public_key) else {
+    pub fn verify_v1(&self, seal_signer: &RistrettoPublicKeyBytes, transaction: &UnsignedTransactionV1) -> bool {
+        let message = Self::create_message_v1(1, seal_signer, transaction);
+        let Ok(public_key) = self.public_key.try_from_byte_type() else {
             return false;
         };
-        let Ok(signature) = RistrettoSchnorr::try_from_byte_type(&self.signature) else {
+        let Ok(signature) = RistrettoSchnorr::convert_from_byte_type(&self.signature) else {
             return false;
         };
         signature.verify(&public_key, message)
@@ -123,16 +134,21 @@ impl TransactionSignature {
         &self.public_key
     }
 
-    fn create_message(seal_signer: &RistrettoPublicKeyBytes, transaction: &UnsignedTransactionV1) -> [u8; 64] {
+    pub fn create_message_v1(
+        schema_version: u16,
+        seal_signer: &RistrettoPublicKeyBytes,
+        transaction: &UnsignedTransactionV1,
+    ) -> [u8; 64] {
         let signature_fields = TransactionSignatureFields::from(transaction);
-        engine_hasher64(EngineHashDomainLabel::TransactionSignature)
+        transaction_hasher_v1("Signature")
+            .chain(&schema_version)
             .chain(seal_signer)
             .chain(&signature_fields)
             .result()
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, borsh::BorshSerialize)]
 struct TransactionSignatureFields<'a> {
     network: u8,
     fee_instructions: &'a [Instruction],

@@ -26,7 +26,7 @@ import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
-import { CircularProgress, Alert } from "@mui/material";
+import { CircularProgress } from "@mui/material";
 import { useAccountsCreate } from "@api/hooks/useAccounts";
 import useAccountStore from "@store/accountStore";
 import type { AccountsCreateResponse } from "@tari-project/typescript-bindings";
@@ -40,10 +40,10 @@ function AddAccount({ open, setOpen }: { open: boolean; setOpen: React.Dispatch<
   const [accountFormState, setAccountFormState] = useState({
     accountName: "",
   });
-  const { mutateAsync: mutateAddAccount, isPending, error, isSuccess, data, reset } = useAccountsCreate();
+  const { mutateAsync: mutateAddAccount, isPending, error, isSuccess, reset } = useAccountsCreate();
   const theme = useTheme();
   const setAccount = useAccountStore((state) => state.setAccount);
-  const setPublicKey = useAccountStore((state) => state.setPublicKey);
+  const setOotleAddress = useAccountStore((state) => state.setOotleAddress);
 
   const handleClose = () => {
     setAccountFormState({ accountName: "" });
@@ -56,8 +56,8 @@ function AddAccount({ open, setOpen }: { open: boolean; setOpen: React.Dispatch<
     try {
       const newAccount: AccountsCreateResponse = await mutateAddAccount({ accountName: accountFormState.accountName });
       setAccount(newAccount.account);
-      setPublicKey(newAccount.public_key);
-      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      setOotleAddress(newAccount.address);
+      await queryClient.invalidateQueries({ queryKey: ["accounts"] });
       setTimeout(() => {
         handleClose();
       }, 3000);

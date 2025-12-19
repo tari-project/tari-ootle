@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_engine_types::indexed_value::IndexedValueError;
+use tari_engine_types::{commit_result::RejectReason, indexed_value::IndexedValueError};
 use tari_template_lib::types::{HashParseError, TemplateAddress};
 
 use crate::{runtime::RuntimeError, template::TemplateLoaderError, wasm::WasmExecutionError};
@@ -45,10 +45,24 @@ pub enum TransactionError {
     InvariantError { details: String },
     #[error("Load template error: {0}")]
     LoadTemplate(#[from] TemplateLoaderError),
-    #[error("WASM binary too big! {0} bytes are greater than allowed maximum {1} bytes.")]
-    WasmBinaryTooBig(usize, usize),
+    #[error("WASM binary too big! {size} bytes are greater than allowed maximum {max} bytes.")]
+    WasmBinaryTooBig { size: usize, max: usize },
     #[error("Template provider error: {0}")]
     TemplateProvider(String),
     #[error("Converting to hash error: {0}")]
     HashConversion(#[from] HashParseError),
+    #[error("Function specified for component update is not marked as a migration function: {name}")]
+    NotAMigrationFunction { name: String },
+    #[error("Migration functions cannot be called directly: {name}")]
+    CannotCallMigrationFunctionDirectly { name: String },
+}
+
+impl TransactionError {
+    pub fn to_reject_reason(&self) -> RejectReason {
+        match self {
+            Self::RuntimeError(err) => err.to_reject_reason(),
+            Self::WasmExecutionError(WasmExecutionError::RuntimeError(err)) => err.to_reject_reason(),
+            _ => RejectReason::ExecutionFailure(self.to_string()),
+        }
+    }
 }

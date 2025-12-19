@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use tari_template_lib_types::{
-    crypto::{BalanceProofSignature, PedersenCommitmentBytes, RangeProofBytes, SchnorrSignatureBytes},
+    crypto::{BalanceProofSignature, PedersenCommitmentBytes, RangeProofBytes},
     Amount,
 };
 
@@ -12,6 +12,7 @@ use crate::models::StealthUnspentOutput;
 /// A statement for stealth outputs. A statement must contain confidential outputs
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct StealthOutputsStatement {
     /// The stealth outputs that are to be created
     pub outputs: Vec<StealthUnspentOutput>,
@@ -20,24 +21,33 @@ pub struct StealthOutputsStatement {
     pub revealed_output_amount: Amount,
     /// Bulletproof range proof for the output commitments proving that values are in the range
     /// [minimum_value_promise, 2^64)
-    // TODO: consider creating multiple batches of outputs each with an aggregate BP, since BP+ initialization for
-    // arbitrary number (tested 512) is expensive and slow
     pub agg_range_proof: RangeProofBytes,
+}
+
+impl StealthOutputsStatement {
+    /// Create a new output statement with no stealth outputs, only a revealed amount.
+    pub fn new_revealed_only(amount: Amount) -> Self {
+        Self {
+            outputs: vec![],
+            revealed_output_amount: amount,
+            agg_range_proof: RangeProofBytes::empty(),
+        }
+    }
+}
+
+/// A statement for stealth outputs to spend as inputs.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
+pub struct StealthInput {
+    /// The commitment of the unspent output being spent
+    pub commitment: PedersenCommitmentBytes,
 }
 
 /// A statement for stealth outputs. A statement must contain confidential outputs
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct StealthInput {
-    /// The commitment of the unspent output being spent
-    pub commitment: PedersenCommitmentBytes,
-    /// Signature that proves ownership of the unspent output. This must be signed by the owner_public_key of the
-    /// output.
-    pub owner_proof: SchnorrSignatureBytes,
-}
-/// A statement for stealth outputs. A statement must contain confidential outputs
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct StealthInputsStatement {
     /// The stealth inputs that are to be spent
     pub inputs: Vec<StealthInput>,
@@ -47,7 +57,7 @@ pub struct StealthInputsStatement {
 
 impl StealthInputsStatement {
     pub fn new(inputs: Vec<StealthInput>, revealed_amount: Amount) -> Self {
-        assert!(!revealed_amount.is_negative(), "Revealed amount must be positive");
+        assert!(!revealed_amount.is_negative(), "Revealed amount must be non-negative");
         assert!(
             !inputs.is_empty() || !revealed_amount.is_zero(),
             "At least one input or a revealed amount must be provided"
@@ -58,18 +68,37 @@ impl StealthInputsStatement {
         }
     }
 
-    pub fn new_revealed(amount: Amount) -> Self {
+    /// Create a new input statement with no stealth inputs, only a revealed amount.
+    pub fn new_revealed_only(amount: Amount) -> Self {
         Self::new(vec![], amount)
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct StealthTransferStatement {
     pub inputs_statement: StealthInputsStatement,
     pub outputs_statement: StealthOutputsStatement,
     /// Balance proof that proves that no coins were created or destroyed during the transfer (assuming the range proof
-    /// is valid).
-    #[cfg_attr(feature = "ts", ts(type = "{public_nonce: string, signature: string}"))]
-    pub balance_proof: BalanceProofSignature,
+    /// is valid). This may be None, if and only if, the transfer is revealed-only (i.e. no stealth inputs or outputs).
+    pub balance_proof: Option<BalanceProofSignature>,
+}
+
+impl StealthTransferStatement {
+    pub fn revealed_only(input_amount: Amount, output_amount: Amount) -> Self {
+        Self {
+            inputs_statement: StealthInputsStatement::new_revealed_only(input_amount),
+            outputs_statement: StealthOutputsStatement::new_revealed_only(output_amount),
+            balance_proof: None,
+        }
+    }
+
+    pub fn revealed_input_amount(&self) -> Amount {
+        self.inputs_statement.revealed_amount
+    }
+
+    pub fn revealed_output_amount(&self) -> Amount {
+        self.outputs_statement.revealed_output_amount
+    }
 }

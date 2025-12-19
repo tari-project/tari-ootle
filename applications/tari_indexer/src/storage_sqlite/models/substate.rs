@@ -23,10 +23,14 @@
 
 use std::convert::TryFrom;
 
-use tari_ootle_storage::time::PrimitiveDateTime;
+use tari_ootle_storage::{time::PrimitiveDateTime, StorageError};
 
 use crate::{
-    storage_sqlite::{models::substate::SubstateRecord as SubstateRow, schema::substates},
+    storage_sqlite::{
+        models::substate::SubstateRecord as SubstateRow,
+        schema::substates,
+        serialization::deserialize_json,
+    },
     substate_manager::SubstateResponse,
 };
 
@@ -39,19 +43,22 @@ pub struct SubstateRecord {
     pub data: String,
     pub template_address: Option<String>,
     pub module_name: Option<String>,
-    pub timestamp: PrimitiveDateTime,
     pub updated_at: PrimitiveDateTime,
     pub created_at: PrimitiveDateTime,
 }
 
 impl TryFrom<SubstateRecord> for SubstateResponse {
-    type Error = anyhow::Error;
+    type Error = StorageError;
 
     fn try_from(row: SubstateRow) -> Result<Self, Self::Error> {
         Ok(SubstateResponse {
-            address: row.address.parse()?,
+            id: row.address.parse().map_err(|e| StorageError::DecodingError {
+                operation: "TryFrom<SubstateRecord> for SubstateResponse",
+                item: "Substate",
+                details: format!("Invalid substate address {}: {}", row.address, e),
+            })?,
             version: row.version as u32,
-            substate: serde_json::from_str(&row.data)?,
+            substate: deserialize_json(&row.data)?,
         })
     }
 }
@@ -64,5 +71,4 @@ pub struct NewSubstate {
     pub data: String,
     pub template_address: Option<String>,
     pub module_name: Option<String>,
-    pub timestamp: PrimitiveDateTime,
 }

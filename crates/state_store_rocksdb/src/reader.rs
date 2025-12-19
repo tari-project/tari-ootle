@@ -40,16 +40,12 @@ use tari_consensus_types::{
     LastVoted,
     LeafBlock,
     LockedBlock,
+    PcId,
     ProposalCertificate,
-    QcId,
     TcId,
     TimeoutCertificate,
 };
-use tari_engine_types::{
-    confidential::UnclaimedConfidentialOutput,
-    substate::SubstateId,
-    template_lib_models::UnclaimedConfidentialOutputAddress,
-};
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{
     displayable::Displayable,
     optional::Optional,
@@ -75,9 +71,9 @@ use tari_ootle_storage::{
         PendingShardStateTreeDiff,
         StateVersionTransitions,
         SubstateChange,
-        SubstateCreatedProof,
+        SubstateCreate,
         SubstateData,
-        SubstateDestroyedProof,
+        SubstateDestroy,
         SubstateLock,
         SubstatePledges,
         SubstateRecord,
@@ -122,8 +118,6 @@ use crate::{
             LeafBlockCf,
             LockedBlockCf,
         },
-        burnt_utxo,
-        burnt_utxo::BurntUtxoCf,
         certificates::{proposal::ProposalCertificateCf, timeout::TimeoutCertificateCf},
         chain,
         epoch_checkpoint,
@@ -137,6 +131,7 @@ use crate::{
         foreign_substate_pledge,
         foreign_substate_pledge::ForeignSubstatePledgeCf,
         lock_conflict,
+        parked_block,
         pending_state_tree_diff,
         state_transition,
         state_transition::StateTransitionType,
@@ -486,6 +481,19 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(high_tc)
     }
 
+    fn is_block_in_end_of_epoch_chain(&self, block_id: &BlockId) -> Result<bool, StorageError> {
+        const OPERATION: &str = "is_block_in_end_of_epoch_chain";
+        let block_cf = self.db().cf(BlockCf)?;
+        let chain = self.get_pending_chain_ordered(block_id)?;
+        for block in chain {
+            let block = block_cf.get(&block, OPERATION)?;
+            if block.is_epoch_end() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     fn foreign_proposals_get_any<'a, I: IntoIterator<Item = &'a BlockId>>(
         &self,
         block_ids: I,
@@ -510,10 +518,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn foreign_proposals_has_unconfirmed(&self, epoch: Epoch) -> Result<bool, StorageError> {
-        let exists = self
-            .db()
-            .cf(foreign_proposal::UnconfirmedIndexEpochQuery)?
-            .any_exists_within_range(..(epoch.as_u64() + 1).to_be_bytes())?;
+        let cf = self.db().cf(foreign_proposal::UnconfirmedIndexEpochQuery)?;
+        let start = cf.encode_key(&Epoch::zero());
+        let end = cf.encode_key(&(epoch + Epoch(1)));
+        let exists = cf.any_exists_within_range(start..end)?;
 
         Ok(exists)
     }
@@ -595,6 +603,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn finalized_transaction_execution_get(&self, tx_id: &TransactionId) -> Result<TransactionExecution, StorageError> {
         const OPERATION: &str = "transaction_executions_get";
 
+        let finalized_cf = self.db().cf(FinalizedTransactionLinkCf)?;
+        if !finalized_cf.exists(tx_id, OPERATION)? {
+            return Err(StorageError::NotFound {
+                item: "TransactionExecution",
+                key: format!("{tx_id}"),
+            });
+        }
         let cf = self.db().cf(block_transaction_execution::ByTransactionIdQuery)?;
         let mut iter = cf.query_prefix_range_key_iterator(Ordering::default(), tx_id);
         let Some((tx_id, block_id, height)) = iter.next().transpose()? else {
@@ -730,7 +745,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         const OPERATION: &str = "blocks_get_all_between";
 
         // Prevent the possibility of memory exhaustion (defensive, not in response to an observed bug)
-        if limit > 1_000_000 {
+        if limit > 1_000 {
             return Err(StorageError::QueryError {
                 reason: format!("{OPERATION}: limit {limit} is too large"),
             });
@@ -1097,7 +1112,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         })
     }
 
-    fn proposal_certificates_get(&self, epoch: Epoch, qc_id: &QcId) -> Result<ProposalCertificate, StorageError> {
+    fn proposal_certificates_get(&self, epoch: Epoch, qc_id: &PcId) -> Result<ProposalCertificate, StorageError> {
         const OPERATION: &str = "proposal_certificates_get";
         let qc = self.db().cf(ProposalCertificateCf)?.get(&(epoch, *qc_id), OPERATION)?;
         Ok(qc)
@@ -1105,7 +1120,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn proposal_certificates_get_many<'a, I>(&self, qc_ids: I) -> Result<Vec<ProposalCertificate>, StorageError>
     where
-        I: IntoIterator<Item = &'a (Epoch, QcId)>,
+        I: IntoIterator<Item = &'a (Epoch, PcId)>,
         I::IntoIter: ExactSizeIterator,
     {
         const OPERATION: &str = "proposal_certificates_get_all";
@@ -1175,7 +1190,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         for block_id in pending_chain {
             let mut iter = query.prefix_range_value_iterator(Ordering::default(), &(block_id, *transaction_id));
             if let Some(update) = iter.next().transpose()? {
-                trace!(
+                debug!(
                     target: LOG_TARGET,
                     "{OPERATION}: found update {} for block {}: {:#} -> {:#}",
                     update.transaction_id, block_id,
@@ -1198,7 +1213,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(exists)
     }
 
-    fn transaction_pool_get_all(&self) -> Result<Vec<TransactionPoolRecord>, StorageError> {
+    fn transaction_pool_get_all(&self, limit: usize) -> Result<Vec<TransactionPoolRecord>, StorageError> {
         // TODO: Only used in tests
         const OPERATION: &str = "transaction_pool_get_all";
         let cf = self.db().cf(TransactionPoolCf)?;
@@ -1217,13 +1232,16 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let n = cf.count(OPERATION)?;
         let iter = cf.value_iterator(Ordering::Ascending, OPERATION);
-        let mut transactions = Vec::with_capacity(n);
+        let mut transactions = Vec::with_capacity(n.min(limit));
         for result in iter {
             let mut tx = result?;
-            if let Some(update) = updates.remove(tx.transaction_id()) {
+            if let Some(update) = updates.remove(tx.id()) {
                 update.merge_into(&mut tx);
             }
             transactions.push(tx);
+            if transactions.len() == limit {
+                break;
+            }
         }
         Ok(transactions)
     }
@@ -1267,14 +1285,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         for result in iter {
             let mut tx = result?;
-            if lock_conflicted.contains(tx.transaction_id()) {
+            if lock_conflicted.contains(tx.id()) {
                 continue;
             }
 
-            if lock_conflicts_cf.exists_prefix(tx.transaction_id())? {
+            if lock_conflicts_cf.exists_prefix(tx.id())? {
                 continue;
             }
-            if let Some(update) = updates.remove(tx.transaction_id()) {
+            if let Some(update) = updates.remove(tx.id()) {
                 update.merge_into(&mut tx);
             }
             if tx.is_ready() {
@@ -1319,10 +1337,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         for result in iter {
             let tx_id = result?;
-            // It's possible that the transaction has been removed from the pool in another thread 😱 - observed in
-            // consensus_tests
             if must_query {
                 let Some(tx_pool_rec) = cf.get(&tx_id, OPERATION).optional()? else {
+                    // It's possible that the transaction has been removed from the pool in another thread 😱 - observed
+                    // in consensus_tests
                     continue;
                 };
 
@@ -1338,14 +1356,15 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                     }
                 }
 
-                if skip_lock_conflicted {
-                    let iter = lock_conflict_query.query_prefix_range_iterator(Ordering::default(), &tx_id);
-                    for result in iter {
-                        let (_, value) = result?;
-                        if !value.is_local_only {
-                            continue;
-                        }
-                    }
+                if skip_lock_conflicted && lock_conflict_query.exists_prefix(&tx_id)? {
+                    continue;
+                    // let iter = lock_conflict_query.query_prefix_range_iterator(Ordering::default(), &tx_id);
+                    // for result in iter {
+                    //     let (_, value) = result?;
+                    //     if !value.is_local_only {
+                    //         continue;
+                    //     }
+                    // }
                 }
             }
 
@@ -1598,10 +1617,19 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         state_version: Version,
         value_filter: SubstateValueFilterFlags,
     ) -> Result<StateVersionTransitions, StorageError> {
+        if value_filter.is_empty() {
+            return Err(StorageError::QueryError {
+                reason: "state_transitions_get_starting_at: value_filter cannot be empty".to_string(),
+            });
+        }
+
         const OPERATION: &str = "state_transitions_get_n_after";
 
         let query = self.db().cf(state_transition::ByShardAndStateVersionQuery)?;
-        let mut iter = query.query_range_iterator(Ordering::Ascending, (req_shard, state_version)..);
+        let mut iter = query.query_range_iterator(
+            Ordering::Ascending,
+            (req_shard, state_version)..(Shard::max(), Version::MAX),
+        );
         let substate_cf = self.db().cf(SubstateCf)?;
 
         // NOTE: The state version may not have any transitions
@@ -1624,33 +1652,49 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let substates = substate_cf.multi_get(data.transitions.iter().map(|t| t.substate_address), OPERATION)?;
 
         let mut updates = Vec::with_capacity(data.transitions.len());
+        let all_hashes = value_filter.include_filtered_hashes();
+        let up_only = value_filter.is_up_only();
         // multi_get returns the substates in the same order as queried, so ordered by transitions
-        for (data, substate) in data.transitions.iter().zip(substates) {
-            let update = match data.transition {
+        for (rec, substate) in data.transitions.iter().zip(substates) {
+            let update = match rec.transition {
                 StateTransitionType::Up => {
-                    let value = value_filter
+                    let exclude = up_only && substate.substate_value.is_none();
+                    value_filter
                         .contains_substate(&substate.substate_id)
-                        .then_some(substate.substate_value)
-                        .flatten()
-                        .map_or_else(
-                            || SubstateValueOrHash::Hash(substate.state_hash),
-                            |v| SubstateValueOrHash::Value(Box::new(v)),
-                        );
-                    SubstateUpdateProof::Create(SubstateCreatedProof {
-                        substate: SubstateData {
-                            substate_id: substate.substate_id,
-                            version: substate.version,
-                            value,
-                        },
-                    })
+                        // filter includes substate, return full value if available, otherwise return hash
+                        .then(|| {
+                            substate
+                                .substate_value
+                                .map(|v| SubstateValueOrHash::Value(Box::new(v)))
+                                .unwrap_or_else(|| SubstateValueOrHash::Hash(substate.state_hash))
+                        })
+                        // Otherwise if the client still wants all hashes for filtered out substates
+                        .or_else(|| all_hashes.then_some(SubstateValueOrHash::Hash(substate.state_hash)))
+                        .map(|value| {
+                            SubstateUpdateProof::Create(SubstateCreate {
+                                substate: SubstateData {
+                                    substate_id: substate.substate_id,
+                                    version: substate.version,
+                                    value,
+                                },
+                            })
+                        }).filter(|_| !exclude)
                 },
-                StateTransitionType::Down => SubstateUpdateProof::Destroy(SubstateDestroyedProof {
-                    substate_id: substate.substate_id,
-                    version: substate.version,
-                }),
+                StateTransitionType::Down => (!up_only)
+                    .then(|| {
+                        value_filter.contains_substate(&substate.substate_id).then(|| {
+                            SubstateUpdateProof::Destroy(SubstateDestroy {
+                                substate_id: substate.substate_id,
+                                version: substate.version,
+                            })
+                        })
+                    })
+                    .flatten(),
             };
 
-            updates.push(update);
+            if let Some(update) = update {
+                updates.push(update);
+            }
         }
 
         Ok(StateVersionTransitions {
@@ -1733,7 +1777,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     ) -> Result<Vec<EpochCheckpoint>, StorageError> {
         // const OPERATION: &str = "epoch_checkpoint_get_all";
         let query = self.db().cf(epoch_checkpoint::ByEpochQuery)?;
-        let iter = query.query_range_iterator(Ordering::Ascending, from_epoch..);
+        let iter = query.query_range_iterator(Ordering::Ascending, from_epoch..Epoch::max());
         let epoch_checkpoints = iter
             .map(|result| result.map(|(_, checkpoint)| checkpoint))
             .take(limit)
@@ -1749,6 +1793,17 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         const OPERATION: &str = "epoch_checkpoint_get_by_shard_group";
         let cf = self.db().cf(EpochCheckpointCf)?;
         let checkpoint = cf.get(&(epoch, shard_group), OPERATION)?;
+        Ok(checkpoint)
+    }
+
+    fn epoch_checkpoint_get_last(&self) -> Result<EpochCheckpoint, StorageError> {
+        const OPERATION: &str = "epoch_checkpoint_get_last";
+        let cf = self.db().cf(EpochCheckpointCf)?;
+        let mut iter = cf.iterator(Ordering::Descending, OPERATION);
+        let (_, checkpoint) = iter.next().ok_or_else(|| StorageError::NotFound {
+            item: "EpochCheckpoint",
+            key: "last".to_string(),
+        })??;
         Ok(checkpoint)
     }
 
@@ -1808,68 +1863,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(pledges)
     }
 
-    fn burnt_utxos_get(
-        &self,
-        commitment: &UnclaimedConfidentialOutputAddress,
-    ) -> Result<UnclaimedConfidentialOutput, StorageError> {
-        const OPERATION: &str = "burnt_utxos_get";
-        let cf = self.db().cf(BurntUtxoCf)?;
-        let output = cf.get(commitment, OPERATION)?;
-        Ok(output)
-    }
-
-    fn burnt_utxos_get_all_unproposed(
-        &self,
-        leaf_block: &BlockId,
-        limit: usize,
-    ) -> Result<HashMap<UnclaimedConfidentialOutputAddress, UnclaimedConfidentialOutput>, StorageError> {
-        const OPERATION: &str = "burnt_utxos_get_all_unproposed";
-        if !self.blocks_exists(leaf_block)? {
-            return Err(StorageError::NotFound {
-                item: "Block",
-                key: leaf_block.to_string(),
-            });
-        }
-
-        if limit == 0 {
-            return Ok(HashMap::new());
-        }
-
-        let exclude_block_ids = self.get_pending_chain_with_commands_between(leaf_block)?;
-
-        let cf = self.db().cf(BurntUtxoCf)?;
-        let index_cf = self.db().cf(burnt_utxo::ProposedInBlockIndex)?;
-
-        let iter = cf.iterator(Ordering::default(), OPERATION);
-
-        let mut outputs = HashMap::new();
-        for result in iter {
-            let (commitment, output) = result?;
-            // TODO: consider optimising
-            let mut is_proposed = false;
-            for excluded_block_id in &exclude_block_ids {
-                if index_cf.exists_prefix(&(*excluded_block_id, commitment))? {
-                    is_proposed = true;
-                    break;
-                }
-            }
-            if is_proposed {
-                continue;
-            }
-
-            outputs.insert(commitment, output);
-            if outputs.len() == limit {
-                break;
-            }
-        }
-
-        Ok(outputs)
-    }
-
-    fn burnt_utxos_count(&self) -> Result<u64, StorageError> {
-        const OPERATION: &str = "burnt_utxos_count";
-        let count = self.db().cf(BurntUtxoCf)?.count(OPERATION)?;
-        Ok(count as u64)
+    fn parked_block_exists(&self, block_id: &BlockId) -> Result<bool, StorageError> {
+        const OPERATION: &str = "parked_block_exists";
+        let exists = self.db().cf(parked_block::ParkedBlockCf)?.exists(block_id, OPERATION)?;
+        Ok(exists)
     }
 
     fn foreign_parked_blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError> {

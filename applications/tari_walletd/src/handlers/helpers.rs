@@ -4,29 +4,20 @@
 use std::{collections::HashSet, fmt::Display};
 
 use tari_engine_types::{component::derive_component_address_from_public_key, ToByteType};
-use tari_ootle_common_types::{
-    optional::{IsNotFoundError, Optional},
-    SubstateRequirement,
-};
+use tari_ootle_common_types::{optional::Optional, SubstateRequirement};
 use tari_ootle_wallet_sdk::{
     apis::accounts::{AccountsApi, AccountsApiError},
-    models::AccountWithPublicKey,
-    network::{StatusResponseError, WalletNetworkInterface},
-    storage::WalletStore,
+    models::{AccountWithAddress, DerivedKeyIndex, TransactionFinalizedEvent, WalletEvent},
     WalletSdk,
+    WalletSdkSpec,
 };
-use tari_ootle_wallet_sdk_services::indexer_jrpc_impl::IndexerJsonRpcNetworkInterface;
-use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::models::ComponentAddress;
 use tari_transaction::TransactionId;
 use tari_wallet_daemon_client::ComponentAddressOrName;
 use tokio::sync::broadcast;
 
-use crate::{
-    jrpc_server::ApplicationErrorCode,
-    services::{TransactionFinalizedEvent, WalletEvent},
-};
+use crate::jrpc_server::ApplicationErrorCode;
 
 pub async fn wait_for_result(
     events: &mut broadcast::Receiver<WalletEvent>,
@@ -76,8 +67,8 @@ pub async fn wait_for_result_and_account(
                     event.status,
                 ));
             },
-            WalletEvent::AccountCreatedOnChain(event) if event.account.address == *account_address => {
-                maybe_account = Some(event.account.address);
+            WalletEvent::AccountCreatedOnChain(event) if event.account.component_address == *account_address => {
+                maybe_account = Some(event.account.component_address);
             },
             WalletEvent::AccountChangedOnChain(event) if event.account_address == *account_address => {
                 maybe_account = Some(event.account_address);
@@ -93,58 +84,51 @@ pub async fn wait_for_result_and_account(
     }
 }
 
-pub fn get_account_with_inputs(
+pub fn get_account_with_inputs<TSpec: WalletSdkSpec>(
     account: Option<&ComponentAddressOrName>,
-    sdk: &WalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>,
-) -> Result<(AccountWithPublicKey, HashSet<SubstateRequirement>), anyhow::Error> {
+    sdk: &WalletSdk<TSpec>,
+) -> Result<(AccountWithAddress, HashSet<SubstateRequirement>), anyhow::Error> {
     let account = get_account_or_default(account, &sdk.accounts_api())?;
-
-    // Add all versioned account child addresses as inputs
-    let inputs = sdk
-        .substate_api()
-        .load_dependent_substates(&[&account.account.address.into()])?;
+    let inputs = if account.is_confirmed_on_chain() {
+        // Add all versioned account child addresses as inputs
+        sdk.substate_api()
+            .load_dependent_substates(&[&account.account.component_address.into()])?
+    } else {
+        HashSet::new()
+    };
 
     Ok((account, inputs))
 }
 
-pub fn get_account<TStore, TNetworkInterface>(
+pub fn get_account<TSpec: WalletSdkSpec>(
     account: &ComponentAddressOrName,
-    accounts_api: &AccountsApi<'_, TStore, TNetworkInterface>,
-) -> Result<AccountWithPublicKey, AccountsApiError>
-where
-    TStore: WalletStore,
-{
+    accounts_api: &AccountsApi<'_, TSpec>,
+) -> Result<AccountWithAddress, AccountsApiError> {
     match account {
         ComponentAddressOrName::ComponentAddress(address) => Ok(accounts_api.get_account_by_address(address)?),
         ComponentAddressOrName::Name(name) => Ok(accounts_api.get_account_by_name(name)?),
     }
 }
 
-pub(crate) fn get_account_by_key_index<TStore, TNetworkInterface>(
-    sdk: &WalletSdk<TStore, TNetworkInterface>,
-    key_index: u64,
-) -> Result<AccountWithPublicKey, AccountsApiError>
-where
-    TStore: WalletStore,
-    TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
-{
-    let (_, pk) = sdk.key_manager_api().derive_account_keypair(key_index)?;
-    let pk = pk.to_byte_type();
-    let address = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &pk);
+pub(crate) fn get_account_by_key_index<TSpec: WalletSdkSpec>(
+    sdk: &WalletSdk<TSpec>,
+    key_index: DerivedKeyIndex,
+) -> Result<AccountWithAddress, AccountsApiError> {
+    let key = sdk.key_manager_api().derive_account_address(key_index)?;
+    let address =
+        derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &key.address.account_key().to_byte_type());
     sdk.accounts_api().get_account_by_address(&address)
 }
 
-pub fn get_account_or_default<TStore, TNetworkInterface>(
+pub fn get_account_or_default<TSpec: WalletSdkSpec>(
     account: Option<&ComponentAddressOrName>,
-    accounts_api: &AccountsApi<'_, TStore, TNetworkInterface>,
-) -> Result<AccountWithPublicKey, anyhow::Error>
-where
-    TStore: WalletStore,
-{
+    accounts_api: &AccountsApi<'_, TSpec>,
+) -> Result<AccountWithAddress, anyhow::Error> {
     let result;
     if let Some(a) = account {
-        result = get_account(a, accounts_api)?;
+        result = get_account(a, accounts_api)
+            .optional()?
+            .ok_or_else(|| not_found(format!("Account '{a}' not found.",)))?;
     } else {
         result = accounts_api
             .get_default()

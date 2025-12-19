@@ -37,14 +37,14 @@ import { useTheme } from "@mui/material/styles";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import FetchStatusCheck from "@components/FetchStatusCheck";
-import StatusChip from "@components/StatusChip";
+import TransactionsStatusChip from "@components/TransactionsStatusChip";
 import { DataTableCell } from "@components/StyledComponents";
 import { useGetAllTransactions } from "@api/hooks/useTransactions";
 import { emptyRows, handleChangePage, handleChangeRowsPerPage, formatCurrency } from "@utils/helpers";
 import { Account, WalletTransaction } from "@tari-project/typescript-bindings";
 import TimeChip from "./TimeChip";
 
-export default function Transactions({ account }: { account: Account; ownerPublicKey: string }) {
+export default function Transactions({ account }: { account: Account }) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const { data, isLoading, error, isError, refetch, isRefetching } = useGetAllTransactions({
@@ -52,7 +52,8 @@ export default function Transactions({ account }: { account: Account; ownerPubli
     // Some stealth transactions cannot be identified by component/public key in the wallet - so we fetch all transactions.
     // If this feature is badly needed, we can "tag" transactions as involving a specific account when they are created.
     component: null, //: account ? substateIdToString(account.address) : null,
-    signer_public_key: null, //: ownerPublicKey ? ownerPublicKey : null,
+    // Stealth transaction are not able to be identified by signer public key, so for simplicity we fetch all transactions.
+    signer_public_key: null,
   });
   useEffect(() => {
     refetch();
@@ -99,7 +100,7 @@ export default function Transactions({ account }: { account: Account; ownerPubli
                         </Stack>
                       </DataTableCell>
                       <DataTableCell>
-                        <StatusChip status={status} showTitle />
+                        <TransactionsStatusChip status={status} showTitle />
                       </DataTableCell>
                       <DataTableCell>
                         {fee_receipt?.total_fees_paid ? formatCurrency(fee_receipt.total_fees_paid) : "--"}

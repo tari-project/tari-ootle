@@ -38,9 +38,9 @@ impl FeeState {
             });
         }
 
-        let Some(amount) = resource_container.amount().to_u64_checked() else {
+        let Some(amount) = resource_container.unlocked_amount().to_u64_checked() else {
             return Err(RuntimeError::InvalidAmount {
-                amount: resource_container.amount(),
+                amount: resource_container.unlocked_amount(),
                 reason: "Payed an invalid amount. Amount must be positive and not overflow".to_string(),
             });
         };
@@ -48,7 +48,7 @@ impl FeeState {
             Some(new_total) => self.running_total = new_total,
             None => {
                 return Err(RuntimeError::InvalidAmount {
-                    amount: resource_container.amount(),
+                    amount: resource_container.unlocked_amount(),
                     reason: "Payed an invalid amount. Amount overflowed".to_string(),
                 });
             },
@@ -83,11 +83,21 @@ impl FeeState {
         std::mem::take(&mut self.fee_charges)
     }
 
+    pub fn is_paid_in_full(&self) -> bool {
+        self.total_payments() >= self.total_charges()
+    }
+
     pub fn total_charges(&self) -> u64 {
         self.fee_charges.get_total()
     }
 
     pub fn total_payments(&self) -> u64 {
         self.running_total
+    }
+
+    pub fn merge_charges(&mut self, other: &Self) {
+        for (source, amount) in other.fee_charges.iter() {
+            self.add_charge(*source, *amount);
+        }
     }
 }

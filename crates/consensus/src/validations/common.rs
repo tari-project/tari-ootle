@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use log::{debug, warn};
 use tari_common_types::types::FixedHash;
-use tari_consensus_types::ProposalCertificate;
+use tari_consensus_types::{QuorumCertificateRef, TimeoutVote};
 use tari_ootle_common_types::{
     committee::Committee,
     DerivableFromPublicKey,
@@ -200,7 +200,7 @@ pub(super) fn check_block_signature<TSignerService: ValidatorSignatureVerifierSe
     Ok(())
 }
 
-pub(super) fn check_quorum_certificate<TConsensusSpec: ConsensusSpec>(
+pub(super) fn check_proposal_certificate<TConsensusSpec: ConsensusSpec>(
     candidate_block: &Block,
     committee: &Committee<TConsensusSpec::Addr>,
     signing_service: &TConsensusSpec::SignerService,
@@ -213,7 +213,27 @@ pub(super) fn check_quorum_certificate<TConsensusSpec: ConsensusSpec>(
         });
     }
 
-    check_quorum_certificate_signatures::<TConsensusSpec>(qc, committee, signing_service)?;
+    check_quorum_certificate_signatures::<TConsensusSpec>(qc.into(), committee, signing_service)?;
+
+    Ok(())
+}
+
+pub(super) fn check_timeout_certificate<TConsensusSpec: ConsensusSpec>(
+    candidate_block: &Block,
+    committee: &Committee<TConsensusSpec::Addr>,
+    signing_service: &TConsensusSpec::SignerService,
+) -> Result<(), ProposalValidationError> {
+    let Some(tc) = candidate_block.timeout_certificate() else {
+        return Ok(());
+    };
+    if candidate_block.height() <= tc.height() {
+        return Err(ProposalValidationError::CandidateBlockNotHigherThanJustify {
+            justify_block_height: tc.height(),
+            candidate_block_height: candidate_block.height(),
+        });
+    }
+
+    check_quorum_certificate_signatures::<TConsensusSpec>(tc.into(), committee, signing_service)?;
 
     Ok(())
 }
@@ -221,7 +241,7 @@ pub(super) fn check_quorum_certificate<TConsensusSpec: ConsensusSpec>(
 /// Validates the signatures of the quorum certificate.
 // pub because used in on receive NEWVIEW
 pub fn check_quorum_certificate_signatures<TConsensusSpec: ConsensusSpec>(
-    qc: &ProposalCertificate,
+    qc: QuorumCertificateRef<'_>,
     committee: &Committee<TConsensusSpec::Addr>,
     signing_service: &TConsensusSpec::SignerService,
 ) -> Result<(), ProposalValidationError> {
@@ -239,9 +259,9 @@ pub fn check_quorum_certificate_signatures<TConsensusSpec: ConsensusSpec>(
             return Err(ProposalValidationError::ValidatorNotInCommittee {
                 validator: signature.public_key().to_string(),
                 details: format!(
-                    "QC signed with validator {} that is not in committee {}",
+                    "QC {} signed with validator {} that is not in committee",
+                    qc,
                     signature.public_key(),
-                    qc.shard_group(),
                 ),
             });
         };
@@ -253,16 +273,30 @@ pub fn check_quorum_certificate_signatures<TConsensusSpec: ConsensusSpec>(
             });
         }
 
-        let block_id = qc.calculate_block_id();
-        let message = ProposalCertificateSignatureFields {
-            block_id: block_id.hash(),
-            decision: qc.decision(),
-        };
-        let vote = SignedProposalVote { message, signature };
-
-        let is_valid = signing_service.verify(&vote);
-        if !is_valid {
-            return Err(ProposalValidationError::QcInvalidSignature { qc: qc.calculate_id() });
+        match qc {
+            QuorumCertificateRef::ProposalCertificate(pc) => {
+                let block_id = pc.calculate_block_id();
+                let message = ProposalCertificateSignatureFields {
+                    block_id: block_id.hash(),
+                    decision: pc.decision(),
+                };
+                let vote = SignedProposalVote { message, signature };
+                let is_valid = signing_service.verify(&vote);
+                if !is_valid {
+                    return Err(ProposalValidationError::QcInvalidSignature { qc: qc.calculate_id() });
+                }
+            },
+            QuorumCertificateRef::TimeoutCertificate(tc) => {
+                let vote = TimeoutVote {
+                    epoch: tc.epoch(),
+                    height: tc.height(),
+                    signature: signature.clone(),
+                };
+                let is_valid = signing_service.verify(&vote);
+                if !is_valid {
+                    return Err(ProposalValidationError::QcInvalidSignature { qc: qc.calculate_id() });
+                }
+            },
         }
     }
 

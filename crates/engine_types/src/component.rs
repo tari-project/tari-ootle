@@ -52,7 +52,7 @@ pub fn derive_component_address_from_public_key(
     ComponentAddress::new(key)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ComponentHeader {
     pub template_address: TemplateAddress,
@@ -94,17 +94,23 @@ impl ComponentHeader {
         self
     }
 
+    pub fn set_template_address(&mut self, template_address: TemplateAddress) -> &mut Self {
+        self.template_address = template_address;
+        self
+    }
+
     pub fn contains_substate(&self, address: &SubstateId) -> Result<bool, IndexedValueError> {
         let found = IndexedWellKnownTypes::value_contains_substate(self.state(), address)?;
         Ok(found)
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ComponentBody {
     #[serde(with = "serde_with::cbor_value")]
     #[cfg_attr(feature = "ts", ts(type = "any"))]
+    #[borsh(serialize_with = "crate::borsh::serialize_cbor_value")]
     pub state: tari_bor::Value,
 }
 

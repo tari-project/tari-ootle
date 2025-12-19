@@ -11,18 +11,19 @@ pub mod keys;
 pub mod nfts;
 pub mod rpc;
 pub mod settings;
+pub mod stealth_utxos;
 pub mod substates;
 pub mod templates;
 pub mod transaction;
 pub mod validator;
 pub mod wallet;
-pub mod wasm_optimizer;
 pub mod webauthn;
 pub mod webrtc;
 
 use std::future::Future;
 
-use axum::{async_trait, headers::authorization::Bearer};
+use async_trait::async_trait;
+use axum_extra::headers::authorization::Bearer;
 pub use context::HandlerContext;
 use error::HandlerError;
 

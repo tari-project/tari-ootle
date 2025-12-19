@@ -146,13 +146,6 @@ loggers:
     level: info
     appenders:
       - network
-
-  tari::indexer::json_rpc:
-    level: debug
-    appenders:
-      - json_rpc
-    additive: true
-
   hyper:
     level: info
     appenders:

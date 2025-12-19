@@ -21,13 +21,13 @@ jobs:
       run:
         working-directory: bindings
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
       - name: Use Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
@@ -47,13 +47,13 @@ jobs:
       run:
         working-directory: clients/javascript/wallet_daemon_client
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
       - name: Use Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
@@ -67,4 +67,34 @@ jobs:
           pnpm publish --access public --no-git-checks || echo "Publish failed (probably already published)"
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-      
+
+
+  # Publish the Tari Indexer client to the NPM registry
+  publish-indexer-client:
+    runs-on: ubuntu-latest
+    needs: publish-typescript-bindings
+    defaults:
+      run:
+        working-directory: clients/javascript/indexer_client
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - name: Use Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build-dist
+        name: "Build Bindings Dist"
+        working-directory: bindings
+      - run: pnpm run build
+      - run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+          pnpm publish --access public --no-git-checks || echo "Publish failed (probably already published)"
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+

@@ -151,11 +151,37 @@ loggers:
   tari::ootle:
     level: debug
     appenders:
-      - ootle
       - stdout
     additive: false
 
+  tari::ootle::epoch_manager:
+    level: debug
+    appenders:
+      - ootle
+    additive: false
+
+  tari::ootle::epoch_oracles:
+    level: debug
+    appenders:
+      - ootle
+    additive: false
+
   c::sidechain::validations:
+    level: debug
+    appenders:
+      - consensus
+
+  tari::consensus:
+    level: debug
+    appenders:
+      - consensus
+
+  tari::ootle::rpc_state_sync:
+    level: debug
+    appenders:
+      - consensus
+
+  tari::ootle::storage:
     level: debug
     appenders:
       - consensus
@@ -165,10 +191,21 @@ loggers:
     appenders:
       - consensus
 
-  tari::ootle::networking:
+  tari::ootle::hotstuff:
+    level: debug
+    appenders:
+      - consensus
+
+  tari::networking:
     level: debug
     appenders:
       - network
+
+  tari::ootle::p2p:
+    level: debug
+    appenders:
+      - network
+      - ootle
 
   tari::ootle::engine:
     level: debug

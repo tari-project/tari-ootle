@@ -22,6 +22,7 @@
 
 use std::{ops::RangeInclusive, path::PathBuf, sync::Arc, time::Duration};
 
+use indexmap::IndexMap;
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
 use tari_base_node_client::types::BaseLayerValidatorNode;
@@ -38,6 +39,7 @@ use tari_ootle_common_types::{
     Epoch,
     NodeHeight,
     PeerAddress,
+    StateVersion,
     SubstateAddress,
 };
 use tari_ootle_storage::{
@@ -65,6 +67,7 @@ pub struct GetIdentityResponse {
     pub supported_protocols: Vec<String>,
     pub protocol_version: String,
     pub user_agent: String,
+    pub fee_claim_public_key: RistrettoPublicKeyBytes,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,7 +79,7 @@ pub struct GetTemplateRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
 pub struct GetTemplateResponse {
-    pub registration_metadata: TemplateMetadata,
+    pub metadata: TemplateMetadata,
     pub abi: TemplateAbi,
 }
 
@@ -102,19 +105,6 @@ pub struct FunctionDef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
-pub struct GetTemplatesRequest {
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub limit: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "validator-node-client/"))]
-pub struct GetTemplatesResponse {
-    pub templates: Vec<TemplateMetadata>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -123,8 +113,8 @@ pub struct GetTemplatesResponse {
 pub struct TemplateMetadata {
     pub name: String,
     pub address: TemplateAddress,
-    /// SHA hash of binary
-    pub binary_sha: Vec<u8>,
+    pub code_size: usize,
+    pub author: RistrettoPublicKeyBytes,
 }
 
 /// A request to submit a transaction
@@ -198,6 +188,7 @@ pub struct GetConsensusStatusResponse {
     pub epoch: Epoch,
     pub height: NodeHeight,
     pub state: String,
+    pub state_versions: Option<IndexMap<Shard, StateVersion>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

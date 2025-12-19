@@ -21,33 +21,29 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import Grid from "@mui/material/Grid";
-import Box from "@mui/material/Box";
-import Divider from "@mui/material/Divider";
-import Typography from "@mui/material/Typography";
 import IconButton from "@mui/material/IconButton";
 import { useTheme } from "@mui/material/styles";
 import { InnerHeading, StyledPaper } from "@components/StyledComponents";
 import { refreshAccountsBalances } from "@api/hooks/useAccounts";
 import useAccountStore from "@store/accountStore";
 import Transactions from "@routes/Transactions/Transactions";
-import AccountBalance from "./AccountBalance";
 import AccountDetails from "./AccountDetails";
 import ActionMenu from "./ActionMenu";
 import Assets from "./Assets";
-import SelectAccount from "./SelectAccount";
 import { substateIdToString } from "@tari-project/typescript-bindings";
 import { Refresh } from "@mui/icons-material";
 import queryClient from "@api/queryClient";
+import PageHeader from "@components/PageHeader";
 
 function MyAssets() {
   const theme = useTheme();
-  const { account, publicKey } = useAccountStore();
+  const { account } = useAccountStore();
 
   if (!account) {
     return <>Loading...</>;
   }
 
-  const refreshBalances = refreshAccountsBalances(substateIdToString(account.address));
+  const refreshBalances = refreshAccountsBalances(substateIdToString(account.component_address));
   const handleRefreshClicked = () => {
     refreshBalances.mutate();
     queryClient.invalidateQueries({
@@ -60,54 +56,7 @@ function MyAssets() {
 
   return (
     <>
-      <Grid item xs={12} md={12} lg={12}>
-        <Box
-          className="flex-container"
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            width: "100%",
-          }}
-        >
-          <Typography
-            variant="h4"
-            style={{
-              paddingBottom: theme.spacing(2),
-            }}
-          >
-            My Assets
-          </Typography>
-          <ActionMenu />
-        </Box>
-        <Divider />
-      </Grid>
-
-      <Grid
-        item
-        xs={12}
-        md={12}
-        lg={12}
-        style={{
-          position: "sticky",
-          top: 50,
-          background: theme.palette.background.default,
-          opacity: 0.9,
-          zIndex: 1,
-          paddingBottom: theme.spacing(1),
-        }}
-      >
-        <Box
-          className="flex-container"
-          style={{
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <AccountBalance />
-          <SelectAccount />
-        </Box>
-      </Grid>
+      <PageHeader title="My Assets" rightComponent={<ActionMenu />} />
 
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
@@ -138,7 +87,7 @@ function MyAssets() {
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
           <InnerHeading>Transactions</InnerHeading>
-          <Transactions account={account} ownerPublicKey={publicKey} />
+          <Transactions account={account} />
         </StyledPaper>
       </Grid>
     </>

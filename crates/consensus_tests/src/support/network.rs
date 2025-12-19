@@ -8,6 +8,7 @@ use std::{
 
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
 use itertools::Itertools;
+use log::info;
 use tari_consensus::messages::HotstuffMessage;
 use tari_ootle_common_types::ShardGroup;
 use tari_ootle_storage::consensus_models::TransactionRecord;
@@ -112,7 +113,7 @@ pub struct TestNetwork {
     network_task_handle: task::JoinHandle<()>,
     tx_new_transaction: mpsc::Sender<(TestVnDestination, TransactionRecord)>,
     network_status: watch::Sender<NetworkStatus>,
-    offline_destinations: Arc<RwLock<Vec<TestVnDestination>>>,
+    offline_destinations: Arc<RwLock<Vec<TestAddress>>>,
     num_sent_messages: Arc<AtomicUsize>,
     num_filtered_messages: Arc<AtomicUsize>,
     _on_message: watch::Receiver<Option<HotstuffMessage>>,
@@ -127,18 +128,25 @@ impl TestNetwork {
         &self.network_task_handle
     }
 
-    pub async fn go_offline(&self, destination: TestVnDestination) -> &Self {
-        if destination.is_shard() {
-            unimplemented!("Sorry :/ taking a bucket offline is not yet supported in the test harness");
-        }
-        self.offline_destinations.write().await.push(destination);
+    pub async fn go_offline(&self, node: TestAddress) -> &Self {
+        self.offline_destinations.write().await.push(node);
         self
     }
 
-    pub async fn is_offline(&self, address: &TestAddress, num_committees: u32) -> bool {
+    pub async fn go_online(&self, node: &TestAddress) -> &Self {
+        let mut write = self.offline_destinations.write().await;
+        if let Some(pos) = write.iter().position(|d| d == node) {
+            info!("🟢 Bringing {} back online", node);
+            write.remove(pos);
+        } else {
+            panic!("🟡 Tried to bring {} online but it was not offline", node);
+        }
+        self
+    }
+
+    pub async fn is_offline(&self, address: &TestAddress) -> bool {
         let read = self.offline_destinations.read().await;
-        read.iter()
-            .any(|d| d.is_for(address, ShardGroup::all_shards(TEST_NUM_PRESHARDS), num_committees))
+        read.iter().any(|d| d == address)
     }
 
     #[allow(dead_code)]
@@ -164,7 +172,7 @@ impl TestNetwork {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TestVnDestination {
     All,
     Address(TestAddress),
@@ -185,10 +193,6 @@ impl TestVnDestination {
 
     pub fn is_for_vn(&self, vn: &Validator) -> bool {
         self.is_for(&vn.address, vn.shard_group, vn.num_committees)
-    }
-
-    pub fn is_shard(&self) -> bool {
-        matches!(self, TestVnDestination::Committee(_))
     }
 }
 
@@ -215,7 +219,7 @@ pub struct TestNetworkWorker {
     num_filtered_messages: Arc<AtomicUsize>,
     transaction_store: Arc<RwLock<HashMap<TransactionId, TransactionRecord>>>,
 
-    offline_destinations: Arc<RwLock<Vec<TestVnDestination>>>,
+    offline_destinations: Arc<RwLock<Vec<TestAddress>>>,
     shutdown_signal: ShutdownSignal,
     message_filter: Option<MessageFilter>,
 }
@@ -330,11 +334,7 @@ impl TestNetworkWorker {
                     continue;
                 }
             }
-            // TODO: support for taking a whole committee bucket offline
-            if to != from &&
-                self.is_offline_destination(&from, &to, ShardGroup::all_shards(TEST_NUM_PRESHARDS))
-                    .await
-            {
+            if to != from && self.is_offline_destination(&from, &to).await {
                 continue;
             }
 
@@ -362,11 +362,8 @@ impl TestNetworkWorker {
                 return;
             }
         }
-        if from != to &&
-            self.is_offline_destination(&from, &to, ShardGroup::all_shards(TEST_NUM_PRESHARDS))
-                .await
-        {
-            log::info!("🗑️ [TEST] Discarding message {msg} from {from}. Leader {to} is offline");
+        if from != to && self.is_offline_destination(&from, &to).await {
+            log::info!("🗑️ [TEST] Discarding message {msg} from {from}. {from}/{to} is offline");
             return;
         }
         log::debug!("✉️ Message {} sent from {} to {}", msg, from, to);
@@ -376,10 +373,8 @@ impl TestNetworkWorker {
         self.tx_hs_message.get(&to).unwrap().send((from, msg)).await.unwrap();
     }
 
-    async fn is_offline_destination(&self, from: &TestAddress, to: &TestAddress, shard: ShardGroup) -> bool {
+    async fn is_offline_destination(&self, from: &TestAddress, to: &TestAddress) -> bool {
         let lock = self.offline_destinations.read().await;
-        // 99999 is not used TODO: support for taking entire shard group offline
-        lock.iter()
-            .any(|d| d.is_for(from, shard, 99999) || d.is_for(to, shard, 99999))
+        lock.iter().any(|d| d == from || d == to)
     }
 }

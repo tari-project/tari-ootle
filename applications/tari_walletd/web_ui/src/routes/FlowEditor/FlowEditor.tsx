@@ -47,6 +47,7 @@ import {
   DialogContent,
   DialogActions,
   SelectChangeEvent,
+  FormHelperText,
 } from "@mui/material";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
@@ -60,7 +61,7 @@ import { GeneratedCodeType, TariNetwork, TransactionProps } from "@tari-project/
 import { substateIdToString } from "@utils/helpers";
 import CloseIcon from "@mui/icons-material/Close";
 import { Highlight } from "prism-react-renderer";
-import useFlowEditorStore, { INITIAL_FLOW_STATE } from "@store/flowEditorStore";
+import useFlowEditorStore from "@store/flowEditorStore";
 import {
   shortenString,
   UnsignedTransactionV1,
@@ -69,7 +70,7 @@ import {
   TESTNET_NFT_FAUCET_ADDRESS,
   TESTNET_XTR_FAUCET_ADDRESS,
 } from "@tari-project/typescript-bindings";
-import { settingsGet, submitTransactionDryRun, transactionsSubmit, transactionsWaitResult } from "../../utils/json_rpc";
+import { settingsGet, submitTransactionDryRun, transactionsSubmit, transactionsWaitResult } from "@utils/json_rpc";
 import { useAccountsList } from "@api/hooks/useAccounts";
 import CopyAddress from "@components/CopyAddress";
 
@@ -176,9 +177,9 @@ function FlowEditor() {
     }
   }, [currentState]);
 
-  const onAccountChange = (e: SelectChangeEvent<string>) => {
+  const onAccountChange = (e: SelectChangeEvent) => {
     const selected = dataAccountsList?.accounts.find(
-      (acc: any) => substateIdToString(acc.account.address) === e.target.value,
+      (acc: any) => substateIdToString(acc.account.component_address) === e.target.value,
     );
     setAccount(selected);
   };
@@ -188,7 +189,7 @@ function FlowEditor() {
       throw new Error("Account is not available");
     }
     const network = await getTariNetwork();
-    const accountAddress = substateIdToString(account.account.address);
+    const accountAddress = substateIdToString(account.account.component_address);
     return {
       network,
       accountAddress,
@@ -206,12 +207,16 @@ function FlowEditor() {
     if (!account) {
       throw new Error("Account is not available");
     }
+    if (!account.account.owner_key_id) {
+      throw new Error("Selected account does not have an owner key");
+    }
     const request = {
       transaction: { V1: transaction },
-      signing_key_index: account.account.key_index,
+      seal_signer: account.account.owner_key_id!,
+      other_signers: [],
       detect_inputs: true,
       detect_inputs_use_unversioned: true,
-      proof_ids: [],
+      lock_ids: [],
     };
     const submitResp = transaction.dry_run ? await submitTransactionDryRun(request) : await transactionsSubmit(request);
     const result = await transactionsWaitResult({
@@ -225,7 +230,7 @@ function FlowEditor() {
         setFee(result.final_fee);
       }
     } else {
-      let failureReason = undefined;
+      let failureReason;
       if (!txResult) {
         failureReason = "Execution failed";
       } else if ("Reject" in txResult) {
@@ -272,23 +277,32 @@ function FlowEditor() {
   return (
     <Grid container spacing={2}>
       <Grid item xs={panelOpen ? 9 : 12}>
-        <Grid item xs={12} md={12} lg={12}>
-          <PageHeading>Flow Editor</PageHeading>
-        </Grid>
-        <Grid item xs={12} md={12} lg={12}>
-          <StyledPaper>
-            <div style={{ height: "600px", width: "100%" }}>
-              <QueryBuilder
-                theme={themeMode}
-                getTransactionProps={getTransactionProps}
-                showGeneratedCode={showGeneratedCode}
-                executeTransaction={executeTransaction}
-                onNodesChange={onChange}
-                onEdgesChange={onChange}
-                onConnect={onChange}
-              />
-            </div>
-          </StyledPaper>
+        <Grid
+          container
+          spacing={3}
+          style={{
+            margin: 0,
+            width: "100%",
+          }}
+        >
+          <Grid item xs={12} md={12} lg={12}>
+            <PageHeading>Flow Editor</PageHeading>
+          </Grid>
+          <Grid item xs={12} md={12} lg={12}>
+            <StyledPaper>
+              <div style={{ height: "600px", width: "100%" }}>
+                <QueryBuilder
+                  theme={themeMode}
+                  getTransactionProps={getTransactionProps}
+                  showGeneratedCode={showGeneratedCode}
+                  executeTransaction={executeTransaction}
+                  onNodesChange={onChange}
+                  onEdgesChange={onChange}
+                  onConnect={onChange}
+                />
+              </div>
+            </StyledPaper>
+          </Grid>
         </Grid>
       </Grid>
       <Drawer
@@ -314,24 +328,29 @@ function FlowEditor() {
         </Box>
         <Box mb={2}>
           <FormControl fullWidth size="small">
-            <InputLabel id="account-select-label">Account used to pay fees</InputLabel>
+            <InputLabel id="account-select-label">Account</InputLabel>
             <Select
               labelId="account-select-label"
               name="account"
               label="Account"
-              value={account ? substateIdToString(account.account.address) : ""}
+              placeholder="Select an account"
+              value={account ? substateIdToString(account.account.component_address) : ""}
               onChange={onAccountChange}
             >
               {dataAccountsList?.accounts?.map((acc: any) => (
-                <MenuItem key={substateIdToString(acc.account.address)} value={substateIdToString(acc.account.address)}>
-                  {acc.account.name || substateIdToString(acc.account.address)}
+                <MenuItem
+                  key={substateIdToString(acc.account.component_address)}
+                  value={substateIdToString(acc.account.component_address)}
+                >
+                  {acc.account.name || substateIdToString(acc.account.component_address)}
                 </MenuItem>
               ))}
             </Select>
+            <FormHelperText>Select the account used to pay fees</FormHelperText>
           </FormControl>
           {account ? (
             <Typography variant="subtitle2" mt={1}>
-              Address: <CopyAddress address={substateIdToString(account.account.address)} />
+              Address: <CopyAddress address={substateIdToString(account.account.component_address)} />
             </Typography>
           ) : (
             <Typography color="error" variant="subtitle2" mt={1}>
@@ -341,12 +360,10 @@ function FlowEditor() {
         </Box>
         <Divider />
         <Box mt={2} mb={2}>
-          <Typography variant="subtitle2" gutterBottom>
-            Transaction Fee
-          </Typography>
           <TextField
             size="small"
             type="number"
+            label="Transaction Fee"
             value={fee}
             onChange={(e) => setFee(Number(e.target.value))}
             inputProps={{ min: 0 }}
@@ -369,38 +386,38 @@ function FlowEditor() {
           />
         </Box>
         <Box mt={2} mb={2}>
-          <Typography variant="subtitle2" gutterBottom>
-            Template ID
-          </Typography>
           <Box display="flex" gap={1}>
             <TextField
               size="small"
               value={templateId}
+              label="Template ID"
               onChange={(e) => setTemplateId(e.target.value)}
               placeholder="Enter template id"
               fullWidth
             />
           </Box>
           <Box mt={2} mb={2}>
-            <InputLabel id="template-select-label">Builtin Templates</InputLabel>
-            <Select
-              style={{ minWidth: "100%" }}
-              labelId="template-select-label"
-              name="templateId"
-              label="Template Id"
-              placeholder="Select a builtin template"
-              value={KNOWN_TEMPLATES.find((t) => t.address === templateId)?.address || ""}
-              onChange={(e) => setTemplateId(e.target.value)}
-            >
-              <MenuItem key={""} value={""}>
-                <em>None</em>
-              </MenuItem>
-              {KNOWN_TEMPLATES.map((template) => (
-                <MenuItem key={template.address} value={template.address}>
-                  {template.name} {shortenString(template.address)}
+            <FormControl fullWidth size="small">
+              <InputLabel id="template-select-label">Builtin Templates</InputLabel>
+              <Select
+                labelId="template-select-label"
+                name="templateId"
+                label="Builtin Templates"
+                placeholder="Select a builtin template"
+                value={KNOWN_TEMPLATES.find((t) => t.address === templateId)?.address || ""}
+                onChange={(e) => setTemplateId(e.target.value)}
+              >
+                <MenuItem key={""} value={""}>
+                  <em>None</em>
                 </MenuItem>
-              ))}
-            </Select>
+                {KNOWN_TEMPLATES.map((template) => (
+                  <MenuItem key={template.address} value={template.address}>
+                    {template.name} {shortenString(template.address)}
+                  </MenuItem>
+                ))}
+              </Select>
+              <FormHelperText>Select a builtin template</FormHelperText>
+            </FormControl>
           </Box>
           <Box>
             <Button variant="contained" onClick={() => refetch()} disabled={!templateId || isLoading}>

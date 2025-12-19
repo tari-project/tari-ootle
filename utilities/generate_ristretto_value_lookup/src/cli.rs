@@ -18,6 +18,13 @@ pub struct Cli {
     /// The maximum value to include in the lookup table
     #[clap(short = 'x', long)]
     pub max: u64,
+    /// The number of worker threads to use
+    #[clap(short = 'j', long)]
+    pub jobs: Option<usize>,
+
+    /// Validate the lookup table at the path
+    #[clap(short = 'v', long, help = "Validate the lookup table at the path")]
+    pub validate: bool,
 }
 
 impl Cli {

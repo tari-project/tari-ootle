@@ -18,7 +18,7 @@ use std::{
 
 use diesel::{sql_query, Connection, RunQueryDsl, SqliteConnection};
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
-use tari_ootle_wallet_sdk::storage::{WalletStorageError, WalletStore};
+use tari_ootle_wallet_sdk::storage::{ReadableWalletStore, WalletStorageError, WriteableWalletStore};
 
 use crate::{reader::ReadTransaction, writer::WriteTransaction};
 
@@ -54,9 +54,8 @@ impl SqliteWalletStore {
     }
 }
 
-impl WalletStore for SqliteWalletStore {
+impl ReadableWalletStore for SqliteWalletStore {
     type ReadTransaction<'a> = ReadTransaction<'a>;
-    type WriteTransaction<'a> = WriteTransaction<'a>;
 
     fn create_read_tx(&self) -> Result<Self::ReadTransaction<'_>, WalletStorageError> {
         let mut lock = self.connection.lock().unwrap();
@@ -65,6 +64,10 @@ impl WalletStore for SqliteWalletStore {
             .map_err(|e| WalletStorageError::general("BEGIN transaction", e))?;
         Ok(ReadTransaction::new(lock))
     }
+}
+
+impl WriteableWalletStore for SqliteWalletStore {
+    type WriteTransaction<'a> = WriteTransaction<'a>;
 
     fn create_write_tx(&self) -> Result<Self::WriteTransaction<'_>, WalletStorageError> {
         let mut lock = self.connection.lock().unwrap();

@@ -4,9 +4,10 @@
 use std::{
     collections::HashSet,
     iter,
-    ops::{Deref, DerefMut, Sub},
+    ops::{Add, Deref, DerefMut, Sub},
     str::FromStr,
     sync::MutexGuard,
+    time::Duration,
 };
 
 use diesel::{
@@ -21,13 +22,26 @@ use diesel::{
 use log::*;
 use serde::Serialize;
 use tari_bor::json_encoding::CborValueJsonSerializeWrapper;
-use tari_engine_types::{resource::Resource, substate::SubstateId, UtxoAddress, UtxoId};
-use tari_ootle_common_types::{shard::Shard, StateVersion, VersionedSubstateIdRef};
+use tari_engine_types::{
+    resource::Resource,
+    substate::{SubstateDiff, SubstateId},
+};
+use tari_ootle_common_types::{
+    displayable::Displayable,
+    optional::Optional,
+    shard::Shard,
+    Epoch,
+    StateVersion,
+    VersionedSubstateIdRef,
+};
 use tari_ootle_wallet_sdk::{
     models::{
         AccountUpdate,
         AuthoredTemplateModel,
         ConfidentialOutputModel,
+        ImportedKeyId,
+        KeyId,
+        KeyType,
         NewAccountData,
         NonFungibleToken,
         OutputStatus,
@@ -36,15 +50,20 @@ use tari_ootle_wallet_sdk::{
         TransactionStatus,
         UtxoUnspent,
         VaultModel,
+        WalletEvent,
         WalletLockId,
         WalletTransactionUpdate,
     },
-    storage::{WalletStorageError, WalletStoreReader, WalletStoreWriter},
+    storage::{CommittableStore, WalletEventStoreWriter, WalletStorageError, WalletStoreReader, WalletStoreWriter},
 };
 use tari_template_lib::{
-    models::{EncryptedData, NonFungibleId, ResourceAddress, VaultId},
-    prelude::{crypto::UtxoTag, ComponentAddress, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
-    types::{Amount, TemplateAddress},
+    models::{ComponentAddress, NonFungibleId, ResourceAddress, UtxoAddress, UtxoId, VaultId},
+    types::{
+        crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
+        Amount,
+        EncryptedData,
+        TemplateAddress,
+    },
 };
 use tari_transaction::{Transaction, TransactionId};
 use tari_utilities::hex::Hex;
@@ -56,8 +75,7 @@ use crate::{
     models,
     models::StealthOutputUpdate,
     reader::ReadTransaction,
-    schema::accounts,
-    serialization::{serialize_hex, serialize_json},
+    serialization::{deserialize_hex_try_from, deserialize_json, serialize_hex, serialize_json},
 };
 
 const LOG_TARGET: &str = "auth::tari::dan::wallet_sdk::storage_sqlite::writer";
@@ -93,19 +111,148 @@ impl<'a> WriteTransaction<'a> {
         }
         Ok(())
     }
+
+    fn stealth_outputs_release_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "stealth_outputs_release_by_lock_id";
+        use crate::schema::stealth_outputs;
+
+        // Unlock locked unspent stealth_outputs
+        diesel::update(stealth_outputs::table)
+            .filter(stealth_outputs::lock_id.eq(lock_id))
+            .filter(stealth_outputs::status.eq(OutputStatus::LockedForSpend.as_key_str()))
+            .filter(stealth_outputs::is_on_chain.eq(true))
+            .set((
+                stealth_outputs::status.eq(OutputStatus::Unspent.as_key_str()),
+                stealth_outputs::lock_id.eq::<Option<i32>>(None),
+                stealth_outputs::locked_at.eq::<Option<PrimitiveDateTime>>(None),
+            ))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        // Remove stealth_outputs that were created by this lock
+        diesel::delete(stealth_outputs::table)
+            .filter(stealth_outputs::lock_id.eq(lock_id))
+            .filter(
+                stealth_outputs::status
+                    .eq(OutputStatus::LockedUnconfirmed.as_key_str())
+                    .or(stealth_outputs::status
+                        .eq(OutputStatus::LockedForSpend.as_key_str())
+                        .and(stealth_outputs::is_on_chain.eq(false))),
+            )
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(())
+    }
+
+    fn stealth_outputs_finalize_by_lock_id(
+        &mut self,
+        lock_id: WalletLockId,
+        diff: &SubstateDiff,
+    ) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "stealth_outputs_finalize_by_lock_id";
+        use crate::schema::stealth_outputs;
+
+        // Fetch the outputs locked by this lock_id
+        let locked_outputs = stealth_outputs::table
+            .select((
+                stealth_outputs::id,
+                stealth_outputs::resource_address,
+                stealth_outputs::commitment,
+            ))
+            .filter(stealth_outputs::lock_id.eq(lock_id))
+            .load_iter::<(i32, String, String), _>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        let up_id_index = diff
+            .up_iter()
+            .filter_map(|(id, _)| id.as_utxo_address())
+            .collect::<HashSet<_>>();
+        let down_id_index = diff
+            .down_iter()
+            .filter_map(|(id, _)| id.as_utxo_address())
+            .collect::<HashSet<_>>();
+        let mut to_confirm = vec![];
+        let mut to_spend = vec![];
+
+        for res in locked_outputs {
+            let (id, resx, commitment) = res.map_err(|e| WalletStorageError::general(OPERATION, e))?;
+            let resource_address = resx.parse().map_err(|_| WalletStorageError::DecodingError {
+                operation: "try_to_substate_id",
+                item: "output",
+                details: format!("Corrupt db: invalid resource address '{resx}' for id {id}"),
+            })?;
+            let commitment: PedersenCommitmentBytes =
+                deserialize_hex_try_from(&commitment).map_err(|_| WalletStorageError::DecodingError {
+                    operation: "try_into_output",
+                    item: "output commitment",
+                    details: "Corrupt db: invalid hex representation".to_string(),
+                })?;
+
+            let addr = UtxoAddress::new(resource_address, commitment.into());
+            let is_downed = down_id_index.contains(&addr);
+            let is_upped = up_id_index.contains(&addr);
+
+            if is_upped {
+                to_confirm.push(id);
+            } else if is_downed {
+                to_spend.push(id);
+            } else {
+                // Lock will be released (i.e. LockedUnconfirmed outputs deleted, LockedForSpend -> Unspent)
+            }
+        }
+
+        if !to_confirm.is_empty() {
+            // Unlock locked unconfirmed stealth_outputs
+            diesel::update(stealth_outputs::table)
+                .filter(stealth_outputs::lock_id.eq(lock_id))
+                .filter(stealth_outputs::status.eq(OutputStatus::LockedUnconfirmed.as_key_str()))
+                .filter(stealth_outputs::id.eq_any(to_confirm))
+                .set((
+                    stealth_outputs::status.eq(OutputStatus::Unspent.as_key_str()),
+                    stealth_outputs::lock_id.eq::<Option<i32>>(None),
+                    stealth_outputs::locked_at.eq::<Option<PrimitiveDateTime>>(None),
+                    stealth_outputs::is_on_chain.eq(true),
+                ))
+                .execute(self.connection())
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        }
+
+        if !to_spend.is_empty() {
+            // Mark locked outputs as spent
+            diesel::update(stealth_outputs::table)
+                .filter(stealth_outputs::lock_id.eq(lock_id))
+                .filter(stealth_outputs::status.eq(OutputStatus::LockedForSpend.as_key_str()))
+                .filter(stealth_outputs::id.eq_any(to_spend))
+                .set((
+                    stealth_outputs::status.eq(OutputStatus::Spent.as_key_str()),
+                    stealth_outputs::lock_id.eq::<Option<i32>>(None),
+                    stealth_outputs::locked_at.eq::<Option<PrimitiveDateTime>>(None),
+                ))
+                .execute(self.connection())
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        }
+
+        // Any outputs that were not confirmed or spent are released
+        self.stealth_outputs_release_by_lock_id(lock_id)?;
+
+        Ok(())
+    }
+}
+
+impl CommittableStore for WriteTransaction<'_> {
+    fn commit(&mut self) -> Result<(), WalletStorageError> {
+        self.transaction.commit_internal()?;
+        Ok(())
+    }
+
+    fn rollback(&mut self) -> Result<(), WalletStorageError> {
+        self.transaction.rollback_internal()?;
+        Ok(())
+    }
 }
 
 impl WalletStoreWriter for WriteTransaction<'_> {
-    fn commit(mut self) -> Result<(), WalletStorageError> {
-        self.transaction.commit()?;
-        Ok(())
-    }
-
-    fn rollback(mut self) -> Result<(), WalletStorageError> {
-        self.transaction.rollback()?;
-        Ok(())
-    }
-
     fn jwt_add_empty_token(&mut self) -> Result<u64, WalletStorageError> {
         use crate::schema::auth_status;
 
@@ -183,7 +330,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
 
     // -------------------------------- KeyManager -------------------------------- //
 
-    fn key_manager_insert(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError> {
+    fn key_manager_insert_or_ignore(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError> {
         use crate::schema::key_manager_states;
         let index =
             i64::try_from(index).map_err(|_| WalletStorageError::general("key_manager_insert", "index is negative"))?;
@@ -206,6 +353,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
 
         diesel::insert_into(key_manager_states::table)
             .values(value_set)
+            .on_conflict_do_nothing()
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("key_manager_insert", e))?;
 
@@ -216,6 +364,9 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         use crate::schema::key_manager_states;
         let index = i64::try_from(index)
             .map_err(|_| WalletStorageError::general("key_manager_set_active_index", "index too large"))?;
+
+        // Ensure it exists
+        self.key_manager_insert_or_ignore(branch, index as u64)?;
 
         let active_id = key_manager_states::table
             .select(key_manager_states::id)
@@ -265,6 +416,30 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
         Ok(())
+    }
+
+    fn key_manager_insert_imported_key(
+        &mut self,
+        label: &str,
+        encrypted_key: &[u8],
+        key_type: KeyType,
+    ) -> Result<ImportedKeyId, WalletStorageError> {
+        const OPERATION: &str = "key_manager_insert_imported_key";
+        use crate::schema::key_manager_imported_keys;
+
+        diesel::insert_into(key_manager_imported_keys::table)
+            .values((
+                key_manager_imported_keys::label.eq(label),
+                key_manager_imported_keys::encrypted_secret.eq(encrypted_key),
+                key_manager_imported_keys::key_type.eq(key_type.to_string()),
+            ))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        let last_inserted_id: i32 = diesel::select(dsl::sql::<diesel::sql_types::Integer>("last_insert_rowid()"))
+            .get_result(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(ImportedKeyId::from(last_inserted_id as u32))
     }
 
     // -------------------------------- Config -------------------------------- //
@@ -489,7 +664,11 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         &mut self,
         account_name: Option<&str>,
         address: &ComponentAddress,
-        owner_key_index: u64,
+        view_only_key_id: KeyId,
+        owner_key_id: Option<KeyId>,
+        owner_public_key: &RistrettoPublicKeyBytes,
+        associated_stealth_resources: &HashSet<ResourceAddress>,
+        birthday_epoch: Epoch,
         is_confirmed_on_chain: bool,
         is_default: bool,
     ) -> Result<(), WalletStorageError> {
@@ -506,7 +685,11 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .values((
                 accounts::name.eq(account_name),
                 accounts::address.eq(address.to_string()),
-                accounts::owner_key_index.eq(owner_key_index as i64),
+                accounts::view_only_key_id.eq(serialize_json(&view_only_key_id)?),
+                accounts::owner_key_id.eq(owner_key_id.as_ref().map(serialize_json).transpose()?),
+                accounts::owner_public_key.eq(serialize_hex(owner_public_key)),
+                accounts::stealth_resources.eq(serialize_json(&associated_stealth_resources)?),
+                accounts::birthday_epoch.eq(birthday_epoch.as_u64() as i64),
                 accounts::is_confirmed_on_chain.eq(is_confirmed_on_chain),
                 accounts::is_default.eq(is_default),
             ))
@@ -516,7 +699,11 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
-    fn accounts_update(&mut self, address: &ComponentAddress, update: AccountUpdate) -> Result<(), WalletStorageError> {
+    fn accounts_update(
+        &mut self,
+        address: &ComponentAddress,
+        update: AccountUpdate<'_>,
+    ) -> Result<(), WalletStorageError> {
         use crate::schema::accounts;
         let AccountUpdate {
             name,
@@ -540,11 +727,22 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .map_err(|e| WalletStorageError::general("accounts_update", e))?;
 
         if num_rows == 0 {
-            return Err(WalletStorageError::NotFound {
-                operation: "accounts_update",
-                entity: "account".to_string(),
-                key: address.to_string(),
-            });
+            // Check if the account exists, because this could have been an update that didnt change anything
+            // (rows_affected = 0)
+            let exists = accounts::table
+                .filter(accounts::address.eq(address.to_string()))
+                .limit(1)
+                .count()
+                .get_result::<i64>(self.connection())
+                .map_err(|e| WalletStorageError::general("accounts_update", e))?;
+
+            if exists == 0 {
+                return Err(WalletStorageError::NotFound {
+                    operation: "accounts_update",
+                    entity: "account".to_string(),
+                    key: address.to_string(),
+                });
+            }
         }
 
         Ok(())
@@ -645,7 +843,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         amount_to_lock: Amount,
     ) -> Result<(), WalletStorageError> {
         const OPERATION: &str = "vaults_lock_revealed_funds";
-        use crate::schema::vaults;
+        use crate::schema::{vault_locks, vaults};
 
         if amount_to_lock.is_zero() {
             // No-op
@@ -661,19 +859,25 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         self.ensure_lock_exists(lock_id)?;
         let vault_str = vault_id.to_string();
 
-        let (db_id, existing_lock_id) = vaults::table
-            .select((vaults::id, vaults::locked_by))
+        let vault_db_id = vaults::table
+            .select(vaults::id)
             .filter(vaults::address.eq(&vault_str))
-            .first::<(i32, Option<i32>)>(self.connection())
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-
-        // Only one lock per vault (for simplicity, but unlikely to be a real limitation)
-        if existing_lock_id.is_some_and(|l| l != lock_id) {
-            return Err(WalletStorageError::BadQuery {
+            .first::<i32>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
                 operation: OPERATION,
-                details: format!("Vault {} is already locked by another lock", vault_id),
-            });
-        }
+                entity: "vault".to_string(),
+                key: vault_str.clone(),
+            })?;
+
+        let existing_lock = vault_locks::table
+            .select(vault_locks::lock_id)
+            .filter(vault_locks::vault_id.eq(vault_db_id))
+            .filter(vault_locks::lock_id.eq(lock_id))
+            .count()
+            .get_result::<i64>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
         // TODO: we're limited to i64::MAX. Could be an issue with resources that have a high
         // divisibility. e.g. i64::MAX < 10 ETH. Values could be represented as a string
@@ -684,41 +888,54 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             WalletStorageError::bad_query(OPERATION, "amount to lock is too large, must be less than i64::MAX")
         })?;
 
-        let changeset = (
-            vaults::locked_revealed_balance.eq(amount_to_lock),
-            vaults::locked_by.eq(lock_id),
-        );
-
-        let num_rows = diesel::update(vaults::table)
-            .set(changeset)
-            .filter(vaults::id.eq(db_id))
-            .execute(self.connection())
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-
-        if num_rows == 0 {
-            return Err(WalletStorageError::NotFound {
-                operation: OPERATION,
-                entity: "vault".to_string(),
-                key: vault_id.to_string(),
-            });
+        if existing_lock > 0 {
+            // Add to the existing lock
+            diesel::update(vault_locks::table)
+                .set(vault_locks::amount.eq(vault_locks::amount.add(amount_to_lock)))
+                .filter(vault_locks::lock_id.eq(lock_id))
+                .filter(vault_locks::vault_id.eq(vault_db_id))
+                .execute(self.connection())
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        } else {
+            diesel::insert_into(vault_locks::table)
+                .values((
+                    vault_locks::vault_id.eq(vault_db_id),
+                    vault_locks::lock_id.eq(lock_id),
+                    vault_locks::amount.eq(amount_to_lock),
+                ))
+                .execute(self.connection())
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
         }
 
         Ok(())
     }
 
     fn vaults_finalized_locked_revealed_funds(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError> {
-        const OPERATION: &str = "vaults_finalized_locked_funds";
-        use crate::schema::vaults;
+        const OPERATION: &str = "vaults_finalized_locked_revealed_funds";
+        use crate::schema::{vault_locks, vaults};
 
-        let changeset = (
-            vaults::revealed_balance.eq(vaults::revealed_balance.sub(vaults::locked_revealed_balance)),
-            vaults::locked_revealed_balance.eq(0),
-            vaults::locked_by.eq(None::<i32>),
-        );
+        // Fetch the vault locked by this lock_id
+        let (vault_id, amount) = vault_locks::table
+            .select((vault_locks::vault_id, vault_locks::amount))
+            .filter(vault_locks::lock_id.eq(lock_id))
+            .first::<(i32, i64)>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "vault lock".to_string(),
+                key: lock_id.to_string(),
+            })?;
+
+        // Delete the lock record
+        diesel::delete(vault_locks::table)
+            .filter(vault_locks::lock_id.eq(lock_id))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
         let num_rows = diesel::update(vaults::table)
-            .set(changeset)
-            .filter(vaults::locked_by.eq(lock_id))
+            .set(vaults::revealed_balance.eq(vaults::revealed_balance.sub(amount)))
+            .filter(vaults::id.eq(vault_id))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
@@ -735,21 +952,12 @@ impl WalletStoreWriter for WriteTransaction<'_> {
 
     fn vaults_release_lock_revealed_funds(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError> {
         const OPERATION: &str = "vaults_unlock_revealed_funds";
-        use crate::schema::vaults;
+        use crate::schema::vault_locks;
 
-        let num_rows = diesel::update(vaults::table)
-            .set((vaults::locked_revealed_balance.eq(0), vaults::locked_by.eq(None::<i32>)))
-            .filter(vaults::locked_by.eq(lock_id))
+        diesel::delete(vault_locks::table)
+            .filter(vault_locks::lock_id.eq(lock_id))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-
-        if num_rows == 0 {
-            return Err(WalletStorageError::NotFound {
-                operation: OPERATION,
-                entity: "lock on vault".to_string(),
-                key: lock_id.to_string(),
-            });
-        }
 
         Ok(())
     }
@@ -807,9 +1015,9 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
-    // -------------------------------- Outputs -------------------------------- //
+    // -------------------------------- Confidential Outputs -------------------------------- //
 
-    fn outputs_lock_smallest_amount(
+    fn confidential_outputs_lock_smallest_amount(
         &mut self,
         vault_id: &VaultId,
         lock_id: WalletLockId,
@@ -825,6 +1033,8 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         let locked_output = confidential_outputs::table
             .filter(confidential_outputs::vault_id.eq(vault_db_id))
             .filter(confidential_outputs::status.eq(OutputStatus::Unspent.as_key_str()))
+            // We have the key to spend
+            .filter(confidential_outputs::owner_key_id.is_not_null())
             .order_by(confidential_outputs::value.asc())
             .first::<models::ConfidentialOutput>(self.connection())
             .optional()
@@ -880,7 +1090,8 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                     })
                 })
                 .transpose()?,
-            encryption_secret_key_index: locked_output.encryption_secret_key_index as u64,
+            view_only_key_id: deserialize_json(locked_output.view_only_key_id)?,
+            owner_key_id: locked_output.owner_key_id.as_ref().map(deserialize_json).transpose()?,
             encrypted_data: EncryptedData::try_from(locked_output.encrypted_data).map_err(|len| {
                 WalletStorageError::DecodingError {
                     operation: "outputs_lock_smallest_amount",
@@ -889,12 +1100,13 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 }
             })?,
             public_asset_tag: None,
+            memo: locked_output.memo_json.as_ref().map(deserialize_json).transpose()?,
             status: OutputStatus::LockedForSpend,
             lock_id: Some(lock_id),
         })
     }
 
-    fn outputs_insert(&mut self, output: ConfidentialOutputModel) -> Result<(), WalletStorageError> {
+    fn confidential_outputs_insert(&mut self, output: ConfidentialOutputModel) -> Result<(), WalletStorageError> {
         use crate::schema::{accounts, confidential_outputs, vaults};
 
         let account_id = accounts::table
@@ -917,8 +1129,10 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 // TODO: allow arbitrary precision in wallet
                 confidential_outputs::value.eq(output.value.to_u64_checked().expect("value overflow u64") as i64),
                 confidential_outputs::sender_public_nonce.eq(output.sender_public_nonce.map(|pk| pk.to_hex())),
-                confidential_outputs::encryption_secret_key_index.eq(output.encryption_secret_key_index as i64),
+                confidential_outputs::view_only_key_id.eq(serialize_json(&output.view_only_key_id)?),
+                confidential_outputs::owner_key_id.eq(output.owner_key_id.as_ref().map(serialize_json).transpose()?),
                 confidential_outputs::encrypted_data.eq(output.encrypted_data.as_ref()),
+                confidential_outputs::memo_json.eq(output.memo.as_ref().map(serialize_json).transpose()?),
                 confidential_outputs::status.eq(output.status.as_key_str()),
                 confidential_outputs::lock_id.eq(output.lock_id),
             ))
@@ -928,7 +1142,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
-    fn outputs_finalize_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError> {
+    fn confidential_outputs_finalize_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError> {
         use crate::schema::confidential_outputs;
 
         // Unlock locked unconfirmed confidential_outputs
@@ -958,7 +1172,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
-    fn outputs_release_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError> {
+    fn confidential_outputs_release_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError> {
         use crate::schema::confidential_outputs;
 
         // Unlock locked unspent confidential_outputs
@@ -990,7 +1204,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         lock_id: WalletLockId,
     ) -> Result<StealthOutputModel, WalletStorageError> {
         const OPERATION: &str = "stealth_outputs_lock_smallest_amount";
-        use crate::schema::stealth_outputs;
+        use crate::schema::{accounts, stealth_outputs};
 
         self.ensure_lock_exists(lock_id)?;
 
@@ -1009,10 +1223,13 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                     // Allow locking a UTXO created within the transaction
                     .or(stealth_outputs::status
                         .eq(OutputStatus::LockedUnconfirmed.as_key_str())
-                        .and(stealth_outputs::lock_id.eq(lock_id ))),
+                        .and(stealth_outputs::lock_id.eq(lock_id))),
             )
+            // We have the key to spend
+            .filter(stealth_outputs::owner_key_id.is_not_null())
             .filter(stealth_outputs::is_burnt.eq(false))
             .filter(stealth_outputs::is_frozen.eq(false))
+            .filter(stealth_outputs::is_condition_spendable.eq(true))
             .order_by(stealth_outputs::value.asc())
             .first::<models::StealthOutput>(self.connection())
             .optional()
@@ -1040,6 +1257,43 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(output)
     }
 
+    fn stealth_outputs_lock_many(
+        &mut self,
+        resource_address: &ResourceAddress,
+        utxos: &[&PedersenCommitmentBytes],
+        lock_id: WalletLockId,
+    ) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "stealth_outputs_lock_many";
+        use crate::schema::stealth_outputs;
+
+        let num_rows = diesel::update(stealth_outputs::table)
+            .set((
+                stealth_outputs::status.eq(OutputStatus::LockedForSpend.as_key_str()),
+                stealth_outputs::lock_id.eq(lock_id),
+                stealth_outputs::locked_at.eq(dsl::now),
+            ))
+            .filter(stealth_outputs::resource_address.eq(resource_address.to_string()))
+            .filter(stealth_outputs::commitment.eq_any(utxos.iter().map(|id| serialize_hex(id.as_ref()))))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        if num_rows != utxos.len() {
+            return Err(WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "stealth_output".to_string(),
+                key: format!(
+                    "{}/{} found: resource_address={}, utxos={}",
+                    num_rows,
+                    utxos.len(),
+                    resource_address,
+                    utxos.display()
+                ),
+            });
+        }
+
+        Ok(())
+    }
+
     fn stealth_outputs_insert(&mut self, output: &StealthOutputModel) -> Result<(), WalletStorageError> {
         const OPERATION: &str = "stealth_outputs_insert";
         use crate::schema::{accounts, stealth_outputs};
@@ -1054,15 +1308,20 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                     .assume_not_null()),
                 stealth_outputs::resource_address.eq(output.resource_address.to_string()),
                 stealth_outputs::commitment.eq(output.commitment.to_hex()),
-                stealth_outputs::value.eq(output.value.to_string()),
+                stealth_outputs::value.eq(output.value as i64),
                 stealth_outputs::sender_public_nonce.eq(serialize_hex(output.sender_public_nonce)),
-                stealth_outputs::encryption_secret_key_index.eq(output.encryption_secret_key_index as i64),
+                stealth_outputs::view_only_key_id.eq(serialize_json(&output.view_only_key_id)?),
+                stealth_outputs::owner_key_id.eq(output.owner_key_id.as_ref().map(serialize_json).transpose()?),
                 stealth_outputs::encrypted_data.eq(output.encrypted_data.as_ref()),
                 stealth_outputs::tag_byte.eq(output.tag_byte.value() as i32),
+                stealth_outputs::memo_json.eq(output.memo.as_ref().map(serialize_json).transpose()?),
+                stealth_outputs::spend_condition.eq(serialize_json(&output.spend_condition)?),
+                stealth_outputs::minimum_value_promise.eq(output.minimum_value_promise as i64),
                 stealth_outputs::is_on_chain.eq(output.is_on_chain),
                 stealth_outputs::status.eq(output.status.as_key_str()),
                 stealth_outputs::is_burnt.eq(output.is_burnt),
                 stealth_outputs::is_frozen.eq(output.is_frozen),
+                stealth_outputs::is_condition_spendable.eq(output.is_condition_spendable),
                 stealth_outputs::lock_id.eq(output.lock_id),
             ))
             .execute(self.connection())
@@ -1102,71 +1361,6 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
-    fn stealth_outputs_finalize_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError> {
-        const OPERATION: &str = "stealth_outputs_finalize_by_lock_id";
-        use crate::schema::stealth_outputs;
-
-        // Unlock locked unconfirmed stealth_outputs
-        diesel::update(stealth_outputs::table)
-            .filter(stealth_outputs::lock_id.eq(lock_id))
-            .filter(stealth_outputs::status.eq(OutputStatus::LockedUnconfirmed.as_key_str()))
-            .set((
-                stealth_outputs::status.eq(OutputStatus::Unspent.as_key_str()),
-                stealth_outputs::lock_id.eq::<Option<i32>>(None),
-                stealth_outputs::locked_at.eq::<Option<PrimitiveDateTime>>(None),
-                stealth_outputs::is_on_chain.eq(true),
-            ))
-            .execute(self.connection())
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-
-        // Mark locked confidential_outputs as spent
-        diesel::update(stealth_outputs::table)
-            .filter(stealth_outputs::lock_id.eq(lock_id))
-            .filter(stealth_outputs::status.eq(OutputStatus::LockedForSpend.as_key_str()))
-            .set((
-                stealth_outputs::status.eq(OutputStatus::Spent.as_key_str()),
-                stealth_outputs::lock_id.eq::<Option<i32>>(None),
-                stealth_outputs::locked_at.eq::<Option<PrimitiveDateTime>>(None),
-            ))
-            .execute(self.connection())
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-
-        Ok(())
-    }
-
-    fn stealth_outputs_release_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError> {
-        const OPERATION: &str = "stealth_outputs_release_by_lock_id";
-        use crate::schema::stealth_outputs;
-
-        // Unlock locked unspent stealth_outputs
-        diesel::update(stealth_outputs::table)
-            .filter(stealth_outputs::lock_id.eq(lock_id))
-            .filter(stealth_outputs::status.eq(OutputStatus::LockedForSpend.as_key_str()))
-            .filter(stealth_outputs::is_on_chain.eq(true))
-            .set((
-                stealth_outputs::status.eq(OutputStatus::Unspent.as_key_str()),
-                stealth_outputs::lock_id.eq::<Option<i32>>(None),
-                stealth_outputs::locked_at.eq::<Option<PrimitiveDateTime>>(None),
-            ))
-            .execute(self.connection())
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-
-        // Remove stealth_outputs that were created by this lock
-        diesel::delete(stealth_outputs::table)
-            .filter(stealth_outputs::lock_id.eq(lock_id))
-            .filter(
-                stealth_outputs::status
-                    .eq(OutputStatus::LockedUnconfirmed.as_key_str())
-                    .or(stealth_outputs::status
-                        .eq(OutputStatus::LockedForSpend.as_key_str())
-                        .and(stealth_outputs::is_on_chain.eq(false))),
-            )
-            .execute(self.connection())
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-
-        Ok(())
-    }
-
     fn stealth_outputs_update(
         &mut self,
         address: &UtxoAddress,
@@ -1202,14 +1396,22 @@ impl WalletStoreWriter for WriteTransaction<'_> {
     }
 
     // locks
-    fn locks_create(&mut self) -> Result<WalletLockId, WalletStorageError> {
+    fn locks_create(&mut self, timeout: Option<Duration>) -> Result<WalletLockId, WalletStorageError> {
         const OPERATION: &str = "locks_create";
         use crate::schema::locks;
 
-        diesel::insert_into(locks::table)
-            .default_values()
-            .execute(self.connection())
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        if let Some(timeout) = timeout {
+            let timeout_seconds = i32::try_from(timeout.as_secs()).unwrap_or(i32::MAX);
+            diesel::insert_into(locks::table)
+                .values(locks::timeout_at.eq(dsl::sql(&format!("datetime('now', '+{} seconds')", timeout_seconds))))
+                .execute(self.connection())
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        } else {
+            diesel::insert_into(locks::table)
+                .default_values()
+                .execute(self.connection())
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        }
         // TODO: See if we can upgrade libSQLite 0.35
         let lock_id = locks::table
             .select(locks::id)
@@ -1240,9 +1442,47 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         use crate::schema::locks;
 
         diesel::update(locks::table.filter(locks::id.eq(lock_id)))
-            .set(locks::transaction_id.eq(serialize_hex(transaction_id)))
+            .set((
+                locks::transaction_id.eq(serialize_hex(transaction_id)),
+                locks::timeout_at.eq(None::<PrimitiveDateTime>),
+            ))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(())
+    }
+
+    fn locks_release_stale(&mut self) -> Result<usize, WalletStorageError> {
+        const OPERATION: &str = "locks_release_stale";
+        use crate::schema::locks;
+
+        let stale_locks = locks::table
+            .select(locks::id)
+            .filter(locks::timeout_at.is_not_null())
+            .filter(locks::timeout_at.le(dsl::now))
+            .get_results::<i32>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        let num_stale = stale_locks.len();
+        for lock_id in stale_locks {
+            self.locks_release(lock_id)?;
+        }
+
+        Ok(num_stale)
+    }
+
+    fn locks_unlock_finalized(&mut self, lock_id: WalletLockId, diff: &SubstateDiff) -> Result<(), WalletStorageError> {
+        self.stealth_outputs_finalize_by_lock_id(lock_id, diff)?;
+        self.confidential_outputs_finalize_by_lock_id(lock_id)?;
+        self.vaults_finalized_locked_revealed_funds(lock_id).optional()?;
+        self.locks_delete(lock_id)?;
+        Ok(())
+    }
+
+    fn locks_release(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError> {
+        self.confidential_outputs_release_by_lock_id(lock_id)?;
+        self.stealth_outputs_release_by_lock_id(lock_id)?;
+        self.vaults_release_lock_revealed_funds(lock_id)?;
+        self.locks_delete(lock_id)?;
 
         Ok(())
     }
@@ -1416,18 +1656,23 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
-    fn utxo_process_queue_extend<I: IntoIterator<Item = (u64, UtxoUnspent)>>(
+    fn utxo_process_queue_extend<I: IntoIterator<Item = (ComponentAddress, UtxoUnspent)>>(
         &mut self,
         resource_address: &ResourceAddress,
         items: I,
     ) -> Result<(), WalletStorageError> {
         const OPERATION: &str = "utxo_process_queue_extend";
-        use crate::schema::utxo_process_queue;
+        use crate::schema::{accounts, utxo_process_queue};
 
-        for (account_key_index, unspent) in items {
+        for (account_address, unspent) in items {
             diesel::insert_into(utxo_process_queue::table)
                 .values((
-                    utxo_process_queue::account_key_index.eq(account_key_index as i64),
+                    utxo_process_queue::account_id.eq(accounts::table
+                        .select(accounts::id)
+                        .filter(accounts::address.eq(account_address.to_string()))
+                        .limit(1)
+                        .single_value()
+                        .assume_not_null()),
                     utxo_process_queue::utxo_tag.eq(unspent.tag.value() as i32),
                     utxo_process_queue::public_nonce.eq(serialize_hex(unspent.public_nonce)),
                     utxo_process_queue::resource_address.eq(resource_address.to_string()),
@@ -1471,11 +1716,59 @@ impl WalletStoreWriter for WriteTransaction<'_> {
     }
 }
 
+impl WalletEventStoreWriter for WriteTransaction<'_> {
+    fn append_wallet_event(&mut self, event: &WalletEvent) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "append_wallet_event";
+        use crate::schema::{accounts, wallet_events};
+
+        let (maybe_account, payload) = match event {
+            WalletEvent::TransactionSubmitted(payload) => (
+                payload.new_account.as_ref().map(|a| a.address),
+                serialize_json(payload)?,
+            ),
+            WalletEvent::TransactionFinalized(payload) => (None, serialize_json(payload)?),
+            WalletEvent::TransactionInvalid(payload) => (None, serialize_json(payload)?),
+            WalletEvent::AccountCreatedOnChain(payload) => {
+                (Some(payload.account.component_address), serialize_json(payload)?)
+            },
+            WalletEvent::AccountChangedOnChain(payload) => (Some(payload.account_address), serialize_json(payload)?),
+            WalletEvent::AuthLoginRequest(payload) => (None, serialize_json(payload)?),
+            WalletEvent::UtxoRecoveryStarted(payload) => (None, serialize_json(payload)?),
+            WalletEvent::UtxoRecovered(payload) => (Some(payload.account_address), serialize_json(payload)?),
+            WalletEvent::UtxoRecoveryCompleted(payload) => (None, serialize_json(payload)?),
+            WalletEvent::UtxoSpent(payload) => (Some(payload.account_address), serialize_json(payload)?),
+        };
+
+        let maybe_account = maybe_account.map(|addr| addr.to_string());
+
+        let account_id = match maybe_account {
+            Some(addr) => accounts::table
+                .select(accounts::id)
+                .filter(accounts::address.eq(addr))
+                .first::<i32>(self.connection())
+                .optional()
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?,
+            None => None,
+        };
+
+        diesel::insert_into(wallet_events::table)
+            .values((
+                wallet_events::account_id.eq(account_id),
+                wallet_events::event_type.eq(event.as_event_type().to_string()),
+                wallet_events::event_data.eq(payload),
+            ))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(())
+    }
+}
+
 impl Drop for WriteTransaction<'_> {
     fn drop(&mut self) {
         if !self.transaction.is_done() {
             warn!(target: LOG_TARGET, "WriteTransaction was not committed or rolled back");
-            if let Err(err) = self.transaction.rollback() {
+            if let Err(err) = self.transaction.rollback_internal() {
                 warn!(target: LOG_TARGET, "Failed to rollback WriteTransaction: {}", err);
             }
         }

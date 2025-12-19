@@ -6,34 +6,54 @@ use std::{collections::HashSet, fmt::Display};
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{
+    confidential::MinotariBurnClaimProof,
     hashing::{hasher32, EngineHashDomainLabel},
     indexed_value::IndexedValueError,
-    instruction::Instruction,
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
 };
-use tari_ootle_common_types::{committee::CommitteeInfo, Epoch, SubstateRequirement, SubstateRequirementRef};
-use tari_template_lib::{models::ComponentAddress, prelude::TemplateAddress};
+use tari_ootle_common_types::{
+    committee::CommitteeInfo,
+    Epoch,
+    Network,
+    SubstateAddress,
+    SubstateRequirement,
+    SubstateRequirementRef,
+    ToSubstateAddress,
+    VersionedSubstateId,
+};
+use tari_template_lib::{
+    models::{ClaimedOutputTombstoneAddress, ComponentAddress},
+    prelude::TemplateAddress,
+};
 
 use crate::{
     builder::TransactionBuilder,
     transaction_id::TransactionId,
     v1::UnsealedTransactionV1,
     weight::TransactionWeight,
+    Instruction,
     TransactionSealSignature,
     TransactionSignature,
     TransactionV1,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Transaction {
     V1(TransactionV1),
 }
 
 impl Transaction {
-    pub fn builder() -> TransactionBuilder {
-        TransactionBuilder::new()
+    /// Creates a new transaction builder.
+    /// NOTE: The network is set to LocalNet. Be sure to set the correct network using for_network.
+    /// NOTE: this method will likely be deprecated in the future
+    pub fn builder_localnet() -> TransactionBuilder {
+        Self::builder(Network::LocalNet)
+    }
+
+    pub fn builder<N: Into<u8>>(network: N) -> TransactionBuilder {
+        TransactionBuilder::new(network)
     }
 
     pub fn new(unsigned_transaction: UnsealedTransactionV1, seal_signature: TransactionSealSignature) -> Self {
@@ -139,14 +159,57 @@ impl Transaction {
         }
     }
 
+    pub fn involved_substate_addresses_iter(&self) -> impl Iterator<Item = SubstateAddress> + '_ {
+        self
+            .all_inputs_iter()
+            // The version does not affect the shard group
+            .map(|i| i.or_zero_version().to_substate_address())
+            // We define involvement as either being an input or a known output
+            .chain(self.known_output_addresses_iter())
+    }
+
+    pub fn claim_burn_outputs_iter(&self) -> impl Iterator<Item = ClaimedOutputTombstoneAddress> + '_ {
+        self.claim_burn_iter()
+            .map(|c| ClaimedOutputTombstoneAddress::from_commitment(c.commitment))
+    }
+
+    pub fn claim_burn_iter(&self) -> impl Iterator<Item = &MinotariBurnClaimProof> + '_ {
+        self.instructions()
+            .iter()
+            .chain(self.fee_instructions())
+            .filter_map(|i| i.claim_burn())
+    }
+
     pub fn all_inputs_substate_ids_iter(&self) -> impl Iterator<Item = &SubstateId> + '_ {
         self.inputs().iter().map(|i| i.substate_id())
     }
 
-    /// Returns true if the provided committee is involved in at least one input of this transaction.
-    pub fn is_involved_inputs(&self, committee_info: &CommitteeInfo) -> bool {
-        self.all_inputs_iter()
-            .any(|id| committee_info.includes_substate_id(id.substate_id()))
+    /// Returns true if the provided committee is involved in at least one input or known output of this transaction.
+    /// A committee may be involved even if this function returns false if and only if it is involved in outputs only.
+    pub fn is_involved(&self, committee_info: &CommitteeInfo) -> bool {
+        if self.is_global() {
+            return true;
+        }
+
+        self.involved_substate_addresses_iter()
+            .any(|addr| committee_info.includes_substate_address(&addr))
+    }
+
+    pub fn known_output_addresses_iter(&self) -> impl Iterator<Item = SubstateAddress> + '_ {
+        let tx_substate_address = self.calculate_id().to_substate_address();
+        std::iter::once(tx_substate_address).chain(
+            self.claim_burn_outputs_iter()
+                .map(|c| SubstateAddress::from_object_key(c.as_object_key(), 0)),
+        )
+    }
+
+    pub fn known_outputs_iter(&self) -> impl Iterator<Item = VersionedSubstateId> + '_ {
+        let tx_receipt = self.calculate_id().into_receipt_address();
+        std::iter::once(VersionedSubstateId::new(tx_receipt, 0)).chain(
+            self.claim_burn_outputs_iter()
+                .map(SubstateId::from)
+                .map(|s| VersionedSubstateId::new(s, 0)),
+        )
     }
 
     pub fn has_publish_template(&self) -> bool {
@@ -167,7 +230,7 @@ impl Transaction {
         })
     }
 
-    pub fn num_unique_inputs(&self) -> usize {
+    pub fn num_inputs(&self) -> usize {
         self.all_inputs_substate_ids_iter().count()
     }
 
@@ -183,7 +246,7 @@ impl Transaction {
         }
     }
 
-    pub const fn schema_version(&self) -> u64 {
+    pub const fn schema_version(&self) -> u16 {
         match self {
             Self::V1(tx) => tx.schema_version(),
         }
@@ -195,6 +258,8 @@ impl Transaction {
         }
     }
 
+    /// Returns an iterator that iterates over all the statically referenced template addresses in this transaction.
+    /// NOTE: This does not include templates required for component method calls.
     pub fn referenced_templates_iter(&self) -> impl Iterator<Item = &TemplateAddress> + '_ {
         self.instructions()
             .iter()
@@ -239,29 +304,27 @@ impl Display for Transaction {
 #[cfg(test)]
 mod tests {
     use rand::rngs::OsRng;
-    use tari_common_types::types::PrivateKey;
     use tari_crypto::{
         keys::{PublicKey as _, SecretKey},
-        ristretto::RistrettoPublicKey,
-        tari_utilities::ByteArray,
+        ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     };
     use tari_engine_types::ToByteType;
     use tari_ootle_common_types::crypto::create_key_pair;
-    use tari_template_lib::types::TemplateAddress;
+    use tari_template_lib::{prelude::Bytes, types::TemplateAddress};
 
     use super::*;
-    use crate::args;
+    use crate::{args, call_args};
 
     fn create_transaction() -> TransactionBuilder {
-        Transaction::builder()
-            .for_network(123u8)
+        Transaction::builder(123u8)
             .create_account(Default::default())
             .call_method(ComponentAddress::from_array([1; 32]), "method", args![
                 1,
                 2,
                 3,
                 "string",
-                tari_template_lib::call_args![1, 2]
+                call_args![1, 2],
+                Bytes::from_vec(vec![12; 100])
             ])
             .call_function(TemplateAddress::from_array([1; 32]), "function", args![
                 1,
@@ -270,7 +333,7 @@ mod tests {
                 ComponentAddress::from_array([1; 32])
             ])
             .put_last_instruction_output_on_workspace("workspace")
-            .publish_template(b"template".to_vec())
+            .publish_template(b"template".to_vec().try_into().unwrap())
             .add_input(SubstateRequirement::versioned(
                 SubstateId::Component(ComponentAddress::from_array([1; 32])),
                 1,
@@ -289,15 +352,16 @@ mod tests {
 
     #[test]
     fn it_correctly_signs_and_verifies() {
-        let secret = PrivateKey::random(&mut OsRng);
+        let secret = RistrettoSecretKey::random(&mut OsRng);
         let public_key = RistrettoPublicKey::from_secret_key(&secret);
         let subject = create_transaction().build_and_seal(&secret);
         assert!(subject.verify_all_signatures());
 
-        let secret2 = PrivateKey::random(&mut OsRng);
+        let secret2 = RistrettoSecretKey::random(&mut OsRng);
         let subject = create_transaction()
-            .add_signature(&public_key.to_byte_type(), &secret2)
-            .build_and_seal(&secret);
+            .finish()
+            .add_signer(&public_key.to_byte_type(), &secret2)
+            .seal(&secret);
         assert!(subject.verify_all_signatures());
     }
 }

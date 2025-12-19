@@ -27,7 +27,7 @@ import Transactions from "./Transactions";
 import useAccountStore from "@store/accountStore";
 
 function TransactionsLayout() {
-  const { account, publicKey } = useAccountStore();
+  const { account } = useAccountStore();
   return (
     <>
       <Grid item xs={12} md={12} lg={12}>
@@ -35,7 +35,7 @@ function TransactionsLayout() {
       </Grid>
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
-          <Transactions account={account!} ownerPublicKey={publicKey!} />
+          <Transactions account={account!} />
         </StyledPaper>
       </Grid>
     </>

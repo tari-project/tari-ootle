@@ -130,16 +130,6 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
                 envs: vec![],
             }),
         },
-        // ExecutableConfig {
-        //     instance_type: InstanceType::TariSignalingServer,
-        //     execuable_path: None,
-        //     compile: Some(CompileConfig {
-        //         working_dir: Some(".".into()),
-        //         package_name: "tari_signaling_server".to_string(),
-        //         target_dir: None,
-        //     }),
-        //     env: vec![],
-        // },
         ExecutableConfig {
             instance_type: InstanceType::TariWalletDaemon,
             execuable_path: None,
@@ -203,7 +193,6 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
             instances,
             executables,
         },
-        auto_register_previous_templates: true,
         enable_manual_validator_connect: false,
         public_ip: None,
         log_to_file: false,

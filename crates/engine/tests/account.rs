@@ -3,9 +3,8 @@
 
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine::runtime::{ActionIdent, RuntimeError};
-use tari_engine_types::{instruction::Instruction, ToByteType};
+use tari_engine_types::ToByteType;
 use tari_template_lib::{
-    call_args,
     constants::XTR,
     models::{ComponentAddress, ResourceAddress},
     prelude::AccessRules,
@@ -14,36 +13,16 @@ use tari_template_lib::{
 };
 use tari_template_test_tooling::{
     support::assert_error::{assert_access_denied_for_action, assert_reject_reason},
-    test_faucet_component,
+    xtr_faucet_component,
     TemplateTest,
 };
-use tari_transaction::{args, Transaction};
+use tari_transaction::{args, call_args, Instruction, Transaction};
 
 #[test]
 fn basic_faucet_transfer() {
     let mut template_test = TemplateTest::new(Vec::<&str>::new());
 
-    let faucet_template = template_test.get_template_address("TestFaucet");
-
-    let initial_supply = Amount::from(1_000_000_000_000u64);
-    let result = template_test
-        .execute_and_commit(
-            vec![Instruction::CallFunction {
-                address: faucet_template,
-                function: "mint".to_string(),
-                args: call_args![initial_supply],
-            }],
-            vec![template_test.owner_proof()],
-        )
-        .unwrap();
-    let faucet_component: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
-    let faucet_resource = result
-        .finalize
-        .result
-        .expect("Faucet mint failed")
-        .up_iter()
-        .find_map(|(address, _)| address.as_resource_address())
-        .unwrap();
+    let (faucet_component, faucet_resource) = template_test.create_test_faucet_component(1_000_000_000_000u64);
 
     // Create sender and receiver accounts
     let (sender_address, sender_proof, _) = template_test.create_funded_account();
@@ -51,7 +30,7 @@ fn basic_faucet_transfer() {
 
     let _result = template_test
         .build_and_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(faucet_component, "take_free_coins", args![])
                 .put_last_instruction_output_on_workspace("free_coins")
                 .call_method(sender_address, "deposit", args![Workspace("free_coins")]),
@@ -61,7 +40,7 @@ fn basic_faucet_transfer() {
 
     let result = template_test
         .build_and_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(sender_address, "withdraw", args![faucet_resource, Amount(100)])
                 .put_last_instruction_output_on_workspace("foo_bucket")
                 .call_method(receiver_address, "deposit", args![Workspace("foo_bucket")])
@@ -93,7 +72,7 @@ fn withdraw_from_account_prevented() {
         .execute_and_commit(
             vec![Instruction::CallFunction {
                 address: faucet_template,
-                function: "mint".to_string(),
+                function: "mint".try_into().unwrap(),
                 args: call_args![initial_supply],
             }],
             vec![template_test.owner_proof()],
@@ -131,7 +110,7 @@ fn withdraw_from_account_prevented() {
     let (dest_address, non_owning_token, non_owning_key) = template_test.create_funded_account();
 
     let reason = template_test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(source_account, "withdraw", args![faucet_resource, Amount(100)])
             .put_last_instruction_output_on_workspace("stolen_coins")
             .call_method(source_account, "deposit", args![Workspace("stolen_coins")])
@@ -175,7 +154,7 @@ fn attempt_to_overwrite_account() {
     let source_account_pk = RistrettoPublicKey::from_secret_key(&source_account_sk);
 
     let overwriting_tx = template_test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             // Create component with the same ID
             .create_account(source_account_pk.to_byte_type())
             // Signed by source account so that it can pay the fees for the new account creation
@@ -189,7 +168,7 @@ fn attempt_to_overwrite_account() {
     });
 
     let result = template_test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(source_account, "get_balances", call_args![])
             .build_and_seal(&source_account_sk),
         vec![],
@@ -216,13 +195,14 @@ fn gasless() {
     let fee_account_pk = RistrettoPublicKey::from_secret_key(&fee_account_sk);
 
     test.execute_expect_success(
-        Transaction::builder()
-            .fee_transaction_pay_from_component(fee_account, 1000)
+        Transaction::builder_localnet()
+            .pay_fee_from_component(fee_account, 1000)
             .call_method(user_account, "withdraw", args![XTR, Amount(100)])
             .put_last_instruction_output_on_workspace("b")
             .call_method(user2_account, "deposit", args![Workspace("b")])
-            .add_signature(&fee_account_pk.to_byte_type(), &user_account_sk)
-            .build_and_seal(&fee_account_sk),
+            .finish()
+            .add_signer(&fee_account_pk.to_byte_type(), &user_account_sk)
+            .seal(&fee_account_sk),
         vec![fee_account_proof, user_account_proof],
     );
 
@@ -249,8 +229,8 @@ fn custom_access_rules() {
         .default(rule!(allow_all));
 
     let result = template_test.execute_expect_success(
-        Transaction::builder()
-            .call_method(test_faucet_component(), "take_free_coins", args![])
+        Transaction::builder_localnet()
+            .call_method(xtr_faucet_component(), "take", args![1000])
             .put_last_instruction_output_on_workspace("bucket")
             // Create component with the same ID
             .create_account_with_custom_rules(
@@ -270,11 +250,63 @@ fn custom_access_rules() {
     // We create another account and we we will withdraw from the custom one
     let (user2_account, user2_account_proof, user2_secret_key) = template_test.create_funded_account();
     template_test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(user_account, "withdraw", args![XTR, Amount(100)])
             .put_last_instruction_output_on_workspace("b")
             .call_method(user2_account, "deposit", args![Workspace("b")])
             .build_and_seal(&user2_secret_key),
         vec![user2_account_proof],
     );
+}
+
+#[test]
+fn take_from_bucket() {
+    let mut test = TemplateTest::new(Vec::<&str>::new());
+
+    let faucet_template = test.get_template_address("TestFaucet");
+    let (alice, _proof, _alice_sk) = test.create_empty_account();
+    let (bob, _proof, _bob_sk) = test.create_empty_account();
+
+    let initial_supply = Amount::from(1_000_000_000_000u64);
+    test.execute_expect_success(
+        Transaction::builder_localnet()
+            .allocate_component_address("faucet")
+            .call_function(faucet_template, "mint_with_opts", args![
+                initial_supply,
+                "faucet".to_string(),
+                Workspace("faucet"),
+            ])
+            .call_method("faucet", "take_free_coins_custom", args![1000])
+            .put_last_instruction_output_on_workspace("free_coins")
+            .take_from_bucket("free_coins", 100, "foo_bucket")
+            // Take all to test what happens when free_coins is empty (should not fail due to dangling buckets)
+            .take_from_bucket("free_coins", 900, "bar_bucket")
+            .call_method(alice, "deposit", args![Workspace("foo_bucket")])
+            .call_method(bob, "deposit", args![Workspace("bar_bucket")])
+            .build_and_seal(test.secret_key()),
+        vec![test.owner_proof()],
+    );
+
+    let resources = test.read_only_state_store().get_all_resources().unwrap();
+    let faucet_resource = resources
+        .iter()
+        .find(|(_, r)| r.token_symbol() == Some("faucet"))
+        .map(|(addr, _)| *addr)
+        .unwrap();
+
+    let alice_acc = test.read_only_state_store().get_account(alice).unwrap();
+    let bob_acc = test.read_only_state_store().get_account(bob).unwrap();
+    let alice_balance = test
+        .read_only_state_store()
+        .get_vault(&alice_acc.get_vault_by_resource(&faucet_resource).unwrap().vault_id())
+        .unwrap()
+        .balance();
+    let bob_balance = test
+        .read_only_state_store()
+        .get_vault(&bob_acc.get_vault_by_resource(&faucet_resource).unwrap().vault_id())
+        .unwrap()
+        .balance();
+
+    assert_eq!(alice_balance, 100);
+    assert_eq!(bob_balance, 900);
 }

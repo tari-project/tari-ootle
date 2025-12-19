@@ -34,7 +34,7 @@ import useAccountStore from "@store/accountStore";
 
 function Onboarding() {
   const { mutate, status } = useAccountsCreate();
-  const { setAccount, setPublicKey, setPopup } = useAccountStore();
+  const { setAccount, setOotleAddress, setPopup } = useAccountStore();
   const theme = useTheme();
 
   const [accountFormState, setAccountFormState] = useState({
@@ -50,7 +50,7 @@ function Onboarding() {
       {
         onSuccess: (resp) => {
           setAccount(resp.account);
-          setPublicKey(resp.public_key);
+          setOotleAddress(resp.address);
         },
         onError: (e) => {
           setPopup({ title: "Account create failed: " + e, error: true });

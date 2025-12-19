@@ -6,7 +6,7 @@ use diesel::Queryable;
 #[derive(Debug, Clone, Queryable)]
 pub struct UtxoProcessQueue {
     pub _id: i32,
-    pub account_key_index: i64,
+    pub _account_id: i32,
     pub resource_address: String,
     pub utxo_tag: i32,
     pub public_nonce: String,

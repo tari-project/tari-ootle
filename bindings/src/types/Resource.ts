@@ -5,18 +5,19 @@ import type { Metadata } from "./Metadata";
 import type { OwnerRule } from "./OwnerRule";
 import type { ResourceAccessRules } from "./ResourceAccessRules";
 import type { ResourceType } from "./ResourceType";
+import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
 
 export type Resource = {
   resource_type: ResourceType;
   owner_rule: OwnerRule;
-  owner_key: Array<number>;
+  owner_key: RistrettoPublicKeyBytes | null;
   access_rules: ResourceAccessRules;
   metadata: Metadata;
   /**
    * The total supply of the resource. None means total_supply tracking is disabled.
    */
   total_supply: Amount | null;
-  view_key: string | null;
+  view_key: RistrettoPublicKeyBytes | null;
   auth_hook: AuthHook | null;
   divisibility: number;
 };

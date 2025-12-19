@@ -3,7 +3,13 @@
 
 use std::time::{Duration, Instant};
 
-use tari_ootle_wallet_sdk::storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter};
+use tari_ootle_wallet_sdk::storage::{
+    CommittableStore,
+    WalletStorageError,
+    WalletStore,
+    WalletStoreReader,
+    WalletStoreWriter,
+};
 use thiserror::Error;
 use webauthn_rs::prelude::{Passkey, PasskeyAuthentication, PasskeyRegistration};
 

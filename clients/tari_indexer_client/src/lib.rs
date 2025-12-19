@@ -20,10 +20,17 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+mod conversions;
 #[cfg(feature = "client")]
 pub mod error;
 #[cfg(feature = "client")]
 pub mod graphql_client;
+pub mod protobuf;
 #[cfg(feature = "client")]
-pub mod json_rpc_client;
+pub mod protobuf_stream;
+pub mod rest_api;
+#[cfg(feature = "client")]
+pub mod rest_api_client;
 pub mod types;
+
+pub use prost;

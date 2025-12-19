@@ -3,17 +3,21 @@
 
 use std::str::FromStr;
 
-use tari_engine_types::{Utxo, UtxoAddress, UtxoId, UtxoOutput};
+use tari_engine_types::{Utxo, UtxoOutput};
 use tari_ootle_common_types::StateVersion;
 use tari_ootle_storage::{time::PrimitiveDateTime, StorageError};
 use tari_ootle_wallet_sdk::models::{UtxoBurnt, UtxoSpent, UtxoUnspent, WalletUtxoUpdate};
-use tari_template_lib::prelude::{PedersenCommitmentBytes, ResourceAddress};
+use tari_template_lib::{
+    models::{UtxoAddress, UtxoId},
+    prelude::{PedersenCommitmentBytes, ResourceAddress},
+};
 
 use crate::storage_sqlite::{schema::utxos, serialization::deserialize_bincode};
 
 #[derive(AsChangeset, Default)]
 #[diesel(table_name = utxos)]
 pub(crate) struct UtxoRecordUpdate {
+    pub epoch: Option<i64>,
     pub version: Option<i32>,
     pub output: Option<Option<Vec<u8>>>,
     pub state_version: Option<i64>,
@@ -33,6 +37,7 @@ pub(crate) struct UtxoRecordInsert {
     pub state_version: i64,
     pub output: Option<Vec<u8>>,
     pub utxo_tag: i32,
+    pub epoch: i64,
     pub is_spent: bool,
     pub is_burnt: bool,
     pub is_frozen: bool,
@@ -49,6 +54,7 @@ pub(crate) struct UtxoRecord {
     pub state_version: i64,
     pub output: Option<Vec<u8>>,
     pub _utxo_tag: i32,
+    pub epoch: i64,
     pub _is_spent: bool,
     pub is_burnt: bool,
     pub is_frozen: bool,

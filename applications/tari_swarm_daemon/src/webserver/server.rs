@@ -6,12 +6,14 @@ use std::{str::FromStr, sync::Arc};
 use anyhow::Context;
 use axum::{
     handler::HandlerWithoutStateExt,
-    headers::{authorization::Basic, Authorization},
-    http::{HeaderValue, Response, Uri},
+    http::{header, HeaderValue, Response, StatusCode, Uri},
     response::IntoResponse,
     routing::post,
     Extension,
     Router,
+};
+use axum_extra::{
+    headers::{authorization::Basic, Authorization},
     TypedHeader,
 };
 use axum_jrpc::{
@@ -23,13 +25,13 @@ use axum_jrpc::{
 };
 use include_dir::{include_dir, Dir};
 use log::*;
-use reqwest::{header, StatusCode};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::json;
+use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
 use tokio::fs;
 use tower_http::{cors::CorsLayer, services::ServeDir};
 
-use crate::webserver::{context::HandlerContext, error::HandlerError, handler::JrpcHandler, rpc, templates};
+use crate::webserver::{context::HandlerContext, error::HandlerError, handler::JrpcHandler, rpc};
 
 const LOG_TARGET: &str = "tari::ootle::swarm::webserver";
 
@@ -56,7 +58,6 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
     let serve_misc = ServeDir::new(misc_dir).not_found_service(not_found.into_service());
 
     let router = Router::new()
-        .route("/upload_template", post(templates::upload))
         .route("/json_rpc", post(json_rpc_handler))
         .nest_service("/templates", serve_templates)
         .nest_service("/misc", serve_misc)
@@ -64,16 +65,9 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         .layer(Extension(Arc::new(context)))
         .layer(CorsLayer::permissive());
 
-    let server = axum::Server::try_bind(&bind_address).or_else(|_| {
-        warn!(
-            target: LOG_TARGET,
-            "🕸️ Failed to bind on preferred address {}. Trying OS-assigned", bind_address
-        );
-        axum::Server::try_bind(&"127.0.0.1:0".parse().unwrap())
-    })?;
-
-    let server = server.serve(router.into_make_service());
-    info!(target: LOG_TARGET, "🕸️ Webserver listening on {}", server.local_addr());
+    let listener = try_bind_with_fallback(bind_address).await?;
+    let server = axum::serve(listener, router);
+    info!(target: LOG_TARGET, "🕸️ Webserver listening on {}", server.local_addr()?);
     server.await?;
 
     Ok(())
@@ -114,7 +108,7 @@ async fn handler(
             .body(body.to_owned())
             .unwrap();
     }
-    log::warn!(target: LOG_TARGET, "Not found {:?}", path);
+    warn!(target: LOG_TARGET, "Not found {:?}", path);
     Response::builder()
         .status(StatusCode::NOT_FOUND)
         .body(String::new())
@@ -178,11 +172,11 @@ where
     let resp = handler
         .handle(&context, params)
         .await
-        .map_err(|e| resolve_handler_error(answer_id, &e))?;
+        .map_err(|e| resolve_handler_error(answer_id.clone(), &e))?;
     Ok(JsonRpcResponse::success(answer_id, resp))
 }
 
-fn resolve_handler_error(answer_id: i64, e: &HandlerError) -> JsonRpcResponse {
+fn resolve_handler_error(answer_id: axum_jrpc::Id, e: &HandlerError) -> JsonRpcResponse {
     match e {
         HandlerError::Anyhow(e) => resolve_any_error(answer_id, e),
         // HandlerError::NotFound => JsonRpcResponse::error(
@@ -192,7 +186,7 @@ fn resolve_handler_error(answer_id: i64, e: &HandlerError) -> JsonRpcResponse {
     }
 }
 
-fn resolve_any_error(answer_id: i64, e: &anyhow::Error) -> JsonRpcResponse {
+fn resolve_any_error(answer_id: axum_jrpc::Id, e: &anyhow::Error) -> JsonRpcResponse {
     warn!(target: LOG_TARGET, "🌐 JSON-RPC error: {}", e);
     if let Some(handler_err) = e.downcast_ref::<HandlerError>() {
         return resolve_handler_error(answer_id, handler_err);

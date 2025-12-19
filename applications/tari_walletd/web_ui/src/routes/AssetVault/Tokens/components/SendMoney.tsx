@@ -20,50 +20,28 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { FormEvent, useState, useEffect } from "react";
-import Button from "@mui/material/Button";
+import { FormEvent, useState } from "react";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
 import { useAccountsGetBalances, useAccountsTransfer } from "@api/hooks/useAccounts";
 import useAccountStore from "@store/accountStore";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
 import {
+  BadgeUsage,
   BalanceEntry,
-  ConfidentialTransferInputSelection,
+  UtxoInputSelection,
+  rejectReasonToString,
   ResourceAddress,
   ResourceType,
   substateIdToString,
   XTR,
 } from "@tari-project/typescript-bindings";
 import { transactionsWaitResult } from "@utils/json_rpc";
-import FormStep, { SendMoneyFormState } from "../steps/FormStep";
+import FormStep, { FormError, SendMoneyFormState } from "../steps/FormStep";
 import ConfirmationStep from "../steps/ConfirmationStep";
 import ResultStep, { TransferResult } from "../steps/ResultStep";
 import PopupTitle from "@/components/PopupTitle";
-
-export default function SendMoney() {
-  const [open, setOpen] = useState(false);
-  const { account } = useAccountStore();
-
-  const { data } = useAccountsGetBalances(account ? substateIdToString(account.address) : "");
-  const xtrBalanceEntry = data?.balances?.find((b: BalanceEntry) => b.resource_address === XTR);
-
-  return (
-    <>
-      <Button variant="outlined" onClick={() => setOpen(true)}>
-        Send Tari
-      </Button>
-      <SendMoneyDialog
-        open={open}
-        handleClose={() => setOpen(false)}
-        onSendComplete={() => setOpen(false)}
-        resource_type="Confidential"
-        resource_address={XTR}
-        token_symbol={xtrBalanceEntry?.token_symbol || ""}
-      />
-    </>
-  );
-}
+import { XTR_CURRENCY } from "@utils/constants";
 
 export interface SendMoneyDialogProps {
   open: boolean;
@@ -76,12 +54,13 @@ export interface SendMoneyDialogProps {
 
 export function SendMoneyDialog(props: SendMoneyDialogProps) {
   const INITIAL_VALUES: SendMoneyFormState = {
-    publicKey: "",
-    outputToConfidential: false,
+    address: "",
+    outputToRevealed: false,
     inputSelection: "PreferRevealed",
     amount: "",
     fee: "",
     badge: null,
+    memo: "",
   };
 
   const [activeStep, setActiveStep] = useState(0);
@@ -90,23 +69,28 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   const [isEstimatingFee, setIsEstimatingFee] = useState(false);
   const [transferFormState, setTransferFormState] = useState(INITIAL_VALUES);
   const [transferResult, setTransferResult] = useState<TransferResult | undefined>();
+  const [formError, setFormError] = useState<FormError | null>(null);
   const { mutateAsync: sendIt } = useAccountsTransfer();
 
-  const { account, setPopup } = useAccountStore();
+  const { account } = useAccountStore();
+
+  const { data } = useAccountsGetBalances(account?.component_address);
 
   if (!account) {
     return null;
   }
 
-  const { data } = useAccountsGetBalances(substateIdToString(account.address));
   const badges = data?.balances
     ?.filter((b: BalanceEntry) => b.resource_type === "NonFungible" && BigInt(b.balance) > 0n)
     .map((b: BalanceEntry) => b.resource_address) as string[];
 
   // Find the available balance for the resource we're trying to send
-  const balanceEntry = data?.balances?.find(
-    (b: BalanceEntry) => b.resource_address === (props.resource_address || XTR),
-  );
+  const balanceEntry = data?.balances?.find((b: BalanceEntry) => b.resource_address === props.resource_address);
+
+  if (!balanceEntry) {
+    console.warn("No balance entry found for resource", props.resource_address);
+    return null;
+  }
 
   // Function to calculate available balance based on input selection
   const calculateAvailableBalance = () => {
@@ -139,18 +123,8 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
 
   const availableBalance = calculateAvailableBalance();
 
-  const transfer = {
-    account: substateIdToString(account.address),
-    amount: Math.floor((parseFloat(transferFormState.amount) || 0) * Math.pow(10, balanceEntry?.divisibility || 6)),
-    resource_address: props.resource_address!,
-    destination_public_key: transferFormState.publicKey,
-    resourceType: props.resource_type,
-    output_to_revealed: !transferFormState.outputToConfidential,
-    input_selection: transferFormState.inputSelection as ConfidentialTransferInputSelection,
-    badge: transferFormState.badge,
-  };
-
   function setFormValue(e: React.ChangeEvent<HTMLInputElement>) {
+    setFormError(null);
     const { name, value } = e.target;
 
     // For amount field, parse the input to allow decimal values
@@ -163,19 +137,25 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
       if (parts.length > 2) {
         processedValue = parts[0] + "." + parts.slice(1).join("");
       }
+    } else if (name === "fee" && value) {
+      // let parsed = parseInt(transferFormState.fee);
+      // if (!isNaN(parsed)) {
+      //   processedValue = parsed.toString(); // (parsed / XTR_CURRENCY.DIVISOR).toString();
+      // }
     }
 
     // Clear fee when amount or publicKey changes to trigger re-estimation
-    const shouldClearFee = (name === "amount" || name === "publicKey") && transferFormState.fee;
+    // const shouldClearFee = (name === "amount" || name === "address") && transferFormState.fee;
 
     setTransferFormState({
       ...transferFormState,
       [name]: processedValue,
-      ...(shouldClearFee ? { fee: "" } : {}),
+      // ...(shouldClearFee ? { fee: "" } : {}),
     });
   }
 
   function setSelectFormValue(e: SelectChangeEvent<unknown>) {
+    setFormError(null);
     setTransferFormState({
       ...transferFormState,
       [e.target.name]: e.target.value,
@@ -183,6 +163,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   }
 
   function setCheckboxFormValue(e: React.ChangeEvent<HTMLInputElement>) {
+    setFormError(null);
     setTransferFormState({
       ...transferFormState,
       [e.target.name]: e.target.checked,
@@ -190,6 +171,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   }
 
   const handleUseBadgeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormError(null);
     setUseBadge(e.target.checked);
     if (!e.target.checked) {
       setTransferFormState({
@@ -200,38 +182,51 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   };
 
   const estimateFee = async () => {
-    if (!account || isEstimatingFee || !transferFormState.publicKey.trim() || !transferFormState.amount) {
+    if (!account || isEstimatingFee || !transferFormState.address.trim() || !transferFormState.amount) {
+      return;
+    }
+    if (!balanceEntry) {
+      console.warn("No balance entry found for resource", props.resource_address);
       return;
     }
 
     setIsEstimatingFee(true);
 
     try {
+      let amount = Math.floor((parseFloat(transferFormState.amount) || 0) * Math.pow(10, balanceEntry.divisibility));
       // Create transfer object with current form state
       const currentTransfer = {
-        account: substateIdToString(account.address),
-        amount: Math.floor((parseFloat(transferFormState.amount) || 0) * Math.pow(10, balanceEntry?.divisibility || 6)),
+        account: substateIdToString(account.component_address),
+        amount,
         resource_address: props.resource_address || XTR,
-        destination_public_key: transferFormState.publicKey,
+        destination_address: transferFormState.address,
         resourceType: props.resource_type,
-        output_to_revealed: !transferFormState.outputToConfidential,
-        input_selection: transferFormState.inputSelection as ConfidentialTransferInputSelection,
-        badge: transferFormState.badge,
+        output_to_revealed: transferFormState.outputToRevealed,
+        input_selection: transferFormState.inputSelection as UtxoInputSelection,
+        badge_usage: transferFormState.badge ? { Resource: transferFormState.badge } : ("None" as BadgeUsage),
+        output_memo: transferFormState.memo ? { Message: transferFormState.memo } : undefined,
       };
 
       const result = await sendIt?.({ ...currentTransfer, dry_run: true, max_fee: 3000 });
       const resp = await transactionsWaitResult({ transaction_id: result.transaction_id, timeout_secs: null });
       const transactionResult = resp.result?.result;
 
-      if (!transactionResult || !("Accept" in transactionResult)) {
+      if (!transactionResult) {
         throw new Error("Fee estimation failed");
       }
+      if ("Reject" in transactionResult) {
+        throw new Error(`Transaction rejected: ${rejectReasonToString(transactionResult.Reject)}`);
+      }
+      if ("AcceptFeeRejectRest" in transactionResult) {
+        throw new Error(`Transaction rejected: ${rejectReasonToString(transactionResult.AcceptFeeRejectRest[1])}`);
+      }
 
-      const fee = resp.final_fee + 100;
+      let fee = resp.final_fee;
+      if (props.resource_type === "Confidential") {
+        // TODO: Add extra amount for confidential transactions, since the bullet proof size is variable
+        fee += 100;
+      }
       setTransferFormState((prevState) => ({ ...prevState, fee: fee.toString() }));
-    } catch (error) {
-      console.error("Fee estimation error:", error);
-      // Don't block the user if fee estimation fails
     } finally {
       setIsEstimatingFee(false);
     }
@@ -244,7 +239,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     }
 
     // Check if required fields are filled
-    if (!transferFormState.publicKey.trim() || !transferFormState.amount) {
+    if (!transferFormState.address.trim() || !transferFormState.amount) {
       return;
     }
 
@@ -253,6 +248,10 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
       try {
         await estimateFee();
       } catch (error) {
+        setFormError({
+          type: "general",
+          message: `Failed to estimate fee: ${error}`,
+        });
         console.error("Fee estimation failed:", error);
         return;
       }
@@ -270,6 +269,20 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     setActiveStep(2);
 
     try {
+      let amount = Math.floor((parseFloat(transferFormState.amount) || 0) * Math.pow(10, balanceEntry.divisibility));
+      const transfer = {
+        account: substateIdToString(account.component_address),
+        amount,
+        resource_address: props.resource_address!,
+        destination_address: transferFormState.address,
+        resourceType: props.resource_type,
+        output_to_revealed: transferFormState.outputToRevealed,
+        input_selection: transferFormState.inputSelection as UtxoInputSelection,
+        // TODO: support for other types of BadgeUsage
+        badge_usage: transferFormState.badge ? { Resource: transferFormState.badge } : ("None" as BadgeUsage),
+        output_memo: transferFormState.memo ? { Message: transferFormState.memo } : undefined,
+      };
+
       await sendIt?.({
         ...transfer,
         dry_run: false,
@@ -294,13 +307,13 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   const handleClose = () => {
     const wasSuccessful = transferResult?.success;
     setActiveStep(0);
-    setTransferFormState(INITIAL_VALUES);
     setTransferResult(undefined);
     setUseBadge(false);
     setDisabled(false);
     props.handleClose?.();
     // Call onSendComplete only after successful transfer when dialog closes
     if (wasSuccessful) {
+      setTransferFormState(INITIAL_VALUES);
       props.onSendComplete?.();
     }
   };
@@ -323,7 +336,8 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
             isEstimatingFee={isEstimatingFee}
             availableBalance={availableBalance}
             token_symbol={props.token_symbol}
-            divisibility={balanceEntry?.divisibility || 6}
+            divisibility={balanceEntry.divisibility}
+            formError={formError}
             onSubmit={handleFormSubmit}
             onCancel={handleClose}
             onFormValueChange={setFormValue}

@@ -14,7 +14,11 @@ use serde::Serialize;
 use serde_json::{json, value::Index};
 use tari_ootle_common_types::displayable::Displayable;
 use tari_ootle_storage::{consensus_models::Evidence, Ordering};
-use tari_state_store_rocksdb::{codecs::DbCodec, column_families, error::RocksDbStorageError, traits::Cf};
+use tari_state_store_rocksdb::{
+    codecs::{DbCodec, KeyPrefix},
+    error::RocksDbStorageError,
+    traits::Cf,
+};
 
 use crate::webserver::{
     context::HandlerContext,
@@ -22,9 +26,8 @@ use crate::webserver::{
     handlers::types::{decode_hex_prefix, Column, TableRequest, TableResponse},
 };
 
-pub fn list<CF, F, B, S>(cf: F) -> impl Handler<(), S, B>
+pub fn list<CF, F, S>(cf: F) -> impl Handler<(), S>
 where
-    B: axum::body::HttpBody + Send + 'static,
     S: Clone + Send + Sync + 'static,
     F: Fn() -> CF + Send + Sync + Clone + 'static,
     CF: Cf + Send + Sync + 'static,
@@ -37,21 +40,22 @@ where
             async move {
                 const OPERATION: &str = "list_cf";
                 let db = context.open_db(&db_name)?;
-                let mut table = create_table_for_cf(CF::name());
+                let mut table = create_table_for_cf::<CF>();
                 let transformer = create_transformer::<CF>();
 
                 let tx = db.read_only_context();
                 let cf = tx.cf(cf())?;
                 let key_codec = CF::key_codec();
-                let ordering = if req.asc {
-                    Ordering::Ascending
-                } else {
+                let has_key_prefix = CF::key_prefix().is_some();
+                let ordering = if req.desc {
                     Ordering::Descending
+                } else {
+                    Ordering::Ascending
                 };
                 #[allow(clippy::type_complexity)]
                 let iter: Box<dyn Iterator<Item = Result<(CF::Key, CF::Value), RocksDbStorageError>>> =
-                    if let Some(prefix_hex) = req.query.as_ref() {
-                        let key_prefix = decode_hex_prefix(prefix_hex)?;
+                    if let Some(prefix_hex) = req.query.as_ref().filter(|q| !q.is_empty()) {
+                        let key_prefix = decode_hex_prefix::<CF>(prefix_hex)?;
                         Box::new(cf.prefix_range_iterator_raw_key(ordering, key_prefix))
                     } else {
                         Box::new(cf.iterator(ordering, OPERATION))
@@ -88,7 +92,11 @@ where
                             "value": value,
                         });
                     }
-                    value.set_value("id", serde_json::Value::String(hex::encode(key)));
+
+                    value.set_value(
+                        "id",
+                        serde_json::Value::String(hex::encode(&key[usize::from(has_key_prefix)..])),
+                    );
                     table.add_row(value);
                 }
                 let total = cf.count(OPERATION)?;
@@ -105,18 +113,25 @@ where
 }
 
 #[allow(clippy::too_many_lines)]
-fn create_table_for_cf(cf_name: &str) -> TableResponse {
+fn create_table_for_cf<CF: Cf>() -> TableResponse {
     let mut table = TableResponse::empty();
 
-    match cf_name {
-        "bookkeeping" => {
-            table.with_columns([
-                Column::new("block_id", "Block ID"),
-                Column::new("epoch", "Epoch"),
-                Column::new("height", "Height"),
-            ]);
-        },
-        "blocks" => {
+    let cf_name = CF::name();
+    if cf_name == "bookkeeping" {
+        table.with_columns([
+            Column::new("block_id", "Block ID"),
+            Column::new("epoch", "Epoch"),
+            Column::new("height", "Height"),
+        ]);
+        return table;
+    }
+
+    let Some(prefix) = CF::key_prefix().map(|p| KeyPrefix::from_repr(p).expect("invalid KeyPrefix")) else {
+        return table;
+    };
+
+    match prefix {
+        KeyPrefix::Blocks => {
             table.with_columns([
                 Column::new("block_id", "Block ID"),
                 Column::new("epoch", "Epoch"),
@@ -125,7 +140,7 @@ fn create_table_for_cf(cf_name: &str) -> TableResponse {
                 Column::new("flags", "Flags"),
             ]);
         },
-        "transactions" => {
+        KeyPrefix::Transactions => {
             table.with_columns([
                 Column::new("transaction.V1.id", "Tx Id"),
                 Column::new("transaction.V1.body.transaction.instructions", "Instructions"),
@@ -135,16 +150,7 @@ fn create_table_for_cf(cf_name: &str) -> TableResponse {
                 Column::new("transaction.V1.seal_signature.public_key", "Seal signer"),
             ]);
         },
-        "votes" => {
-            table.with_columns([
-                Column::new("epoch", "Epoch"),
-                Column::new("block_id", "Block ID"),
-                Column::new("decision", "Decision"),
-                Column::new("sender_leaf_hash", "Sender Leaf Hash"),
-                Column::new("signature", "Signature"),
-            ]);
-        },
-        "foreign_proposals" => {
+        KeyPrefix::ForeignProposals => {
             table.with_columns([
                 Column::new("proposal.commit_proof.V1.commit_proof.header.epoch", "Epoch"),
                 Column::new("proposal.commit_proof.V1.commit_proof.header.height", "Height"),
@@ -159,13 +165,13 @@ fn create_table_for_cf(cf_name: &str) -> TableResponse {
                 Column::new("status", "Status"),
             ]);
         },
-        "foreignproposals_epoch_idx" => {
+        KeyPrefix::ForeignProposalsEpochIndex => {
             table.with_columns([
                 Column::new("block_id", "Block ID"),
                 Column::new("proposed_in_block", "Proposed in"),
             ]);
         },
-        s if s == column_families::certificates::proposal::ProposalCertificateCf::name() => {
+        KeyPrefix::ProposalCertificates => {
             table.with_columns([
                 Column::new("height", "Height"),
                 Column::new("header_hash", "Header hash"),
@@ -175,7 +181,7 @@ fn create_table_for_cf(cf_name: &str) -> TableResponse {
                 Column::new("num_signatures", "# sigs"),
             ]);
         },
-        "transaction_pool" => {
+        KeyPrefix::TransactionPool => {
             table.with_columns([
                 Column::new("transaction_id", "Transaction ID"),
                 Column::new("summary", "Summary"),
@@ -191,7 +197,7 @@ fn create_table_for_cf(cf_name: &str) -> TableResponse {
                 Column::new("is_ready", "Is Ready"),
             ]);
         },
-        "substates" => {
+        KeyPrefix::Substates => {
             table.with_columns([
                 Column::new("substate_id", "Substate ID"),
                 Column::new("version", "Version"),
@@ -210,8 +216,8 @@ fn create_table_for_cf(cf_name: &str) -> TableResponse {
 }
 
 fn create_transformer<CF: Cf>() -> Box<dyn Fn(serde_json::Value) -> anyhow::Result<serde_json::Value>> {
-    match CF::name() {
-        n if n == column_families::transaction_pool::TransactionPoolCf::name() => Box::new(|mut v| {
+    match CF::key_prefix() {
+        Some(n) if n == KeyPrefix::TransactionPool.as_u8() => Box::new(|mut v| {
             let stage = v.get("pending_stage").unwrap().as_str().unwrap_or_else(|| {
                 v.get("stage")
                     .unwrap()
@@ -277,7 +283,7 @@ fn create_transformer<CF: Cf>() -> Box<dyn Fn(serde_json::Value) -> anyhow::Resu
             Ok(v)
         }),
 
-        n if n == column_families::certificates::proposal::ProposalCertificateCf::name() => Box::new(|mut v| {
+        Some(n) if n == KeyPrefix::ProposalCertificates.as_u8() => Box::new(|mut v| {
             v["num_signatures"] =
                 serde_json::Value::Number(v["signatures"].as_array().map_or(0, |sigs| sigs.len()).into());
             Ok(v)

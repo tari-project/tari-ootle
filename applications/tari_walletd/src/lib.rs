@@ -26,7 +26,6 @@ mod handlers;
 #[cfg(feature = "web_ui")]
 mod http_ui;
 mod jrpc_server;
-mod notify;
 mod services;
 mod webrtc;
 
@@ -34,25 +33,29 @@ use std::{fs, panic, pin, process};
 
 use log::*;
 use tari_common_types::seeds::seed_words::SeedWords;
-use tari_ootle_common_types::{optional::Optional, NumPreshards};
+use tari_ootle_app_utilities::genesis_resources::{get_public_identity_resource, get_stealth_tari_resource};
+use tari_ootle_common_types::{optional::Optional, Network, NumPreshards};
 use tari_ootle_wallet_sdk::{
-    apis::{
-        config::{ConfigApi, ConfigKey},
-        key_manager::KeyBranch,
-    },
-    WalletSdk,
+    apis::config::{ConfigApi, ConfigKey},
+    cipher_seed::CipherSeedRestore,
+    local_key_store::LocalKeyStore,
+    models::EpochBirthday,
+    WalletSdk as Sdk,
     WalletSdkConfig,
+    WalletSdkSpec,
 };
-use tari_ootle_wallet_sdk_services::indexer_jrpc_impl::IndexerJsonRpcNetworkInterface;
+use tari_ootle_wallet_sdk_services::{
+    account_recovery::AccountRecoveryService,
+    indexer_rest_api::IndexerRestApiNetworkInterface,
+    notify::Notify,
+};
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_shutdown::ShutdownSignal;
-use tari_template_lib::constants::XTR;
 
 use crate::{
     config::ApplicationConfig,
     handlers::{auth::create_authenticator, HandlerContext},
-    notify::Notify,
-    services::{recovery_service, spawn_services},
+    services::spawn_services,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon";
@@ -60,6 +63,16 @@ const LOG_TARGET: &str = "tari::ootle::wallet_daemon";
 const DEFAULT_FEE: u64 = 1500;
 // TODO: must match the global network value. All testnets currently have 256 pre-shards.
 const NUM_PRESHARDS: NumPreshards = NumPreshards::current();
+
+pub struct OotleWalletDaemonSpec;
+
+impl WalletSdkSpec for OotleWalletDaemonSpec {
+    type KeyStore = LocalKeyStore;
+    type NetworkInterface = IndexerRestApiNetworkInterface;
+    type Store = SqliteWalletStore;
+}
+
+pub type WalletSdk = Sdk<OotleWalletDaemonSpec>;
 
 pub async fn run_tari_ootle_walletd(
     config: ApplicationConfig,
@@ -70,31 +83,28 @@ pub async fn run_tari_ootle_walletd(
     // console_subscriber::init();
 
     let wallet_store = init_wallet_store(&config)?;
-    let mut wallet_sdk = initialize_wallet_sdk(&config, wallet_store.clone())?;
+    let mut wallet_sdk: WalletSdk = initialize_wallet_sdk(&config, wallet_store.clone())?;
 
-    let needs_seed_recovery = wallet_sdk.initialize_cipher_seed(seed_words)?;
+    let needs_seed_recovery =
+        wallet_sdk.initialize_cipher_seed(seed_words.map(CipherSeedRestore::FromSeedWords).unwrap_or_default())?;
 
-    wallet_sdk.key_manager_api().get_or_create_initial(KeyBranch::Account)?;
-
-    tokio::spawn({
-        let wallet_sdk = wallet_sdk.clone();
-        async move {
-            // Ensures that the XTR resource is available in the substate cache
-            if let Err(err) = wallet_sdk.substate_api().fetch_resource(XTR).await {
-                error!(target: LOG_TARGET, "Failed to fetch XTR resource: {}", err);
-            }
-        }
-    });
+    // Insert genesis resources
+    let (xtr_addr, xtr_resx) = get_stealth_tari_resource(wallet_sdk.network());
+    wallet_sdk.resources_api().upsert_resource(&xtr_addr, &xtr_resx)?;
+    let (addr, resx) = get_public_identity_resource();
+    wallet_sdk.resources_api().upsert_resource(&addr, &resx)?;
 
     let notify = Notify::new(100);
     let services = spawn_services(shutdown_signal.clone(), notify.clone(), wallet_sdk.clone());
 
     // trigger account scanning if needed
     if needs_seed_recovery {
-        let scanner = recovery_service::AccountRecoveryService::new(
+        let cipher_seed_birthday = wallet_sdk.key_manager_api().get_cipher_seed_birthday_epoch()?;
+        let scanner = AccountRecoveryService::new(
             wallet_sdk.clone(),
             services.account_monitor_handle.clone(),
             config.ootle_wallet_daemon.recovery_abandon_count,
+            cipher_seed_birthday,
         );
         let shutdown_signal = shutdown_signal.clone();
         tokio::spawn(async move {
@@ -119,7 +129,8 @@ pub async fn run_tari_ootle_walletd(
         authenticator,
         shutdown_signal,
     );
-    let (jrpc_address, listen_fut) = jrpc_server::spawn_listener(jrpc_address, signaling_server_address, handlers)?;
+    let (jrpc_address, listen_fut) =
+        jrpc_server::spawn_listener(jrpc_address, signaling_server_address, handlers).await?;
 
     // Run the web ui
     #[cfg(feature = "web_ui")]
@@ -174,26 +185,36 @@ pub async fn run_tari_ootle_walletd(
 }
 
 pub fn init_wallet_store(config: &ApplicationConfig) -> anyhow::Result<SqliteWalletStore> {
-    let store = SqliteWalletStore::try_open(config.common.base_path.join("data/wallet.sqlite"))?;
+    let store = SqliteWalletStore::try_open(config.to_data_dir().join("wallet.sqlite"))?;
     store.run_migrations()?;
     Ok(store)
 }
 
-pub fn initialize_wallet_sdk(
-    config: &ApplicationConfig,
-    store: SqliteWalletStore,
-) -> anyhow::Result<WalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>> {
+pub fn initialize_wallet_sdk(config: &ApplicationConfig, store: SqliteWalletStore) -> anyhow::Result<WalletSdk> {
     let sdk_config = WalletSdkConfig {
         network: config.ootle_wallet_daemon.network,
         override_keyring_password: config.ootle_wallet_daemon.override_keyring_password.clone(),
     };
     let config_api = ConfigApi::new(&store);
-    let indexer_jrpc_endpoint = if let Some(indexer_url) = config_api.get(ConfigKey::IndexerUrl).optional()? {
+    let indexer_endpoint = if let Some(indexer_url) = config_api.get(ConfigKey::IndexerUrl).optional()? {
         indexer_url
     } else {
-        config.ootle_wallet_daemon.indexer_json_rpc_url.clone()
+        config.ootle_wallet_daemon.indexer_api_url.clone()
     };
-    let indexer = IndexerJsonRpcNetworkInterface::new(indexer_jrpc_endpoint);
-    let sdk = WalletSdk::initialize(store, indexer, sdk_config)?;
+    let indexer = IndexerRestApiNetworkInterface::new(indexer_endpoint);
+    let birthday = get_epoch_birthday(sdk_config.network);
+    let sdk = WalletSdk::initialize_with_local_key_store(store, indexer, sdk_config, birthday)?;
     Ok(sdk)
+}
+
+const fn get_epoch_birthday(network: Network) -> EpochBirthday {
+    // TODO: set the zero epoch time for each network according to actual zero epoch time
+    match network {
+        Network::MainNet => EpochBirthday::far_future(),
+        Network::StageNet => EpochBirthday::far_future(),
+        Network::NextNet => EpochBirthday::far_future(),
+        Network::LocalNet => EpochBirthday::far_future(),
+        Network::Igor => EpochBirthday::far_future(),
+        Network::Esmeralda => EpochBirthday::far_future(),
+    }
 }

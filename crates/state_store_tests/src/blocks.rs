@@ -2,31 +2,31 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_common_types::types::FixedHash;
+use tari_consensus_types::{PcId, ShardGroupAccumulatedData};
 use tari_ootle_common_types::{
     optional::Optional,
     Epoch,
     ExtraData,
     ExtraFieldKey,
+    Network,
     NodeHeight,
     NumPreshards,
     ShardGroup,
 };
 use tari_ootle_storage::{
-    consensus_models::{Block, Command},
+    consensus_models::{Block, BookkeepingModel, Command},
     Ordering,
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
 };
+use tari_template_lib::prelude::SchnorrSignatureBytes;
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::helpers::{create_rocksdb, create_tx_atom};
+use crate::helpers::{commit_chain, create_chain, create_rocksdb, create_tx_atom};
 
 mod basic_block_operations {
-    use tari_consensus_types::QcId;
-
     use super::*;
-    use crate::helpers::{commit_chain, create_chain};
 
     #[test]
     fn basic_block_operations_rocksdb() {
@@ -61,7 +61,7 @@ mod basic_block_operations {
         // set qcs
         let block1_from_db = tx.blocks_get(block1.id()).unwrap();
         assert!(!block1_from_db.has_justify_qc());
-        tx.blocks_set_qcs(block1_from_db.id(), None, Some(&QcId::zero()))
+        tx.blocks_set_qcs(block1_from_db.id(), None, Some(&PcId::zero()))
             .unwrap();
         let block1_from_db = tx.blocks_get(block1.id()).unwrap();
         assert!(block1_from_db.has_justify_qc());
@@ -69,7 +69,7 @@ mod basic_block_operations {
         // set is_commited flag
         let block1_from_db = tx.blocks_get(block1.id()).unwrap();
         assert!(!block1_from_db.is_committed());
-        tx.blocks_set_qcs(block1_from_db.id(), Some(&QcId::zero()), None)
+        tx.blocks_set_qcs(block1_from_db.id(), Some(&PcId::zero()), None)
             .unwrap();
         let block1_from_db = tx.blocks_get(block1.id()).unwrap();
         assert!(block1_from_db.is_committed());
@@ -84,10 +84,6 @@ mod basic_block_operations {
 }
 
 mod block_parent_operations {
-    use tari_consensus_types::QcId;
-    use tari_ootle_common_types::Network;
-    use tari_template_lib::prelude::SchnorrSignatureBytes;
-
     use super::*;
 
     #[test]
@@ -125,6 +121,7 @@ mod block_parent_operations {
             SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
             FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
             ExtraData::default(),
         )
         .unwrap();
@@ -147,6 +144,7 @@ mod block_parent_operations {
             SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
             FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
             ExtraData::default(),
         )
         .unwrap();
@@ -181,9 +179,9 @@ mod block_parent_operations {
         assert_eq!(res, vec![]);
 
         // commit the blocks
-        tx.blocks_set_qcs(zero_block.id(), Some(&QcId::zero()), None).unwrap();
-        tx.blocks_set_qcs(block1.id(), Some(&QcId::zero()), None).unwrap();
-        tx.blocks_set_qcs(block2.id(), Some(&QcId::zero()), None).unwrap();
+        tx.blocks_set_qcs(zero_block.id(), Some(&PcId::zero()), None).unwrap();
+        tx.blocks_set_qcs(block1.id(), Some(&PcId::zero()), None).unwrap();
+        tx.blocks_set_qcs(block2.id(), Some(&PcId::zero()), None).unwrap();
 
         // blocks_get_all_by_parent
         let res = tx.blocks_get_committed_by_parent(zero_block.id()).unwrap();
@@ -211,21 +209,13 @@ mod block_parent_operations {
 }
 
 mod block_query_operations {
-    use tari_consensus_types::QcId;
-    use tari_ootle_common_types::Network;
-    use tari_ootle_storage::consensus_models::BookkeepingModel;
-    use tari_template_lib::prelude::SchnorrSignatureBytes;
 
     use super::*;
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn block_query_operations_rocksdb() {
         let (db, _tmp) = create_rocksdb();
-        block_query_operations(&db);
-    }
-
-    #[allow(clippy::too_many_lines)]
-    fn block_query_operations(db: &impl StateStore) {
         let mut tx = db.create_write_tx().unwrap();
 
         // insert multiple blocks
@@ -235,7 +225,7 @@ mod block_query_operations {
 
         let zero_block = Block::zero_block(network, NumPreshards::P64);
         zero_block.insert(&mut tx).unwrap();
-        tx.blocks_set_qcs(zero_block.id(), Some(&QcId::zero()), Some(&QcId::zero()))
+        tx.blocks_set_qcs(zero_block.id(), Some(&PcId::zero()), Some(&PcId::zero()))
             .unwrap();
 
         let shard_group = ShardGroup::all_shards(NumPreshards::P64);
@@ -256,11 +246,12 @@ mod block_query_operations {
             SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
             FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
             ExtraData::default(),
         )
         .unwrap();
         block1.insert(&mut tx).unwrap();
-        tx.blocks_set_qcs(block1.id(), Some(&QcId::zero()), Some(&QcId::zero()))
+        tx.blocks_set_qcs(block1.id(), Some(&PcId::zero()), Some(&PcId::zero()))
             .unwrap();
         block1.as_locked().set(&mut tx).unwrap();
 
@@ -282,11 +273,12 @@ mod block_query_operations {
             SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
             FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
             ExtraData::default(),
         )
         .unwrap();
         block2.insert(&mut tx).unwrap();
-        tx.blocks_set_qcs(block2.id(), Some(&QcId::zero()), Some(&QcId::zero()))
+        tx.blocks_set_qcs(block2.id(), Some(&PcId::zero()), Some(&PcId::zero()))
             .unwrap();
         tx.proposal_certificates_save(block2.justify()).unwrap();
 
@@ -314,6 +306,7 @@ mod block_query_operations {
             SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
             FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
             block3_data.clone(),
         )
         .unwrap();

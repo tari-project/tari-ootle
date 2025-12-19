@@ -7,7 +7,6 @@ use serde::Serialize;
 use tari_consensus_types::BlockId;
 use tari_ootle_common_types::{Epoch, ShardGroup};
 use tari_ootle_storage::consensus_models::{ForeignParkedProposal, ForeignProposal, ForeignProposalRecord};
-use tari_transaction::TransactionId;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ForeignProposalMessage {
@@ -61,7 +60,7 @@ impl Display for ForeignProposalNotificationMessage {
         write!(
             f,
             "ForeignProposalNotificationMessage({}, {})",
-            self.epoch, self.block_id
+            self.epoch, self.block_id,
         )
     }
 }
@@ -76,20 +75,12 @@ pub enum ForeignProposalRequestMessage {
         for_shard_group: ShardGroup,
         epoch: Epoch,
     },
-    /// Request a foreign proposal for a specific transaction ID. This is used as a "bump" when a transaction is
-    /// reached LocalPrepared but the foreign proposal has not yet been received after some time.
-    ByTransactionId {
-        transaction_id: TransactionId,
-        for_shard_group: ShardGroup,
-        epoch: Epoch,
-    },
 }
 
 impl ForeignProposalRequestMessage {
     pub fn epoch(&self) -> Epoch {
         match self {
             Self::ByBlockId { epoch, .. } => *epoch,
-            Self::ByTransactionId { epoch, .. } => *epoch,
         }
     }
 }
@@ -106,17 +97,6 @@ impl Display for ForeignProposalRequestMessage {
                     f,
                     "ForeignProposalRequestMessage(ByBlockId, {}, {}, {})",
                     epoch, for_shard_group, block_id
-                )
-            },
-            Self::ByTransactionId {
-                transaction_id,
-                for_shard_group,
-                epoch,
-            } => {
-                write!(
-                    f,
-                    "ForeignProposalRequestMessage(ByTransactionId, {}, {}, {})",
-                    epoch, for_shard_group, transaction_id
                 )
             },
         }

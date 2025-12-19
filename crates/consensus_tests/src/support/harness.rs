@@ -261,7 +261,7 @@ impl Test {
             } else {
                 self.on_hotstuff_event().await
             };
-            if self.network.is_offline(&address, self.num_committees).await {
+            if self.network.is_offline(&address).await {
                 info!("[{}] Ignoring event for offline node: {:?}", address, event);
                 continue;
             }
@@ -283,7 +283,10 @@ impl Test {
 
     pub fn dump_pool_info(&self) {
         for v in self.validators.values().sorted_unstable_by_key(|a| &a.address) {
-            let pool = v.state_store.with_read_tx(|tx| tx.transaction_pool_get_all()).unwrap();
+            let pool = v
+                .state_store
+                .with_read_tx(|tx| tx.transaction_pool_get_all(1000))
+                .unwrap();
             println!("Validator {}", v.address);
             let mut table = Table::new();
             table
@@ -302,7 +305,7 @@ impl Test {
                     v.address,
                     tx.current_stage(),
                     tx.pending_stage().display(),
-                    tx.transaction_id(),
+                    tx.id(),
                     tx.current_decision(),
                     tx.is_ready(),
                     format!(
@@ -648,11 +651,11 @@ impl TestBuilder {
                     missed_proposal_recovery_threshold: 5,
                     max_number_commands_in_block: 500,
                     fee_exhaust_divisor: 20,
-                    epochs_per_era: Epoch(10),
-                    template_binary_max_size_bytes: 1000 * 1000 * 5,
                 },
-                state_tree_cleanup_interval: Duration::from_secs(60),
-                epoch_gc_interval: Duration::from_secs(60),
+                state_tree_cleanup_interval: Duration::from_secs(1000),
+                epoch_gc_interval: Duration::from_secs(1000),
+                enable_eviction_proposal: true,
+                epoch_end_grace_period: Duration::from_secs(1),
             },
         }
     }
@@ -660,6 +663,11 @@ impl TestBuilder {
     #[allow(dead_code)]
     pub fn disable_timeout(mut self) -> Self {
         self.timeout = None;
+        self
+    }
+
+    pub fn modify_config<F: FnOnce(&mut HotstuffConfig)>(mut self, f: F) -> Self {
+        f(&mut self.config);
         self
     }
 

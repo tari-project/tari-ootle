@@ -39,10 +39,12 @@ use axum::{
 };
 use log::*;
 use serde::Serialize;
+use tari_ootle_app_utilities::tcp::try_bind_with_fallback;
 use tower_http::cors::CorsLayer;
 
 use crate::{
     graphql::model::events::{EventQuery, EventSchema},
+    storage_sqlite::SqliteIndexerStore,
     substate_manager::SubstateManager,
     EventManager,
 };
@@ -52,8 +54,9 @@ const LOG_TARGET: &str = "tari::indexer::graphql";
 pub async fn run_graphql(
     preferred_address: SocketAddr,
     substate_manager: SubstateManager,
-    event_manager: EventManager,
+    store: SqliteIndexerStore,
 ) -> Result<(), anyhow::Error> {
+    let event_manager = EventManager::new(store);
     let schema = Schema::build(EventQuery, EmptyMutation, EmptySubscription)
         .data(substate_manager)
         .data(event_manager)
@@ -64,16 +67,9 @@ pub async fn run_graphql(
         .layer(CorsLayer::permissive())
         .layer(Extension(schema));
 
-    let server = axum::Server::try_bind(&preferred_address)
-        .or_else(|_| {
-            warn!(
-                target: LOG_TARGET,
-                "🌐 Failed to bind on preferred address {}. Trying OS-assigned", preferred_address
-            );
-            axum::Server::try_bind(&"127.0.0.1:0".parse().unwrap())
-        })?
-        .serve(router.into_make_service());
-    let bind_addr = server.local_addr();
+    let listener = try_bind_with_fallback(preferred_address).await?;
+    let server = axum::serve(listener, router);
+    let bind_addr = server.local_addr()?;
     info!(target: LOG_TARGET, "🌐 GraphQL listening on {bind_addr}");
     server.await?;
 

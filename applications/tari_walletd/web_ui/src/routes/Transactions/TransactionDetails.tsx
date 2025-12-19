@@ -48,12 +48,12 @@ import Inputs from "./Inputs";
 import Signers from "./Signers";
 import ExecutionResults from "./ExecutionResults";
 import FeeReceipt from "./FeeReceipt";
-import StatusChip from "@components/StatusChip";
+import TransactionsStatusChip from "@components/TransactionsStatusChip";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import Loading from "@components/Loading";
 import Error from "@components/Error";
-import { FinalizeResult, TransactionResult, TransactionSignature } from "@tari-project/typescript-bindings";
+import { FinalizeResult, TransactionResult } from "@tari-project/typescript-bindings";
 import { getRejectReasonFromTransactionResult, rejectReasonToString } from "@tari-project/typescript-bindings";
 import { BsQuestionCircle } from "react-icons/bs";
 import { formatCurrency } from "@/utils/helpers";
@@ -132,11 +132,7 @@ export default function TransactionDetails() {
       } else {
         reason = txResult.Reject;
       }
-      if (typeof reason === "string") {
-        return reason;
-      } else {
-        return JSON.stringify(reason);
-      }
+      return rejectReasonToString(reason);
     };
 
     const seal_signature = data.transaction.V1?.seal_signature;
@@ -180,7 +176,7 @@ export default function TransactionDetails() {
                   <TableRow>
                     <TableCell>Status</TableCell>
                     <DataTableCell>
-                      <StatusChip status={data.status} />
+                      <TransactionsStatusChip status={data.status} />
                     </DataTableCell>
                   </TableRow>
                   <TableRow>

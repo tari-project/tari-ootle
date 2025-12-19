@@ -37,7 +37,7 @@ use reqwest::{
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json as json;
 use serde_json::json;
-use tari_ootle_wallet_sdk::apis::key_manager::KeyBranch;
+use tari_ootle_wallet_sdk::models::KeyBranch;
 use types::{
     AccountsCreateFreeTestCoinsRequest,
     AccountsCreateFreeTestCoinsResponse,
@@ -82,10 +82,14 @@ use crate::{
         AccountsCreateOrGetResponse,
         AccountsCreateRequest,
         AccountsCreateResponse,
+        AccountsCreateStealthTransferStatementRequest,
+        AccountsCreateStealthTransferStatementResponse,
         AccountsGetBalancesRequest,
         AccountsGetBalancesResponse,
         AccountsListRequest,
         AccountsListResponse,
+        AccountsRenameRequest,
+        AccountsRenameResponse,
         AuthGetAllJwtRequest,
         AuthGetAllJwtResponse,
         AuthRevokeTokenRequest,
@@ -112,6 +116,10 @@ use crate::{
         SettingsGetResponse,
         StealthTransferRequest,
         StealthTransferResponse,
+        StealthUtxosDecryptValueRequest,
+        StealthUtxosDecryptValueResponse,
+        StealthUtxosListRequest,
+        StealthUtxosListResponse,
         TransactionGetAllRequest,
         TransactionGetAllResponse,
         TransactionGetRequest,
@@ -153,6 +161,10 @@ impl WalletDaemonClient {
             request_id: 0,
             token,
         })
+    }
+
+    pub fn endpoint(&self) -> &Url {
+        &self.endpoint
     }
 
     pub fn set_auth_token(&mut self, token: EncodedJwtString) -> &mut Self {
@@ -316,6 +328,15 @@ impl WalletDaemonClient {
             .await
     }
 
+    pub async fn accounts_rename(
+        &mut self,
+        account: ComponentAddressOrName,
+        new_name: String,
+    ) -> Result<AccountsRenameResponse, WalletDaemonClientError> {
+        self.send_request("accounts.rename", &AccountsRenameRequest { account, new_name })
+            .await
+    }
+
     pub async fn accounts_transfer<T: Borrow<AccountsTransferRequest>>(
         &mut self,
         req: T,
@@ -337,6 +358,16 @@ impl WalletDaemonClient {
         self.send_request("accounts.stealth_transfer", req.borrow()).await
     }
 
+    pub async fn accounts_create_stealth_transfer_statement<
+        T: Borrow<AccountsCreateStealthTransferStatementRequest>,
+    >(
+        &mut self,
+        req: T,
+    ) -> Result<AccountsCreateStealthTransferStatementResponse, WalletDaemonClientError> {
+        self.send_request("accounts.create_stealth_transfer_statement", req.borrow())
+            .await
+    }
+
     pub async fn claim_burn<T: Borrow<ClaimBurnRequest>>(
         &mut self,
         req: T,
@@ -344,7 +375,7 @@ impl WalletDaemonClient {
         self.send_request("accounts.claim_burn", req.borrow()).await
     }
 
-    pub async fn create_transfer_proof<T: Borrow<ProofsGenerateRequest>>(
+    pub async fn confidential_create_transfer_proof<T: Borrow<ProofsGenerateRequest>>(
         &mut self,
         req: T,
     ) -> Result<ProofsGenerateResponse, WalletDaemonClientError> {
@@ -457,6 +488,20 @@ impl WalletDaemonClient {
     ) -> Result<PublishTemplateResponse, WalletDaemonClientError> {
         self.send_request("transactions.publish_template", request.borrow())
             .await
+    }
+
+    pub async fn stealth_utxos_list<T: Borrow<StealthUtxosListRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<StealthUtxosListResponse, WalletDaemonClientError> {
+        self.send_request("stealth_utxos.list", request.borrow()).await
+    }
+
+    pub async fn stealth_utxos_decrypt_value<T: Borrow<StealthUtxosDecryptValueRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<StealthUtxosDecryptValueResponse, WalletDaemonClientError> {
+        self.send_request("stealth_utxos.decrypt_value", request.borrow()).await
     }
 
     pub async fn get_settings(&mut self) -> Result<SettingsGetResponse, WalletDaemonClientError> {

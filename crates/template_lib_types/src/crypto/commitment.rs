@@ -35,11 +35,11 @@ impl PedersenCommitmentBytes {
         Self([0u8; Self::length()])
     }
 
-    pub fn from_public_key(commitment: RistrettoPublicKeyBytes) -> Self {
+    pub const fn from_public_key(commitment: RistrettoPublicKeyBytes) -> Self {
         Self(commitment.into_array())
     }
 
-    pub fn from_array(bytes: [u8; Self::length()]) -> Self {
+    pub const fn from_array(bytes: [u8; Self::length()]) -> Self {
         Self(bytes)
     }
 
@@ -61,15 +61,15 @@ impl PedersenCommitmentBytes {
         Ok(Self(bytes))
     }
 
-    pub fn as_bytes(&self) -> &[u8] {
+    pub const fn as_bytes(&self) -> &[u8] {
         &self.0
     }
 
-    pub fn into_array(self) -> [u8; Self::length()] {
+    pub const fn into_array(self) -> [u8; Self::length()] {
         self.0
     }
 
-    pub fn as_hash(&self) -> Hash {
+    pub const fn as_hash(&self) -> Hash {
         Hash::from_array(self.0)
     }
 }

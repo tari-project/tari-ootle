@@ -32,13 +32,12 @@ use tari_common_types::tari_address::TariAddress;
 use tari_transaction_components::{
     consensus::ConsensusManager,
     generate_coinbase_with_wallet_output,
-    key_manager::TariKeyId,
+    key_manager::{KeyManager, TariKeyId},
     transaction_components::{MemoField, RangeProofType, WalletOutput},
     MicroMinotari,
 };
-use tari_transaction_key_manager::MemoryDbKeyManager;
 
-use crate::TariWorld;
+use crate::{util::cucumber_log, TariWorld};
 
 type BaseNodeClient = BaseNodeGrpcClient<tonic::transport::Channel>;
 
@@ -55,6 +54,8 @@ pub fn register_miner_process(world: &mut TariWorld, miner_name: String, base_no
         base_node_name,
         wallet_name,
     };
+
+    cucumber_log(format!("Miner {} registered", miner_name));
     world.miners.insert(miner_name, miner);
 }
 
@@ -89,12 +90,13 @@ async fn create_base_node_client(world: &TariWorld, miner_name: &String) -> Base
     BaseNodeClient::connect(base_node_grpc_url).await.unwrap()
 }
 
-async fn mine_block(world: &TariWorld, payment_address: &TariAddress, base_client: &mut BaseNodeClient) {
+async fn mine_block(world: &mut TariWorld, payment_address: &TariAddress, base_client: &mut BaseNodeClient) {
+    let key_id = world.script_key_id();
     let (block_template, _) = create_block_template_with_coinbase(
         base_client,
         0,
-        &world.key_manager,
-        &world.script_key_id().await,
+        &mut world.key_manager,
+        &key_id,
         payment_address,
         false,
         &world.consensus_manager,
@@ -120,7 +122,7 @@ async fn mine_block_without_wallet_with_template(base_client: &mut BaseNodeClien
 async fn create_block_template_with_coinbase(
     base_client: &mut BaseNodeClient,
     weight: u64,
-    key_manager: &MemoryDbKeyManager,
+    key_manager: &mut KeyManager,
     script_key_id: &TariKeyId,
     wallet_payment_address: &TariAddress,
     stealth_payment: bool,
@@ -162,7 +164,6 @@ async fn create_block_template_with_coinbase(
         RangeProofType::BulletProofPlus,
         MemoField::new_empty(),
     )
-    .await
     .unwrap();
     let body = block_template.body.as_mut().unwrap();
 

@@ -32,68 +32,67 @@ mod dry_run;
 pub mod graphql;
 #[cfg(feature = "web_ui")]
 mod http_ui;
+mod rest_api;
 
-mod block_data;
-mod event_data;
+mod event;
 mod event_manager;
-mod json_rpc;
+#[cfg(feature = "metrics")]
+mod metrics;
 mod network_client;
 mod network_state_sync;
+mod notify;
 mod storage_sqlite;
+mod store;
 mod substate_file_cache;
 mod substate_manager;
+mod template_manager;
 mod transaction_manager;
 
 use std::{convert::Infallible, fs, future, future::Future};
 
 use log::*;
-use network_state_sync::BlockScanner;
 use serde::Serialize;
-use substate_manager::SubstateManager;
 use tari_common::exit_codes::{ExitCode, ExitError};
 use tari_consensus::consensus_constants::ConsensusConstants;
-use tari_engine::transaction::TransactionProcessorConfig;
-use tari_engine_types::confidential::UnclaimedConfidentialOutput;
+use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_epoch_manager::{
-    traits::{EpochManagerSpec, EpochUtxoStore, LayerOneTransactionSubmitter},
+    traits::{EpochManagerSpec, LayerOneTransactionSubmitter},
     EpochManagerEvent,
     EpochManagerReader,
 };
 use tari_epoch_oracles::EpochOracle;
-use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::NetworkingService;
-use tari_ootle_app_utilities::{keypair::setup_keypair_prompt, template_download_queue::TemplateDownloadQueue};
-use tari_ootle_common_types::{layer_one_transaction::LayerOneTransactionDef, Epoch, PeerAddress};
+use tari_ootle_app_utilities::keypair::setup_keypair_prompt;
+use tari_ootle_common_types::{layer_one_transaction::LayerOneTransactionDef, PeerAddress};
 use tari_ootle_storage::global::{DbFactory, GlobalDb};
 use tari_ootle_storage_sqlite::{global::SqliteGlobalDbAdapter, SqliteDbFactory};
 use tari_shutdown::ShutdownSignal;
-use tokio::{task, time};
+use tokio::task;
 
 use crate::{
     bootstrap::{spawn_services, Services},
     config::ApplicationConfig,
-    dry_run::processor::DryRunTransactionProcessor,
     event_manager::EventManager,
     graphql::server::run_graphql,
-    json_rpc::{spawn_json_rpc, JsonRpcHandlers},
-    substate_file_cache::SubstateFileCache,
-    transaction_manager::TransactionManager,
 };
 
 const LOG_TARGET: &str = "tari::indexer::app";
 
 #[allow(clippy::too_many_lines)]
-pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: ShutdownSignal) -> Result<(), ExitError> {
+pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
     info!(target: LOG_TARGET, "Starting indexer node on network {}", config.network);
-    let keypair = setup_keypair_prompt(&config.indexer.identity_file, true)?;
+    let keypair = setup_keypair_prompt(config.to_identity_file_path(), true)?;
 
-    let db_factory = SqliteDbFactory::new(config.indexer.data_dir.clone());
+    let db_factory = SqliteDbFactory::new(config.global_db_path());
     db_factory
         .migrate()
         .map_err(|e| ExitError::new(ExitCode::DatabaseError, e))?;
     let global_db = db_factory
         .get_or_create_global_db()
         .map_err(|e| ExitError::new(ExitCode::DatabaseError, e))?;
+
+    #[cfg(feature = "metrics")]
+    let mut registry = create_metrics_registry(keypair.public_key());
 
     let consensus_constants = ConsensusConstants::from(config.network);
     let services = spawn_services(
@@ -102,69 +101,45 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         keypair.clone(),
         global_db,
         consensus_constants.clone(),
+        #[cfg(feature = "metrics")]
+        &mut registry,
     )
     .await?;
-
-    let mut epoch_manager_events = services.epoch_manager.subscribe();
-
-    let substate_cache_dir = config.common.base_path.join("substate_cache");
-    let substate_cache = SubstateFileCache::new(substate_cache_dir)
-        .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Substate cache error: {}", e)))?;
-
-    let substate_scanner = SubstateScanner::new(
-        services.epoch_manager.clone(),
-        services.validator_node_client_factory.clone(),
-        substate_cache,
-    );
-
-    let substate_manager = SubstateManager::new(substate_scanner.clone(), services.store.clone());
-    let transaction_manager = TransactionManager::new(services.network_client.clone(), services.store.clone());
-
-    // dry run
-    let dry_run_transaction_processor = DryRunTransactionProcessor::new(
-        TransactionProcessorConfig::new(config.network)
-            .with_template_binary_max_size_bytes(consensus_constants.template_binary_max_size_bytes),
-        services.epoch_manager.clone(),
-        services.validator_node_client_factory.clone(),
-        services.template_manager.clone(),
-    );
-
-    // Run the event manager
-    let event_manager = EventManager::new(services.store.clone());
 
     // Run the GraphQL API
     let graphql_address = config.indexer.graphql_address;
     if let Some(address) = graphql_address {
         info!(target: LOG_TARGET, "🌐 Started GraphQL server on {}", address);
-        task::spawn(run_graphql(address, substate_manager.clone(), event_manager));
+        task::spawn(run_graphql(
+            address,
+            services.substate_manager.clone(),
+            services.store.clone(),
+        ));
     }
 
-    // Run the JSON-RPC API
-    let jrpc_address = config.indexer.json_rpc_address;
-    if let Some(jrpc_address) = jrpc_address {
-        info!(target: LOG_TARGET, "🌐 Started JSON-RPC server on {}", jrpc_address);
-        let handlers = JsonRpcHandlers::new(
-            &services,
-            substate_manager,
-            transaction_manager,
-            services.global_db.clone(),
-            services.template_manager.clone(),
-            dry_run_transaction_processor,
-        );
-        let jrpc_address = spawn_json_rpc(jrpc_address, handlers)?;
-        debug!(target: LOG_TARGET, "JSON-RPC address {}", jrpc_address);
+    // Run the REST API
+    let listen_addr = config.indexer.api_listen_address;
+    if let Some(listen_addr) = listen_addr {
+        #[cfg(not(feature = "metrics"))]
+        let server = rest_api::Server::new();
+        #[cfg(feature = "metrics")]
+        let server = rest_api::Server::new(registry);
+        let listen_address = server
+            .spawn(listen_addr, &services, shutdown_signal.clone())
+            .await
+            .map_err(|e| ExitError::new(ExitCode::ConfigError, e))?;
+        debug!(target: LOG_TARGET, "API address {}", listen_address);
         // Run the web ui
         #[cfg(feature = "web_ui")]
         if let Some(address) = config.indexer.web_ui_address {
-            // json rpc
-            let public_jrpc_url = config
+            let public_api_url = config
                 .indexer
-                .web_ui_public_json_rpc_url
-                .unwrap_or_else(|| format!("http://{jrpc_address}/json_rpc"));
-            let public_jrpc_address = url::Url::parse(&public_jrpc_url).map_err(|err| {
+                .web_ui_public_api_url
+                .unwrap_or_else(|| format!("http://{listen_address}"));
+            let public_api_address = url::Url::parse(&public_api_url).map_err(|err| {
                 ExitError::new(
                     ExitCode::ConfigError,
-                    format!("Invalid public JSON-rpc url '{public_jrpc_url}': {err}"),
+                    format!("Invalid public API url '{public_api_url}': {err}"),
                 )
             })?;
 
@@ -186,41 +161,26 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
 
             tokio::spawn(http_ui::server::run_http_ui_server(
                 address,
-                public_jrpc_address,
+                public_api_address,
                 public_graphql_url,
             ));
         }
     }
     #[cfg(not(feature = "web_ui"))]
-    info!(target: LOG_TARGET, "🕸️ Web UI not enabled. Run with --features web_ui to enable it.");
-
-    // Run the event scanner
-    let event_scanner = BlockScanner::new(
-        services.epoch_manager.clone(),
-        services.validator_node_client_factory.clone(),
-        services.store.clone(),
-    );
+    info!(target: LOG_TARGET, "🕸️ Web UI not enabled. Compile with --features web_ui to enable it.");
 
     // Create pid to allow watchers to know that the process has started
     fs::write(config.common.base_path.join("pid"), std::process::id().to_string())
         .map_err(|e| ExitError::new(ExitCode::IOError, e))?;
 
-    let mut scanning_interval = time::interval(config.indexer.scanning_interval);
+    // let mut scanning_interval = time::interval(config.indexer.block_scanning_interval);
     // Skip - because we assume that the reason we missed it is because of scanning
-    scanning_interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+    // scanning_interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+
+    let mut epoch_manager_events = services.epoch_manager.subscribe();
 
     loop {
         tokio::select! {
-            // keep scanning the dan layer for new events
-            _ = scanning_interval.tick() => {
-                // TODO: shutdown while scanning
-                match event_scanner.scan().await {
-                    Ok(0) => {},
-                    Ok(cnt) => info!(target: LOG_TARGET, "Scanned {} block(s) successfully", cnt),
-                    Err(e) =>  error!(target: LOG_TARGET, "Event auto-scan failed: {}", e),
-                };
-            },
-
             Ok(event) = epoch_manager_events.recv() => {
                 if let Err(err) = handle_epoch_manager_event(&services, event).await {
                     error!(target: LOG_TARGET, "Error handling epoch manager event: {}", err);
@@ -228,7 +188,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
             },
 
             _ = shutdown_signal.wait() => {
-                dbg!("Shutting down run_substate_polling");
+                debug!(target: LOG_TARGET, "Shutting down run_substate_polling");
                 break;
             },
         }
@@ -256,19 +216,9 @@ impl EpochManagerSpec for IndexerEpochManagerSpec {
     type Addr = PeerAddress;
     type EpochEventOracle = EpochOracle<GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>>;
     type LayerOneSubmitter = Noop;
-    type TemplateDownloader = TemplateDownloadQueue;
-    type UtxoStore = Noop;
 }
 
 pub struct Noop;
-
-impl EpochUtxoStore for Noop {
-    type Error = Infallible;
-
-    fn add_unclaimed_utxo(&mut self, _epoch: Epoch, _substate: UnclaimedConfidentialOutput) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
 
 impl LayerOneTransactionSubmitter for Noop {
     type Error = Infallible;
@@ -280,4 +230,16 @@ impl LayerOneTransactionSubmitter for Noop {
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send {
         future::ready(Ok(()))
     }
+}
+
+#[cfg(feature = "metrics")]
+fn create_metrics_registry(public_key: &RistrettoPublicKey) -> prometheus_client::registry::Registry {
+    use std::borrow::Cow;
+    prometheus_client::registry::Registry::with_labels(
+        [
+            (Cow::Borrowed("app"), Cow::Borrowed("OotleIndexer")),
+            (Cow::Borrowed("public_key"), Cow::Owned(public_key.to_string())),
+        ]
+        .into_iter(),
+    )
 }

@@ -24,24 +24,22 @@ impl Validator<Transaction> for TransactionNetworkValidator {
     type Context = ();
     type Error = TransactionValidationError;
 
-    fn validate(&self, _context: &Self::Context, input: &Transaction) -> Result<(), Self::Error> {
-        match input {
-            Transaction::V1(tx) => {
-                let tx_network = Network::try_from(tx.network()).map_err(|error| Self::Error::UnknownNetwork {
-                    byte: tx.network(),
-                    details: error.to_string(),
-                })?;
-                if tx_network == self.network {
-                    Ok(())
-                } else {
-                    warn!(target: LOG_TARGET, "TransactionNetworkValidator - FAIL: mismatching networks: TX: {} != Current: {}", tx_network, self.network);
-                    Err(Self::Error::NetworkMismatch {
-                        actual: self.network,
-                        expected: tx_network,
-                    })
-                }
-            },
+    fn validate(&self, _context: &Self::Context, tx: &Transaction) -> Result<(), Self::Error> {
+        let tx_network =
+            Network::try_from(tx.network()).map_err(|error| TransactionValidationError::UnknownNetwork {
+                byte: tx.network(),
+                details: error.to_string(),
+            })?;
+
+        if tx_network != self.network {
+            warn!(target: LOG_TARGET, "TransactionNetworkValidator - FAIL: mismatching networks: TX: {} != Current: {}", tx_network, self.network);
+            return Err(Self::Error::NetworkMismatch {
+                actual: tx_network,
+                expected: self.network,
+            });
         }
+
+        Ok(())
     }
 }
 

@@ -5,7 +5,7 @@ mod account;
 
 mod config;
 
-mod output;
+mod confidential_output;
 
 mod substate;
 
@@ -22,9 +22,9 @@ mod webauthn_registrations;
 
 pub use account::*;
 pub use authored_template::*;
+pub use confidential_output::*;
 pub use config::*;
 pub use non_fungible_tokens::*;
-pub use output::*;
 pub use resource::*;
 pub use stealth_output::*;
 pub use substate::Substate;

@@ -27,6 +27,7 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use tari_consensus::messages::{
+    CatchUpRequestMessage,
     ForeignProposalMessage,
     ForeignProposalNotificationMessage,
     ForeignProposalRequestMessage,
@@ -35,15 +36,15 @@ use tari_consensus::messages::{
     MissingTransactionsResponse,
     NewViewMessage,
     ProposalMessage,
-    SyncRequestMessage,
     VoteMessage,
 };
 use tari_consensus_types::{
     BlockId,
     Decision,
+    PcId,
     ProposalCertificate,
     ProposalVote,
-    QcId,
+    ShardGroupAccumulatedData,
     TimeoutCertificate,
     TimeoutVote,
 };
@@ -71,7 +72,6 @@ use tari_ootle_storage::{
         ForeignProposal,
         ForeignProposalAtom,
         LeaderFee,
-        MintConfidentialOutputAtom,
         SubstateCreated,
         SubstateDestroyed,
         SubstateRecord,
@@ -309,19 +309,6 @@ impl From<&ForeignProposalRequestMessage> for proto::consensus::ForeignProposalR
                     },
                 )),
             },
-            ForeignProposalRequestMessage::ByTransactionId {
-                transaction_id,
-                for_shard_group,
-                epoch,
-            } => Self {
-                request: Some(proto::consensus::foreign_proposal_request::Request::ByTransactionId(
-                    proto::consensus::ForeignProposalRequestByTransactionId {
-                        transaction_id: transaction_id.as_bytes().to_vec(),
-                        for_shard_group: for_shard_group.encode_as_u32(),
-                        epoch: epoch.as_u64(),
-                    },
-                )),
-            },
         }
     }
 }
@@ -338,14 +325,6 @@ impl TryFrom<proto::consensus::ForeignProposalRequest> for ForeignProposalReques
                     for_shard_group: ShardGroup::decode_from_u32(by_block_id.for_shard_group)
                         .ok_or_else(|| anyhow!("Invalid ShardGroup"))?,
                     epoch: Epoch(by_block_id.epoch),
-                }
-            },
-            proto::consensus::foreign_proposal_request::Request::ByTransactionId(by_transaction_id) => {
-                ForeignProposalRequestMessage::ByTransactionId {
-                    transaction_id: TransactionId::try_from(by_transaction_id.transaction_id)?,
-                    for_shard_group: ShardGroup::decode_from_u32(by_transaction_id.for_shard_group)
-                        .ok_or_else(|| anyhow!("Invalid ShardGroup"))?,
-                    epoch: Epoch(by_transaction_id.epoch),
                 }
             },
         })
@@ -481,13 +460,14 @@ impl From<&consensus_models::BlockHeader> for proto::consensus::BlockHeader {
             timestamp: value.timestamp(),
             epoch_hash: value.epoch_hash().as_bytes().to_vec(),
             extra_data: Some(value.extra_data().into()),
+            accumulated_data: Some(value.accumulated_data().into()),
         }
     }
 }
 
 fn try_convert_proto_block_header(
     value: proto::consensus::BlockHeader,
-    justify_id: QcId,
+    justify_id: PcId,
     commands: &BTreeSet<Command>,
 ) -> Result<consensus_models::BlockHeader, anyhow::Error> {
     let network = u8::try_from(value.network)
@@ -520,6 +500,10 @@ fn try_convert_proto_block_header(
             value.state_merkle_root.try_into()?,
             value.timestamp,
             value.epoch_hash.try_into()?,
+            value
+                .accumulated_data
+                .ok_or_else(|| anyhow!("AccumulatedData not provided"))?
+                .try_into()?,
         ))
     } else {
         // We calculate the BlockId and command MR locally from remote data. This means that they will
@@ -543,6 +527,10 @@ fn try_convert_proto_block_header(
                 .ok_or_else(|| anyhow!("Block conversion: Block signature is missing"))?,
             value.timestamp,
             value.epoch_hash.try_into()?,
+            value
+                .accumulated_data
+                .ok_or_else(|| anyhow!("AccumulatedData not provided"))?
+                .try_into()?,
             extra_data,
         )?;
 
@@ -648,9 +636,6 @@ impl From<&Command> for proto::consensus::Command {
             Command::ForeignProposal(foreign_proposal) => {
                 proto::consensus::command::Command::ForeignProposal(foreign_proposal.into())
             },
-            Command::MintConfidentialOutput(atom) => {
-                proto::consensus::command::Command::MintConfidentialOutput(atom.into())
-            },
             Command::EvictNode(atom) => proto::consensus::command::Command::EvictNode(atom.into()),
             Command::EndEpoch => proto::consensus::command::Command::EndEpoch(true),
         };
@@ -672,9 +657,6 @@ impl TryFrom<proto::consensus::Command> for Command {
             proto::consensus::command::Command::SomeAccept(tx) => Command::SomeAccept(tx.try_into()?),
             proto::consensus::command::Command::ForeignProposal(foreign_proposal) => {
                 Command::ForeignProposal(foreign_proposal.try_into()?)
-            },
-            proto::consensus::command::Command::MintConfidentialOutput(atom) => {
-                Command::MintConfidentialOutput(atom.try_into()?)
             },
             proto::consensus::command::Command::EvictNode(atom) => Command::EvictNode(atom.try_into()?),
             proto::consensus::command::Command::EndEpoch(_) => Command::EndEpoch,
@@ -720,7 +702,7 @@ impl From<&LeaderFee> for proto::consensus::LeaderFee {
     fn from(value: &LeaderFee) -> Self {
         Self {
             leader_fee: value.fee,
-            global_exhaust_burn: value.global_exhaust_burn,
+            exhaust_burn: value.exhaust_burn,
         }
     }
 }
@@ -731,7 +713,7 @@ impl TryFrom<proto::consensus::LeaderFee> for LeaderFee {
     fn try_from(value: proto::consensus::LeaderFee) -> Result<Self, Self::Error> {
         Ok(Self {
             fee: value.leader_fee,
-            global_exhaust_burn: value.global_exhaust_burn,
+            exhaust_burn: value.exhaust_burn,
         })
     }
 }
@@ -755,27 +737,6 @@ impl TryFrom<proto::consensus::ForeignProposalAtom> for ForeignProposalAtom {
             block_id: BlockId::try_from(value.block_id)?,
             shard_group: ShardGroup::decode_from_u32(value.shard_group)
                 .ok_or_else(|| anyhow!("Block shard_group ({}) is not a valid", value.shard_group))?,
-        })
-    }
-}
-
-// -------------------------------- MintConfidentialOutputAtom -------------------------------- //
-
-impl From<&MintConfidentialOutputAtom> for proto::consensus::MintConfidentialOutputAtom {
-    fn from(value: &MintConfidentialOutputAtom) -> Self {
-        Self {
-            commitment: value.commitment.as_bytes().to_vec(),
-        }
-    }
-}
-
-impl TryFrom<proto::consensus::MintConfidentialOutputAtom> for MintConfidentialOutputAtom {
-    type Error = anyhow::Error;
-
-    fn try_from(value: proto::consensus::MintConfidentialOutputAtom) -> Result<Self, Self::Error> {
-        use tari_template_lib::models::UnclaimedConfidentialOutputAddress;
-        Ok(Self {
-            commitment: UnclaimedConfidentialOutputAddress::from_bytes(&value.commitment)?,
         })
     }
 }
@@ -834,6 +795,7 @@ impl From<AbortReason> for proto::consensus::AbortReason {
             AbortReason::OneOrMoreInputsNotFound => Self::OneOrMoreInputsNotFound,
             AbortReason::ForeignPledgeInputConflict => Self::ForeignPledgeInputConflict,
             AbortReason::InsufficientFeesPaid => Self::InsufficientFeesPaid,
+            AbortReason::FeePaymentInMainIntent => Self::FeePaymentInMainIntent,
         }
     }
 }
@@ -851,6 +813,7 @@ impl TryFrom<proto::consensus::AbortReason> for AbortReason {
             proto::consensus::AbortReason::OneOrMoreInputsNotFound => Ok(Self::OneOrMoreInputsNotFound),
             proto::consensus::AbortReason::ForeignPledgeInputConflict => Ok(Self::ForeignPledgeInputConflict),
             proto::consensus::AbortReason::InsufficientFeesPaid => Ok(Self::InsufficientFeesPaid),
+            proto::consensus::AbortReason::FeePaymentInMainIntent => Ok(Self::FeePaymentInMainIntent),
         }
     }
 }
@@ -1052,8 +1015,8 @@ impl From<SubstateDestroyed> for proto::consensus::SubstateDestroyedMetadata {
 
 // -------------------------------- SyncRequest -------------------------------- //
 
-impl From<&SyncRequestMessage> for proto::consensus::SyncRequest {
-    fn from(value: &SyncRequestMessage) -> Self {
+impl From<&CatchUpRequestMessage> for proto::consensus::SyncRequest {
+    fn from(value: &CatchUpRequestMessage) -> Self {
         Self {
             epoch: value.epoch.as_u64(),
             block_height: value.block_height.as_u64(),
@@ -1061,7 +1024,7 @@ impl From<&SyncRequestMessage> for proto::consensus::SyncRequest {
     }
 }
 
-impl TryFrom<proto::consensus::SyncRequest> for SyncRequestMessage {
+impl TryFrom<proto::consensus::SyncRequest> for CatchUpRequestMessage {
     type Error = anyhow::Error;
 
     fn try_from(value: proto::consensus::SyncRequest) -> Result<Self, Self::Error> {
@@ -1098,5 +1061,31 @@ impl TryFrom<proto::consensus::ShardStateVersions> for ShardStateVersions {
 
         ShardStateVersions::from_vec(value.versions.into_iter().map(StateVersion::new).collect())
             .map_err(|e| anyhow!("Failed to convert ShardStateVersions: {}", e))
+    }
+}
+
+// -------------------------------- AccumulatedData -------------------------------- //
+
+impl From<&ShardGroupAccumulatedData> for proto::consensus::ShardGroupAccumulatedData {
+    fn from(value: &ShardGroupAccumulatedData) -> Self {
+        // Extract 2 u64s from the total_exhaust_burn u128
+        let msb = value.total_exhaust_burn >> 64;
+        let lsb = value.total_exhaust_burn & u128::from(u64::MAX);
+
+        Self {
+            total_exhaust_burn_msb: msb as u64,
+            total_exhaust_burn_lsb: lsb as u64,
+        }
+    }
+}
+
+impl TryFrom<proto::consensus::ShardGroupAccumulatedData> for ShardGroupAccumulatedData {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::ShardGroupAccumulatedData) -> Result<Self, anyhow::Error> {
+        let total_exhaust_burn =
+            (u128::from(value.total_exhaust_burn_msb) << 64) | u128::from(value.total_exhaust_burn_lsb);
+
+        Ok(Self { total_exhaust_burn })
     }
 }

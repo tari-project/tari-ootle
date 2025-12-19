@@ -70,8 +70,8 @@ pub fn generate_dispatcher(ast: &TemplateAst) -> Result<TokenStream> {
     Ok(output)
 }
 
-fn get_function_names(ast: &TemplateAst) -> impl Iterator<Item = String> + '_ {
-    ast.get_functions().map(|f| f.name)
+fn get_function_names(ast: &TemplateAst) -> impl Iterator<Item = &str> + '_ {
+    ast.get_functions().map(|f| f.name.as_str())
 }
 
 fn get_function_blocks(ast: &TemplateAst) -> impl Iterator<Item = Expr> + '_ {
@@ -79,7 +79,8 @@ fn get_function_blocks(ast: &TemplateAst) -> impl Iterator<Item = Expr> + '_ {
         .map(|function| get_function_block(&ast.template_name, function))
 }
 
-fn get_function_block(template_ident: &Ident, ast: FunctionAst) -> Expr {
+#[allow(clippy::too_many_lines)]
+fn get_function_block(template_ident: &Ident, ast: &FunctionAst) -> Expr {
     let template_mod_name = format_ident!("{}_template", template_ident);
     let mut args: Vec<Expr> = vec![];
     let expected_num_args = ast.input_types.len();
@@ -96,6 +97,7 @@ fn get_function_block(template_ident: &Ident, ast: FunctionAst) -> Expr {
     });
     let func_name = &ast.name;
     let mut is_mutable_call = false;
+
     // encode all arguments of the functions
     for (i, input_type) in ast.input_types.iter().enumerate() {
         let arg_ident = format_ident!("arg_{}", i);
@@ -103,40 +105,59 @@ fn get_function_block(template_ident: &Ident, ast: FunctionAst) -> Expr {
         match input_type {
             // "self" argument
             TypeAst::Receiver { mutability } => {
+                assert!(
+                    !ast.is_migration,
+                    "migration functions cannot have &self or &mut self arguments"
+                );
                 is_mutable_call = *mutability;
                 if is_mutable_call {
                     args.push(parse_quote! { &mut state });
                 } else {
                     args.push(parse_quote! { &state });
                 }
-                stmts.extend(
-                [
-                    parse_quote! {
-                    let component_address = from_value::<::tari_template_lib::models::ComponentAddress>(&call_info.args[#i])
-                        .unwrap_or_else(|e| panic!("failed to decode component instance for function '{}': {}",  #func_name, e));
-                    },
-                    parse_quote! {
-                        let component_manager = engine().component_manager(component_address);
-                    },
-                    parse_quote! {
-                        let mut state = component_manager.get_state::<#template_mod_name::#template_ident>();
-                    },
-                ]);
+                stmts.extend([
+                        parse_quote! {
+                            let component_address = from_value::<::tari_template_lib::models::ComponentAddress>(&call_info.args[#i])
+                                .unwrap_or_else(|e| panic!("failed to decode component instance for function '{}': {}",  #func_name, e));
+                        },
+                        parse_quote! {
+                            let component_manager = engine().component_manager(component_address);
+                        },
+                        parse_quote! {
+                            let mut state = component_manager.get_state::<#template_mod_name::#template_ident>();
+                        },
+                    ]);
             },
             // non-self argument
             TypeAst::Typed { type_path, .. } => {
-                args.push(parse_quote! { #arg_ident });
-                stmts.push(parse_quote! {
-                    let #arg_ident = from_value::<#type_path>(&call_info.args[#i])
-                        .unwrap_or_else(|e| panic!("failed to decode argument at position {} ({}) for function '{}': {}", #i, rust::any::type_name::<#type_path>(), #func_name, e));
-                })
+                if i == 0 && ast.is_migration {
+                    stmts.extend([
+                            parse_quote! {
+                                let component_address = from_value::<::tari_template_lib::models::ComponentAddress>(&call_info.args[0])
+                                    .unwrap_or_else(|e| panic!("failed to decode component instance for function '{}': {}",  #func_name, e));
+                            },
+                            parse_quote! {
+                                let component_manager = engine().component_manager(component_address);
+                            },
+                            parse_quote! {
+                                let old_state = component_manager.get_state::<#type_path>();
+                            },
+                        ]);
+                    args.push(parse_quote! { old_state });
+                } else {
+                    args.push(parse_quote! { #arg_ident });
+                    stmts.push(parse_quote! {
+                            let #arg_ident = from_value::<#type_path>(&call_info.args[#i])
+                                .unwrap_or_else(|e| panic!("failed to decode argument at position {} ({}) for function '{}': {}", #i, rust::any::type_name::<#type_path>(), #func_name, e));
+                        })
+                }
             },
             TypeAst::Tuple { type_tuple, .. } => {
                 args.push(parse_quote! { #arg_ident });
                 stmts.push(parse_quote! {
-                    let #arg_ident = from_value::<#type_tuple>(&call_info.args[#i])
-                        .unwrap_or_else(|e| panic!("failed to decode tuple argument at position {} for function '{}': {}", #i, #func_name, e));
-                });
+                        let #arg_ident = from_value::<#type_tuple>(&call_info.args[#i])
+                            .unwrap_or_else(|e| panic!("failed to decode tuple argument at position {} for function '{}': {}", #i, #func_name, e));
+                    });
             },
         }
     }
@@ -147,19 +168,26 @@ fn get_function_block(template_ident: &Ident, ast: FunctionAst) -> Expr {
         let rtn = #template_mod_name::#template_ident::#function_ident(#(#args),*);
     });
 
-    // replace "Self" if present in the return value
-    stmts.extend(replace_self_in_output(&ast));
+    if ast.is_migration {
+        stmts.extend([
+            // Empty result
+            parse_quote! { result = encode_with_len(&()); },
+            // Set the state to the return value
+            parse_quote! { component_manager.set_state(rtn); },
+        ]);
+    } else {
+        // Handle "Self" (if present) in the return position by creating a new component
+        stmts.extend(replace_self_in_output(ast));
 
-    // encode the result value
-    stmts.push(parse_quote! {
-        result = encode_with_len(&rtn);
-    });
-
-    // after user function invocation, update the component state
-    if is_mutable_call {
+        // encode the result value
         stmts.push(parse_quote! {
-            component_manager.set_state(state);
+            result = encode_with_len(&rtn);
         });
+
+        // after user function invocation, update the component state
+        if is_mutable_call {
+            stmts.push(parse_quote! { component_manager.set_state(state); });
+        }
     }
 
     // construct the code block for the function
@@ -174,22 +202,22 @@ fn get_function_block(template_ident: &Ident, ast: FunctionAst) -> Expr {
 }
 
 fn replace_self_in_output(ast: &FunctionAst) -> Vec<Stmt> {
-    let mut stmts: Vec<Stmt> = vec![];
     if let Some(output_type) = &ast.output_type {
         match output_type {
             TypeAst::Typed { type_path, .. } => {
                 if let Some(stmt) = replace_self_in_single_value(type_path) {
-                    stmts.push(stmt);
+                    return vec![stmt];
                 }
             },
             TypeAst::Tuple { type_tuple, .. } => {
-                stmts.push(replace_self_in_tuple(type_tuple));
+                let stmt = replace_self_in_tuple(type_tuple);
+                return vec![stmt];
             },
             _ => todo!("replace_self_in_output only supports typed and tuple"),
         }
     }
 
-    stmts
+    vec![]
 }
 
 fn replace_self_in_single_value(type_path: &TypePath) -> Option<Stmt> {

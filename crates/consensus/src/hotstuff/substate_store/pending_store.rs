@@ -115,7 +115,7 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
                 },
                 SubstateChange::Down { id, .. } => {
                     debug!(target: LOG_TARGET, "Creating substate in place: {}", id);
-                    let value = creator(Some(id.as_ref()))?;
+                    let value = creator(Some(id.as_versioned_ref()))?;
                     let next_id = id.to_next_version();
                     let up = SubstateChange::Up {
                         shard: id.to_shard(num_preshards),
@@ -168,7 +168,7 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
             },
             SubstateChange::Down { id, .. } => {
                 debug!(target: LOG_TARGET, "Re-creating DOWNed substate in place: {}", id);
-                let value = creator(Some(id.as_ref()))?;
+                let value = creator(Some(id.as_versioned_ref()))?;
                 let next_id = id.into_next_version();
                 let up = SubstateChange::Up {
                     shard: next_id.to_shard(self.num_preshards),
@@ -228,7 +228,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingS
                 }
             },
             SubstateChange::Down { id, .. } => {
-                self.assert_is_up(id.as_ref())?;
+                self.assert_is_up(id.as_versioned_ref())?;
             },
         }
 
@@ -335,6 +335,11 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
             })?;
 
         Ok(LatestSubstateVersion { version, is_up })
+    }
+
+    pub fn exists(&self, id: &SubstateId) -> Result<bool, SubstateStoreError> {
+        let latest = self.get_latest_version(id).optional()?;
+        Ok(latest.is_some())
     }
 
     pub fn get_many<I: IntoIterator<Item = (SubstateRequirement, u32)> + ExactSizeIterator>(
@@ -505,9 +510,10 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
                 if has_local_only_rules && requested_lock_type.is_write() {
                     warn!(
                         target: LOG_TARGET,
-                        "⚠️ Lock conflict(1): [{}] Read lock(local_only={}) is present. Requested lock is {}(local_only={})",
+                        "⚠️ Lock conflict(1): [{}] Read lock(local_only={}) is present in {}. Requested lock is {}(local_only={})",
                         versioned_substate_id,
                         existing.is_local_only(),
+                        existing.transaction_id(),
                         requested_lock_type,
                         is_local_only
                     );
@@ -526,9 +532,10 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
                 if !has_local_only_rules && !same_transaction && !requested_lock_type.is_read() {
                     warn!(
                         target: LOG_TARGET,
-                        "⚠️ Lock conflict(2): [{}] Read lock(local_only={}) is present. Requested lock is {}(local_only={})",
+                        "⚠️ Lock conflict(2): [{}] Read lock(local_only={}) is present in {}. Requested lock is {}(local_only={})",
                         versioned_substate_id,
                         existing.is_local_only(),
+                        existing.transaction_id(),
                         requested_lock_type,
                         is_local_only
                     );
@@ -547,9 +554,10 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
                 if !has_local_only_rules && same_transaction && !requested_lock_type.is_output() {
                     warn!(
                         target: LOG_TARGET,
-                        "⚠️ Lock conflict(3): [{}] Read lock(local_only={}) is present. Requested lock is {}(local_only={})",
+                        "⚠️ Lock conflict(3): [{}] Read lock(local_only={}) is present in {}. Requested lock is {}(local_only={})",
                         versioned_substate_id,
                         existing.is_local_only(),
+                        existing.transaction_id(),
                         requested_lock_type,
                         is_local_only
                     );
@@ -604,9 +612,10 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
                 if !requested_lock_type.is_output() {
                     warn!(
                         target: LOG_TARGET,
-                        "⚠️ Lock conflict: [{}] Write lock(local_only={}) is present. Requested lock is {}(local_only={})",
+                        "⚠️ Lock conflict: [{}] Write lock(local_only={}) is present in {}. Requested lock is {}(local_only={})",
                         versioned_substate_id,
                         existing.is_local_only(),
+                        existing.transaction_id(),
                         requested_lock_type,
                         is_local_only
                     );
@@ -637,10 +646,11 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
                 if !has_local_only_rules {
                     warn!(
                         target: LOG_TARGET,
-                        "⚠️ Lock conflict: [{}, {}] Output lock(local_only={}) is present. Requested lock is {}(local_only={})",
+                        "⚠️ Lock conflict: [{}, {}] Output lock(local_only={}) is present in {}. Requested lock is {}(local_only={})",
                         transaction_id,
                         versioned_substate_id,
                         existing.is_local_only(),
+                        existing.transaction_id(),
                         requested_lock_type,
                         is_local_only
                     );
@@ -659,10 +669,11 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
                 if requested_lock_type.is_output() {
                     warn!(
                         target: LOG_TARGET,
-                        "⚠️ Lock conflict: [{}, {}] Output lock(local_only={}) is present. Requested lock is Output(local_only={})",
+                        "⚠️ Lock conflict: [{}, {}] Output lock(local_only={}) is present in {}. Requested lock is Output(local_only={})",
                         transaction_id,
                         versioned_substate_id,
                         existing.is_local_only(),
+                        existing.transaction_id(),
                         is_local_only
                     );
                     return Err(LockFailedError::LockConflict {

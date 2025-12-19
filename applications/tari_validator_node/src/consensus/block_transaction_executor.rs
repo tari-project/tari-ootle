@@ -28,9 +28,7 @@ pub struct TarBlockTransactionExecutor<TExecutor, TValidator> {
     validator: Arc<TValidator>,
 }
 
-impl<TExecutor, TValidator> TarBlockTransactionExecutor<TExecutor, TValidator>
-where TExecutor: TransactionExecutor
-{
+impl<TExecutor: TransactionExecutor, TValidator> TarBlockTransactionExecutor<TExecutor, TValidator> {
     pub fn new(executor: TExecutor, validator: TValidator) -> Self {
         Self {
             executor,
@@ -120,7 +118,7 @@ where
 
         let exec = TransactionExecution::new(exec_output.result, resolved_inputs, resulting_outputs);
 
-        info!(target: LOG_TARGET, "Transaction {} executed. {}", id, exec.result().finalize.result);
+        info!(target: LOG_TARGET, "Transaction {} executed in {:.2?}. {}", id, exec.result().execution_time, exec.result().finalize.result);
         Ok(exec)
     }
 }

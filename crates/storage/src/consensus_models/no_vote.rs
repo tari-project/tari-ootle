@@ -53,6 +53,8 @@ pub enum NoVoteReason {
     LeaderFeeDisagreement,
     #[error("Total leader fee disagreement")]
     TotalLeaderFeeDisagreement,
+    #[error("Total accumulated exhaust burn disagreement")]
+    TotalExhaustBurnDisagreement,
     #[error("No leader fee")]
     NoLeaderFee,
     #[error("Local only proposed for multi shard")]
@@ -71,10 +73,6 @@ pub enum NoVoteReason {
     ForeignProposalAlreadyConfirmed,
     #[error("Foreign proposal processing failed")]
     ForeignProposalProcessingFailed,
-    #[error("Mint confidential output unknown")]
-    MintConfidentialOutputUnknown,
-    #[error("Mint confidential output store failed")]
-    MintConfidentialOutputStoreFailed,
     #[error("The node is not at the end of the epoch")]
     NotEndOfEpoch,
     #[error("The node is not at the end of the epoch and other commands are present")]
@@ -120,6 +118,7 @@ impl NoVoteReason {
             Self::AllAcceptMustBeCommit { .. } => "AllAcceptMustBeCommit",
             Self::FeeDisagreement => "FeeDisagreement",
             Self::LeaderFeeDisagreement => "LeaderFeeDisagreement",
+            Self::TotalExhaustBurnDisagreement => "TotalExhaustBurnDisagreement",
             Self::NoLeaderFee => "NoLeaderFee",
             Self::LocalOnlyProposedForMultiShard => "LocalOnlyProposedForMultiShard",
             Self::MultiShardProposedForLocalOnly => "MultiShardProposedForLocalOnly",
@@ -129,8 +128,6 @@ impl NoVoteReason {
             Self::ForeignProposalNotReceived => "ForeignProposalNotReceived",
             Self::ForeignProposalAlreadyConfirmed => "ForeignProposalAlreadyConfirmed",
             Self::ForeignProposalProcessingFailed => "ForeignProposalProcessingFailed",
-            Self::MintConfidentialOutputUnknown => "MintConfidentialOutputUnknown",
-            Self::MintConfidentialOutputStoreFailed => "MintConfidentialOutputStoreFailed",
             Self::NotEndOfEpoch => "NotEndOfEpoch",
             Self::EndOfEpochWithOtherCommands => "EndOfEpochWithOtherCommands",
             Self::TotalLeaderFeeDisagreement => "TotalLeaderFeeDisagreement",

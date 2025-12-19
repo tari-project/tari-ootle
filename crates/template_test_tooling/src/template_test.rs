@@ -14,50 +14,57 @@ use serde::de::DeserializeOwned;
 use tari_crypto::{
     keys::PublicKey as _,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
-    tari_utilities::{hex::Hex, ByteArray},
+    tari_utilities::hex::Hex,
 };
 use tari_engine::{
     executables::Executable,
     fees::{FeeModule, FeeTable},
     runtime::{AuthParams, RuntimeModule},
-    state_store::{memory::MemoryStateStore, new_memory_store, StateWriter},
+    state_store::{memory::MemoryStateStore, StateWriter},
     template::LoadedTemplate,
-    transaction::{TransactionError, TransactionProcessor, TransactionProcessorConfig},
+    transaction::{TransactionError, TransactionProcessor},
     wasm::LoadedWasmTemplate,
 };
 use tari_engine_types::{
     commit_result::{ExecuteResult, RejectReason},
-    instruction::Instruction,
+    indexed_value::IndexedWellKnownTypes,
     substate::{SubstateDiff, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
     ToByteType,
 };
-use tari_ootle_common_types::{
-    crypto::create_key_pair_from_seed,
-    substate_type::SubstateType,
-    Network,
-    SubstateRequirement,
-};
-use tari_template_builtin::{ACCOUNT_TEMPLATE_ADDRESS, NFT_FAUCET_TEMPLATE_ADDRESS, XTR_FAUCET_TEMPLATE_ADDRESS};
+use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::SubstateType, SubstateRequirement};
+use tari_template_builtin::all_builtin_templates;
 use tari_template_lib::{
-    args::InstructionArg,
     constants::{NFT_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_COMPONENT_ADDRESS},
-    models::{ComponentAddress, NonFungibleAddress},
+    models::{ComponentAddress, NonFungibleAddress, ResourceAddress},
     prelude::RistrettoPublicKeyBytes,
     types::{Amount, TemplateAddress},
 };
-use tari_transaction::{args, builder::named_args::BuilderWorkspaceKey, Transaction, TransactionBuilder};
+use tari_transaction::{
+    args,
+    args::InstructionArg,
+    builder::{named_args::BuilderWorkspaceKey, MainIntent},
+    Instruction,
+    Transaction,
+    TransactionBuilder,
+};
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 
 use crate::{
-    builtin_component_state::{initialize_builtin_faucet_state, initialize_builtin_nft_faucet_state},
+    builtin_component_state::{
+        add_tari_resources,
+        initialize_builtin_faucet_state,
+        initialize_builtin_nft_faucet_state,
+    },
+    mocks::AlwaysPassesProofVerifier,
     read_only_state_store::ReadOnlyStateStore,
+    template_spec::TemplateSpec,
     track_calls::TrackCallsModule,
     wrapped_transaction::WrappedTransaction,
     Package,
 };
 
-pub const fn test_faucet_component() -> ComponentAddress {
+pub const fn xtr_faucet_component() -> ComponentAddress {
     XTR_FAUCET_COMPONENT_ADDRESS
 }
 
@@ -66,7 +73,7 @@ pub fn test_nft_faucet_component() -> ComponentAddress {
 }
 
 pub struct TemplateTest {
-    package: Package,
+    package: Arc<Package>,
     track_calls: TrackCallsModule,
     secret_key: RistrettoSecretKey,
     public_key: RistrettoPublicKey,
@@ -77,17 +84,21 @@ pub struct TemplateTest {
     fee_table: FeeTable,
     virtual_substates: VirtualSubstates,
     key_seed: u8,
+    auto_add_proofs_from_signers: bool,
 }
 
 impl TemplateTest {
-    pub fn new<I: IntoIterator<Item = P>, P: Clone + AsRef<Path>>(template_paths: I) -> Self {
+    /// The initial balance of a funded account created by `create_funded_account`.
+    pub const FUNDED_ACCOUNT_INITIAL_BALANCE: u64 = 1_000_000_000;
+
+    pub fn new<I: IntoIterator<Item = T>, T: Into<TemplateSpec>>(template_paths: I) -> Self {
         Self::new_internal(template_paths, None::<(String, String)>)
     }
 
-    pub fn new_with_compile_envs<I, P, TEnvs, K, V>(template_paths: I, envs: TEnvs) -> Self
+    pub fn new_with_compile_envs<I, T, TEnvs, K, V>(template_paths: I, envs: TEnvs) -> Self
     where
-        I: IntoIterator<Item = P>,
-        P: Clone + AsRef<Path>,
+        I: IntoIterator<Item = T>,
+        T: Into<TemplateSpec>,
         TEnvs: IntoIterator<Item = (K, V)>,
         TEnvs::IntoIter: Clone,
         K: AsRef<OsStr>,
@@ -96,10 +107,10 @@ impl TemplateTest {
         Self::new_internal(template_paths, envs)
     }
 
-    fn new_internal<I, P, TEnvs, K, V>(template_paths: I, envs: TEnvs) -> Self
+    fn new_internal<I, T, TEnvs, K, V>(templates: I, envs: TEnvs) -> Self
     where
-        I: IntoIterator<Item = P>,
-        P: Clone + AsRef<Path>,
+        I: IntoIterator<Item = T>,
+        T: Into<TemplateSpec>,
         TEnvs: IntoIterator<Item = (K, V)>,
         TEnvs::IntoIter: Clone,
         K: AsRef<OsStr>,
@@ -108,17 +119,18 @@ impl TemplateTest {
         let mut builder = Package::builder();
 
         // Add builtin templates
-        builder.add_builtin_template(&ACCOUNT_TEMPLATE_ADDRESS);
-        builder.add_builtin_template(&NFT_FAUCET_TEMPLATE_ADDRESS);
-        builder.add_builtin_template(&XTR_FAUCET_TEMPLATE_ADDRESS);
+        for (addr, code) in all_builtin_templates() {
+            builder.add_template_from_code(*addr, *code);
+        }
 
-        // Add the faucet template for fungible tokens
+        // Add the faucet template for non-XTR fungible tokens
         builder.add_template(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/faucet"));
 
         // Add all of the templates specified in the argument
         let envs_iter = envs.into_iter();
-        for path in template_paths {
-            builder.add_template_with_envs(path, envs_iter.clone());
+        for template in templates {
+            let spec = template.into();
+            builder.add_template_opts(spec.path, &spec.features, envs_iter.clone());
         }
 
         let package = builder.build();
@@ -149,13 +161,13 @@ impl TemplateTest {
         virtual_substates.insert(VirtualSubstateId::CurrentEpoch, VirtualSubstate::CurrentEpoch(0));
 
         Self {
-            package,
+            package: Arc::new(package),
             track_calls: TrackCallsModule::new(),
             public_key,
             secret_key,
             name_to_template,
             last_outputs: HashSet::new(),
-            state_store: new_memory_store(),
+            state_store: MemoryStateStore::new(),
             virtual_substates,
             enable_fees: false,
             fee_table: FeeTable {
@@ -164,14 +176,17 @@ impl TemplateTest {
                 per_byte_storage_cost: 1,
                 per_event_cost: 1,
                 per_log_cost: 1,
+                per_signature_verification_cost: 1,
+                per_template_load_cost_unit: 1,
             },
             key_seed: 1,
+            auto_add_proofs_from_signers: true,
         }
     }
 
     pub fn bootstrap_state(&mut self) {
-        let template_addr = self.get_template_address("TestFaucet");
-        initialize_builtin_faucet_state(&mut self.state_store, &self.public_key, template_addr);
+        add_tari_resources(&mut self.state_store).unwrap();
+        initialize_builtin_faucet_state(&mut self.state_store, &self.public_key);
         initialize_builtin_nft_faucet_state(&mut self.state_store)
     }
 
@@ -195,7 +210,7 @@ impl TemplateTest {
             builder.add_loaded_template(addr, template);
         }
         let template_addr = builder.add_template_opts(path, features, envs);
-        self.package = builder.build();
+        self.package = Arc::new(builder.build());
         self.name_to_template.insert(name.into(), template_addr);
 
         template_addr
@@ -208,6 +223,16 @@ impl TemplateTest {
 
     pub fn disable_fees(&mut self) -> &mut Self {
         self.enable_fees = false;
+        self
+    }
+
+    pub fn enable_auto_add_proofs_from_signers(&mut self) -> &mut Self {
+        self.auto_add_proofs_from_signers = true;
+        self
+    }
+
+    pub fn disable_auto_add_proofs_from_signers(&mut self) -> &mut Self {
+        self.auto_add_proofs_from_signers = false;
         self
     }
 
@@ -290,6 +315,7 @@ impl TemplateTest {
             .unwrap_or_else(|| panic!("No template with name {}", name))
     }
 
+    #[track_caller]
     pub fn create_account<T>(
         &mut self,
         owner_public_key: RistrettoPublicKeyBytes,
@@ -301,7 +327,12 @@ impl TemplateTest {
     {
         let result = self
             .build_and_execute(
-                Transaction::builder().create_account_with_custom_rules(owner_public_key, None, None, workspace_id),
+                Transaction::builder_localnet().create_account_with_custom_rules(
+                    owner_public_key,
+                    None,
+                    None,
+                    workspace_id,
+                ),
                 proofs,
             )
             .unwrap_success();
@@ -314,6 +345,7 @@ impl TemplateTest {
             .unwrap()
     }
 
+    #[track_caller]
     pub fn call_function<T>(
         &mut self,
         template_name: &str,
@@ -328,7 +360,7 @@ impl TemplateTest {
             .execute_and_commit(
                 vec![Instruction::CallFunction {
                     address: self.get_template_address(template_name),
-                    function: func_name.to_owned(),
+                    function: func_name.to_string().try_into().unwrap(),
                     args,
                 }],
                 proofs,
@@ -343,6 +375,7 @@ impl TemplateTest {
             .unwrap()
     }
 
+    #[track_caller]
     pub fn call_method<T>(
         &mut self,
         component_address: ComponentAddress,
@@ -357,7 +390,7 @@ impl TemplateTest {
             .execute_and_commit(
                 vec![Instruction::CallMethod {
                     call: component_address.into(),
-                    method: method_name.to_owned(),
+                    method: method_name.try_into().unwrap(),
                     args,
                 }],
                 proofs,
@@ -377,11 +410,6 @@ impl TemplateTest {
         (self.owner_proof(), self.secret_key.clone())
     }
 
-    #[deprecated(note = "Please use owner_proof instead. This method will be removed.")]
-    pub fn get_test_proof(&self) -> NonFungibleAddress {
-        self.owner_proof()
-    }
-
     pub fn owner_proof(&self) -> NonFungibleAddress {
         NonFungibleAddress::from_public_key(self.public_key.to_byte_type())
     }
@@ -394,10 +422,11 @@ impl TemplateTest {
         &self.public_key
     }
 
-    pub fn get_test_public_key_bytes(&self) -> RistrettoPublicKeyBytes {
-        RistrettoPublicKeyBytes::from_bytes(self.public_key.as_bytes()).unwrap()
+    pub fn to_public_key_bytes(&self) -> RistrettoPublicKeyBytes {
+        self.public_key.to_byte_type()
     }
 
+    #[track_caller]
     pub fn create_empty_account(&mut self) -> (ComponentAddress, NonFungibleAddress, RistrettoSecretKey) {
         let (owner_proof, public_key, secret_key) = self.create_owner_proof();
         let old_fail_fees = self.enable_fees;
@@ -415,13 +444,16 @@ impl TemplateTest {
         self.create_funded_account()
     }
 
+    #[track_caller]
     pub fn create_funded_account(&mut self) -> (ComponentAddress, NonFungibleAddress, RistrettoSecretKey) {
         let (owner_proof, public_key, secret_key) = self.create_owner_proof();
         let old_fail_fees = self.enable_fees;
         self.enable_fees = false;
         let result = self.execute_expect_success(
-            Transaction::builder()
-                .call_method(test_faucet_component(), "take_free_coins", args![])
+            Transaction::builder_localnet()
+                .call_method(xtr_faucet_component(), "take", args![
+                    Self::FUNDED_ACCOUNT_INITIAL_BALANCE
+                ])
                 .put_last_instruction_output_on_workspace("bucket")
                 .create_account_with_bucket(public_key.to_byte_type(), "bucket")
                 .build_and_seal(&secret_key),
@@ -440,6 +472,7 @@ impl TemplateTest {
         (component, owner_proof, secret_key)
     }
 
+    #[track_caller]
     pub fn create_custom_funded_account<A: Into<Amount>>(
         &mut self,
         amount: A,
@@ -453,8 +486,8 @@ impl TemplateTest {
         let old_fail_fees = self.enable_fees;
         self.enable_fees = false;
         let result = self.execute_expect_success(
-            Transaction::builder()
-                .call_method(test_faucet_component(), "take_free_coins_custom", args![amount.into()])
+            Transaction::builder_localnet()
+                .call_method(xtr_faucet_component(), "take", args![amount.into()])
                 .put_last_instruction_output_on_workspace("bucket")
                 .create_account_with_bucket(public_key.to_byte_type(), "bucket")
                 .build_and_seal(&secret_key),
@@ -473,25 +506,68 @@ impl TemplateTest {
         (component, owner_proof, secret_key, public_key)
     }
 
+    #[track_caller]
+    pub fn create_test_faucet_component<A: Into<Amount>>(
+        &mut self,
+        initial_supply: A,
+    ) -> (ComponentAddress, ResourceAddress) {
+        let template_addr = self.get_template_address("TestFaucet");
+        let result = self.execute_expect_success(
+            Transaction::builder_localnet()
+                .call_function(template_addr, "mint", args![initial_supply.into()])
+                .build_and_seal(&self.secret_key),
+            vec![],
+        );
+
+        let (addr, component) = result
+            .expect_success()
+            .up_iter()
+            .filter_map(|(id, substate)| {
+                id.as_component_address().and_then(|addr| {
+                    let component = substate.substate_value().as_component()?;
+                    if component.template_address == template_addr {
+                        Some((addr, component.clone()))
+                    } else {
+                        None
+                    }
+                })
+            })
+            .next()
+            .expect("No component address found in faucet creation result");
+
+        let indexed = IndexedWellKnownTypes::from_value(component.state()).unwrap();
+        let vault_id = indexed
+            .vault_ids()
+            .first()
+            .expect("No vault id found in faucet component state");
+        let vault = self
+            .read_only_state_store()
+            .get_vault(vault_id)
+            .expect("No vault id found in faucet component state");
+        (addr, *vault.resource_address())
+    }
+
     fn next_key_seed(&mut self) -> u8 {
         let seed = self.key_seed;
         self.key_seed += 1;
         seed
     }
 
+    #[track_caller]
     pub fn create_owner_proof(&mut self) -> (NonFungibleAddress, RistrettoPublicKey, RistrettoSecretKey) {
         let (secret_key, public_key) = create_key_pair_from_seed(self.next_key_seed());
         let owner_token = NonFungibleAddress::from_public_key(public_key.to_byte_type());
         (owner_token, public_key, secret_key)
     }
 
+    #[track_caller]
     pub fn try_execute_instructions(
         &mut self,
         fee_instructions: Vec<Instruction>,
         instructions: Vec<Instruction>,
         proofs: Vec<NonFungibleAddress>,
     ) -> Result<ExecuteResult, TransactionError> {
-        let transaction = Transaction::builder()
+        let transaction = Transaction::builder_localnet()
             .with_fee_instructions(fee_instructions)
             .with_instructions(instructions)
             .build_and_seal(&self.secret_key);
@@ -499,10 +575,11 @@ impl TemplateTest {
         self.try_execute(transaction, proofs)
     }
 
+    #[track_caller]
     pub fn try_execute(
         &mut self,
         transaction: Transaction,
-        proofs: Vec<NonFungibleAddress>,
+        mut proofs: Vec<NonFungibleAddress>,
     ) -> Result<ExecuteResult, TransactionError> {
         let mut modules: Vec<Arc<dyn RuntimeModule>> = vec![Arc::new(self.track_calls.clone())];
 
@@ -510,16 +587,25 @@ impl TemplateTest {
             modules.push(Arc::new(FeeModule::new(0, self.fee_table.clone())));
         }
 
+        if self.auto_add_proofs_from_signers {
+            proofs.extend(
+                transaction
+                    .signers_iter()
+                    .map(|pk| NonFungibleAddress::from_public_key(*pk)),
+            );
+        }
+
         let auth_params = AuthParams {
-            initial_ownership_proofs: proofs,
+            initial_ownership_proofs: Arc::new(proofs.into_iter().collect()),
         };
+
         let processor = TransactionProcessor::new(
-            TransactionProcessorConfig::new(Network::LocalNet),
-            Arc::new(self.package.clone()),
+            self.package.clone(),
             self.state_store.clone().into_read_only(),
             auth_params,
             self.virtual_substates.clone(),
             modules,
+            Arc::new(AlwaysPassesProofVerifier),
         );
 
         let mut wrapped_transaction = WrappedTransaction::new(transaction);
@@ -554,6 +640,7 @@ impl TemplateTest {
         Ok(result)
     }
 
+    #[track_caller]
     pub fn execute_and_commit_on_success(
         &mut self,
         transaction: Transaction,
@@ -583,7 +670,11 @@ impl TemplateTest {
     }
 
     /// Executes a transaction. Panics if the transaction fails.
-    pub fn build_and_execute(&mut self, builder: TransactionBuilder, proofs: Vec<NonFungibleAddress>) -> ExecuteResult {
+    pub fn build_and_execute(
+        &mut self,
+        builder: TransactionBuilder<MainIntent>,
+        proofs: Vec<NonFungibleAddress>,
+    ) -> ExecuteResult {
         let transaction = builder.build_and_seal(&self.secret_key);
         self.execute_expect_commit(transaction, proofs)
     }
@@ -611,6 +702,7 @@ impl TemplateTest {
         result.expect_failure().clone()
     }
 
+    #[track_caller]
     pub fn execute_and_commit(
         &mut self,
         instructions: Vec<Instruction>,
@@ -619,6 +711,7 @@ impl TemplateTest {
         self.execute_and_commit_with_fees(vec![], instructions, proofs)
     }
 
+    #[track_caller]
     pub fn execute_and_commit_with_fees(
         &mut self,
         fee_instructions: Vec<Instruction>,
@@ -643,6 +736,7 @@ impl TemplateTest {
         Ok(result)
     }
 
+    #[track_caller]
     pub fn execute_and_commit_manifest<'a, I: IntoIterator<Item = (&'a str, ManifestValue)>>(
         &mut self,
         manifest: &str,

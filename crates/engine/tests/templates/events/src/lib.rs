@@ -33,8 +33,7 @@ mod event {
     impl EventEmitter {
         pub fn test_function(topic: String) {
             println!("Emitting a new event");
-            let payload = [("my", "event")];
-            emit_event(topic, payload);
+            emit_event(topic, metadata!("my" => "event"));
         }
     }
 }

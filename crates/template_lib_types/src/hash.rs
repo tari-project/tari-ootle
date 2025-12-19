@@ -28,10 +28,14 @@ use tari_template_abi::rust::{
     str::FromStr,
 };
 
-use crate::{hex::fixed_bytes_from_hex, serde_helpers};
+use crate::{
+    hex::{fixed_bytes_from_hex, write_hex_fmt},
+    serde_helpers,
+};
 
 /// Representation of a 32-byte hash value
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[serde(transparent)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Hash(
@@ -61,10 +65,7 @@ impl Hash {
     }
 
     pub fn write_hex_fmt<W: fmt::Write>(&self, writer: &mut W) -> fmt::Result {
-        for b in self.0 {
-            write!(writer, "{:02x?}", b)?;
-        }
-        Ok(())
+        write_hex_fmt(writer, &self.0)
     }
 
     pub fn try_from_slice(data: &[u8]) -> Result<Self, HashParseError> {
@@ -155,10 +156,7 @@ impl DerefMut for Hash {
 
 impl Display for Hash {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        for x in self.0 {
-            write!(f, "{:02x?}", x)?;
-        }
-        Ok(())
+        write_hex_fmt(f, &self.0)
     }
 }
 

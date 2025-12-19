@@ -15,9 +15,9 @@ use tari_crypto::{
 use tari_engine_types::crypto::{get_static_range_proof_service, MAX_LAZY_BP_AGG_FACTORS};
 use tari_template_lib::types::crypto::RangeProofBytes;
 
-use crate::UnblindedOutputStatement;
+use crate::OutputWitness;
 
-pub fn generate_extended_bullet_proof<'a, I: IntoIterator<Item = &'a UnblindedOutputStatement>>(
+pub fn generate_extended_bullet_proof<'a, I: IntoIterator<Item = &'a OutputWitness>>(
     statements: I,
 ) -> Result<RangeProofBytes, RangeProofError> {
     let mut extended_witnesses = statements
@@ -27,10 +27,7 @@ pub fn generate_extended_bullet_proof<'a, I: IntoIterator<Item = &'a UnblindedOu
                 RistrettoExtendedMask::assign(ExtensionDegree::DefaultPedersen, vec![stmt.mask.clone()]).unwrap();
             RistrettoExtendedWitness {
                 mask: extended_mask,
-                value: stmt
-                    .amount
-                    .to_u64_checked()
-                    .expect("BUG: Invalid output statement amount provided to generate_extended_bullet_proof"),
+                value: stmt.amount,
                 minimum_value_promise: stmt.minimum_value_promise,
             }
         })

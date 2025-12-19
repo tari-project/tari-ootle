@@ -153,6 +153,16 @@ export const componentSettings: ThemeOptions = {
         },
       },
     },
+    MuiMenuItem: {
+      defaultProps: {
+        sx: {
+          marginRight: 1,
+          marginLeft: 1,
+          borderRadius: 1,
+          padding: "12px 8px",
+        },
+      },
+    },
   },
 };
 

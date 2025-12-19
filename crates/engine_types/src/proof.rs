@@ -24,8 +24,7 @@ use std::collections::BTreeSet;
 
 use tari_template_lib::{
     models::{BucketId, NonFungibleId, ResourceAddress, VaultId},
-    prelude::ResourceType,
-    types::Amount,
+    types::{Amount, ResourceType},
 };
 
 use crate::resource_container::ResourceContainer;
@@ -83,7 +82,7 @@ impl LockedResource {
     }
 
     pub fn amount(&self) -> Amount {
-        self.locked.amount()
+        self.locked.unlocked_amount()
     }
 
     pub fn resource_address(&self) -> &ResourceAddress {

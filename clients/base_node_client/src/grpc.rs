@@ -22,9 +22,12 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use async_trait::async_trait;
+use futures_util::TryStreamExt;
 use log::*;
-use minotari_app_grpc::tari_rpc::{self as grpc, GetShardKeyRequest, GetValidatorNodeChangesRequest};
+use minotari_app_grpc::{
+    tari_rpc,
+    tari_rpc::{self as grpc, GetValidatorNodeChangesRequest},
+};
 use minotari_node_grpc_client::BaseNodeGrpcClient;
 use tari_common_types::types::FixedHash;
 use tari_node_components::blocks::BlockHeader;
@@ -32,6 +35,7 @@ use tari_ootle_common_types::{Epoch, SubstateAddress};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction_components::transaction_components::CodeTemplateRegistration;
 use tari_utilities::ByteArray;
+use tonic::codegen::tokio_stream::Stream;
 use url::Url;
 
 use crate::{
@@ -93,7 +97,6 @@ impl GrpcBaseNodeClient {
     }
 }
 
-#[async_trait]
 impl BaseNodeClient for GrpcBaseNodeClient {
     async fn test_connection(&mut self) -> Result<(), BaseNodeClientError> {
         self.connection().await?;
@@ -127,7 +130,7 @@ impl BaseNodeClient for GrpcBaseNodeClient {
         &mut self,
         epoch: Epoch,
         sidechain_id: Option<&RistrettoPublicKeyBytes>,
-    ) -> Result<Vec<minotari_app_grpc::tari_rpc::ValidatorNodeChange>, BaseNodeClientError> {
+    ) -> Result<Vec<tari_rpc::ValidatorNodeChange>, BaseNodeClientError> {
         let client = self.connection().await?;
         let result = client
             .get_validator_node_changes(GetValidatorNodeChangesRequest {
@@ -141,7 +144,10 @@ impl BaseNodeClient for GrpcBaseNodeClient {
         Ok(changes)
     }
 
-    async fn get_validator_nodes(&mut self, height: u64) -> Result<Vec<BaseLayerValidatorNode>, BaseNodeClientError> {
+    async fn get_validator_nodes(
+        &mut self,
+        height: u64,
+    ) -> Result<impl Stream<Item = Result<BaseLayerValidatorNode, BaseNodeClientError>>, BaseNodeClientError> {
         let inner = self.connection().await?;
 
         // SidechainId is empty because we need all the sidechain nodes to create the merkle root
@@ -149,74 +155,38 @@ impl BaseNodeClient for GrpcBaseNodeClient {
             height,
             sidechain_id: vec![],
         };
-        let mut stream = inner.get_active_validator_nodes(request).await?.into_inner();
+        let stream = inner.get_active_validator_nodes(request).await?.into_inner();
 
-        let mut vns = vec![];
-        loop {
-            match stream.message().await {
-                Ok(Some(val)) => {
-                    vns.push(BaseLayerValidatorNode {
-                        public_key: RistrettoPublicKeyBytes::from_bytes(&val.public_key).map_err(|_| {
-                            BaseNodeClientError::InvalidPeerMessage("public_key was not a valid public key".to_string())
-                        })?,
-                        shard_key: {
-                            let hash = FixedHash::try_from(val.shard_key.as_slice()).map_err(|_| {
-                                BaseNodeClientError::InvalidPeerMessage(
-                                    "shard_key was not a valid fixed hash".to_string(),
-                                )
-                            })?;
-                            SubstateAddress::from_hash_and_version(hash, 0)
-                        },
-                        sidechain_id: if val.sidechain_id.is_empty() {
-                            None
-                        } else {
-                            Some(RistrettoPublicKeyBytes::from_bytes(&val.sidechain_id).map_err(|_| {
+        let stream = stream
+            .map_err(|e| BaseNodeClientError::GrpcStatus {
+                code: e.code(),
+                message: e.message().to_string(),
+            })
+            .and_then(|resp| async move {
+                Ok(BaseLayerValidatorNode {
+                    public_key: RistrettoPublicKeyBytes::from_bytes(&resp.public_key).map_err(|_| {
+                        BaseNodeClientError::InvalidPeerMessage("public_key was not a valid public key".to_string())
+                    })?,
+                    shard_key: {
+                        let hash = FixedHash::try_from(resp.shard_key.as_slice()).map_err(|_| {
+                            BaseNodeClientError::InvalidPeerMessage("shard_key was not a valid fixed hash".to_string())
+                        })?;
+                        SubstateAddress::from_hash_and_version(hash, 0)
+                    },
+                    sidechain_id: Some(&resp.sidechain_id)
+                        .filter(|s| !s.is_empty())
+                        .map(|sid| {
+                            RistrettoPublicKeyBytes::from_bytes(sid).map_err(|_| {
                                 BaseNodeClientError::InvalidPeerMessage(
                                     "sidechain_id was not a valid public key".to_string(),
                                 )
-                            }))
-                        }
+                            })
+                        })
                         .transpose()?,
-                    });
-                },
-                Ok(None) => {
-                    break;
-                },
-                Err(e) => {
-                    return Err(BaseNodeClientError::InvalidPeerMessage(format!(
-                        "Error reading stream: {}",
-                        e
-                    )));
-                },
-            }
-        }
+                })
+            });
 
-        if vns.is_empty() {
-            debug!(target: LOG_TARGET, "No validator nodes at height {}", height);
-        }
-
-        Ok(vns)
-    }
-
-    async fn get_shard_key(
-        &mut self,
-        epoch: Epoch,
-        public_key: &RistrettoPublicKeyBytes,
-    ) -> Result<Option<SubstateAddress>, BaseNodeClientError> {
-        let inner = self.connection().await?;
-        let request = GetShardKeyRequest {
-            epoch: epoch.as_u64(),
-            public_key: public_key.as_bytes().to_vec(),
-        };
-        match inner.get_shard_key(request).await {
-            Ok(result) => {
-                let result = result.into_inner();
-                let hash = FixedHash::try_from(result.shard_key.as_slice())?;
-                Ok(Some(SubstateAddress::from_hash_and_version(hash, 0)))
-            },
-            Err(status) if matches!(status.code(), tonic::Code::NotFound) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
+        Ok(Box::pin(stream))
     }
 
     async fn get_template_registrations(
@@ -261,7 +231,7 @@ impl BaseNodeClient for GrpcBaseNodeClient {
         Ok(templates)
     }
 
-    async fn get_header_by_hash(&mut self, block_hash: FixedHash) -> Result<BlockHeader, BaseNodeClientError> {
+    async fn get_header_by_hash(&mut self, block_hash: &FixedHash) -> Result<BlockHeader, BaseNodeClientError> {
         let inner = self.connection().await?;
         let request = grpc::GetHeaderByHashRequest {
             hash: block_hash.to_vec(),
@@ -272,6 +242,33 @@ impl BaseNodeClient for GrpcBaseNodeClient {
             .ok_or_else(|| BaseNodeClientError::InvalidPeerMessage("Base node returned no header".to_string()))?;
         let header = header.try_into().map_err(BaseNodeClientError::InvalidPeerMessage)?;
         Ok(header)
+    }
+
+    async fn stream_headers(
+        &mut self,
+        from_height: u64,
+        limit: u64,
+    ) -> Result<impl Stream<Item = Result<BlockHeader, BaseNodeClientError>> + Unpin, BaseNodeClientError> {
+        let inner = self.connection().await?;
+        let request = grpc::ListHeadersRequest {
+            from_height,
+            num_headers: limit,
+            sorting: tari_rpc::Sorting::Asc as i32,
+        };
+        let stream = inner.list_headers(request).await?.into_inner();
+        let stream = stream
+            .map_err(|e| BaseNodeClientError::GrpcStatus {
+                code: e.code(),
+                message: e.message().to_string(),
+            })
+            .and_then(|header_msg| async {
+                let header = header_msg.header.ok_or_else(|| {
+                    BaseNodeClientError::InvalidPeerMessage("Base node returned no header".to_string())
+                })?;
+                header.try_into().map_err(BaseNodeClientError::InvalidPeerMessage)
+            });
+
+        Ok(Box::pin(stream))
     }
 
     async fn get_consensus_constants(

@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_common_types::types::FixedHash;
+use tari_consensus_types::ShardGroupAccumulatedData;
 use tari_ootle_common_types::{Epoch, ExtraData, Network, NodeHeight};
 use tari_ootle_storage::{
     consensus_models::{Block, Command},
@@ -46,6 +47,7 @@ fn missing_transactions_operations(db: impl StateStore) {
         SchnorrSignatureBytes::zero(),
         EpochTime::now().as_u64(),
         FixedHash::zero(),
+        ShardGroupAccumulatedData::default(),
         ExtraData::default(),
     )
     .unwrap();

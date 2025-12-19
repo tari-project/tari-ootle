@@ -18,7 +18,8 @@ const LOG_TARGET: &str = "tari::ootle::swarm::webserver";
 
 pub fn spawn<S>(config: Config, shutdown: S) -> task::JoinHandle<anyhow::Result<()>>
 where S: Future<Output = ()> + Send + 'static {
-    let context = HandlerContext::new(config);
+    let mut context = HandlerContext::new(config);
+    server::register_all_cfs(&mut context);
     tokio::spawn(async move {
         tokio::select! {
             result = server::run(context) => {

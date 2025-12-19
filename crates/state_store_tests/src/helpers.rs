@@ -25,7 +25,7 @@ use std::{io::Write, ops::Deref};
 use rand::{rngs::OsRng, Rng, RngCore};
 use tari_bor::cbor;
 use tari_common_types::types::FixedHash;
-use tari_consensus_types::{BlockId, Decision, LeafBlock, ProposalCertificate, QcId};
+use tari_consensus_types::{BlockId, Decision, LeafBlock, PcId, ProposalCertificate, ShardGroupAccumulatedData};
 use tari_engine_types::{
     component::{ComponentBody, ComponentHeader},
     substate::{hash_substate, SubstateId, SubstateValue},
@@ -295,6 +295,7 @@ pub fn create_block(parent: Option<&Block>) -> Block {
         SchnorrSignatureBytes::zero(),
         EpochTime::now().as_u64(),
         FixedHash::zero(),
+        ShardGroupAccumulatedData::default(),
         ExtraData::default(),
     )
     .unwrap()
@@ -328,6 +329,7 @@ pub fn create_block_with_qc(parent: &LeafBlock) -> Block {
         SchnorrSignatureBytes::zero(),
         EpochTime::now().as_u64(),
         FixedHash::zero(),
+        ShardGroupAccumulatedData::default(),
         ExtraData::default(),
     )
     .unwrap()
@@ -374,7 +376,7 @@ where
     chain[len - 3].as_locked().set(tx).unwrap();
 
     for block in &chain[..len - 3] {
-        tx.blocks_set_qcs(block.id(), Some(&QcId::zero()), Some(&QcId::zero()))
+        tx.blocks_set_qcs(block.id(), Some(&PcId::zero()), Some(&PcId::zero()))
             .unwrap();
     }
 
@@ -408,6 +410,7 @@ pub fn create_foreign_proposal(parent_id: BlockId, epoch: Epoch) -> ForeignPropo
         SchnorrSignatureBytes::zero(),
         EpochTime::now().as_u64(),
         FixedHash::zero(),
+        ShardGroupAccumulatedData::default(),
         ExtraData::new(),
     )
     .unwrap();
@@ -426,6 +429,7 @@ pub fn create_foreign_proposal(parent_id: BlockId, epoch: Epoch) -> ForeignPropo
             state_merkle_root: Default::default(),
             command_merkle_root: Default::default(),
             signature: Default::default(),
+            accumulated_data: Default::default(),
             metadata_hash: Default::default(),
         },
         proof_elements: vec![CommitProofElement::QuorumCertificate(

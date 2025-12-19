@@ -55,7 +55,7 @@ jobs:
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Set Matrix
         id: set-matrix
@@ -109,7 +109,7 @@ jobs:
 
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -219,9 +219,11 @@ jobs:
           choco upgrade protoc -y
           rustup target add ${{ matrix.builds.target }}
 
-      - uses: pnpm/action-setup@v4
+      - name: Install Dependencies - Node
+        uses: pnpm/action-setup@v4
         with:
           version: 10
+          run_install: true
 
       - name: Set environment variables - Nix
         if: ${{ ! startsWith(runner.os,'Windows') }}
@@ -307,6 +309,47 @@ jobs:
             echo "CARGO_OPTIONS=${{ env.CARGO_OPTIONS }} --${{ env.TS_BUILD }}" >> $GITHUB_ENV
           fi
 
+      - name: Install Dependencies - TypeScript (globally)
+        shell: bash
+        run: |
+          npm install -g typescript
+
+      - name: Build Dependencies - Node (bindings)
+        shell: bash
+        working-directory: ${{ github.workspace }}/bindings
+        run: |
+          pnpm install
+          pnpm run build-dev
+
+      - name: Build Dependencies - Node (indexer_client)
+        shell: bash
+        working-directory: ${{ github.workspace }}/clients/javascript/indexer_client
+        run: |
+          pnpm install
+          pnpm run build
+
+      - name: Build Dependencies - applications (indexer)
+        shell: bash
+        working-directory: ${{ github.workspace }}/applications/tari_indexer/web_ui
+        run: |
+          pnpm install
+          pnpm run build
+
+      - name: Build Dependencies - applications (validator_node)
+        shell: bash
+        working-directory: ${{ github.workspace }}/applications/tari_validator_node/web_ui
+        run: |
+          pnpm install
+          pnpm run build
+
+      # - name: Build Dependencies - applications (swarm)
+      #   shell: bash
+      #   #working-directory: ${{ github.workspace }}/applications/tari_swarm_daemon/web_ui
+      #   working-directory: ${{ github.workspace }}/applications/tari_swarm_daemon/webui
+      #   run: |
+      #     pnpm install
+      #     pnpm run build
+
       - name: Show command used for Cargo
         shell: bash
         run: |
@@ -315,7 +358,7 @@ jobs:
           echo "cross flag: ${{ matrix.builds.cross }}"
 
       - name: Build release binaries
-        timeout-minutes: 60
+        timeout-minutes: 90
         shell: bash
         run: |
           ${{ env.CARGO }} build ${{ env.CARGO_OPTIONS }} \
@@ -377,7 +420,7 @@ jobs:
         if: ${{ false }}
         # if: startsWith(runner.os,'macOS')
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ env.TS_FILENAME }}_unsigned-archive-${{ matrix.builds.name }}
           path: "${{ env.MTS_SOURCE }}/*"
@@ -520,7 +563,7 @@ jobs:
         if: ${{ false }}
         # if: startsWith(runner.os,'macOS')
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ env.TS_FILENAME }}-${{ matrix.builds.name }}-${{ env.TARI_VERSION }}.pkg
           path: "${{ env.distDirPKG }}/${{ env.TS_FILENAME }}-${{ matrix.builds.name }}-${{ env.TARI_VERSION }}*.pkg*"
@@ -529,7 +572,7 @@ jobs:
         if: ${{ ( startsWith(runner.os,'Windows') ) && ( env.AZURE_TENANT_ID != '' ) }}
         env:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-        uses: azure/trusted-signing-action@v0.5.9
+        uses: azure/trusted-signing-action@v0.5.11
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -575,7 +618,7 @@ jobs:
         # if: ${{ ( startsWith(runner.os,'Windows') ) && ( env.AZURE_TENANT_ID != '' ) }}
         env:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-        uses: azure/trusted-signing-action@v0.5.9
+        uses: azure/trusted-signing-action@v0.5.11
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -606,7 +649,7 @@ jobs:
         # Disabled
         if: ${{ false }}
         # if: startsWith(runner.os,'Windows')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: "${{ env.TS_FILENAME }}_windows_installer"
           path: "${{ github.workspace }}/buildtools/Output/*"
@@ -643,7 +686,7 @@ jobs:
           ${SHARUN} --check "${{ env.BINFILE }}.zip.sha256"
 
       - name: Artifact upload for Archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ env.TS_FILENAME }}_archive-${{ matrix.builds.name }}
           path: "${{ github.workspace }}${{ env.TS_DIST }}/${{ env.BINFILE }}.zip*"
@@ -663,10 +706,10 @@ jobs:
 
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Download macOS binaries
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           path: osxuni
           # macos - x86_64 / arm64
@@ -842,7 +885,7 @@ jobs:
           ${SHARUN} --check "${{ env.BINFILE }}.zip.sha256"
 
       - name: Artifact upload for Archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ env.TS_FILENAME }}_archive-macos-universal
           path: "${{ github.workspace }}/osxuni/macos-universal/${{ env.BINFILE }}.zip*"
@@ -862,7 +905,7 @@ jobs:
 
     steps:
       - name: Download binaries
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           path: ${{ env.TS_FILENAME }}
           pattern: "${{ env.TS_FILENAME }}*"

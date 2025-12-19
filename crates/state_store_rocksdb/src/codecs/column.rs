@@ -1,7 +1,11 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{fmt, fmt::Display, io::Read};
+use std::{
+    fmt,
+    fmt::Display,
+    io::{Read, Write},
+};
 
 use anyhow::anyhow;
 
@@ -42,6 +46,19 @@ impl<const COL: u8> Display for ByteColumn<COL> {
 pub struct ColumnCodec;
 
 impl<const COL: u32> DbCodec<Column<COL>> for ColumnCodec {
+    fn encode_len(&self, _value: &Column<COL>) -> Result<usize, RocksDbStorageError> {
+        Ok(size_of::<u32>())
+    }
+
+    fn encode_into<W: Write>(&self, _value: &Column<COL>, writer: &mut W) -> Result<(), RocksDbStorageError> {
+        writer
+            .write_all(&COL.to_be_bytes())
+            .map_err(|e| RocksDbStorageError::EncodeError {
+                source: anyhow!("ColumnCodec: Failed to write column bytes: {}", e),
+            })?;
+        Ok(())
+    }
+
     fn encode(&self, _value: &Column<COL>) -> Result<EncodeVec, RocksDbStorageError> {
         Ok(EncodeVec::new_from_array(COL.to_be_bytes()))
     }
@@ -66,6 +83,17 @@ impl<const COL: u32> DbCodec<Column<COL>> for ColumnCodec {
 }
 
 impl<const COL: u8> DbCodec<ByteColumn<COL>> for ColumnCodec {
+    fn encode_len(&self, _value: &ByteColumn<COL>) -> Result<usize, RocksDbStorageError> {
+        Ok(1)
+    }
+
+    fn encode_into<W: Write>(&self, _value: &ByteColumn<COL>, writer: &mut W) -> Result<(), RocksDbStorageError> {
+        writer.write_all(&[COL]).map_err(|e| RocksDbStorageError::EncodeError {
+            source: anyhow!("ByteColumnCodec: Failed to write column byte: {}", e),
+        })?;
+        Ok(())
+    }
+
     fn encode(&self, _value: &ByteColumn<COL>) -> Result<EncodeVec, RocksDbStorageError> {
         Ok(EncodeVec::new_from_array([COL]))
     }

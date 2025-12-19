@@ -6,41 +6,25 @@ import { nftList, nftTransfer } from "@utils/json_rpc";
 import { ApiError } from "@api/helpers/types";
 import { TransferNftRequest } from "@tari-project/typescript-bindings";
 import queryClient from "@api/queryClient";
-import type { ComponentAddressOrName } from "@tari-project/typescript-bindings/dist";
+import { ComponentAddress, ComponentAddressOrName } from "@tari-project/typescript-bindings";
 
 export interface ListAccountNftsReq {
   account: ComponentAddressOrName | null;
   enabled?: boolean;
 }
 
-export const useListNfts = (request: ListAccountNftsReq) => {
+export const useNFTsList = (account: ComponentAddress, offset: number, limit: number) => {
   return useQuery({
-    queryKey: ["list_nfts", request.account],
-    queryFn: async () => {
-      if (!request.account) {
-        return [];
-      }
-      const limit = 100;
-      let offset = 0;
-      let nfts = await nftList({
-        account: request.account,
-        limit: limit,
-        offset: offset,
-      });
-      let result = nfts.nfts;
-      while (nfts.nfts.length > 0) {
-        offset += limit;
-        nfts = await nftList({
-          account: request.account,
-          limit: 1,
-          offset: offset,
-        });
-        result = result.concat(nfts.nfts);
-      }
-      return result;
-    },
-    enabled: request.enabled !== false && !!request.account,
-    retry: false,
+    queryKey: ["nfts_list", account, offset, limit],
+    queryFn: () => nftList({ account: { ComponentAddress: account }, offset, limit }),
+    enabled: !!account,
+    staleTime: 30000,
+    gcTime: 60000,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchInterval: false,
+    retry: 2,
+    retryDelay: (attemptIndex) => Math.min(2000 * 2 ** attemptIndex, 8000),
   });
 };
 
@@ -53,16 +37,12 @@ export const useNftsTransfer = (request: TransferNftRequest) => {
       error;
     },
     onSettled: () => {
-      // Invalidate all NFT-related queries
-      queryClient.invalidateQueries({ 
+      // Invalidate all NFT-related queries to trigger fresh fetch
+      queryClient.invalidateQueries({
         predicate: (query) => {
           const key = query.queryKey[0];
-          return typeof key === "string" && (
-            key === "nfts" || 
-            key === "list_nfts" || 
-            key === "nfts_list"
-          );
-        }
+          return typeof key === "string" && (key === "nfts" || key === "list_nfts" || key === "nfts_list");
+        },
       });
     },
   });

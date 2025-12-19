@@ -20,10 +20,7 @@ use crate::{
 #[test]
 fn rocksdb() {
     let (db, _tmp) = create_rocksdb();
-    operations(db);
-}
 
-fn operations(db: impl StateStore) {
     let num_transitions = 100; // Makes double
     const EPOCH: Epoch = Epoch::zero();
     let mut tx = db.create_write_tx().unwrap();
@@ -69,7 +66,7 @@ fn operations(db: impl StateStore) {
     for (state_version, (num_substates, shards)) in &shards {
         for shard in shards {
             let transitions = tx
-                .state_transitions_get_starting_at(*shard, *state_version, SubstateValueFilterFlags::empty())
+                .state_transitions_get_starting_at(*shard, *state_version, SubstateValueFilterFlags::all())
                 .unwrap();
             assert_eq!(transitions.epoch, EPOCH);
             assert_eq!(transitions.state_version, *state_version);

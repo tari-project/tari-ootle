@@ -24,7 +24,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   listRecentTransactions,
   getTransactionResult,
-} from "../../utils/json_rpc";
+} from "../../utils/api";
 
 interface UseListRecentTransactionsProps {
   last_id: string | null;
@@ -32,9 +32,9 @@ interface UseListRecentTransactionsProps {
 }
 
 export const useListRecentTransactions = ({
-  last_id,
-  limit,
-}: UseListRecentTransactionsProps) => {
+                                            last_id,
+                                            limit,
+                                          }: UseListRecentTransactionsProps) => {
   return useQuery({
     queryKey: ["recent_transactions"],
     queryFn: () => {

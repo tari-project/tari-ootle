@@ -30,22 +30,29 @@ import {
   accountsGetBalances,
   accountsGetDefault,
   accountsList,
+  accountsRename,
   accountsStealthTransfer,
   accountsTransfer,
   mintFaucetNfts,
-  nftList,
   validatorsGetFees,
+  stealthUtxosList,
 } from "@utils/json_rpc";
 import { ApiError } from "@api/helpers/types";
 import queryClient from "@api/queryClient";
-import type {
-  AccountOrKeyIndex,
-  ClaimBurnProof,
+import {
+  AccountOrKeyId,
+  BadgeUsage,
   ClaimBurnRequest,
   ComponentAddress,
   ComponentAddressOrName,
-  ConfidentialTransferInputSelection,
+  UtxoInputSelection,
+  decodeOotleAddress,
+  Memo,
+  OutputStatus,
+  ResourceAddress,
   ResourceType,
+  XTR,
+  PayTo,
 } from "@tari-project/typescript-bindings";
 
 const DEFAULT_MAX_FEE = 2000;
@@ -75,7 +82,7 @@ export const useAccountsCreate = () => {
       return await accountsCreate({
         account_name: req.accountName || "",
         is_default: req.isDefault || null,
-        key_id: req.keyId || null,
+        key_index: req.keyId ?? null,
       });
     },
     onError: (error: ApiError) => {
@@ -87,17 +94,42 @@ export const useAccountsCreate = () => {
   });
 };
 
+export type AccountsRenameMutate = {
+  account: ComponentAddress;
+  newName: string;
+};
+
+export const useAccountsRename = () => {
+  return useMutation({
+    mutationFn: async (req: AccountsRenameMutate) => {
+      return await accountsRename({
+        account: { ComponentAddress: req.account },
+        new_name: req.newName,
+      });
+    },
+    onError: (error: ApiError) => {
+      error;
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      queryClient.invalidateQueries({ queryKey: [`accounts_get_${variables.account}`] });
+      queryClient.refetchQueries({ queryKey: ["accounts"] });
+    },
+  });
+};
+
 export interface TransferParams {
   account: ComponentAddress;
   amount: number;
   resource_address: string;
-  destination_public_key: string;
+  destination_address: string;
   max_fee: number | null;
   resourceType: ResourceType;
   output_to_revealed: boolean;
-  input_selection: ConfidentialTransferInputSelection;
-  badge: string | null;
+  input_selection: UtxoInputSelection;
+  badge_usage: BadgeUsage;
   dry_run: boolean;
+  output_memo?: Memo;
 }
 
 export const useAccountsTransfer = () => {
@@ -105,28 +137,43 @@ export const useAccountsTransfer = () => {
     mutationFn: (params: TransferParams) => {
       const account = { ComponentAddress: params.account };
       const max_fee = params.max_fee || DEFAULT_MAX_FEE;
+      const parsedAddress = decodeOotleAddress(params.destination_address);
       if (params.resourceType === "Confidential") {
         let transferRequest = {
           account,
           amount: params.amount,
           resource_address: params.resource_address,
-          destination_public_key: params.destination_public_key,
+          destination_address: params.destination_address,
           max_fee,
-          proof_from_badge_resource: params.badge,
+          // TODO: we only support Resource badge usage for confidential transfers for now
+          proof_from_badge_resource:
+            typeof params.badge_usage === "object" && "Resource" in params.badge_usage
+              ? params.badge_usage.Resource
+              : null,
           input_selection: params.input_selection,
           output_to_revealed: params.output_to_revealed,
+          output_memo: params.output_memo || null,
           dry_run: params.dry_run,
         };
         return accountsConfidentialTransfer(transferRequest);
       } else if (params.resourceType === "Stealth") {
         let transferRequest = {
           owner_account: account,
+          // For simplicity, we'll use prefer revealed for fees whenever a non-XTR stealth transfer is made
+          fee_input_selection: params.resource_address === XTR ? params.input_selection : "PreferRevealed",
           input_selection: params.input_selection,
           resource_address: params.resource_address,
-          destination_public_key: params.destination_public_key,
+          badge_usage: params.badge_usage,
+          transfers: [
+            {
+              destination_address: params.destination_address,
+              blinded_output_amount: params.output_to_revealed ? 0n : BigInt(params.amount),
+              revealed_output_amount: params.output_to_revealed ? params.amount : 0,
+              output_memo: params.output_memo || null,
+              pay_to: "StealthPublicKey" as PayTo,
+            },
+          ],
           max_fee,
-          blinded_output_amount: params.output_to_revealed ? 0 : params.amount,
-          revealed_output_amount: params.output_to_revealed ? params.amount : 0,
           dry_run: params.dry_run,
         };
         return accountsStealthTransfer(transferRequest);
@@ -136,9 +183,13 @@ export const useAccountsTransfer = () => {
           account,
           amount: params.amount,
           resource_address: params.resource_address,
-          destination_public_key: params.destination_public_key,
+          destination_public_key: parsedAddress.accountPublicKey,
           max_fee,
-          proof_from_badge_resource: params.badge,
+          // TODO: we only support Resource badge usage for public fungible transfers for now
+          proof_from_badge_resource:
+            typeof params.badge_usage === "object" && "Resource" in params.badge_usage
+              ? params.badge_usage.Resource
+              : null,
           input_selection: params.input_selection,
           output_to_revealed: params.output_to_revealed,
           dry_run: params.dry_run,
@@ -210,7 +261,16 @@ export const useMintTestnetFaucetNfts = () => {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: ["accounts_balances"] });
-      queryClient.invalidateQueries({ queryKey: ["nfts_list"] });
+
+      // Delayed invalidation for NFTs to handle wallet processing time
+      setTimeout(() => {
+        queryClient.invalidateQueries({
+          predicate: (query) => {
+            const key = query.queryKey[0];
+            return typeof key === "string" && (key === "nfts" || key === "list_nfts" || key === "nfts_list");
+          },
+        });
+      }, 1500);
     },
   });
 };
@@ -223,10 +283,11 @@ export const useAccountsList = (offset: number, limit: number, enabled: boolean 
   });
 };
 
-export const useAccountsGetBalances = (account: ComponentAddress, refresh: boolean = false) => {
+export const useAccountsGetBalances = (account?: ComponentAddress, refresh: boolean = false) => {
   return useQuery({
+    enabled: !!account,
     queryKey: [`accounts_balances_${account}`],
-    queryFn: () => accountsGetBalances({ account: { ComponentAddress: account }, refresh }),
+    queryFn: () => accountsGetBalances({ account: { ComponentAddress: account! }, refresh }),
     refetchInterval: 5000,
     structuralSharing: (oldData, newData) => {
       if (!oldData || !newData) return newData;
@@ -267,16 +328,47 @@ export const useAccountsGet = (account: ComponentAddress) => {
   });
 };
 
-export const useAccountNFTsList = (account: ComponentAddress, offset: number, limit: number) => {
+// export const useAccountNFTsList = (account: ComponentAddress, offset: number, limit: number) => {
+//   return useQuery({
+//     queryKey: ["nfts_list", account, offset, limit],
+//     queryFn: () => nftList({ account: { ComponentAddress: account }, offset, limit }),
+//   });
+// };
+
+export const useValidatorFees = (accountOrKeyId: AccountOrKeyId, shardGroup = null) => {
   return useQuery({
-    queryKey: ["nfts_list", account, offset, limit],
-    queryFn: () => nftList({ account: { ComponentAddress: account }, offset, limit }),
+    queryKey: ["validator_fees"],
+    queryFn: () => validatorsGetFees({ account_or_key: accountOrKeyId, shard_group: shardGroup }),
   });
 };
 
-export const useValidatorFees = (accountOrKeyIndex: AccountOrKeyIndex, shardGroup = null) => {
+// (alias) type StealthUtxosListRequest = {
+//     resource_address: ResourceAddress;
+//     account_address: ComponentAddress | null;
+//     filter_by_status: OutputStatus | null;
+// }
+
+export const useStealthUtxosList = (
+  account_address: ComponentAddress,
+  resource_address: ResourceAddress,
+  filter_by_status: OutputStatus | null,
+) => {
   return useQuery({
-    queryKey: ["validator_fees"],
-    queryFn: () => validatorsGetFees({ account_or_key: accountOrKeyIndex, shard_group: shardGroup }),
+    queryKey: ["stealth_utxos_list", account_address, resource_address, filter_by_status],
+    queryFn: () =>
+      stealthUtxosList({
+        account_address,
+        resource_address,
+        filter_by_status,
+      }),
+    enabled: !!account_address && !!resource_address,
+    refetchInterval: 5000,
+    structuralSharing: (oldData, newData) => {
+      if (!oldData || !newData) return newData;
+      if (JSON.stringify(oldData) === JSON.stringify(newData)) {
+        return oldData;
+      }
+      return newData;
+    },
   });
 };

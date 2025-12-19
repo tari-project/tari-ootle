@@ -41,29 +41,37 @@ import queryClient from "@api/queryClient";
 import { AccountInfo, substateIdToString, shortenSubstateId } from "@tari-project/typescript-bindings";
 import CopyAddress from "@components/CopyAddress";
 
-function Account(account: AccountInfo, index: number) {
+function Account({ account }: { account: AccountInfo }) {
+  const {
+    account: { name, component_address },
+    address,
+  } = account;
   return (
-    <TableRow key={index}>
+    <TableRow>
       <DataTableCell>
         <Link
-          to={`/accounts/${substateIdToString(account.account.address)}`}
+          to={`/accounts/${substateIdToString(component_address)}`}
           style={{
             textDecoration: "none",
             color: "inherit",
           }}
         >
-          {account.account.name || shortenSubstateId(account.account.address)}
+          {name || shortenSubstateId(component_address)}
         </Link>
       </DataTableCell>
       <DataTableCell>
-        <CopyAddress address={substateIdToString(account.account.address)} />
-      </DataTableCell>
-      <DataTableCell>{account.account.key_index}</DataTableCell>
-      <DataTableCell>
-        <CopyAddress address={account.public_key} />
+        <CopyAddress address={substateIdToString(component_address)} />
       </DataTableCell>
       <DataTableCell>
-        <IconButton component={Link} to={`/accounts/${substateIdToString(account.account.address)}`}>
+        {account.account.owner_key_id && "Derived" in account.account.owner_key_id
+          ? account.account.owner_key_id.Derived.index.toString()
+          : "imported"}
+      </DataTableCell>
+      <DataTableCell>
+        <CopyAddress address={address} />
+      </DataTableCell>
+      <DataTableCell>
+        <IconButton component={Link} to={`/accounts/${substateIdToString(component_address)}`}>
           <ChevronRight />
         </IconButton>
       </DataTableCell>
@@ -96,8 +104,8 @@ function Accounts() {
     });
   };
 
-  const onSubmitAddAccount = () => {
-    mutateAddAccount(
+  const onSubmitAddAccount = async () => {
+    await mutateAddAccount(
       {
         accountName: accountFormState.accountName,
       },
@@ -172,15 +180,17 @@ function Accounts() {
               <TableHead>
                 <TableRow>
                   <TableCell>Name</TableCell>
-                  <TableCell>Address</TableCell>
+                  <TableCell>Component</TableCell>
                   <TableCell>Key index</TableCell>
-                  <TableCell>Public key</TableCell>
+                  <TableCell>Address</TableCell>
                   <TableCell>Details</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {dataAccountsList &&
-                  dataAccountsList.accounts.map((account: AccountInfo, index: number) => Account(account, index))}
+                  dataAccountsList.accounts.map((account: AccountInfo, index) => (
+                    <Account account={account} key={index} />
+                  ))}
               </TableBody>
             </Table>
           </TableContainer>

@@ -18,12 +18,12 @@ use tari_consensus_types::{
     LastVoted,
     LeafBlock,
     LockedBlock,
+    PcId,
     ProposalCertificate,
-    QcId,
     TcId,
     TimeoutCertificate,
 };
-use tari_engine_types::{confidential::UnclaimedConfidentialOutput, substate::SubstateId};
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{
     shard::Shard,
     Epoch,
@@ -37,7 +37,7 @@ use tari_ootle_common_types::{
     VersionedSubstateIdRef,
 };
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, StateTreePayload, Version};
-use tari_template_lib::{models::UnclaimedConfidentialOutputAddress, types::crypto::RistrettoPublicKeyBytes};
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 use time::PrimitiveDateTime;
 
@@ -46,7 +46,6 @@ use crate::{
         Block,
         BlockDiff,
         BlockTransactionExecution,
-        BurntUtxo,
         EpochCheckpoint,
         Evidence,
         ForeignParkedProposal,
@@ -125,6 +124,7 @@ pub trait StateStoreReadTransaction: Sized {
     fn last_sent_new_view_get(&self, epoch: Epoch) -> Result<LastSentNewView, StorageError>;
     fn high_pc_get(&self, epoch: Epoch) -> Result<HighPc, StorageError>;
     fn high_tc_get(&self, epoch: Epoch) -> Result<HighTc, StorageError>;
+    fn is_block_in_end_of_epoch_chain(&self, block_id: &BlockId) -> Result<bool, StorageError>;
     fn foreign_proposals_get_any<'a, I: IntoIterator<Item = &'a BlockId>>(
         &self,
         block_ids: I,
@@ -203,10 +203,10 @@ pub trait StateStoreReadTransaction: Sized {
     ) -> Result<SubstateChange, StorageError>;
 
     // -------------------------------- ProposalCertificate -------------------------------- //
-    fn proposal_certificates_get(&self, epoch: Epoch, qc_id: &QcId) -> Result<ProposalCertificate, StorageError>;
+    fn proposal_certificates_get(&self, epoch: Epoch, qc_id: &PcId) -> Result<ProposalCertificate, StorageError>;
     fn proposal_certificates_get_many<'a, I>(&self, qc_ids: I) -> Result<Vec<ProposalCertificate>, StorageError>
     where
-        I: IntoIterator<Item = &'a (Epoch, QcId)>,
+        I: IntoIterator<Item = &'a (Epoch, PcId)>,
         I::IntoIter: ExactSizeIterator;
 
     // -------------------------------- TimeoutCertificate -------------------------------- //
@@ -223,7 +223,7 @@ pub trait StateStoreReadTransaction: Sized {
         transaction_id: &TransactionId,
     ) -> Result<TransactionPoolRecord, StorageError>;
     fn transaction_pool_exists(&self, transaction_id: &TransactionId) -> Result<bool, StorageError>;
-    fn transaction_pool_get_all(&self) -> Result<Vec<TransactionPoolRecord>, StorageError>;
+    fn transaction_pool_get_all(&self, limit: usize) -> Result<Vec<TransactionPoolRecord>, StorageError>;
     fn transaction_pool_get_many_ready(
         &self,
         max_txs: usize,
@@ -310,6 +310,8 @@ pub trait StateStoreReadTransaction: Sized {
         shard_group: ShardGroup,
     ) -> Result<EpochCheckpoint, StorageError>;
 
+    fn epoch_checkpoint_get_last(&self) -> Result<EpochCheckpoint, StorageError>;
+
     // -------------------------------- Foreign Substate Pledges -------------------------------- //
     fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(
         &self,
@@ -325,19 +327,8 @@ pub trait StateStoreReadTransaction: Sized {
         &self,
         transaction_id: &TransactionId,
     ) -> Result<SubstatePledges, StorageError>;
-
-    // -------------------------------- BurntUtxos -------------------------------- //
-    fn burnt_utxos_get(
-        &self,
-        commitment: &UnclaimedConfidentialOutputAddress,
-    ) -> Result<UnclaimedConfidentialOutput, StorageError>;
-    fn burnt_utxos_get_all_unproposed(
-        &self,
-        leaf_block: &BlockId,
-        limit: usize,
-    ) -> Result<HashMap<UnclaimedConfidentialOutputAddress, UnclaimedConfidentialOutput>, StorageError>;
-
-    fn burnt_utxos_count(&self) -> Result<u64, StorageError>;
+    // -------------------------------- Parked blocks / Missing Transactions -------------------------------- //
+    fn parked_block_exists(&self, block_id: &BlockId) -> Result<bool, StorageError>;
 
     // -------------------------------- Foreign parked block -------------------------------- //
     fn foreign_parked_blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError>;
@@ -376,8 +367,8 @@ pub trait StateStoreWriteTransaction {
     fn blocks_set_qcs(
         &mut self,
         block_id: &BlockId,
-        commit_qc_id: Option<&QcId>,
-        justify_qc_id: Option<&QcId>,
+        commit_qc_id: Option<&PcId>,
+        justify_qc_id: Option<&PcId>,
     ) -> Result<(), StorageError>;
 
     // -------------------------------- BlockDiff -------------------------------- //
@@ -549,20 +540,6 @@ pub trait StateStoreWriteTransaction {
 
     // -------------------------------- Epoch checkpoint -------------------------------- //
     fn epoch_checkpoint_save(&mut self, checkpoint: &EpochCheckpoint) -> Result<(), StorageError>;
-
-    // -------------------------------- BurntUtxo -------------------------------- //
-    fn burnt_utxos_insert(&mut self, burnt_utxo: &BurntUtxo) -> Result<(), StorageError>;
-    fn burnt_utxos_set_proposed_block(
-        &mut self,
-        commitment: &UnclaimedConfidentialOutputAddress,
-        proposed_in_block: &BlockId,
-    ) -> Result<(), StorageError>;
-    fn burnt_utxos_clear_proposed_block(&mut self, proposed_in_block: &BlockId) -> Result<(), StorageError>;
-    fn burnt_utxos_delete(
-        &mut self,
-        commitment: &UnclaimedConfidentialOutputAddress,
-        proposed_in_block: &BlockId,
-    ) -> Result<(), StorageError>;
 
     // -------------------------------- Lock conflicts -------------------------------- //
     fn lock_conflicts_insert_all<'a, I: IntoIterator<Item = (&'a TransactionId, &'a Vec<LockConflict>)>>(

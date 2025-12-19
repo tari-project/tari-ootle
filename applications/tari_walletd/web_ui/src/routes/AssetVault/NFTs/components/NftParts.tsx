@@ -29,13 +29,12 @@ import { NftCard as Card, DataTableCell } from "@components/StyledComponents";
 import { convertCborValue } from "@utils/cbor";
 import { shortenSubstateId, displayNftId } from "@utils/helpers";
 import SendNft from "./SendNft";
-
+import { Fragment } from "react/jsx-runtime";
 
 function NftCard({ nft }: { nft: NonFungibleToken }) {
   const mutableData = convertCborValue(nft.mutable_data);
-  const data = convertCborValue(nft.data);
+  const data = convertCborValue(nft.data) as Record<string, any> | undefined;
   const imageUrl = mutableData?.image_url;
-  const originalOwner = data?.original_owner;
 
   return (
     <Grid item xs={12} sm={6} md={4} lg={3}>
@@ -59,19 +58,15 @@ function NftCard({ nft }: { nft: NonFungibleToken }) {
             <Typography variant="h6" component="h2" fontWeight="bold" noWrap>
               {displayNftId(nft.nft_id)}
             </Typography>
-            <Chip
-              icon={
-                nft.is_burnt ? (
-                  <CancelRoundedIcon style={{ height: 16, width: 16 }} />
-                ) : (
-                  <CheckCircleRoundedIcon style={{ height: 16, width: 16 }} />
-                )
-              }
-              label={nft.is_burnt ? "Burnt" : "Active"}
-              color={nft.is_burnt ? "error" : "success"}
-              size="small"
-              variant="outlined"
-            />
+            {nft.is_burnt && (
+              <Chip
+                icon={<CancelRoundedIcon style={{ height: 16, width: 16 }} />}
+                label={"Burnt"}
+                color={"error"}
+                size="small"
+                variant="outlined"
+              />
+            )}
           </Box>
 
           <Divider />
@@ -81,10 +76,7 @@ function NftCard({ nft }: { nft: NonFungibleToken }) {
           </Typography>
 
           <Divider />
-          <Typography variant="subtitle2">Original Owner:</Typography>
-          <Typography variant="body2" color="text.secondary" gutterBottom>
-            <CopyAddress address={originalOwner || ""} />
-          </Typography>
+          {data ? <NftData data={data} /> : null}
 
           <SendNft nftId={nft.nft_id} resourceAddress={nft.resource_address} />
         </CardContent>
@@ -93,11 +85,40 @@ function NftCard({ nft }: { nft: NonFungibleToken }) {
   );
 }
 
+function NftData({ data }: { data: Record<string, any> }) {
+  return (
+    <>
+      {Object.keys(data).map((key, i) => {
+        const value = data[key];
+        return (
+          <Fragment key={i}>
+            <Typography variant="subtitle2">{key}</Typography>
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              <CopyAddress address={String(value)} />
+            </Typography>
+          </Fragment>
+        );
+      })}
+    </>
+  );
+}
+
 function NftRow({ nft }: { nft: NonFungibleToken }) {
   const mutableData = convertCborValue(nft.mutable_data);
   const data = convertCborValue(nft.data);
   const imageUrl = mutableData?.image_url;
-  const originalOwner = data?.original_owner;
+
+  const metadata: [string, string][] = [];
+  if (data && typeof data === "object") {
+    let limit = 5;
+    for (const [key, value] of Object.entries(data)) {
+      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        metadata.push([key, value.toString()]);
+        limit -= 1;
+        if (limit === 0) break;
+      }
+    }
+  }
 
   return (
     <TableRow>
@@ -127,7 +148,11 @@ function NftRow({ nft }: { nft: NonFungibleToken }) {
       </DataTableCell>
       <DataTableCell>
         <Typography variant="body2">
-          <CopyAddress address={originalOwner || ""} />
+          {metadata.map(([key, value], index) => (
+            <div key={index}>
+              <strong>{key}:</strong> {value}
+            </div>
+          ))}
         </Typography>
       </DataTableCell>
       <DataTableCell>

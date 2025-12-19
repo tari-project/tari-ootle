@@ -10,6 +10,7 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::{
     optional::{IsNotFoundError, Optional},
+    response_status::{ResponseErrorStatus, TransactionStatusResponseError},
     VersionedSubstateIdRef,
 };
 use tari_template_lib::{
@@ -19,9 +20,9 @@ use tari_template_lib::{
 use tari_transaction::{Transaction, TransactionId};
 
 use crate::{
-    models::{NewAccountData, TransactionStatus, WalletTransaction, WalletTransactionUpdate},
-    network::{StatusResponseError, TransactionFinalizedResult, WalletNetworkInterface, WalletQueryErrorStatus},
-    storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
+    models::{NewAccountData, TransactionStatus, WalletLockId, WalletTransaction, WalletTransactionUpdate},
+    network::{TransactionFinalizedResult, WalletNetworkInterface},
+    storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter, WriteableWalletStore},
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_sdk::apis::transaction";
@@ -35,7 +36,7 @@ impl<'a, TStore, TNetworkInterface> TransactionApi<'a, TStore, TNetworkInterface
 where
     TStore: WalletStore,
     TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
+    TNetworkInterface::Error: IsNotFoundError + TransactionStatusResponseError,
 {
     pub fn new(store: &'a TStore, network_interface: &'a TNetworkInterface) -> Self {
         Self {
@@ -50,7 +51,8 @@ where
         Ok(transaction)
     }
 
-    pub async fn insert_new_transaction(
+    /// Inserts a new transaction into the wallet database with status `New`.
+    pub fn insert_new_transaction(
         &self,
         transaction: Transaction,
         new_account_info: Option<NewAccountData>,
@@ -63,8 +65,18 @@ where
         Ok(tx_id)
     }
 
+    /// Submits a transaction to the network. The transaction must be in the `New` status.
+    /// If the submission is successful, the transaction status is updated to `Pending`.
+    /// If the transaction is rejected, the status is updated to `InvalidTransaction` and the
+    /// rejection reason is stored.
+    /// Returns `Ok(true)` if the transaction was successfully submitted, `Ok(false)` if it was rejected
     pub async fn submit_transaction(&self, transaction_id: TransactionId) -> Result<bool, TransactionApiError> {
         let transaction = self.store.with_read_tx(|tx| tx.transactions_get(transaction_id))?;
+        if transaction.is_dry_run {
+            return Err(TransactionApiError::DryRunMismatchError {
+                details: "Transaction is marked as dry run and cannot be submitted".to_string(),
+            });
+        }
 
         if !matches!(transaction.status, TransactionStatus::New) {
             return Err(TransactionApiError::StoreError(WalletStorageError::OperationError {
@@ -83,21 +95,21 @@ where
                     )
                 })?;
             },
-            Err(err) => match err.get_status() {
-                WalletQueryErrorStatus::TransactionRejected { message } => {
-                    warn!(target: LOG_TARGET, "Invalid transaction submission: {transaction_id} {message}");
-                    self.store.with_write_tx(|tx| {
-                        tx.transactions_update(
-                            WalletTransactionUpdate::new(transaction_id)
-                                .with_new_status(TransactionStatus::InvalidTransaction)
-                                .with_invalid_reason(&message),
-                        )
-                    })?;
-                    return Ok(false);
-                },
-                _ => {
-                    return Err(err.into());
-                },
+            Err(err) => {
+                return match err.get_status() {
+                    ResponseErrorStatus::TransactionRejected { message } => {
+                        warn!(target: LOG_TARGET, "Invalid transaction submission: {transaction_id} {message}");
+                        self.store.with_write_tx(|tx| {
+                            tx.transactions_update(
+                                WalletTransactionUpdate::new(transaction_id)
+                                    .with_new_status(TransactionStatus::InvalidTransaction)
+                                    .with_invalid_reason(&message),
+                            )
+                        })?;
+                        Ok(false)
+                    },
+                    _ => Err(err.into()),
+                }
             },
         }
 
@@ -108,6 +120,12 @@ where
         &self,
         transaction: Transaction,
     ) -> Result<WalletTransaction, TransactionApiError> {
+        if !transaction.is_dry_run() {
+            return Err(TransactionApiError::DryRunMismatchError {
+                details: "Transaction is not marked as dry run but submitted to dry-run".to_string(),
+            });
+        }
+
         self.store
             .with_write_tx(|tx| tx.transactions_insert(&transaction, None, true))?;
 
@@ -250,27 +268,25 @@ where
                             .with_finalized_time(finalized_time),
                     )?;
 
-                    // if the transaction being processed is confidential,
-                    // we should make sure that the account's locked outputs
-                    // are either set to spent or released, depending if the
+
+                    // Make sure that any locked outputs are either set to spent or released, depending on if the
                     // transaction was finalized or rejected. Always release for dry runs.
-                    if transaction.is_dry_run ||
-                        !matches!(
-                            new_status,
-                            TransactionStatus::Accepted | TransactionStatus::OnlyFeeAccepted
-                        )
-                    {
+                    if transaction.is_dry_run {
                         self.release_all_locks_for_transaction_internal(tx, transaction_id)?;
                     } else {
-                        // TODO: it becomes more complicated if the transaction is Fee accepted, we'll need to finalize
-                        // spends relating to fees and release the rest
-                        let lock_ids = tx.locks_get_by_transaction_id(transaction_id)?;
-                        info!(target: LOG_TARGET, "Finalizing locked outputs for transaction {}: {:?}", transaction_id, lock_ids);
-                        for lock_id in lock_ids {
-                            tx.outputs_finalize_by_lock_id(lock_id)?;
-                            tx.stealth_outputs_finalize_by_lock_id(lock_id)?;
-                            tx.vaults_finalized_locked_revealed_funds(lock_id).optional()?;
-                            tx.locks_delete(lock_id)?;
+                        let maybe_diff = execution_result
+                            .as_ref()
+                            .and_then(|e| e.finalize.result.any_accept());
+                        match maybe_diff {
+                            Some(diff) => {
+                                if let Some(lock_id) = tx.locks_get_by_transaction_id(transaction_id).optional()? {
+                                    info!(target: LOG_TARGET, "Finalizing locked outputs for transaction {}: {}", transaction_id, lock_id);
+                                    tx.locks_unlock_finalized(lock_id, diff)?;
+                                }
+                            }
+                            None => {
+                                self.release_all_locks_for_transaction_internal(tx, transaction_id)?;
+                            }
                         }
                     }
 
@@ -288,21 +304,24 @@ where
             .with_write_tx(|tx| self.release_all_locks_for_transaction_internal(tx, transaction_id))
     }
 
-    fn release_all_locks_for_transaction_internal(
+    pub fn locks_set_transaction_id(
         &self,
-        tx: &mut <TStore as WalletStore>::WriteTransaction<'_>,
+        lock_id: WalletLockId,
         transaction_id: TransactionId,
     ) -> Result<(), TransactionApiError> {
-        let lock_ids = tx.locks_get_by_transaction_id(transaction_id)?;
+        self.store
+            .with_write_tx(|tx| tx.locks_link_transaction(lock_id, transaction_id))?;
+        Ok(())
+    }
 
-        debug!(target: LOG_TARGET, "Releasing {} locks (and associated outputs) for transaction {} that was not committed", lock_ids.len(), transaction_id);
-        for lock_id in lock_ids {
-            // Lock could be for confidential outputs or stealth outputs
-            tx.outputs_release_by_lock_id(lock_id)?;
-            tx.stealth_outputs_release_by_lock_id(lock_id)?;
-            // If the lock locks a vault, we need to release the revealed funds
-            tx.vaults_release_lock_revealed_funds(lock_id).optional()?;
-            tx.locks_delete(lock_id)?;
+    fn release_all_locks_for_transaction_internal(
+        &self,
+        tx: &mut <TStore as WriteableWalletStore>::WriteTransaction<'_>,
+        transaction_id: TransactionId,
+    ) -> Result<(), TransactionApiError> {
+        if let Some(lock_id) = tx.locks_get_by_transaction_id(transaction_id).optional()? {
+            debug!(target: LOG_TARGET, "Releasing lock {} (and associated outputs) for transaction {} that was not committed", lock_id, transaction_id);
+            tx.locks_release(lock_id)?;
         }
 
         Ok(())
@@ -316,13 +335,14 @@ where
     ) -> Result<(), TransactionApiError> {
         let mut downed_substates_with_parents = HashMap::with_capacity(diff.down_len());
         for (id, _) in diff.down_iter() {
-            if id.is_layer1_commitment() {
-                info!(target: LOG_TARGET, "Layer 1 commitment {} downed", id);
+            if id.is_claimed_output_tombstone() {
+                // Should never happen
+                warn!(target: LOG_TARGET, "❓️ Claimed tombstone {} downed", id);
                 continue;
             }
 
             let Some(downed) = tx.substates_remove(id).optional()? else {
-                warn!(target: LOG_TARGET, "Downed substate {} not found", id);
+                debug!(target: LOG_TARGET, "Downed substate {} not found", id);
                 continue;
             };
 
@@ -334,19 +354,20 @@ where
         let (components, mut other_substates) = diff.up_iter().partition::<Vec<_>, _>(|(addr, _)| addr.is_component());
 
         for (component_addr, substate) in components {
-            let header = substate.substate_value().component().unwrap();
-            let indexed = IndexedWellKnownTypes::from_value(header.state())?;
+            let component = substate.substate_value().component().unwrap();
+            let indexed =
+                IndexedWellKnownTypes::from_value(component.state()).map_err(TransactionApiError::IndexedValueError)?;
 
             debug!(target: LOG_TARGET, "Substate {} up", component_addr);
             tx.substates_upsert_root(
                 VersionedSubstateIdRef::new(component_addr, substate.version()),
                 indexed.referenced_substates().collect(),
-                Some(header.module_name.clone()),
-                Some(header.template_address),
+                Some(component.module_name.clone()),
+                Some(component.template_address),
             )?;
 
             for owned_id in indexed.referenced_substates() {
-                if let Some(pos) = other_substates.iter().position(|(addr, _)| addr == &owned_id) {
+                if let Some(pos) = other_substates.iter().position(|(addr, _)| *addr == owned_id) {
                     let (_, child) = other_substates.swap_remove(pos);
                     // If there was a previous parent for this substate, we keep it as is.
                     let parent = downed_substates_with_parents
@@ -366,7 +387,7 @@ where
                             if let Some(resource) = tx.substates_get(&vault.resource_address.into()).optional()? {
                                 tx.substates_upsert_child(
                                     &vault.account_address.into(),
-                                    resource.substate_id.as_ref(),
+                                    resource.substate_id.as_versioned_ref(),
                                     HashSet::new(),
                                 )?;
                             }
@@ -429,33 +450,32 @@ where
                             if let Some(resource) = tx.substates_get(&vault.resource_address.into()).optional()? {
                                 tx.substates_upsert_child(
                                     &vault.account_address.into(),
-                                    resource.substate_id.as_ref(),
+                                    resource.substate_id.as_versioned_ref(),
                                     HashSet::new(),
                                 )?;
                             }
                         },
                         None => {
-                            // This should never happen because Vaults can't dangle and these are removed by the
-                            // previous loop above
-                            warn!(target: LOG_TARGET, "Vault {} does not have a parent", vault_id);
-                            tx.substates_upsert_root(
-                                VersionedSubstateIdRef::new(id, substate.version()),
-                                [(*substate
-                                    .substate_value()
-                                    .vault()
-                                    .expect("should be vault")
-                                    .resource_address())
-                                .into()]
-                                .into_iter()
-                                .collect(),
-                                None,
-                                None,
-                            )?;
+                            // We don't know the parent account of this vault.
+                            debug!(target: LOG_TARGET, "Vault {} does not have a parent", vault_id);
+                            // tx.substates_upsert_root(
+                            //     VersionedSubstateIdRef::new(id, substate.version()),
+                            //     [(*substate
+                            //         .substate_value()
+                            //         .vault()
+                            //         .expect("should be vault")
+                            //         .resource_address())
+                            //     .into()]
+                            //     .into_iter()
+                            //     .collect(),
+                            //     None,
+                            //     None,
+                            // )?;
                         },
                     }
                     continue;
                 },
-                SubstateId::UnclaimedConfidentialOutput(_) => {
+                SubstateId::ClaimedOutputTombstone(_) => {
                     tx.substates_upsert_root(
                         VersionedSubstateIdRef::new(id, substate.version()),
                         [XTR.into()].into_iter().collect(),
@@ -470,13 +490,15 @@ where
                         .non_fungible()
                         .and_then(|s| s.contents())
                         .map(|c| IndexedWellKnownTypes::from_value(c.data()))
-                        .transpose()?;
+                        .transpose()
+                        .map_err(TransactionApiError::IndexedValueError)?;
                     let referenced_mdata = substate
                         .substate_value()
                         .non_fungible()
                         .and_then(|s| s.contents())
                         .map(|c| IndexedWellKnownTypes::from_value(c.mutable_data()))
-                        .transpose()?;
+                        .transpose()
+                        .map_err(TransactionApiError::IndexedValueError)?;
                     tx.substates_upsert_child(
                         &SubstateId::Resource(*resource_address),
                         VersionedSubstateIdRef::new(id, substate.version()),
@@ -516,13 +538,15 @@ pub enum TransactionApiError {
     StoreError(#[from] WalletStorageError),
     #[error("Network interface error: {status} {message}")]
     NetworkInterfaceError {
-        status: WalletQueryErrorStatus,
+        status: ResponseErrorStatus,
         message: String,
     },
     #[error("Failed to extract known type data from value: {0}")]
-    IndexedValueError(#[from] IndexedValueError),
+    IndexedValueError(IndexedValueError),
     #[error("Invalid transaction query response: {details}")]
     InvalidTransactionQueryResponse { details: String },
+    #[error("Dry run transaction mismatch error: {details}")]
+    DryRunMismatchError { details: String },
 }
 
 impl IsNotFoundError for TransactionApiError {
@@ -531,7 +555,7 @@ impl IsNotFoundError for TransactionApiError {
     }
 }
 
-impl<T: StatusResponseError> From<T> for TransactionApiError {
+impl<T: TransactionStatusResponseError> From<T> for TransactionApiError {
     fn from(value: T) -> Self {
         TransactionApiError::NetworkInterfaceError {
             status: value.get_status(),

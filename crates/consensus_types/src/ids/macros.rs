@@ -45,7 +45,7 @@ macro_rules! create_hash_type {
                 self.0.iter().all(|b| *b == 0)
             }
 
-            pub fn into_array(self) -> [u8; 32] {
+            pub const fn into_array(self) -> [u8; 32] {
                 self.0.into_array()
             }
 

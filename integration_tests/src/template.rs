@@ -19,7 +19,7 @@ use tari_wallet_daemon_client::{
     ComponentAddressOrName,
 };
 
-use crate::{wallet_daemon_cli::get_auth_wallet_daemon_client, TariWorld};
+use crate::{wallet_daemon_client::get_auth_wallet_daemon_client, TariWorld};
 
 #[derive(Debug)]
 pub struct RegisteredTemplate {

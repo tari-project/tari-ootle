@@ -4,13 +4,13 @@
 use std::time::Duration;
 
 use tari_common_types::types::{FixedHash, PrivateKey};
-use tari_consensus_types::{Decision, QcId};
+use tari_consensus_types::{Decision, PcId, ShardGroupAccumulatedData};
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, TransactionResult},
     fees::{FeeBreakdown, FeeReceipt},
     substate::SubstateDiff,
 };
-use tari_ootle_common_types::{Epoch, ExtraData, NodeHeight, SubstateRequirement};
+use tari_ootle_common_types::{Epoch, ExtraData, Network, NodeHeight, SubstateRequirement};
 use tari_ootle_storage::{
     consensus_models::{
         Block,
@@ -36,8 +36,6 @@ use crate::{
 };
 
 mod confirm_all_transitions {
-    use tari_ootle_common_types::Network;
-
     use super::*;
 
     #[test]
@@ -57,7 +55,7 @@ mod confirm_all_transitions {
         let zero_block = Block::zero_block(network, TEST_NUM_PRESHARDS);
         zero_block.insert(&mut tx).unwrap();
         tx.proposal_certificates_save(zero_block.justify()).unwrap();
-        tx.blocks_set_qcs(zero_block.id(), Some(&QcId::zero()), Some(&QcId::zero()))
+        tx.blocks_set_qcs(zero_block.id(), Some(&PcId::zero()), Some(&PcId::zero()))
             .unwrap();
 
         let shard_group = zero_block.shard_group();
@@ -79,6 +77,7 @@ mod confirm_all_transitions {
             SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
             FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
             ExtraData::default(),
         )
         .unwrap();
@@ -93,22 +92,10 @@ mod confirm_all_transitions {
         tx.transaction_pool_insert_new(atom3.id, atom3.decision, &Evidence::empty(), true, false)
             .unwrap();
         let block_id = *block1.id();
-        let transactions = tx.transaction_pool_get_all().unwrap();
-        let mut tx_1 = transactions
-            .iter()
-            .find(|tx| *tx.transaction_id() == atom1.id)
-            .unwrap()
-            .clone();
-        let mut tx_2 = transactions
-            .iter()
-            .find(|tx| *tx.transaction_id() == atom2.id)
-            .unwrap()
-            .clone();
-        let mut tx_3 = transactions
-            .iter()
-            .find(|tx| *tx.transaction_id() == atom3.id)
-            .unwrap()
-            .clone();
+        let transactions = tx.transaction_pool_get_all(1000).unwrap();
+        let mut tx_1 = transactions.iter().find(|tx| *tx.id() == atom1.id).unwrap().clone();
+        let mut tx_2 = transactions.iter().find(|tx| *tx.id() == atom2.id).unwrap().clone();
+        let mut tx_3 = transactions.iter().find(|tx| *tx.id() == atom3.id).unwrap().clone();
 
         assert!(tx.transaction_pool_exists(&atom1.id).unwrap());
         assert!(tx.transaction_pool_exists(&atom2.id).unwrap());
@@ -174,21 +161,21 @@ mod transaction_operations {
 
         // transactions_insert
         let tx1 = TransactionRecord::new(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .add_instruction(Instruction::DropAllProofsInWorkspace)
                 .add_input(SubstateRequirement::new(create_random_substate_id(), Some(0)))
                 .build_and_seal(&PrivateKey::default()),
         );
         tx.transactions_insert(&tx1).unwrap();
         let tx2 = TransactionRecord::new(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .add_instruction(Instruction::DropAllProofsInWorkspace)
                 .add_input(SubstateRequirement::new(create_random_substate_id(), Some(1)))
                 .build_and_seal(&PrivateKey::default()),
         );
         tx.transactions_insert(&tx2).unwrap();
         let unexisting_tx = TransactionRecord::new(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .add_instruction(Instruction::DropAllProofsInWorkspace)
                 .add_input(SubstateRequirement::new(create_random_substate_id(), Some(2)))
                 .build_and_seal(&PrivateKey::default()),
@@ -211,7 +198,7 @@ mod transaction_operations {
 
         // transactions_update
         let updated_tx = TransactionRecord::new(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .add_instruction(Instruction::DropAllProofsInWorkspace)
                 .add_input(SubstateRequirement::new(create_random_substate_id(), Some(3)))
                 .build_and_seal(&PrivateKey::default()),
@@ -250,14 +237,14 @@ mod transaction_execution_operations {
 
         // insert some transactions
         let tx1 = TransactionRecord::new(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .add_instruction(Instruction::DropAllProofsInWorkspace)
                 .add_input(SubstateRequirement::new(create_random_substate_id(), Some(0)))
                 .build_and_seal(&PrivateKey::default()),
         );
         tx.transactions_insert(&tx1).unwrap();
         let tx2 = TransactionRecord::new(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .add_instruction(Instruction::DropAllProofsInWorkspace)
                 .add_input(SubstateRequirement::new(create_random_substate_id(), Some(1)))
                 .build_and_seal(&PrivateKey::default()),
@@ -327,7 +314,7 @@ mod transaction_execution_operations {
         // transactions_finalize_all
         tx.transaction_pool_insert_new(*tx1.id(), Decision::Commit, &Evidence::empty(), true, false)
             .unwrap();
-        let transactions = tx.transaction_pool_get_all().unwrap();
+        let transactions = tx.transaction_pool_get_all(1000).unwrap();
         assert_eq!(transactions.len(), 1);
         tx.transactions_finalize_all(transactions.iter()).unwrap();
 

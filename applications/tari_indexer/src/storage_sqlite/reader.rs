@@ -1,13 +1,13 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{fmt::Write, str::FromStr};
+use std::{collections::HashMap, fmt::Write, str::FromStr};
 
 use diesel::{
     dsl,
     sql_types,
-    BoolExpressionMethods,
     ExpressionMethods,
+    NullableExpressionMethods,
     OptionalExtension,
     QueryDsl,
     RunQueryDsl,
@@ -16,29 +16,39 @@ use diesel::{
 };
 use log::info;
 use serde::de::DeserializeOwned;
-use tari_consensus_types::BlockId;
 use tari_engine_types::{
-    substate::{SubstateId, SubstateValue},
+    events::Event,
+    substate::{Substate, SubstateId, SubstateValue},
+    transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
     Utxo,
-    UtxoId,
 };
 use tari_indexer_client::types::{ListSubstateItem, NonFungibleSubstate, TransactionEntry};
-use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, ShardGroup, StateVersion};
-use tari_ootle_storage::{time::PrimitiveDateTime, StorageError};
+use tari_ootle_common_types::{
+    displayable::Displayable,
+    shard::Shard,
+    substate_type::SubstateType,
+    Epoch,
+    ShardGroup,
+    StateVersion,
+};
+use tari_ootle_storage::{time::PrimitiveDateTime, Ordering, StorageError};
 use tari_ootle_storage_sqlite::SqliteTransaction;
-use tari_ootle_wallet_sdk::models::WalletUtxoUpdate;
+use tari_ootle_wallet_sdk::models::UtxoStateUpdateSet;
 use tari_template_lib::{
-    models::ResourceAddress,
+    models::{ResourceAddress, UtxoId},
     prelude::{RistrettoPublicKeyBytes, TemplateAddress},
-    types::crypto::UtxoTag,
+    types::{crypto::UtxoTag, Hash},
 };
 use tari_transaction::{Transaction, TransactionId};
 
-use crate::storage_sqlite::{
-    models,
-    models::{EventRecord, KeyValue, ScannedBlockId, SubstateRecord},
-    serialization::{deserialize_hex_try_from, deserialize_json, serialize_hex},
-    IndexerStoreReadTransaction,
+use crate::{
+    storage_sqlite::{
+        models,
+        models::{EventRecord, KeyValue, SubstateRecord},
+        serialization::{deserialize_hex_try_from, deserialize_json, serialize_hex},
+    },
+    store::IndexerStoreReadTransaction,
+    substate_manager::SubstateResponse,
 };
 
 const LOG_TARGET: &str = "tari::indexer::storage_sqlite::reader";
@@ -60,6 +70,7 @@ impl<'a> SqliteStoreReadTransaction<'a> {
 impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
     fn list_substates(
         &mut self,
+        by_id: Option<&SubstateId>,
         by_type: Option<SubstateType>,
         by_template_address: Option<TemplateAddress>,
         limit: Option<u64>,
@@ -68,6 +79,10 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         use crate::storage_sqlite::schema::substates;
 
         let mut query = substates::table.into_boxed();
+
+        if let Some(substate_id) = by_id {
+            query = query.filter(substates::address.eq(substate_id.to_string()));
+        }
 
         if let Some(template_address) = by_template_address {
             query = query.filter(substates::template_address.eq(template_address.to_string()));
@@ -85,20 +100,25 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             query = query.offset(offset as i64);
         }
 
-        let substates: Vec<SubstateRecord> = query
+        let substates = query
             .order_by(substates::id.desc())
-            .get_results(self.connection())
+            .load_iter::<SubstateRecord, _>(self.connection())
             .map_err(|e| StorageError::QueryError {
                 reason: format!("list_substates: {}", e),
             })?;
 
         let items = substates
             .into_iter()
-            .map(|s| {
-                let substate_id = SubstateId::from_str(&s.address)?;
+            .map(|res| {
+                let s = res.map_err(|e| StorageError::QueryError {
+                    reason: format!("list_substates: {}", e),
+                })?;
+                let substate_id = SubstateId::from_str(&s.address).map_err(|e| StorageError::DataInconsistency {
+                    details: format!("Invalid substate address {}: {}", s.address, e),
+                })?;
                 let version = s.version as u32;
                 let template_address = s.template_address.map(|h| deserialize_hex_try_from(&h)).transpose()?;
-                let timestamp = s.timestamp;
+                let timestamp = s.updated_at;
                 Ok(ListSubstateItem {
                     substate_id,
                     module_name: s.module_name,
@@ -107,7 +127,7 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
                     timestamp,
                 })
             })
-            .collect::<Result<Vec<ListSubstateItem>, anyhow::Error>>()
+            .collect::<Result<_, StorageError>>()
             .map_err(|e| StorageError::QueryError {
                 reason: format!("list_substates: invalid substate items: {}", e),
             })?;
@@ -140,18 +160,35 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             })
     }
 
-    fn get_non_fungible_count(&mut self, resource_address: String) -> Result<i64, StorageError> {
-        use crate::storage_sqlite::schema::non_fungible_indexes;
+    fn get_substates(&mut self, ids: &[SubstateId]) -> Result<HashMap<SubstateId, Substate>, StorageError> {
+        use crate::storage_sqlite::schema::substates;
 
-        let count = non_fungible_indexes::table
-            .filter(non_fungible_indexes::resource_address.eq(resource_address))
-            .count()
-            .get_result::<i64>(self.connection())
+        let str_ids = ids.iter().map(|id| id.to_string());
+
+        let rows = substates::table
+            .select(substates::all_columns)
+            .filter(substates::address.eq_any(str_ids))
+            .load_iter::<SubstateRecord, _>(self.connection())
             .map_err(|e| StorageError::QueryError {
-                reason: format!("get_non_fungible_count: {}", e),
+                reason: format!("get_substates: {}", e),
             })?;
 
-        Ok(count)
+        rows.into_iter()
+            .map(|res| {
+                res.map_err(|e| StorageError::QueryError {
+                    reason: format!("get_substates: {e}"),
+                })
+                .and_then(SubstateResponse::try_from)
+            })
+            .map(|res| {
+                res.map(|substate_resp| {
+                    (
+                        substate_resp.id,
+                        Substate::new(substate_resp.version, substate_resp.substate),
+                    )
+                })
+            })
+            .collect()
     }
 
     fn get_non_fungibles_by_resource_address(
@@ -166,13 +203,16 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             .filter(substates::address.like(format!("nft_{}_%", resource_address.as_object_key())))
             .limit(limit as i64)
             .offset(offset as i64)
-            .get_results::<SubstateRecord>(self.connection())
+            .load_iter::<SubstateRecord, _>(self.connection())
             .map_err(|e| StorageError::QueryError {
                 reason: format!("get_non_fungibles_by_resource_address: {}", e),
             })?;
 
         res.into_iter()
-            .map(|row| {
+            .map(|res| {
+                let row = res.map_err(|e| StorageError::QueryError {
+                    reason: format!("get_non_fungibles_by_resource_address: {}", e),
+                })?;
                 let value: SubstateValue =
                     serde_json::from_str(&row.data).map_err(|e| StorageError::DataInconsistency {
                         details: format!("Failed to parse substate data: {}", e),
@@ -193,11 +233,11 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
 
     fn get_events(
         &mut self,
-        substate_id_filter: Option<SubstateId>,
-        topic_filter: Option<String>,
+        substate_id_filter: Option<&SubstateId>,
+        topic_filter: Option<&str>,
         offset: u32,
         limit: u32,
-    ) -> Result<Vec<EventRecord>, StorageError> {
+    ) -> Result<Vec<(TransactionId, Event)>, StorageError> {
         // TODO: allow to query by payload as well, unifying all event methods into one
         info!(
             target: LOG_TARGET,
@@ -218,63 +258,52 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             query = query.filter(events::topic.eq(topic));
         }
 
-        query = query.offset(offset.into());
-        if limit > 0 {
-            query = query.limit(limit.into());
-        }
-
-        let events = query
+        let event_rows = query
+            .offset(offset.into())
+            .limit(limit.into())
             .order(events::id.desc())
-            .get_results::<EventRecord>(self.connection())
+            .load_iter::<EventRecord, _>(self.connection())
             .map_err(|e| StorageError::QueryError {
                 reason: format!("get_events: {}", e),
             })?;
 
-        Ok(events)
-    }
-
-    fn get_oldest_scanned_epoch(&mut self) -> Result<Option<Epoch>, StorageError> {
-        use crate::storage_sqlite::schema::scanned_block_ids;
-
-        let res: Option<i64> = scanned_block_ids::table
-            .select(diesel::dsl::min(scanned_block_ids::epoch))
-            .first(self.connection())
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("get_oldest_scanned_epoch: {}", e),
-            })?;
-
-        let oldest_epoch = res
-            .map(|r| {
-                let epoch_as_u64 = r as u64;
-                Ok::<Epoch, StorageError>(Epoch(epoch_as_u64))
+        event_rows
+            .map(|res| {
+                res.map_err(|e| StorageError::QueryError {
+                    reason: format!("get_events: {}", e),
+                })
+                .and_then(|row| {
+                    let substate_id = row
+                        .substate_id
+                        .as_ref()
+                        .map(|str| SubstateId::from_str(str))
+                        .transpose()
+                        .map_err(|e| StorageError::DataInconsistency {
+                            details: format!(
+                                "Invalid substate_id {} in events table: {}",
+                                row.substate_id.display(),
+                                e
+                            ),
+                        })?;
+                    let template_address =
+                        Hash::from_hex(&row.template_address).map_err(|e| StorageError::DataInconsistency {
+                            details: format!(
+                                "Invalid template_address {} in events table: {}",
+                                row.template_address, e
+                            ),
+                        })?;
+                    let tx_hash = Hash::from_hex(&row.tx_hash).map_err(|e| StorageError::DataInconsistency {
+                        details: format!("Invalid tx_hash {} in events table: {}", row.tx_hash, e),
+                    })?;
+                    let topic = row.topic;
+                    let payload = deserialize_json(&row.payload)?;
+                    Ok((
+                        TransactionId::from(tx_hash),
+                        Event::new(substate_id, template_address, topic, payload),
+                    ))
+                })
             })
-            .transpose()?;
-
-        Ok(oldest_epoch)
-    }
-
-    fn get_last_scanned_block_id(
-        &mut self,
-        epoch: Epoch,
-        shard_group: ShardGroup,
-    ) -> Result<Option<BlockId>, StorageError> {
-        use crate::storage_sqlite::schema::scanned_block_ids;
-
-        let row: Option<ScannedBlockId> = scanned_block_ids::table
-            .filter(
-                scanned_block_ids::epoch
-                    .eq(epoch.0 as i64)
-                    .and(scanned_block_ids::shard_group.eq(shard_group.encode_as_u32() as i32)),
-            )
-            .first(self.connection())
-            .optional()
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("get_last_scanned_block_id: {}", e),
-            })?;
-
-        let block_id_option = row.map(|r| BlockId::try_from(r.last_block_id)).transpose()?;
-
-        Ok(block_id_option)
+            .collect()
     }
 
     fn list_recent_transactions(
@@ -322,6 +351,87 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
         .collect()
     }
 
+    fn list_transaction_receipts(
+        &mut self,
+        last_id: Option<TransactionReceiptAddress>,
+        limit: u64,
+        ordering: Ordering,
+    ) -> Result<Vec<(TransactionReceiptAddress, TransactionReceipt)>, StorageError> {
+        const OPERATION: &str = "list_transaction_receipts";
+        use crate::storage_sqlite::schema::transaction_receipts;
+
+        let mut query = transaction_receipts::table
+            .select((transaction_receipts::address, transaction_receipts::data))
+            .into_boxed();
+        if let Some(last_id) = last_id {
+            let tr = alias!(transaction_receipts as tr);
+            let subquery = tr
+                .select(tr.field(transaction_receipts::id))
+                .filter(tr.field(transaction_receipts::address).eq(last_id.to_string()))
+                .limit(1)
+                .single_value()
+                .assume_not_null();
+
+            query = match ordering {
+                Ordering::Ascending => query.filter(transaction_receipts::id.gt(subquery)),
+                Ordering::Descending => query.filter(transaction_receipts::id.lt(subquery)),
+            }
+        }
+
+        query = match ordering {
+            Ordering::Ascending => query.order_by(transaction_receipts::id.asc()),
+            Ordering::Descending => query.order_by(transaction_receipts::id.desc()),
+        };
+
+        let rows = query
+            .limit(limit as i64)
+            .load_iter::<(String, String), _>(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?;
+
+        rows.into_iter()
+            .map(|row| {
+                row.map_err(|e| StorageError::QueryError {
+                    reason: format!("{OPERATION}: {}", e),
+                })
+                .and_then(|(addr, data)| {
+                    Ok((
+                        TransactionReceiptAddress::from_str(&addr).map_err(|e| StorageError::DataInconsistency {
+                            details: format!("Invalid transaction receipt address {}: {}", addr, e),
+                        })?,
+                        deserialize_json(data)?,
+                    ))
+                })
+            })
+            .collect()
+    }
+
+    fn get_transaction_receipt(
+        &mut self,
+        address: &TransactionReceiptAddress,
+    ) -> Result<TransactionReceipt, StorageError> {
+        const OPERATION: &str = "get_transaction_receipt";
+        use crate::storage_sqlite::schema::transaction_receipts;
+
+        let receipt_addr_hex = serialize_hex(address.as_object_key());
+
+        let receipt_entry = transaction_receipts::table
+            .select(transaction_receipts::data)
+            .filter(transaction_receipts::address.eq(receipt_addr_hex))
+            .first::<String>(self.connection())
+            .optional()
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?
+            .ok_or_else(|| StorageError::NotFound {
+                item: "transaction_receipt",
+                key: address.to_string(),
+            })?;
+
+        deserialize_json(&receipt_entry)
+    }
+
     // -------------------------------- KeyValues -------------------------------- //
     fn key_value_get_value<K: AsRef<str>, T: DeserializeOwned>(&mut self, key: K) -> Result<T, StorageError> {
         let key_value = self.key_value_get_raw(key)?;
@@ -343,6 +453,21 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
             })?;
 
         Ok(key_value.into())
+    }
+
+    fn epoch_checkpoint_exists(&mut self, shard_group: ShardGroup, epoch: Epoch) -> Result<bool, StorageError> {
+        const OPERATION: &str = "epoch_checkpoint_exists";
+        use crate::storage_sqlite::schema::epoch_checkpoints;
+        let count: i64 = epoch_checkpoints::table
+            .filter(epoch_checkpoints::shard_group.eq(shard_group.to_parsable_string()))
+            .filter(epoch_checkpoints::epoch.eq(epoch.as_u64() as i64))
+            .limit(1)
+            .count()
+            .get_result(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?;
+        Ok(count > 0)
     }
 
     fn utxos_get_max_state_version(
@@ -369,19 +494,30 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
     fn utxos_get_updates(
         &mut self,
         resource_address: ResourceAddress,
+        from_epoch: Epoch,
         shard: Shard,
         from_state_version: StateVersion,
+        unspent_only: bool,
         limit: u32,
-    ) -> Result<(StateVersion, Vec<WalletUtxoUpdate>), StorageError> {
+    ) -> Result<UtxoStateUpdateSet, StorageError> {
         const OPERATION: &str = "get_utxo_updates";
         use crate::storage_sqlite::schema::utxos;
 
-        let rows = utxos::table
+        let mut query = utxos::table
             .filter(utxos::resource_address.eq(resource_address.to_string()))
             .filter(utxos::state_version.gt(from_state_version.as_u64() as i64))
+            .filter(utxos::epoch.ge(from_epoch.as_u64() as i64))
             .filter(utxos::shard.eq(shard.as_u32() as i32))
             .limit(i64::from(limit))
             .order_by(utxos::state_version.asc())
+            .into_boxed();
+        if unspent_only {
+            // Only return unspent UTXOs
+            query = query
+                .filter(utxos::is_spent.eq(false))
+                .filter(utxos::is_burnt.eq(false));
+        }
+        let rows = query
             .load_iter::<models::UtxoRecord, _>(self.connection())
             .map_err(|e| StorageError::QueryError {
                 reason: format!("{OPERATION}: {}", e),
@@ -389,16 +525,69 @@ impl IndexerStoreReadTransaction for SqliteStoreReadTransaction<'_> {
 
         let mut updates = Vec::new();
         let mut max_state_version = StateVersion::zero();
+        let mut max_epoch = Epoch::zero();
         for row in rows {
             let row = row.map_err(|e| StorageError::QueryError {
                 reason: format!("{OPERATION}: {}", e),
             })?;
+            let epoch = Epoch(row.epoch as u64);
             let (state_version, update) = row.try_convert_to_update()?;
             max_state_version = max_state_version.max(state_version);
+            max_epoch = max_epoch.max(epoch);
             updates.push(update);
         }
 
-        Ok((max_state_version, updates))
+        Ok(UtxoStateUpdateSet {
+            updates,
+            max_state_version,
+            max_epoch,
+        })
+    }
+
+    fn utxos_list(
+        &mut self,
+        resource_address: &ResourceAddress,
+        from_id: Option<UtxoId>,
+        limit: u32,
+    ) -> Result<Vec<(UtxoId, Utxo)>, StorageError> {
+        const OPERATION: &str = "utxos_list";
+        use crate::storage_sqlite::schema::utxos;
+
+        let mut query = utxos::table
+            .filter(utxos::resource_address.eq(resource_address.to_string()))
+            .filter(utxos::is_spent.eq(false))
+            .filter(utxos::is_burnt.eq(false))
+            .into_boxed();
+
+        if let Some(from_id) = from_id {
+            let uxo = alias!(utxos as uxo);
+            let subquery = uxo
+                .select(uxo.field(utxos::id))
+                .filter(uxo.field(utxos::commitment).eq(from_id.to_commitment_hex_string()))
+                .limit(1)
+                .single_value()
+                .assume_not_null();
+            query = query.filter(utxos::id.gt(subquery));
+        }
+
+        let rows = query
+            .limit(i64::from(limit))
+            .order_by(utxos::id.asc())
+            .load_iter::<models::UtxoRecord, _>(self.connection())
+            .map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })?;
+
+        rows.map(|res| {
+            res.map_err(|e| StorageError::QueryError {
+                reason: format!("{OPERATION}: {}", e),
+            })
+            .and_then(|row| {
+                let (address, utxo) = row.try_convert_to_utxo()?;
+                Ok((*address.id(), utxo))
+            })
+        })
+        .collect()
     }
 
     fn utxos_get_unspent_by_public_nonce_and_tag(

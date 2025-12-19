@@ -22,6 +22,7 @@
 
 use std::str::FromStr;
 
+use base64::{prelude::BASE64_STANDARD, Engine};
 use clap::{Args, Subcommand};
 use tari_bor::encode;
 use tari_wallet_daemon_client::{types::ConfidentialCreateOutputProofRequest, WalletDaemonClient};
@@ -34,7 +35,7 @@ pub enum ProofsSubcommand {
 
 #[derive(Debug, Args, Clone)]
 pub struct GenerateArgs {
-    pub amount: i64,
+    pub amount: u64,
     #[clap(short = 'o', long)]
     pub output_type: OutputType,
 }
@@ -65,9 +66,7 @@ impl ProofsSubcommand {
         match self {
             Generate(args) => {
                 let resp = client
-                    .create_confidential_output_proof(ConfidentialCreateOutputProofRequest {
-                        amount: args.amount.into(),
-                    })
+                    .create_confidential_output_proof(ConfidentialCreateOutputProofRequest { amount: args.amount })
                     .await?;
 
                 match args.output_type {
@@ -76,7 +75,7 @@ impl ProofsSubcommand {
                     },
                     OutputType::Base64 => {
                         let encode_proof = encode(&resp.proof)?;
-                        println!("{}", base64::encode(encode_proof));
+                        println!("{}", BASE64_STANDARD.encode(encode_proof));
                     },
                 }
             },

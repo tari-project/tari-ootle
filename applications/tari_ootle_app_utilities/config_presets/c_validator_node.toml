@@ -1,0 +1,47 @@
+########################################################################################################################
+#                                                                                                                      #
+#                      Validator Node Configuration Options (ValidatorNodeConfig)                                      #
+#                                                                                                                      #
+########################################################################################################################
+
+[validator_node]
+
+# A path to the file that stores your node identity and secret key (default = "validator_node_id.json")
+#identity_file = "validator_node_id.json"
+
+# The node's publicly-accessible hostname. This is the host name that is advertised on the network so that
+# peers can find you.
+# _NOTE_: If using the `tor` transport type, public_address will be ignored and an onion address will be
+# automatically configured (default = )
+#public_address =
+
+# The relative path to store persistent data (default = "data/validator_node")
+#data_dir = "data/validator_node"
+
+# JSON-RPC listener address (default = "127.0.0.1:18200")
+#json_rpc_address = "127.0.0.1:18200"
+
+# HTTP UI listener address (default = "127.0.0.1:5000")
+#web_ui_address = "127.0.0.1:5000"
+
+# Set to true to enable auto registration for each epoch (default = true)
+#auto_register = true
+[validator_node.consensus]
+# Disable evictions for now
+enable_eviction_proposal = false
+
+#[validator_node.database]
+## The type of database ("rocksdb" or "sqlite") to use (default = "sqlite")
+#type = "sqlite"
+#
+#[validator_node.database.sqlite]
+#path = "state.db"
+#
+#[validator_node.database.rocksdb]
+#path = "rocksdb"
+
+[validator_node.p2p]
+#enable_mdns = true
+#listener_port = 0
+#reachability_mode = "auto"
+

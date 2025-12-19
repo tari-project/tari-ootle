@@ -22,7 +22,7 @@
 
 use std::io;
 
-use tari_ootle_storage::time::{PrimitiveDateTime, UtcDateTime};
+use tari_ootle_storage::time::{OffsetDateTime, PrimitiveDateTime};
 
 pub(crate) fn read_to_fixed<const SZ: usize, T, R>(reader: &mut R) -> Option<T>
 where
@@ -41,6 +41,6 @@ pub(crate) fn read_n_bytes<R: io::Read>(reader: &mut R, n: usize) -> Option<Vec<
 }
 
 pub(crate) fn now() -> PrimitiveDateTime {
-    let now = UtcDateTime::now();
+    let now = OffsetDateTime::now_utc();
     PrimitiveDateTime::new(now.date(), now.time())
 }

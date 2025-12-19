@@ -27,50 +27,50 @@ use libp2p::identity;
 use log::warn;
 use minotari_app_utilities::identity_management;
 use tari_base_node_client::grpc::GrpcBaseNodeClient;
-use tari_common::{
-    configuration::bootstrap::{grpc_default_port, ApplicationType},
-    exit_codes::{ExitCode, ExitError},
-};
+use tari_common::configuration::bootstrap::{grpc_default_port, ApplicationType};
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_engine_types::ToByteType;
 use tari_epoch_manager::service::{EpochManagerConfig, EpochManagerHandle};
 use tari_epoch_oracles::{
-    base_layer::BaseLayerOracle,
-    configured::{ConfiguredEpochOracle, IntervalEpochTicker},
+    base_layer::{BaseLayerEpochOracleConfig, BaseLayerEpochOracleFeatures, BaseLayerOracle},
+    configured::{ConfiguredEpochOracle, RealTimeEpochTicker},
     hybrid::{watch_ticker, HybridEpochOracle},
     store::EpochOracleStore,
     EpochOracle,
 };
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_ootle_app_utilities::{
+    claim_burn_proof_verifier::TariClaimBurnProofVerifier,
     common::verify_correct_network,
     configuration::convert_network_to_l1_network,
     epoch_oracle_config::EpochOracleType,
+    fee_tables::get_fee_table_by_network,
     keypair::RistrettoKeypair,
     seed_peer::SeedPeer,
-    template_download_queue::TemplateDownloadQueue,
+    shared_consts::TXTR_FAUCET_INITIAL_SUPPLY,
 };
 use tari_ootle_common_types::{optional::Optional, Network, PeerAddress};
 use tari_ootle_p2p::TariMessagingSpec;
 use tari_ootle_storage::global::GlobalDb;
 use tari_ootle_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_shutdown::ShutdownSignal;
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
-use tari_template_manager::{implementation::TemplateManager, interface::TemplateManagerHandle};
+use tari_template_lib::{prelude::RistrettoPublicKeyBytes, types::Amount};
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
 use crate::{
+    dry_run::processor::DryRunTransactionProcessor,
+    event::IndexerEvent,
     network_client::TariNetworkClient,
     network_state_sync,
     network_state_sync::NetworkWideStateSyncConfig,
-    storage_sqlite::{
-        models::Key,
-        IndexerStore,
-        IndexerStoreReadTransaction,
-        IndexerStoreWriteTransaction,
-        SqliteIndexerStore,
-    },
+    notify::Notify,
+    storage_sqlite::{models::Key, SqliteIndexerStore},
+    store::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreWriteTransaction},
+    substate_file_cache::SubstateFileCache,
+    substate_manager::SubstateManager,
+    template_manager::TemplateManager,
+    transaction_manager::TransactionManager,
     ApplicationConfig,
     IndexerEpochManagerSpec,
     Noop,
@@ -85,16 +85,13 @@ pub async fn spawn_services(
     keypair: RistrettoKeypair,
     global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     consensus_constants: ConsensusConstants,
+    #[cfg(feature = "metrics")] metrics_registry: &mut prometheus_client::registry::Registry,
 ) -> Result<Services, anyhow::Error> {
     ensure_directories_exist(config)?;
 
     // Initialize networking
-    let identity = identity::Keypair::sr25519_from_bytes(keypair.secret_key().as_bytes().to_vec()).map_err(|e| {
-        ExitError::new(
-            ExitCode::ConfigError,
-            format!("Failed to create libp2p identity from secret bytes: {}", e),
-        )
-    })?;
+    let identity = identity::Keypair::sr25519_from_bytes(keypair.secret_key().as_bytes().to_vec())
+        .context("Failed to create libp2p identity from secret bytes")?;
     let seed_peers = config
         .peer_seeds
         .peer_seeds
@@ -108,7 +105,8 @@ pub async fn spawn_services(
             (peer_id, p.into_address())
         })
         .collect();
-    let (networking, _) = tari_networking::Builder::<TariMessagingSpec>::new(identity)
+
+    let network_builder = tari_networking::Builder::<TariMessagingSpec>::new(identity)
         .with_messaging_mode(MessagingMode::Disabled)
         .with_config(tari_networking::Config {
             // TODO: configurable
@@ -154,17 +152,23 @@ pub async fn spawn_services(
                 },
                 None => builder,
             }
-        })
-        .spawn(shutdown.clone())?;
+        });
+    #[cfg(feature = "metrics")]
+    let network_builder = network_builder.with_metrics(metrics_registry);
+
+    let (networking, _) = network_builder.spawn(shutdown.clone())?;
 
     // Connect to substate db
-    let store = SqliteIndexerStore::try_create(config.indexer.state_db_path())?;
+    let store = SqliteIndexerStore::try_create(config.state_db_path())?;
     check_store(config, &store)?;
+
+    if config.network.is_testnet() {
+        // TODO: We happen to know that the testnet faucet mints u64::MAX tXTR. This is hacky.
+        hack_xtr_initial_supply(&store)?;
+    }
 
     // Epoch event oracle
     let epoch_event_oracle = create_epoch_oracle(config, global_db.clone(), &consensus_constants).await?;
-
-    let (template_queue_sender, template_queue_receiver) = TemplateDownloadQueue::create();
 
     // Epoch manager
     let (epoch_manager, _) = tari_epoch_manager::service::spawn_service::<IndexerEpochManagerSpec>(
@@ -183,8 +187,6 @@ pub async fn spawn_services(
         keypair.public_key().to_byte_type(),
         epoch_event_oracle,
         Noop,
-        template_queue_sender,
-        Noop,
         shutdown.clone(),
     );
 
@@ -196,26 +198,46 @@ pub async fn spawn_services(
         consensus_constants.num_preshards,
     );
 
-    // Template manager
-    let template_manager = TemplateManager::initialize(global_db.clone(), config.indexer.templates.clone())?;
-    let (template_manager_service, _) = tari_template_manager::implementation::spawn(
-        template_manager.clone(),
-        epoch_manager.clone(),
-        validator_node_client_factory.clone(),
-        template_queue_receiver,
-        shutdown.clone(),
-    );
+    let event_notifier = Notify::new(1000);
+
     network_state_sync::NetworkWideStateSync::new(
         epoch_manager.clone(),
         networking.clone(),
         store.clone(),
-        template_manager_service.clone(),
         NetworkWideStateSyncConfig {
             event_filters: Arc::from(config.indexer.event_filters.clone()),
-            ..Default::default()
+            work_interval: config.indexer.state_scanning_interval,
         },
+        event_notifier.clone(),
     )
     .spawn(shutdown.clone());
+
+    // Substate manager
+    let substate_cache_dir = config.to_data_dir().join("substate_cache");
+    let substate_cache = SubstateFileCache::new(substate_cache_dir).context("Failed to create substate cache")?;
+    let substate_manager = SubstateManager::new(
+        store.clone(),
+        epoch_manager.clone(),
+        validator_node_client_factory.clone(),
+        substate_cache,
+    );
+    #[cfg(feature = "metrics")]
+    let substate_manager = substate_manager.with_metrics(metrics_registry);
+
+    // Template manager
+    let template_manager = TemplateManager::initialize(global_db.clone(), substate_manager.clone())?;
+
+    // dry run
+    let fee_table = get_fee_table_by_network(config.network);
+    let dry_run_transaction_processor = DryRunTransactionProcessor::new(
+        fee_table.clone(),
+        epoch_manager.clone(),
+        template_manager.clone(),
+        substate_manager.clone(),
+        TariClaimBurnProofVerifier::new(config.network, global_db.clone()),
+    );
+
+    let transaction_manager = TransactionManager::new(network_client.clone(), store.clone());
 
     // Save final node identity after comms has initialized. This is required because the public_address can be
     // changed by comms during initialization when using tor.
@@ -224,12 +246,14 @@ pub async fn spawn_services(
         keypair,
         networking,
         epoch_manager,
-        validator_node_client_factory,
-        network_client,
+        _validator_node_client_factory: validator_node_client_factory,
         store,
         global_db,
         template_manager,
-        _template_manager_service: template_manager_service,
+        substate_manager,
+        transaction_manager,
+        dry_run_transaction_processor,
+        event_notifier,
     })
 }
 
@@ -237,27 +261,30 @@ pub struct Services {
     pub keypair: RistrettoKeypair,
     pub networking: NetworkingHandle<TariMessagingSpec>,
     pub epoch_manager: EpochManagerHandle<PeerAddress>,
-    pub validator_node_client_factory: TariValidatorNodeRpcClientFactory,
+    pub _validator_node_client_factory: TariValidatorNodeRpcClientFactory,
     pub store: SqliteIndexerStore,
-    pub network_client: TariNetworkClient<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory>,
     pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
-    pub template_manager: TemplateManager<PeerAddress>,
-    pub _template_manager_service: TemplateManagerHandle,
+    pub template_manager: TemplateManager,
+    pub substate_manager: SubstateManager,
+    pub transaction_manager:
+        TransactionManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SqliteIndexerStore>,
+    pub dry_run_transaction_processor: DryRunTransactionProcessor,
+    pub event_notifier: Notify<IndexerEvent>,
 }
 
 fn ensure_directories_exist(config: &ApplicationConfig) -> io::Result<()> {
-    fs::create_dir_all(&config.indexer.data_dir)?;
+    fs::create_dir_all(config.to_data_dir())?;
     Ok(())
 }
 
-fn save_identities(config: &ApplicationConfig, identity: &RistrettoKeypair) -> Result<(), ExitError> {
-    identity_management::save_as_json(&config.indexer.identity_file, identity)
-        .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Failed to save node identity: {}", e)))?;
+fn save_identities(config: &ApplicationConfig, identity: &RistrettoKeypair) -> anyhow::Result<()> {
+    identity_management::save_as_json(config.to_identity_file_path(), identity)
+        .context("Failed to save indexer identity")?;
 
     Ok(())
 }
 
-async fn create_base_layer_client(config: &ApplicationConfig) -> Result<GrpcBaseNodeClient, ExitError> {
+async fn create_base_layer_client(config: &ApplicationConfig) -> anyhow::Result<GrpcBaseNodeClient> {
     let url = config
         .epoch_oracle
         .base_layer
@@ -274,14 +301,14 @@ async fn create_base_layer_client(config: &ApplicationConfig) -> Result<GrpcBase
         });
     GrpcBaseNodeClient::connect(url)
         .await
-        .map_err(|err| ExitError::new(ExitCode::ConfigError, format!("Could not connect to base node {}", err)))
+        .context("Failed to create gRPC base node client")
 }
 
 async fn create_epoch_oracle<TStore: EpochOracleStore + Clone + Send + 'static>(
     config: &ApplicationConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
-) -> Result<EpochOracle<TStore>, ExitError> {
+) -> anyhow::Result<EpochOracle<TStore>> {
     match config.epoch_oracle.oracle_type {
         EpochOracleType::BaseLayer => {
             let oracle = create_base_layer_epoch_oracle(config, store, consensus_constants).await?;
@@ -302,37 +329,40 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + 'static>(
     config: &ApplicationConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
-) -> Result<BaseLayerOracle<TStore>, ExitError> {
+) -> anyhow::Result<BaseLayerOracle<TStore>> {
     let mut base_node_client = create_base_layer_client(config).await?;
     verify_correct_network(&mut base_node_client, config.network).await?;
     Ok(BaseLayerOracle::new(
         store,
         base_node_client,
-        consensus_constants.base_layer_confirmations,
-        config.epoch_oracle.base_layer.scanning_interval,
-        config.indexer.sidechain_id.as_ref().map(|p| p.to_byte_type()),
-        config
-            .indexer
-            .burnt_utxo_sidechain_id
-            .as_ref()
-            .map(|p| p.to_byte_type()),
-        config.indexer.sidechain_id.as_ref().map(|p| p.to_byte_type()),
+        BaseLayerEpochOracleConfig {
+            start_height: 0,
+            height_lag: consensus_constants.base_layer_confirmations,
+            scanning_interval: config.epoch_oracle.base_layer.scanning_interval,
+            sidechain_id: config.indexer.sidechain_id.as_ref().map(|p| p.to_byte_type()),
+            features: BaseLayerEpochOracleFeatures {
+                sync_headers: false,
+                sync_validator_node_changes: true,
+            },
+        },
+        config.network,
     ))
 }
 
 async fn create_configured_epoch_oracle<TStore: EpochOracleStore + Send>(
     config: &ApplicationConfig,
     store: TStore,
-) -> Result<ConfiguredEpochOracle<TStore, IntervalEpochTicker>, ExitError> {
+) -> anyhow::Result<ConfiguredEpochOracle<TStore, RealTimeEpochTicker>> {
     let oracle_config = config.epoch_oracle.configured.load().await?;
-    Ok(ConfiguredEpochOracle::new(oracle_config, store))
+    let oracle = ConfiguredEpochOracle::create(oracle_config, store)?;
+    Ok(oracle)
 }
 
 async fn create_hybrid_epoch_oracle<TStore: EpochOracleStore + Clone + Send + 'static>(
     config: &ApplicationConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
-) -> Result<HybridEpochOracle<TStore>, ExitError> {
+) -> anyhow::Result<HybridEpochOracle<TStore>> {
     let base_layer_oracle = create_base_layer_epoch_oracle(config, store.clone(), consensus_constants).await?;
     let oracle_config = config.epoch_oracle.configured.load().await?;
     let (ticker, trigger) = watch_ticker();
@@ -359,5 +389,18 @@ fn check_store<TStore: IndexerStore>(config: &ApplicationConfig, store: &TStore)
                     .map_err(|e| anyhow!("Failed to set network in the store: {}", e))
             },
         }
+    })
+}
+
+fn hack_xtr_initial_supply<TStore: IndexerStore>(store: &TStore) -> anyhow::Result<()> {
+    store.with_write_tx(|tx| {
+        // Check if the initial supply is already set
+        let existing_supply: Option<Amount> = tx.key_value_get_value(Key::XtrAccumulatedClaimed).optional()?;
+        if existing_supply.is_some() {
+            return Ok(());
+        }
+
+        tx.key_value_set(Key::XtrAccumulatedClaimed, TXTR_FAUCET_INITIAL_SUPPLY)
+            .map_err(|e| anyhow!("Failed to set XTR initial supply in the store: {}", e))
     })
 }

@@ -13,8 +13,5 @@
  * - **Stealth** A fungible resource using the highest level of confidentiality. Funds are not kept in vaults, and each
  *   output is an independent confidential substate (kind of like creating a new unlinked vault for each currency
  *   note).
- *
- * This enum is serializable/deserializable with `serde` and optionally generates
- * TypeScript bindings when the `ts` feature is enabled.
  */
 export type ResourceType = "Fungible" | "NonFungible" | "Confidential" | "Stealth";

@@ -6,8 +6,6 @@ create table substates
     data             text      not NULL,
     template_address text      NULL,
     module_name      text      NULL,
-    -- Block timestamp
-    timestamp        timestamp not NULL,
     updated_at       timestamp not null default current_timestamp,
     created_at       timestamp not null default current_timestamp
 );
@@ -31,23 +29,6 @@ create table substate_transitions
 create unique index substate_transitions_substate_id_version_uniq on substate_transitions (substate_id, version, is_up);
 create index substate_transitions_shard_state_version_idx on substate_transitions (shard, state_version);
 
--- all the indexes in NFT resources
-create table non_fungible_indexes
-(
-    id                   integer not NULL primary key AUTOINCREMENT,
-    resource_address     text    not NULL,
-    idx                  integer not NULL,
-    non_fungible_address text    not NULL,
-    FOREIGN KEY (resource_address) REFERENCES substates (address),
-    FOREIGN KEY (non_fungible_address) REFERENCES substates (address)
-);
-
--- A list can only have one single item at any specific position
-create unique index uniq_nft_indexes on non_fungible_indexes (resource_address, idx);
-
--- DB index for faster collection scan queries
-create index nft_indexes_resource on non_fungible_indexes (resource_address, idx);
-
 -- Event data
 create table events
 (
@@ -64,22 +45,16 @@ create table events
 -- DB index for faster collection scan queries
 create index events_indexer on events (template_address, tx_hash);
 
--- Latest scanned blocks, separately by committee (epoch + shard)
--- Used mostly for efficient scanning of events in the whole network
-create table scanned_block_ids
+-- Transaction receipts
+create table transaction_receipts
 (
-    id            integer not NULL primary key AUTOINCREMENT,
-    epoch         bigint  not NULL,
-    shard_group   integer not null,
-    last_block_id blob    not null
+    id         integer   not NULL primary key AUTOINCREMENT,
+    address    text      not NULL,
+    data       text      not NULL,
+    created_at timestamp not null default current_timestamp
 );
 
-
--- There should only be one last scanned block by committee (epoch + shard)
-create unique index scanned_block_ids_unique_committee on scanned_block_ids (epoch, shard_group);
-
--- DB index for faster retrieval of the latest block by committee
-create index scanned_block_ids_committee on scanned_block_ids (epoch, shard_group);
+create unique index transaction_receipts_address_uniq on transaction_receipts (address);
 
 create table transactions
 (
@@ -127,12 +102,12 @@ create table utxos
     state_version    bigint    not NULL,
     output           blob      NULL,
     utxo_tag         int       not NULL,
+    epoch            bigint    not NULL,
     is_spent         boolean   not NULL,
     is_burnt         boolean   not NULL,
     is_frozen        boolean   not NULL,
     created_at       timestamp not null default current_timestamp
 );
 
-CREATE INDEX utxos_resource_state_version_shard_idx ON utxos (resource_address, state_version, shard);
+CREATE INDEX utxos_resource_state_version_shard_epoch_idx ON utxos (resource_address, state_version, shard, epoch);
 CREATE UNIQUE INDEX utxos_resource_public_nonce_utxo_tag_uniq_partial ON utxos (resource_address, public_nonce, utxo_tag) WHERE is_spent = false;
-

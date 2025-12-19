@@ -10,7 +10,7 @@ use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, SchnorrSignature
 
 pub type ValidatorSchnorrSignature = SchnorrSignature<RistrettoPublicKey, PrivateKey, ValidatorNodeHashDomain>;
 
-#[derive(Clone, Debug, Hash, Deserialize, Serialize, BorshSerialize)]
+#[derive(Clone, Debug, Hash, Deserialize, Serialize, BorshSerialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ValidatorSignatureBytes {
     pub public_key: RistrettoPublicKeyBytes,

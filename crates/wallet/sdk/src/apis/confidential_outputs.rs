@@ -3,12 +3,10 @@
 
 use log::*;
 use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
-use tari_engine_types::{crypto::PrivateOutput, FromByteType, ToByteType};
+use tari_engine_types::{crypto::PrivateOutput, ConvertFromByteType, ToByteType};
 use tari_ootle_common_types::optional::{IsNotFoundError, Optional};
 use tari_ootle_wallet_crypto::{kdfs, MaskAndValue};
 use tari_template_lib::{models::VaultId, prelude::PedersenCommitmentBytes, types::Amount};
-use tari_transaction::TransactionId;
-use tari_transaction_components::key_manager::tari_key_manager::DerivedKey;
 
 use crate::{
     apis::{
@@ -16,24 +14,32 @@ use crate::{
         confidential_crypto::{ConfidentialCryptoApi, ConfidentialCryptoApiError},
         key_manager::{KeyManagerApi, KeyManagerApiError},
     },
-    models::{Account, ConfidentialOutputModel, OutputStatus, WalletLockId},
-    storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
+    models::{Account, ConfidentialOutputModel, OutputStatus, WalletLockId, WalletSecretKey},
+    storage::{
+        CommittableStore,
+        ReadableWalletStore,
+        WalletStorageError,
+        WalletStoreReader,
+        WalletStoreWriter,
+        WriteableWalletStore,
+    },
+    WalletSdkSpec,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_sdk::apis::confidential_outputs";
 
-pub struct ConfidentialOutputsApi<'a, TStore> {
-    store: &'a TStore,
-    key_manager_api: KeyManagerApi<'a, TStore>,
+pub struct ConfidentialOutputsApi<'a, TSpec: WalletSdkSpec> {
+    store: &'a TSpec::Store,
+    key_manager_api: KeyManagerApi<'a, TSpec>,
     crypto_api: ConfidentialCryptoApi,
 }
 
-impl<'a, TStore> ConfidentialOutputsApi<'a, TStore>
-where TStore: WalletStore
+impl<'a, TSpec> ConfidentialOutputsApi<'a, TSpec>
+where TSpec: WalletSdkSpec
 {
     pub fn new(
-        store: &'a TStore,
-        key_manager_api: KeyManagerApi<'a, TStore>,
+        store: &'a TSpec::Store,
+        key_manager_api: KeyManagerApi<'a, TSpec>,
         crypto_api: ConfidentialCryptoApi,
     ) -> Self {
         Self {
@@ -94,7 +100,9 @@ where TStore: WalletStore
         let mut total_output_amount = Amount::zero();
         let mut outputs = Vec::new();
         while total_output_amount < amount {
-            let output = tx.outputs_lock_smallest_amount(vault_id, lock_id).optional()?;
+            let output = tx
+                .confidential_outputs_lock_smallest_amount(vault_id, lock_id)
+                .optional()?;
             match output {
                 Some(output) => {
                     total_output_amount += output.value;
@@ -111,39 +119,7 @@ where TStore: WalletStore
 
     pub fn add_output(&self, output: ConfidentialOutputModel) -> Result<(), ConfidentialOutputsApiError> {
         let mut tx = self.store.create_write_tx()?;
-        tx.outputs_insert(output)?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub fn create_lock(&self) -> Result<WalletLockId, ConfidentialOutputsApiError> {
-        let lock_id = self.store.with_write_tx(|tx| tx.locks_create())?;
-        Ok(lock_id)
-    }
-
-    pub fn lock_vault_revealed_funds(
-        &self,
-        lock_id: WalletLockId,
-        vault_id: &VaultId,
-        amount: Amount,
-    ) -> Result<(), ConfidentialOutputsApiError> {
-        self.store
-            .with_write_tx(|tx| tx.vaults_lock_revealed_funds(lock_id, vault_id, amount))?;
-        Ok(())
-    }
-
-    pub fn release_locked_outputs(&self, lock_id: WalletLockId) -> Result<(), ConfidentialOutputsApiError> {
-        let mut tx = self.store.create_write_tx()?;
-        tx.outputs_release_by_lock_id(lock_id)?;
-        tx.locks_delete(lock_id)?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub fn finalize_outputs_for_lock(&self, lock_id: WalletLockId) -> Result<(), ConfidentialOutputsApiError> {
-        let mut tx = self.store.create_write_tx()?;
-        tx.outputs_finalize_by_lock_id(lock_id)?;
-        tx.locks_delete(lock_id)?;
+        tx.confidential_outputs_insert(output)?;
         tx.commit()?;
         Ok(())
     }
@@ -155,13 +131,11 @@ where TStore: WalletStore
         let mut outputs_with_masks = Vec::with_capacity(outputs.len());
         for output in outputs {
             // Encryption is always done with a DH of the account's public key
-            let encryption_key = self
-                .key_manager_api
-                .derive_account_key(output.encryption_secret_key_index)?;
+            let encryption_key = self.key_manager_api.get_key(output.view_only_key_id)?;
             // Either derive the mask from the sender's public nonce or from the local key manager
             let shared_decrypt_key = match output.sender_public_nonce {
                 Some(nonce) => {
-                    let nonce = RistrettoPublicKey::try_from_byte_type(&nonce).map_err(|_| {
+                    let nonce = RistrettoPublicKey::convert_from_byte_type(&nonce).map_err(|_| {
                         // We stored these outputs in the db, but they are malformed?
                         ConfidentialOutputsApiError::InvariantError {
                             details: format!(
@@ -172,47 +146,30 @@ where TStore: WalletStore
                     })?;
 
                     // Derive shared secret
-                    kdfs::encrypted_data_dh_kdf_aead(&encryption_key.key, &nonce)
+                    kdfs::encrypted_data_dh_kdf_aead(&encryption_key.secret, &nonce)
                 },
                 None => {
                     // Use local secret
-                    encryption_key.key
+                    encryption_key.secret
                 },
             };
 
-            let (_, mask) = self.crypto_api.extract_value_and_mask(
+            let decrypted = self.crypto_api.decrypt_output_data(
                 &shared_decrypt_key,
                 &output.commitment,
                 &output.encrypted_data,
+                true,
             )?;
 
-            outputs_with_masks.push(MaskAndValue {
-                value: output.value,
-                mask,
-            });
+            // We're resolving for spending so we don't need the memo
+            outputs_with_masks.push(decrypted.into_mask_and_value());
         }
         Ok(outputs_with_masks)
     }
 
-    pub fn finalize_locked_revealed_funds(&self, lock_id: WalletLockId) -> Result<(), ConfidentialOutputsApiError> {
-        let mut tx = self.store.create_write_tx()?;
-        tx.vaults_finalized_locked_revealed_funds(lock_id)?;
-        tx.commit()?;
-
-        Ok(())
-    }
-
-    pub fn release_revealed_funds(&self, lock_id: WalletLockId) -> Result<(), ConfidentialOutputsApiError> {
-        let mut tx = self.store.create_write_tx()?;
-        tx.vaults_release_lock_revealed_funds(lock_id)?;
-        tx.commit()?;
-
-        Ok(())
-    }
-
     pub fn get_unspent_balance(&self, vault_id: &VaultId) -> Result<Amount, ConfidentialOutputsApiError> {
         let mut tx = self.store.create_read_tx()?;
-        let balance = tx.outputs_get_unspent_balance(vault_id)?;
+        let balance = tx.confidential_outputs_get_unspent_balance(vault_id)?;
         Ok(balance.into())
     }
 
@@ -225,12 +182,14 @@ where TStore: WalletStore
         vault_id: VaultId,
         outputs: I,
     ) -> Result<(), ConfidentialOutputsApiError> {
-        // We do not support changing of account key at this time
-        let key = self.key_manager_api.derive_account_key(account.key_index)?;
+        let view_key = self.key_manager_api.get_key(account.view_only_key_id)?;
         let mut tx = self.store.create_write_tx()?;
 
         for (commitment, output) in outputs {
-            match tx.outputs_get_by_commitment(&vault_id, commitment).optional()? {
+            match tx
+                .confidential_outputs_get_by_commitment(&vault_id, commitment)
+                .optional()?
+            {
                 Some(_) => {
                     info!(
                         target: LOG_TARGET,
@@ -241,9 +200,9 @@ where TStore: WalletStore
                 },
                 None => {
                     // Output does not exist. Add it to the store
-                    match self.validate_output(account, &key, vault_id, *commitment, output) {
+                    match self.validate_output(account, &view_key, vault_id, *commitment, output) {
                         Ok(output) => {
-                            tx.outputs_insert(output)?;
+                            tx.confidential_outputs_insert(output)?;
                         },
                         Err(e) => {
                             warn!(
@@ -265,13 +224,13 @@ where TStore: WalletStore
     fn validate_output(
         &self,
         account: &Account,
-        key: &DerivedKey,
+        key: &WalletSecretKey,
         vault_id: VaultId,
         commitment: PedersenCommitmentBytes,
         output: &PrivateOutput,
     ) -> Result<ConfidentialOutputModel, ConfidentialOutputsApiError> {
         // Validate the commitment is well-formed.
-        let _output_commitment = PedersenCommitment::try_from_byte_type(&commitment).map_err(|e| {
+        let _output_commitment = PedersenCommitment::convert_from_byte_type(&commitment).map_err(|e| {
             ConfidentialOutputsApiError::InvalidParameter {
                 param: "commitment",
                 reason: format!("Invalid output commitment bytes: {}", e),
@@ -279,7 +238,7 @@ where TStore: WalletStore
         })?;
 
         let output_stealth_public_nonce =
-            RistrettoPublicKey::try_from_byte_type(&output.public_nonce).map_err(|e| {
+            RistrettoPublicKey::convert_from_byte_type(&output.public_nonce).map_err(|e| {
                 ConfidentialOutputsApiError::InvalidParameter {
                     param: "stealth_public_nonce",
                     reason: format!("Failed to parse stealth public nonce: {}", e),
@@ -289,11 +248,12 @@ where TStore: WalletStore
         let unblinded_result = self.crypto_api.unblind_output(
             &commitment,
             &output.encrypted_data,
-            &key.key,
+            &key.secret,
             &output_stealth_public_nonce,
+            false,
         );
-        let (value, status) = match unblinded_result {
-            Ok(output) => (output.value, OutputStatus::Unspent),
+        let (value, memo, status) = match unblinded_result {
+            Ok(output) => (output.value(), output.memo, OutputStatus::Unspent),
             Err(e) => {
                 warn!(
                     target: LOG_TARGET,
@@ -301,32 +261,24 @@ where TStore: WalletStore
                     commitment,
                     e
                 );
-                (Amount::zero(), OutputStatus::Invalid)
+                (0, None, OutputStatus::Invalid)
             },
         };
 
         Ok(ConfidentialOutputModel {
-            account_address: account.address,
+            account_address: account.component_address,
             vault_id,
             commitment,
-            value,
+            value: value.into(),
             sender_public_nonce: Some(output_stealth_public_nonce.to_byte_type()),
-            encryption_secret_key_index: key.key_index,
+            view_only_key_id: key.key_id,
+            owner_key_id: account.owner_key_id,
             encrypted_data: output.encrypted_data.clone(),
             public_asset_tag: None,
+            memo,
             status,
             lock_id: None,
         })
-    }
-
-    pub fn locks_set_transaction_id(
-        &self,
-        lock_id: WalletLockId,
-        transaction_id: TransactionId,
-    ) -> Result<(), ConfidentialOutputsApiError> {
-        self.store
-            .with_write_tx(|tx| tx.locks_link_transaction(lock_id, transaction_id))?;
-        Ok(())
     }
 }
 

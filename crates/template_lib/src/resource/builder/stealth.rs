@@ -1,14 +1,14 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_lib_types::Amount;
+use tari_template_lib_types::{Amount, ResourceType};
 
 use super::{IMAGE_URL, TOKEN_SYMBOL};
 use crate::{
     args::MintArg,
     auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
     models::{Bucket, ComponentAddress, Metadata, ResourceAddress, ResourceAddressAllocation},
-    resource::{ResourceManager, ResourceType, DEFAULT_DIVISIBILITY},
+    resource::{ResourceManager, DEFAULT_DIVISIBILITY},
     types::crypto::RistrettoPublicKeyBytes,
 };
 
@@ -77,8 +77,13 @@ impl StealthResourceBuilder {
     }
 
     /// Sets the already allocated address for the resource
-    pub fn with_address_allocation(mut self, address: ResourceAddressAllocation) -> Self {
-        self.address_allocation = Some(address);
+    pub fn with_address_allocation(self, address: ResourceAddressAllocation) -> Self {
+        self.with_address_allocation_opt(Some(address))
+    }
+
+    /// Sets the already allocated address for the resource, optionally
+    pub fn with_address_allocation_opt(mut self, address: Option<ResourceAddressAllocation>) -> Self {
+        self.address_allocation = address;
         self
     }
 
@@ -223,8 +228,10 @@ impl StealthResourceBuilder {
     /// This builds the resource and mints the initial supply of tokens, returning the address of the resource.
     /// NOTE that stealth resources do not return the bucket of the initial supply since
     /// they are minted as individual UTXO substates and cannot be placed in vault.
-    pub fn initial_supply(self, initial_supply: Amount) -> Bucket {
-        let mint_arg = MintArg::Stealth { amount: initial_supply };
+    pub fn initial_supply<A: Into<Amount>>(self, initial_supply: A) -> Bucket {
+        let mint_arg = MintArg::Stealth {
+            amount: initial_supply.into(),
+        };
 
         let (_, bucket) = self.build_internal(Some(mint_arg));
         bucket.expect("[initial_supply] Bucket not returned from engine")

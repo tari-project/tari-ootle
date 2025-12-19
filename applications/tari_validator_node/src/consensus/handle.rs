@@ -50,8 +50,8 @@ impl ConsensusHandle {
         &self.current_view
     }
 
-    pub fn subscribe_to_hotstuff_events(&mut self) -> broadcast::Receiver<HotstuffEvent> {
-        self.events_subscription.subscribe()
+    pub fn subscribe_to_hotstuff_events(&mut self) -> Result<broadcast::Receiver<HotstuffEvent>, anyhow::Error> {
+        Ok(self.events_subscription.try_subscribe()?)
     }
 
     pub fn get_current_state(&self) -> ConsensusCurrentState {

@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use borsh::BorshSerialize;
+use log::info;
 use tari_bor::{Deserialize, Serialize};
 use tari_common_types::types::PrivateKey;
 use tari_crypto::{
@@ -16,9 +17,11 @@ use tari_template_lib::{models::ViewableBalanceProof, types::crypto::RistrettoPu
 use crate::{
     crypto::{get_commitment_factory, messages, value_lookup_table::ValueLookupTable},
     resource_container::ResourceError,
-    FromByteType,
+    ConvertFromByteType,
     ToByteType,
 };
+
+const LOG_TARGET: &str = "tari::ootle::engine_types::crypto::elgamal";
 
 pub fn validate_elgamal_verifiable_balance_proof(
     commitment: &PedersenCommitment,
@@ -47,6 +50,12 @@ pub fn validate_elgamal_verifiable_balance_proof(
             details: "Invalid value for E".to_string(),
         }
     })?;
+
+    if proof.elgamal_public_nonce.is_zero() {
+        return Err(ResourceError::InvalidConfidentialProof {
+            details: "Public nonce for ElGamal encryption cannot be the identity point".to_string(),
+        });
+    }
 
     let elgamal_public_nonce =
         RistrettoPublicKey::from_canonical_bytes(&*proof.elgamal_public_nonce).map_err(|_| {
@@ -129,17 +138,17 @@ pub fn validate_elgamal_verifiable_balance_proof(
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct CompressedElgamalVerifiableBalance {
+pub struct ElgamalVerifiableBalanceBytes {
     pub encrypted: RistrettoPublicKeyBytes,
     pub public_nonce: RistrettoPublicKeyBytes,
 }
 
-impl FromByteType<CompressedElgamalVerifiableBalance> for ElgamalVerifiableBalance {
+impl ConvertFromByteType<ElgamalVerifiableBalanceBytes> for ElgamalVerifiableBalance {
     type Error = tari_utilities::ByteArrayError;
 
-    fn try_from_byte_type(bytes: &CompressedElgamalVerifiableBalance) -> Result<Self, Self::Error> {
-        let encrypted = RistrettoPublicKey::try_from_byte_type(&bytes.encrypted)?;
-        let public_nonce = RistrettoPublicKey::try_from_byte_type(&bytes.public_nonce)?;
+    fn convert_from_byte_type(bytes: &ElgamalVerifiableBalanceBytes) -> Result<Self, Self::Error> {
+        let encrypted = RistrettoPublicKey::convert_from_byte_type(&bytes.encrypted)?;
+        let public_nonce = RistrettoPublicKey::convert_from_byte_type(&bytes.public_nonce)?;
         Ok(ElgamalVerifiableBalance {
             encrypted,
             public_nonce,
@@ -147,13 +156,13 @@ impl FromByteType<CompressedElgamalVerifiableBalance> for ElgamalVerifiableBalan
     }
 }
 
-impl From<ElgamalVerifiableBalance> for CompressedElgamalVerifiableBalance {
+impl From<ElgamalVerifiableBalance> for ElgamalVerifiableBalanceBytes {
     fn from(value: ElgamalVerifiableBalance) -> Self {
         (&value).into()
     }
 }
 
-impl From<&ElgamalVerifiableBalance> for CompressedElgamalVerifiableBalance {
+impl From<&ElgamalVerifiableBalance> for ElgamalVerifiableBalanceBytes {
     fn from(value: &ElgamalVerifiableBalance) -> Self {
         Self {
             encrypted: value.encrypted.to_byte_type(),
@@ -203,14 +212,14 @@ impl ElgamalVerifiableBalance {
         let mut results = vec![None; balances.len()];
 
         for v in value_range {
-            let value = lookup_table.lookup(v)?.unwrap_or_else(|| {
-                // Fallback to slow lookup method if the lookup table does not contain a key for the value
-                let pk = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(v));
-                copy_fixed(pk.as_bytes())
-            });
+            let Some(value) = lookup_table.lookup(v)? else {
+                log::debug!(target: LOG_TARGET, "Value {} not found in lookup table", v);
+                break;
+            };
 
             while let Some(pos) = balances.iter().position(|(_, balance)| value == balance.as_bytes()) {
                 let (order, _) = balances.swap_remove(pos);
+                info!(target: LOG_TARGET, "Found encrypted balance: {}", v);
                 results
                     .get_mut(order)
                     .expect("batched_brute_force: balances index greater than results")
@@ -226,12 +235,12 @@ impl ElgamalVerifiableBalance {
     }
 }
 
-impl TryFrom<&CompressedElgamalVerifiableBalance> for ElgamalVerifiableBalance {
+impl TryFrom<&ElgamalVerifiableBalanceBytes> for ElgamalVerifiableBalance {
     type Error = tari_utilities::ByteArrayError;
 
-    fn try_from(value: &CompressedElgamalVerifiableBalance) -> Result<Self, Self::Error> {
-        let encrypted = RistrettoPublicKey::try_from_byte_type(&value.encrypted)?;
-        let public_nonce = RistrettoPublicKey::try_from_byte_type(&value.public_nonce)?;
+    fn try_from(value: &ElgamalVerifiableBalanceBytes) -> Result<Self, Self::Error> {
+        let encrypted = RistrettoPublicKey::convert_from_byte_type(&value.encrypted)?;
+        let public_nonce = RistrettoPublicKey::convert_from_byte_type(&value.public_nonce)?;
         Ok(ElgamalVerifiableBalance {
             encrypted,
             public_nonce,
@@ -240,20 +249,14 @@ impl TryFrom<&CompressedElgamalVerifiableBalance> for ElgamalVerifiableBalance {
 }
 
 impl ToByteType for ElgamalVerifiableBalance {
-    type ByteType = CompressedElgamalVerifiableBalance;
+    type ByteType = ElgamalVerifiableBalanceBytes;
 
     fn to_byte_type(&self) -> Self::ByteType {
-        CompressedElgamalVerifiableBalance {
+        ElgamalVerifiableBalanceBytes {
             encrypted: self.encrypted.to_byte_type(),
             public_nonce: self.public_nonce.to_byte_type(),
         }
     }
-}
-
-fn copy_fixed(src: &[u8]) -> [u8; 32] {
-    let mut buf = [0u8; 32];
-    buf.copy_from_slice(src);
-    buf
 }
 
 #[cfg(test)]
@@ -265,6 +268,12 @@ mod tests {
 
     use super::*;
 
+    fn copy_fixed(src: &[u8]) -> [u8; 32] {
+        let mut buf = [0u8; 32];
+        buf.copy_from_slice(src);
+        buf
+    }
+
     #[derive(Default)]
     pub struct TestLookupTable;
 
@@ -272,7 +281,6 @@ mod tests {
         type Error = Infallible;
 
         fn lookup(&mut self, value: u64) -> Result<Option<[u8; 32]>, Self::Error> {
-            // This would be a sequential lookup in a real implementation
             Ok(Some(copy_fixed(
                 RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(value)).as_bytes(),
             )))

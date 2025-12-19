@@ -1,13 +1,16 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::HashSet;
+use std::{
+    collections::{hash_map::Entry, HashMap, HashSet},
+    time::{Duration, Instant},
+};
 
 use anyhow::anyhow;
 use log::*;
 use tari_consensus_types::{BlockId, ProposalCertificate};
 use tari_epoch_manager::EpochManagerReader;
-use tari_ootle_common_types::{committee::CommitteeInfo, optional::Optional, Epoch, ShardGroup};
+use tari_ootle_common_types::{committee::CommitteeInfo, optional::Optional, Epoch, NodeAddressable, ShardGroup};
 use tari_ootle_storage::{
     consensus_models::{
         Block,
@@ -20,9 +23,9 @@ use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
 };
-use tokio::task;
 
 use crate::{
+    bounded_spawn::BoundedSpawn,
     hotstuff::{
         commit_proofs::generate_block_commit_proof,
         error::HotStuffError,
@@ -41,13 +44,13 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::on_receive_foreign_proposal";
 
-#[derive(Clone)]
 pub struct OnReceiveForeignProposalHandler<TConsensusSpec: ConsensusSpec> {
     store: TConsensusSpec::StateStore,
     epoch_manager: TConsensusSpec::EpochManager,
     pacemaker: PaceMakerHandle,
     outbound_messaging: TConsensusSpec::OutboundMessaging,
-    recently_requested: HashSet<BlockId>,
+    pending_requests: PendingRequests<TConsensusSpec::Addr>,
+    bounded_spawner: BoundedSpawn,
 }
 
 impl<TConsensusSpec> OnReceiveForeignProposalHandler<TConsensusSpec>
@@ -64,7 +67,8 @@ where TConsensusSpec: ConsensusSpec
             epoch_manager,
             pacemaker,
             outbound_messaging,
-            recently_requested: HashSet::new(),
+            pending_requests: PendingRequests::new(),
+            bounded_spawner: BoundedSpawn::new(20),
         }
     }
 
@@ -84,7 +88,7 @@ where TConsensusSpec: ConsensusSpec
                 "FOREIGN PROPOSAL: Already received proposal for block {}",
                 block_id
             );
-            self.remove_recently_requested(&block_id);
+            self.pending_requests.remove(&block_id);
             return Ok(());
         }
 
@@ -102,20 +106,11 @@ where TConsensusSpec: ConsensusSpec
             Ok::<_, HotStuffError>(())
         })?;
 
-        // TODO: keep track of requested proposals and if there are any non-responses after a certain time, request from
-        // another node
-        self.remove_recently_requested(&block_id);
+        self.pending_requests.remove(&block_id);
 
         // Foreign proposals to propose
         self.pacemaker.beat();
         Ok(())
-    }
-
-    fn remove_recently_requested(&mut self, block_id: &BlockId) {
-        self.recently_requested.remove(block_id);
-        if self.recently_requested.capacity() - self.recently_requested.len() > 1000 {
-            self.recently_requested.shrink_to_fit();
-        }
     }
 
     pub async fn handle_notification_received(
@@ -131,7 +126,7 @@ where TConsensusSpec: ConsensusSpec
             from,
             message.block_id,
         );
-        if self.recently_requested.contains(&message.block_id) {
+        if self.pending_requests.contains(&message.block_id) {
             info!(
                 target: LOG_TARGET,
                 "🌐 FOREIGN PROPOSAL: Already requested block {}. Ignoring.",
@@ -171,9 +166,10 @@ where TConsensusSpec: ConsensusSpec
             .get_committee_by_shard_group(
                 current_epoch,
                 foreign_committee_info.shard_group(),
-                // We only request from one - note that we happen to know that get_committee_by_shard_group shuffles
-                // the committee.
+                // We only request from one
                 Some(1),
+                // Shuffle to select a random peer
+                true,
             )
             .await?;
 
@@ -204,7 +200,8 @@ where TConsensusSpec: ConsensusSpec
             )
             .await?;
 
-        self.recently_requested.insert(message.block_id);
+        self.pending_requests
+            .insert(selected.address.clone(), message.block_id, foreign_committee_info);
 
         Ok(())
     }
@@ -217,14 +214,26 @@ where TConsensusSpec: ConsensusSpec
         let store = self.store.clone();
         let outbound_messaging = self.outbound_messaging.clone();
 
-        // No need for consensus to wait for the task to complete
-        // TODO: bounded spawn to limit the number of concurrent tasks created by possibly malicious requests
-        task::spawn(async move {
-            let _timer = TraceTimer::debug(LOG_TARGET, "OnReceiveForeignProposalRequest");
-            if let Err(err) = Self::handle_requested_task(store, outbound_messaging, from, message).await {
-                error!(target: LOG_TARGET, "Error handling requested foreign proposal: {}", err);
-            }
-        });
+        // Spawn: Dont block consensus when processing requests.
+        if self
+            .bounded_spawner
+            .try_spawn({
+                let from = from.clone();
+                async move {
+                    let _timer = TraceTimer::debug(LOG_TARGET, "OnReceiveForeignProposalRequest");
+                    if let Err(err) = Self::handle_requested_task(store, outbound_messaging, from, message).await {
+                        error!(target: LOG_TARGET, "Error handling requested foreign proposal: {}", err);
+                    }
+                }
+            })
+            .is_err()
+        {
+            warn!(
+                target: LOG_TARGET,
+                "⚠️ FOREIGN PROPOSAL: too many concurrent foreign proposal requests, dropping request from {}",
+                from
+            );
+        }
 
         Ok(())
     }
@@ -286,12 +295,89 @@ where TConsensusSpec: ConsensusSpec
                     .send(from, HotstuffMessage::ForeignProposal(proposal.into()))
                     .await?;
             },
-            ForeignProposalRequestMessage::ByTransactionId { .. } => {
-                error!(
+        }
+
+        Ok(())
+    }
+
+    pub async fn handle_timed_out_requests(
+        &mut self,
+        local_committee_info: &CommitteeInfo,
+    ) -> Result<(), HotStuffError> {
+        const TIMEOUT: Duration = Duration::from_secs(30);
+        let timed_out = self
+            .pending_requests
+            .drain_timed_out(TIMEOUT)
+            .take(10)
+            .collect::<Vec<_>>();
+        if !timed_out.is_empty() {
+            info!(
+                target: LOG_TARGET,
+                "🌐 FOREIGN PROPOSAL: {} request(s) timed out",
+                timed_out.len(),
+            );
+        }
+        for (block_id, requests) in timed_out {
+            info!(
+                target: LOG_TARGET,
+                "🌐 FOREIGN PROPOSAL: Request for block {} timed out (previously sent to {} unique peers). Retrying...",
+                block_id,
+                requests.num_unique_peers()
+            );
+
+            if self
+                .store
+                .with_read_tx(|tx| ForeignProposalRecord::record_exists(tx, &block_id))?
+            {
+                // This is expected behaviour, we may receive the same foreign proposal notification multiple times
+                debug!(
                     target: LOG_TARGET,
-                    "TODO FOREIGN PROPOSAL: Request by transaction id is not supported. Ignoring."
+                    "FOREIGN PROPOSAL: Already received proposal for block {}",
+                    block_id,
                 );
-            },
+                return Ok(());
+            }
+
+            if requests.num_unique_peers() >= local_committee_info.num_shard_group_members() as usize {
+                warn!(
+                    target: LOG_TARGET,
+                    "🌐 FOREIGN PROPOSAL: All validators in shard group {} have been requested for block {}. \
+                     Aborting further requests.",
+                    requests.shard_group(),
+                    block_id,
+                );
+                // If a FP is never received + proposed by any local member, the transaction will TIMEOUT and ABORT
+                return Ok(());
+            }
+
+            let shard_group = requests.shard_group();
+            let epoch = requests.epoch();
+
+            let selected = self
+                .epoch_manager
+                .get_random_committee_member(requests.epoch(), Some(requests.shard_group()), requests.peers)
+                .await?;
+
+            info!(
+                target: LOG_TARGET,
+                "🌐 REQUEST foreign proposal {} for block {} from {}",
+                shard_group,
+                block_id,
+                selected,
+            );
+            self.outbound_messaging
+                .send(
+                    selected.address.clone(),
+                    HotstuffMessage::ForeignProposalRequest(ForeignProposalRequestMessage::ByBlockId {
+                        block_id,
+                        for_shard_group: local_committee_info.shard_group(),
+                        epoch,
+                    }),
+                )
+                .await?;
+
+            self.pending_requests
+                .insert(selected.address.clone(), block_id, requests.committee_info)
         }
 
         Ok(())
@@ -333,11 +419,12 @@ where TConsensusSpec: ConsensusSpec
     ) -> Result<(), ProposalValidationError> {
         // TODO: validations specific to the foreign proposal. General block validations (signature etc) are already
         //       performed in on_message_validate. These should be in the validator helper module.
+        let epoch = local_committee_info.epoch();
+        // Allow one epoch behind as Prepare/Accept rounds may have been conducted in the previous/subsequent epoch
+        // before/after epoch end
+        let epoch_range = epoch.saturating_sub(Epoch(1))..=epoch + Epoch(1);
 
-        if proposal.epoch() != local_committee_info.epoch() &&
-            // Allow one epoch behind as Prepare/Accept rounds may have been conducted in the previous epoch before epoch end
-            proposal.epoch() != local_committee_info.epoch() - Epoch(1)
-        {
+        if !epoch_range.contains(&proposal.epoch()) {
             warn!(
                 target: LOG_TARGET,
                 "⚠️ FOREIGN PROPOSAL: Invalid proposal epoch: {}. Current epoch: {}",
@@ -499,4 +586,74 @@ fn generate_transaction_commands_commit_proof_for_shard_group<TTx: StateStoreRea
     let proof = generate_block_commit_proof(tx, commit_qc, committed_block)?;
     let command_commit_proof = CommandsCommitProof::new_latest(applicable_commands.collect(), proof);
     Ok(command_commit_proof)
+}
+
+struct PendingRequests<TAddr> {
+    pending: HashMap<BlockId, ForeignRequests<TAddr>>,
+}
+
+impl<TAddr: NodeAddressable> PendingRequests<TAddr> {
+    pub(self) fn new() -> Self {
+        Self {
+            pending: HashMap::new(),
+        }
+    }
+
+    pub(self) fn contains(&self, block_id: &BlockId) -> bool {
+        self.pending.contains_key(block_id)
+    }
+
+    pub(self) fn insert(&mut self, address: TAddr, block_id: BlockId, committee_info: CommitteeInfo) {
+        match self.pending.entry(block_id) {
+            Entry::Occupied(occupied) => {
+                let entry = occupied.into_mut();
+                entry.peers.insert(address);
+                entry.at = Instant::now();
+            },
+            Entry::Vacant(vacant) => {
+                let mut peers = HashSet::new();
+                peers.insert(address);
+                vacant.insert(ForeignRequests {
+                    peers,
+                    committee_info,
+                    at: Instant::now(),
+                });
+            },
+        }
+    }
+
+    pub(self) fn remove(&mut self, block_id: &BlockId) -> Option<ForeignRequests<TAddr>> {
+        let item = self.pending.remove(block_id);
+        if self.pending.capacity() >= 1000 {
+            self.pending.shrink_to_fit();
+        }
+        item
+    }
+
+    pub(self) fn drain_timed_out(
+        &mut self,
+        timeout: Duration,
+    ) -> impl Iterator<Item = (BlockId, ForeignRequests<TAddr>)> + '_ {
+        self.pending.extract_if(move |_, reqs| reqs.at.elapsed() >= timeout)
+    }
+}
+
+struct ForeignRequests<TAddr> {
+    pub peers: HashSet<TAddr>,
+    pub committee_info: CommitteeInfo,
+    pub at: Instant,
+}
+
+impl<TAddr> ForeignRequests<TAddr> {
+    pub fn epoch(&self) -> Epoch {
+        self.committee_info.epoch()
+    }
+
+    pub fn shard_group(&self) -> ShardGroup {
+        self.committee_info.shard_group()
+    }
+
+    pub fn num_unique_peers(&self) -> usize {
+        self.peers.len()
+    }
 }

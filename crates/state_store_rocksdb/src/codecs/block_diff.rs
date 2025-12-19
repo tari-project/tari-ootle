@@ -1,14 +1,14 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::io::Read;
+use std::{io, io::Read};
 
 use anyhow::anyhow;
 use tari_common_types::types::FixedHash;
 use tari_consensus_types::BlockId;
 
 use crate::{
-    codecs::{DbCodec, EncodeVec, SubstateIdCodec},
+    codecs::{DbCodec, SubstateIdCodec},
     column_families::block_diff::BlockDiffKey,
     error::RocksDbStorageError,
     utils::read_to_fixed,
@@ -25,19 +25,42 @@ pub struct BlockDiffKeyCodec<T> {
 }
 
 impl DbCodec<BlockDiffKey> for BlockDiffKeyCodec<BlockIdSeqSubstateIdVersion> {
-    fn encode(&self, value: &BlockDiffKey) -> Result<EncodeVec, RocksDbStorageError> {
+    fn encode_len(&self, value: &BlockDiffKey) -> Result<usize, RocksDbStorageError> {
+        let len = BlockId::byte_size() + // block_id
+            4 + // sequence
+            self.substate_id_codec.encode_len(&value.substate_id)? + // substate_id
+            4 + // version
+            1; // is_up
+        Ok(len)
+    }
+
+    fn encode_into<W: io::Write>(&self, value: &BlockDiffKey, writer: &mut W) -> Result<(), RocksDbStorageError> {
         let block_id_bytes = value.block_id.as_bytes();
+        writer
+            .write_all(block_id_bytes)
+            .map_err(|e| RocksDbStorageError::EncodeError {
+                source: anyhow!("BlockIdSubstateIdVersionCodec: Failed to write block_id: {}", e),
+            })?;
         let sequence_bytes = value.sequence.to_be_bytes();
-        let substate_id_bytes = self.substate_id_codec.encode(&value.substate_id)?;
+        writer
+            .write_all(&sequence_bytes)
+            .map_err(|e| RocksDbStorageError::EncodeError {
+                source: anyhow!("BlockIdSubstateIdVersionCodec: Failed to write sequence: {}", e),
+            })?;
+        self.substate_id_codec.encode_into(&value.substate_id, writer)?;
         let version_bytes = value.version.to_be_bytes();
-        let bool_byte = [u8::from(value.is_up)];
-        Ok(EncodeVec::from_slices(&[
-            block_id_bytes,
-            &sequence_bytes,
-            &substate_id_bytes,
-            &version_bytes,
-            bool_byte.as_slice(),
-        ]))
+        writer
+            .write_all(&version_bytes)
+            .map_err(|e| RocksDbStorageError::EncodeError {
+                source: anyhow!("BlockIdSubstateIdVersionCodec: Failed to write version: {}", e),
+            })?;
+        let is_up_byte = u8::from(value.is_up);
+        writer
+            .write_all(&[is_up_byte])
+            .map_err(|e| RocksDbStorageError::EncodeError {
+                source: anyhow!("BlockIdSubstateIdVersionCodec: Failed to write is_up: {}", e),
+            })?;
+        Ok(())
     }
 
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<BlockDiffKey, RocksDbStorageError> {
@@ -66,19 +89,47 @@ impl DbCodec<BlockDiffKey> for BlockDiffKeyCodec<BlockIdSeqSubstateIdVersion> {
 }
 
 impl DbCodec<BlockDiffKey> for BlockDiffKeyCodec<SubstateIdBlockIdVersionSeq> {
-    fn encode(&self, value: &BlockDiffKey) -> Result<EncodeVec, RocksDbStorageError> {
+    fn encode_len(&self, value: &BlockDiffKey) -> Result<usize, RocksDbStorageError> {
+        let len = self.substate_id_codec.encode_len(&value.substate_id)? + // substate_id
+            BlockId::byte_size() + // block_id
+            4 + // version
+            1 + // is_up
+            4; // sequence
+        Ok(len)
+    }
+
+    fn encode_into<W: io::Write>(&self, value: &BlockDiffKey, writer: &mut W) -> Result<(), RocksDbStorageError> {
         let substate_id_bytes = self.substate_id_codec.encode(&value.substate_id)?;
+        writer
+            .write_all(&substate_id_bytes)
+            .map_err(|e| RocksDbStorageError::EncodeError {
+                source: anyhow!("BlockIdSubstateIdVersionCodec: Failed to write substate_id: {}", e),
+            })?;
         let block_id_bytes = value.block_id.as_bytes();
+        writer
+            .write_all(block_id_bytes)
+            .map_err(|e| RocksDbStorageError::EncodeError {
+                source: anyhow!("BlockIdSubstateIdVersionCodec: Failed to write block_id: {}", e),
+            })?;
         let version_bytes = value.version.to_be_bytes();
-        let is_up_bytes = [u8::from(value.is_up)];
+        writer
+            .write_all(&version_bytes)
+            .map_err(|e| RocksDbStorageError::EncodeError {
+                source: anyhow!("BlockIdSubstateIdVersionCodec: Failed to write version: {}", e),
+            })?;
+        let is_up_byte = u8::from(value.is_up);
+        writer
+            .write_all(&[is_up_byte])
+            .map_err(|e| RocksDbStorageError::EncodeError {
+                source: anyhow!("BlockIdSubstateIdVersionCodec: Failed to write is_up: {}", e),
+            })?;
         let sequence_bytes = value.sequence.to_be_bytes();
-        Ok(EncodeVec::from_slices(&[
-            &substate_id_bytes,
-            block_id_bytes,
-            &version_bytes,
-            is_up_bytes.as_slice(),
-            &sequence_bytes,
-        ]))
+        writer
+            .write_all(&sequence_bytes)
+            .map_err(|e| RocksDbStorageError::EncodeError {
+                source: anyhow!("BlockIdSubstateIdVersionCodec: Failed to write sequence: {}", e),
+            })?;
+        Ok(())
     }
 
     fn decode_reader<R: Read>(&self, reader: &mut R) -> Result<BlockDiffKey, RocksDbStorageError> {

@@ -1,6 +1,18 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    block_headers (id) {
+        id -> Integer,
+        epoch -> BigInt,
+        height -> BigInt,
+        block_hash -> Binary,
+        kernel_merkle_root -> Binary,
+        validator_node_merkle_root -> Binary,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     bmt_cache (epoch) {
         epoch -> BigInt,
         bmt -> Binary,
@@ -20,7 +32,7 @@ diesel::table! {
 diesel::table! {
     epochs (epoch) {
         epoch -> BigInt,
-        validator_node_mr -> Binary,
+        epoch_hash -> Binary,
     }
 }
 
@@ -74,6 +86,7 @@ diesel::table! {
 diesel::joinable!(committees -> validator_nodes (validator_node_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    block_headers,
     bmt_cache,
     committees,
     epochs,

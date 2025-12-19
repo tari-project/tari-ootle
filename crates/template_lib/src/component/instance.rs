@@ -31,9 +31,16 @@ impl<T> ComponentBuilder<T> {
     }
 
     /// Use an allocated address for the component.
-    pub fn with_address_allocation(mut self, allocation: ComponentAddressAllocation) -> Self {
-        assert!(self.address_allocation.is_none(), "Address allocation already set");
-        self.address_allocation = Some(allocation);
+    pub fn with_address_allocation(self, allocation: ComponentAddressAllocation) -> Self {
+        self.with_address_allocation_opt(Some(allocation))
+    }
+
+    /// Use an allocated address for the component, if `Some`.
+    pub fn with_address_allocation_opt(mut self, allocation: Option<ComponentAddressAllocation>) -> Self {
+        if let Some(allocation) = allocation {
+            assert!(self.address_allocation.is_none(), "Address allocation already set");
+            self.address_allocation = Some(allocation);
+        }
         self
     }
 

@@ -11,7 +11,6 @@ pub mod events;
 pub mod fees;
 pub mod hashing;
 pub mod indexed_value;
-pub mod instruction;
 pub mod instruction_result;
 pub mod limits;
 pub mod lock;
@@ -27,24 +26,21 @@ pub mod transaction_receipt;
 pub mod vault;
 pub mod virtual_substate;
 
-mod template;
+pub mod template;
 
 pub mod entity_id_provider;
 pub mod id_provider;
 
-mod argument_parser;
-mod component_call;
+mod borsh;
+mod hash;
 pub mod json_cbor;
 pub mod published_template;
-mod resource_address_ref;
 mod substate_serde;
 mod utxo;
 mod validator_fee;
 
-pub use argument_parser::parse_arg;
 pub use byte_types::*;
-pub use component_call::*;
-pub use resource_address_ref::*;
+pub use hash::*;
 pub use template::{calculate_template_binary_hash, parse_template_address};
 pub use utxo::*;
 pub use validator_fee::*;

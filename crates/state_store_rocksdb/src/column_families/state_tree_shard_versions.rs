@@ -24,20 +24,24 @@ use tari_ootle_common_types::shard::Shard;
 use tari_state_tree::Version;
 
 use crate::{
-    codecs::{NumberCodec, ShardCodec},
+    codecs::{KeyPrefix, NumberCodec, ShardCodec},
+    column_families::cf_names,
+    prefixed,
     traits::{Cf, QueryCf},
 };
 
+prefixed!(StateTreeShardVersionPrefix, KeyPrefix::StateTreeShardVersion);
 pub struct StateTreeShardVersionCf;
 
 impl Cf for StateTreeShardVersionCf {
     type Key = Shard;
     type KeyCodec = ShardCodec;
+    type Prefix = StateTreeShardVersionPrefix;
     type Value = Version;
     type ValueCodec = NumberCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "state_tree_shard_versions"
+        cf_names::STATE_TREE
     }
 }
 

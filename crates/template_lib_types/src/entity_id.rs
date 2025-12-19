@@ -8,10 +8,11 @@ use tari_template_abi::rust::{
     str::FromStr,
 };
 
-use crate::serde_helpers;
+use crate::{hex::write_hex_fmt, serde_helpers};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct EntityId(
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "serde_helpers::fixed_hex")]
@@ -38,14 +39,11 @@ impl EntityId {
     }
 
     pub fn from_hex(s: &str) -> Result<Self, KeyParseError> {
-        from_hex(s).map(Self::from_array)
+        from_hex_to_array(s).map(Self::from_array)
     }
 
     pub fn write_hex_fmt<W: fmt::Write>(&self, writer: &mut W) -> fmt::Result {
-        for b in self.0 {
-            write!(writer, "{:02x?}", b)?;
-        }
-        Ok(())
+        write_hex_fmt(writer, &self.0)
     }
 }
 
@@ -139,6 +137,7 @@ impl From<[u8; Self::LENGTH]> for ComponentKey {
 /// Representation of a 32-byte object key
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct ObjectKey(#[serde(with = "serde_helpers::fixed_hex")] [u8; Self::LENGTH]);
 
 impl ObjectKey {
@@ -159,19 +158,16 @@ impl ObjectKey {
         self.0
     }
 
-    pub fn array(&self) -> &[u8; Self::LENGTH] {
+    pub const fn array(&self) -> &[u8; Self::LENGTH] {
         &self.0
     }
 
     pub fn from_hex(s: &str) -> Result<Self, KeyParseError> {
-        from_hex(s).map(Self::from_array)
+        from_hex_to_array(s).map(Self::from_array)
     }
 
     pub fn write_hex_fmt<W: fmt::Write>(&self, writer: &mut W) -> fmt::Result {
-        for b in self.0 {
-            write!(writer, "{:02x?}", b)?;
-        }
-        Ok(())
+        write_hex_fmt(writer, &self.0)
     }
 
     pub fn try_from_slice(data: &[u8]) -> Result<Self, KeyParseError> {
@@ -248,10 +244,7 @@ impl DerefMut for ObjectKey {
 
 impl Display for ObjectKey {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        for x in self.0 {
-            write!(f, "{:02x?}", x)?;
-        }
-        Ok(())
+        write_hex_fmt(f, &self.0)
     }
 }
 
@@ -268,7 +261,7 @@ impl Display for KeyParseError {
     }
 }
 
-pub fn from_hex<const N: usize>(s: &str) -> Result<[u8; N], KeyParseError> {
+pub fn from_hex_to_array<const N: usize>(s: &str) -> Result<[u8; N], KeyParseError> {
     if s.len() != N * 2 {
         return Err(KeyParseError);
     }

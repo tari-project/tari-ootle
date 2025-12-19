@@ -54,6 +54,7 @@ impl ProcessDefinition for MinotariNode {
             .arg(format!("-pbase_node.p2p.public_addresses={public_address}"))
             .arg(format!("-pbase_node.grpc_address=/ip4/{listen_ip}/tcp/{grpc_port}"))
             .arg(format!("-pbase_node.http_wallet_query_service.port={http_api_port}"))
+            .arg("-pbase_node.grpc_server_allow_methods=list_headers")
             .args([
                 "--non-interactive",
                 "--enable-mining",

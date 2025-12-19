@@ -33,6 +33,8 @@ function getSubstateType(substateId: string): string {
   if (substateId.startsWith("commitment_")) return "Commitment";
   if (substateId.startsWith("txreceipt_")) return "Transaction Receipt";
   if (substateId.startsWith("template_")) return "Template";
+  if (substateId.startsWith("utxo_")) return "Utxo";
+  if (substateId.startsWith("vnfp_")) return "VnFeePool";
   return "Unknown";
 }
 
@@ -50,6 +52,12 @@ function getTypeColor(type: string): "primary" | "secondary" | "success" | "warn
       return "warning";
     case "Transaction Receipt":
       return "error";
+    case "Template":
+      return "info";
+    case "Utxo":
+      return "success";
+    case "VnFeePool":
+      return "secondary";
     default:
       return "primary";
   }

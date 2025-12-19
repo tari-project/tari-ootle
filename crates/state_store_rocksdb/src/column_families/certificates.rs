@@ -20,28 +20,33 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_consensus_types::{ProposalCertificate, QcId, TcId, TimeoutCertificate};
+use tari_consensus_types::{PcId, ProposalCertificate, TcId, TimeoutCertificate};
 use tari_ootle_common_types::Epoch;
 
 use crate::{
-    codecs::{DefaultVersionedCodec, EpochCodec, FixedBytesCodec32},
+    codecs::{DefaultVersionedCodec, EpochCodec, FixedBytesCodec32, KeyPrefix},
+    prefixed,
     traits::{Cf, QueryCf},
     versioned_types::{VersionedProposalCertificate, VersionedTimeoutCertificate},
 };
 
 pub mod proposal {
     use super::*;
+    use crate::column_families::cf_names;
+
+    prefixed!(ProposalCertificatePrefix, KeyPrefix::ProposalCertificates);
 
     pub struct ProposalCertificateCf;
 
     impl Cf for ProposalCertificateCf {
-        type Key = (Epoch, QcId);
+        type Key = (Epoch, PcId);
         type KeyCodec = (EpochCodec, FixedBytesCodec32);
+        type Prefix = ProposalCertificatePrefix;
         type Value = ProposalCertificate;
         type ValueCodec = DefaultVersionedCodec<VersionedProposalCertificate>;
 
         fn name() -> &'static str {
-            "proposal_certificates"
+            cf_names::CERTIFICATES
         }
     }
 
@@ -56,17 +61,21 @@ pub mod proposal {
 
 pub mod timeout {
     use super::*;
+    use crate::column_families::cf_names;
+
+    prefixed!(TimeoutCertificatePrefix, KeyPrefix::TimeoutCertificates);
 
     pub struct TimeoutCertificateCf;
 
     impl Cf for TimeoutCertificateCf {
         type Key = (Epoch, TcId);
         type KeyCodec = (EpochCodec, FixedBytesCodec32);
+        type Prefix = TimeoutCertificatePrefix;
         type Value = TimeoutCertificate;
         type ValueCodec = DefaultVersionedCodec<VersionedTimeoutCertificate>;
 
         fn name() -> &'static str {
-            "timeout_certificates"
+            cf_names::CERTIFICATES
         }
     }
 

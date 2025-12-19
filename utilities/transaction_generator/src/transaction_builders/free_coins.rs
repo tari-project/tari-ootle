@@ -16,21 +16,20 @@ pub fn builder(network: Network) -> impl Fn(u64) -> Transaction {
 
         let account_address = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &signer_public_key);
 
-        Transaction::builder()
+        Transaction::builder_localnet()
             .for_network(network.as_byte())
             .with_fee_instructions_builder(|builder| {
                 builder
-                    .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Amount(5000)])
+                    .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![5000])
                     .put_last_instruction_output_on_workspace("free_coins")
                     .create_account_with_bucket(signer_public_key, "free_coins")
-                    .call_method(account_address, "pay_fee", args![Amount(1000)])
+                    .call_method(account_address, "pay_fee", args![1000])
             })
             .with_inputs([
                 SubstateRequirement::unversioned(XTR),
                 SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
                 SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
             ])
-            .with_authorized_seal_signer()
             .build_and_seal(&signer_secret_key)
     }
 }

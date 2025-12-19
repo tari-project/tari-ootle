@@ -8,22 +8,22 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-tari_common_types = { workspace = true }
 tari_engine_types = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 tari_crypto = { workspace = true, features = ["borsh"] }
-tari_template_lib = { workspace = true }
+tari_template_lib = { workspace = true, features = ["std"] }
 tari_bor = { workspace = true }
+tari_hashing = { workspace = true }
 
 borsh = { workspace = true }
 log = { workspace = true }
 rand = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 serde = { workspace = true, default-features = true }
+serde_json = { workspace = true }
 ts-rs = { workspace = true, optional = true }
-
-[dev-dependencies]
-tari_bor = { workspace = true }
+hex = { workspace = true }
+thiserror = { workspace = true }
 
 [features]
-ts = ["ts-rs"]
+ts = ["ts-rs", "tari_engine_types/ts", "tari_ootle_common_types/ts", "tari_template_lib/ts", "tari_bor/ts"]

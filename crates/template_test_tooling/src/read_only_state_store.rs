@@ -10,8 +10,12 @@ use tari_engine_types::{
     resource::Resource,
     substate::{Substate, SubstateId},
     vault::Vault,
+    Utxo,
 };
-use tari_template_lib::models::{Account, ComponentAddress, ResourceAddress, VaultId};
+use tari_template_lib::{
+    models::{Account, ComponentAddress, ResourceAddress, UtxoAddress, VaultId},
+    types::TemplateAddress,
+};
 
 pub struct ReadOnlyStateStore<'a> {
     store: &'a MemoryStateStore,
@@ -26,9 +30,26 @@ impl<'a> ReadOnlyStateStore<'a> {
         Ok(substate.into_substate_value().into_component().unwrap())
     }
 
+    pub fn get_components_by_template_address(
+        &self,
+        template_address: TemplateAddress,
+    ) -> Result<Vec<(ComponentAddress, ComponentHeader)>, StateStoreError> {
+        let mut components = Vec::new();
+        self.with_substates(|id, substate| {
+            if let SubstateId::Component(component_address) = id {
+                if let Some(component) = substate.substate_value().as_component() {
+                    if component.template_address == template_address {
+                        components.push((*component_address, component.clone()));
+                    }
+                }
+            }
+        })?;
+        Ok(components)
+    }
+
     pub fn get_account(&self, account_address: ComponentAddress) -> Result<Account, StateStoreError> {
         let account = self.get_component(account_address)?;
-        Account::from_value(account.state()).map_err(StateStoreError::custom)
+        Account::from_value(account.state()).map_err(|e| StateStoreError::CustomStr(e.to_string()))
     }
 
     pub fn get_vaults_for_account(
@@ -50,9 +71,36 @@ impl<'a> ReadOnlyStateStore<'a> {
         Ok(substate.into_substate_value().into_resource().unwrap())
     }
 
+    pub fn get_all_resources(&self) -> Result<HashMap<ResourceAddress, Resource>, StateStoreError> {
+        let mut resources = HashMap::new();
+        self.with_substates(|id, substate| {
+            if let SubstateId::Resource(resource_address) = id {
+                let resource = substate.substate_value().as_resource().unwrap();
+                resources.insert(*resource_address, resource.clone());
+            }
+        })?;
+        Ok(resources)
+    }
+
     pub fn get_vault(&self, vault_id: &VaultId) -> Result<Vault, StateStoreError> {
         let substate = self.get_substate(&SubstateId::Vault(*vault_id))?;
         Ok(substate.into_substate_value().into_vault().unwrap())
+    }
+
+    pub fn get_utxo(&self, utxo_addr: UtxoAddress) -> Result<Utxo, StateStoreError> {
+        let substate = self.get_substate(&SubstateId::Utxo(utxo_addr))?;
+        Ok(substate.into_substate_value().into_utxo().unwrap())
+    }
+
+    pub fn get_all_utxos(&self) -> Result<Vec<(UtxoAddress, Utxo)>, StateStoreError> {
+        let mut utxos = Vec::new();
+        self.with_substates(|id, substate| {
+            if let SubstateId::Utxo(utxo_addr) = id {
+                let utxo = substate.substate_value().as_utxo().unwrap();
+                utxos.push((utxo_addr.clone(), utxo.clone()));
+            }
+        })?;
+        Ok(utxos)
     }
 
     pub fn inspect_component(&self, component_address: ComponentAddress) -> Result<IndexedValue, StateStoreError> {
@@ -71,8 +119,8 @@ impl<'a> ReadOnlyStateStore<'a> {
     }
 
     pub fn with_substates<F>(&self, mut f: F) -> Result<(), StateStoreError>
-    where F: FnMut(Substate) {
-        self.store.iter().for_each(|(_, substate)| f(substate.clone()));
+    where F: FnMut(&SubstateId, &Substate) {
+        self.store.iter().for_each(|(id, substate)| f(id, substate));
         Ok(())
     }
 }

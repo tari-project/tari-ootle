@@ -28,19 +28,20 @@ import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import CheckBox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
-import { Divider, InputLabel, Stack, InputAdornment, Typography, Box } from "@mui/material";
+import { Divider, InputLabel, Stack, InputAdornment, Typography } from "@mui/material";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
-import { ResourceType, ResourceAddress } from "@tari-project/typescript-bindings";
-import { validateAddress, formatDisplayCurrency } from "@utils/helpers";
-import { CURRENCY } from "@utils/constants";
+import { ResourceType, ResourceAddress, validateOotleAddress } from "@tari-project/typescript-bindings";
+import { formatDisplayCurrency } from "@utils/helpers";
+import { XTR_CURRENCY } from "@utils/constants";
 
 export interface SendMoneyFormState {
-  publicKey: string;
-  outputToConfidential: boolean;
+  address: string;
+  outputToRevealed: boolean;
   inputSelection: string;
   amount: string;
   fee: string;
   badge: string | null;
+  memo: string;
 }
 
 interface FormStepProps {
@@ -54,6 +55,7 @@ interface FormStepProps {
   availableBalance?: number;
   token_symbol: string;
   divisibility: number;
+  formError?: FormError | null;
   onSubmit: (e: FormEvent) => void;
   onCancel: () => void;
   onFormValueChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -61,6 +63,11 @@ interface FormStepProps {
   onCheckboxFormValueChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onUseBadgeChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
+
+export type FormError = {
+  type: "general" | "address" | "amount" | "fee";
+  message: string;
+};
 
 export default function FormStep({
   resource_address,
@@ -73,6 +80,7 @@ export default function FormStep({
   availableBalance,
   token_symbol,
   divisibility,
+  formError,
   onSubmit,
   onCancel,
   onFormValueChange,
@@ -89,7 +97,8 @@ export default function FormStep({
   const enteredAmount = parseFloat(transferFormState.amount) || 0;
   const hasInsufficientFunds = availableBalance !== undefined && enteredAmount > availableBalance;
 
-  const isFormValid = validateAddress(transferFormState.publicKey) && transferFormState.amount && !hasInsufficientFunds;
+  const isFormValid =
+    validateOotleAddress(transferFormState.address) && transferFormState.amount && !hasInsufficientFunds;
 
   // Format amount for display
   const formatAmountValue = (amount: string) => {
@@ -103,9 +112,8 @@ export default function FormStep({
     }
 
     // Otherwise, show formatted value
-    const hasDecimals = amount.includes(".") && amount.split(".")[1].length > 0;
     return num.toLocaleString("en-US", {
-      minimumFractionDigits: hasDecimals ? 0 : 2,
+      minimumFractionDigits: 0,
       maximumFractionDigits: divisibility,
     });
   };
@@ -150,11 +158,11 @@ export default function FormStep({
           </>
         )}
         <Stack direction="column" spacing={0.5}>
+          <DisplayFormError forType="address" formError={formError} />
           <TextField
-            name="publicKey"
-            label="To Public Key"
-            value={transferFormState.publicKey}
-            inputProps={{ pattern: "^[0-9a-fA-F]*$" }}
+            name="address"
+            label="To Address"
+            value={transferFormState.address}
             required
             onChange={onFormValueChange}
             style={{ flexGrow: 1 }}
@@ -167,14 +175,31 @@ export default function FormStep({
             <FormControlLabel
               control={
                 <CheckBox
-                  name="outputToConfidential"
-                  checked={transferFormState.outputToConfidential}
+                  name="outputToRevealed"
+                  checked={transferFormState.outputToRevealed}
                   onChange={onCheckboxFormValueChange}
                   disabled={disabled}
                 />
               }
-              label="Send Confidential Outputs"
+              label="Send Revealed Funds"
             />
+            {transferFormState.outputToRevealed && (
+              <Typography color="warning.main">
+                ⚠️ Warning: Revealed funds are visible on the blockchain and can be viewed by anyone.
+              </Typography>
+            )}
+
+            {transferFormState.outputToRevealed ? null : (
+              <TextField
+                name="memo"
+                label="Memo message (optional, max 253 characters)"
+                inputProps={{ maxLength: 253 }}
+                value={transferFormState.memo}
+                onChange={onFormValueChange}
+                style={{ flexGrow: 1 }}
+                disabled={disabled}
+              />
+            )}
             <InputLabel id="select-input-selection">Input Selection</InputLabel>
             <Select
               name="inputSelection"
@@ -191,6 +216,7 @@ export default function FormStep({
           </>
         )}
 
+        <DisplayFormError forType="amount" formError={formError} />
         <TextField
           name="amount"
           label="Amount"
@@ -205,13 +231,13 @@ export default function FormStep({
           error={hasInsufficientFunds}
           helperText={
             hasInsufficientFunds
-              ? `Insufficient funds. Available balance: ${formatDisplayCurrency(availableBalance || 0)}`
+              ? `Insufficient funds. Available balance: ${formatDisplayCurrency(availableBalance || 0, divisibility, token_symbol)}`
               : availableBalance !== undefined
-                ? `Available balance: ${formatDisplayCurrency(availableBalance)}`
+                ? `Available balance: ${formatDisplayCurrency(availableBalance, divisibility, token_symbol)}`
                 : undefined
           }
           InputProps={{
-            placeholder: "0.0",
+            placeholder: "0" + (divisibility > 0 ? "." + "0".repeat(divisibility) : ""),
             endAdornment: token_symbol ? <InputAdornment position="end">{token_symbol}</InputAdornment> : undefined,
           }}
         />
@@ -219,23 +245,21 @@ export default function FormStep({
         <TextField
           name="fee"
           label="Fee"
-          value={
-            isEstimatingFee
-              ? "Estimating..."
-              : transferFormState.fee
-                ? (parseInt(transferFormState.fee) / CURRENCY.DIVISOR).toString()
-                : ""
-          }
+          value={transferFormState.fee}
           placeholder={isEstimatingFee ? "Estimating..." : "Auto-calculated"}
           onChange={onFormValueChange}
-          disabled={true}
           style={{ flexGrow: 1 }}
           InputProps={{
-            endAdornment: !isEstimatingFee && token_symbol ? <InputAdornment position="end">{token_symbol}</InputAdornment> : null,
+            endAdornment:
+              !isEstimatingFee && token_symbol ? (
+                <InputAdornment position="end">µ{XTR_CURRENCY.SYMBOL}</InputAdornment>
+              ) : null,
           }}
         />
 
         <Divider />
+
+        <DisplayFormError forType="general" formError={formError} />
         <Stack direction="row" justifyContent="space-between" sx={{ mt: 3 }}>
           <Button variant="outlined" onClick={onCancel} disabled={disabled}>
             Cancel
@@ -246,5 +270,15 @@ export default function FormStep({
         </Stack>
       </Stack>
     </Form>
+  );
+}
+
+function DisplayFormError({ forType, formError }: { forType: FormError["type"]; formError?: FormError | null }) {
+  if (!formError) return null;
+  if (formError.type !== forType) return null;
+  return (
+    <Typography color="error" sx={{ mb: 2 }}>
+      {formError.message}
+    </Typography>
   );
 }

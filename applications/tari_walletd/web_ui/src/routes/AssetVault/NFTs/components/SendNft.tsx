@@ -26,14 +26,14 @@ import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
 import useAccountStore from "@store/accountStore";
-import type {
+import {
   Account,
   ComponentAddressOrName,
   ResourceAddress,
   NonFungibleId,
   NonFungibleToken,
 } from "@tari-project/typescript-bindings";
-import { useListNfts, useNftsTransfer } from "@api/hooks/useNfts";
+import { useNftsTransfer, useNFTsList } from "@api/hooks/useNfts";
 import { substateIdToString } from "@utils/helpers";
 import { useAccountsList } from "@api/hooks/useAccounts";
 import { useNftTransferStore } from "@store/nftTransferStore";
@@ -76,13 +76,9 @@ export interface TransferNftDialogProps {
 }
 
 function getAccountSelector(account: Account): ComponentAddressOrName {
-  return account.name
-    ? {
-        Name: account.name,
-      }
-    : {
-        ComponentAddress: substateIdToString(account.address),
-      };
+  return {
+    ComponentAddress: account.component_address,
+  };
 }
 
 function nftIdToString(nftId: NonFungibleId): string {
@@ -120,7 +116,6 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     setDisabled,
     setTransferFormState,
     setValidity,
-    setIsEstimatingFee,
     setTransferResult,
     setAutoCloseTimeoutId,
     initializeFormState,
@@ -128,7 +123,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   } = useNftTransferStore();
 
   const [availableNfts, setAvailableNfts] = useState<NonFungibleToken[]>([]);
-  const [isEstimatingFee, setLocalIsEstimatingFee] = useState(false);
+  const [isEstimatingFee, setIsEstimatingFee] = useState(false);
 
   // Memoize account selectors to prevent infinite re-renders - now nullable
   const sourceAccount = useMemo(() => (account ? getAccountSelector(account) : null), [account]);
@@ -138,59 +133,57 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   }, [transferFormState.payerAccount, sourceAccount]);
 
   // List NFTs - only enabled when account is present
-  const { data: loadedNfts, refetch: refetchNfts } = useListNfts({
-    account: sourceAccount,
-    enabled: !!account,
-  });
+  const { data: nftsResponse, refetch: refetchNfts } = useNFTsList(account?.component_address!, 0, 1000);
+  const loadedNfts = nftsResponse?.nfts;
 
   // List all accounts for payer account selection - only enabled when account is present
   const { data: accountsResp } = useAccountsList(0, 1000, !!account);
   const accounts = accountsResp?.accounts;
 
   // Only refetch NFTs when account is available
-  if (account) {
-    refetchNfts().catch(console.error);
-  }
+  useEffect(() => {
+    if (account) {
+      refetchNfts().catch(console.error);
+    }
+  }, [account, refetchNfts]);
 
   // Memoize hook parameters to prevent re-renders
-  const feeEstimateParams = useMemo(
-    () => ({
+  const feeEstimateParams = useMemo(() => {
+    return {
       dry_run: true,
       max_fee: 3000,
       nfts: transferFormState.nfts,
       source_account: sourceAccount!,
-      target_account_public_key: transferFormState.targetAccountPublicKey,
+      target_account_address: transferFormState.targetAccountAddress,
       fee_payer_account: feePayerAccount!,
       resource_address: transferFormState.resourceAddress,
-    }),
-    [
-      transferFormState.nfts,
-      sourceAccount,
-      transferFormState.targetAccountPublicKey,
-      feePayerAccount,
-      transferFormState.resourceAddress,
-    ],
-  );
+    };
+  }, [
+    transferFormState.nfts,
+    sourceAccount,
+    transferFormState.targetAccountAddress,
+    feePayerAccount,
+    transferFormState.resourceAddress,
+  ]);
 
-  const transferParams = useMemo(
-    () => ({
+  const transferParams = useMemo(() => {
+    return {
       nfts: transferFormState.nfts,
       source_account: sourceAccount!,
-      target_account_public_key: transferFormState.targetAccountPublicKey,
+      target_account_address: transferFormState.targetAccountAddress,
       dry_run: false,
       max_fee: parseInt(transferFormState.maxFee) || 3000,
       fee_payer_account: feePayerAccount!,
       resource_address: transferFormState.resourceAddress,
-    }),
-    [
-      transferFormState.nfts,
-      sourceAccount,
-      transferFormState.targetAccountPublicKey,
-      transferFormState.maxFee,
-      feePayerAccount,
-      transferFormState.resourceAddress,
-    ],
-  );
+    };
+  }, [
+    transferFormState.nfts,
+    sourceAccount,
+    transferFormState.targetAccountAddress,
+    transferFormState.maxFee,
+    feePayerAccount,
+    transferFormState.resourceAddress,
+  ]);
 
   // Fee estimation and transfer hooks
   const { mutateAsync: calculateFeeEstimate } = useNftsTransfer(feeEstimateParams);
@@ -202,10 +195,9 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     }
 
     setIsEstimatingFee(true);
-    setLocalIsEstimatingFee(true);
 
     // Ensure the form state is updated for fee estimation
-    setTransferFormState({ targetAccountPublicKey: targetAccount });
+    setTransferFormState({ targetAccountAddress: targetAccount });
 
     try {
       // Use a small delay to ensure state is updated
@@ -214,9 +206,8 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       const result = await calculateFeeEstimate?.();
 
       if (result && "Accept" in result.result.result) {
-        const fee = result.fee + 100; // Add buffer as per original comment
-        setTransferFormState({ maxFee: fee.toString() });
-        return fee;
+        setTransferFormState({ maxFee: result.fee.toString() });
+        return result.fee;
       } else {
         console.error("Fee estimation rejected:", result);
         throw new Error("Could not estimate transfer fee");
@@ -226,31 +217,61 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       throw e;
     } finally {
       setIsEstimatingFee(false);
-      setLocalIsEstimatingFee(false);
     }
   };
 
   const estimateFee = async () => {
-    return estimateFeeWithTargetAccount(transferFormState.targetAccountPublicKey);
+    if (!account || isEstimatingFee || !transferFormState.targetAccountAddress.trim()) {
+      return;
+    }
+
+    setIsEstimatingFee(true);
+
+    try {
+      const result = await calculateFeeEstimate?.();
+
+      if (result && "Accept" in result.result.result) {
+        setTransferFormState({ maxFee: result.fee.toString() });
+        return result.fee;
+      } else {
+        console.error("Fee estimation rejected:", result);
+        throw new Error("Could not estimate transfer fee");
+      }
+    } catch (e: any) {
+      console.error("Fee estimation error:", e);
+      throw e;
+    } finally {
+      setIsEstimatingFee(false);
+    }
   };
 
   const handleFormSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!account) return;
 
-    // Check if target account is filled (minimum requirement)
-    if (!transferFormState.targetAccountPublicKey.trim()) {
+    // Check if target account is filled
+    if (!transferFormState.targetAccountAddress.trim()) {
       setPopup({ title: "Missing information", error: true, message: "Please enter the target account public key" });
       return;
     }
 
-    // Only estimate fee if we don't already have one
+    // Check if NFTs are selected (if not pre-selected)
+    if (!preSelectedNftId && transferFormState.nfts.length === 0) {
+      setPopup({ title: "Missing NFTs", error: true, message: "Please select at least one NFT to transfer" });
+      return;
+    }
+
+    // If no fee is calculated yet, estimate it before proceeding
     if (!transferFormState.maxFee) {
       try {
         await estimateFee();
       } catch (error) {
         console.error("Fee estimation failed:", error);
-        // Don't proceed if fee estimation failed
+        setPopup({
+          title: "Fee estimation failed",
+          error: true,
+          message: "Unable to estimate transaction fee. Please try again or check if you have sufficient funds.",
+        });
         return;
       }
     }
@@ -297,6 +318,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
 
   const handleClose = () => {
     resetState(preSelectedNftId, preSelectedResourceAddress);
+    setCurrentStep("form");
     props.handleClose?.();
   };
 
@@ -332,7 +354,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     });
   };
 
-  const handlePayerAccountChange = (event: SelectChangeEvent<string>) => {
+  const handlePayerAccountChange = (event: SelectChangeEvent) => {
     const value = event.target.value;
 
     if (value != "") {
@@ -346,21 +368,6 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     }
   };
 
-  // Handle target account changes for auto fee estimation
-  useEffect(() => {
-    const targetAccount = transferFormState.targetAccountPublicKey;
-    if (targetAccount.trim() && targetAccount.match(/^[0-9a-fA-F]+$/)) {
-      // Small delay to let state update, then estimate fee
-      const timeoutId = setTimeout(() => {
-        estimateFeeWithTargetAccount(targetAccount).catch(() => {
-          // Fee estimation failed, but don't block the user
-        });
-      }, 500);
-
-      return () => clearTimeout(timeoutId);
-    }
-  }, [transferFormState.targetAccountPublicKey]);
-
   useEffect(() => {
     if (loadedNfts !== undefined) {
       setAvailableNfts(loadedNfts);
@@ -369,25 +376,11 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
 
   useEffect(() => {
     if (props.open && account) {
-      // When dialog opens, ensure we have fresh state with correct NFT
-      initializeFormState(preSelectedNftId, preSelectedResourceAddress, substateIdToString(account.address));
+      // When dialog opens, always reset to ensure clean state
+      resetState(preSelectedNftId, preSelectedResourceAddress);
+      initializeFormState(preSelectedNftId, preSelectedResourceAddress, substateIdToString(account.component_address));
     }
-  }, [props.open, preSelectedNftId, preSelectedResourceAddress, account?.address]);
-
-  const steps = ["Enter Details", "Confirm Transfer", "Complete"];
-
-  const getStepIndex = () => {
-    switch (currentStep) {
-      case "form":
-        return 0;
-      case "confirmation":
-        return 1;
-      case "result":
-        return 2;
-      default:
-        return 0;
-    }
-  };
+  }, [props.open, preSelectedNftId, preSelectedResourceAddress, account?.component_address]);
 
   return (
     <Dialog open={props.open} onClose={handleClose} maxWidth="sm" fullWidth>

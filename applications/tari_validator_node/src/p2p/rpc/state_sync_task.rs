@@ -54,7 +54,7 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
         loop {
             match self.fetch_next_batch(current_state_version) {
                 Ok(Some(transitions)) => {
-                    info!(target: LOG_TARGET, "🌍 Fetched {} state transition(s) up to v{}", transitions.updates.len(), transitions.state_version);
+                    debug!(target: LOG_TARGET, "🌍 Fetched {} state transition(s) up to v{}", transitions.updates.len(), transitions.state_version);
                     if let Some(end_epoch) = self.end_epoch {
                         // TODO(perf): might be better to not load in the first place, however also might incur the cost
                         // of a db index, more complex keys or loading from db anyway
@@ -76,7 +76,7 @@ impl<TStateStore: StateStore> StateSyncTask<TStateStore> {
                     // ))))
                     // .await?;
 
-                    info!(target: LOG_TARGET, "🌍sync complete ({}). {} update(s) sent.", current_state_version, counter);
+                    debug!(target: LOG_TARGET, "🌍sync complete ({}). {} update(s) sent.", current_state_version, counter);
                     // Finished
                     return Ok(());
                 },

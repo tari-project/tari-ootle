@@ -56,6 +56,7 @@ pub struct TwoBlocksCf;
 impl Cf for TwoBlocksCf {
     type Key = (BlockId, TransactionId);
     type KeyCodec = (BlockIdCodec, BytesCodec);
+    type Prefix = ();
     type Value = u64;
     type ValueCodec = NumberCodec<Self::Value>;
 
@@ -77,6 +78,7 @@ pub struct EpochHeightBlock;
 impl Cf for EpochHeightBlock {
     type Key = (Epoch, NodeHeight, BlockId);
     type KeyCodec = (EpochCodec, NumberCodec<NodeHeight>, BlockIdCodec);
+    type Prefix = ();
     type Value = ();
     type ValueCodec = UnitCodec;
 

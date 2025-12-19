@@ -3,6 +3,7 @@
 
 pub mod assert_error;
 pub mod confidential;
+pub mod spec;
 pub mod stealth;
 
-pub use tari_ootle_wallet_crypto::AlwaysMissLookupTable;
+pub use tari_ootle_wallet_crypto::GenerateValueLookup;

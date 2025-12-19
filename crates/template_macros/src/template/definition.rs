@@ -57,21 +57,8 @@ mod tests {
             mod foo {
                 use std::collections::HashMap as _;
 
-                struct Foo {}
-                impl Foo {
-                    pub fn no_args_function() -> String {
-                        \"Hello World!\".to_string()
-                    }
-                    pub fn some_args_function(a: i8, b: String) -> u32 {
-                        1_u32
-                    }
-                    pub fn no_return_function() {}
-                    pub fn constructor() -> Self {
-                      Self{}
-                    }
-                    pub fn method(&self){}
-                    fn private_function() {}
-                }
+                pub struct Foo {}
+                impl Foo { }
             }
         "})
         .unwrap();
@@ -85,28 +72,10 @@ mod tests {
             pub mod Foo_template {
                 use ::tari_template_lib::template_dependencies::*;
                 use std::collections::HashMap as _;
-                #[derive(Debug, serde :: Serialize, serde :: Deserialize)]
+                #[derive(serde :: Serialize, serde :: Deserialize)]
                 #[serde(crate = "self::serde")]
-                struct Foo {}
-                impl Foo {
-                    pub fn no_args_function() -> String {
-                        "Hello World!".to_string()
-                    }
-
-                    pub fn some_args_function(a: i8, b: String) -> u32 {
-                        1_u32
-                    }
-
-                    pub fn no_return_function() {}
-
-                    pub fn constructor() -> Self {
-                        Self {}
-                    }
-
-                    pub fn method(&self) {}
-
-                    fn private_function() {}
-                }
+                pub struct Foo { }
+                impl Foo {}
             }
         });
     }

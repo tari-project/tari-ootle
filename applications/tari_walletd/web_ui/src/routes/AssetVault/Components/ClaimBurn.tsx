@@ -153,11 +153,9 @@ export default function ClaimBurn() {
                 disabled={claimBurnFormState.disabled}
               >
                 {accountsList?.accounts?.map((account: AccountInfo, i: number) => (
-                  <MenuItem key={i} value={account.account.address}>
+                  <MenuItem key={i} value={account.account.component_address}>
                     <div>
-                      <i>
-                        {account.account.name} ({account.public_key})
-                      </i>
+                      <i>{account.account.name}</i>
                     </div>
                   </MenuItem>
                 ))}

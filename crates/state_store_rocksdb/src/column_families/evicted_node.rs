@@ -26,10 +26,13 @@ use tari_ootle_common_types::Epoch;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
-    codecs::{BlockIdCodec, DefaultCodec, PublicKeyCodec},
+    codecs::{BlockIdCodec, DefaultCodec, KeyPrefix, PublicKeyCodec},
+    column_families::cf_names,
+    prefixed,
     traits::{Cf, QueryCf},
 };
 
+prefixed!(EvictedNodePrefix, KeyPrefix::EvictedNodes);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvictedNodeData {
     pub epoch: Epoch,
@@ -41,11 +44,12 @@ pub struct EvictedNodeCf;
 impl Cf for EvictedNodeCf {
     type Key = (RistrettoPublicKeyBytes, BlockId);
     type KeyCodec = (PublicKeyCodec, BlockIdCodec);
+    type Prefix = EvictedNodePrefix;
     type Value = EvictedNodeData;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "evicted_nodes"
+        cf_names::CHAIN_METADATA
     }
 }
 

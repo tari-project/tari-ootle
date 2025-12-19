@@ -25,18 +25,17 @@ impl Runner {
         let fee_vault = self
             .sdk
             .accounts_api()
-            .get_vault_by_resource(&in_account.address, &XTR)?;
+            .get_vault_by_resource(&in_account.component_address, &XTR)?;
 
         let transaction = self
             .new_transaction_builder()
-            .fee_transaction_pay_from_component(in_account.address, 1000)
-            .call_function(self.faucet_template.address, "mint", args![Amount(1_000_000_000)])
+            .pay_fee_from_component(in_account.component_address, 1000)
+            .call_function(self.faucet_template, "mint", args![1_000_000_000])
             .with_inputs([
-                SubstateRequirement::unversioned(in_account.address),
+                SubstateRequirement::unversioned(in_account.component_address),
                 SubstateRequirement::unversioned(fee_vault.id),
                 SubstateRequirement::unversioned(fee_vault.resource_address),
             ])
-            .with_authorized_seal_signer()
             .build_and_seal(&key.key);
 
         let finalize = self.submit_transaction_and_wait(transaction).await?;
@@ -45,9 +44,8 @@ impl Runner {
         let component_address = diff
             .up_iter()
             .find_map(|(addr, s)| {
-                addr.as_component_address().filter(|_| {
-                    s.substate_value().component().unwrap().template_address == self.faucet_template.address
-                })
+                addr.as_component_address()
+                    .filter(|_| s.substate_value().component().unwrap().template_address == self.faucet_template)
             })
             .ok_or_else(|| anyhow::anyhow!("Faucet Component address not found"))?;
         let resource_address = diff

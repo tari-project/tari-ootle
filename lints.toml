@@ -22,8 +22,7 @@ deny = [
     'unreachable_patterns',
     'clippy::cloned_instead_of_copied',
     'clippy::create_dir',
-    # TODO: re-add this and remove dbg!
-    #    'clippy::dbg_macro',
+    'clippy::dbg_macro',
     'clippy::else_if_without_else',
     'clippy::inline_always',
     'let_underscore_drop',
@@ -71,6 +70,9 @@ allow = [
     'clippy::mutable_key_type',
     # Using `format!("hello {}", x)` vs `format!("hello {x}")` is not a big deal/will cause code churn to fix, so we'll allow it.
     'clippy::uninlined_format_args',
+    # Dropping a type that does not implement Drop is sometimes used legitamately e.g. a struct containing a reference, subsequent code wants to make a mutable borrow.
+    # The lint is only a warn by default and does not include a complete explanation of why this is bad or any caveats.
+    'clippy::drop_non_drop',
 ]
 
 warn = [

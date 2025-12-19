@@ -4,11 +4,12 @@
 use tari_bor::{Deserialize, Serialize};
 use tari_template_abi::rust::{fmt::Display, iter, ops};
 
-const ALL_FLAGS: u8 = 0b0011;
+const ALL_FLAGS: u8 = VaultFreezeFlag::Deposits as u8 | VaultFreezeFlag::Withdrawals as u8;
 
 #[derive(Clone, Debug, Copy, Default, Serialize, Deserialize)]
 #[serde(transparent)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct VaultFreezeFlags(u8);
 
 impl VaultFreezeFlags {

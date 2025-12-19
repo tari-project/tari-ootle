@@ -21,15 +21,15 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { create } from "zustand";
-import { Account } from "@tari-project/typescript-bindings";
+import { Account, OotleAddress } from "@tari-project/typescript-bindings";
 
 interface Store {
   showBalance: boolean;
   setShowBalance: (show: boolean) => void;
   account: Account | null;
   setAccount: (account: Account) => void;
-  publicKey: string;
-  setPublicKey: (publicKey: string) => void;
+  address: string;
+  setOotleAddress: (address: OotleAddress) => void;
   indexer: string;
   setIndexer: (indexer: string) => void;
   popup: any;
@@ -41,8 +41,8 @@ const useAccountStore = create<Store>()((set) => ({
   setShowBalance: (show) => set({ showBalance: show }),
   account: null,
   setAccount: (account) => set({ account: account }),
-  publicKey: "",
-  setPublicKey: (publicKey) => set({ publicKey: publicKey }),
+  address: "",
+  setOotleAddress: (address) => set({ address: address }),
   indexer: "",
   setIndexer: (indexer) => set({ indexer: indexer }),
   popup: { visible: false },

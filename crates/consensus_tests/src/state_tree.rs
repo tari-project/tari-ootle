@@ -19,7 +19,10 @@ use crate::support::{logging::setup_logger, Test, TestAddress, TEST_NUM_PRESHARD
 async fn check_state_transitions() {
     setup_logger();
     let mut test = Test::builder()
-        .with_rocks_path("/tmp/test{}")
+        .modify_config(|config_mut| {
+            // Epoch change ASAP
+            config_mut.epoch_end_grace_period = Duration::from_secs(0);
+        })
         .modify_consensus_constants(|config| {
             config.pacemaker_block_time = Duration::from_millis(500);
         })
@@ -70,7 +73,11 @@ async fn check_state_transitions() {
                 let mut all_transitions = vec![];
                 let mut next_state_version = 1;
                 while let Some(transitions) = tx
-                    .state_transitions_get_starting_at(shard, next_state_version, SubstateValueFilterFlags::empty())
+                    .state_transitions_get_starting_at(
+                        shard,
+                        next_state_version,
+                        SubstateValueFilterFlags::all_substates(),
+                    )
                     .optional()
                     .unwrap()
                 {

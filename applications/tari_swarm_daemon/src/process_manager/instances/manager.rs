@@ -34,7 +34,6 @@ use crate::{
         AllocatedPorts,
         IndexerProcess,
         Instance,
-        SignalingServerProcess,
         WalletDaemonProcess,
     },
 };
@@ -50,7 +49,6 @@ pub struct InstanceManager {
     validator_nodes: IndexMap<InstanceId, ValidatorNodeProcess>,
     indexers: IndexMap<InstanceId, IndexerProcess>,
     wallet_daemons: IndexMap<InstanceId, WalletDaemonProcess>,
-    signaling_servers: IndexMap<InstanceId, SignalingServerProcess>,
     port_allocator: PortAllocator,
     instance_id: InstanceId,
 }
@@ -75,7 +73,6 @@ impl InstanceManager {
             validator_nodes: IndexMap::new(),
             indexers: IndexMap::new(),
             wallet_daemons: IndexMap::new(),
-            signaling_servers: IndexMap::new(),
             instance_id: 0,
         }
     }
@@ -182,12 +179,12 @@ impl InstanceManager {
                     .context("Failed to open claim public key file")?;
                 let file = file.into_std().await;
                 let reader = StdBufReader::new(file);
-                let claim_public_key = serde_json::from_reader::<_, serde_json::Value>(reader)
+                let claim_data = serde_json::from_reader::<_, serde_json::Value>(reader)
                     .context("Failed to read claim public key file")?;
-                let claim_public_key = claim_public_key
-                    .get("public_key")
+                let claim_public_key = claim_data
+                    .get("account_public_key")
                     .and_then(|pk| pk.as_str())
-                    .context("Failed to extract public key from claim public key file")?;
+                    .ok_or_else(|| anyhow!("Failed to extract public key from claim public key file: {claim_data}"))?;
                 info!("Setting claim public key to {}", claim_public_key);
                 instance_settings.insert("claim_public_key".to_string(), claim_public_key.to_string());
             }
@@ -281,10 +278,6 @@ impl InstanceManager {
             InstanceType::TariIndexer => {
                 self.indexers.insert_sorted(instance_id, IndexerProcess::new(instance));
             },
-            InstanceType::TariSignalingServer => {
-                self.signaling_servers
-                    .insert_sorted(instance_id, SignalingServerProcess::new(instance));
-            },
             InstanceType::TariWalletDaemon => {
                 self.wallet_daemons
                     .insert_sorted(instance_id, WalletDaemonProcess::new(instance));
@@ -328,10 +321,6 @@ impl InstanceManager {
 
     pub fn indexers(&self) -> impl Iterator<Item = &IndexerProcess> + Sized {
         self.indexers.values()
-    }
-
-    pub fn signaling_servers(&self) -> impl Iterator<Item = &SignalingServerProcess> + Sized {
-        self.signaling_servers.values()
     }
 
     // pub fn wallet_daemons(&self) -> impl Iterator<Item = &WalletDaemonProcess> + Sized {
@@ -433,9 +422,6 @@ impl InstanceManager {
             InstanceType::TariIndexer => {
                 self.indexers.shift_remove(&id);
             },
-            InstanceType::TariSignalingServer => {
-                self.signaling_servers.shift_remove(&id);
-            },
             InstanceType::TariWalletDaemon => {
                 self.wallet_daemons.shift_remove(&id);
             },
@@ -458,7 +444,6 @@ impl InstanceManager {
             .chain(self.minotari_miners.values_mut().map(|x| x.instance_mut()))
             .chain(self.validator_nodes.values_mut().map(|x| x.instance_mut()))
             .chain(self.indexers.values_mut().map(|x| x.instance_mut()))
-            .chain(self.signaling_servers.values_mut().map(|x| x.instance_mut()))
             .chain(self.wallet_daemons.values_mut().map(|x| x.instance_mut()))
     }
 
@@ -470,7 +455,6 @@ impl InstanceManager {
             .chain(self.minotari_miners.values().map(|x| x.instance()))
             .chain(self.validator_nodes.values().map(|x| x.instance()))
             .chain(self.indexers.values().map(|x| x.instance()))
-            .chain(self.signaling_servers.values().map(|x| x.instance()))
             .chain(self.wallet_daemons.values().map(|x| x.instance()))
     }
 

@@ -30,6 +30,7 @@ const TAG: u64 = BinaryTag::Metadata as u64;
 
 /// A collection of user-defined data used to describe other types, for example, non-fungible tokens or events
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Metadata(BorTag<BTreeMap<String, String>, TAG>);
 
@@ -45,8 +46,17 @@ impl Metadata {
         self
     }
 
-    pub fn get(&self, key: &str) -> Option<&String> {
-        self.0.get(key)
+    pub fn get(&self, key: &str) -> Option<&str> {
+        self.0.get(key).map(|s| s.as_str())
+    }
+
+    pub fn get_or_insert<K: Into<String>, V: Into<String>>(&mut self, key: K, default: V) -> &str {
+        let key = key.into();
+        self.0.entry(key).or_insert_with(|| default.into())
+    }
+
+    pub fn remove(&mut self, key: &str) -> Option<String> {
+        self.0.remove(key)
     }
 
     pub fn contains_key(&self, key: &str) -> bool {
@@ -63,14 +73,11 @@ impl FromStr for Metadata {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if !s.contains('=') {
-            return Err("Invalid metadata string, missing '='".to_string());
-        }
         let pairs = s.split(',').map(|pair| {
-            let mut split = pair.split('=');
-            let key = split.next().ok_or_else(|| "Missing key".to_string())?;
-            let value = split.next().ok_or_else(|| "Missing value".to_string())?;
-            Ok::<(String, String), String>((key.to_string(), value.to_string()))
+            let (key, value) = pair
+                .split_once('=')
+                .ok_or_else(|| "Invalid key=value pair".to_string())?;
+            Ok::<_, String>((key.trim().to_string(), value.trim().to_string()))
         });
         let mut map = BTreeMap::new();
         for pair in pairs {
@@ -78,6 +85,12 @@ impl FromStr for Metadata {
             map.insert(key, value);
         }
         Ok(Self(BorTag::new(map)))
+    }
+}
+
+impl From<()> for Metadata {
+    fn from(_: ()) -> Self {
+        Self::new()
     }
 }
 
@@ -123,5 +136,52 @@ impl Display for Metadata {
             write!(f, "key = {}, value = {} ", key, value)?;
         }
         Ok(())
+    }
+}
+
+/// Creates a metadata object
+///
+/// # Example
+///
+/// ```rust
+/// # use tari_template_lib::metadata;
+/// metadata!(
+///   "name" => "My NFT",
+///   "description" => "This is my first NFT",
+///   "image" => "https://example.com/my-nft.png"
+/// );
+/// ```
+#[macro_export]
+macro_rules! metadata {
+    ($($key:expr => $value:expr),* $(,)?) => {
+        {
+            let mut metadata = $crate::models::Metadata::new();
+            $(
+                metadata.insert($key, $value);
+            )*
+            metadata
+        }
+    };
+    () => {
+        $crate::models::Metadata::new()
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn metadata_macro() {
+        let i = 123;
+        let metadata = metadata!(
+            "name" => "My NFT",
+            "description" => "This is my first NFT",
+            "image" => "https://example.com/my-nft.png",
+            "index" => i.to_string()
+        );
+
+        assert_eq!(metadata.get("name"), Some("My NFT"));
+        assert_eq!(metadata.get("description"), Some("This is my first NFT"));
+        assert_eq!(metadata.get("image"), Some("https://example.com/my-nft.png"));
+        assert_eq!(metadata.get("index"), Some("123"));
     }
 }

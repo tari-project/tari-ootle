@@ -40,7 +40,7 @@ impl SubstateChange {
     pub fn versioned_substate_id(&self) -> VersionedSubstateIdRef<'_> {
         match self {
             SubstateChange::Up { id, substate, .. } => VersionedSubstateIdRef::new(id, substate.version()),
-            SubstateChange::Down { id, .. } => id.as_ref(),
+            SubstateChange::Down { id, .. } => id.as_versioned_ref(),
         }
     }
 

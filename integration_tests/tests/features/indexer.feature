@@ -6,29 +6,10 @@
 Feature: Indexer node
 
   Scenario: Wallet daemon is able to connect to indexer
-
-    ##### Setup
-    # Initialize a base node, wallet, miner and VN
-    Given a base node BASE
-    Given a wallet WALLET connected to base node BASE
-    Given a miner MINER connected to base node BASE and wallet WALLET
-
-    # Initialize indexer and connect wallet daemon
-    Given an indexer IDX connected to base node BASE
-    Given a wallet daemon WALLET_D connected to indexer IDX
-
-    # Initialize a validator node
-    Given a validator node VN connected to base node BASE and wallet daemon WALLET_D
-
-    # Fund wallet to send VN registration tx
-    When miner MINER mines 10 new blocks
-    When wallet WALLET has at least 2000 T
-    When validator node VN sends a registration transaction to base wallet WALLET
-    When miner MINER mines 26 new blocks
-    Then the validator node VN is listed as registered
+    Given a network with registered validator VN and wallet daemon WALLET_D
 
     # Create the sender account
-    When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
+    When I create an account ACC via the wallet daemon WALLET_D with 2 XTR
 
     # Publish some templates
     When wallet daemon WALLET_D publishes the template "counter" using account ACC
@@ -42,47 +23,38 @@ Feature: Indexer node
     # Create a new SparkleNft component and mint an NFT
     When I call function "new" on template "basic_nft" using account ACC to pay fees via wallet daemon WALLET_D named "NFT"
     When I submit a transaction manifest via wallet daemon WALLET_D signed by the key of ACC with inputs "NFT, ACC" named "TX1"
-  ```
-  // $mint NFT/resources/0 6
-  // $nft_index NFT/resources/0 0
-  // $nft_index NFT/resources/0 1
-  // $nft_index NFT/resources/0 2
-  // $nft_index NFT/resources/0 3
-  // $nft_index NFT/resources/0 4
-  // $nft_index NFT/resources/0 5
+  """
   let sparkle_nft = global!["NFT/components/SparkleNft"];
-  let mut acc1 = global!["ACC/components/Account"];
+  let mut acc = global!["ACC/accounts/ACC"];
 
   // mint a couple of nfts with random ids
   let nft_bucket_1 = sparkle_nft.mint("Astronaut (Image by Freepik.com)", "https://img.freepik.com/free-vector/hand-drawn-nft-style-ape-illustration_23-2149622024.jpg");
-  acc1.deposit(nft_bucket_1);
+  acc.deposit(nft_bucket_1);
   let nft_bucket_2 = sparkle_nft.mint("Baby (Image by Freepik.com)", "https://img.freepik.com/free-vector/hand-drawn-nft-style-ape-illustration_23-2149629576.jpg");
-  acc1.deposit(nft_bucket_2);
+  acc.deposit(nft_bucket_2);
   let nft_bucket_3 = sparkle_nft.mint("Cool (Image by Freepik.com)", "https://img.freepik.com/free-vector/hand-drawn-nft-style-ape-illustration_23-2149622021.jpg");
-  acc1.deposit(nft_bucket_3);
+  acc.deposit(nft_bucket_3);
   let nft_bucket_4 = sparkle_nft.mint("Metaverse (Image by Freepik.com)", "https://img.freepik.com/premium-vector/hand-drawn-monkey-ape-vr-box-virtual-nft-style_361671-246.jpg");
-  acc1.deposit(nft_bucket_4);
+  acc.deposit(nft_bucket_4);
   let nft_bucket_5 = sparkle_nft.mint("Suit (Image by Freepik.com)", "https://img.freepik.com/free-vector/hand-drawn-nft-style-ape-illustration_23-2149629594.jpg");
-  acc1.deposit(nft_bucket_5);
+  acc.deposit(nft_bucket_5);
   let nft_bucket_6 = sparkle_nft.mint("Cook  (Image by Freepik.com)", "https://img.freepik.com/free-vector/hand-drawn-nft-style-ape-illustration_23-2149629582.jpg");
-  acc1.deposit(nft_bucket_6);
-  ```
+  acc.deposit(nft_bucket_6);
+  """
 
     # Get substate of a component (the counter has been increased, so the version is 1)
-    Then the indexer IDX returns version 1 for substate COUNTER/components/Counter
+    Then the indexer INDEXER returns version 1 for substate COUNTER/components/Counter
 
     # Get substate of a resource (the nft resource has been mutated by the minting, so the version is 1)
-    Then the indexer IDX returns version 1 for substate NFT/resources/0
+    Then the indexer INDEXER returns version 1 for substate NFT/resources/SPKL
 
     # Get substate of an nft (newly minted and not mutated, so version is 0)
-    Then the indexer IDX returns version 0 for substate TX1/nfts/0
+    Then the indexer INDEXER returns version 0 for substate TX1/nfts/0
 
-    # List the nfts of a resource
-    # FIXME: indexer relies on NFT index which is no longer created
-#    Then the indexer IDX returns 6 non fungibles for resource NFT/resources/0
+    Then I wait for the indexer INDEXER to sync with the network
 
     # Scan the network for the event emitted on ACC creation
-    When indexer IDX scans the network events for account ACC has topics std.component.created,Account.pay_fee,Account.deposit,std.component.updated
+    When indexer INDEXER scans the network events for account ACC with topics std.component.created,std.vault.pay_fee,std.component.updated
 
   Scenario: Indexer GraphQL requests work
     # Initialize a base node, wallet, miner and VN
@@ -92,68 +64,31 @@ Feature: Indexer node
     Given an indexer IDX connected to base node BASE
 
     # Check GraphQL request
-    Given IDX indexer GraphQL request works
+    Then IDX indexer GraphQL request works
 
   Scenario: Indexer GraphQL requests events over network substate indexing
+    Given a network with registered validator VN and wallet daemon WALLET_D
 
-    ##### Setup
-    # Initialize a base node, wallet, miner and VN
-    Given a base node BASE
-    Given a wallet WALLET connected to base node BASE
-    Given a miner MINER connected to base node BASE and wallet WALLET
+    When I create an account ACC_1 via the wallet daemon WALLET_D with 1 XTR
+    When I create an account ACC_2 via the wallet daemon WALLET_D with 1 XTR
 
-    # Initialize a validator node
-    Given a validator node VN connected to base node BASE and wallet daemon WALLET_D
-
-    # Fund wallet to send VN registration tx
-    When miner MINER mines 10 new blocks
-    When wallet WALLET has at least 2000 T
-    When validator node VN sends a registration transaction to base wallet WALLET
-    When miner MINER mines 26 new blocks
-    Then the validator node VN is listed as registered
-
-    # Initialize indexer and connect wallet daemon
-    Given an indexer IDX connected to base node BASE
-    Given a wallet daemon WALLET_D connected to indexer IDX
-
-    When I create an account ACC_1 via the wallet daemon WALLET_D with 10000 free coins
-    When I create an account ACC_2 via the wallet daemon WALLET_D with 10000 free coins
-
+    Then I wait for the indexer INDEXER to sync with the network
     ##### Scenario
     # Scan the network for the event emitted on ACC_1 creation
-    When indexer IDX scans the network events for account ACC_1 with topics std.component.created,pay_fee
+    When indexer INDEXER scans the network events for account ACC_1 with topics std.component.created,std.vault.pay_fee
 
     # Scan the network for the event emitted on ACC_2 creation
-    When indexer IDX scans the network events for account ACC_2 with topics std.component.created,pay_fee
+    When indexer INDEXER scans the network events for account ACC_2 with topics std.component.created,std.vault.pay_fee
 
   Scenario: Indexer GraphQL filtering and pagination of events
-
-    ##### Setup
-    # Initialize a base node, wallet, miner and VN
-    Given a base node BASE
-    Given a wallet WALLET connected to base node BASE
-    Given a miner MINER connected to base node BASE and wallet WALLET
-
-    # Initialize a validator node
-    Given a validator node VN connected to base node BASE and wallet daemon WALLET_D
-
-    # Fund wallet to send VN registration tx
-    When miner MINER mines 10 new blocks
-    When wallet WALLET has at least 2000 T
-    When validator node VN sends a registration transaction to base wallet WALLET
-    When miner MINER mines 26 new blocks
-    Then the validator node VN is listed as registered
-
-    # Initialize indexer and connect wallet daemon
-    Given an indexer IDX connected to base node BASE
-    Given a wallet daemon WALLET_D connected to indexer IDX
+    Given a network with registered validator VN and wallet daemon WALLET_D
 
     # publish template
-    When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
+    When I create an account ACC via the wallet daemon WALLET_D with 2000000 XTR
     When wallet daemon WALLET_D publishes the template "faucet" using account ACC
 
-    When I create an account ACC_1 via the wallet daemon WALLET_D with 10000 free coins
-    When I create an account ACC_2 via the wallet daemon WALLET_D with 10000 free coins
+    When I create an account ACC_1 via the wallet daemon WALLET_D with 10000 XTR
+    When I create an account ACC_2 via the wallet daemon WALLET_D with 10000 XTR
 
     ##### Scenario
     # Create a new faucet component
@@ -161,11 +96,11 @@ Feature: Indexer node
 
     # Generate some events by doing vault operations with the faucet and the acounts
     When I submit a transaction manifest via wallet daemon WALLET_D signed by the key of ACC_1 with inputs "FAUCET, ACC_1, ACC_2" named "TX1"
-  ```
+  """
   let faucet = global!["FAUCET/components/TestFaucet"];
-  let faucet_resource = global!["FAUCET/resources/0"];
-  let mut acc1 = global!["ACC_1/components/Account"];
-  let mut acc2 = global!["ACC_2/components/Account"];
+  let faucet_resource = global!["FAUCET/resources/FAUCET"];
+  let mut acc1 = global!["ACC_1/accounts/ACC_1"];
+  let mut acc2 = global!["ACC_2/accounts/ACC_2"];
 
   // get tokens from the faucet to ACC_1
   let faucet_bucket = faucet.take_free_coins();
@@ -178,10 +113,10 @@ Feature: Indexer node
   // transfer some tokens back from ACC_2 to ACC_1
   let bucket2 = acc2.withdraw(faucet_resource, Amount(20));
   acc1.deposit(bucket2);
-  ```
+  """
 
     # Wait for the scanning and indexing of events
-    When I wait 10 seconds
+    Then I wait for the indexer INDEXER to sync with the network
 
     # Query the events from the network
-    When indexer IDX scans the network for events of resource FAUCET/resources/0
+    When indexer INDEXER scans the network for events of resource FAUCET/resources/FAUCET

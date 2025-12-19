@@ -10,9 +10,9 @@ use tari_jellyfish::TreeHash;
 use tari_ootle_common_types::shard::Shard;
 use tari_ootle_storage::consensus_models::{
     EpochCheckpoint,
-    SubstateCreatedProof,
+    SubstateCreate,
     SubstateData,
-    SubstateDestroyedProof,
+    SubstateDestroy,
     SubstateUpdateProof,
     SubstateValueOrHash,
     TreeRootSummary,
@@ -23,10 +23,10 @@ use crate::{
     proto,
 };
 
-impl TryFrom<proto::rpc::SubstateCreatedProof> for SubstateCreatedProof {
+impl TryFrom<proto::rpc::SubstateCreate> for SubstateCreate {
     type Error = anyhow::Error;
 
-    fn try_from(value: proto::rpc::SubstateCreatedProof) -> Result<Self, Self::Error> {
+    fn try_from(value: proto::rpc::SubstateCreate) -> Result<Self, Self::Error> {
         Ok(Self {
             substate: value
                 .substate
@@ -37,19 +37,18 @@ impl TryFrom<proto::rpc::SubstateCreatedProof> for SubstateCreatedProof {
     }
 }
 
-impl From<SubstateCreatedProof> for proto::rpc::SubstateCreatedProof {
-    fn from(value: SubstateCreatedProof) -> Self {
+impl From<SubstateCreate> for proto::rpc::SubstateCreate {
+    fn from(value: SubstateCreate) -> Self {
         Self {
             substate: Some(value.substate.into()),
-            // created_justify: Some((&value.created_qc).into()),
         }
     }
 }
 
-impl TryFrom<proto::rpc::SubstateDestroyedProof> for SubstateDestroyedProof {
+impl TryFrom<proto::rpc::SubstateDestroy> for SubstateDestroy {
     type Error = anyhow::Error;
 
-    fn try_from(value: proto::rpc::SubstateDestroyedProof) -> Result<Self, Self::Error> {
+    fn try_from(value: proto::rpc::SubstateDestroy) -> Result<Self, Self::Error> {
         Ok(Self {
             substate_id: SubstateId::from_bytes(&value.substate_id)?,
             version: value.version,
@@ -57,12 +56,11 @@ impl TryFrom<proto::rpc::SubstateDestroyedProof> for SubstateDestroyedProof {
     }
 }
 
-impl From<SubstateDestroyedProof> for proto::rpc::SubstateDestroyedProof {
-    fn from(value: SubstateDestroyedProof) -> Self {
+impl From<SubstateDestroy> for proto::rpc::SubstateDestroy {
+    fn from(value: SubstateDestroy) -> Self {
         Self {
             substate_id: value.substate_id.to_bytes(),
             version: value.version,
-            // destroyed_justify: Some((&value.justify).into()),
         }
     }
 }

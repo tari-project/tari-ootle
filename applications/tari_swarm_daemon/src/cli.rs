@@ -74,8 +74,6 @@ pub struct Overrides {
     pub start_port: Option<u16>,
     #[clap(short = 'k', long)]
     pub skip_registration: bool,
-    #[clap(long)]
-    pub disable_template_auto_register: bool,
     #[clap(long, value_enum)]
     pub wallet_daemon_auth: Option<WalletDaemonAuth>,
     #[clap(long)]
@@ -115,10 +113,6 @@ impl Overrides {
             config.start_port = port;
         }
 
-        if self.disable_template_auto_register {
-            config.auto_register_previous_templates = false;
-        }
-
         if let Some(auth) = self.wallet_daemon_auth {
             // set wallet daemon auth method for all instances using the override
             config.processes.instances.iter_mut().for_each(|instance| {
@@ -152,7 +146,6 @@ fn instance_type_to_package_name(instance_type: InstanceType) -> String {
         InstanceType::TariValidatorNode => "tari_validator_node".to_string(),
         InstanceType::TariIndexer => "tari_indexer".to_string(),
         InstanceType::TariWalletDaemon => "tari_ootle_walletd".to_string(),
-        InstanceType::TariSignalingServer => "tari_signaling_server".to_string(),
         InstanceType::TariWalletDaemonCreateKey => "tari_wallet_daemon_create_key".to_string(),
     }
 }

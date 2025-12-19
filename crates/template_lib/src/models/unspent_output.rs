@@ -2,9 +2,12 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use tari_bor::{Deserialize, Serialize};
-use tari_template_lib_types::crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag};
+use tari_template_lib_types::{
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
+    EncryptedData,
+};
 
-use crate::models::{EncryptedData, ViewableBalanceProof};
+use crate::{auth::AccessRule, models::ViewableBalanceProof};
 
 /// An unspent output that does not reveal the value and the owner of the coin it represents.
 ///
@@ -17,6 +20,7 @@ use crate::models::{EncryptedData, ViewableBalanceProof};
 ///   is enabled for a resource.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct UnspentOutput {
     pub commitment: PedersenCommitmentBytes,
     /// Public nonce (R) that was used to generate the commitment mask
@@ -31,10 +35,35 @@ pub struct UnspentOutput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct StealthUnspentOutput {
     pub output: UnspentOutput,
-    /// The public key that must prove ownership of this UTXO. This is typically a one time "stealth" public key
-    /// selected by the client.
-    pub owner_public_key: RistrettoPublicKeyBytes,
+    pub spend_condition: SpendCondition,
     pub tag: UtxoTag,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum SpendCondition {
+    /// The public key that must prove ownership of this UTXO. This is typically a one time "stealth" public key but is
+    /// selected by the client.
+    Signed(RistrettoPublicKeyBytes),
+    AccessRule(AccessRule),
+}
+
+impl SpendCondition {
+    pub const fn signed_by(&self) -> Option<&RistrettoPublicKeyBytes> {
+        match self {
+            Self::Signed(pk) => Some(pk),
+            _ => None,
+        }
+    }
+
+    pub const fn as_type_str(&self) -> &'static str {
+        match self {
+            Self::Signed(_) => "SignedBy",
+            Self::AccessRule(_) => "AccessRule",
+        }
+    }
 }

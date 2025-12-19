@@ -38,11 +38,11 @@ use tari_consensus_types::{
     LastVoted,
     LeafBlock,
     LockedBlock,
+    PcId,
     ProposalCertificate,
-    QcId,
     TimeoutCertificate,
 };
-use tari_engine_types::{substate::SubstateId, template_lib_models::UnclaimedConfidentialOutputAddress};
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::{
     optional::Optional,
     shard::Shard,
@@ -57,7 +57,6 @@ use tari_ootle_storage::{
     consensus_models::{
         Block,
         BlockTransactionExecution,
-        BurntUtxo,
         EpochCheckpoint,
         Evidence,
         ForeignParkedProposal,
@@ -82,6 +81,7 @@ use tari_ootle_storage::{
         ValidatorConsensusStats,
         ValidatorStatsUpdate,
     },
+    time,
     Ordering,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
@@ -115,11 +115,10 @@ use crate::{
             LeafBlockCf,
             LockedBlockCf,
         },
-        burnt_utxo,
-        burnt_utxo::BurntUtxoCf,
         certificates::{proposal::ProposalCertificateCf, timeout::TimeoutCertificateCf},
         chain,
         chain::PendingChainIndex,
+        diagnostic_no_vote::{DiagnosticsNoVoteCf, DiagnosticsNoVoteData},
         epoch_checkpoint::EpochCheckpointCf,
         evicted_node,
         evicted_node::{EvictedNodeCf, EvictedNodeData},
@@ -144,7 +143,7 @@ use crate::{
             StateTransitionType,
         },
         state_tree,
-        state_tree::{StateTreeCf, StateTreeStaleNodesModel},
+        state_tree::{StateTreeCf, StateTreeStaleNodesCf},
         state_tree_shard_versions::StateTreeShardVersionCf,
         substate,
         substate::{SubstateCf, SubstateHeadData},
@@ -334,8 +333,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     fn blocks_set_qcs(
         &mut self,
         block_id: &BlockId,
-        commit_qc_id: Option<&QcId>,
-        justify_qc_id: Option<&QcId>,
+        commit_qc_id: Option<&PcId>,
+        justify_qc_id: Option<&PcId>,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "blocks_set_qcs";
         if commit_qc_id.is_none() && justify_qc_id.is_none() {
@@ -672,10 +671,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         // Add transactions to finalized CF
         let data = FinalizedTransactionLinkData { finalized_at: now() };
         for transaction in iter {
-            finalized_cf.put(transaction.transaction_id(), &data, OPERATION)?;
+            finalized_cf.put(transaction.id(), &data, OPERATION)?;
 
             // Delete from block index which is used for querying pending executions
-            let iter = exec_query.query_prefix_range_key_iterator(Ordering::default(), transaction.transaction_id());
+            let iter = exec_query.query_prefix_range_key_iterator(Ordering::default(), transaction.id());
             for result in iter {
                 let (tx_id, block_id, height) = result?;
                 exec_index_cf.delete(&(block_id, tx_id, height), OPERATION)?;
@@ -777,7 +776,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 let (tx_id, block_id, height) = result?;
                 // Don't remove for this block or any later blocks (higher height)
                 if height > locked_height {
-                    debug!(
+                    trace!(
                         target: LOG_TARGET,
                         "Skip deleting transaction execution for transaction {} in block {} ({} > {})",
                         tx_id,
@@ -826,6 +825,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             None,
             None,
             is_ready,
+            time::OffsetDateTime::now_utc(),
+            None,
         );
 
         self.db()
@@ -858,15 +859,16 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         cf.put(&(*block.block_id(), *update.transaction_id()), &value, OPERATION)?;
 
-        // TODO: remove CF - this is only used for debugging (or maybe make it configurable)
-        let cf = self
-            .db()
-            .cf(transaction_pool_state_update::TransactionPoolStateUpdateDebugHistoryCf)?;
-        cf.put(
-            &(block.epoch(), block.height(), *update.transaction_id()),
-            &value,
-            OPERATION,
-        )?;
+        if self.options.debugging_data {
+            let cf = self
+                .db()
+                .cf(transaction_pool_state_update::TransactionPoolStateUpdateDebugHistoryCf)?;
+            cf.put(
+                &(block.epoch(), block.height(), *update.transaction_id()),
+                &value,
+                OPERATION,
+            )?;
+        }
 
         // Set is_ready and pending_stage to the updated values. This allows has_uncommitted_transactions to return an
         // accurate value without querying records in the updates table.
@@ -875,6 +877,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         tx_pool_value.set_is_ready(update.is_ready_now());
         tx_pool_value.set_pending_stage(Some(update.stage()));
+        tx_pool_value.set_last_updated(*block.block_id(), time::OffsetDateTime::now_utc());
         cf.put(update.transaction_id(), &tx_pool_value, OPERATION)?;
 
         Ok(())
@@ -889,7 +892,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let cf = self.db().cf(TransactionPoolCf)?;
         let pool_recs = cf.multi_get(transaction_ids, OPERATION)?;
         for tx in &pool_recs {
-            cf.delete(tx.transaction_id(), OPERATION)?;
+            cf.delete(tx.id(), OPERATION)?;
         }
 
         Ok(pool_recs)
@@ -1419,7 +1422,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         const OPERATION: &str = "state_tree_nodes_record_stale_tree_nodes";
 
         self.db()
-            .cf(StateTreeStaleNodesModel)?
+            .cf(StateTreeStaleNodesCf)?
             .put(&(shard, version), &nodes, OPERATION)?;
 
         Ok(())
@@ -1429,11 +1432,12 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         const OPERATION: &str = "state_tree_nodes_clear_all_stale";
         /// We buffer deletes to ensure that we delete entire subtrees at once. The number of buffered deletes may
         /// exceed this threshold when flushed, due to whole subtrees being added.
-        const DELETE_BUFFER_FLUSH_THRESHOLD: usize = 1_000_000;
+        const DELETE_BUFFER_FLUSH_THRESHOLD: usize = 100_000;
 
         let cf = self.db().cf(StateTreeCf)?;
         let versions_cf = self.db().cf(StateTreeShardVersionCf)?;
         let stale_cf = self.db().cf(state_tree::ByStateTreeStaleShardQuery)?;
+        let mut delete_buffer = Vec::with_capacity(DELETE_BUFFER_FLUSH_THRESHOLD); // ~3.3 MB for 100k entries (excl. nibble path vec)
         for shard in ShardGroup::all_shards(num_preshards).shard_iter() {
             let timer = Instant::now();
             let mut num_deleted = 0;
@@ -1450,7 +1454,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                     break;
                 }
 
-                let mut delete_buffer = vec![];
                 for node in nodes {
                     // Deletes are buffered to ensure that we delete entire subtrees at once.
                     if delete_buffer.len() >= DELETE_BUFFER_FLUSH_THRESHOLD {
@@ -1494,16 +1497,17 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 }
 
                 if !delete_buffer.is_empty() {
-                    debug!(target: LOG_TARGET, "Deleting final {} stale nodes from shard {}", delete_buffer.len(), shard);
+                    debug!(target: LOG_TARGET, "Deleting last {} stale nodes from shard {}", delete_buffer.len(), shard);
                     for key in &delete_buffer {
                         cf.delete(key, OPERATION)?;
                     }
                     num_deleted += delete_buffer.len();
+                    delete_buffer.clear();
                 }
 
                 // Finally delete the stale node record
                 self.db()
-                    .cf(StateTreeStaleNodesModel)?
+                    .cf(StateTreeStaleNodesCf)?
                     .delete(&(shard, version), OPERATION)?;
             }
 
@@ -1541,76 +1545,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         self.db()
             .cf(EpochCheckpointCf)?
             .put(&(checkpoint.epoch(), shard_group), checkpoint, OPERATION)?;
-
-        Ok(())
-    }
-
-    fn burnt_utxos_insert(&mut self, burnt_utxo: &BurntUtxo) -> Result<(), StorageError> {
-        const OPERATION: &str = "burnt_utxos_insert";
-
-        self.db()
-            .cf(BurntUtxoCf)?
-            .put(&burnt_utxo.commitment, &burnt_utxo.output, OPERATION)?;
-
-        if let Some(proposed_in_block) = burnt_utxo.proposed_in_block {
-            self.db().cf(burnt_utxo::ProposedInBlockIndex)?.put(
-                &(proposed_in_block, burnt_utxo.commitment),
-                &(),
-                OPERATION,
-            )?;
-        }
-
-        Ok(())
-    }
-
-    fn burnt_utxos_set_proposed_block(
-        &mut self,
-        commitment: &UnclaimedConfidentialOutputAddress,
-        proposed_in_block: &BlockId,
-    ) -> Result<(), StorageError> {
-        const OPERATION: &str = "burnt_utxos_set_proposed_block";
-
-        if !self.db().cf(BurntUtxoCf)?.exists(commitment, OPERATION)? {
-            return Err(StorageError::NotFound {
-                item: "burnt_utxos",
-                key: commitment.to_string(),
-            });
-        }
-
-        self.db()
-            .cf(burnt_utxo::ProposedInBlockIndex)?
-            .put(&(*proposed_in_block, *commitment), &(), OPERATION)?;
-
-        Ok(())
-    }
-
-    fn burnt_utxos_clear_proposed_block(&mut self, proposed_in_block: &BlockId) -> Result<(), StorageError> {
-        const OPERATION: &str = "burnt_utxos_clear_proposed_block";
-
-        let cf = self.db().cf(burnt_utxo::ProposedInBlockIndex)?;
-        let query = self.db().cf(burnt_utxo::ByProposedInBlockIdQuery)?;
-        let iter = query.query_prefix_range_key_iterator(Ordering::Ascending, proposed_in_block);
-
-        for result in iter {
-            let key = result?;
-            cf.delete(&key, OPERATION)?;
-        }
-
-        Ok(())
-    }
-
-    fn burnt_utxos_delete(
-        &mut self,
-        commitment: &UnclaimedConfidentialOutputAddress,
-        proposed_in_block: &BlockId,
-    ) -> Result<(), StorageError> {
-        const OPERATION: &str = "burnt_utxos_delete";
-
-        self.db().cf(BurntUtxoCf)?.delete_or_not_found(commitment, OPERATION)?;
-
-        self.db()
-            .cf(burnt_utxo::ProposedInBlockIndex)?
-            .delete(&(*proposed_in_block, *commitment), OPERATION)?;
 
         Ok(())
     }
@@ -1794,8 +1728,18 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
-    fn diagnostics_add_no_vote(&mut self, _block_id: BlockId, _reason: NoVoteReason) -> Result<(), StorageError> {
-        // used for debugging. TODO: consider implementing as a user option or keeping in the global Sqlite db
+    fn diagnostics_add_no_vote(&mut self, block_id: BlockId, reason: NoVoteReason) -> Result<(), StorageError> {
+        const OPERATION: &str = "diagnostics_add_no_vote";
+        if self.options.debugging_data {
+            self.db().cf(DiagnosticsNoVoteCf)?.insert(
+                &block_id,
+                &DiagnosticsNoVoteData {
+                    reason: reason.to_string().into_boxed_str(),
+                },
+                OPERATION,
+            )?;
+        }
+
         Ok(())
     }
 }

@@ -27,5 +27,4 @@ pub enum Event {
         stream_id: StreamId,
         error: Error,
     },
-    Error(Error),
 }

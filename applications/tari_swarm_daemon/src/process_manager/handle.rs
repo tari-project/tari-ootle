@@ -6,7 +6,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use tari_common_types::types::FixedHash;
 use tokio::sync::{mpsc, oneshot};
 use url::Url;
 
@@ -44,10 +43,6 @@ pub enum ProcessManagerRequest {
         blocks: u64,
         reply: Reply<()>,
     },
-    RegisterTemplate {
-        data: TemplateData,
-        reply: Reply<()>,
-    },
     RegisterValidatorNode {
         instance_id: InstanceId,
         reply: Reply<()>,
@@ -73,15 +68,6 @@ pub enum ProcessManagerRequest {
 pub struct MinotariNodeDetails {
     pub instance_info: InstanceInfo,
     pub height: Option<u64>,
-}
-
-#[derive(Debug)]
-pub struct TemplateData {
-    pub name: String,
-    pub version: u32,
-    pub contents_hash: FixedHash,
-    // TODO: remove when base layer registration removed
-    pub contents_url: Option<Url>,
 }
 
 #[derive(Debug, Clone)]
@@ -141,7 +127,32 @@ impl InstanceInfo {
                 let web_port = self.ports.get("jrpc").expect("jrpc port not found");
                 format!("http://{public_ip}:{web_port}/json_rpc")
                     .parse()
-                    .expect("Invalid web URL")
+                    .expect("Invalid JSON-RPC URL")
+            },
+        }
+    }
+
+    pub fn get_public_api_url(&self) -> Url {
+        match self.settings.get("public_api_url") {
+            Some(url) => url
+                .parse()
+                .expect("Invalid API URL. Please check `public_api_url` in your config."),
+            None => {
+                let public_ip = self
+                    .settings
+                    .get("public_ip")
+                    .map(|s| {
+                        // Required for webauthn
+                        if s == "127.0.0.1" {
+                            return "localhost";
+                        }
+                        s.as_str()
+                    })
+                    .unwrap_or("localhost");
+                let web_port = self.ports.get("api").expect("api port not found");
+                format!("http://{public_ip}:{web_port}")
+                    .parse()
+                    .expect("Invalid api URL")
             },
         }
     }
@@ -295,15 +306,6 @@ impl ProcessManagerHandle {
                 blocks,
                 reply: tx_reply,
             })
-            .await?;
-
-        rx_reply.await?
-    }
-
-    pub async fn register_template(&self, data: TemplateData) -> anyhow::Result<()> {
-        let (tx_reply, rx_reply) = oneshot::channel();
-        self.tx_request
-            .send(ProcessManagerRequest::RegisterTemplate { data, reply: tx_reply })
             .await?;
 
         rx_reply.await?

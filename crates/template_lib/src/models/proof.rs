@@ -29,8 +29,7 @@ use tari_template_abi::{call_engine, rust::fmt, EngineOp};
 use crate::{
     args::{InvokeResult, ProofAction, ProofInvokeArg, ProofRef},
     models::{BinaryTag, NonFungibleId, ResourceAddress},
-    prelude::ResourceType,
-    types::Amount,
+    types::{Amount, ResourceType},
 };
 
 const TAG: u64 = BinaryTag::ProofId.as_u64();

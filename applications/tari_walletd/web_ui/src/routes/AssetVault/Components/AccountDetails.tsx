@@ -20,48 +20,153 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import Box from "@mui/material/Box";
-import { GridHeadCell, GridDataCell, DataTableCell } from "@components/StyledComponents";
-import { styled } from "@mui/material/styles";
+import { DataTableCell } from "@components/StyledComponents";
 import useAccountStore from "@store/accountStore";
 import CopyAddress from "@components/CopyAddress";
-import { substateIdToString } from "@tari-project/typescript-bindings";
+import {
+  decodeOotleAddress,
+  encodeOotleAddress,
+  OotleAddress,
+  substateIdToString,
+} from "@tari-project/typescript-bindings";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
+import AccountName from "@/components/AccountName";
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
+  TextField,
+  Tooltip,
+} from "@mui/material";
+import IconButton from "@mui/material/IconButton";
+import { IoPaperPlaneOutline } from "react-icons/io5";
+import { useState } from "react";
+import QRCode from "react-qr-code";
+import Typography from "@mui/material/Typography";
 
 function AccountDetails() {
-  const { account, publicKey } = useAccountStore();
+  const [payRefDialogOpen, setPayRefDialogOpen] = useState(false);
+  const { account, address, setAccount } = useAccountStore();
+
   if (!account) {
     return <>Loading...</>;
   }
 
+  const handleRenameSuccess = (newName: string) => {
+    setAccount({ ...account, name: newName });
+  };
+
   return (
     <TableContainer>
+      <PayRefDialog address={address} open={payRefDialogOpen} onClose={() => setPayRefDialogOpen(false)} />
       <Table>
         <TableHead>
           <TableRow>
             <TableCell>Name</TableCell>
+            <TableCell>Component</TableCell>
             <TableCell>Address</TableCell>
-            <TableCell>Public Key</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
           <TableRow>
-            <DataTableCell>{account.name}</DataTableCell>
             <DataTableCell>
-              <CopyAddress address={substateIdToString(account.address)} />
+              <AccountName
+                accountAddress={substateIdToString(account.component_address)}
+                currentName={account?.name}
+                onRenameSuccess={handleRenameSuccess}
+              />
             </DataTableCell>
             <DataTableCell>
-              <CopyAddress address={publicKey} />
+              <CopyAddress address={substateIdToString(account.component_address)} />
+            </DataTableCell>
+            <DataTableCell>
+              <CopyAddress address={address} />
+              <Tooltip title="PayRef address">
+                <IconButton size="small" onClick={(_e) => setPayRefDialogOpen(true)} color="primary">
+                  <IoPaperPlaneOutline />
+                </IconButton>
+              </Tooltip>
             </DataTableCell>
           </TableRow>
         </TableBody>
       </Table>
     </TableContainer>
+  );
+}
+
+type PayRefDialogProps = {
+  address: OotleAddress;
+  open: boolean;
+  onClose: () => void;
+};
+
+function PayRefDialog(props: PayRefDialogProps) {
+  const { address, open, onClose } = props;
+
+  const [currentAddress, setCurrentAddress] = useState(address);
+
+  const handleOnChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const decoded = decodeOotleAddress(address);
+    decoded.payRef = event.target.value;
+    const addr = encodeOotleAddress(decoded);
+    setCurrentAddress(addr);
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      aria-labelledby="alert-dialog-title"
+      aria-describedby="alert-dialog-description"
+    >
+      <form onSubmit={() => {}}>
+        <DialogTitle id="alert-dialog-title">Pay Ref Address</DialogTitle>
+        <DialogContent>
+          <DialogContentText id="alert-dialog-description">
+            Generate an address with an embedded payment reference
+          </DialogContentText>
+          <div
+            style={{
+              marginTop: "1rem",
+              display: "flex",
+              flexDirection: "column",
+              gap: "1rem",
+            }}
+          >
+            <TextField
+              name="link"
+              placeholder="Inv12345...."
+              label="Payment Ref."
+              fullWidth
+              onChange={handleOnChange}
+            />
+            <QRCode
+              size={256}
+              style={{ height: "auto", maxWidth: "100%", width: "100%" }}
+              value={currentAddress}
+              viewBox={`0 0 256 256`}
+            />
+
+            <Typography variant="subtitle1">
+              <CopyAddress address={currentAddress} />
+            </Typography>
+          </div>
+        </DialogContent>
+        <DialogActions>
+          <Button variant="outlined" onClick={onClose}>
+            Close
+          </Button>
+        </DialogActions>
+      </form>
+    </Dialog>
   );
 }
 

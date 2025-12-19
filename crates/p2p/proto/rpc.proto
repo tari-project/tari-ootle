@@ -90,7 +90,7 @@ message GetPeersResponse {
 }
 
 message GetSubstateRequest {
-  tari.ootle.transaction.SubstateRequirement substate_requirement = 1;
+  tari.ootle.common.SubstateRequirement substate_requirement = 1;
 }
 
 message GetSubstateResponse {
@@ -140,20 +140,18 @@ message SubstateData {
 
 message SubstateUpdate {
   oneof update {
-    SubstateCreatedProof create = 1;
-    SubstateDestroyedProof destroy = 2;
+    SubstateCreate create = 1;
+    SubstateDestroy destroy = 2;
   }
 }
 
-message SubstateCreatedProof {
+message SubstateCreate {
   SubstateData substate = 1;
-  //  tari.ootle.consensus.QuorumCertificate created_justify = 2;
 }
 
-message SubstateDestroyedProof {
+message SubstateDestroy {
   bytes substate_id = 1;
   uint32 version = 2;
-  //  tari.ootle.consensus.QuorumCertificate destroyed_justify = 3;
 }
 
 message SyncBlocksRequest {
@@ -186,7 +184,7 @@ message SyncBlocksResponse {
     uint32 transaction_count = 5;
     tari.ootle.transaction.Transaction transaction = 6;
     uint32 transaction_receipt_count = 7;
-    SubstateCreatedProof transaction_receipt = 8;
+    SubstateCreate transaction_receipt = 8;
   }
 }
 
@@ -252,7 +250,6 @@ message SyncStateResponse {
 
 enum TemplateType {
   Wasm = 0;
-  Manifest = 1;
 }
 
 message SyncTemplatesRequest {

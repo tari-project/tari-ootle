@@ -1,0 +1,19 @@
+[workspace]
+[package]
+name = "liquidity-pool"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tari_template_lib = { path = "../../../../crates/template_lib", default-features = false, features = ["macro", "alloc", "extra-arith"] }
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[profile.release]
+opt-level = 3       # Optimize for performance at the cost of compilation time.
+lto = true          # Enable Link Time Optimization.
+codegen-units = 1   # Reduce number of codegen units to increase optimizations.
+panic = 'abort'     # Abort on panic (reduces binary size).
+strip = 'debuginfo' # Strip debug info to reduce binary size.
+

@@ -68,7 +68,7 @@ mod template {
             } else {
                 vault.withdraw_all()
             };
-            ComponentManager::get(dest_component).call("deposit", call_args![stolen])
+            ComponentManager::get(dest_component).call("deposit", args![stolen])
         }
 
         pub fn with_vault_copy() -> Self {

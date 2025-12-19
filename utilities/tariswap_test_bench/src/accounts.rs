@@ -4,18 +4,12 @@
 use std::ops::RangeInclusive;
 
 use log::info;
-use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
-use tari_engine_types::{
-    component::derive_component_address_from_public_key,
-    indexed_value::IndexedWellKnownTypes,
-    ToByteType,
-};
-use tari_ootle_common_types::SubstateRequirement;
-use tari_ootle_wallet_sdk::models::Account;
-use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
+use tari_engine_types::{indexed_value::IndexedWellKnownTypes, ToByteType};
+use tari_ootle_common_types::{Epoch, SubstateRequirement};
+use tari_ootle_wallet_sdk::models::{Account, KeyBranch, KeyId};
 use tari_template_lib::{
     constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
-    resource::ResourceType,
+    prelude::ResourceType,
 };
 use tari_transaction::args;
 
@@ -23,25 +17,32 @@ use crate::{faucet::Faucet, runner::Runner};
 
 impl Runner {
     pub async fn create_account_with_free_coins(&mut self) -> anyhow::Result<Account> {
-        let key = self.sdk.key_manager_api().derive_account_key(0)?;
-        let owner_public_key = RistrettoPublicKey::from_secret_key(&key.key).to_byte_type();
-
-        let account_address = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &owner_public_key);
+        let owner_key = self
+            .sdk
+            .key_manager_api()
+            .get_public_key(KeyId::derived(KeyBranch::Account, 0))?;
+        let owner_public_key = owner_key.public_key.to_byte_type();
+        let account_address = self
+            .sdk
+            .accounts_api()
+            .derive_account_address_from_public_key(&owner_public_key);
 
         let transaction = self
             .new_transaction_builder()
             .with_fee_instructions_builder(|builder| {
                 builder
-                    .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Amount(1_000_000_000)])
+                    .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![1_000_000_000])
                     .put_last_instruction_output_on_workspace("coins")
                     .create_account_with_bucket(owner_public_key, "coins")
-                    .call_method(account_address, "pay_fee", args![Amount(1000)])
+                    .pay_fee_from_component(account_address, 1000)
             })
             .with_inputs([
                 SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
                 SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
             ])
-            .build_and_seal(&key.key);
+            .finish();
+
+        let transaction = self.sdk.signer_api().sign(owner_key.key_id(), transaction)?;
 
         let finalize = self.submit_transaction_and_wait(transaction).await?;
         let diff = finalize.result.any_accept().unwrap();
@@ -55,7 +56,15 @@ impl Runner {
             .find(|vault_id| *vault_id != XTR_FAUCET_VAULT_ADDRESS)
             .unwrap();
 
-        self.sdk.accounts_api().add_account(None, &account, 0, true, true)?;
+        self.sdk.accounts_api().add_account(
+            None,
+            &account,
+            KeyId::derived(KeyBranch::ViewOnlyKey, 0),
+            KeyId::derived(KeyBranch::Account, 0),
+            Epoch::zero(),
+            true,
+            true,
+        )?;
         self.sdk
             .accounts_api()
             .add_vault(account, vault, XTR, ResourceType::Stealth, Some("XTR".to_string()), 6)?;
@@ -69,35 +78,43 @@ impl Runner {
         pay_fee_account: &Account,
         account_key_indexes: RangeInclusive<u64>,
     ) -> anyhow::Result<Vec<Account>> {
-        let key = self.sdk.key_manager_api().derive_account_key(0)?;
+        let key = self
+            .sdk
+            .key_manager_api()
+            .get_public_key(KeyId::derived(KeyBranch::Account, 0))?;
         let key_index_start = *account_key_indexes.start();
         let num_accounts = *account_key_indexes.end() as usize - key_index_start as usize + 1;
         let owners = account_key_indexes
             .map(|idx| {
-                let key = self.sdk.key_manager_api().derive_account_key(idx)?;
+                let key = self
+                    .sdk
+                    .key_manager_api()
+                    .get_public_key(KeyId::derived(KeyBranch::Account, idx))?;
                 Ok(key)
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
 
-        let mut builder = self
-            .new_transaction_builder()
-            .fee_transaction_pay_from_component(pay_fee_account.address, 1000 * owners.len());
-        for owner in &owners {
-            builder = builder.create_account(RistrettoPublicKey::from_secret_key(&owner.key).to_byte_type());
-        }
-
         let pay_fee_vault = self
             .sdk
             .accounts_api()
-            .get_vault_by_resource(&pay_fee_account.address, &XTR)?;
+            .get_vault_by_resource(&pay_fee_account.component_address, &XTR)?;
 
-        let transaction = builder
+        let transaction = self
+            .new_transaction_builder()
+            .pay_fee_from_component(pay_fee_account.component_address, 1000 * owners.len())
+            .then(|builder| {
+                owners.iter().fold(builder, |builder, owner| {
+                    builder.create_account(owner.public_key.to_byte_type())
+                })
+            })
             .with_inputs([
-                SubstateRequirement::unversioned(pay_fee_account.address),
+                SubstateRequirement::unversioned(pay_fee_account.component_address),
                 SubstateRequirement::unversioned(pay_fee_vault.id),
                 SubstateRequirement::unversioned(pay_fee_vault.resource_address),
             ])
-            .build_and_seal(&key.key);
+            .finish();
+
+        let transaction = self.sdk.signer_api().sign(key.key_id, transaction)?;
 
         let finalize = self.submit_transaction_and_wait(transaction).await?;
         let diff = finalize.result.any_accept().unwrap();
@@ -108,18 +125,24 @@ impl Runner {
                 .up_iter()
                 .map(|(addr, _)| addr)
                 .filter_map(|addr| addr.as_component_address())
-                .filter(|addr| *addr != pay_fee_account.address)
+                .filter(|addr| *addr != pay_fee_account.component_address)
                 .find(|addr| {
-                    derive_component_address_from_public_key(
-                        &ACCOUNT_TEMPLATE_ADDRESS,
-                        &RistrettoPublicKey::from_secret_key(&owner.key).to_byte_type(),
-                    ) == *addr
+                    self.sdk
+                        .accounts_api()
+                        .derive_account_address_from_public_key(&owner.public_key.to_byte_type()) ==
+                        *addr
                 })
                 .expect("New account not found in diff");
 
-            self.sdk
-                .accounts_api()
-                .add_account(None, &account_addr, owner.key_index, true, false)?;
+            self.sdk.accounts_api().add_account(
+                None,
+                &account_addr,
+                owner.key_id,
+                owner.key_id,
+                Epoch::zero(),
+                true,
+                false,
+            )?;
             let account = self.sdk.accounts_api().get_account_by_address(&account_addr)?;
             accounts.push(account.account);
         }
@@ -137,26 +160,25 @@ impl Runner {
         let fee_vault = self
             .sdk
             .accounts_api()
-            .get_vault_by_resource(&fee_account.address, &XTR)?;
+            .get_vault_by_resource(&fee_account.component_address, &XTR)?;
 
-        for accounts in all_accounts.chunks(100) {
+        for accounts in all_accounts.chunks(25) {
             let transaction = self
                 .new_transaction_builder()
-                .fee_transaction_pay_from_component(fee_account.address, 1000 * accounts.len())
+                .pay_fee_from_component(fee_account.component_address, 1000 * accounts.len())
                 .then(|builder| {
                     accounts.iter().fold(builder, |builder, account| {
                         builder
                             .call_method(faucet.component_address, "take_free_coins", args![])
                             .put_last_instruction_output_on_workspace("faucet")
-                            .call_method(account.address, "deposit", args![Workspace("faucet")])
-                            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Amount(1_000_000)])
+                            .call_method(account.component_address, "deposit", args![Workspace("faucet")])
+                            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![1_000_000])
                             .put_last_instruction_output_on_workspace("xtr")
-                            .call_method(account.address, "deposit", args![Workspace("xtr")])
-                            .add_input(SubstateRequirement::unversioned(account.address))
+                            .call_method(account.component_address, "deposit", args![Workspace("xtr")])
+                            .add_input(SubstateRequirement::unversioned(account.component_address))
                     })
                 })
                 .with_inputs([
-                    SubstateRequirement::unversioned(XTR),
                     SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
                     SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
                     SubstateRequirement::unversioned(faucet.component_address),
@@ -181,7 +203,7 @@ impl Runner {
                 .filter(|(addr, _)| {
                     *addr != XTR_FAUCET_COMPONENT_ADDRESS &&
                         *addr != faucet.component_address &&
-                        *addr != fee_account.address
+                        *addr != fee_account.component_address
                 })
                 .filter_map(|(addr, substate)| {
                     Some((addr.as_component_address()?, substate.substate_value().component()?))
@@ -212,7 +234,7 @@ impl Runner {
                     )?;
                 }
             }
-            info!("✅ Funded 100 accounts");
+            info!("✅ Funded 25 accounts");
         }
 
         Ok(())

@@ -18,7 +18,7 @@ pub fn fixed_bytes_from_hex<const L: usize>(s: &str) -> Result<[u8; L], HashPars
 }
 
 pub fn bytes_from_hex(s: &str) -> Result<Vec<u8>, HashParseError> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return Err(HashParseError);
     }
 
@@ -38,7 +38,19 @@ pub fn bytes_to_hex<T: AsRef<[u8]>>(bytes: T) -> String {
 
 pub fn write_hex_fmt<W: fmt::Write>(writer: &mut W, bytes: &[u8]) -> fmt::Result {
     for b in bytes {
-        write!(writer, "{:02x?}", b)?;
+        write!(writer, "{:02x}", b)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_formats_as_hex() {
+        let bytes = [0xde, 0xad, 0xbe, 0xef];
+        let hex = bytes_to_hex(bytes);
+        assert_eq!(hex, "deadbeef");
+    }
 }

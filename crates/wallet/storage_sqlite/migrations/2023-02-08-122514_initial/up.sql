@@ -13,6 +13,18 @@ CREATE TABLE key_manager_states
 
 CREATE UNIQUE INDEX key_manager_states_uniq_branch_seed_index on key_manager_states (branch_seed, `index`);
 
+CREATE TABLE key_manager_imported_keys
+(
+    id               INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    label            TEXT                              NOT NULL,
+    encrypted_secret BLOB                              NOT NULL,
+    key_type         TEXT                              NOT NULL,
+    created_at       DATETIME                          NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX key_manager_imported_keys_uniq_label on key_manager_imported_keys (label);
+
+
 -- Config
 
 CREATE TABLE config
@@ -72,7 +84,10 @@ CREATE TABLE accounts
     id                    INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
     name                  TEXT     NULL,
     address               TEXT     NOT NULL,
-    owner_key_index       BIGINT   NOT NULL,
+    owner_public_key      TEXT     NOT NULL,
+    view_only_key_id      TEXT     NOT NULL,
+    owner_key_id          TEXT     NULL,
+    birthday_epoch        BIGINT   NOT NULL,
     is_default            BOOLEAN  NOT NULL DEFAULT 0,
     is_confirmed_on_chain BOOLEAN  NOT NULL,
     stealth_resources     TEXT     NOT NULL DEFAULT '[]',
@@ -81,27 +96,38 @@ CREATE TABLE accounts
 );
 
 CREATE UNIQUE INDEX accounts_uniq_address ON accounts (address);
+CREATE UNIQUE INDEX accounts_uniq_owner_public_key ON accounts (owner_public_key);
 CREATE UNIQUE INDEX accounts_uniq_name ON accounts (name) WHERE name IS NOT NULL;
 
 -- Vaults
 CREATE TABLE vaults
 (
-    id                      INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    account_id              INTEGER  NOT NULL REFERENCES accounts (id),
-    address                 TEXT     NOT NULL,
-    resource_address        TEXT     NOT NULL,
-    resource_type           TEXT     NOT NULL,
-    revealed_balance        BIGINT   NOT NULL DEFAULT 0,
-    confidential_balance    BIGINT   NOT NULL DEFAULT 0,
-    locked_revealed_balance BIGINT   NOT NULL DEFAULT 0,
-    token_symbol            TEXT     NULL,
-    divisibility            INTEGER  NOT NULL DEFAULT 0,
-    locked_by               INTEGER  NULL REFERENCES locks (id) ON DELETE SET NULL,
-    created_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id                   INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    account_id           INTEGER  NOT NULL REFERENCES accounts (id),
+    address              TEXT     NOT NULL,
+    resource_address     TEXT     NOT NULL,
+    resource_type        TEXT     NOT NULL,
+    revealed_balance     BIGINT   NOT NULL DEFAULT 0,
+    confidential_balance BIGINT   NOT NULL DEFAULT 0,
+    token_symbol         TEXT     NULL,
+    divisibility         INTEGER  NOT NULL DEFAULT 0,
+    created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE UNIQUE INDEX vaults_uniq_address ON vaults (address);
+
+-- Vault locks
+CREATE TABLE vault_locks
+(
+    id         INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    vault_id   INTEGER  NOT NULL REFERENCES vaults (id) ON DELETE CASCADE,
+    lock_id    INTEGER  NOT NULL REFERENCES locks (id) ON DELETE CASCADE,
+    amount     BIGINT   NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX vault_locks_uniq_vault_lock ON vault_locks (vault_id, lock_id);
 
 -- Resources
 CREATE TABLE resources
@@ -128,21 +154,23 @@ CREATE UNIQUE INDEX resources_uniq_address ON resources (address);
 -- Confidential Outputs
 CREATE TABLE confidential_outputs
 (
-    id                          INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    account_id                  INTEGER  NOT NULL REFERENCES accounts (id),
-    vault_id                    INTEGER  NOT NULL REFERENCES vaults (id),
-    commitment                  TEXT     NOT NULL,
-    value                       BIGINT   NOT NULL,
-    sender_public_nonce         TEXT     NULL,
-    encryption_secret_key_index BIGINT   NOT NULL,
-    public_asset_tag            TEXT     NULL,
+    id                  INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    account_id          INTEGER  NOT NULL REFERENCES accounts (id),
+    vault_id            INTEGER  NOT NULL REFERENCES vaults (id),
+    commitment          TEXT     NOT NULL,
+    value               BIGINT   NOT NULL,
+    sender_public_nonce TEXT     NULL,
+    view_only_key_id    TEXT     NOT NULL,
+    owner_key_id        TEXT     NULL,
+    public_asset_tag    TEXT     NULL,
+    memo_json           TEXT     NULL,
     -- Status can be "Unspent", "Spent", "Locked", "LockedUnconfirmed", "Invalid"
-    status                      TEXT     NOT NULL,
-    locked_at                   DATETIME NULL,
-    lock_id                     INTEGER  NULL,
-    encrypted_data              blob     NOT NULL DEFAULT '',
-    created_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    status              TEXT     NOT NULL,
+    locked_at           DATETIME NULL,
+    lock_id             INTEGER  NULL,
+    encrypted_data      blob     NOT NULL DEFAULT '',
+    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE UNIQUE INDEX confidential_outputs_uniq_commitment ON confidential_outputs (commitment);
@@ -153,8 +181,11 @@ CREATE TABLE locks
 (
     id             INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
     transaction_id TEXT     NULL,
+    timeout_at     DATETIME NULL,
     created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE UNIQUE INDEX locks_uniq_transaction_id ON locks (transaction_id) WHERE transaction_id IS NOT NULL;
 
 -- Auth token, we don't store the auth token, the token in this table is the jwt token that is granted when user accepts the auth login request.
 CREATE TABLE auth_status
@@ -215,24 +246,29 @@ CREATE TABLE webauthn_registration_passkeys
 -- Stealth Outputs
 CREATE TABLE stealth_outputs
 (
-    id                          INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    owner_account_id            INTEGER  NOT NULL,
-    resource_address            TEXT     NOT NULL,
-    commitment                  TEXT     NOT NULL,
-    value                       TEXT     NOT NULL,
-    sender_public_nonce         TEXT     NOT NULL,
+    id                     INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    owner_account_id       INTEGER  NOT NULL REFERENCES accounts (id),
+    resource_address       TEXT     NOT NULL,
+    commitment             TEXT     NOT NULL,
+    value                  BIGINT   NOT NULL,
+    sender_public_nonce    TEXT     NOT NULL,
     -- Status can be "Unspent", "Spent", "Locked", "LockedUnconfirmed", "Invalid"
-    status                      TEXT     NOT NULL,
-    locked_at                   DATETIME NULL,
-    lock_id                     INTEGER  NULL,
-    encryption_secret_key_index BIGINT   NOT NULL,
-    encrypted_data              BLOB     NOT NULL DEFAULT '',
-    tag_byte                    INTEGER  NOT NULL,
-    is_burnt                    BOOLEAN  NOT NULL DEFAULT 0,
-    is_frozen                   BOOLEAN  NOT NULL DEFAULT 0,
-    is_on_chain                 BOOLEAN  NOT NULL,
-    created_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    status                 TEXT     NOT NULL,
+    locked_at              DATETIME NULL,
+    lock_id                INTEGER  NULL,
+    view_only_key_id       TEXT     NOT NULL,
+    owner_key_id           TEXT     NULL,
+    encrypted_data         BLOB     NOT NULL DEFAULT '',
+    tag_byte               INTEGER  NOT NULL,
+    memo_json              TEXT     NULL,
+    spend_condition        TEXT     NOT NULL,
+    minimum_value_promise  BIGINT   NOT NULL,
+    is_burnt               BOOLEAN  NOT NULL DEFAULT 0,
+    is_frozen              BOOLEAN  NOT NULL DEFAULT 0,
+    is_on_chain            BOOLEAN  NOT NULL,
+    is_condition_spendable BOOLEAN  NOT NULL,
+    created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE UNIQUE INDEX stealth_outputs_uniq_resource_addr_commitment ON stealth_outputs (resource_address, commitment);
@@ -256,13 +292,26 @@ CREATE INDEX shard_state_versions_account_resource_shard_state_version_idx ON sh
 -- UTXO process queue
 CREATE TABLE utxo_process_queue
 (
-    id                INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    account_key_index BIGINT   NOT NULL,
-    resource_address  TEXT     NOT NULL,
-    utxo_tag          INT      NOT NULL,
-    public_nonce      TEXT     NOT NULL,
-    created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id               INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    account_id       INTEGER  NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+    resource_address TEXT     NOT NULL,
+    utxo_tag         INT      NOT NULL,
+    public_nonce     TEXT     NOT NULL,
+    created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE UNIQUE INDEX utxo_process_queue_account_resource_tag_nonce_uniq
-    ON utxo_process_queue (account_key_index, resource_address, utxo_tag, public_nonce);
+    ON utxo_process_queue (account_id, resource_address, utxo_tag, public_nonce);
+
+CREATE TABLE wallet_events
+(
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER  NULL,
+    event_type TEXT     NOT NULL,
+    event_data TEXT     NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE NO ACTION
+);
+
+CREATE INDEX idx_wallet_events_account_id ON wallet_events (account_id) where account_id IS NOT NULL;
+CREATE INDEX idx_wallet_events_event_type ON wallet_events (event_type);

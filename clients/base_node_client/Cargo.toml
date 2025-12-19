@@ -16,11 +16,11 @@ tari_utilities = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 tari_template_lib = { workspace = true }
 
-async-trait = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true, default-features = true }
 thiserror = { workspace = true }
 tonic = { workspace = true }
+futures-util = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 url = { workspace = true }
 

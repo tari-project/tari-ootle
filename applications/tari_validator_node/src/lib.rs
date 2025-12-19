@@ -21,18 +21,20 @@
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 mod bootstrap;
+mod cmap_semaphore;
 mod config;
 pub mod consensus;
 mod event_subscription;
 mod file_l1_submitter;
+mod genesis_state;
 #[cfg(feature = "web_ui")]
 mod http_ui;
 mod json_rpc;
 #[cfg(feature = "metrics")]
 mod metrics;
-mod node;
+pub mod node;
 mod p2p;
-mod state_bootstrap;
+mod state_store_template_provider;
 pub mod transaction_validators;
 mod validator;
 
@@ -45,11 +47,7 @@ use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_engine_types::crypto::{get_commitment_factory, get_static_range_proof_service, MAX_LAZY_BP_AGG_FACTORS};
 use tari_epoch_manager::traits::EpochManagerSpec;
 use tari_epoch_oracles::EpochOracle;
-use tari_ootle_app_utilities::{
-    keypair::RistrettoKeypair,
-    template_download_queue::TemplateDownloadQueue,
-    utxo_store::StateUtxoStore,
-};
+use tari_ootle_app_utilities::keypair::RistrettoKeypair;
 use tari_ootle_common_types::{PeerAddress, SubstateAddress};
 use tari_ootle_storage::global::{DbFactory, GlobalDb};
 use tari_ootle_storage_sqlite::{global::SqliteGlobalDbAdapter, SqliteDbFactory};
@@ -96,7 +94,7 @@ pub async fn run_validator_node(
 ) -> Result<(), anyhow::Error> {
     info!(target: LOG_TARGET, "Starting validator node on network {}", config.network);
 
-    let db_factory = SqliteDbFactory::new(config.validator_node.data_dir.clone());
+    let db_factory = SqliteDbFactory::new(config.validator_node.get_global_db_path());
     db_factory
         .migrate()
         .map_err(|e| ExitError::new(ExitCode::DatabaseError, e))?;
@@ -144,7 +142,8 @@ pub async fn run_validator_node(
             handlers,
             #[cfg(feature = "metrics")]
             base_registry,
-        )?;
+        )
+        .await?;
         // Run the web ui
         #[cfg(feature = "web_ui")]
         if let Some(address) = config.validator_node.web_ui_listener_address {
@@ -221,8 +220,6 @@ impl EpochManagerSpec for ValidatorNodeEpochManagerSpec {
     type Addr = PeerAddress;
     type EpochEventOracle = EpochOracle<GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>>;
     type LayerOneSubmitter = FileLayerOneSubmitter;
-    type TemplateDownloader = TemplateDownloadQueue;
-    type UtxoStore = StateUtxoStore<ValidatorNodeStateStore>;
 }
 
 #[cfg(test)]

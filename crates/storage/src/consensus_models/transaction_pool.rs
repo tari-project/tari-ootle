@@ -7,6 +7,7 @@ use std::{
     marker::PhantomData,
     num::NonZeroU64,
     str::FromStr,
+    time::Duration,
 };
 
 use log::*;
@@ -91,6 +92,15 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
             )?;
         }
         Ok(())
+    }
+
+    pub fn get_all(
+        &self,
+        tx: &TStateStore::ReadTransaction<'_>,
+        limit: usize,
+    ) -> Result<Vec<TransactionPoolRecord>, TransactionPoolError> {
+        let recs = tx.transaction_pool_get_all(limit)?;
+        Ok(recs)
     }
 
     pub fn get_batch_for_next_block(
@@ -333,6 +343,9 @@ pub struct TransactionPoolRecord {
     local_decision: Option<Decision>,
     remote_decision: Option<Decision>,
     is_ready: bool,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    last_updated: time::OffsetDateTime,
+    last_updated_in_block: Option<BlockId>,
 }
 
 impl TransactionPoolRecord {
@@ -349,6 +362,8 @@ impl TransactionPoolRecord {
             local_decision: None,
             remote_decision: None,
             is_ready: false,
+            last_updated: time::OffsetDateTime::now_utc(),
+            last_updated_in_block: None,
         }
     }
 
@@ -364,6 +379,8 @@ impl TransactionPoolRecord {
         local_decision: Option<Decision>,
         remote_decision: Option<Decision>,
         is_ready: bool,
+        last_updated: time::OffsetDateTime,
+        last_updated_in_block: Option<BlockId>,
     ) -> Self {
         Self {
             transaction_id: id,
@@ -377,6 +394,8 @@ impl TransactionPoolRecord {
             local_decision,
             remote_decision,
             is_ready,
+            last_updated,
+            last_updated_in_block,
         }
     }
 
@@ -425,7 +444,7 @@ impl TransactionPoolRecord {
         self.remote_decision
     }
 
-    pub fn transaction_id(&self) -> &TransactionId {
+    pub fn id(&self) -> &TransactionId {
         &self.transaction_id
     }
 
@@ -472,7 +491,7 @@ impl TransactionPoolRecord {
     }
 
     pub fn to_receipt_id(&self) -> TransactionReceiptAddress {
-        (*self.transaction_id()).into()
+        (*self.id()).into()
     }
 
     pub fn get_current_transaction_atom(&self) -> TransactionAtom {
@@ -557,6 +576,12 @@ impl TransactionPoolRecord {
         self
     }
 
+    pub fn set_last_updated(&mut self, in_block: BlockId, timestamp: time::OffsetDateTime) -> &mut Self {
+        self.last_updated_in_block = Some(in_block);
+        self.last_updated = timestamp;
+        self
+    }
+
     pub fn set_stage(&mut self, stage: TransactionPoolStage) -> &mut Self {
         self.stage = stage;
         self
@@ -597,7 +622,7 @@ impl TransactionPoolRecord {
         info!(
             target: LOG_TARGET,
             "📝 Setting next update for transaction {} to {}->{},is_ready={}->{},{}->{}",
-            self.transaction_id(),
+            self.id(),
             self.current_stage(),
             next_stage,
             self.is_ready,
@@ -619,6 +644,17 @@ impl TransactionPoolRecord {
     pub fn set_evidence(&mut self, evidence: Evidence) -> &mut Self {
         self.evidence = evidence;
         self
+    }
+
+    pub fn since_last_updated(&self) -> Duration {
+        let d = time::OffsetDateTime::now_utc() - self.last_updated;
+        // If d is negative (perhaps only possible with a mal-timed clock adjustment), we treat this like a saturating
+        // sub (zero duration)
+        d.try_into().unwrap_or_default()
+    }
+
+    pub fn last_updated_in_block(&self) -> Option<&BlockId> {
+        self.last_updated_in_block.as_ref()
     }
 
     /// Merges the given evidence into the existing evidence of the transaction pool record.
@@ -675,7 +711,7 @@ impl TransactionPoolRecord {
         I: IntoIterator<Item = &'a TransactionId>,
     {
         let recs = tx.transaction_pool_remove_all(transaction_ids)?;
-        let iter = recs.iter().map(|rec| rec.transaction_id());
+        let iter = recs.iter().map(|rec| rec.id());
         // Clear any related foreign pledges
         tx.foreign_substate_pledges_remove_many(iter.clone())?;
         // Clear any related lock_conflicts
@@ -696,7 +732,7 @@ impl TransactionPoolRecord {
         &self,
         tx: &TTx,
     ) -> Result<TransactionRecord, TransactionPoolError> {
-        let transaction = TransactionRecord::get(tx, self.transaction_id())?;
+        let transaction = TransactionRecord::get(tx, self.id())?;
         Ok(transaction)
     }
 
@@ -705,7 +741,7 @@ impl TransactionPoolRecord {
         tx: &TTx,
         from_block: &LeafBlock,
     ) -> Result<BlockTransactionExecution, TransactionPoolError> {
-        let exec = BlockTransactionExecution::get_pending_for_block(tx, self.transaction_id(), from_block)?;
+        let exec = BlockTransactionExecution::get_pending_for_block(tx, self.id(), from_block)?;
         Ok(exec)
     }
 
@@ -767,20 +803,20 @@ impl TransactionPoolRecord {
                 debug!(
                     target: LOG_TARGET,
                     "Transaction {} is missing a version for substate_id {}",
-                    self.transaction_id(),
+                    self.id(),
                     substate_id,
                 );
                 return Ok(false);
             };
             let address = SubstateAddress::from_substate_id(substate_id, version);
             // TODO(perf): O(n) queries
-            if tx.foreign_substate_pledges_exists_for_transaction_and_address(self.transaction_id(), address)? {
+            if tx.foreign_substate_pledges_exists_for_transaction_and_address(self.id(), address)? {
                 continue;
             }
 
             if log_enabled!(Level::Debug) {
                 // Load them for debugging purposes
-                let pledges = tx.foreign_substate_pledges_get_all_by_transaction_id(self.transaction_id())?;
+                let pledges = tx.foreign_substate_pledges_get_all_by_transaction_id(self.id())?;
                 let remote_shard_group = address.to_shard_group(
                     local_committee_info.num_preshards(),
                     local_committee_info.num_committees(),
@@ -794,7 +830,7 @@ impl TransactionPoolRecord {
                     target: LOG_TARGET,
                     "{} Transaction {} is missing a foreign {} pledge for {}:{} from {} ({} pledge(s) found)",
                     local_committee_info.shard_group(),
-                    self.transaction_id(),
+                    self.id(),
                     lock_type,
                     substate_id,
                     version,
@@ -869,6 +905,8 @@ mod tests {
                 local_decision: None,
                 remote_decision: None,
                 is_ready: false,
+                last_updated: time::OffsetDateTime::now_utc(),
+                last_updated_in_block: None,
             }
         }
 
@@ -881,21 +919,21 @@ mod tests {
             let leader_fee = tx.calculate_leader_fee(total_num_involved_shards.try_into().unwrap(), exhaust_divisor);
             // Total payable fee + burn is always equal to the total block fee
             assert_eq!(
-                leader_fee.fee * total_num_involved_shards + leader_fee.global_exhaust_burn,
+                leader_fee.fee * total_num_involved_shards + leader_fee.exhaust_burn,
                 total_tx_fee,
                 "Fees were created or lost in the calculation. Expected: {}, Actual: {}",
                 total_tx_fee,
-                leader_fee.fee * total_num_involved_shards + leader_fee.global_exhaust_burn
+                leader_fee.fee * total_num_involved_shards + leader_fee.exhaust_burn
             );
 
             let deviation_from_target_burn =
-                leader_fee.global_exhaust_burn as f32 - (total_tx_fee.checked_div(exhaust_divisor).unwrap_or(0) as f32);
+                leader_fee.exhaust_burn as f32 - (total_tx_fee.checked_div(exhaust_divisor).unwrap_or(0) as f32);
             assert!(
                 deviation_from_target_burn.abs() <= total_num_involved_shards as f32,
                 "Deviation from target burn is too high: {} (target: {}, actual: {}, num_shards: {}, divisor: {})",
                 deviation_from_target_burn,
                 total_tx_fee.checked_div(exhaust_divisor).unwrap_or(0),
-                leader_fee.global_exhaust_burn,
+                leader_fee.exhaust_burn,
                 total_num_involved_shards,
                 exhaust_divisor
             );
@@ -907,51 +945,51 @@ mod tests {
         fn it_calculates_the_correct_leader_fee() {
             let fee = check_calculate_leader_fee(100, 1, 20);
             assert_eq!(fee.fee, 95);
-            assert_eq!(fee.global_exhaust_burn, 5);
+            assert_eq!(fee.exhaust_burn, 5);
 
             let fee = check_calculate_leader_fee(100, 1, 10);
             assert_eq!(fee.fee, 90);
-            assert_eq!(fee.global_exhaust_burn, 10);
+            assert_eq!(fee.exhaust_burn, 10);
 
             let fee = check_calculate_leader_fee(100, 2, 0);
             assert_eq!(fee.fee, 50);
-            assert_eq!(fee.global_exhaust_burn, 0);
+            assert_eq!(fee.exhaust_burn, 0);
 
             let fee = check_calculate_leader_fee(100, 2, 10);
             assert_eq!(fee.fee, 45);
-            assert_eq!(fee.global_exhaust_burn, 10);
+            assert_eq!(fee.exhaust_burn, 10);
 
             let fee = check_calculate_leader_fee(100, 3, 0);
             assert_eq!(fee.fee, 33);
             // Even with no exhaust, we still burn 1 due to integer div floor
-            assert_eq!(fee.global_exhaust_burn, 1);
+            assert_eq!(fee.exhaust_burn, 1);
 
             let fee = check_calculate_leader_fee(100, 3, 10);
             assert_eq!(fee.fee, 30);
-            assert_eq!(fee.global_exhaust_burn, 10);
+            assert_eq!(fee.exhaust_burn, 10);
 
             let fee = check_calculate_leader_fee(98, 3, 10);
             assert_eq!(fee.fee, 30);
-            assert_eq!(fee.global_exhaust_burn, 8);
+            assert_eq!(fee.exhaust_burn, 8);
 
             let fee = check_calculate_leader_fee(98, 3, 21);
             assert_eq!(fee.fee, 32);
             // target burn is 4, but the remainder burn is 5, so we give 1 more to the leaders and burn 2
-            assert_eq!(fee.global_exhaust_burn, 2);
+            assert_eq!(fee.exhaust_burn, 2);
 
             // Target burn is 8, and the remainder burn is 8, so we burn 8
             let fee = check_calculate_leader_fee(98, 10, 10);
             assert_eq!(fee.fee, 9);
-            assert_eq!(fee.global_exhaust_burn, 8);
+            assert_eq!(fee.exhaust_burn, 8);
 
             let fee = check_calculate_leader_fee(19802, 45, 20);
             assert_eq!(fee.fee, 418);
-            assert_eq!(fee.global_exhaust_burn, 992);
+            assert_eq!(fee.exhaust_burn, 992);
 
             // High burn amount due to not enough fees to pay out all involved shards to compensate
             let fee = check_calculate_leader_fee(311, 45, 20);
             assert_eq!(fee.fee, 6);
-            assert_eq!(fee.global_exhaust_burn, 41);
+            assert_eq!(fee.exhaust_burn, 41);
         }
 
         #[test]
@@ -963,7 +1001,7 @@ mod tests {
                 let involved = OsRng.gen_range(1..100u64);
                 let fee = check_calculate_leader_fee(fee, involved, 20);
                 total_fees += fee.fee * involved;
-                total_burnt += fee.global_exhaust_burn;
+                total_burnt += fee.exhaust_burn;
             }
 
             println!(

@@ -27,20 +27,18 @@ import MyAssets from "./Components/MyAssets";
 import { useEffect } from "react";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import useAuthStore from "@store/authStore";
-import { useWalletInfo } from "@api/hooks/useWalletInfo";
 
 function AssetVault() {
   const account = useAccountStore((state) => state.account);
   const setAccount = useAccountStore((state) => state.setAccount);
-  const setPublicKey = useAccountStore((state) => state.setPublicKey);
+  const setOotleAddress = useAccountStore((state) => state.setOotleAddress);
   const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
   const authStore = useAuthStore();
-  const { data: walletInfo } = useWalletInfo();
 
   useEffect(() => {
     if (!isError && defaultAccount) {
       setAccount(defaultAccount.account);
-      setPublicKey(defaultAccount.public_key);
+      setOotleAddress(defaultAccount.address);
     }
 
     if (error) {
@@ -49,8 +47,6 @@ function AssetVault() {
       authStore.clearToken();
     }
   }, [defaultAccount, isError]);
-
-  console.log("walletInfo", walletInfo);
 
   return (
     <FetchStatusCheck errorMessage={""} isError={false} isLoading={isLoading}>

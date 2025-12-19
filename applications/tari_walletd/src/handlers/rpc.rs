@@ -1,7 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use axum::headers::authorization::Bearer;
+use axum_extra::headers::authorization::Bearer;
+use tari_ootle_wallet_sdk::models::AuthLoginRequestEvent;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{
@@ -24,7 +25,6 @@ use tari_wallet_daemon_client::{
 use crate::{
     config::WalletDaemonAuth,
     handlers::{auth::Authenticator, HandlerContext},
-    services::AuthLoginRequestEvent,
 };
 
 // NOTE: most of these do not require a bearer token, either because they are not sensitive or because they validate a

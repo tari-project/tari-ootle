@@ -7,7 +7,7 @@ use borsh::BorshSerialize;
 use indexmap::IndexMap;
 use log::*;
 use serde::{Deserialize, Serialize};
-use tari_consensus_types::QcId;
+use tari_consensus_types::PcId;
 use tari_engine_types::{serde_with, substate::SubstateId};
 use tari_ootle_common_types::{
     borsh::indexmap as indexmap_borsh,
@@ -199,6 +199,12 @@ impl Evidence {
         self.evidence.get(&shard_group).is_none_or(|e| e.inputs().is_empty())
     }
 
+    pub fn output_only_shard_groups_iter(&self) -> impl Iterator<Item = ShardGroup> + '_ {
+        self.evidence
+            .iter()
+            .filter_map(|(sg, e)| if e.inputs().is_empty() { Some(*sg) } else { None })
+    }
+
     pub fn is_committee_input_only(&self, shard_group: ShardGroup) -> bool {
         self.evidence.get(&shard_group).is_none_or(|e| e.outputs().is_empty())
     }
@@ -248,7 +254,7 @@ impl Evidence {
         self.evidence.contains_key(shard_group)
     }
 
-    pub fn qc_ids_iter(&self) -> impl Iterator<Item = &QcId> + '_ {
+    pub fn qc_ids_iter(&self) -> impl Iterator<Item = &PcId> + '_ {
         self.evidence
             .values()
             .flat_map(|e| e.prepare_qc.iter().chain(e.accept_qc.iter()))
@@ -413,9 +419,9 @@ pub struct ShardGroupEvidence {
     #[cfg_attr(feature = "ts", ts(type = "Record<string, number>"))]
     outputs: IndexMap<SubstateId, u32>,
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
-    prepare_qc: Option<QcId>,
+    prepare_qc: Option<PcId>,
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
-    accept_qc: Option<QcId>,
+    accept_qc: Option<PcId>,
 }
 
 impl ShardGroupEvidence {
@@ -536,7 +542,7 @@ impl ShardGroupEvidence {
         self
     }
 
-    pub fn set_prepare_qc(&mut self, qc_id: QcId) -> &mut Self {
+    pub fn set_prepare_qc(&mut self, qc_id: PcId) -> &mut Self {
         debug!(
             target: LOG_TARGET,
             "set_prepare_qc: QC[{qc_id}]",
@@ -545,11 +551,11 @@ impl ShardGroupEvidence {
         self
     }
 
-    pub fn prepare_qc(&self) -> Option<&QcId> {
+    pub fn prepare_qc(&self) -> Option<&PcId> {
         self.prepare_qc.as_ref()
     }
 
-    pub fn set_accept_qc(&mut self, qc_id: QcId) -> &mut Self {
+    pub fn set_accept_qc(&mut self, qc_id: PcId) -> &mut Self {
         debug!(
             target: LOG_TARGET,
             "set_accept_qc: QC[{qc_id}]",
@@ -558,7 +564,7 @@ impl ShardGroupEvidence {
         self
     }
 
-    pub fn accept_qc(&self) -> Option<&QcId> {
+    pub fn accept_qc(&self) -> Option<&PcId> {
         self.accept_qc.as_ref()
     }
 }

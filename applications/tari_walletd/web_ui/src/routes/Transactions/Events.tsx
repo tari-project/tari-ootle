@@ -21,7 +21,18 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useState } from "react";
-import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Collapse, Box, Chip, Typography } from "@mui/material";
+import {
+  TableContainer,
+  Table,
+  TableHead,
+  TableRow,
+  TableCell,
+  TableBody,
+  Collapse,
+  Box,
+  Chip,
+  Typography,
+} from "@mui/material";
 import { DataTableCell, AccordionIconButton } from "@components/StyledComponents";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
@@ -34,42 +45,52 @@ function renderPayloadField(key: string, value: any) {
   if (key === "amount" && typeof value === "string") {
     return (
       <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-        <Typography variant="body2" color="text.secondary">Amount:</Typography>
+        <Typography variant="body2" color="text.secondary">
+          Amount:
+        </Typography>
         <Chip label={value} size="small" color="primary" variant="outlined" />
       </Box>
     );
   }
-  
+
   if (key === "resource_type" && typeof value === "string") {
     return (
       <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-        <Typography variant="body2" color="text.secondary">Resource Type:</Typography>
+        <Typography variant="body2" color="text.secondary">
+          Resource Type:
+        </Typography>
         <Chip label={value} size="small" color="secondary" variant="outlined" />
       </Box>
     );
   }
-  
+
   if (key === "resource" || key === "resource_address") {
     return (
       <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-        <Typography variant="body2" color="text.secondary">Resource:</Typography>
+        <Typography variant="body2" color="text.secondary">
+          Resource:
+        </Typography>
         <CopyAddress address={value} />
       </Box>
     );
   }
-  
+
   if (key === "module_name" && typeof value === "string") {
     return (
       <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-        <Typography variant="body2" color="text.secondary">Module:</Typography>
+        <Typography variant="body2" color="text.secondary">
+          Module:
+        </Typography>
         <Chip label={value} size="small" color="info" variant="outlined" />
       </Box>
     );
   }
-  
+
   return (
     <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-      <Typography variant="body2" color="text.secondary">{key}:</Typography>
+      <Typography variant="body2" color="text.secondary">
+        {key}:
+      </Typography>
       <Typography variant="body2">{String(value)}</Typography>
     </Box>
   );
@@ -79,28 +100,29 @@ function renderPayload(payload: any) {
   if (!payload || typeof payload !== "object") {
     return <Typography variant="body2">{JSON.stringify(payload)}</Typography>;
   }
-  
+
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
       {Object.entries(payload).map(([key, value]) => (
-        <Box key={key}>
-          {renderPayloadField(key, value)}
-        </Box>
+        <Box key={key}>{renderPayloadField(key, value)}</Box>
       ))}
     </Box>
   );
 }
 
-function RowData({ substate_id, template_address, topic, tx_hash, payload }: Event, index: number) {
+function RowData({ substate_id, template_address, topic, payload }: Event, index: number) {
   const [open, setOpen] = useState(false);
   const theme = useTheme();
   return (
     <>
       <TableRow key={index}>
         <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>{topic}</DataTableCell>
-        <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>{substate_id ? <CopyAddress address={substateIdToString(substate_id)} /> : "--"}</DataTableCell>
-        <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>{template_address ? <CopyAddress address={template_address} /> : "--"}</DataTableCell>
-        <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>{tx_hash ? <CopyAddress address={tx_hash} /> : "--"}</DataTableCell>
+        <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>
+          {substate_id ? <CopyAddress address={substateIdToString(substate_id)} /> : "--"}
+        </DataTableCell>
+        <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>
+          {template_address ? <CopyAddress address={template_address} /> : "--"}
+        </DataTableCell>
         <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none", textAlign: "center" }}>
           <AccordionIconButton
             aria-label="expand row"
@@ -124,7 +146,9 @@ function RowData({ substate_id, template_address, topic, tx_hash, payload }: Eve
         >
           <Collapse in={open} timeout="auto" unmountOnExit>
             <Box sx={{ p: 2, backgroundColor: theme.palette.accent.background, borderRadius: 1 }}>
-              <Typography variant="subtitle2" sx={{ mb: 1 }}>Payload Details</Typography>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                Payload Details
+              </Typography>
               {renderPayload(payload)}
               <Box sx={{ mt: 2 }}>
                 <CodeBlockExpand title="Raw Payload" content={payload} />
@@ -151,13 +175,12 @@ export default function Events({ data }: { data: Event[] }) {
           </TableRow>
         </TableHead>
         <TableBody>
-          {data.map(({ substate_id, template_address, topic, tx_hash, payload }: Event, index: number) => {
+          {data.map(({ substate_id, template_address, topic, payload }: Event, index: number) => {
             return (
               <RowData
                 substate_id={substate_id}
                 template_address={template_address}
                 topic={topic}
-                tx_hash={tx_hash}
                 payload={payload}
                 key={index}
               />

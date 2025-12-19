@@ -55,10 +55,10 @@ where TConsensusSpec: ConsensusSpec
             .check_and_collect_vote(from, current_height, epoch_state, message.vote)
             .await
         {
-            Ok(Some((_, high_qc))) => {
+            Ok(Some((_, high_pc))) => {
                 // Reset the leader timeout (not the block timer) - this mitigates the chance of our node sending a
                 // NEWVIEW just before we are ready to propose
-                self.pacemaker.reset_leader_timeout(high_qc.block_height()).await?;
+                self.pacemaker.reset_leader_timeout(&high_pc).await?;
                 // We've reached quorum, trigger a check to see if we should propose immediately
                 self.pacemaker.beat();
             },

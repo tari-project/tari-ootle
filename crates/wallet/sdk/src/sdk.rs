@@ -1,11 +1,9 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::sync::Arc;
+use std::{fmt::Debug, sync::Arc};
 
-use digest::crypto_common::rand_core::{OsRng, RngCore};
 use log::{info, warn};
-use passwords::PasswordGenerator;
 use tari_common_types::seeds::{
     cipher_seed::CipherSeed,
     error::CipherError,
@@ -13,11 +11,7 @@ use tari_common_types::seeds::{
     seed_words::SeedWords,
 };
 use tari_crypto::tari_utilities::SafePassword;
-use tari_ootle_common_types::{
-    optional::{IsNotFoundError, Optional},
-    Network,
-    NetworkParseError,
-};
+use tari_ootle_common_types::{optional::Optional, Epoch, Network, NetworkParseError};
 use zeroize::Zeroizing;
 
 use crate::{
@@ -27,22 +21,27 @@ use crate::{
         confidential_outputs::ConfidentialOutputsApi,
         confidential_transfer::ConfidentialTransferApi,
         config::{ConfigApi, ConfigApiError, ConfigKey},
+        events::EventsApi,
         key_manager::{KeyManagerApi, KeyManagerApiError},
+        locks::LocksApi,
         non_fungible_tokens::NonFungibleTokensApi,
+        password_manager::{PasswordManagerApi, PasswordManagerApiError},
         resources::ResourcesApi,
+        signer::SignerApi,
         stealth_crypto::StealthCryptoApi,
         stealth_outputs::StealthOutputsApi,
         stealth_transfer::StealthTransferApi,
         substate::SubstatesApi,
         template::TemplateApi,
         transaction::TransactionApi,
+        viewable_balance::ViewableBalanceApi,
     },
-    network::{StatusResponseError, WalletNetworkInterface},
-    storage::{WalletStorageError, WalletStore},
+    cipher_seed::{CipherSeedRestore, WalletCipherSeed},
+    local_key_store::LocalKeyStore,
+    models::EpochBirthday,
+    spec::WalletSdkSpec,
+    storage::WalletStorageError,
 };
-
-const KEYRING_ENTRIES_SERVICE: &str = "tari-ootle-wallet";
-const CIPHER_SEED_PASSWORD_KEYRING_ENTRY_NAME: &str = "cipher-seed-password";
 
 const LOG_TARGET: &str = "wallet::sdk::api";
 
@@ -53,77 +52,60 @@ pub struct WalletSdkConfig {
     pub override_keyring_password: Option<SafePassword>,
 }
 
-#[derive(Debug, Clone)]
-pub struct WalletSdk<TStore, TNetworkInterface> {
-    store: TStore,
-    network_interface: TNetworkInterface,
+pub struct WalletSdk<TSpec: WalletSdkSpec> {
+    store: TSpec::Store,
+    network_interface: TSpec::NetworkInterface,
+    key_store: TSpec::KeyStore,
     config: WalletSdkConfig,
-    loaded_cipher_seed: Option<Arc<CipherSeed>>,
+    epoch_birthday: EpochBirthday,
 }
 
-impl<TStore, TNetworkInterface> WalletSdk<TStore, TNetworkInterface>
-where
-    TStore: WalletStore,
-    TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError + StatusResponseError,
-{
+impl<TSpec: WalletSdkSpec> WalletSdk<TSpec> {
     pub fn initialize(
-        store: TStore,
-        indexer: TNetworkInterface,
+        store: TSpec::Store,
+        indexer: TSpec::NetworkInterface,
+        key_store: TSpec::KeyStore,
         config: WalletSdkConfig,
-    ) -> Result<WalletSdk<TStore, TNetworkInterface>, WalletSdkError> {
-        // initialize network
-        let config_api = ConfigApi::new(&store);
-        if !config_api.exists(ConfigKey::Network)? {
-            config_api.set(ConfigKey::Network, config.network.as_key_str(), false)?;
-        }
+        epoch_birthday: EpochBirthday,
+    ) -> Result<Self, WalletSdkError> {
+        Self::check_or_set_store_network(&store, config.network)?;
 
         Ok(Self {
             store,
             network_interface: indexer,
+            key_store,
             config,
-            loaded_cipher_seed: None,
+            epoch_birthday,
         })
     }
 
-    /// Initializes the cipher seed for the wallet. Either creating a new cipher seed or recovering it from the provided
-    /// seed words if provided and necessary. Returns true if the cipher seed was recovered from the seed words,
-    /// otherwise false.
-    pub fn initialize_cipher_seed(&mut self, seed_words: Option<&SeedWords>) -> Result<bool, WalletSdkError> {
-        match self.load_cipher_seed()? {
-            Some(_) => {
-                if seed_words.is_some() {
-                    warn!(
-                        target: LOG_TARGET,
-                        "⚠️  Wallet already initialized. Ignoring seed words provided for recovery.",
-                    );
-                }
-                let requires_recovery = self.config_api().get(ConfigKey::RecoveryNeeded).optional()?;
-                // This should have been set - it is an error if it is not
-                requires_recovery.ok_or_else(|| WalletSdkError::InvariantError {
-                    details: "Cipher seed already initialized but recovery_needed not set.".to_string(),
-                })
-            },
-            None => {
-                if let Some(seed_words) = seed_words {
-                    self.restore_cipher_seed(seed_words)?;
-                    info!(target: LOG_TARGET, "🔑 Successfully restored wallet seed key!");
-                    self.config_api().set(ConfigKey::RecoveryNeeded, &true, false)?;
-                    Ok(true)
-                } else {
-                    self.create_cipher_seed()?;
-                    self.config_api().set(ConfigKey::RecoveryNeeded, &false, false)?;
-                    Ok(false)
-                }
-            },
-        }
+    pub fn get_store_network(store: &TSpec::Store) -> Result<Option<Network>, WalletSdkError> {
+        let config_api = ConfigApi::new(store);
+        let network = config_api.get(ConfigKey::Network).optional()?;
+        Ok(network)
     }
 
-    pub fn store(&self) -> &TStore {
+    fn check_or_set_store_network(store: &TSpec::Store, config_network: Network) -> Result<(), WalletSdkError> {
+        if let Some(network) = Self::get_store_network(store)? {
+            if config_network != network {
+                return Err(WalletSdkError::InvariantError {
+                    details: format!(
+                        "Network mismatch. Config network is {:?} but database network is {:?}",
+                        config_network, network
+                    ),
+                });
+            }
+        } else {
+            ConfigApi::new(&store).set(ConfigKey::Network, config_network.as_key_str())?;
+        }
+        Ok(())
+    }
+
+    pub fn store(&self) -> &TSpec::Store {
         &self.store
     }
 
-    pub fn config_api(&self) -> ConfigApi<'_, TStore> {
+    pub fn config_api(&self) -> ConfigApi<'_, TSpec::Store> {
         ConfigApi::new(&self.store)
     }
 
@@ -135,37 +117,59 @@ where
         self.config.network
     }
 
-    pub fn get_network_interface(&self) -> &TNetworkInterface {
+    pub fn get_network_interface(&self) -> &TSpec::NetworkInterface {
         &self.network_interface
     }
 
+    pub fn locks_api(&self) -> LocksApi<'_, TSpec::Store> {
+        LocksApi::new(&self.store)
+    }
+
+    pub fn event_api(&self) -> EventsApi<'_, TSpec::Store> {
+        EventsApi::new(&self.store)
+    }
+
     /// Returns the KeyManager API for the wallet.
-    ///
-    /// ## Panics
-    /// This function will panic if the cipher seed has not been initialized i.e. `initialize_cipher_seed` has not been
-    /// called once before calling this.
-    pub fn key_manager_api(&self) -> KeyManagerApi<'_, TStore> {
+    /// This key manager uses the configured key store to access key material.
+    pub fn key_manager_api(&self) -> KeyManagerApi<'_, TSpec> {
+        let network = self.config.network;
         KeyManagerApi::new(
+            network,
             &self.store,
-            self.loaded_cipher_seed
-                .as_ref()
-                .expect("key_manager_api: cipher seed not initialized. initialize_cipher_seed must be called first"),
+            &self.key_store,
+            self.password_manager_api(),
+            self.epoch_birthday,
         )
     }
 
-    pub fn transaction_api(&self) -> TransactionApi<'_, TStore, TNetworkInterface> {
+    /// Returns the Signer API for the wallet. This API uses the configured key store.
+    pub fn signer_api(&self) -> SignerApi<'_, TSpec> {
+        SignerApi::new(self.key_manager_api())
+    }
+
+    pub(crate) fn password_manager_api(&self) -> PasswordManagerApi<'_, TSpec::Store> {
+        PasswordManagerApi::new(self.config_api(), &self.config)
+    }
+
+    pub fn transaction_api(&self) -> TransactionApi<'_, TSpec::Store, TSpec::NetworkInterface> {
         TransactionApi::new(&self.store, &self.network_interface)
     }
 
-    pub fn substate_api(&self) -> SubstatesApi<'_, TStore, TNetworkInterface> {
+    pub fn substate_api(&self) -> SubstatesApi<'_, TSpec::Store, TSpec::NetworkInterface> {
         SubstatesApi::new(&self.store, &self.network_interface)
     }
 
-    pub fn accounts_api(&self) -> AccountsApi<'_, TStore, TNetworkInterface> {
-        AccountsApi::new(&self.store, self.substate_api(), self.key_manager_api())
+    pub fn accounts_api(&self) -> AccountsApi<'_, TSpec> {
+        AccountsApi::new(
+            self.config.network,
+            &self.store,
+            self.substate_api(),
+            self.key_manager_api(),
+            self.epoch_birthday,
+        )
     }
 
-    pub fn resources_api(&self) -> ResourcesApi<'_, TStore> {
+    pub fn resources_api(&self) -> ResourcesApi<'_, TSpec::Store> {
         ResourcesApi::new(&self.store)
     }
 
@@ -173,16 +177,18 @@ where
         ConfidentialCryptoApi::new()
     }
 
-    pub fn confidential_outputs_api(&self) -> ConfidentialOutputsApi<'_, TStore> {
+    pub fn confidential_outputs_api(&self) -> ConfidentialOutputsApi<'_, TSpec> {
         ConfidentialOutputsApi::new(&self.store, self.key_manager_api(), self.confidential_crypto_api())
     }
 
-    pub fn confidential_transfer_api(&self) -> ConfidentialTransferApi<'_, TStore, TNetworkInterface> {
+    pub fn confidential_transfer_api(&self) -> ConfidentialTransferApi<'_, TSpec> {
         ConfidentialTransferApi::new(
             self.key_manager_api(),
             self.accounts_api(),
+            self.locks_api(),
             self.confidential_outputs_api(),
             self.substate_api(),
+            self.transaction_api(),
             self.confidential_crypto_api(),
             self.config_api(),
         )
@@ -192,18 +198,18 @@ where
         StealthCryptoApi::new()
     }
 
-    pub fn stealth_transfer_api(&self) -> StealthTransferApi<'_, TStore, TNetworkInterface> {
+    pub fn stealth_transfer_api(&self) -> StealthTransferApi<'_, TSpec> {
         StealthTransferApi::new(
-            self.key_manager_api(),
             self.accounts_api(),
             self.stealth_outputs_api(),
+            self.locks_api(),
             self.substate_api(),
-            self.stealth_crypto_api(),
+            self.key_manager_api(),
             self.config_api(),
         )
     }
 
-    pub fn stealth_outputs_api(&self) -> StealthOutputsApi<'_, TStore> {
+    pub fn stealth_outputs_api(&self) -> StealthOutputsApi<'_, TSpec> {
         StealthOutputsApi::new(
             self.store(),
             self.key_manager_api(),
@@ -212,124 +218,164 @@ where
         )
     }
 
-    pub fn non_fungible_api(&self) -> NonFungibleTokensApi<'_, TStore> {
+    pub fn non_fungible_api(&self) -> NonFungibleTokensApi<'_, TSpec::Store> {
         NonFungibleTokensApi::new(&self.store)
     }
 
-    pub fn template_api(&self) -> TemplateApi<'_, TStore> {
+    pub fn template_api(&self) -> TemplateApi<'_, TSpec::Store> {
         TemplateApi::new(&self.store)
     }
 
-    /// Tries to get encrypted cipher seed from DB and decrypts it using OS keyring if possible.
-    fn load_cipher_seed(&mut self) -> Result<Option<Arc<CipherSeed>>, WalletSdkError> {
-        if let Some(ref cipher_seed) = self.loaded_cipher_seed {
-            return Ok(Some(cipher_seed.clone()));
-        }
+    pub fn viewable_balance_api(&self) -> ViewableBalanceApi {
+        ViewableBalanceApi
+    }
 
-        let Some(cipher_seed_encrypted) = self.config_api().get::<Vec<u8>>(ConfigKey::CipherSeed).optional()? else {
+    pub fn calculate_birthday_epoch(&self) -> Epoch {
+        self.epoch_birthday.calculate_current_epoch()
+    }
+}
+
+impl<TSpec> WalletSdk<TSpec>
+where TSpec: WalletSdkSpec<KeyStore = LocalKeyStore>
+{
+    pub fn initialize_with_local_key_store(
+        store: TSpec::Store,
+        indexer: TSpec::NetworkInterface,
+        config: WalletSdkConfig,
+        epoch_birthday: EpochBirthday,
+    ) -> Result<Self, WalletSdkError> {
+        Self::check_or_set_store_network(&store, config.network)?;
+
+        let cipher_seed = Self::load_cipher_seed(
+            ConfigApi::new(&store),
+            PasswordManagerApi::new(ConfigApi::new(&store), &config),
+        )?
+        .map(WalletCipherSeed::CipherSeed)
+        .unwrap_or(WalletCipherSeed::None);
+
+        Ok(Self {
+            store,
+            network_interface: indexer,
+            key_store: LocalKeyStore::new(cipher_seed),
+            config,
+            epoch_birthday,
+        })
+    }
+
+    fn load_cipher_seed(
+        config_api: ConfigApi<'_, TSpec::Store>,
+        password_manager_api: PasswordManagerApi<'_, TSpec::Store>,
+    ) -> Result<Option<Arc<CipherSeed>>, WalletSdkError> {
+        let Some(cipher_seed_encrypted) = config_api
+            .get::<Zeroizing<Box<[u8]>>>(ConfigKey::CipherSeed)
+            .optional()?
+        else {
             // Cipher seed not found in DB. This is expected if the wallet has not been initialized yet.
             return Ok(None);
         };
-        let password = self.get_cipher_seed_password()?;
+        let password = password_manager_api.get_cipher_seed_password()?;
         let cipher_seed = CipherSeed::from_enciphered_bytes(&cipher_seed_encrypted, Some(password))?;
-        self.loaded_cipher_seed = Some(Arc::new(cipher_seed));
-        Ok(self.loaded_cipher_seed.clone())
+        Ok(Some(Arc::new(cipher_seed)))
     }
 
     fn create_cipher_seed(&mut self) -> Result<(), WalletSdkError> {
-        let cipher_seed = CipherSeed::new();
-        let password = self.create_cipher_seed_password()?;
+        let password = self.password_manager_api().create_cipher_seed_password()?;
+        let cipher_seed = CipherSeed::random();
         let encrypted_cipher_seed = cipher_seed.encipher(Some(password))?;
-        self.config_api()
-            .set(ConfigKey::CipherSeed, &encrypted_cipher_seed, true)?;
-        self.loaded_cipher_seed = Some(Arc::new(cipher_seed));
+        self.config_api().set(ConfigKey::CipherSeed, &encrypted_cipher_seed)?;
+        self.key_store.set_cipher_seed(Arc::new(cipher_seed));
         Ok(())
     }
 
     /// Restores cipher seed from seed words, encrypts with a new random password (and saves to OS keychain)
     /// and replaces current cipher seed in the DB (to let every component use the new seed).
-    fn restore_cipher_seed(&mut self, seed_words: &SeedWords) -> Result<(), WalletSdkError> {
+    fn restore_cipher_seed_from_seed_words(&mut self, seed_words: &SeedWords) -> Result<(), WalletSdkError> {
+        let password = self.password_manager_api().create_cipher_seed_password()?;
         let cipher_seed = CipherSeed::from_mnemonic(seed_words, None)?;
-        let password = self.create_cipher_seed_password()?;
         let encrypted_cipher_seed = cipher_seed.encipher(Some(password))?;
-        self.config_api()
-            .set(ConfigKey::CipherSeed, &encrypted_cipher_seed, true)?;
-        self.loaded_cipher_seed = Some(Arc::new(cipher_seed));
+        self.config_api().set(ConfigKey::CipherSeed, &encrypted_cipher_seed)?;
+        self.key_store.set_cipher_seed(Arc::new(cipher_seed));
         Ok(())
     }
 
     /// Retrieve the seed words from current cipher seed stored.
-    pub fn load_seed_words(&mut self) -> Result<SeedWords, WalletSdkError> {
+    pub fn load_seed_words(&mut self) -> Result<Option<SeedWords>, WalletSdkError> {
         let seed_words = self
-            .load_cipher_seed()?
-            .ok_or_else(|| WalletSdkError::InvariantError {
-                details: "call to load_cipher_seed without initializing the cipher seed".to_string(),
-            })?
-            .to_mnemonic(MnemonicLanguage::English, None)?;
+            .key_store
+            .cipher_seed()
+            .map(|s| s.to_mnemonic(MnemonicLanguage::English, None))
+            .transpose()?;
         Ok(seed_words)
     }
 
-    fn get_cipher_seed_password(&self) -> Result<SafePassword, WalletSdkError> {
-        if let Some(ref password) = self.config.override_keyring_password {
-            return Ok(password.clone());
-        }
-
-        let key = self.config_api().get::<String>(ConfigKey::KeyringPasswordEntryKey)?;
-        let entry = self.get_cipher_seed_password_keyring_entry(&key)?;
-        // If get_password fails with NoEntry, it means that the password is not set in the keyring i.e. IsNotFoundError
-        // will return true which is what we want.
-        let password = entry.get_password()?;
-        Ok(SafePassword::from(password))
-    }
-
-    fn create_cipher_seed_password(&mut self) -> Result<SafePassword, WalletSdkError> {
-        if let Some(ref password) = self.config.override_keyring_password {
-            // If we are overriding the keyring password, we don't need to set it in the keyring.
-            // This is because the password is already set in the config.
-            return Ok(password.clone());
-        }
-
-        let key = match self
+    pub fn is_recovery_needed(&self) -> Result<bool, WalletSdkError> {
+        let recovery_needed = self
             .config_api()
-            .get::<String>(ConfigKey::KeyringPasswordEntryKey)
+            .get::<bool>(ConfigKey::RecoveryNeeded)
             .optional()?
-        {
-            Some(key) => key,
-            None => {
-                // If the key is not set, we generate a new key and set it in the config.
-                // The nonce is used to differentiate between different password entries in the keyring when running
-                // multiple instances of the wallet on the same network. This nonce is generated once per wallet
-                // database.
-                let nonce = generate_password_entry_key_nonce();
-                let key = format!(
-                    "{}-{}-{}",
-                    CIPHER_SEED_PASSWORD_KEYRING_ENTRY_NAME, self.config.network, nonce
-                );
-                self.config_api().set(ConfigKey::KeyringPasswordEntryKey, &key, false)?;
-                key
-            },
-        };
-
-        let (str_password, safe_password) = generate_password()?;
-        let entry = self.get_cipher_seed_password_keyring_entry(&key)?;
-        entry.set_password(&str_password)?;
-        Ok(safe_password)
+            .unwrap_or(false);
+        Ok(recovery_needed)
     }
 
-    fn get_cipher_seed_password_keyring_entry(&self, key: &str) -> Result<keyring::Entry, WalletSdkError> {
-        let result = keyring::Entry::new(KEYRING_ENTRIES_SERVICE, key);
-
-        match result {
-            Ok(entry) => Ok(entry),
-            Err(keyring::Error::NoEntry) => {
-                // NoEntry maps to various errors in the keyring codebase, including AccessDenied, keyExpired etc.
-                // Entry::new says that it will only return an error if the service/user are invalid but there may be
-                // more errors possible e.g. AccessDenied. In any case we provide a better error than NoEntry for this
-                // case. We dont want IsNotFoundError to be true for this case.
-                Err(WalletSdkError::FailedToAccessKeyRing)
+    /// Initializes the cipher seed for the wallet. Either creating a new cipher seed or recovering it from the provided
+    /// seed words if provided and necessary. Returns true if the cipher seed was recovered from the seed words,
+    /// otherwise false.
+    pub fn initialize_cipher_seed(&mut self, restore: CipherSeedRestore<'_>) -> Result<bool, WalletSdkError> {
+        match self.key_store.cipher_seed() {
+            Some(_) => {
+                if !restore.is_create_new() {
+                    warn!(
+                        target: LOG_TARGET,
+                        "⚠️  Wallet already initialized. Ignoring seed words provided for recovery.",
+                    );
+                }
+                let requires_recovery = self.config_api().get(ConfigKey::RecoveryNeeded).optional()?;
+                // This should have been set - it is an error if it is not
+                requires_recovery.ok_or_else(|| WalletSdkError::InvariantError {
+                    details: "Cipher seed already initialized but recovery_needed not set.".to_string(),
+                })
             },
-            Err(err) => Err(err.into()),
+            None => match restore {
+                CipherSeedRestore::CreateNewIfRequired => {
+                    self.create_cipher_seed()?;
+                    self.config_api().set(ConfigKey::RecoveryNeeded, &false)?;
+                    Ok(false)
+                },
+                CipherSeedRestore::FromSeedWords(seed_words) => {
+                    self.restore_cipher_seed_from_seed_words(seed_words)?;
+                    info!(target: LOG_TARGET, "🔑 Successfully restored wallet seed key!");
+                    self.config_api().set(ConfigKey::RecoveryNeeded, &true)?;
+                    Ok(true)
+                },
+            },
         }
+    }
+}
+
+impl<TSpec> Clone for WalletSdk<TSpec>
+where
+    TSpec: WalletSdkSpec,
+    TSpec::Store: Clone,
+    TSpec::NetworkInterface: Clone,
+    TSpec::KeyStore: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            store: self.store.clone(),
+            network_interface: self.network_interface.clone(),
+            key_store: self.key_store.clone(),
+            config: self.config.clone(),
+            epoch_birthday: self.epoch_birthday,
+        }
+    }
+}
+
+impl<TSpec: WalletSdkSpec> Debug for WalletSdk<TSpec> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WalletSdk")
+            .field("config", &self.config)
+            .field("epoch_birthday", &self.epoch_birthday)
+            .finish()
     }
 }
 
@@ -339,62 +385,14 @@ pub enum WalletSdkError {
     WalletStorageError(#[from] WalletStorageError),
     #[error("Config API error: {0}")]
     ConfigApiError(#[from] ConfigApiError),
-    #[error("OS Keyring error: {0}")]
-    KeyRing(#[from] keyring::Error),
     #[error("Key manager error: {0}")]
     KeyManager(#[from] KeyManagerApiError),
     #[error("Cipher error: {0}")]
     CipherError(#[from] CipherError),
-    #[error("Failed to generate password for cipher seed: {0}")]
-    PasswordGeneration(String),
-    #[error(
-        "OS keyring not supported on this device. You may have to specify an encryption password by using the \
-         `--password` cli option."
-    )]
-    FailedToAccessKeyRing,
+    #[error("Password manager error: {0}")]
+    PasswordManagerError(#[from] PasswordManagerApiError),
     #[error(transparent)]
     NetworkParseError(#[from] NetworkParseError),
     #[error("Invariant error: {details}. This indicates a bug in the code.")]
     InvariantError { details: String },
-}
-
-impl IsNotFoundError for WalletSdkError {
-    fn is_not_found_error(&self) -> bool {
-        match self {
-            Self::WalletStorageError(e) => e.is_not_found_error(),
-            Self::ConfigApiError(e) => e.is_not_found_error(),
-            Self::KeyManager(e) => e.is_not_found_error(),
-            Self::KeyRing(keyring::Error::NoEntry) => true,
-            Self::KeyRing(_) |
-            Self::CipherError(_) |
-            Self::PasswordGeneration(_) |
-            Self::InvariantError { .. } |
-            Self::FailedToAccessKeyRing |
-            Self::NetworkParseError(_) => false,
-        }
-    }
-}
-
-// Generate a new random password.
-fn generate_password() -> Result<(Zeroizing<String>, SafePassword), WalletSdkError> {
-    let pg = PasswordGenerator {
-        length: 256,
-        numbers: true,
-        lowercase_letters: true,
-        uppercase_letters: true,
-        symbols: false,
-        spaces: false,
-        exclude_similar_characters: false,
-        strict: true,
-    };
-    let generated_password = pg
-        .generate_one()
-        .map_err(|error| WalletSdkError::PasswordGeneration(error.to_string()))?;
-
-    let safe_password = SafePassword::from(generated_password.clone());
-    Ok((Zeroizing::new(generated_password), safe_password))
-}
-
-fn generate_password_entry_key_nonce() -> u64 {
-    OsRng.next_u64()
 }

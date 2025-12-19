@@ -10,7 +10,7 @@ license.workspace = true
 [dependencies]
 tari_bor = { workspace = true, default-features = true, features = ["std"] }
 tari_common_types = { workspace = true }
-tari_crypto = { workspace = true, features = ["borsh"] }
+tari_crypto = { workspace = true, features = ["serde", "borsh"] }
 tari_ootle_common_types = { workspace = true }
 tari_engine_types = { workspace = true }
 tari_template_abi = { workspace = true, features = ["std"] }
@@ -19,7 +19,6 @@ tari_template_lib = { workspace = true }
 tari_utilities = { workspace = true }
 tari_transaction = { workspace = true }
 
-anyhow = { workspace = true }
 blake2 = { workspace = true }
 cargo_toml = { workspace = true }
 log = { workspace = true, features = ["std"] }

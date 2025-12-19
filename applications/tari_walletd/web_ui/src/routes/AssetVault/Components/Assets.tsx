@@ -20,14 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import Box from "@mui/material/Box";
-import Tab from "@mui/material/Tab";
-import Tabs from "@mui/material/Tabs";
-import Typography from "@mui/material/Typography";
-import React, { useState } from "react";
-import { useAccountNFTsList } from "@api/hooks/useAccounts";
+import { Box, Tab, Tabs, Typography } from "@mui/material";
+import React, { useState, useEffect } from "react";
 import { ApiError } from "@api/helpers/types";
-import { useListNfts } from "@api/hooks/useNfts";
+import { useNFTsList } from "@api/hooks/useNfts";
 import { substateIdToString, handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
 import NFTList from "@routes/AssetVault/NFTs/NFTList";
 import { Account } from "@tari-project/typescript-bindings";
@@ -78,23 +74,31 @@ function Assets({ account }: { account: Account }) {
   }, [account]);
 
   const {
-    data: nftsListData,
+    data: allNfts,
     isError: nftsListIsError,
     error: nftsListError,
-    isFetching: nftsListIsFetching,
-  } = useAccountNFTsList(substateIdToString(account.address), nftPage * nftRowsPerPage, nftRowsPerPage);
+    isLoading: nftsListIsFetching,
+    refetch: refetchNfts,
+  } = useNFTsList(substateIdToString(account.component_address), 0, 1000);
 
-  // Get total count of NFTs for accurate pagination
-  const { data: allNfts } = useListNfts({
-    account: { ComponentAddress: substateIdToString(account.address) },
-  });
+  const totalCount = allNfts?.nfts?.length || 0;
 
-  // Calculate total count - use actual count from allNfts, fallback to estimation
-  const currentNfts = nftsListData?.nfts || [];
-  const actualTotal = allNfts ? allNfts.length : null;
+  // Auto-adjust page if current page is empty due to NFT transfers
+  useEffect(() => {
+    if (totalCount > 0 && nftPage > 0) {
+      const maxPage = Math.ceil(totalCount / nftRowsPerPage) - 1;
+      if (nftPage > maxPage) {
+        setNftPage(maxPage);
+      }
+    }
+  }, [totalCount, nftPage, nftRowsPerPage, setNftPage]);
 
-  // Use actual total if available, otherwise fall back to simple estimation
-  const totalCount = actualTotal !== null ? actualTotal : currentNfts.length;
+  const startIndex = nftPage * nftRowsPerPage;
+  const endIndex = startIndex + nftRowsPerPage;
+  const nftsListData = {
+    ...allNfts,
+    nfts: allNfts?.nfts?.slice(startIndex, endIndex) || [],
+  };
 
   const handleChange = (_event: React.SyntheticEvent, newValue: number) => {
     setAssetTab(newValue);
@@ -122,6 +126,7 @@ function Assets({ account }: { account: Account }) {
           rowsPerPage={nftRowsPerPage}
           onPageChange={(event, newPage) => handleChangePage(event, newPage, setNftPage)}
           onRowsPerPageChange={(event) => handleChangeRowsPerPage(event, setNftRowsPerPage, setNftPage)}
+          onManualRefresh={() => refetchNfts()}
         />
       </TabPanel>
     </Box>

@@ -27,7 +27,9 @@ use tari_ootle_storage::consensus_models::{Evidence, LeaderFee, TransactionPoolR
 use tari_transaction::TransactionId;
 
 use crate::{
-    codecs::{BlockIdCodec, BytesCodec, DefaultCodec, EpochCodec, NumberCodec, TransactionIdCodec},
+    codecs::{BlockIdCodec, BytesCodec, DefaultCodec, EpochCodec, KeyPrefix, NumberCodec, TransactionIdCodec},
+    column_families::cf_names,
+    prefixed,
     traits::{Cf, QueryCf},
 };
 
@@ -61,16 +63,19 @@ impl TransactionPoolStateUpdateData {
     }
 }
 
+prefixed!(TransactionPoolStateUpdatePrefix, KeyPrefix::TransactionPoolStateUpdates);
+
 pub struct TransactionPoolStateUpdateCf;
 
 impl Cf for TransactionPoolStateUpdateCf {
     type Key = (BlockId, TransactionId);
     type KeyCodec = (BlockIdCodec, TransactionIdCodec);
+    type Prefix = TransactionPoolStateUpdatePrefix;
     type Value = TransactionPoolStateUpdateData;
     type ValueCodec = DefaultCodec<TransactionPoolStateUpdateData>;
 
     fn name() -> &'static str {
-        "transaction_pool_updates"
+        cf_names::TRANSACTIONS
     }
 }
 
@@ -82,15 +87,21 @@ impl QueryCf for ByBlockIdQuery {
     type KeyCodec = BlockIdCodec;
 }
 
+prefixed!(
+    TransactionPoolStateUpdateDebugHistoryPrefix,
+    KeyPrefix::TransactionPoolStateUpdateDebugHistory
+);
+
 pub struct TransactionPoolStateUpdateDebugHistoryCf;
 
 impl Cf for TransactionPoolStateUpdateDebugHistoryCf {
     type Key = (Epoch, NodeHeight, TransactionId);
     type KeyCodec = (EpochCodec, NumberCodec<NodeHeight>, BytesCodec);
+    type Prefix = ();
     type Value = TransactionPoolStateUpdateData;
     type ValueCodec = DefaultCodec<TransactionPoolStateUpdateData>;
 
     fn name() -> &'static str {
-        "transaction_pool_updates_debug_history"
+        cf_names::DIAGNOSTICS
     }
 }

@@ -10,13 +10,24 @@ use std::{
     process::Command,
 };
 
-const TEMPLATE_BUILTINS: &[&str] = &["templates/account", "templates/nft_faucet", "templates/faucet"];
+const TEMPLATE_BUILTINS: &[&str] = &[
+    "templates/account",
+    "templates/nft_faucet",
+    "templates/faucet",
+    "templates/liquidity_pool",
+];
 
 fn main() -> Result<(), Box<dyn Error>> {
-    // Rebuild templates if abi or lib changes
-    println!("cargo:rerun-if-changed=../template_abi");
-    println!("cargo:rerun-if-changed=../template_lib");
-    println!("cargo:rerun-if-changed=../tari_bor");
+    // Rebuild templates if abi or lib changes (only if they exist in the build context)
+    if Path::new("../template_abi").exists() {
+        println!("cargo:rerun-if-changed=../template_abi");
+    }
+    if Path::new("../template_lib").exists() {
+        println!("cargo:rerun-if-changed=../template_lib");
+    }
+    if Path::new("../tari_bor").exists() {
+        println!("cargo:rerun-if-changed=../tari_bor");
+    }
     for template in TEMPLATE_BUILTINS {
         // we only want to rebuild if a template was added/modified
         println!("cargo:rerun-if-changed={}/src", template);

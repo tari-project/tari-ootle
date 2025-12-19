@@ -2,11 +2,10 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine::runtime::RuntimeError;
-use tari_engine_types::instruction::Instruction;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::{call_args, models::ComponentAddress, types::Amount};
+use tari_template_lib::{models::ComponentAddress, types::Amount};
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
-use tari_transaction::{args, Transaction};
+use tari_transaction::{args, call_args, Instruction, Transaction};
 
 #[test]
 fn basic_emit_event() {
@@ -17,7 +16,7 @@ fn basic_emit_event() {
         .execute_and_commit(
             vec![Instruction::CallFunction {
                 address: event_emitter_template,
-                function: "test_function".to_string(),
+                function: "test_function".try_into().unwrap(),
                 args: call_args![topic],
             }],
             vec![],
@@ -41,7 +40,7 @@ fn cannot_use_standard_topic() {
     let (_, _, private_key) = template_test.create_funded_account();
     let invalid_topic = "std.mytopic";
     let reason = template_test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_function(event_emitter_template, "test_function", args![invalid_topic])
             .build_and_seal(&private_key),
         [].into(),
@@ -63,7 +62,7 @@ fn builtin_vault_events() {
         .execute_and_commit(
             vec![Instruction::CallFunction {
                 address: faucet_template,
-                function: "mint".to_string(),
+                function: "mint".try_into().unwrap(),
                 args: call_args![initial_supply],
             }],
             vec![template_test.owner_proof()],
@@ -83,7 +82,7 @@ fn builtin_vault_events() {
     let (receiver_address, _, _) = template_test.create_funded_account();
     template_test
         .build_and_execute(
-            Transaction::builder()
+            Transaction::builder_localnet()
                 .call_method(faucet_component, "take_free_coins", args![])
                 .put_last_instruction_output_on_workspace("free_coins")
                 .call_method(sender_address, "deposit", args![Workspace("free_coins")]),
@@ -94,7 +93,7 @@ fn builtin_vault_events() {
     // transfer some tokens between accounts
     let amount = Amount::from(100);
     let result = template_test.build_and_execute(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(sender_address, "withdraw", args![faucet_resource, amount])
             .put_last_instruction_output_on_workspace("foo_bucket")
             .call_method(receiver_address, "deposit", args![Workspace("foo_bucket")]),
@@ -116,8 +115,8 @@ fn builtin_vault_events() {
         *event.payload().get("resource_address").unwrap(),
         faucet_resource.to_string()
     );
-    assert_eq!(*event.payload().get("resource_type").unwrap(), "Fungible");
-    assert_eq!(*event.payload().get("amount").unwrap(), amount.to_string());
+    assert_eq!(event.payload().get("resource_type").unwrap(), "Fungible");
+    assert_eq!(event.payload().get("amount").unwrap(), amount.to_string());
 
     // a standard event for the deposit must have been emmitted
     let event = result
@@ -129,9 +128,9 @@ fn builtin_vault_events() {
     assert_eq!(event.template_address(), ACCOUNT_TEMPLATE_ADDRESS);
     // assert_eq!(event.component_address().unwrap(), receiver_address);
     assert_eq!(
-        *event.payload().get("resource_address").unwrap(),
+        event.payload().get("resource_address").unwrap(),
         faucet_resource.to_string()
     );
-    assert_eq!(*event.payload().get("resource_type").unwrap(), "Fungible");
-    assert_eq!(*event.payload().get("amount").unwrap(), amount.to_string());
+    assert_eq!(event.payload().get("resource_type").unwrap(), "Fungible");
+    assert_eq!(event.payload().get("amount").unwrap(), amount.to_string());
 }

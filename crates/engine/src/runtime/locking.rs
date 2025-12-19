@@ -172,6 +172,7 @@ impl Display for LockState {
     }
 }
 
+// TODO: ideally this would not implement Clone, but needed currently for the usual borrow-checker reasons.
 #[derive(Debug, Clone)]
 pub struct LockedSubstate {
     address: SubstateId,

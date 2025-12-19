@@ -1,10 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_crypto::{
-    keys::PublicKey,
-    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
-};
+use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::ToByteType;
 use tari_template_lib::{
     models::{
@@ -19,12 +16,12 @@ use tari_template_lib::{
 };
 
 use crate::{
-    balance_proof::{generate_stealth_balance_proof_signature, generate_stealth_owner_proof_signature},
+    balance_proof::generate_stealth_balance_proof_signature,
     bullet_proof::generate_extended_bullet_proof,
     error::ConfidentialProofError,
     viewable_balance_proof::create_viewable_balance_proof,
-    UnblindedStealthInputStatement,
-    UnblindedStealthOutputStatement,
+    SecretStealthOutputStatement,
+    StealthInputWitness,
     WalletCryptoError,
 };
 
@@ -35,8 +32,10 @@ pub fn create_transfer_statement<'a, Inputs, Outputs>(
     revealed_output_amount: Amount,
 ) -> Result<StealthTransferStatement, WalletCryptoError>
 where
-    Inputs: IntoIterator<Item = &'a UnblindedStealthInputStatement>,
-    Outputs: IntoIterator<Item = &'a UnblindedStealthOutputStatement> + Clone,
+    Inputs: IntoIterator<Item = StealthInputWitness>,
+    Inputs::IntoIter: ExactSizeIterator,
+    Outputs: IntoIterator<Item = &'a SecretStealthOutputStatement> + Clone,
+    Outputs::IntoIter: ExactSizeIterator,
 {
     if revealed_input_amount.is_negative() {
         return Err(WalletCryptoError::InvalidArgument {
@@ -51,52 +50,42 @@ where
         });
     }
 
-    let mut input_iter = inputs.into_iter();
-    let num_inputs_estimate = {
-        let (lower, upper) = input_iter.size_hint();
-        upper.unwrap_or(lower)
-    };
-    let (inputs_to_spend, agg_input_mask) = input_iter.try_fold(
-        (Vec::with_capacity(num_inputs_estimate), RistrettoSecretKey::default()),
-        |(mut inputs, agg_input), input| {
-            let commitment =
-                input
-                    .mask_and_value
-                    .to_commitment()
-                    .ok_or_else(|| WalletCryptoError::InvalidArgument {
-                        name: "input value",
-                        details: format!("Input value {} must be non-negative", input.mask_and_value.value),
-                    })?;
-            let stealth_public_key = RistrettoPublicKey::from_secret_key(&input.owner_secret).to_byte_type();
+    let mut inputs = inputs.into_iter();
+    let num_inputs = inputs.len();
 
-            let signature = generate_stealth_owner_proof_signature(
-                &input.owner_secret,
-                &stealth_public_key,
-                &commitment.to_byte_type(),
-                &input.public_nonce.to_byte_type(),
-            );
+    let outputs_statement = create_outputs_statement(output_statements.clone(), revealed_output_amount)?;
+    let output_statements = output_statements.into_iter();
+    let num_outputs = output_statements.len();
+
+    let (inputs_to_spend, agg_input_mask) = inputs.try_fold(
+        (Vec::with_capacity(num_inputs), RistrettoSecretKey::default()),
+        |(mut inputs, agg_input), input| {
             inputs.push(StealthInput {
-                commitment: commitment.to_byte_type(),
-                owner_proof: signature,
+                commitment: input.mask_and_value.to_commitment().to_byte_type(),
             });
             Ok::<_, WalletCryptoError>((inputs, agg_input + &input.mask_and_value.mask))
         },
     )?;
 
     let agg_output_mask = output_statements
-        .clone()
-        .into_iter()
-        .map(|stmt| &stmt.statement.mask)
+        .map(|stmt| &stmt.witness.mask)
         .fold(RistrettoSecretKey::default(), |agg, mask| agg + mask);
 
-    let balance_proof = generate_stealth_balance_proof_signature(
-        &agg_input_mask,
-        &agg_output_mask,
-        &revealed_input_amount,
-        &revealed_output_amount,
-    );
+    let inputs_statement = StealthInputsStatement {
+        inputs: inputs_to_spend.clone(),
+        revealed_amount: revealed_input_amount,
+    };
 
-    let outputs_statement = create_outputs_statement(output_statements, revealed_output_amount)?;
+    let balance_proof = if num_outputs == 0 && num_inputs == 0 {
+        None
+    } else {
+        Some(generate_stealth_balance_proof_signature(
+            &agg_input_mask,
+            &agg_output_mask,
+            &inputs_statement,
+            &outputs_statement,
+        ))
+    };
 
     Ok(StealthTransferStatement {
         inputs_statement: StealthInputsStatement {
@@ -108,7 +97,7 @@ where
     })
 }
 
-pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a UnblindedStealthOutputStatement> + Clone>(
+pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a SecretStealthOutputStatement> + Clone>(
     output_statements: Outputs,
     revealed_output_amount: Amount,
 ) -> Result<StealthOutputsStatement, ConfidentialProofError> {
@@ -116,11 +105,8 @@ pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a UnblindedSt
         .clone()
         .into_iter()
         .map(|output_stmt| {
-            let unblinded_stmt = &output_stmt.statement;
-            let commitment = output_stmt
-                .statement
-                .to_commitment()
-                .ok_or(ConfidentialProofError::NegativeAmount)?;
+            let unblinded_stmt = &output_stmt.witness;
+            let commitment = output_stmt.witness.to_commitment();
             let output = UnspentOutput {
                 commitment: commitment.to_byte_type(),
                 sender_public_nonce: unblinded_stmt.sender_public_nonce.to_byte_type(),
@@ -138,13 +124,13 @@ pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a UnblindedSt
 
             Ok::<_, ConfidentialProofError>(StealthUnspentOutput {
                 output,
-                owner_public_key: output_stmt.output_owner_public_key.to_byte_type(),
+                spend_condition: output_stmt.spend_condition.clone(),
                 tag: output_stmt.tag,
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let output_range_proof = generate_extended_bullet_proof(output_statements.into_iter().map(|o| &o.statement))?;
+    let output_range_proof = generate_extended_bullet_proof(output_statements.into_iter().map(|o| &o.witness))?;
 
     Ok(StealthOutputsStatement {
         outputs,
@@ -156,24 +142,22 @@ pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a UnblindedSt
 #[cfg(test)]
 mod tests {
     use rand::rngs::OsRng;
-    use tari_crypto::{
-        keys::SecretKey,
-        ristretto::{RistrettoPublicKey, RistrettoSecretKey},
-    };
+    use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
     use tari_engine_types::stealth::validate_stealth_outputs_statement;
     use tari_template_lib::{
-        models::EncryptedData,
-        types::{crypto::UtxoTag, Amount},
+        models::SpendCondition,
+        prelude::RistrettoPublicKeyBytes,
+        types::{crypto::UtxoTag, Amount, EncryptedData},
     };
 
     use super::*;
-    use crate::UnblindedOutputStatement;
+    use crate::OutputWitness;
 
-    fn create_valid_proof(amount: Amount, minimum_value_promise: u64) -> StealthOutputsStatement {
+    fn create_valid_proof(amount: u64, minimum_value_promise: u64) -> StealthOutputsStatement {
         let mask = RistrettoSecretKey::random(&mut OsRng);
         create_outputs_statement(
-            &[UnblindedStealthOutputStatement {
-                statement: UnblindedOutputStatement {
+            &[SecretStealthOutputStatement {
+                witness: OutputWitness {
                     amount,
                     minimum_value_promise,
                     mask,
@@ -181,7 +165,7 @@ mod tests {
                     encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
                     resource_view_key: None,
                 },
-                output_owner_public_key: RistrettoPublicKey::default(),
+                spend_condition: SpendCondition::Signed(RistrettoPublicKeyBytes::default()),
                 tag: UtxoTag::new(0),
             }],
             Amount::zero(),
@@ -191,13 +175,13 @@ mod tests {
 
     #[test]
     fn it_is_valid_if_proof_is_valid() {
-        let proof = create_valid_proof(100.into(), 0);
+        let proof = create_valid_proof(100, 0);
         validate_stealth_outputs_statement(&proof, None).unwrap();
     }
 
     #[test]
     fn it_is_invalid_if_minimum_value_changed() {
-        let mut proof = create_valid_proof(100.into(), 100);
+        let mut proof = create_valid_proof(100, 100);
         proof.outputs[0].output.minimum_value_promise = 99;
         validate_stealth_outputs_statement(&proof, None).unwrap_err();
         proof.outputs[0].output.minimum_value_promise = 1000;

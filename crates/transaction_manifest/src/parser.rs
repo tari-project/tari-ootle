@@ -28,11 +28,16 @@ use syn::{
     Stmt,
     UseTree,
 };
+use tari_engine_types::{json_cbor::convert_json_to_cbor, substate::SubstateId};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     args::LogLevel,
-    types::{Amount, TemplateAddress},
+    constants::XTR,
+    models::{Metadata, NonFungibleId},
+    types::{hex::bytes_from_hex, Amount, TemplateAddress},
 };
+
+use crate::error::ManifestError;
 
 #[derive(Debug, Clone)]
 pub enum ManifestIntent {
@@ -40,6 +45,7 @@ pub enum ManifestIntent {
     InvokeComponent(InvokeIntent),
     AssignInput(AssignInputStmt),
     Log(LogIntent),
+    DropAllProofs,
 }
 
 #[derive(Debug, Clone)]
@@ -79,7 +85,17 @@ pub enum ManifestLiteral {
 #[derive(Debug, Clone)]
 pub enum SpecialLiteral {
     Amount(Amount),
-    NonFungibleId(Lit),
+    NonFungibleId(NonFungibleId),
+    Cbor(tari_bor::Value),
+    Metadata(Metadata),
+    SubstateId(OrVar<SubstateId>),
+    Address(OrVar<SubstateId>),
+}
+
+#[derive(Debug, Clone)]
+pub enum OrVar<T> {
+    Var(Ident),
+    Value(T),
 }
 
 pub struct ManifestParser;
@@ -177,11 +193,22 @@ impl ManifestParser {
             Stmt::Local(local) => self.handle_local(local),
             // component.function_name(arg1, arg2);
             Stmt::Expr(expr, _) => self.handle_semi_expr(expr),
+            Stmt::Macro(mac) => self.handle_macro_stmt(mac),
             _ => Err(syn::Error::new_spanned(
                 stmt.clone(),
                 format!("Invalid statement {:?}", stmt),
             )),
         }
+    }
+
+    fn handle_macro_stmt(&self, mac: syn::StmtMacro) -> Result<ManifestIntent, syn::Error> {
+        let Macro { path, tokens, .. } = mac.mac;
+
+        let Some(mac_ident) = path.segments.first() else {
+            return Err(syn::Error::new_spanned(path, "macro path must have a single segment"));
+        };
+
+        macro_call(&mac_ident.ident, tokens)
     }
 
     fn handle_local(&self, local: Local) -> Result<ManifestIntent, syn::Error> {
@@ -356,6 +383,7 @@ fn macro_call(mac: &Ident, tokens: TokenStream) -> Result<ManifestIntent, syn::E
             level: LogLevel::Error,
             message: parse2::<LitStr>(tokens)?.value(),
         })),
+        "drop_all_proofs" => Ok(ManifestIntent::DropAllProofs),
         _ => Err(syn::Error::new_spanned(mac, "Invalid macro name")),
     }
 }
@@ -365,12 +393,18 @@ fn build_arguments(args: Punctuated<Expr, Comma>) -> Result<Vec<ManifestLiteral>
         .map(|arg| match arg {
             Expr::Lit(lit) => Ok(ManifestLiteral::Lit(lit.lit)),
 
-            Expr::Path(expr_path) => {
-                if let Some(seg) = expr_path.path.segments.first() {
-                    Ok(ManifestLiteral::Workspace(seg.ident.clone()))
+            Expr::Path(ExprPath { path, .. }) => {
+                if let Some(seg) = path.segments.first() {
+                    if seg.ident == "XTR" {
+                        Ok(ManifestLiteral::Special(SpecialLiteral::Address(OrVar::Value(
+                            XTR.into(),
+                        ))))
+                    } else {
+                        Ok(ManifestLiteral::Workspace(seg.ident.clone()))
+                    }
                 } else {
                     Err(syn::Error::new_spanned(
-                        expr_path,
+                        path,
                         "Invalid path, only single segment paths are supported",
                     ))
                 }
@@ -394,6 +428,21 @@ fn build_arguments(args: Punctuated<Expr, Comma>) -> Result<Vec<ManifestLiteral>
                     ))
                 }
             },
+            Expr::Macro(ExprMacro { mac, .. }) => match mac.path.get_ident() {
+                Some(name) if name == "cbor" => {
+                    let cbor_value: serde_json::Value = serde_json::from_str(&mac.tokens.to_string()).map_err(|e| {
+                        syn::Error::new_spanned(&mac.tokens, format!("Failed to parse CBOR JSON value: {}", e))
+                    })?;
+                    let cbor = convert_json_to_cbor(cbor_value).map_err(|e| {
+                        syn::Error::new_spanned(&mac.tokens, format!("Failed to convert JSON to CBOR value: {}", e))
+                    })?;
+                    Ok(ManifestLiteral::Special(SpecialLiteral::Cbor(cbor)))
+                },
+                _ => Err(syn::Error::new_spanned(
+                    mac,
+                    "Invalid argument, only literals and variables are supported",
+                )),
+            },
             _ => Err(syn::Error::new_spanned(
                 arg,
                 "Invalid argument, only literals and variables are supported",
@@ -402,37 +451,147 @@ fn build_arguments(args: Punctuated<Expr, Comma>) -> Result<Vec<ManifestLiteral>
         .collect()
 }
 
+#[allow(clippy::too_many_lines)]
 fn handle_special_literals(name: &Ident, args: Punctuated<Expr, Comma>) -> Result<ManifestLiteral, syn::Error> {
-    if name == "Amount" {
-        let amt = args
-            .first()
-            .ok_or_else(|| syn::Error::new_spanned(name, "Invalid function call"))?;
-        match amt {
-            Expr::Lit(ExprLit { lit: Lit::Int(lit), .. }) => {
-                Ok(ManifestLiteral::Special(SpecialLiteral::Amount(lit.base10_parse()?)))
-            },
-            _ => Err(syn::Error::new_spanned(
-                amt,
-                "Invalid argument, only literals and variables are supported",
-            )),
-        }
-    } else if name == "NonFungibleId" {
-        let arg = args
-            .first()
-            .ok_or_else(|| syn::Error::new_spanned(name, "Invalid function call"))?;
-        if let Expr::Lit(ExprLit { lit, .. }) = arg {
-            Ok(ManifestLiteral::Special(SpecialLiteral::NonFungibleId(lit.clone())))
-        } else {
-            Err(syn::Error::new_spanned(
-                arg,
-                "Invalid argument, only literals and variables are supported",
-            ))
-        }
-    } else {
-        Err(syn::Error::new_spanned(
+    let name_str = name.to_string();
+    match name_str.as_str() {
+        "Amount" => {
+            let amt = args
+                .first()
+                .ok_or_else(|| syn::Error::new_spanned(name, "Invalid function call"))?;
+            match amt {
+                Expr::Lit(ExprLit { lit: Lit::Int(lit), .. }) => {
+                    Ok(ManifestLiteral::Special(SpecialLiteral::Amount(lit.base10_parse()?)))
+                },
+                _ => Err(syn::Error::new_spanned(
+                    amt,
+                    "Invalid argument, only literals and variables are supported",
+                )),
+            }
+        },
+        "SubstateId" | "Address" => {
+            let arg = args
+                .first()
+                .ok_or_else(|| syn::Error::new_spanned(name, "Invalid function call"))?;
+            match arg {
+                Expr::Lit(ExprLit {
+                    lit: Lit::Str(lit_str), ..
+                }) => {
+                    let id = lit_str.value().parse().map_err(|e| {
+                        syn::Error::new_spanned(lit_str, format!("Failed to parse Bytes from hex string: {}", e))
+                    })?;
+                    if name_str == "Address" {
+                        Ok(ManifestLiteral::Special(SpecialLiteral::Address(OrVar::Value(id))))
+                    } else {
+                        Ok(ManifestLiteral::Special(SpecialLiteral::SubstateId(OrVar::Value(id))))
+                    }
+                },
+                // TODO: more general support for this
+                Expr::Path(ExprPath { path, .. }) => {
+                    if let Some(seg) = path.segments.first() {
+                        if name_str == "Address" {
+                            Ok(ManifestLiteral::Special(SpecialLiteral::Address(OrVar::Var(
+                                seg.ident.clone(),
+                            ))))
+                        } else {
+                            Ok(ManifestLiteral::Special(SpecialLiteral::SubstateId(OrVar::Var(
+                                seg.ident.clone(),
+                            ))))
+                        }
+                    } else {
+                        Err(syn::Error::new_spanned(
+                            path,
+                            "Invalid path, only single segment paths are supported",
+                        ))
+                    }
+                },
+                _ => Err(syn::Error::new_spanned(
+                    arg,
+                    "Invalid argument, only string literals are supported for Substate",
+                )),
+            }
+        },
+        "NonFungibleId" => {
+            let arg = args
+                .first()
+                .ok_or_else(|| syn::Error::new_spanned(name, "Invalid function call"))?;
+            if let Expr::Lit(ExprLit { lit, .. }) = arg {
+                let id = lit_to_nonfungible_id(lit)
+                    .map_err(|e| syn::Error::new_spanned(lit, format!("Failed to parse NonFungibleId: {}", e)))?;
+                Ok(ManifestLiteral::Special(SpecialLiteral::NonFungibleId(id)))
+            } else {
+                Err(syn::Error::new_spanned(
+                    arg,
+                    "Invalid argument, only literals and variables are supported",
+                ))
+            }
+        },
+        "Metadata" => {
+            let arg = args
+                .first()
+                .ok_or_else(|| syn::Error::new_spanned(name, "Invalid function call"))?;
+            if let Expr::Lit(ExprLit {
+                lit: Lit::Str(lit_str), ..
+            }) = arg
+            {
+                let metadata: Metadata = lit_str.value().parse().map_err(|e| {
+                    syn::Error::new_spanned(lit_str, format!("Failed to parse Metadata JSON value: {}", e))
+                })?;
+                Ok(ManifestLiteral::Special(SpecialLiteral::Metadata(metadata)))
+            } else {
+                Err(syn::Error::new_spanned(
+                    arg,
+                    "Invalid argument, only string literals are supported for Metadata",
+                ))
+            }
+        },
+        "HexBytes" | "PublicKey" => {
+            let arg = args
+                .first()
+                .ok_or_else(|| syn::Error::new_spanned(name, "Invalid function call"))?;
+            if let Expr::Lit(ExprLit {
+                lit: Lit::Str(lit_str), ..
+            }) = arg
+            {
+                let bytes = bytes_from_hex(&lit_str.value()).map_err(|e| {
+                    syn::Error::new_spanned(lit_str, format!("Failed to parse Bytes from hex string: {}", e))
+                })?;
+                Ok(ManifestLiteral::Special(SpecialLiteral::Cbor(tari_bor::Value::Bytes(
+                    bytes,
+                ))))
+            } else {
+                Err(syn::Error::new_spanned(
+                    arg,
+                    "Invalid argument, only string literals are supported for Bytes",
+                ))
+            }
+        },
+        "Cbor" => {
+            let expr = args
+                .first()
+                .ok_or_else(|| syn::Error::new_spanned(name, "Invalid function call"))?;
+            match expr {
+                Expr::Lit(ExprLit { lit: Lit::Str(lit), .. }) => {
+                    let cbor_value: serde_json::Value = serde_json::from_str(&lit.value())
+                        .map_err(|e| syn::Error::new_spanned(lit, format!("Failed to parse CBOR JSON value: {}", e)))?;
+                    let cbor = convert_json_to_cbor(cbor_value).map_err(|e| {
+                        syn::Error::new_spanned(lit, format!("Failed to convert JSON to CBOR value: {}", e))
+                    })?;
+                    Ok(ManifestLiteral::Special(SpecialLiteral::Cbor(cbor)))
+                },
+                _ => Err(syn::Error::new_spanned(
+                    expr,
+                    "Invalid argument, only string literals are supported",
+                )),
+            }
+        },
+        s => Err(syn::Error::new_spanned(
             name,
-            "Invalid function call, only Amount is supported",
-        ))
+            format!(
+                "Invalid function call '{s}', only Amount, SubstateId, Address, NonFungibleId, Metadata, HexBytes, \
+                 Cbor and PublicKey are supported"
+            ),
+        )),
     }
 }
 
@@ -451,5 +610,44 @@ fn extract_single_var_name(expr: &Expr) -> Result<Ident, syn::Error> {
             expr.clone(),
             format!("Invalid method call {:?}", expr),
         )),
+    }
+}
+
+fn lit_to_nonfungible_id(lit: &Lit) -> Result<NonFungibleId, ManifestError> {
+    match lit {
+        Lit::Str(s) => Ok(NonFungibleId::try_from_string(s.value()).map_err(|e| {
+            ManifestError::UnsupportedExpr(format!(
+                "Invalid non-fungible ID string literal ({:?}) ({})",
+                e,
+                s.value()
+            ))
+        })?),
+        Lit::ByteStr(v) => {
+            let bytes = v.value();
+            if bytes.len() != 32 {
+                return Err(ManifestError::UnsupportedExpr(
+                    "Non-fungible ID byte string literal length must be less than 32 bytes".to_string(),
+                ));
+            }
+
+            let mut id = [0u8; 32];
+            id.copy_from_slice(&bytes);
+            Ok(NonFungibleId::from_u256(id))
+        },
+        Lit::Int(v) => match v.suffix() {
+            "u8" | "u16" | "u32" => Ok(NonFungibleId::from_u32(v.base10_parse()?)),
+            "u64" => Ok(NonFungibleId::from_u64(v.base10_parse()?)),
+            "" => Err(ManifestError::UnsupportedExpr(
+                "Non-fungible ID integer literal must have a type suffix specified (1u32, 2u64 etc)".to_string(),
+            )),
+            _ => Err(ManifestError::UnsupportedExpr(format!(
+                "Invalid non-fungible ID integer literal suffix ({})",
+                v.suffix()
+            ))),
+        },
+        _ => Err(ManifestError::UnsupportedExpr(format!(
+            "Unsupported non-fungible ID literal ({:?})",
+            lit
+        ))),
     }
 }

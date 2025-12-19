@@ -11,16 +11,14 @@ Feature: Claim Burn
 
     When I create an account ACC via the wallet daemon WALLET_D
 
-    When I burn 10T on wallet NETWORK_CONSOLE_WALLET to proof BURN_PROOF for wallet daemon WALLET_D 
+    When I burn 10T on wallet MINOTARI_WALLET to proof BURN_PROOF for wallet daemon WALLET_D
 
     # unfortunately have to wait for this to get into the mempool....
-    Then there is 1 transaction in the mempool of NETWORK_BASE_NODE within 10 seconds
-    When miner NETWORK_MINER mines 13 new blocks
+    Then there is 1 transaction in the mempool of BASE_NODE within 10 seconds
+    When miner MINER mines 13 new blocks
     Then VN has scanned to at least height 30
 
-    When I convert commitment in proof BURN_PROOF into COMM_ADDRESS address
-    Then validator node VN has state at COMM_ADDRESS within 20 seconds
-
+    When I wait for proof BURN_PROOF to confirm on wallet MINOTARI_WALLET
     When I claim burn BURN_PROOF and spend it into account ACC using wallet daemon WALLET_D
 
     Then I wait for ACC on wallet daemon WALLET_D to have balance gte 900000
@@ -32,15 +30,14 @@ Feature: Claim Burn
 
     When I create an account ACC via the wallet daemon WALLET_D
 
-    When I burn 10T on wallet NETWORK_CONSOLE_WALLET to proof BURN_PROOF for wallet daemon WALLET_D 
+    When I burn 10T on wallet MINOTARI_WALLET to proof BURN_PROOF for wallet daemon WALLET_D
 
     # unfortunately have to wait for this to get into the mempool....
-    Then there is 1 transaction in the mempool of NETWORK_BASE_NODE within 10 seconds
-    When miner NETWORK_MINER mines 13 new blocks
+    Then there is 1 transaction in the mempool of BASE_NODE within 10 seconds
+    When miner MINER mines 13 new blocks
     Then VN has scanned to at least height 30
 
-    When I convert commitment in proof BURN_PROOF into COMM_ADDRESS address
-    Then validator node VN has state at COMM_ADDRESS within 20 seconds
+    When I wait for proof BURN_PROOF to confirm on wallet MINOTARI_WALLET
 
     When I claim burn BURN_PROOF and spend it into account ACC using wallet daemon WALLET_D
     When I claim burn BURN_PROOF and spend it into account ACC using wallet daemon WALLET_D, it fails

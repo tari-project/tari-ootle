@@ -9,6 +9,7 @@ use tari_template_abi::rust::fmt;
 /// 4 bytes gives a reasonable trade-off between initial download size and utxo size.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct UtxoTag(u32);
 
 impl UtxoTag {
@@ -18,6 +19,12 @@ impl UtxoTag {
 
     pub const fn value(&self) -> u32 {
         self.0
+    }
+}
+
+impl From<u32> for UtxoTag {
+    fn from(value: u32) -> Self {
+        Self(value)
     }
 }
 

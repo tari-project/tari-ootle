@@ -34,24 +34,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    non_fungible_indexes (id) {
-        id -> Integer,
-        resource_address -> Text,
-        idx -> Integer,
-        non_fungible_address -> Text,
-    }
-}
-
-diesel::table! {
-    scanned_block_ids (id) {
-        id -> Integer,
-        epoch -> BigInt,
-        shard_group -> Integer,
-        last_block_id -> Binary,
-    }
-}
-
-diesel::table! {
     substate_transitions (id) {
         id -> Integer,
         shard -> Integer,
@@ -74,8 +56,16 @@ diesel::table! {
         data -> Text,
         template_address -> Nullable<Text>,
         module_name -> Nullable<Text>,
-        timestamp -> Timestamp,
         updated_at -> Timestamp,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    transaction_receipts (id) {
+        id -> Integer,
+        address -> Text,
+        data -> Text,
         created_at -> Timestamp,
     }
 }
@@ -100,6 +90,7 @@ diesel::table! {
         state_version -> BigInt,
         output -> Nullable<Binary>,
         utxo_tag -> Integer,
+        epoch -> BigInt,
         is_spent -> Bool,
         is_burnt -> Bool,
         is_frozen -> Bool,
@@ -111,10 +102,9 @@ diesel::allow_tables_to_appear_in_same_query!(
     epoch_checkpoints,
     events,
     key_values,
-    non_fungible_indexes,
-    scanned_block_ids,
     substate_transitions,
     substates,
+    transaction_receipts,
     transactions,
     utxos,
 );

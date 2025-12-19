@@ -55,7 +55,7 @@ pub struct Behaviour {
     /// reachable addresses, if any.
     connected: HashMap<PeerId, SmallVec<[Connection; 2]>>,
     pending_outbound_streams: HashMap<PeerId, SmallVec<[OpenStreamRequest; 10]>>,
-    next_outbound_stream_id: StreamId,
+    next_stream_id: StreamId,
 }
 
 impl Behaviour {
@@ -65,7 +65,7 @@ impl Behaviour {
             pending_events: VecDeque::new(),
             pending_outbound_streams: HashMap::new(),
             connected: HashMap::new(),
-            next_outbound_stream_id: StreamId::default(),
+            next_stream_id: StreamId::default(),
         }
     }
 
@@ -88,7 +88,7 @@ impl Behaviour {
     }
 
     pub fn open_substream(&mut self, peer_id: PeerId, protocol: StreamProtocol) -> StreamId {
-        let stream_id = self.next_outbound_stream_id();
+        let stream_id = self.next_stream_id();
         let request = OpenStreamRequest::new(stream_id, peer_id, protocol);
 
         match self.get_connections(&peer_id) {
@@ -113,9 +113,9 @@ impl Behaviour {
         stream_id
     }
 
-    fn next_outbound_stream_id(&mut self) -> StreamId {
-        let request_id = self.next_outbound_stream_id;
-        self.next_outbound_stream_id = self.next_outbound_stream_id.wrapping_add(1);
+    fn next_stream_id(&mut self) -> StreamId {
+        let request_id = self.next_stream_id;
+        self.next_stream_id = self.next_stream_id.wrapping_add(1);
         request_id
     }
 
@@ -285,7 +285,6 @@ impl NetworkBehaviour for Behaviour {
             Event::InboundSubstreamOpen { .. } => {},
             Event::InboundFailure { .. } => {},
             Event::OutboundFailure { .. } => {},
-            Event::Error(_) => {},
         }
 
         self.pending_events.push_back(ToSwarm::GenerateEvent(event));

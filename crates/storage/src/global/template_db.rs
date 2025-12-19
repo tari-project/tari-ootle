@@ -28,7 +28,7 @@ use std::{
 use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::Epoch;
 use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
-use time::{PrimitiveDateTime, UtcDateTime};
+use time::{OffsetDateTime, PrimitiveDateTime};
 
 use crate::global::GlobalDbAdapter;
 
@@ -50,9 +50,9 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> TemplateDb<'a, 'tx, TGlobalDbAd
         self.backend.get_templates(self.tx, limit)
     }
 
-    pub fn get_templates_by_addresses(
+    pub fn get_templates_by_addresses<'i, I: IntoIterator<Item = &'i TemplateAddress>>(
         &mut self,
-        addresses: Vec<&[u8]>,
+        addresses: I,
     ) -> Result<Vec<DbTemplate>, TGlobalDbAdapter::Error> {
         self.backend.get_templates_by_addresses(self.tx, addresses)
     }
@@ -71,7 +71,7 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> TemplateDb<'a, 'tx, TGlobalDbAd
 
     pub fn template_exists(
         &mut self,
-        key: &[u8],
+        key: &TemplateAddress,
         status: Option<TemplateStatus>,
     ) -> Result<bool, TGlobalDbAdapter::Error> {
         self.backend.template_exists(self.tx, key, status)
@@ -87,7 +87,7 @@ pub struct DbTemplate {
     pub author_public_key: RistrettoPublicKeyBytes,
     pub template_address: TemplateAddress,
     pub template_name: String,
-    pub expected_hash: FixedHash,
+    pub binary_hash: FixedHash,
     pub epoch: Epoch,
     pub template_type: DbTemplateType,
     pub code: Option<Vec<u8>>,
@@ -106,7 +106,7 @@ impl DbTemplate {
             author_public_key,
             template_name: String::new(),
             template_address,
-            expected_hash: FixedHash::zero(),
+            binary_hash: FixedHash::zero(),
             status: TemplateStatus::Pending,
             code: None,
             added_at: now(),
@@ -118,7 +118,7 @@ impl DbTemplate {
 }
 
 fn now() -> PrimitiveDateTime {
-    let now = UtcDateTime::now();
+    let now = OffsetDateTime::now_utc();
     PrimitiveDateTime::new(now.date(), now.time())
 }
 
@@ -136,7 +136,6 @@ pub struct DbTemplateUpdate {
 #[derive(Debug, Clone)]
 pub enum DbTemplateType {
     Wasm,
-    Manifest,
 }
 
 impl FromStr for DbTemplateType {
@@ -146,7 +145,6 @@ impl FromStr for DbTemplateType {
         let normalized = s.trim().to_lowercase();
         match normalized.as_str() {
             "wasm" => Ok(DbTemplateType::Wasm),
-            "manifest" => Ok(DbTemplateType::Manifest),
             _ => Err(()),
         }
     }
@@ -156,7 +154,6 @@ impl DbTemplateType {
     pub fn as_str(&self) -> &'static str {
         match self {
             DbTemplateType::Wasm => "Wasm",
-            DbTemplateType::Manifest => "Manifest",
         }
     }
 }

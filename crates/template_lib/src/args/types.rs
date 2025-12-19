@@ -26,9 +26,10 @@ use tari_template_abi::rust::{
     fmt::{Display, Formatter},
     str::FromStr,
 };
+use tari_template_lib_types::{bytes::Bytes, crypto::StealthValueProof, ResourceType};
 
 use crate::{
-    args::{freeze_flags::VaultFreezeFlags, InstructionArg},
+    args::freeze_flags::VaultFreezeFlags,
     auth::{AuthHook, OwnerRule, ResourceAccessRules},
     models::{
         AddressAllocationId,
@@ -43,11 +44,11 @@ use crate::{
         ResourceAddress,
         ResourceAddressAllocation,
         StealthTransferStatement,
+        UtxoId,
         VaultId,
         VaultRef,
     },
     prelude::{ComponentAccessRules, ConfidentialOutputStatement, TemplateAddress},
-    resource::ResourceType,
     template::BuiltinTemplate,
     types::{
         crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
@@ -66,6 +67,7 @@ pub struct EmitLogArg {
 /// All the possible log levels
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub enum LogLevel {
     Error,
     Warn,
@@ -117,7 +119,7 @@ impl std::error::Error for LogLevelParseError {}
 pub struct ComponentInvokeArg {
     pub component_ref: ComponentRef,
     pub action: ComponentAction,
-    pub args: Vec<Vec<u8>>,
+    pub args: Vec<Bytes>,
 }
 
 /// The possible actions that can be performed on components
@@ -180,7 +182,7 @@ pub struct EmitEventArg {
 pub struct ResourceInvokeArg {
     pub resource_ref: ResourceRef,
     pub action: ResourceAction,
-    pub args: Vec<Vec<u8>>,
+    pub args: Vec<Bytes>,
 }
 
 /// Encapsulates all the ways that a resource can be referenced
@@ -227,16 +229,20 @@ pub enum ResourceAction {
     UpdateNonFungibleData,
     /// Get the total supply of a resource
     GetTotalSupply,
-    /// Get the [ResourceType] of a resource
-    GetResourceType,
+    /// Get the [ResourceInfo] of a resource
+    GetResourceInfo,
     /// Gets a non-fungible resource by its ID
     GetNonFungible,
     /// Update the access rules of a resource
     UpdateAccessRules,
     /// Sets the freeze flags on a vault of a resource.
-    SetFreeze,
+    SetVaultFreeze,
     /// Executes a stealth transfer for the resource
     StealthTransfer,
+    /// Un/freezes one or more stealth UTXOs of a resource
+    SetStealthUtxosFreeze,
+    /// Burns a stealth UTXO of a resource
+    StealthUtxoBurn,
 }
 
 /// All the possible minting operation types
@@ -311,13 +317,13 @@ pub struct ResourceUpdateNonFungibleDataArg {
 /// A convenience enum that allows to specify resource types
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ResourceDiscriminator {
+    /// Select all tokens
     Everything,
-    Fungible {
-        amount: Amount,
-    },
-    NonFungible {
-        tokens: BTreeSet<NonFungibleId>,
-    },
+    /// Select a specific amount of fungible (public or stealth) tokens
+    Fungible { amount: Amount },
+    /// Select specific non-fungible tokens
+    NonFungible { tokens: BTreeSet<NonFungibleId> },
+    /// Select specific confidential commitments and a revealed amount
     Confidential {
         commitments: BTreeSet<PedersenCommitmentBytes>,
         revealed_amount: Amount,
@@ -366,7 +372,7 @@ pub struct FreezeResourceArg {
 pub struct VaultInvokeArg {
     pub vault_ref: VaultRef,
     pub action: VaultAction,
-    pub args: Vec<Vec<u8>>,
+    pub args: Vec<Bytes>,
 }
 
 /// The possible actions that can be performed on vaults
@@ -428,7 +434,7 @@ pub struct PayFeeArg {
 pub struct BucketInvokeArg {
     pub bucket_ref: BucketRef,
     pub action: BucketAction,
-    pub args: Vec<Vec<u8>>,
+    pub args: Vec<Bytes>,
 }
 
 /// Encapsulates all the ways that a bucket can be referenced
@@ -477,6 +483,7 @@ pub enum BucketAction {
     GetNonFungibleIds,
     GetNonFungibles,
     CountConfidentialCommitments,
+    DropEmpty,
 }
 
 /// A bucket burn operation argument
@@ -485,22 +492,32 @@ pub struct BucketBurnArg {
     pub bucket_id: BucketId,
 }
 
+/// BucketAction::GetAmount argument
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum BucketGetAmountArg {
+    AmountOnly,
+    LockedOnly,
+    AmountAndLocked,
+    Everything,
+}
+
 // -------------------------------- Workspace -------------------------------- //
 
 /// The possible actions that can be performed on workspace variables
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug)]
 pub enum WorkspaceAction {
     PutLastInstructionOutput,
     Get,
     DropAllProofs,
     AssertBucketContains,
+    DropAll,
 }
 
 /// A workspace operation argument
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct WorkspaceInvokeArg {
     pub action: WorkspaceAction,
-    pub args: Vec<Vec<u8>>,
+    pub args: Vec<Bytes>,
 }
 
 // -------------------------------- NonFungible -------------------------------- //
@@ -510,7 +527,7 @@ pub struct WorkspaceInvokeArg {
 pub struct NonFungibleInvokeArg {
     pub address: NonFungibleAddress,
     pub action: NonFungibleAction,
-    pub args: Vec<Vec<u8>>,
+    pub args: Vec<Bytes>,
 }
 
 /// The possible actions that can be performed on non-fungible resources
@@ -561,15 +578,7 @@ pub enum CallerContextAction {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CallerContextInvokeArg {
     pub action: CallerContextAction,
-    pub args: Vec<Vec<u8>>,
-}
-
-/// Possible allocatable address types
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub enum AllocatableAddressType {
-    Component,
-    Resource,
+    pub args: Vec<Bytes>,
 }
 
 // -------------------------------- AddressAllocation -------------------------------- //
@@ -597,11 +606,11 @@ pub enum AllocateAddressResult {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CallInvokeArg {
     pub action: CallAction,
-    pub args: Vec<Vec<u8>>,
+    pub args: Vec<Bytes>,
 }
 
 /// All the possible call operation types
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum CallAction {
     /// Call to a template's function
     CallFunction,
@@ -614,7 +623,7 @@ pub enum CallAction {
 pub struct CallFunctionArg {
     pub template_address: TemplateAddress,
     pub function: String,
-    pub args: Vec<InstructionArg>,
+    pub args: Vec<Bytes>,
 }
 
 /// A component's method call operation argument
@@ -622,7 +631,7 @@ pub struct CallFunctionArg {
 pub struct CallMethodArg {
     pub component_address: ComponentAddress,
     pub method: String,
-    pub args: Vec<InstructionArg>,
+    pub args: Vec<Bytes>,
 }
 
 // -------------------------------- ProofInvoke -------------------------------- //
@@ -632,7 +641,7 @@ pub struct CallMethodArg {
 pub struct ProofInvokeArg {
     pub proof_ref: ProofRef,
     pub action: ProofAction,
-    pub args: Vec<Vec<u8>>,
+    pub args: Vec<Bytes>,
 }
 
 /// All the possible ways to reference a proof
@@ -709,4 +718,18 @@ pub struct BuiltinTemplateInvokeArg {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum BuiltinTemplateAction {
     GetTemplateAddress { bultin: BuiltinTemplate },
+}
+
+// -------------------------------- UTXOs -------------------------------- //
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SetFreezeStealthUtxosArg {
+    pub utxos: Vec<UtxoId>,
+    pub freeze: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BurnStealthUtxoArg {
+    pub utxo_id: UtxoId,
+    pub value_proof: Option<StealthValueProof>,
 }

@@ -26,7 +26,7 @@ impl TransactionPoolStatusUpdate {
     }
 
     pub fn transaction_id(&self) -> &TransactionId {
-        self.transaction.transaction_id()
+        self.transaction.id()
     }
 
     pub fn stage(&self) -> TransactionPoolStage {

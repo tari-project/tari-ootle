@@ -8,12 +8,16 @@ edition = "2021"
 tari_template_abi = { path = "../../../template_abi" }
 tari_template_lib = { path = "../../../template_lib" }
 
-[profile.release]
-opt-level = 's'     # Optimize for size.
-lto = true          # Enable Link Time Optimization.
-codegen-units = 1   # Reduce number of codegen units to increase optimizations.
-panic = 'abort'     # Abort on panic.
-strip = "debuginfo" # Strip debug info.
-
 [lib]
 crate-type = ["cdylib", "lib"]
+
+[profile.release]
+# Optimize for performance at the cost of compilation time.
+# Note: since this is a builtin template, binary size is not a concern.
+# For other templates, consider setting opt-level to "s" or "z" to reduce binary size.
+opt-level = 3
+lto = true          # Enable Link Time Optimization.
+codegen-units = 1   # Reduce number of codegen units to increase optimizations.
+panic = 'abort'     # Abort on panic (reduces binary size).
+strip = 'debuginfo' # Strip debug info to reduce binary size.
+

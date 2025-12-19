@@ -21,40 +21,42 @@
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tari_engine::state_store::StateStoreError;
-use tari_engine_types::substate::SubstateId;
 use tari_epoch_manager::EpochManagerError;
 use tari_indexer_lib::error::IndexerError;
 use tari_ootle_app_utilities::transaction_executor::TransactionProcessorError;
-use tari_ootle_common_types::{Epoch, SubstateRequirement};
+use tari_ootle_common_types::optional::IsNotFoundError;
 use tari_rpc_framework::RpcStatus;
 use thiserror::Error;
 
+use crate::{substate_manager::SubstateManagerError, template_manager::TemplateManagerError};
+
 #[derive(Error, Debug)]
 pub enum DryRunTransactionProcessorError {
-    #[error("Substate {id} v{version} is DOWN")]
-    SubstateDowned { id: SubstateId, version: u32 },
     #[error("EpochManager error: {0}")]
     EpochManager(#[from] EpochManagerError),
     #[error("Rpc error: {0}")]
     RpcRequestFailed(#[from] RpcStatus),
     #[error("TransactionProcessor error: {0}")]
     PayloadProcessor(#[from] TransactionProcessorError),
-    #[error(
-        "All validators for epoch {epoch} substate {substate_requirement} failed to return substate. does_not_exist: \
-         {nexist_count}/{max_failures}, errored: {err_count}/{max_failures} (committee_size: {committee_size})"
-    )]
-    AllValidatorsFailedToReturnSubstate {
-        substate_requirement: SubstateRequirement,
-        epoch: Epoch,
-        nexist_count: usize,
-        err_count: usize,
-        max_failures: usize,
-        committee_size: usize,
-    },
     #[error("Indexer error : {0}")]
     IndexerError(#[from] IndexerError),
     #[error("StateStore error: {0}")]
     StateStoreError(#[from] StateStoreError),
     #[error("Not a dry run transaction")]
     NonDryRunTransaction,
+    #[error("Failed to spawn blocking task: {0}")]
+    SpawnBlockingTaskError(#[from] tokio::task::JoinError),
+    #[error("TemplateManager error: {0}")]
+    TemplateManagerError(#[from] TemplateManagerError),
+    #[error("SubstateManager error: {0}")]
+    SubstateManagerError(#[from] SubstateManagerError),
+}
+
+impl IsNotFoundError for DryRunTransactionProcessorError {
+    fn is_not_found_error(&self) -> bool {
+        match self {
+            DryRunTransactionProcessorError::TemplateManagerError(err) => err.is_not_found_error(),
+            _ => false,
+        }
+    }
 }

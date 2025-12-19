@@ -3,9 +3,9 @@
 
 use tari_engine_types::{substate::SubstateId, ToByteType};
 use tari_ootle_common_types::substate_type::SubstateType;
-use tari_template_lib::{call_args, models::ComponentAddress, types::Amount};
+use tari_template_lib::{models::ComponentAddress, types::Amount};
 use tari_template_test_tooling::TemplateTest;
-use tari_transaction::{args, Transaction};
+use tari_transaction::{args, call_args, Transaction};
 
 fn setup() -> (TemplateTest, ComponentAddress, SubstateId) {
     let mut template_test = TemplateTest::new(vec!["tests/templates/nft/airdrop"]);
@@ -22,7 +22,7 @@ fn airdrop() {
         template_test.call_method(airdrop, "total_supply", call_args![], vec![template_test.owner_proof()]);
     assert_eq!(total_supply, Amount::from(100));
 
-    let builder = Transaction::builder().then(|builder| {
+    let builder = Transaction::builder_localnet().then(|builder| {
         // Create 50 accounts
         (0..50).fold(builder, |builder, _| {
             let (_, owner_public_key, _) = template_test.create_owner_proof();
@@ -45,7 +45,7 @@ fn airdrop() {
 
     template_test
         .build_and_execute(
-            Transaction::builder().then(|builder| {
+            Transaction::builder_localnet().then(|builder| {
                 addresses.iter().fold(builder, |builder, addr| {
                     builder.call_method(airdrop, "add_recipient", args![addr])
                 })
@@ -55,7 +55,7 @@ fn airdrop() {
         .unwrap_success();
 
     let result = template_test.build_and_execute(
-        Transaction::builder().then(|builder| {
+        Transaction::builder_localnet().then(|builder| {
             addresses.iter().fold(builder, |builder, addr| {
                 builder
                     .call_method(airdrop, "claim_any", args![addr])

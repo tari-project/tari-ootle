@@ -3,17 +3,17 @@
 use std::time::Duration;
 
 use anyhow::anyhow;
-use axum::headers::authorization::Bearer;
+use axum_extra::headers::authorization::Bearer;
 use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use futures::{future, future::Either};
 use log::*;
-use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::ToByteType;
-use tari_ootle_common_types::{optional::Optional, Epoch, Network};
+use tari_ootle_common_types::{optional::Optional, response_status::ResponseErrorStatus, Epoch, Network};
 use tari_ootle_wallet_sdk::{
-    apis::{config::ConfigKey, key_manager::KeyBranch, transaction::TransactionApiError},
-    network::WalletQueryErrorStatus,
+    apis::{config::ConfigKey, transaction::TransactionApiError},
+    models::WalletEvent,
 };
+use tari_ootle_wallet_sdk_services::transaction_service::TransactionServiceError;
 use tari_transaction::{args, Transaction};
 use tari_transaction_manifest::parse_manifest;
 use tari_wallet_daemon_client::{
@@ -43,11 +43,17 @@ use tokio::time;
 use super::context::HandlerContext;
 use crate::{
     handlers::{
-        helpers::{get_account, get_account_or_default, invalid_params, not_found, transaction_rejected},
-        wasm_optimizer::optimize_wasm_template,
+        helpers::{
+            get_account,
+            get_account_or_default,
+            invalid_params,
+            invalid_request,
+            not_found,
+            transaction_rejected,
+        },
         HandlerError,
     },
-    services::{transaction_service::TransactionServiceError, WalletEvent},
+    services::wasm_optimizer::optimize_wasm_template,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::transaction";
@@ -65,25 +71,32 @@ pub async fn handle_submit_instruction(
     if let Some(ref dump_account) = req.dump_outputs_into {
         let dump_account = get_account(dump_account, &sdk.accounts_api())?;
         builder = builder.put_last_instruction_output_on_workspace("bucket").call_method(
-            *dump_account.address(),
+            *dump_account.component_address(),
             "deposit",
             args![Workspace("bucket")],
         );
     }
     let fee_account = get_account(&req.fee_account, &sdk.accounts_api())?;
+    let owner_key_id = fee_account.owner_key_id().ok_or_else(|| {
+        invalid_params(
+            "fee_account",
+            Some("Fee account does not have an owner key set".to_string()),
+        )
+    })?;
 
     let transaction = builder
-        .fee_transaction_pay_from_component(*fee_account.address(), req.max_fee)
+        .pay_fee_from_component(*fee_account.component_address(), req.max_fee)
         .with_min_epoch(req.min_epoch.map(Epoch))
         .with_max_epoch(req.max_epoch.map(Epoch))
         .build_unsigned_transaction();
 
     let request = TransactionSubmitRequest {
         transaction,
-        signing_key_index: Some(fee_account.key_index()),
+        seal_signer: owner_key_id,
+        other_signers: vec![],
         detect_inputs: req.override_inputs.unwrap_or_default(),
         detect_inputs_use_unversioned: true,
-        proof_ids: vec![],
+        lock_ids: vec![],
     };
     handle_submit(context, token, request).await
 }
@@ -96,11 +109,6 @@ pub async fn handle_submit(
     // TODO: fine-grained checks of individual addresses involved (resources, components, etc)
     context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
     let sdk = context.wallet_sdk();
-    let key_api = sdk.key_manager_api();
-    // Fetch the key to sign the transaction
-    // TODO: Ideally the SDK should take care of signing the transaction internally
-    let (_, key) = key_api.get_key_or_active(KeyBranch::Account, req.signing_key_index)?;
-
     let detected_inputs = if req.detect_inputs {
         // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
         let substates = req.transaction.to_referenced_substates()?;
@@ -139,23 +147,28 @@ pub async fn handle_submit(
         req.detect_inputs_use_unversioned,
     );
 
-    let transaction = context
+    let mut transaction = context
         .transaction_builder()
         .with_unsigned_transaction(req.transaction)
         .with_inputs(detected_inputs)
-        .build_and_seal(&key.key);
+        .finish();
 
-    if log_enabled!(log::Level::Debug) {
-        for input in transaction.inputs() {
-            debug!(target: LOG_TARGET, "Input: {}", input)
+    if !req.other_signers.is_empty() {
+        let main_signer = sdk.key_manager_api().get_public_key(req.seal_signer)?;
+        let main_signer_pk = main_signer.public_key.to_byte_type();
+        let local_signer = sdk.signer_api().with_context(&main_signer_pk);
+        for key in req.other_signers {
+            transaction = local_signer.sign(key, transaction)?;
         }
     }
 
+    let transaction = sdk.signer_api().sign(req.seal_signer, transaction)?;
+
     let tx_id = transaction.calculate_id();
-    for proof_id in req.proof_ids {
-        // update the proofs table with the corresponding transaction hash
-        sdk.confidential_outputs_api()
-            .locks_set_transaction_id(proof_id, tx_id)?;
+    for lock_id in req.lock_ids {
+        // update the locks with the corresponding transaction ID so that they can be finalized/released once the
+        // transaction resolves
+        sdk.transaction_api().locks_set_transaction_id(lock_id, tx_id)?;
     }
 
     info!(
@@ -175,8 +188,8 @@ pub async fn handle_submit(
                     status,
                     message,
                 }) => match &status {
-                    WalletQueryErrorStatus::TransactionRejected { .. } => transaction_rejected(message),
-                    WalletQueryErrorStatus::NotFound { message } => not_found(message),
+                    ResponseErrorStatus::TransactionRejected { .. } => transaction_rejected(message),
+                    ResponseErrorStatus::NotFound { message } => not_found(message),
                     _ => JsonRpcError::new(
                         JsonRpcErrorReason::ApplicationError(1),
                         format!("Failed to submit transaction: {}", e),
@@ -206,8 +219,7 @@ pub async fn handle_submit_dry_run(
     let sdk = context.wallet_sdk();
     let key_api = sdk.key_manager_api();
     // Fetch the key to sign the transaction
-    // TODO: Ideally the SDK should take care of signing the transaction internally
-    let (_, key) = key_api.get_key_or_active(KeyBranch::Account, req.signing_key_index)?;
+    let key = key_api.get_public_key(req.seal_signer)?;
 
     let detected_inputs = if req.detect_inputs {
         // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
@@ -236,12 +248,13 @@ pub async fn handle_submit_dry_run(
         .with_unsigned_transaction(req.transaction)
         .with_inputs(detected_inputs)
         .with_dry_run(true)
-        .build_and_seal(&key.key);
+        .finish();
+    let transaction = sdk.signer_api().sign(key.key_id, transaction)?;
 
-    for proof_id in req.proof_ids {
+    for lock_id in req.lock_ids {
         // update the proofs table with the corresponding transaction hash
-        sdk.confidential_outputs_api()
-            .locks_set_transaction_id(proof_id, transaction.calculate_id())?;
+        sdk.transaction_api()
+            .locks_set_transaction_id(lock_id, transaction.calculate_id())?;
     }
 
     info!(
@@ -284,53 +297,54 @@ pub async fn handle_submit_manifest(
     let instructions = parse_manifest(&req.manifest, variables, Default::default())
         .map_err(|e| invalid_params("manifest", Some(format!("Failed to parse manifest: {}", e))))?;
 
-    let default_account = get_account_or_default(None, &sdk.accounts_api())?;
+    let default_account = sdk
+        .accounts_api()
+        .get_default()
+        .optional()?
+        .ok_or_else(|| invalid_request("No default account found".to_string()))?;
 
-    let signing_key_index = req.signing_key_index.unwrap_or(default_account.key_index());
-    let (_, key) = sdk
-        .key_manager_api()
-        .get_key_or_active(KeyBranch::Account, Some(signing_key_index))?;
-    let seal_signer_pk = RistrettoPublicKey::from_secret_key(&key.key);
+    let account_owner_key_id = default_account.owner_key_id().ok_or_else(|| {
+        invalid_params(
+            "signing_key_id",
+            Some("Default account does not have an owner key set".to_string()),
+        )
+    })?;
+
+    let signing_key_id = req.signing_key_id.unwrap_or(account_owner_key_id);
 
     let network = context.wallet_sdk().config_api().get::<Network>(ConfigKey::Network)?;
 
     let fee_amount = req.max_fee;
 
-    let acc_key = sdk.key_manager_api().derive_account_key(default_account.key_index())?;
-    let builder = Transaction::builder()
+    let transaction = Transaction::builder_localnet()
         .for_network(network.as_byte())
+        .with_dry_run(req.dry_run)
         .with_fee_instructions_builder(|builder| {
             if instructions.fee_instructions.is_empty() {
-                builder.call_method(*default_account.address(), "pay_fee", args![Amount(fee_amount)])
+                builder.call_method(*default_account.component_address(), "pay_fee", args![fee_amount])
             } else {
                 builder.with_instructions(instructions.fee_instructions)
             }
         })
         .with_instructions(instructions.instructions)
-        .then(|builder| {
-            if signing_key_index == default_account.key_index() {
-                builder
-            } else {
-                builder.add_signature(&seal_signer_pk.to_byte_type(), &acc_key.key)
-            }
-        });
-    let signatures = builder.signatures().to_vec();
-    let mut transaction = builder.build_unsigned_transaction();
+        .build_unsigned_transaction();
 
     // Detect inputs
-    let substates = transaction.to_referenced_substates()?;
-    let substates = substates.into_iter().collect::<Vec<_>>();
+    let substates = transaction.to_referenced_substates()?.into_iter().collect::<Vec<_>>();
     let dependencies = sdk.substate_api().locate_dependent_substates(&substates, true).await?;
     let inputs = dependencies.into_iter().map(|input| input.into_unversioned());
 
-    // set currently requested dry run status
-    transaction.set_dry_run(req.dry_run);
+    let transaction = transaction.with_inputs(inputs);
 
-    let transaction = transaction
-        .with_inputs(inputs)
-        .authorized_sealed_signer()
-        .build(signatures)
-        .seal(&key.key);
+    let transaction = if signing_key_id == account_owner_key_id {
+        transaction.finish()
+    } else {
+        sdk.signer_api()
+            .with_context(default_account.owner_public_key())
+            .sign(signing_key_id, transaction)?
+    };
+
+    let transaction = sdk.signer_api().sign(account_owner_key_id, transaction)?;
 
     if req.dry_run {
         let exec_result = context
@@ -499,6 +513,12 @@ pub async fn handle_publish_template(
     let sdk = context.wallet_sdk();
 
     let fee_account = get_account_or_default(req.fee_account.as_ref(), &sdk.accounts_api())?;
+    let owner_key_id = fee_account.owner_key_id().ok_or_else(|| {
+        invalid_params(
+            "fee_account",
+            Some("Fee account does not have an owner key set".to_string()),
+        )
+    })?;
 
     // trying to optimize WASM binary
     let wasm_binary = match optimize_wasm_template(req.binary.as_slice()).await {
@@ -512,19 +532,24 @@ pub async fn handle_publish_template(
         },
     };
 
+    let wasm_binary = wasm_binary
+        .try_into()
+        .map_err(|_| invalid_params("binary", Some("WASM binary too large".to_string())))?;
+
     let transaction = context
         .transaction_builder()
-        .fee_transaction_pay_from_component(*fee_account.address(), req.max_fee)
+        .pay_fee_from_component(*fee_account.component_address(), req.max_fee)
         .publish_template(wasm_binary)
         .build_unsigned_transaction();
 
     if req.dry_run {
         let request = TransactionSubmitDryRunRequest {
             transaction,
-            signing_key_index: Some(fee_account.key_index()),
+            seal_signer: owner_key_id,
+            other_signers: vec![],
             detect_inputs: req.detect_inputs,
             detect_inputs_use_unversioned: true,
-            proof_ids: vec![],
+            lock_ids: vec![],
         };
         let resp = handle_submit_dry_run(context, token, request).await?;
         if let Some(reject) = resp.result.finalize.any_reject() {
@@ -542,10 +567,11 @@ pub async fn handle_publish_template(
     }
     let request = TransactionSubmitRequest {
         transaction,
-        signing_key_index: Some(fee_account.key_index()),
+        seal_signer: owner_key_id,
+        other_signers: vec![],
         detect_inputs: req.detect_inputs,
         detect_inputs_use_unversioned: true,
-        proof_ids: vec![],
+        lock_ids: vec![],
     };
     let resp = handle_submit(context, token, request).await?;
     Ok(PublishTemplateResponse {

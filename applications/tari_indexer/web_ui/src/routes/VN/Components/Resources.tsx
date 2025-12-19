@@ -20,147 +20,193 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useEffect, useState } from "react";
-import { getNonFungibles, getSubstate } from "../../../utils/json_rpc";
+import { useMemo } from "react";
 import { useParams } from "react-router-dom";
 import {
   Grid,
-  ImageList,
-  ImageListItem,
-  ImageListItemBar,
+  Stack,
+  Typography,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Box,
 } from "@mui/material";
-import {
-  NonFungibleSubstate,
-  ResourceAddress,
-  substateIdToString,
-} from "@tari-project/typescript-bindings";
+import { NonFungibleSubstate, shortenString } from "@tari-project/typescript-bindings";
 import { convertCborValue } from "../../../utils/cbor";
-import { Resource } from "@tari-project/typescript-bindings/dist/types/Resource";
-
-interface NftData {
-  img: string | null;
-  title: string;
-  address: string;
-  version: number;
-}
+import { useGetSubstate, useGetNonFungibles } from "../../../api/hooks/useSubstates";
+import FetchStatusCheck from "../../../Components/FetchStatusCheck";
+import CopyToClipboard from "../../../Components/CopyToClipboard";
+import NftRow, { type NftData } from "./NftRow";
 
 function Resources() {
-  const [nfts, setNfts] = useState<NftData[]>([]);
-  const [resource, setResource] = useState<Resource | null>(null);
+  const { resourceAddress } = useParams();
 
-  let { resourceAddress } = useParams();
+  const {
+    data: substateData,
+    isLoading: substateLoading,
+    isError: substateError,
+    error: substateErrorMessage,
+  } = useGetSubstate({
+    address: resourceAddress,
+    version: null,
+    local_search_only: true,
+    enabled: !!resourceAddress,
+  });
 
-  async function update(resourceAddress: ResourceAddress) {
-    const substate = await getSubstate({
-      address: resourceAddress,
-      version: null,
-      local_search_only: true,
-    });
-    if (!("Resource" in substate.substate)) {
-      console.error("Resource not found in substate");
-      return;
+  const resource = useMemo(() => {
+    if (!substateData?.substate || !("Resource" in substateData.substate)) {
+      return null;
     }
-    const resource = substate.substate.Resource;
+    return substateData.substate.Resource;
+  }, [substateData]);
 
-    setResource(resource);
+  const isNonFungible = resource?.resource_type === "NonFungible";
 
-    if (resource.resource_type === "NonFungible") {
-      const resp = await getNonFungibles({
-        address: resourceAddress,
-        start_index: 0,
-        end_index: 10,
-      });
-      let nfts: NftData[] = [];
-      resp.non_fungibles.forEach((nft: NonFungibleSubstate) => {
-        console.log(nft);
-        if (!("NonFungible" in nft.substate)) {
-          console.error("NonFungible not found in substate");
-          return;
-        }
-        let nftData;
+  const {
+    data: nonFungiblesData,
+    isLoading: nftLoading,
+    isError: nftError,
+    error: nftErrorMessage,
+  } = useGetNonFungibles({
+    address: resourceAddress,
+    start_index: 0,
+    end_index: 10,
+    enabled: !!resourceAddress && isNonFungible,
+  });
+
+  const nfts = useMemo(() => {
+    if (!nonFungiblesData?.non_fungibles) return [];
+
+    const processedNfts: NftData[] = [];
+    nonFungiblesData.non_fungibles.forEach((nft: NonFungibleSubstate) => {
+      if (!("NonFungible" in nft.substate)) {
+        console.error("NonFungible not found in substate");
+        return;
+      }
+      let nftData;
+      try {
+        nftData = convertCborValue(nft.substate.NonFungible?.data);
+      } catch (e) {
+        console.error("Error converting CBOR value:", e);
+        return;
+      }
+      if (nftData) {
+        let mutableData;
         try {
-          nftData = convertCborValue(nft.substate.NonFungible?.data);
+          mutableData = convertCborValue(nft.substate.NonFungible?.mutable_data);
         } catch (e) {
-          console.error("Error converting CBOR value:", e);
-          return;
-        }
-        if (nftData) {
-          console.log(nftData);
-          let { image_url, name } = nftData;
-          const nftSubstateId = { NonFungible: nft.address };
-          let address = substateIdToString(nftSubstateId).split("_", 4);
-          nfts.push({
-            img: image_url,
-            title: name,
-            address: `${address[2]}_${address[3]}`,
-            version: nft.version,
-          });
+          console.error("Error converting mutable CBOR value:", e);
         }
 
-        setNfts(nfts);
-      });
-    }
-  }
+        const { name, amount } = nftData;
+        const { image_url } = mutableData || {};
+        const nftId = nft.address.id;
+        const key = Object.keys(nftId)[0];
+        const idValue = nftId[key as keyof typeof nftId];
+        const address = `${key}_${idValue}`;
+        const cleanTitle = name || `NFT ${idValue}`;
 
-  useEffect(() => {
-    if (!resourceAddress) {
-      return;
-    }
-
-    update(resourceAddress).catch((error) => {
-      console.error("Error fetching resource data:", error);
+        processedNfts.push({
+          img: image_url,
+          title: cleanTitle,
+          address,
+          version: nft.version,
+          nft,
+          amount,
+        });
+      }
     });
-  }, [resourceAddress]);
+    return processedNfts;
+  }, [nonFungiblesData]);
+
+  const isLoading = substateLoading || (isNonFungible && nftLoading);
+  const isError = substateError || nftError;
+  const errorMessage = substateErrorMessage || nftErrorMessage;
+
+  const EmptyPlaceHolder = () => (
+    <Stack alignItems="center" justifyContent="center" sx={{ py: 8 }}>
+      <Typography variant="h6" color="text.secondary" gutterBottom>
+        No NFTs found
+      </Typography>
+      <Typography variant="body2" color="text.secondary">
+        This resource doesn't have any NFTs or they couldn't be loaded.
+      </Typography>
+    </Stack>
+  );
+
+  const DisplayNFTs = () => {
+    return (
+      <TableContainer>
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableCell>NFTs ({nfts.length})</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {nfts.map((nftData, index) => (
+              <NftRow key={`${nftData.address}-${index}`} nftData={nftData} />
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    );
+  };
 
   return (
-    <Grid container spacing={2} direction="column" alignItems="left">
-      <Grid item>
-        <p>
-          {resourceAddress} Token Symbol:{" "}
-          {resource?.metadata?.SYMBOL || "<none>"}
-        </p>
-        <p>Resource Type: {resource?.resource_type}</p>
-        <p>Total Supply: {resource?.total_supply}</p>
-      </Grid>
+    <FetchStatusCheck
+      isLoading={isLoading}
+      isError={isError}
+      errorMessage={errorMessage ? (errorMessage as Error).message : "Error fetching resource data."}
+    >
+      <Stack direction="column">
+        <Box sx={{ p: 2, backgroundColor: "background.paper", borderRadius: 1 }}>
+          <Typography variant="h6" gutterBottom>
+            Resource Information
+          </Typography>
+          <Grid container spacing={0}>
+            <Grid item xs={12}>
+              <Stack direction="row" alignItems="baseline" spacing={1}>
+                <Typography variant="subtitle2">Address:</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {resourceAddress ? shortenString(resourceAddress) : ""}
+                  <CopyToClipboard copy={resourceAddress || ""} />
+                </Typography>
+              </Stack>
+            </Grid>
+            <Grid item xs={12}>
+              <Stack direction="row" alignItems="baseline" spacing={1}>
+                <Typography variant="subtitle2">Token Symbol:</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {resource?.metadata?.SYMBOL || "<none>"}
+                </Typography>
+              </Stack>
+            </Grid>
+            <Grid item xs={12}>
+              <Stack direction="row" alignItems="baseline" spacing={1}>
+                <Typography variant="subtitle2">Resource Type:</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {resource?.resource_type}
+                </Typography>
+              </Stack>
+            </Grid>
+            <Grid item xs={12}>
+              <Stack direction="row" alignItems="baseline" spacing={1}>
+                <Typography variant="subtitle2">Total Supply:</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {resource?.total_supply}
+                </Typography>
+              </Stack>
+            </Grid>
+          </Grid>
+        </Box>
 
-      {nfts.length > 0 && (
-        <ImageList cols={4} gap={8}>
-          {nfts.map((item) =>
-            item.img ? (
-              <ImageListItem key={item.address}>
-                <img
-                  src={`${item.img}?size=248&fit=fill&auto=format`}
-                  srcSet={`${item.img}?size=248&fit=fill&auto=format&dpr=2 4x`}
-                  alt={item.title || "NFT image"}
-                  loading="lazy"
-                />
-                <ImageListItemBar
-                  title={item.title}
-                  subtitle={
-                    <span>
-                      {item.address} v{item.version}
-                    </span>
-                  }
-                  position="below"
-                />
-              </ImageListItem>
-            ) : (
-              <ImageListItem key={item.address}>
-                <ImageListItemBar
-                  title={item.title}
-                  subtitle={
-                    <span>
-                      {item.address} v{item.version}
-                    </span>
-                  }
-                  position="below"
-                />
-              </ImageListItem>
-            )
-          )}
-        </ImageList>
-      )}
-    </Grid>
+        {isNonFungible && <>{nfts.length === 0 ? <EmptyPlaceHolder /> : <DisplayNFTs />}</>}
+      </Stack>
+    </FetchStatusCheck>
   );
 }
 

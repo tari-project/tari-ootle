@@ -168,14 +168,14 @@ impl FromIterator<PeerId> for MulticastDestination {
 pub struct NetworkingHandle<TMsg: MessageSpec> {
     tx_request: mpsc::Sender<NetworkingRequest<TMsg>>,
     local_peer_id: PeerId,
-    tx_events: broadcast::Sender<NetworkingEvent>,
+    tx_events: broadcast::WeakSender<NetworkingEvent>,
 }
 
 impl<TMsg: MessageSpec> NetworkingHandle<TMsg> {
     pub(super) fn new(
         local_peer_id: PeerId,
         tx_request: mpsc::Sender<NetworkingRequest<TMsg>>,
-        tx_events: broadcast::Sender<NetworkingEvent>,
+        tx_events: broadcast::WeakSender<NetworkingEvent>,
     ) -> Self {
         Self {
             tx_request,
@@ -184,8 +184,15 @@ impl<TMsg: MessageSpec> NetworkingHandle<TMsg> {
         }
     }
 
+    pub fn is_closed(&self) -> bool {
+        self.tx_request.is_closed()
+    }
+
     pub fn subscribe_events(&self) -> broadcast::Receiver<NetworkingEvent> {
-        self.tx_events.subscribe()
+        self.tx_events
+            .upgrade()
+            .unwrap_or_else(|| broadcast::Sender::new(1))
+            .subscribe()
     }
 
     pub async fn is_subscribed_to_topic<T: Into<String>>(&self, topic: T) -> Result<bool, NetworkingError> {

@@ -1,14 +1,14 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashSet, iter};
+use std::collections::HashSet;
 
 use either::Either;
 use libp2p::{gossipsub, PeerId};
 use log::*;
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_networking::{NetworkingHandle, NetworkingService};
-use tari_ootle_common_types::{Epoch, PeerAddress, ShardGroup, ToSubstateAddress};
+use tari_ootle_common_types::{Epoch, PeerAddress, ShardGroup};
 use tari_ootle_p2p::{proto, NewTransactionMessage, TariMessage, TariMessagingSpec};
 use tari_swarm::messaging::{prost::ProstCodec, Codec};
 use tokio::sync::mpsc;
@@ -152,18 +152,8 @@ impl MempoolGossip<PeerAddress> {
         } else {
             let shard_groups = msg
                 .transaction
-                .all_inputs_iter()
-                .map(|s| {
-                    s.or_zero_version()
-                        .to_substate_address()
-                        .to_shard_group(committee_info.num_preshards(), n)
-                })
-                .chain(iter::once(
-                    msg.transaction
-                        .calculate_id()
-                        .to_substate_address()
-                        .to_shard_group(committee_info.num_preshards(), n),
-                ))
+                .involved_substate_addresses_iter()
+                .map(|s| s.to_shard_group(committee_info.num_preshards(), n))
                 .filter(|sg| exclude_shard_group.as_ref() != Some(sg) && sg != &local_shard_group)
                 .collect::<HashSet<_>>();
             // If the only shard group involved is the excluded one.

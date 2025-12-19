@@ -174,17 +174,26 @@ where TCodec: Codec + Send + Clone + 'static
             ..
         }: ConnectionClosed,
     ) {
-        let connections = self
-            .connected
-            .get_mut(&peer_id)
-            .expect("Expected some established connection to peer before closing.");
+        let Some(connections) = self.connected.get_mut(&peer_id) else {
+            tracing::warn!(
+                "Expected peer entry for peer ID ({peer_id}) before closing connection with connection ID \
+                 {connection_id}."
+            );
+            return;
+        };
 
-        let connection = connections
+        let Some(connection) = connections
             .connections
             .iter()
             .position(|c| c.id == connection_id)
             .map(|p: usize| connections.connections.remove(p))
-            .expect("Expected connection to be established before closing.");
+        else {
+            tracing::warn!(
+                "Expected connection entry for connection ID ({connection_id}) before closing connection with peer \
+                 {peer_id}."
+            );
+            return;
+        };
 
         debug_assert_eq!(connections.is_empty(), remaining_established == 0);
         if connections.is_empty() {

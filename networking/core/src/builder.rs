@@ -72,7 +72,7 @@ where
     }
 
     #[cfg(feature = "metrics")]
-    pub fn with_metrics_registry(mut self, registry: &'a mut libp2p::metrics::Registry) -> Self {
+    pub fn with_metrics(mut self, registry: &'a mut libp2p::metrics::Registry) -> Self {
         self.registry = Some(registry);
         self
     }
@@ -144,6 +144,6 @@ where
             worker = worker.with_metrics(registry_mut);
         }
         let handle = tokio::spawn(worker.run());
-        Ok((NetworkingHandle::new(local_peer_id, tx, tx_events), handle))
+        Ok((NetworkingHandle::new(local_peer_id, tx, tx_events.downgrade()), handle))
     }
 }

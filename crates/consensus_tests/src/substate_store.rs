@@ -102,7 +102,7 @@ fn it_allows_down_then_up() {
         })
         .unwrap();
 
-    let s = store.get(id.to_next_version().as_ref()).unwrap();
+    let s = store.get(id.to_next_version().as_versioned_ref()).unwrap();
     assert_substate_eq(s, new_substate(1, 1));
     let s = store.get_latest_change(id.substate_id()).unwrap().into_up().unwrap();
     assert_substate_eq(s, new_substate(1, 1));
@@ -230,7 +230,7 @@ fn add_substate(store: &TestStore, seed: u8, version: u32) -> VersionedSubstateI
 
 fn create_store() -> (TestStore, TempDir) {
     let temp_dir = tempfile::tempdir().unwrap();
-    let store = RocksDbStateStore::open(&temp_dir, DatabaseOptions::default()).unwrap();
+    let store = RocksDbStateStore::open(&temp_dir, DatabaseOptions::default().with_debugging_data(true)).unwrap();
     store
         .with_write_tx(|tx| {
             let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);

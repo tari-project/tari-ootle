@@ -24,7 +24,7 @@ mod bootstrap;
 pub use bootstrap::*;
 pub mod memory;
 
-use std::{error::Error, fmt::Debug};
+use std::fmt::Debug;
 
 use tari_engine_types::substate::{Substate, SubstateId};
 use tari_ootle_common_types::optional::IsNotFoundError;
@@ -42,8 +42,6 @@ pub trait StateWriter: StateReader {
 pub enum StateStoreError {
     #[error("Non existent shard: {shard:?}")]
     NonExistentShard { shard: Vec<u8> },
-    #[error(transparent)]
-    Custom(#[from] anyhow::Error),
     #[error("Error: {0}")]
     CustomStr(String),
     #[error("{kind} not found with key {key}")]
@@ -53,10 +51,6 @@ pub enum StateStoreError {
 }
 
 impl StateStoreError {
-    pub fn custom<E: Error + Sync + Send + 'static>(e: E) -> Self {
-        StateStoreError::Custom(e.into())
-    }
-
     pub fn custom_str(e: &str) -> Self {
         StateStoreError::CustomStr(e.to_string())
     }

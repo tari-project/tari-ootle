@@ -1,16 +1,17 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::{fs::File, path::PathBuf};
+
 use anyhow::anyhow;
 use minotari_node_grpc_client::grpc;
 use minotari_wallet_grpc_client::WalletGrpcClient;
 use serde::Serialize;
 use tari_crypto::tari_utilities::ByteArray;
-use tari_template_lib_types::crypto::{
-    CommitmentSignatureBytes,
-    PedersenCommitmentBytes,
-    RistrettoPublicKeyBytes,
-    Scalar32Bytes,
+use tari_engine_types::confidential::{AbridgedTransactionKernel, EncodedMerkleProof, MinotariBurnClaimProof};
+use tari_template_lib_types::{
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes},
+    EncryptedData,
 };
 use tari_transaction_components::transaction_components::{memo_field::TxType, MemoField};
 use tari_wallet_daemon_client::types::ClaimBurnProof;
@@ -66,37 +67,115 @@ impl MinoTariWalletProcess {
             return Err(anyhow!("Failed to burn funds: {}", resp.failure_message));
         }
 
-        let ownership_proof = resp
-            .ownership_proof
-            .ok_or_else(|| anyhow!("No ownership proof in response"))?;
         let commitment = PedersenCommitmentBytes::from_bytes(&resp.commitment)
             .map_err(|e| anyhow!("commitment parse error: {e}"))?;
 
-        let ownership_proof = CommitmentSignatureBytes::new(
-            PedersenCommitmentBytes::from_bytes(&ownership_proof.public_nonce)
-                .map_err(|e| anyhow!("comsig public_nonce parse error {e}"))?,
-            Scalar32Bytes::from_bytes(&ownership_proof.u).map_err(|e| anyhow!("comsig u parse error {e}"))?,
-            Scalar32Bytes::from_bytes(&ownership_proof.v).map_err(|e| anyhow!("comsig v parse error {e}"))?,
-        );
-
-        let reciprocal_claim_public_key = RistrettoPublicKeyBytes::from_bytes(&resp.reciprocal_claim_public_key)
-            .map_err(|e| anyhow!("reciprocal_claim_public_key parse error {e}"))?;
-
-        let proof = BurnClaimProofResponse {
+        let resp = BurnClaimProofResponse {
             tx_id: resp.transaction_id,
             claim_public_key,
-            claim_proof: ClaimBurnProof {
-                commitment,
-                ownership_proof,
-                reciprocal_claim_public_key,
-                range_proof: resp
-                    .range_proof
-                    .try_into()
-                    .map_err(|e| anyhow!("range_proof parse error {e}"))?,
-            },
+            commitment,
         };
 
-        Ok(proof)
+        Ok(resp)
+    }
+
+    pub async fn wait_for_claim_burn_proof_task(
+        mut client: WalletGrpcClient<tonic::transport::Channel>,
+        path: PathBuf,
+        commitment: PedersenCommitmentBytes,
+        value: u64,
+        nonce_key_index: u64,
+    ) -> anyhow::Result<()> {
+        let proof = loop {
+            let resp = client
+                .get_burn_claim_proof(grpc::GetBurnClaimProofRequest {
+                    commitment: commitment.as_bytes().to_vec(),
+                })
+                .await?;
+            let resp = resp.into_inner();
+            if let Some(merkle_proof) = resp.merkle_proof {
+                let claim_proof = resp.claim_proof.ok_or_else(|| anyhow!("No claim proof in response"))?;
+                let ownership_proof = claim_proof
+                    .ownership_proof
+                    .ok_or_else(|| anyhow!("No ownership proof in response"))?;
+                let commitment = PedersenCommitmentBytes::from_bytes(&claim_proof.commitment)
+                    .map_err(|e| anyhow!("commitment parse error: {e}"))?;
+
+                let ownership_proof = SchnorrSignatureBytes::new(
+                    RistrettoPublicKeyBytes::from_bytes(&ownership_proof.public_nonce)
+                        .map_err(|e| anyhow!("sig public_nonce parse error {e}"))?,
+                    Scalar32Bytes::from_bytes(&ownership_proof.signature)
+                        .map_err(|e| anyhow!("sig parse error {e}"))?,
+                );
+
+                let reciprocal_claim_public_key =
+                    RistrettoPublicKeyBytes::from_bytes(&claim_proof.reciprocal_claim_public_key)
+                        .map_err(|e| anyhow!("reciprocal_claim_public_key parse error {e}"))?;
+                let kernel = resp.kernel.ok_or_else(|| anyhow!("No kernel in response"))?;
+                let kernel = AbridgedTransactionKernel {
+                    version: kernel.version as u8,
+                    fee: kernel.fee,
+                    lock_height: kernel.lock_height,
+                    excess: kernel
+                        .excess
+                        .as_slice()
+                        .try_into()
+                        .map_err(|e| anyhow!("excess parse error: {e}"))?,
+                    excess_sig: {
+                        let excess_sig = kernel
+                            .excess_sig
+                            .as_ref()
+                            .ok_or_else(|| anyhow!("No excess_sig in response"))?;
+
+                        SchnorrSignatureBytes::new(
+                            excess_sig
+                                .public_nonce
+                                .as_slice()
+                                .try_into()
+                                .map_err(|e| anyhow!("excess_sig parse error: {e}"))?,
+                            excess_sig
+                                .signature
+                                .as_slice()
+                                .try_into()
+                                .map_err(|e| anyhow!("excess_sig parse error: {e}"))?,
+                        )
+                    },
+                };
+
+                break ClaimBurnProof {
+                    claim_proof: MinotariBurnClaimProof {
+                        burn_public_key: reciprocal_claim_public_key,
+                        commitment,
+                        ownership_proof,
+                        encoded_merkle_proof: EncodedMerkleProof {
+                            block_hash: merkle_proof.block_hash.as_slice().try_into().map_err(|e| {
+                                anyhow!(
+                                    "Block hash length {} is out of bounds: {e}",
+                                    merkle_proof.block_hash.len()
+                                )
+                            })?,
+                            encoded_merkle_proof: merkle_proof
+                                .encoded_proof
+                                .try_into()
+                                .map_err(|e| anyhow!("Encoded merkle proof length is out of bounds: {e}"))?,
+                            leaf_index: merkle_proof.leaf_index,
+                        },
+                        kernel,
+                        value,
+                    },
+                    owner_nonce_key_index: nonce_key_index,
+                    encrypted_data: EncryptedData::try_from(resp.encrypted_data)
+                        .map_err(|e| anyhow!("Encrypted data length is out of bounds: {e}",))?,
+                };
+            };
+
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        };
+
+        let mut file = File::create(&path)?;
+        serde_json::to_writer_pretty(&mut file, &proof)?;
+
+        Ok(())
     }
 
     pub async fn get_balance(&self) -> anyhow::Result<grpc::GetBalanceResponse> {
@@ -128,5 +207,5 @@ impl MinoTariWalletProcess {
 pub struct BurnClaimProofResponse {
     pub tx_id: u64,
     pub claim_public_key: RistrettoPublicKeyBytes,
-    pub claim_proof: ClaimBurnProof,
+    pub commitment: PedersenCommitmentBytes,
 }

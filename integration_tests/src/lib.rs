@@ -41,23 +41,22 @@ use tari_common_types::{
 };
 use tari_crypto::keys::SecretKey;
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::SubstateRequirement;
+use tari_ootle_common_types::{ConsensusConstants, SubstateRequirement};
+use tari_ootle_wallet_sdk::models::AccountWithAddress;
 use tari_sidechain::EvictionProof;
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_transaction_components::{
     consensus::ConsensusManager,
-    key_manager::{TariKeyId, TransactionKeyManagerInterface},
+    key_manager::{KeyManager, TariKeyId, TransactionKeyManagerInterface},
 };
-use tari_transaction_key_manager::{create_memory_db_key_manager, MemoryDbKeyManager};
-use tari_wallet_daemon_client::types::ExtClaimBurnProof;
 use template::RegisteredTemplate;
 use validator_node::ValidatorNodeProcess;
 use wallet::WalletProcess;
 use wallet_daemon::TariWalletDaemonProcess;
 
-use crate::logging::get_base_dir;
+use crate::{claim_proof::CucumberClaimProof, logging::get_base_dir};
 
 pub mod base_node;
+pub mod claim_proof;
 pub mod helpers;
 pub mod http_server;
 pub mod indexer;
@@ -66,14 +65,15 @@ pub mod miner;
 pub mod template;
 pub mod util;
 pub mod validator_node;
-pub mod validator_node_cli;
+pub mod validator_node_client;
 pub mod wallet;
 pub mod wallet_daemon;
-pub mod wallet_daemon_cli;
+pub mod wallet_daemon_client;
 
 #[derive(cucumber::World)]
 #[world(init = Self::init)]
 pub struct TariWorld {
+    pub consensus_constants: ConsensusConstants,
     pub base_nodes: IndexMap<String, BaseNodeProcess>,
     pub wallets: IndexMap<String, WalletProcess>,
     pub validator_nodes: IndexMap<String, ValidatorNodeProcess>,
@@ -85,16 +85,14 @@ pub struct TariWorld {
     pub http_server: Option<MockHttpServer>,
     pub template_mock_server_port: Option<u16>,
     pub current_scenario_name: Option<String>,
-    pub claim_proofs: HashMap<String, ExtClaimBurnProof>,
+    pub claim_proofs: HashMap<String, CucumberClaimProof>,
     pub substate_ids: IndexMap<String, SubstateId>,
     pub num_databases_saved: usize,
-    pub account_keys: IndexMap<String, RistrettoPublicKeyBytes>,
-    pub key_manager: MemoryDbKeyManager,
-    /// Key name -> key index
-    pub wallet_keys: IndexMap<String, u64>,
+    pub key_manager: KeyManager,
+    pub wallet_accounts: IndexMap<String, AccountWithAddress>,
     pub wallet_daemons: IndexMap<String, TariWalletDaemonProcess>,
     /// Used for all one-sided coinbase payments
-    pub wallet_private_key: PrivateKey,
+    pub minotari_wallet_private_key: PrivateKey,
     /// A receiver wallet address that is used for default one-sided coinbase payments
     pub default_payment_address: TariAddress,
     pub consensus_manager: ConsensusManager,
@@ -111,6 +109,7 @@ impl TariWorld {
         )
         .unwrap();
         Self {
+            consensus_constants: ConsensusConstants::devnet(),
             base_nodes: IndexMap::new(),
             wallets: IndexMap::new(),
             validator_nodes: IndexMap::new(),
@@ -125,11 +124,10 @@ impl TariWorld {
             claim_proofs: HashMap::new(),
             substate_ids: IndexMap::new(),
             num_databases_saved: 0,
-            account_keys: IndexMap::new(),
-            key_manager: create_memory_db_key_manager().await.unwrap(),
-            wallet_keys: IndexMap::new(),
+            key_manager: KeyManager::new_random().unwrap(),
+            wallet_accounts: IndexMap::new(),
             wallet_daemons: IndexMap::new(),
-            wallet_private_key,
+            minotari_wallet_private_key: wallet_private_key,
             default_payment_address,
             consensus_manager: ConsensusManager::builder(L1Network::LocalNet).build(),
             eviction_proofs: HashMap::new(),
@@ -216,18 +214,34 @@ impl TariWorld {
             .unwrap_or_else(|| panic!("Indexer {} not found", name))
     }
 
+    pub fn get_output<T: AsRef<str>>(&self, output_name: &str, discriminator: T) -> &SubstateRequirement {
+        let outputs = self.outputs.get(output_name).unwrap_or_else(|| {
+            self.print();
+            panic!("Output {} not found", output_name)
+        });
+        outputs.get(discriminator.as_ref()).unwrap_or_else(|| {
+            self.print();
+            panic!(
+                "Output {output_name} with discriminator {} not found",
+                discriminator.as_ref()
+            )
+        })
+    }
+
+    pub fn get_output_fq<T: AsRef<str>>(&self, fq_output_name: T) -> &SubstateRequirement {
+        let (output_name, discriminator) = fq_output_name.as_ref().trim().split_once("/").unwrap_or_else(|| {
+            panic!(
+                "Fully qualified output name must be in the format <output_name>/<discriminator>, got {}",
+                fq_output_name.as_ref()
+            )
+        });
+        self.get_output(output_name, discriminator)
+    }
+
     pub fn get_base_node(&self, name: &str) -> &BaseNodeProcess {
         self.base_nodes
             .get(name)
             .unwrap_or_else(|| panic!("Base node {} not found", name))
-    }
-
-    pub fn get_account_component_address(&self, name: &str) -> Option<SubstateRequirement> {
-        let all_components = self
-            .outputs
-            .get(name)
-            .unwrap_or_else(|| panic!("Account component address {} not found", name));
-        all_components.get("components/Account").cloned()
     }
 
     pub fn add_eviction_proof<T: Into<String>>(&mut self, name: T, eviction_proof: EvictionProof) -> &mut Self {
@@ -303,11 +317,86 @@ impl TariWorld {
         }
     }
 
-    pub async fn script_key_id(&self) -> TariKeyId {
+    pub fn script_key_id(&self) -> TariKeyId {
         self.key_manager
-            .import_key(self.wallet_private_key.clone())
-            .await
+            .create_encrypted_key(self.minotari_wallet_private_key.clone(), None)
             .unwrap()
+    }
+
+    pub fn print(&self) {
+        eprintln!();
+        eprintln!("======================================");
+        eprintln!("=========== CUCUMBER WORLD ===========");
+        eprintln!("======================================");
+        eprintln!();
+
+        // base nodes
+        for (name, node) in &self.base_nodes {
+            eprintln!(
+                "Base node \"{}\": grpc port \"{}\", temp dir path \"{}\"",
+                name,
+                node.grpc_port,
+                node.temp_dir_path.display()
+            );
+        }
+
+        // wallets
+        for (name, node) in &self.wallets {
+            eprintln!(
+                "Wallet \"{}\": grpc port \"{}\", temp dir path \"{}\"",
+                name,
+                node.grpc_port,
+                node.temp_dir_path.display()
+            );
+        }
+
+        // vns
+        for (name, node) in &self.validator_nodes {
+            eprintln!(
+                "Validator node \"{}\": json rpc port \"{}\", web ui port \"{}\", temp dir path \"{:?}\"",
+                name, node.json_rpc_port, node.web_ui_port, node.temp_dir_path
+            );
+        }
+
+        // indexes
+        for (name, node) in &self.indexers {
+            eprintln!(
+                "Indexer \"{}\": json rpc port \"{}\", graphql port \"{}\", web ui port  \"{}\", temp dir path \"{}\"",
+                name, node.api_port, node.graphql_port, node.web_ui_port, node.temp_dir_path
+            );
+        }
+
+        // templates
+        for (name, template) in &self.templates {
+            eprintln!("Template \"{}\" with address \"{}\"", name, template.address);
+        }
+
+        // templates
+        for (name, outputs) in &self.outputs {
+            eprintln!("Outputs \"{}\"", name);
+            for (name, addr) in outputs {
+                eprintln!("  - {}: {}", name, addr);
+            }
+        }
+
+        // wallet daemons
+        for (name, daemon) in &self.wallet_daemons {
+            eprintln!(
+                "Wallet daemon \"{}\": json rpc port \"{}\", indexer api port \"{}\", temp dir path \"{:?}\"",
+                name, daemon.json_rpc_port, daemon.indexer_api_port, daemon.temp_path_dir
+            );
+        }
+
+        for (account_name, account) in &self.wallet_accounts {
+            eprintln!(
+                "Wallet account \"{}\" with address \"{}\"",
+                account_name, account.address
+            );
+        }
+
+        eprintln!();
+        eprintln!("======================================");
+        eprintln!();
     }
 }
 
@@ -328,8 +417,7 @@ impl Debug for TariWorld {
             .field("claim_proofs", &self.claim_proofs.keys())
             .field("addresses", &self.substate_ids.keys())
             .field("num_databases_saved", &self.num_databases_saved)
-            .field("account_keys", &self.account_keys.keys())
-            .field("wallet_keys", &self.wallet_keys.keys())
+            .field("wallet_accounts", &self.wallet_accounts.keys())
             .field("wallet_daemons", &self.wallet_daemons.keys())
             .finish()
     }

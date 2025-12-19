@@ -6,10 +6,10 @@ use std::ops::{Deref, DerefMut};
 use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection};
 use log::{debug, info, warn};
 use serde::Serialize;
-use tari_engine_types::events::Event;
+use tari_engine_types::transaction_receipt::{TransactionReceipt, TransactionReceiptAddress};
 use tari_ootle_common_types::{shard::Shard, substate_type::SubstateType, Epoch, StateVersion};
 use tari_ootle_storage::{
-    consensus_models::{EpochCheckpoint, SubstateUpdateProof},
+    consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof},
     StorageError,
 };
 use tari_ootle_storage_sqlite::SqliteTransaction;
@@ -17,20 +17,13 @@ use tari_transaction::Transaction;
 
 use crate::{
     diesel::ExpressionMethods,
+    network_state_sync::EventFilter,
     storage_sqlite::{
-        models::{
-            NewEvent,
-            NewScannedBlockId,
-            NewSubstate,
-            SubstateRecord,
-            UtxoRecordInsert,
-            UtxoRecordUpdate,
-            UtxoUpdateRecord,
-        },
+        models::{NewEvent, NewSubstate, SubstateRecord, UtxoRecordInsert, UtxoRecordUpdate, UtxoUpdateRecord},
         reader::SqliteStoreReadTransaction,
         serialization::{serialize_bincode, serialize_hex, serialize_json},
-        IndexerStoreWriteTransaction,
     },
+    store::IndexerStoreWriteTransaction,
 };
 
 const LOG_TARGET: &str = "tari::indexer::storage_sqlite::writer";
@@ -66,6 +59,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         const OPERATION: &str = "key_value_set";
         use crate::storage_sqlite::schema::key_values;
         let json = serialize_json(&value)?;
+        debug!(target: LOG_TARGET, "key_value_set called {} {}", key.as_ref(), json);
 
         diesel::insert_into(key_values::table)
             .values((key_values::key.eq(key.as_ref()), key_values::value.eq(&json)))
@@ -115,6 +109,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
 
     fn batch_insert_utxo_updates<I: IntoIterator<Item = UtxoUpdateRecord>>(
         &mut self,
+        epoch: Epoch,
         updates: I,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "batch_insert_utxo_updates";
@@ -135,6 +130,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                         resource_address,
                         state_version: unspent.state_version.as_u64() as i64,
                         utxo_tag: unspent.utxo_output.tag.value() as i32,
+                        epoch: epoch.as_u64() as i64,
                         is_spent: false,
                         is_burnt: false,
                         is_frozen: unspent.is_frozen,
@@ -149,6 +145,7 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
                     let resource_address = spent.address.resource_address().to_string();
                     let commitment = spent.address.id().to_commitment_hex_string();
                     let update = UtxoRecordUpdate {
+                        epoch: Some(epoch.as_u64() as i64),
                         version: Some(spent.version as i32),
                         // Prune the UTXO data for spent outputs
                         output: Some(None),
@@ -170,8 +167,31 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         Ok(())
     }
 
-    fn upsert_substate(&mut self, new_substate: NewSubstate) -> Result<(), StorageError> {
+    fn upsert_substate(&mut self, substate: &SubstateData) -> Result<(), StorageError> {
         use crate::storage_sqlite::schema::substates;
+
+        let template_address = substate
+            .value
+            .value()
+            .and_then(|s| s.component())
+            .map(|c| c.template_address.to_string());
+        let module_name = substate
+            .value
+            .value()
+            .and_then(|s| s.component())
+            .map(|c| c.module_name.clone());
+        let new_substate = NewSubstate {
+            address: substate.substate_id.to_string(),
+            version: substate.version as i32,
+            data: substate
+                .value
+                .value()
+                .map(serialize_json)
+                .transpose()?
+                .unwrap_or_default(),
+            template_address,
+            module_name,
+        };
 
         let address = &new_substate.address;
         let current_substate = substates::table
@@ -213,64 +233,52 @@ impl IndexerStoreWriteTransaction for SqliteStoreWriteTransaction<'_> {
         Ok(())
     }
 
-    fn batch_insert_events<I: IntoIterator<Item = Event>>(&mut self, events: I) -> Result<(), StorageError> {
-        const OPERATION: &str = "batch_insert_events";
-        use crate::storage_sqlite::schema::events;
+    fn batch_insert_transaction_receipts<I: IntoIterator<Item = (TransactionReceiptAddress, TransactionReceipt)>>(
+        &mut self,
+        receipts: I,
+        event_filters: &[EventFilter],
+    ) -> Result<(), StorageError> {
+        const OPERATION: &str = "batch_insert_transaction_receipts";
+        use crate::storage_sqlite::schema::{events, transaction_receipts};
 
-        let events = events.into_iter().map(|event| {
-            Ok::<_, StorageError>(NewEvent {
-                template_address: event.template_address().to_string(),
-                tx_hash: event.tx_hash().to_string(),
-                topic: event.topic(),
-                payload: serialize_json(event.payload())?,
-                substate_id: event.substate_id().map(|s| s.to_string()),
-            })
-        });
+        for (receipt_addr, receipt) in receipts {
+            let receipt_addr_hex = serialize_hex(receipt_addr.as_object_key());
 
-        for result in events {
-            let event = result?;
-
-            diesel::insert_into(events::table)
-                .values(event)
+            diesel::insert_into(transaction_receipts::table)
+                .values((
+                    transaction_receipts::address.eq(&receipt_addr_hex),
+                    transaction_receipts::data.eq(serialize_json(&receipt)?),
+                ))
                 .execute(self.connection())
-                .map_err(|e| StorageError::QueryError {
-                    reason: format!("{OPERATION}: {}", e),
-                })?;
+                .map_err(|e| StorageError::general(OPERATION, e))?;
+
+            // Insert events
+            let events = receipt.events.iter()
+                // only keep the events specified by the indexer filter
+                .filter(|event| {
+                    event_filters.is_empty() || event_filters.iter().any(|filter| filter.matches(event))
+                })
+                .map(|event| {
+                    Ok::<_, StorageError>(NewEvent {
+                        template_address: event.template_address().to_string(),
+                        tx_hash: &receipt_addr_hex,
+                        topic: event.topic(),
+                        payload: serialize_json(event.payload())?,
+                        substate_id: event.substate_id().map(|s| s.to_string()),
+                    })
+                });
+
+            for result in events {
+                let event = result?;
+
+                diesel::insert_into(events::table)
+                    .values(event)
+                    .execute(self.connection())
+                    .map_err(|e| StorageError::QueryError {
+                        reason: format!("{OPERATION}: {}", e),
+                    })?;
+            }
         }
-
-        Ok(())
-    }
-
-    fn save_scanned_block_id(&mut self, new: NewScannedBlockId) -> Result<(), StorageError> {
-        use crate::storage_sqlite::schema::scanned_block_ids;
-
-        diesel::insert_into(scanned_block_ids::table)
-            .values(&new)
-            .on_conflict((scanned_block_ids::epoch, scanned_block_ids::shard_group))
-            .do_update()
-            .set(new.clone())
-            .execute(&mut *self.connection())
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("save_scanned_block_id error: {}", e),
-            })?;
-
-        debug!(
-            target: LOG_TARGET,
-            "Added new scanned block id {} for epoch {} and shard {:?}", hex::encode(&new.last_block_id), new.epoch, new.shard_group
-        );
-
-        Ok(())
-    }
-
-    fn delete_scanned_epochs_older_than(&mut self, epoch: Epoch) -> Result<(), StorageError> {
-        use crate::storage_sqlite::schema::scanned_block_ids;
-
-        diesel::delete(scanned_block_ids::table)
-            .filter(scanned_block_ids::epoch.lt(epoch.as_u64() as i64))
-            .execute(&mut *self.connection())
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("delete_scanned_epochs_older_than: {}", e),
-            })?;
 
         Ok(())
     }

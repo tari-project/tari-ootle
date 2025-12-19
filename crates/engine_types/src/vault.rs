@@ -27,8 +27,7 @@ use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_template_lib::{
     args::VaultFreezeFlags,
     models::{ConfidentialWithdrawProof, NonFungibleId, ResourceAddress, VaultId},
-    prelude::ResourceType,
-    types::{crypto::PedersenCommitmentBytes, Amount},
+    types::{crypto::PedersenCommitmentBytes, Amount, ResourceType},
 };
 
 use crate::{
@@ -38,7 +37,7 @@ use crate::{
     resource_container::{ResourceContainer, ResourceError},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, borsh::BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Vault {
     resource_container: ResourceContainer,
@@ -104,7 +103,7 @@ impl Vault {
     }
 
     pub fn balance(&self) -> Amount {
-        self.resource_container.amount()
+        self.resource_container.unlocked_amount()
     }
 
     pub fn locked_balance(&self) -> Amount {

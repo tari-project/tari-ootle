@@ -3,13 +3,14 @@
 
 use std::str::FromStr;
 
+use tari_ootle_wallet_crypto::memo::Memo;
 use tari_template_lib::{
-    models::{EncryptedData, VaultId},
+    models::VaultId,
     prelude::{ComponentAddress, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
-    types::Amount,
+    types::{Amount, EncryptedData},
 };
 
-use crate::models::WalletLockId;
+use crate::models::{KeyId, WalletLockId};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConfidentialOutputModel {
@@ -18,14 +19,17 @@ pub struct ConfidentialOutputModel {
     pub commitment: PedersenCommitmentBytes,
     pub value: Amount,
     pub sender_public_nonce: Option<RistrettoPublicKeyBytes>,
-    pub encryption_secret_key_index: u64,
+    pub view_only_key_id: KeyId,
+    pub owner_key_id: Option<KeyId>,
     pub encrypted_data: EncryptedData,
     pub public_asset_tag: Option<RistrettoPublicKeyBytes>,
+    pub memo: Option<Memo>,
     pub status: OutputStatus,
     pub lock_id: Option<WalletLockId>,
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum OutputStatus {
     /// The output is available for spending
     Unspent,

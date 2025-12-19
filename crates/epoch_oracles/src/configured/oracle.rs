@@ -7,17 +7,14 @@ use std::{
     task::{Context, Poll},
 };
 
+use anyhow::Context as _;
 use log::*;
 use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle, ValidatorNodeChange};
 use tari_ootle_common_types::{displayable::Displayable, Epoch};
 
 use super::config::Config;
 use crate::{
-    configured::{
-        epoch_ticker::{EpochTicker, IntervalEpochTicker},
-        EpochTickerData,
-        Validator,
-    },
+    configured::{epoch_ticker::EpochTicker, real_time_ticker::RealTimeEpochTicker, EpochTickerData, Validator},
     store::{EpochOracleStore, StoreKey},
 };
 
@@ -32,14 +29,19 @@ pub struct ConfiguredEpochOracle<TStore, TTicker> {
     is_initialized: bool,
     is_done: bool,
 }
-impl<TStore: EpochOracleStore + Send> ConfiguredEpochOracle<TStore, IntervalEpochTicker> {
-    pub fn new(config: Config, store: TStore) -> Self {
+impl<TStore: EpochOracleStore + Send> ConfiguredEpochOracle<TStore, RealTimeEpochTicker> {
+    pub fn create(config: Config, store: TStore) -> anyhow::Result<Self> {
         let epoch = store
-            .get(StoreKey::ConfiguredCurrentEpoch.as_key_bytes())
-            .expect("Failed to get current epoch from store")
+            .get(StoreKey::ConfiguredCurrentEpoch.as_key_bytes())?
             .unwrap_or_else(Epoch::zero);
-        let ticker = IntervalEpochTicker::new(config.epoch_time, config.initial_epoch, epoch);
-        Self {
+        let mut ticker = RealTimeEpochTicker::new(config.initial_epoch, config.base_time, epoch);
+        if let Some(epoch_time) = config.epoch_time {
+            ticker = ticker.with_epoch_time_secs(epoch_time.as_secs().try_into().context("Epoch time cannot be zero")?);
+        } else {
+            ticker = ticker.disable_ticks();
+        }
+
+        Ok(Self {
             config,
             store,
             ticker,
@@ -47,7 +49,7 @@ impl<TStore: EpochOracleStore + Send> ConfiguredEpochOracle<TStore, IntervalEpoc
             queued_validators: HashMap::new(),
             is_initialized: false,
             is_done: false,
-        }
+        })
     }
 }
 
@@ -95,6 +97,16 @@ impl<TStore: EpochOracleStore + Send, TTicker: EpochTicker> ConfiguredEpochOracl
     fn prepare_next_epoch(&mut self, epoch_ticker_data: EpochTickerData) -> anyhow::Result<()> {
         let next_epoch = epoch_ticker_data.epoch;
         let epoch_hash = epoch_ticker_data.epoch_hash;
+        if next_epoch.is_zero() {
+            // If at epoch 0, just emit the epoch changed and done for now events
+            self.pending_events.push_back(EpochEvent::EpochChanged {
+                epoch: next_epoch,
+                epoch_hash,
+            });
+
+            return Ok(());
+        }
+
         let done_for_now = epoch_ticker_data.done_for_now;
         let prev_epoch = next_epoch - Epoch(1);
         self.store

@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use tari_template_abi::rust::{fmt, ops::Deref};
 
-use crate::{crypto::InvalidByteLengthError, serde_helpers};
+use crate::{crypto::InvalidByteLengthError, hex::write_hex_fmt, serde_helpers};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -21,8 +21,12 @@ impl Scalar32Bytes {
         32
     }
 
-    pub fn zero() -> Self {
+    pub const fn zero() -> Self {
         Self([0u8; Self::length()])
+    }
+
+    pub fn is_zero(&self) -> bool {
+        self.0.iter().all(|&b| b == 0)
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, InvalidByteLengthError> {
@@ -77,9 +81,6 @@ impl From<[u8; Scalar32Bytes::length()]> for Scalar32Bytes {
 
 impl fmt::Display for Scalar32Bytes {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for x in self.0 {
-            write!(f, "{:02x?}", x)?;
-        }
-        Ok(())
+        write_hex_fmt(f, &self.0)
     }
 }

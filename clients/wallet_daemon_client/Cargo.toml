@@ -15,6 +15,7 @@ tari_ootle_wallet_sdk = { workspace = true }
 # TODO: Ideally we should not have to include the WASM template lib, we should perhaps extract the address types into a separate crate (e.g. template_types)
 tari_template_lib = { workspace = true }
 tari_template_abi = { workspace = true }
+tari_ootle_address = { workspace = true, features = ["serde"] }
 
 time = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
@@ -23,7 +24,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 webauthn-rs-proto = { workspace = true }
-zeroize = { workspace = true, features = ["serde"] }
+zeroize = { workspace = true, features = ["serde", "simd"] }
 
 [features]
-ts = ["ts-rs"]
+ts = ["ts-rs", "tari_ootle_wallet_sdk/ts", "tari_ootle_common_types/ts", "tari_ootle_address/ts"]

@@ -20,6 +20,7 @@ tari_consensus_types = { workspace = true }
 tari_template_abi = { workspace = true }
 
 reqwest = { workspace = true, features = ["json"] }
+indexmap = { workspace = true }
 multiaddr = { workspace = true }
 serde = { workspace = true, default-features = true, features = ["rc"] }
 serde_json = { workspace = true }

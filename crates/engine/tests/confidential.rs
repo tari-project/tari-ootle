@@ -13,7 +13,6 @@ use tari_engine_types::{
 };
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_template_lib::{
-    call_args,
     models::{Account, ComponentAddress},
     prelude::ConfidentialOutputStatement,
     types::{
@@ -31,11 +30,11 @@ use tari_template_test_tooling::{
             generate_withdraw_proof_with_inputs,
             generate_withdraw_proof_with_view_key,
         },
-        AlwaysMissLookupTable,
+        GenerateValueLookup,
     },
     TemplateTest,
 };
-use tari_transaction::{args, Transaction};
+use tari_transaction::{args, call_args, Transaction};
 use tari_transaction_manifest::ManifestValue;
 use tari_utilities::ByteArray;
 
@@ -69,12 +68,15 @@ fn setup(
 
 #[test]
 fn mint_initial_commitment() {
-    let (confidential_proof, _mask, _change) = generate_confidential_output_statement(Amount::from(100), None);
-    let (mut template_test, faucet, _faucet_resx) = setup(confidential_proof, None);
+    let (confidential_proof, _mask, _change) = generate_confidential_output_statement(100, None);
+    let (test, _faucet, faucet_resx) = setup(confidential_proof, None);
 
-    let total_supply: Option<Amount> = template_test.call_method(faucet, "total_supply", call_args![], vec![]);
-    // Total supply cannot be tracked for confidential resources
-    assert!(total_supply.is_none());
+    let resource = test
+        .read_only_state_store()
+        .get_resource(&faucet_resx.as_resource_address().unwrap())
+        .unwrap();
+    // TODO: confidential total_supply tracking only tracks revealed funds
+    assert_eq!(resource.total_supply(), Some(Amount::from(0)));
 }
 
 #[test]
@@ -89,7 +91,7 @@ fn mint_more_later() {
 
     let withdraw_proof = generate_withdraw_proof(&mask, 100, None, 0);
     template_test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(faucet, "take_free_coins", args![withdraw_proof.proof])
             .put_last_instruction_output_on_workspace("coins")
             .call_method(user_account, "deposit", args![Workspace("coins")])
@@ -357,10 +359,7 @@ fn multi_commitment_join() {
     let withdraw_proof1 = generate_withdraw_proof(&faucet_mask, 1000, Some(99_000), 0);
     let withdraw_proof2 = generate_withdraw_proof(withdraw_proof1.change_mask.as_ref().unwrap(), 1000, Some(98_000), 0);
     let join_proof = generate_withdraw_proof_with_inputs(
-        &[
-            (withdraw_proof1.output_mask, 1000.into()),
-            (withdraw_proof2.output_mask, 1000.into()),
-        ],
+        &[(withdraw_proof1.output_mask, 1000), (withdraw_proof2.output_mask, 1000)],
         0,
         2000,
         None,
@@ -428,7 +427,7 @@ fn mint_and_transfer_revealed() {
 
     let (user_account, _, _) = test.create_empty_account();
 
-    test.call_method::<()>(faucet, "mint_revealed", call_args![Amount(123)], vec![]);
+    test.call_method::<()>(faucet, "mint_revealed", call_args![123], vec![]);
     let balance: Amount = test.call_method(faucet, "vault_balance", call_args![], vec![]);
     assert_eq!(balance, Amount::from(123));
 
@@ -436,7 +435,7 @@ fn mint_and_transfer_revealed() {
     let withdraw = generate_withdraw_proof_with_inputs(&[], 123, 100, None, 23);
 
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(faucet, "take_free_coins", args![withdraw.proof])
             .put_last_instruction_output_on_workspace("b")
             .call_method(user_account, "deposit", args![Workspace("b")])
@@ -456,7 +455,7 @@ fn mint_revealed_with_invalid_proof() {
     let (mut test, faucet, _faucet_resx) = setup(confidential_proof, None);
 
     let reason = test.execute_expect_failure(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(faucet, "mint_revealed_with_bad_range_proof", args![Amount(123)])
             .build_and_seal(test.secret_key()),
         vec![],
@@ -508,7 +507,7 @@ fn mint_with_view_key() {
 
     let withdraw_proof = generate_withdraw_proof_with_view_key(&mask, 100, 55, Some(100 - 55), 0, view_key);
     let result = test.execute_expect_success(
-        Transaction::builder()
+        Transaction::builder_localnet()
             .call_method(faucet, "take_free_coins", args![withdraw_proof.proof])
             .put_last_instruction_output_on_workspace("coins")
             .call_method(user_account, "deposit", args![Workspace("coins")])
@@ -527,7 +526,7 @@ fn mint_with_view_key() {
         faucet_vault.get_confidential_commitments().unwrap(),
         &view_key_secret,
         0..=200,
-        &mut AlwaysMissLookupTable,
+        &mut GenerateValueLookup,
     )
     .unwrap();
     assert_eq!(total_balance, Some(223 - 55));
@@ -542,7 +541,7 @@ fn mint_with_view_key() {
         user_vault.get_confidential_commitments().unwrap(),
         &view_key_secret,
         0..=200,
-        &mut AlwaysMissLookupTable,
+        &mut GenerateValueLookup,
     )
     .unwrap();
     assert_eq!(total_balance, Some(55));

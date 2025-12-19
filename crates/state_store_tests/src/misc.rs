@@ -10,8 +10,8 @@ use tari_consensus_types::{
     LastVoted,
     LeafBlock,
     LockedBlock,
+    PcId,
     ProposalVote,
-    QcId,
     ValidatorSignatureBytes,
 };
 use tari_ootle_common_types::{optional::Optional, Epoch, Network, NodeHeight, ShardGroup};
@@ -31,13 +31,9 @@ use crate::{
 };
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn miscellaneous_rocksdb() {
     let (db, _tmp) = create_rocksdb();
-    miscellaneous_operations(db);
-}
-
-#[allow(clippy::too_many_lines)]
-fn miscellaneous_operations(db: impl StateStore) {
     let mut tx = db.create_write_tx().unwrap();
 
     // last voted
@@ -151,7 +147,7 @@ fn miscellaneous_operations(db: impl StateStore) {
         block_id: BlockId::zero(),
         epoch,
         block_height: NodeHeight(123),
-        qc_id: QcId::zero(),
+        qc_id: PcId::zero(),
     };
     tx.high_pc_set(&high_qc).unwrap();
     let res = tx.high_pc_get(epoch).unwrap();
@@ -188,6 +184,7 @@ fn miscellaneous_operations(db: impl StateStore) {
             state_merkle_root: Default::default(),
             command_merkle_root: Default::default(),
             signature: Default::default(),
+            accumulated_data: Default::default(),
             metadata_hash: Default::default(),
         },
         proof_elements: vec![],

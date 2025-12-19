@@ -20,6 +20,9 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use tari_common_types::types::FixedHash;
+use tari_ootle_common_types::Epoch;
+
 use crate::global::GlobalDbAdapter;
 
 pub struct EpochDb<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> {
@@ -32,17 +35,17 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> EpochDb<'a, 'tx, TGlobalDbAdapt
         Self { backend, tx }
     }
 
-    pub fn insert_epoch(&mut self, db_epoch: DbEpoch) -> Result<(), TGlobalDbAdapter::Error> {
-        self.backend.insert_epoch(self.tx, db_epoch)
+    pub fn insert_epoch(&mut self, epoch: Epoch, epoch_hash: FixedHash) -> Result<(), TGlobalDbAdapter::Error> {
+        self.backend.insert_epoch(self.tx, epoch, epoch_hash)
     }
 
-    pub fn get_epoch_data(&mut self, epoch: u64) -> Result<Option<DbEpoch>, TGlobalDbAdapter::Error> {
+    pub fn get_epoch_data(&mut self, epoch: Epoch) -> Result<Option<EpochData>, TGlobalDbAdapter::Error> {
         self.backend.get_epoch(self.tx, epoch)
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct DbEpoch {
+pub struct EpochData {
     pub epoch: u64,
-    pub validator_node_mr: Vec<u8>,
+    pub epoch_hash: FixedHash,
 }

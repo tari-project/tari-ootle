@@ -35,7 +35,7 @@ mod validator_node_db;
 pub use validator_node_db::ValidatorNodeDb;
 
 mod epoch_db;
-pub use epoch_db::{DbEpoch, EpochDb};
+pub use epoch_db::{EpochData, EpochDb};
 
 mod base_layer_db;
 pub use base_layer_db::*;
@@ -43,4 +43,6 @@ pub use base_layer_db::*;
 mod bmt_db;
 pub use bmt_db::{BmtDb, DbBmt};
 
+mod block_header;
 pub mod models;
+pub use block_header::*;

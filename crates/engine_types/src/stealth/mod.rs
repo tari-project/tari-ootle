@@ -3,6 +3,8 @@
 
 mod outputs;
 mod transfer;
+mod value_proof;
 
 pub use outputs::*;
 pub use transfer::*;
+pub use value_proof::*;

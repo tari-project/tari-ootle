@@ -53,6 +53,7 @@ type WalletGrpcClient = WalletClient<InterceptedService<Channel, ClientAuthentic
 use crate::{
     helpers::{get_os_assigned_ports, wait_listener_on_local_port_os_thread},
     logging::get_base_dir_for_scenario,
+    util::cucumber_log,
     TariWorld,
 };
 
@@ -112,18 +113,10 @@ impl WalletProcess {
     }
 }
 
-pub async fn spawn_wallet(world: &mut TariWorld, wallet_name: String, base_node_name: String) {
+pub async fn spawn_minotari_wallet(world: &mut TariWorld, wallet_name: String, base_node_name: String) {
     // each spawned wallet will use different ports
     let (port, grpc_port) = get_os_assigned_ports();
 
-    // let base_node_public_key = world
-    //     .base_nodes
-    //     .get(&base_node_name)
-    //     .unwrap()
-    //     .identity
-    //     .public_key()
-    //     .clone();
-    // let base_node_port = world.base_nodes.get(&base_node_name).unwrap().port;
     let base_node_http_port = world.base_nodes.get(&base_node_name).unwrap().http_port;
     let temp_dir = get_base_dir_for_scenario(
         "console_wallet",
@@ -176,11 +169,6 @@ pub async fn spawn_wallet(world: &mut TariWorld, wallet_name: String, base_node_
             };
             wallet_config.wallet.http_server_url = format!("http://127.0.0.1:{}", base_node_http_port);
 
-            // wallet_config.wallet.base_node_service_peers = Some(format!(
-            //     "{}::/ip4/127.0.0.1/tcp/{}",
-            //     base_node_public_key, base_node_port
-            // ));
-
             let mut builder = runtime::Builder::new_multi_thread();
             let rt = builder.enable_all().build().unwrap();
 
@@ -232,7 +220,8 @@ pub async fn spawn_wallet(world: &mut TariWorld, wallet_name: String, base_node_
     //     status = wallet_client.get_network_status(Empty {}).await.unwrap().into_inner();
     // }
 
-    world.wallets.insert(wallet_name.clone(), wallet_process);
+    cucumber_log(format!("Minotari wallet {} started", wallet_name));
+    world.wallets.insert(wallet_name, wallet_process);
 }
 
 pub fn run_wallet(runtime: Runtime, config: &mut ApplicationConfig, shutdown: &mut Shutdown) -> Result<(), ExitError> {
@@ -274,5 +263,7 @@ pub fn run_wallet(runtime: Runtime, config: &mut ApplicationConfig, shutdown: &m
         skip_recovery: false,
     };
 
-    run_wallet_with_cli(shutdown, runtime, config, cli)
+    run_wallet_with_cli(shutdown, runtime, config, cli)?;
+
+    Ok(())
 }

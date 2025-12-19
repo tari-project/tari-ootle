@@ -7,7 +7,7 @@ use futures::StreamExt;
 use log::*;
 use tari_engine_types::{
     substate::{SubstateId, SubstateValue},
-    transaction_receipt::TransactionReceipt,
+    transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
 };
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerEvent, EpochManagerReader};
 use tari_networking::NetworkingHandle;
@@ -22,15 +22,17 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_p2p::{proto::rpc, TariMessagingSpec};
 use tari_ootle_storage::{
-    consensus_models::{EpochCheckpoint, SubstateUpdateProof, SubstateValueFilterFlags},
+    consensus_models::{EpochCheckpoint, SubstateData, SubstateUpdateProof, SubstateValueFilterFlags},
     StorageError,
 };
 use tari_rpc_framework::__macro_reexports::future::Either;
 use tari_shutdown::ShutdownSignal;
-use tari_template_manager::interface::{TemplateChange, TemplateManagerHandle};
-use tokio::time;
+use tari_template_lib::prelude::Amount;
+use tari_transaction::TransactionId;
+use tokio::{sync::broadcast, time};
 
 use crate::{
+    event::{IndexerEvent, NewEpochEvent, TransactionFinalizedEvent},
     network_state_sync::{
         committee_client::{ValidatorCommitteeRpcPool, ValidatorRpcSession},
         config::NetworkWideStateSyncConfig,
@@ -39,14 +41,13 @@ use crate::{
         sync_plan::SyncPlan,
         sync_progress::SyncProgress,
     },
+    notify::Notify,
     storage_sqlite::{
         models::{Key, UtxoSpent, UtxoUnspent, UtxoUpdateRecord},
-        IndexerStore,
-        IndexerStoreReadTransaction,
-        IndexerStoreWriteTransaction,
         SqliteIndexerStore,
         SqliteStoreWriteTransaction,
     },
+    store::{IndexerStore, IndexerStoreReadTransaction, IndexerStoreReader, IndexerStoreWriteTransaction},
 };
 
 const LOG_TARGET: &str = "tari::indexer::network_state_sync::worker";
@@ -56,9 +57,9 @@ pub struct NetworkWideStateSync {
     epoch_manager: EpochManagerHandle<PeerAddress>,
     networking: NetworkingHandle<TariMessagingSpec>,
     store: SqliteIndexerStore,
-    template_manager: TemplateManagerHandle,
     stats: SyncStats,
     config: NetworkWideStateSyncConfig,
+    notify: Notify<IndexerEvent>,
 }
 
 impl NetworkWideStateSync {
@@ -66,24 +67,25 @@ impl NetworkWideStateSync {
         epoch_manager: EpochManagerHandle<PeerAddress>,
         networking: NetworkingHandle<TariMessagingSpec>,
         storage: SqliteIndexerStore,
-        template_manager: TemplateManagerHandle,
         config: NetworkWideStateSyncConfig,
+        notify: Notify<IndexerEvent>,
     ) -> Self {
         Self {
             epoch_manager,
             networking,
             store: storage,
-            template_manager,
             stats: SyncStats::new(),
             config,
+            notify,
         }
     }
 
     pub fn spawn(mut self, shutdown_signal: ShutdownSignal) -> tokio::task::JoinHandle<()> {
+        let mut epoch_events = self.epoch_manager.subscribe();
         tokio::spawn(async move {
             loop {
                 let config = self.config.clone();
-                let task = self.start();
+                let task = self.start(&mut epoch_events);
                 let task = pin!(task);
                 match shutdown_signal.clone().select(task).await {
                     Either::Left(_) => {
@@ -103,11 +105,12 @@ impl NetworkWideStateSync {
         })
     }
 
-    async fn start(&mut self) -> Result<(), NetworkStateSyncError> {
+    async fn start(
+        &mut self,
+        epoch_events: &mut broadcast::Receiver<EpochManagerEvent>,
+    ) -> Result<(), NetworkStateSyncError> {
         self.epoch_manager.wait_for_initial_scanning_to_complete().await?;
-        let mut epoch_events = self.epoch_manager.subscribe();
 
-        // TODO: configurable
         let mut interval = time::interval(self.config.work_interval);
         interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
 
@@ -127,6 +130,10 @@ impl NetworkWideStateSync {
     async fn start_sync_round(&mut self) -> Result<(), NetworkStateSyncError> {
         info!(target: LOG_TARGET, "🌍️ Starting network-wide state sync round...");
         let sync_plan = self.initialize_sync_plan().await?;
+        if sync_plan.network_description().epoch.is_zero() {
+            info!(target: LOG_TARGET, "🌍️ Current epoch is zero, skipping sync round.");
+            return Ok(());
+        }
         self.start_sync(sync_plan).await?;
         self.stats.log_stats();
         self.stats.reset();
@@ -137,6 +144,7 @@ impl NetworkWideStateSync {
         match event {
             EpochManagerEvent::EpochChanged { epoch, .. } => {
                 info!(target: LOG_TARGET, "🌍️ Epoch changed to {}.", epoch);
+                self.notify.notify(NewEpochEvent { epoch });
                 self.start_sync_round().await?;
             },
         }
@@ -173,7 +181,7 @@ impl NetworkWideStateSync {
             .epoch()
             .checked_sub(Epoch(1))
             .ok_or_else(|| NetworkStateSyncError::InvariantError {
-                details: "current epoch is zero, there are on checkpoints to sync".to_string(),
+                details: "current epoch is zero, there are no checkpoints to sync".to_string(),
             })?;
         let committee_pools = sync_plan_mut.committee_pools().clone();
 
@@ -213,7 +221,10 @@ impl NetworkWideStateSync {
                 .await?;
 
             if checkpoints.is_empty() {
-                info!(target: LOG_TARGET, "🌍️ No checkpoints found for shard group {shard_group} from epoch {from_epoch}");
+                info!(target: LOG_TARGET, "🌍️ No checkpoints found for shard group {shard_group} from epoch {from_epoch} (prev_epoch {prev_epoch})");
+                sync_plan_mut.add_checkpoint_sync_progress(shard_group, prev_epoch);
+                self.store
+                    .with_write_tx(|tx| tx.key_value_set(Key::SyncProgress, sync_plan_mut.sync_progress()))?;
                 continue;
             }
 
@@ -221,12 +232,12 @@ impl NetworkWideStateSync {
 
             let committee = self
                 .epoch_manager
-                .get_committee_by_shard_group(prev_epoch, shard_group, None)
+                .get_committee_by_shard_group(prev_epoch, shard_group, None, false)
                 .await?;
 
             // TODO: continue on failure
             for checkpoint in checkpoints {
-                info!(target: LOG_TARGET, "🌍️ Validating checkpoint for shard group {shard_group}: {:?}", checkpoint);
+                info!(target: LOG_TARGET, "🌍️ Validating checkpoint for shard group {shard_group}: {}", checkpoint.header().calculate_hash());
                 // TODO: we require historical committees to validate older checkpoints. Figure out the best way to
                 //       avoid needing the data (e.g. VN merkle inclusion proof + historic L1 block MR), or,
                 //       decide it is ok to require this data to be locally stored by all indexers. For now, to avoid
@@ -263,8 +274,18 @@ impl NetworkWideStateSync {
 
                 self.stats.increment_checkpoints();
                 sync_plan_mut.add_checkpoint_sync_progress(shard_group, checkpoint.epoch());
+                let xtr_exhausted = Amount::from(checkpoint.header().accumulated_data().total_exhaust_burn);
                 self.store.with_write_tx(|tx| {
-                    tx.insert_or_ignore_epoch_checkpoint(&checkpoint)?;
+                    if !tx.epoch_checkpoint_exists(shard_group, checkpoint.epoch())? {
+                        tx.insert_or_ignore_epoch_checkpoint(&checkpoint)?;
+
+                        let exhausted = tx
+                            .key_value_get_value::<_, Amount>(Key::XtrAccumulatedExhaustBurn)
+                            .optional()?;
+
+                        let new_exhausted = exhausted.unwrap_or_else(Amount::zero) + xtr_exhausted;
+                        tx.key_value_set(Key::XtrAccumulatedExhaustBurn, new_exhausted)?;
+                    }
                     tx.key_value_set(Key::SyncProgress, sync_plan_mut.sync_progress())
                 })?;
             }
@@ -278,10 +299,11 @@ impl NetworkWideStateSync {
         let mut update_buf = Vec::new();
         let mut utxos_buf = Vec::new();
         let mut transactions_buf = Vec::new();
+        let mut validator_fee_pools_buf = Vec::new();
 
         let mut has_synced_global_shard = false;
 
-        for (shard_group, pool) in committee_pools {
+        for (shard_group, mut pool) in committee_pools {
             // TODO: make this robust against failures, e.g. if one peer fails, continue with others
             // TODO: consider syncing shards in epoch chunks rather than one after another
             // TODO: consider parallelizing shard syncs within a shard group
@@ -293,6 +315,7 @@ impl NetworkWideStateSync {
                     &mut update_buf,
                     &mut utxos_buf,
                     &mut transactions_buf,
+                    &mut validator_fee_pools_buf,
                     shard_group,
                     &mut session,
                 )
@@ -307,6 +330,7 @@ impl NetworkWideStateSync {
                     &mut update_buf,
                     &mut utxos_buf,
                     &mut transactions_buf,
+                    &mut validator_fee_pools_buf,
                     shard_group,
                     &mut session,
                 )
@@ -323,7 +347,8 @@ impl NetworkWideStateSync {
         sync_plan_mut: &mut SyncPlan,
         update_buf: &mut Vec<(Epoch, SubstateUpdateProof)>,
         utxos_buf: &mut Vec<UtxoUpdateRecord>,
-        transactions_buf: &mut Vec<TransactionReceipt>,
+        transactions_buf: &mut Vec<(TransactionReceiptAddress, TransactionReceipt)>,
+        validator_fee_pools_buf: &mut Vec<SubstateData>,
         shard_group: ShardGroup,
         session: &mut ValidatorRpcSession,
     ) -> Result<(), NetworkStateSyncError> {
@@ -335,6 +360,15 @@ impl NetworkWideStateSync {
             .map(|(v, e)| (v.as_u64(), *e))
             .unwrap_or_else(|| (0, Epoch::zero()));
         let from_version = prev_version + 1;
+        let mut value_filters = SubstateValueFilterFlags::UTXO |
+            SubstateValueFilterFlags::VALIDATOR_FEE_POOL |
+            SubstateValueFilterFlags::CLAIMED_OUTPUT_TOMBSTONE |
+            SubstateValueFilterFlags::TRANSACTION_RECEIPT;
+
+        if prev_version == 0 {
+            // If we are syncing from scratch, only get up states to reduce initial sync size
+            value_filters |= SubstateValueFilterFlags::UP_ONLY;
+        }
 
         let mut stream = session
             .sync_state(rpc::SyncStateRequest {
@@ -342,22 +376,15 @@ impl NetworkWideStateSync {
                 shard: shard.as_u32(),
                 // Sync to latest epoch
                 until_epoch: None,
-                value_filters: (SubstateValueFilterFlags::UTXO |
-                    SubstateValueFilterFlags::TEMPLATE |
-                    SubstateValueFilterFlags::TRANSACTION_RECEIPT)
-                    .bits(),
+                value_filters: value_filters.bits(),
             })
             .await?;
 
         let mut is_first_iter = true;
+        let mut xtr_claimed = Amount::zero();
         while let Some(result) = stream.next().await {
-            // Allocations are unavoidable for templates (since the call to the template manager requires owned data due
-            // to async service call). This is completely fine as published templates are expected to be
-            // relatively rare compared to other substate updates.
-            let mut templates_buf = Vec::new();
-
             if is_first_iter {
-                // Avoid log spam, only log if we actually get something from the stream
+                // Avoid log spam, only log once per stream
                 debug!(target: LOG_TARGET, "🌍️ Established stream for {shard} in shard group {shard_group} from peer {} (last sync: {prev_epoch} {prev_version})", session.peer_address());
                 is_first_iter = false;
             }
@@ -377,14 +404,16 @@ impl NetworkWideStateSync {
                     })?;
 
                 extend_bufs_from_substate_update(
+                    &self.notify,
                     shard,
                     state_version,
                     update,
                     msg_epoch,
                     update_buf,
-                    &mut templates_buf,
                     utxos_buf,
                     transactions_buf,
+                    validator_fee_pools_buf,
+                    &mut xtr_claimed,
                 )?;
             }
             if msg.has_more {
@@ -398,57 +427,50 @@ impl NetworkWideStateSync {
 
             self.store.clone().with_write_tx(|tx| {
                 debug!(target: LOG_TARGET, "✅ Committing {} updates for shard {shard} (epoch: {msg_epoch}, state version: {state_version})", update_buf.len());
+                // TODO: this is not currently used. Consider removing. 
                 tx.batch_insert_substate_transitions(shard, state_version, update_buf.drain(..))?;
                 debug!(target: LOG_TARGET, "✅ Committing {} UTXOs for shard {shard} (epoch: {msg_epoch})", utxos_buf.len());
-                tx.batch_insert_utxo_updates(utxos_buf.drain(..))?;
-                // TODO: transaction events and templates
+                tx.batch_insert_utxo_updates(msg_epoch, utxos_buf.drain(..))?;
+                // TODO: there are many ways to do this. This is probably not the best way. This allows wallet to query for validator fee pool values.
+                for substate_data in validator_fee_pools_buf.drain(..) {
+                    tx.upsert_substate(&substate_data)?;
+                }
                 debug!(target: LOG_TARGET, "✅ Committing {} transactions for shard {shard} (epoch: {msg_epoch})", transactions_buf.len());
-                self.stats.increase_events(transactions_buf.len());
+                self.stats.increase_events(transactions_buf.iter().map(|(_, t)| t.events.len()).sum());
                 self.persist_transaction_receipts(tx, transactions_buf.drain(..))?;
 
                 // All done - write the sync progress
                 sync_plan_mut.add_state_sync_progress(shard, state_version, msg_epoch);
-                tx.key_value_set(Key::SyncProgress, sync_plan_mut.sync_progress())
+                tx.key_value_set(Key::SyncProgress, sync_plan_mut.sync_progress())?;
+                let claimed = tx.key_value_get_value(Key::XtrAccumulatedClaimed).optional()?;
+                let new_claimed = claimed.unwrap_or_else(Amount::zero) + xtr_claimed;
+                tx.key_value_set(Key::XtrAccumulatedClaimed, new_claimed)
             })?;
-
-            if !templates_buf.is_empty() {
-                info!(target: LOG_TARGET, "🌍️ Persisting {} template changes for shard {shard} (epoch: {msg_epoch})", templates_buf.len());
-                if let Err(err) = self.template_manager.enqueue_template_changes(templates_buf).await {
-                    error!(target: LOG_TARGET, "⚠️ Failed to enqueue template changes: {}", err);
-                }
-            }
         }
         Ok(())
     }
 
-    fn persist_transaction_receipts<I: IntoIterator<Item = TransactionReceipt>>(
+    fn persist_transaction_receipts<I: IntoIterator<Item = (TransactionReceiptAddress, TransactionReceipt)>>(
         &self,
         tx: &mut SqliteStoreWriteTransaction<'_>,
         receipts: I,
     ) -> Result<(), StorageError> {
-        let events = receipts
-            .into_iter()
-            .flat_map(|receipt| receipt.events)
-            // only keep the events specified by the indexer filter
-            .filter(|event| {
-                self.config.event_filters.is_empty() || self.config.event_filters.iter().any(|filter| filter.matches(event))
-            });
-
-        tx.batch_insert_events(events)?;
-
+        tx.batch_insert_transaction_receipts(receipts, &self.config.event_filters)?;
         Ok(())
     }
 }
 
 fn extend_bufs_from_substate_update(
+    notify: &Notify<IndexerEvent>,
     shard: Shard,
     state_version: StateVersion,
     update: SubstateUpdateProof,
     msg_epoch: Epoch,
     update_buf: &mut Vec<(Epoch, SubstateUpdateProof)>,
-    templates_buf: &mut Vec<TemplateChange>,
     utxos_buf: &mut Vec<UtxoUpdateRecord>,
-    transactions_buf: &mut Vec<TransactionReceipt>,
+    transactions_buf: &mut Vec<(TransactionReceiptAddress, TransactionReceipt)>,
+    validator_fee_pools_buf: &mut Vec<SubstateData>,
+    xtr_claimed_mut: &mut Amount,
 ) -> Result<(), NetworkStateSyncError> {
     match &update {
         SubstateUpdateProof::Create(create) => match create.substate.value().value() {
@@ -470,38 +492,42 @@ fn extend_bufs_from_substate_update(
                 };
             },
             Some(SubstateValue::TransactionReceipt(receipt)) => {
-                transactions_buf.push(receipt.clone());
-            },
-            Some(SubstateValue::Template(template)) => {
-                if let Some(address) = create.substate.substate_id().as_template() {
-                    templates_buf.push(TemplateChange::Add {
-                        template_address: address,
-                        author_public_key: template.author,
-                        binary_hash: template.binary_hash.into_array().into(),
-                        epoch: msg_epoch,
+                if let Some(address) = update.substate_id().as_transaction_receipt_address() {
+                    notify.notify(TransactionFinalizedEvent {
+                        transaction_id: TransactionId::from_receipt_address(address),
+                        outcome: receipt.outcome,
                     });
+                    transactions_buf.push((address, receipt.clone()));
                 } else {
-                    // This is invalid, but possible given a malfunctioning validator
-                    warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received template substate with invalid address: {}", create.substate.substate_id());
+                    warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received Transaction Receipt substate with invalid address: {}", create.substate.substate_id());
                 }
             },
-            Some(_) => {},
+            Some(SubstateValue::ValidatorFeePool(_)) => {
+                validator_fee_pools_buf.push(SubstateData {
+                    substate_id: create.substate.substate_id().clone(),
+                    version: create.substate.version,
+                    value: create.substate.value().clone(),
+                });
+            },
+            Some(SubstateValue::ClaimedOutputTombstone(claim)) => {
+                *xtr_claimed_mut += Amount::from(claim.value);
+            },
+            Some(_) => {
+                warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received unexpected substate value for created substate: {}", create.substate.substate_id());
+            },
             None => {
                 let id = create.substate.substate_id();
-                if id.is_template() || id.is_transaction_receipt() || id.is_utxo() {
+                if id.is_template() || id.is_transaction_receipt() {
                     warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received substate {id} update with no value");
+                }
+                if let Some(addr) = id.as_utxo_address() {
+                    debug!(target: LOG_TARGET, "🌍️ Received UTXO substate {addr} creation with no value. Ignoring as this means it is spent later.");
                 }
             },
         },
         SubstateUpdateProof::Destroy(destroy) => match &destroy.substate_id {
             SubstateId::TransactionReceipt(_) => {
                 warn!(target: LOG_TARGET, "⚠️ NEVER HAPPEN: Received destroy for transaction receipt substate: {}", destroy.substate_id);
-            },
-            SubstateId::Template(template_address) => {
-                // Currently not possible
-                templates_buf.push(TemplateChange::Deprecate {
-                    template_address: *template_address,
-                });
             },
             SubstateId::Utxo(address) => {
                 utxos_buf.push(UtxoUpdateRecord::Spent(UtxoSpent {

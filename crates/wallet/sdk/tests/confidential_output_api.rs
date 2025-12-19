@@ -1,33 +1,17 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, convert::Infallible, str::FromStr};
+mod support;
 
-use tari_crypto::{commitment::HomomorphicCommitmentFactory, tari_utilities::SafePassword};
-use tari_engine_types::{
-    crypto::{commit_amount_checked, get_commitment_factory},
-    substate::SubstateId,
-    ToByteType,
-    Utxo,
-    UtxoId,
-};
-use tari_ootle_common_types::{optional::Optional, shard::Shard, Network, StateVersion};
+use tari_crypto::commitment::HomomorphicCommitmentFactory;
+use tari_engine_types::{crypto::get_commitment_factory, substate::SubstateDiff, ToByteType};
 use tari_ootle_wallet_sdk::{
-    models::{ConfidentialOutputModel, OutputStatus, UtxoUpdateSet, WalletLockId},
-    network::{SubstateQueryResult, TransactionQueryResult, WalletNetworkInterface},
-    storage::{TagAndPublicNoncePair, WalletStore, WalletStoreReader},
-    WalletSdk,
-    WalletSdkConfig,
+    models::{ConfidentialOutputModel, KeyBranch, KeyId, OutputStatus},
+    storage::{ReadableWalletStore, WalletStoreReader},
 };
-use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
-use tari_template_abi::TemplateDef;
-use tari_template_lib::{
-    constants::STEALTH_TARI_RESOURCE_ADDRESS,
-    models::{ComponentAddress, EncryptedData, ResourceAddress, VaultId},
-    resource::ResourceType,
-    types::{crypto::PedersenCommitmentBytes, Amount, TemplateAddress},
-};
-use tari_transaction::{Transaction, TransactionId};
+use tari_template_lib::types::EncryptedData;
+
+use crate::support::Test;
 
 #[test]
 fn outputs_locked_and_released() {
@@ -37,7 +21,7 @@ fn outputs_locked_and_released() {
     let commitment_49 = test.add_unspent_output(49);
     let _commitment_100 = test.add_unspent_output(100);
 
-    let lock_id = test.new_lock();
+    let lock_id = test.new_lock().keep_locked();
     let (inputs, total_value) = test
         .sdk()
         .confidential_outputs_api()
@@ -48,21 +32,18 @@ fn outputs_locked_and_released() {
 
     let locked = test
         .store()
-        .with_read_tx(|tx| tx.outputs_get_locked_by_lock_id(lock_id))
+        .with_read_tx(|tx| tx.confidential_outputs_get_locked_by_lock_id(lock_id))
         .unwrap();
 
     assert!(locked.iter().any(|l| l.commitment == commitment_25));
     assert!(locked.iter().any(|l| l.commitment == commitment_49));
     assert_eq!(locked.len(), 2);
 
-    test.sdk
-        .confidential_outputs_api()
-        .release_locked_outputs(lock_id)
-        .unwrap();
+    test.sdk().locks_api().release_lock(lock_id).unwrap();
 
     let locked = test
         .store()
-        .with_read_tx(|tx| tx.outputs_get_locked_by_lock_id(lock_id))
+        .with_read_tx(|tx| tx.confidential_outputs_get_locked_by_lock_id(lock_id))
         .unwrap();
     assert_eq!(locked.len(), 0);
 }
@@ -76,17 +57,18 @@ fn outputs_locked_and_finalized() {
     let commitment_100 = test.add_unspent_output(100);
 
     let outputs_api = test.sdk().confidential_outputs_api();
-    let proof_id = test.new_lock();
+    let locks_api = test.sdk().locks_api();
+    let lock_id = test.new_lock().keep_locked();
 
     let (inputs, total_value) = outputs_api
-        .lock_outputs_by_amount(proof_id, &Test::test_vault_address(), 50)
+        .lock_outputs_by_amount(lock_id, &Test::test_vault_address(), 50)
         .unwrap();
     assert_eq!(total_value, 74);
     assert_eq!(inputs.len(), 2);
 
     let locked = test
         .store()
-        .with_read_tx(|tx| tx.outputs_get_locked_by_lock_id(proof_id))
+        .with_read_tx(|tx| tx.confidential_outputs_get_locked_by_lock_id(lock_id))
         .unwrap();
 
     assert!(locked.iter().any(|l| l.commitment == commitment_25));
@@ -104,204 +86,36 @@ fn outputs_locked_and_finalized() {
             commitment: commitment_change,
             value: 24.into(),
             sender_public_nonce: None,
-            encryption_secret_key_index: 0,
+            view_only_key_id: KeyId::derived(KeyBranch::ViewOnlyKey, 0),
+            owner_key_id: Some(KeyId::derived(KeyBranch::Account, 0)),
             encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
             public_asset_tag: None,
+            memo: None,
             status: OutputStatus::LockedUnconfirmed,
-            lock_id: Some(proof_id),
+            lock_id: Some(lock_id),
         })
         .unwrap();
 
     let balance = test.get_unspent_balance();
     assert_eq!(balance, 100);
 
-    outputs_api.finalize_outputs_for_lock(proof_id).unwrap();
+    let diff = SubstateDiff::new();
+    locks_api.finalize_lock(lock_id, &diff).unwrap();
 
     {
         let mut tx = test.store().create_read_tx().unwrap();
-        let locked = tx.outputs_get_locked_by_lock_id(proof_id).unwrap();
+        let locked = tx.confidential_outputs_get_locked_by_lock_id(lock_id).unwrap();
         assert_eq!(locked.len(), 0);
 
         let unspent = tx
-            .outputs_get_by_account_and_status(&Test::test_account_address(), OutputStatus::Unspent)
+            .confidential_outputs_get_by_account_and_status(&Test::test_account_address(), OutputStatus::Unspent)
             .unwrap();
         assert!(unspent.iter().any(|l| l.commitment == commitment_change));
         assert!(unspent.iter().any(|l| l.commitment == commitment_100));
         assert_eq!(unspent.len(), 2);
-        let balance = tx.outputs_get_unspent_balance(&Test::test_vault_address()).unwrap();
+        let balance = tx
+            .confidential_outputs_get_unspent_balance(&Test::test_vault_address())
+            .unwrap();
         assert_eq!(balance, 124);
-    }
-}
-
-// -------------------------------- Test Harness -------------------------------- //
-
-struct Test {
-    store: SqliteWalletStore,
-    sdk: WalletSdk<SqliteWalletStore, PanicNetworkInterface>,
-    _temp: tempfile::TempDir,
-}
-
-impl Test {
-    pub fn new() -> Self {
-        let temp = tempfile::tempdir().unwrap();
-        let store = SqliteWalletStore::try_open(temp.path().join("data/wallet.sqlite")).unwrap();
-        store.run_migrations().unwrap();
-
-        let mut sdk = WalletSdk::initialize(store.clone(), PanicNetworkInterface, WalletSdkConfig {
-            network: Network::LocalNet,
-            override_keyring_password: Some(SafePassword::from_str("SuuuCh Sekret W0W").unwrap()),
-        })
-        .unwrap();
-        sdk.initialize_cipher_seed(None).unwrap();
-        let accounts_api = sdk.accounts_api();
-        accounts_api
-            .add_account(Some("test"), &Test::test_account_address(), 0, true, true)
-            .unwrap();
-        accounts_api
-            .add_vault(
-                Test::test_account_address(),
-                Test::test_vault_address(),
-                STEALTH_TARI_RESOURCE_ADDRESS,
-                ResourceType::Stealth,
-                Some("TEST".to_string()),
-                6,
-            )
-            .unwrap();
-
-        Self {
-            store,
-            sdk,
-            _temp: temp,
-        }
-    }
-
-    pub fn test_account_address() -> ComponentAddress {
-        "component_0dc41b5cc74b36d696c7b140323a40a2f98b71df5d60e5a6bf4c1a07ffffffff"
-            .parse()
-            .unwrap()
-    }
-
-    pub fn test_vault_address() -> VaultId {
-        "vault_0dc41b5cc74b36d696c7b140323a40a2f98b71df5d60e5a6bf4c1a07ffffffff"
-            .parse()
-            .unwrap()
-    }
-
-    pub fn add_unspent_output<A: Into<Amount>>(&self, amount: A) -> PedersenCommitmentBytes {
-        let amount = amount.into();
-
-        let outputs_api = self.sdk.confidential_outputs_api();
-        let commitment = commit_amount_checked(&Default::default(), amount)
-            .expect("Cannot add unspent output with negative amount")
-            .to_byte_type();
-        outputs_api
-            .add_output(ConfidentialOutputModel {
-                account_address: Self::test_account_address(),
-                vault_id: Self::test_vault_address(),
-                commitment,
-                value: amount,
-                sender_public_nonce: None,
-                encryption_secret_key_index: 0,
-                encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
-                public_asset_tag: None,
-                status: OutputStatus::Unspent,
-                lock_id: None,
-            })
-            .unwrap();
-        commitment
-    }
-
-    pub fn new_lock(&self) -> WalletLockId {
-        self.sdk.confidential_outputs_api().create_lock().unwrap()
-    }
-
-    pub fn get_unspent_balance(&self) -> Amount {
-        let outputs_api = self.sdk.confidential_outputs_api();
-        outputs_api
-            .get_unspent_balance(&Test::test_vault_address())
-            .optional()
-            .unwrap()
-            .unwrap_or_default()
-    }
-
-    pub fn sdk(&self) -> &WalletSdk<SqliteWalletStore, PanicNetworkInterface> {
-        &self.sdk
-    }
-
-    pub fn store(&self) -> &SqliteWalletStore {
-        &self.store
-    }
-}
-
-#[derive(Debug, Clone)]
-struct PanicNetworkInterface;
-
-// TODO: test the substate scanning in the SDK
-impl WalletNetworkInterface for PanicNetworkInterface {
-    type Error = Infallible;
-
-    #[allow(clippy::diverging_sub_expression)]
-    async fn query_substate(
-        &self,
-        _address: &SubstateId,
-        _version: Option<u32>,
-        _local_search_only: bool,
-    ) -> Result<SubstateQueryResult, Self::Error> {
-        panic!("PanicNetworkInterface called")
-    }
-
-    #[allow(clippy::diverging_sub_expression)]
-    async fn submit_transaction(&self, _transaction: Transaction) -> Result<TransactionId, Self::Error> {
-        panic!("PanicNetworkInterface called")
-    }
-
-    #[allow(clippy::diverging_sub_expression)]
-    async fn submit_dry_run_transaction(
-        &self,
-        _transaction: Transaction,
-    ) -> Result<TransactionQueryResult, Self::Error> {
-        panic!("PanicNetworkInterface called")
-    }
-
-    #[allow(clippy::diverging_sub_expression)]
-    async fn query_transaction_result(
-        &self,
-        _transaction_id: TransactionId,
-    ) -> Result<TransactionQueryResult, Self::Error> {
-        panic!("PanicNetworkInterface called")
-    }
-
-    async fn fetch_template_definition(&self, _template_address: TemplateAddress) -> Result<TemplateDef, Self::Error> {
-        panic!("PanicNetworkInterface called")
-    }
-
-    async fn list_substates(
-        &self,
-        _filter_by_template: Option<TemplateAddress>,
-        _filter_by_type: Option<tari_ootle_common_types::substate_type::SubstateType>,
-        _limit: Option<u64>,
-        _offset: Option<u64>,
-    ) -> Result<tari_ootle_wallet_sdk::network::SubstateListResult, Self::Error> {
-        panic!("PanicNetworkInterface called")
-    }
-
-    async fn wait_until_ready(&self) -> Result<(), Self::Error> {
-        panic!("PanicNetworkInterface called")
-    }
-
-    async fn query_stealth_utxo_updates(
-        &self,
-        _resource_address: ResourceAddress,
-        _shard_state_versions: HashMap<Shard, StateVersion>,
-    ) -> Result<UtxoUpdateSet, Self::Error> {
-        panic!("PanicNetworkInterface called")
-    }
-
-    async fn get_unspent_utxos(
-        &self,
-        _resource_address: ResourceAddress,
-        _tag_and_nonce_pairs: Vec<TagAndPublicNoncePair>,
-    ) -> Result<Vec<(UtxoId, Utxo)>, Self::Error> {
-        panic!("PanicNetworkInterface get_unspent_utxos called")
     }
 }

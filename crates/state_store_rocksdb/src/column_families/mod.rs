@@ -24,7 +24,6 @@ pub mod block;
 pub mod block_diff;
 pub mod block_transaction_execution;
 pub mod bookkeeping;
-pub mod burnt_utxo;
 pub mod chain;
 pub mod epoch_checkpoint;
 pub mod evicted_node;
@@ -33,6 +32,7 @@ pub mod foreign_proposal;
 pub mod foreign_substate_pledge;
 
 pub mod certificates;
+pub mod diagnostic_no_vote;
 pub mod finalized_transaction;
 pub mod lock_conflict;
 pub mod missing_transactions;
@@ -47,3 +47,15 @@ pub mod transaction;
 pub mod transaction_pool;
 pub mod transaction_pool_state_update;
 pub mod validator_node_epoch_stats;
+
+pub(crate) mod cf_names {
+    pub(crate) const CHAIN_METADATA: &str = "chain";
+    pub(crate) const CERTIFICATES: &str = "certificates";
+    pub(crate) const BLOCK: &str = "block";
+    pub(crate) const TRANSACTIONS: &str = "transactions";
+    pub(crate) const BOOKKEEPING: &str = "bookkeeping";
+    pub(crate) const FOREIGN_PROPOSALS: &str = "foreign_proposals";
+    pub(crate) const DIAGNOSTICS: &str = "diagnostics";
+    pub(crate) const SUBSTATES: &str = "substates";
+    pub(crate) const STATE_TREE: &str = "state_tree";
+}

@@ -23,26 +23,35 @@
 use std::future::Future;
 
 use serde::{Deserialize, Serialize};
+use tari_engine_types::substate::SubstateId;
 use tari_validator_node_rpc::client::SubstateResult;
 
 #[derive(thiserror::Error, Debug)]
 #[error("Failed substate cache operation {0}")]
 pub struct SubstateCacheError(pub String);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct SubstateCacheEntry {
     pub version: u32,
     pub substate_result: SubstateResult,
+    pub cached_at: u64,
+}
+
+#[derive(Debug, Serialize, Clone, Copy)]
+pub struct SubstateCacheEntryRef<'a> {
+    pub version: u32,
+    pub substate_result: &'a SubstateResult,
+    pub cached_at: u64,
 }
 
 pub trait SubstateCache: Send + Sync {
     fn read(
         &self,
-        address: String,
+        id: &SubstateId,
     ) -> impl Future<Output = Result<Option<SubstateCacheEntry>, SubstateCacheError>> + Send;
     fn write(
         &self,
-        address: String,
-        entry: &SubstateCacheEntry,
+        id: &SubstateId,
+        entry: SubstateCacheEntryRef<'_>,
     ) -> impl Future<Output = Result<(), SubstateCacheError>> + Send;
 }

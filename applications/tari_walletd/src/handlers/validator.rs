@@ -4,17 +4,17 @@
 use std::collections::HashMap;
 
 use anyhow::anyhow;
-use axum::headers::authorization::Bearer;
+use axum_extra::headers::authorization::Bearer;
 use either::Either;
 use log::*;
-use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{substate::SubstateId, ToByteType};
-use tari_ootle_common_types::{derive_fee_pool_address, optional::Optional, SubstateRequirement};
+use tari_ootle_common_types::{derive_fee_pool_address, SubstateAddress, SubstateRequirement};
+use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId};
 use tari_transaction::args;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{
-        AccountOrKeyIndex,
+        AccountOrKeyId,
         ClaimValidatorFeesRequest,
         ClaimValidatorFeesResponse,
         FeePoolDetails,
@@ -43,47 +43,54 @@ pub async fn handle_get_validator_fees(
     context.check_auth(token, &[JrpcPermission::Admin])?;
 
     let claim_key = match req.account_or_key {
-        AccountOrKeyIndex::Account(acc) => {
+        AccountOrKeyId::Account(acc) => {
             let account = get_account_or_default(acc.as_ref(), &sdk.accounts_api())?;
-            sdk.key_manager_api().derive_account_key(account.key_index())?
+            let account_key_id = account.owner_key_id().ok_or_else(|| {
+                anyhow!("The specified account does not have an associated owner key to derive the claim key from")
+            })?;
+            sdk.key_manager_api().get_public_key(account_key_id)?
         },
-        AccountOrKeyIndex::KeyIndex(index) => sdk.key_manager_api().derive_account_key(index)?,
+        AccountOrKeyId::KeyId(key_id) => sdk.key_manager_api().get_public_key(key_id)?,
     };
-    let claim_public_key = RistrettoPublicKey::from_secret_key(&claim_key.key);
+    let claim_public_key = claim_key.public_key().to_byte_type();
 
     let shards = req
         .shard_group
         .map(|sg| Either::Left(sg.shard_iter()))
         .unwrap_or_else(|| Either::Right(NUM_PRESHARDS.all_shards_iter()));
 
-    let addresses = shards.into_iter().map(|shard| {
-        (
-            shard,
-            derive_fee_pool_address(&claim_public_key.to_byte_type(), NUM_PRESHARDS, shard),
-        )
-    });
+    let ids = shards
+        .into_iter()
+        .map(|shard| derive_fee_pool_address(&claim_public_key, NUM_PRESHARDS, shard))
+        .map(SubstateId::from)
+        .collect::<Vec<_>>();
 
-    let mut fees = HashMap::new();
-
-    // TODO(perf); bulk scan
-    for (shard, address) in addresses {
-        let Some(result) = context
+    let mut fees = HashMap::with_capacity(ids.len());
+    const CHUNK_SIZE: usize = 20;
+    for id_chunk in ids.chunks(CHUNK_SIZE) {
+        let substates = context
             .wallet_sdk()
             .substate_api()
-            .fetch_substate_from_network(&SubstateId::from(address), None)
-            .await
-            .optional()?
-        else {
-            continue;
-        };
+            .get_substates_from_network(id_chunk.to_vec())
+            .await?;
 
-        let Some(amount) = result.substate.as_validator_fee_pool().map(|p| p.amount()) else {
-            warn!(target: LOG_TARGET, "Incorrect substate type found at address {}", address);
-            continue;
-        };
+        info!(target: LOG_TARGET, "🔍️ Found {}/{} fee pool substates for claim key {}", substates.len(), CHUNK_SIZE, claim_public_key);
 
-        if amount > 0 {
-            fees.insert(shard, FeePoolDetails { amount, address });
+        for (substate_id, substate) in substates {
+            let Some(address) = substate_id.as_validator_fee_pool_address() else {
+                warn!(target: LOG_TARGET, "Incorrect substate ID found: {}", substate_id);
+                continue;
+            };
+
+            let Some(amount) = substate.substate_value().as_validator_fee_pool().map(|p| p.amount()) else {
+                warn!(target: LOG_TARGET, "Incorrect substate type found at address {}", substate_id);
+                continue;
+            };
+
+            if amount > 0 {
+                let shard = SubstateAddress::from_substate_id(&substate_id, substate.version()).to_shard(NUM_PRESHARDS);
+                fees.insert(shard, FeePoolDetails { amount, address });
+            }
         }
     }
 
@@ -104,62 +111,87 @@ pub async fn handle_claim_validator_fees(
     }
 
     let (account, inputs) = get_account_with_inputs(req.account.as_ref(), &sdk)?;
-    let account_address = *account.address();
-    let (account_secret_key, account_public_key) = sdk.key_manager_api().derive_account_keypair(account.key_index())?;
+    let account_key_id = account.owner_key_id().ok_or_else(|| {
+        anyhow!("The specified account does not have an associated owner key to derive the claim key from")
+    })?;
+    let account_component_address = *account.component_address();
 
-    let (claim_public_key, claim_secret) = match req.claim_key_index {
-        Some(index) => {
-            let (claim_key, claim_pk) = sdk.key_manager_api().derive_account_keypair(index)?;
-            (claim_pk, Some(claim_key))
-        },
-        None => (RistrettoPublicKey::from_secret_key(&account_secret_key.key), None),
+    let claim_public_key = match req.claim_key_index {
+        Some(index) => sdk
+            .key_manager_api()
+            .get_public_key(KeyId::derived(KeyBranch::Account, index))?
+            .public_key
+            .to_byte_type(),
+        None => *account.address.account_public_key(),
     };
 
     let fee_pool_addresses = req
         .shards
         .into_iter()
-        .map(|shard| derive_fee_pool_address(&claim_public_key.to_byte_type(), NUM_PRESHARDS, shard));
+        .map(|shard| derive_fee_pool_address(&claim_public_key, NUM_PRESHARDS, shard));
 
     // build the transaction
     let max_fee = req.max_fee.unwrap_or(DEFAULT_FEE);
 
-    let transaction = context
+    let unsigned_transaction = context
         .transaction_builder()
         .with_dry_run(req.dry_run)
         .with_fee_instructions_builder(|builder| {
-            let mut bucket_names = vec![];
-            fee_pool_addresses
-                .clone()
-                .enumerate()
-                .fold(builder, |builder, (i, address)| {
-                    bucket_names.push(format!("b{}", i));
-                    builder
-                        .claim_validator_fees(address)
-                        .put_last_instruction_output_on_workspace(bucket_names.last().unwrap())
+            builder
+                .then(|b| {
+                    if account.is_confirmed_on_chain() {
+                        b
+                    } else {
+                        // TODO: make create account idempotent so we don't need to check if the account exists
+                        // This is easy enough, but assumes that the account is given as an input (which requires
+                        // checking anyway). So ideally, we'd be adding "auto-inputs" from the instructions i.e.
+                        // create_account instruction would automatically add the account as an
+                        // input if it exists. This could add complications to multi-shard networks but should be
+                        // possible (a good idea tho?).
+                        b.create_account(*account.address.account_public_key())
+                    }
                 })
                 .then(|builder| {
-                    // TODO: improve this - suggest: the workspace implicitly collect all returned resources (buckets)
-                    // and we should create buckets by taking from the workspace. Then we could collect all buckets and
-                    // deposit once. Greatly reducing gas for this (and a lot of other) transactions.
-                    bucket_names.into_iter().fold(builder, |builder, bucket| {
-                        builder.call_method(account_address, "deposit", args![Workspace(bucket)])
-                    })
+                    let mut bucket_names = vec![];
+                    fee_pool_addresses
+                        .clone()
+                        .enumerate()
+                        .fold(builder, |builder, (i, address)| {
+                            bucket_names.push(format!("b{}", i));
+                            builder
+                                .claim_validator_fees(address)
+                                .put_last_instruction_output_on_workspace(bucket_names.last().unwrap())
+                        })
+                        .then(|builder| {
+                            // TODO: improve this - suggest: the workspace implicitly collect all returned resources
+                            // (buckets) and we should create buckets by taking from the
+                            // workspace. Then we could collect all buckets and
+                            // deposit once. Greatly reducing gas for this (and a lot of other) transactions.
+                            bucket_names.into_iter().fold(builder, |builder, bucket| {
+                                builder.call_method(account_component_address, "deposit", args![Workspace(bucket)])
+                            })
+                        })
                 })
-                .call_method(account_address, "pay_fee", args![max_fee])
+                .call_method(account_component_address, "pay_fee", args![max_fee])
         })
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .with_inputs(fee_pool_addresses.map(SubstateRequirement::unversioned))
-        .then(|builder| {
-            if let Some(secret) = claim_secret {
-                // If the claim key is different from the account secret, we need to sign with both
-                builder
-                    .with_authorized_seal_signer()
-                    .add_signature(&account_public_key.to_byte_type(), &secret.key)
+        .map(|builder| {
+            if let Some(index) = req.claim_key_index {
+                if claim_public_key == *account.address.account_public_key() {
+                    Ok(builder.finish())
+                } else {
+                    // If the claim key is different from the account secret, we need to sign with both
+                    sdk.signer_api()
+                        .with_context(account.address.account_public_key())
+                        .sign(KeyId::derived(KeyBranch::Account, index), builder.finish())
+                }
             } else {
-                builder
+                Ok(builder.finish())
             }
-        })
-        .build_and_seal(&account_secret_key.key);
+        })?;
+
+    let transaction = sdk.signer_api().sign(account_key_id, unsigned_transaction)?;
 
     // send the transaction
     if req.dry_run {

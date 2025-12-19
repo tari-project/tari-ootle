@@ -42,6 +42,7 @@ use diesel::{
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
 use log::debug;
 use serde::{de::DeserializeOwned, Serialize};
+use tari_common_types::types::FixedHash;
 use tari_ootle_common_types::{
     committee::{Committee, CommitteeMember},
     hashing::ValidatorNodeBalancedMerkleTree,
@@ -54,10 +55,11 @@ use tari_ootle_common_types::{
 use tari_ootle_storage::{
     global::{
         models::ValidatorNode,
-        DbEpoch,
+        BlockHeaderModel,
         DbLayer1Transaction,
         DbTemplate,
         DbTemplateUpdate,
+        EpochData,
         GlobalDbAdapter,
         TemplateStatus,
     },
@@ -70,7 +72,7 @@ use super::{models, models::DbValidatorNode};
 use crate::{
     error::SqliteStorageError,
     global::{
-        models::{DbCommittee, MetadataModel, NewEpoch, NewTemplateModel, TemplateModel, TemplateUpdateModel},
+        models::{DbCommittee, MetadataModel, NewTemplateModel, TemplateModel, TemplateUpdateModel},
         serialization::serialize_json,
     },
     SqliteTransaction,
@@ -109,7 +111,7 @@ impl<TAddr> SqliteGlobalDbAdapter<TAddr> {
             .get_result::<i64>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "exists::metadata".to_string(),
+                operation: "exists::metadata",
             })?;
         Ok(result > 0)
     }
@@ -160,7 +162,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 .optional()
                 .map_err(|source| SqliteStorageError::DieselError {
                     source,
-                    operation: "get::metadata_key".to_string(),
+                    operation: "get::metadata_key",
                 })?;
 
         let v = row.map(|r| serde_json::from_slice(&r.value)).transpose()?;
@@ -182,14 +184,14 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 .execute(tx.connection())
                 .map_err(|source| SqliteStorageError::DieselError {
                     source,
-                    operation: "update::metadata".to_string(),
+                    operation: "update::metadata",
                 })?,
             Ok(false) => diesel::insert_into(metadata::table)
                 .values((metadata::key_name.eq(key), metadata::value.eq(value)))
                 .execute(tx.connection())
                 .map_err(|source| SqliteStorageError::DieselError {
                     source,
-                    operation: "insert::metadata".to_string(),
+                    operation: "insert::metadata",
                 })?,
             Err(e) => return Err(e),
         };
@@ -200,13 +202,13 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
     fn template_exists(
         &self,
         tx: &mut Self::DbTransaction<'_>,
-        key: &[u8],
+        key: &TemplateAddress,
         status: Option<TemplateStatus>,
     ) -> Result<bool, Self::Error> {
         use crate::global::schema::templates;
 
         let mut query = templates::table
-            .filter(templates::template_address.eq(key))
+            .filter(templates::template_address.eq(key.as_slice()))
             .into_boxed();
         if let Some(status) = status {
             query = query.filter(templates::status.eq(status.as_str()));
@@ -218,7 +220,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .get_result::<i64>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "exists::metadata".to_string(),
+                operation: "exists::metadata",
             })?;
         Ok(result > 0)
     }
@@ -236,7 +238,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .execute(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "set_status".to_string(),
+                operation: "set_status",
             })?;
         if num_affected == 0 {
             return Err(SqliteStorageError::NotFound {
@@ -255,7 +257,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .optional()
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "get_template".to_string(),
+                operation: "get_template",
             })?;
 
         match template {
@@ -263,7 +265,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 author_public_key: RistrettoPublicKeyBytes::from_bytes(&t.author_public_key)
                     .map_err(|e| SqliteStorageError::MalformedDbData(format!("Failed to decode public key:{e}")))?,
                 template_name: t.template_name,
-                expected_hash: t.expected_hash.try_into()?,
+                binary_hash: t.expected_hash.try_into()?,
                 template_address: t.template_address.try_into()?,
                 template_type: t.template_type.parse().expect("DB template type corrupted"),
                 epoch: Epoch(t.epoch as u64),
@@ -291,7 +293,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .get_results::<TemplateModel>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "get_templates".to_string(),
+                operation: "get_templates",
             })?;
 
         templates
@@ -300,20 +302,20 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .collect()
     }
 
-    fn get_templates_by_addresses(
+    fn get_templates_by_addresses<'a, I: IntoIterator<Item = &'a TemplateAddress>>(
         &self,
         tx: &mut Self::DbTransaction<'_>,
-        addresses: Vec<&[u8]>,
+        addresses: I,
     ) -> Result<Vec<DbTemplate>, Self::Error> {
         use crate::global::schema::templates;
 
         templates::table
             .filter(templates::status.eq(TemplateStatus::Active.as_str()))
-            .filter(templates::template_address.eq_any(addresses))
+            .filter(templates::template_address.eq_any(addresses.into_iter().map(|a| a.as_slice())))
             .get_results::<TemplateModel>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "get_templates_by_addresses".to_string(),
+                operation: "get_templates_by_addresses",
             })?
             .into_iter()
             .map(|t| t.try_into().map_err(SqliteStorageError::TemplateConversion))
@@ -332,7 +334,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .get_results::<TemplateModel>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "get_pending_template".to_string(),
+                operation: "get_pending_template",
             })?;
 
         templates
@@ -343,7 +345,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                         SqliteStorageError::MalformedDbData(format!("Failed to decode public key: {e}"))
                     })?,
                     template_name: t.template_name,
-                    expected_hash: t.expected_hash.try_into()?,
+                    binary_hash: t.expected_hash.try_into()?,
                     template_address: TemplateAddress::try_from_slice(&t.template_address)?,
                     template_type: t.template_type.parse().expect("DB template type corrupted"),
                     code: t.code,
@@ -361,7 +363,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         let new_template = NewTemplateModel {
             author_public_key: item.author_public_key.to_vec(),
             template_name: item.template_name,
-            expected_hash: item.expected_hash.to_vec(),
+            expected_hash: item.binary_hash.to_vec(),
             template_address: item.template_address.to_vec(),
             template_type: item.template_type.as_str().to_string(),
             code: item.code,
@@ -373,7 +375,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .execute(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "insert_template".to_string(),
+                operation: "insert_template",
             })?;
 
         Ok(())
@@ -402,7 +404,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .execute(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "update_template".to_string(),
+                operation: "update_template",
             })?;
 
         Ok(())
@@ -433,7 +435,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .execute(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "insert::validator_nodes".to_string(),
+                operation: "insert::validator_nodes",
             })?;
 
         Ok(())
@@ -453,7 +455,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .execute(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "remove::validator_nodes".to_string(),
+                operation: "remove::validator_nodes",
             })?;
 
         Ok(())
@@ -476,7 +478,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .get_results::<DbValidatorNode>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: format!("get::get_validator_nodes_within_epochs({})", epoch),
+                operation: "get::get_validator_nodes_within_epochs",
             })?;
 
         distinct_validators_sorted(sqlite_vns)
@@ -497,7 +499,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .get_results::<DbValidatorNode>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: format!("get::get_validator_nodes_within_epochs({})", epoch),
+                operation: "get::get_validator_nodes_within_epochs",
             })?;
 
         sqlite_vns.into_iter().map(TryInto::try_into).collect()
@@ -520,7 +522,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .first::<DbValidatorNode>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "get::validator_node".to_string(),
+                operation: "get::validator_node",
             })?;
 
         let vn = vn.try_into()?;
@@ -544,7 +546,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .first::<DbValidatorNode>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "get::validator_node".to_string(),
+                operation: "get::validator_node",
             })?;
 
         let vn = vn.try_into()?;
@@ -561,7 +563,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         .get_result::<Count>(tx.connection())
         .map_err(|source| SqliteStorageError::DieselError {
             source,
-            operation: "count_validator_nodes".to_string(),
+            operation: "count_validator_nodes",
         })?;
 
         Ok(count.cnt as u64)
@@ -583,7 +585,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .get_result::<i64>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "count_validator_nodes".to_string(),
+                operation: "count_validator_nodes",
             })?;
 
         Ok(count as u64)
@@ -607,7 +609,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .first::<i32>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "validator_nodes_set_committee_bucket".to_string(),
+                operation: "validator_nodes_set_committee_bucket",
             })?;
 
         diesel::insert_into(committees::table)
@@ -620,7 +622,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .execute(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "insert::committee_bucket".to_string(),
+                operation: "insert::committee_bucket",
             })?;
         Ok(())
     }
@@ -652,7 +654,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .get_results::<DbValidatorNode>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "validator_nodes_get_for_shard_group".to_string(),
+                operation: "validator_nodes_get_for_shard_group",
             })?;
 
         debug!(target: LOG_TARGET, "Found {} validators", validators.len());
@@ -694,7 +696,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .get_results::<(DbValidatorNode, DbCommittee)>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "validator_nodes_get_overlapping_shard_group".to_string(),
+                operation: "validator_nodes_get_overlapping_shard_group",
             })?;
 
         debug!(target: LOG_TARGET, "Found {} validators", validators.len());
@@ -726,7 +728,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         tx: &mut Self::DbTransaction<'_>,
         epoch: Epoch,
         shard_group: Option<ShardGroup>,
-        excluding: Vec<Self::Addr>,
+        excluding: HashSet<Self::Addr>,
     ) -> Result<ValidatorNode<Self::Addr>, Self::Error> {
         use crate::global::schema::{committees, validator_nodes};
 
@@ -734,7 +736,13 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .inner_join(committees::table.on(validator_nodes::id.eq(committees::validator_node_id)))
             .select(validator_nodes::all_columns)
             .filter(committees::epoch.eq(epoch.as_u64() as i64))
-            .filter(validator_nodes::address.ne_all(excluding.into_iter().map(|a| a.to_string())))
+            .filter(
+                validator_nodes::address.ne_all(
+                    excluding
+                        .iter()
+                        .map(|a| serialize_json(a).expect("serialize address to json")),
+                ),
+            )
             .order_by(sql_random())
             .into_boxed();
 
@@ -746,9 +754,14 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
 
         let vn = query
             .first::<DbValidatorNode>(tx.connection())
+            .optional()
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "get::validator_node".to_string(),
+                operation: "get::validator_node",
+            })?
+            .ok_or(SqliteStorageError::NotFound {
+                item: "validator_node",
+                key: "random selection in validator_nodes_get_random_committee_member_from_shard_group".to_string(),
             })?;
 
         let vn = vn.try_into()?;
@@ -780,7 +793,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .load::<(i32, i32, String, Vec<u8>, i64)>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "validator_nodes_get_committees".to_string(),
+                operation: "validator_nodes_get_committees",
             })?;
 
         let mut committees = HashMap::new();
@@ -802,38 +815,41 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         Ok(committees)
     }
 
-    fn insert_epoch(&self, tx: &mut Self::DbTransaction<'_>, epoch: DbEpoch) -> Result<(), Self::Error> {
+    fn insert_epoch(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        epoch: Epoch,
+        epoch_hash: FixedHash,
+    ) -> Result<(), Self::Error> {
         use crate::global::schema::epochs;
 
-        let sqlite_epoch: NewEpoch = epoch.into();
-
         diesel::insert_into(epochs::table)
-            .values(&sqlite_epoch)
+            .values((
+                epochs::epoch.eq(epoch.as_u64() as i64),
+                epochs::epoch_hash.eq(epoch_hash.as_slice()),
+            ))
             .execute(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "insert::epoch".to_string(),
+                operation: "insert::epoch",
             })?;
 
         Ok(())
     }
 
-    fn get_epoch(&self, tx: &mut Self::DbTransaction<'_>, epoch: u64) -> Result<Option<DbEpoch>, Self::Error> {
+    fn get_epoch(&self, tx: &mut Self::DbTransaction<'_>, epoch: Epoch) -> Result<Option<EpochData>, Self::Error> {
         use crate::global::schema::epochs::dsl;
 
-        let query_res: Option<models::Epoch> = dsl::epochs
-            .find(epoch as i64)
+        let query_res: Option<models::DbEpochData> = dsl::epochs
+            .find(epoch.as_u64() as i64)
             .first(tx.connection())
             .optional()
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "get::epoch".to_string(),
+                operation: "get::epoch",
             })?;
 
-        match query_res {
-            Some(e) => Ok(Some(e.into())),
-            None => Ok(None),
-        }
+        query_res.map(EpochData::try_from).transpose()
     }
 
     fn insert_bmt(
@@ -852,7 +868,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .execute(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "insert::bmt".to_string(),
+                operation: "insert::bmt",
             })?;
 
         Ok(())
@@ -871,7 +887,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .optional()
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "get::bmt".to_string(),
+                operation: "get::bmt",
             })?;
         match query_res {
             Some(bmt) => Ok(Some(serde_json::from_slice(&bmt.bmt)?)),
@@ -895,10 +911,73 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .execute(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "insert::layer_one_transaction".to_string(),
+                operation: "insert::layer_one_transaction",
             })?;
 
         Ok(())
+    }
+
+    fn insert_block_header(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        header: BlockHeaderModel,
+    ) -> Result<(), Self::Error> {
+        use crate::global::schema::block_headers;
+
+        diesel::insert_into(block_headers::table)
+            .values((
+                block_headers::epoch.eq(header.epoch.as_u64() as i64),
+                block_headers::height.eq(header.height as i64),
+                block_headers::block_hash.eq(header.block_hash.as_bytes()),
+                block_headers::kernel_merkle_root.eq(header.kernel_merkle_root.as_bytes()),
+                block_headers::validator_node_merkle_root.eq(header.validator_node_merkle_root.as_bytes()),
+            ))
+            .execute(tx.connection())
+            .map_err(|source| SqliteStorageError::DieselError {
+                source,
+                operation: "insert::block_header",
+            })?;
+
+        Ok(())
+    }
+
+    fn get_block_header_by_hash(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        max_epoch: Epoch,
+        block_hash: &FixedHash,
+    ) -> Result<BlockHeaderModel, Self::Error> {
+        use crate::global::schema::block_headers;
+
+        let header = block_headers::table
+            .filter(block_headers::block_hash.eq(block_hash.as_bytes()))
+            .filter(block_headers::epoch.le(max_epoch.as_u64() as i64))
+            .first::<models::BlockHeaderModel>(tx.connection())
+            .map_err(|source| SqliteStorageError::DieselError {
+                source,
+                operation: "get::block_header_by_hash",
+            })?;
+
+        header.try_into()
+    }
+
+    fn get_first_block_header_by_epoch(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        epoch: Epoch,
+    ) -> Result<BlockHeaderModel, Self::Error> {
+        use crate::global::schema::block_headers;
+
+        let header = block_headers::table
+            .filter(block_headers::epoch.eq(epoch.as_u64() as i64))
+            .order_by(block_headers::height.asc())
+            .first::<models::BlockHeaderModel>(tx.connection())
+            .map_err(|source| SqliteStorageError::DieselError {
+                source,
+                operation: "get::first_block_header_by_epoch",
+            })?;
+
+        header.try_into()
     }
 }
 

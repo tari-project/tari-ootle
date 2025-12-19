@@ -26,7 +26,8 @@ import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
-import { Typography, Box, Stack } from "@mui/material";
+import IconButton from "@mui/material/IconButton";
+import { Typography, Box, Stack, Icon, Tooltip } from "@mui/material";
 import { useState } from "react";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import { DataTableCell } from "@components/StyledComponents";
@@ -45,6 +46,8 @@ import {
   Amount,
 } from "@tari-project/typescript-bindings";
 import CopyAddress from "@components/CopyAddress";
+import { IoWalletOutline } from "react-icons/io5";
+import { useNavigate } from "react-router-dom";
 
 interface BalanceRowProps {
   token_symbol: string;
@@ -86,6 +89,7 @@ function BalanceRow({
   onSendClicked,
 }: BalanceRowProps) {
   const showBalance = useAccountStore((state) => state.showBalance);
+  const navigate = useNavigate();
   return (
     <TableRow key={token_symbol || resource_address}>
       <DataTableCell>{vault_address ? <CopyAddress address={vault_address} /> : "--"}</DataTableCell>
@@ -99,13 +103,22 @@ function BalanceRow({
         {showBalance ? bigintToDecimalString(balance, divisibility) + " " + token_symbol : "*************"}
       </DataTableCell>
       <DataTableCell>
-        <ConfidentialBalance
-          show={showBalance}
-          resourceType={resource_type}
-          balance={confidential_balance}
-          divisibility={divisibility}
-          token_symbol={token_symbol}
-        />
+        <Stack direction="row" alignItems="center" gap={1}>
+          <ConfidentialBalance
+            show={showBalance}
+            resourceType={resource_type}
+            balance={confidential_balance}
+            divisibility={divisibility}
+            token_symbol={token_symbol}
+          />
+          {resource_type === "Stealth" && (
+            <Tooltip title="View Stealth UTXOs">
+              <IconButton size="small" onClick={() => navigate(`/stealth-utxos/${resource_address}`)} color="primary">
+                <IoWalletOutline />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Stack>
       </DataTableCell>
       <DataTableCell>
         <Button variant="outlined" onClick={() => onSendClicked?.(resource_address, resource_type)}>
@@ -127,7 +140,7 @@ function Tokens({ account }: { account: Account }) {
     isError: balancesIsError,
     error: balancesError,
     isFetching: balancesIsFetching,
-  } = useAccountsGetBalances(substateIdToString(account.address));
+  } = useAccountsGetBalances(substateIdToString(account.component_address));
 
   const handleSendResourceClicked = (address: ResourceAddress, resource_type: ResourceType) => {
     setResourceToSend({ address, resource_type });
@@ -137,17 +150,19 @@ function Tokens({ account }: { account: Account }) {
 
   return (
     <>
-      <SendMoneyDialog
-        open={resourceToSend !== null}
-        handleClose={() => setResourceToSend(null)}
-        onSendComplete={() => setResourceToSend(null)}
-        resource_address={resourceToSend?.address}
-        resource_type={resourceToSend?.resource_type!}
-        token_symbol={
-          balancesData?.balances.find((b: BalanceEntry) => b.resource_address === resourceToSend?.address)
-            ?.token_symbol || ""
-        }
-      />
+      {resourceToSend == null ? null : (
+        <SendMoneyDialog
+          open={true}
+          handleClose={() => setResourceToSend(null)}
+          onSendComplete={() => setResourceToSend(null)}
+          resource_address={resourceToSend?.address}
+          resource_type={resourceToSend?.resource_type!}
+          token_symbol={
+            balancesData?.balances.find((b: BalanceEntry) => b.resource_address === resourceToSend?.address)
+              ?.token_symbol || ""
+          }
+        />
+      )}
       <FetchStatusCheck
         isError={balancesIsError as boolean}
         errorMessage={(balancesError as { message?: string })?.message || "Error fetching data"}
@@ -189,37 +204,34 @@ function Tokens({ account }: { account: Account }) {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {balancesData?.balances.map(
-                    (
-                      {
-                        resource_address,
-                        balance,
-                        resource_type,
-                        confidential_balance,
-                        token_symbol,
-                        vault_address,
-                        divisibility,
-                      }: BalanceEntry,
-                      i: number,
-                    ) => (
-                      <BalanceRow
-                        key={i}
-                        token_symbol={token_symbol || ""}
-                        resource_address={resource_address}
-                        resource_type={resource_type}
-                        balance={balance}
-                        confidential_balance={confidential_balance}
-                        vault_address={vault_address ?? undefined} // convert null to undefined
-                        divisibility={divisibility}
-                        onSendClicked={
-                          handleSendResourceClicked as (
-                            resource_address: ResourceAddress,
-                            resource_type: ResourceType,
-                          ) => void
-                        }
-                      />
-                    ),
-                  )}
+                  {balancesData?.balances
+                    .filter((b) => BigInt(b.balance) > 0n || BigInt(b.confidential_balance) > 0n)
+                    .map(
+                      (
+                        {
+                          resource_address,
+                          balance,
+                          resource_type,
+                          confidential_balance,
+                          token_symbol,
+                          vault_address,
+                          divisibility,
+                        }: BalanceEntry,
+                        i: number,
+                      ) => (
+                        <BalanceRow
+                          key={i}
+                          token_symbol={token_symbol || ""}
+                          resource_address={resource_address}
+                          resource_type={resource_type}
+                          balance={balance}
+                          confidential_balance={confidential_balance}
+                          vault_address={vault_address ?? undefined} // convert null to undefined
+                          divisibility={divisibility}
+                          onSendClicked={handleSendResourceClicked}
+                        />
+                      ),
+                    )}
                 </TableBody>
               </Table>
             </TableContainer>

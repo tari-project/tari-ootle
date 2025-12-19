@@ -2,9 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{HashMap, HashSet},
-    fs::File,
-    net::SocketAddr,
+    collections::HashMap,
     path::PathBuf,
     pin::pin,
     time::{Duration, Instant},
@@ -14,18 +12,12 @@ use anyhow::{anyhow, Context};
 use futures::future::Either;
 use log::{debug, info};
 use minotari_wallet_grpc_client::grpc;
-use tari_common_types::types::FixedHash;
-use tari_engine::wasm::WasmModule;
-use tari_engine_types::calculate_template_binary_hash;
 use tari_ootle_app_utilities::configuration::convert_network_to_l1_network;
 use tari_ootle_common_types::Network;
 use tari_shutdown::ShutdownSignal;
-use tari_template_lib_types::TemplateAddress;
 use tari_transaction_components::consensus::NetworkConsensus;
-use tari_validator_node_client::types::{AddPeerRequest, GetTemplatesRequest};
-use tari_wallet_daemon_client::types::ExtClaimBurnProof;
+use tari_validator_node_client::types::AddPeerRequest;
 use tokio::{sync::mpsc, time, time::sleep};
-use url::Url;
 
 use crate::{
     config::{Config, InstanceType},
@@ -35,8 +27,8 @@ use crate::{
         handle::{ProcessManagerHandle, ProcessManagerRequest},
         instances::InstanceManager,
         InstanceId,
+        MinoTariWalletProcess,
         MinotariNodeDetails,
-        TemplateData,
     },
 };
 
@@ -46,10 +38,7 @@ pub struct ProcessManager {
     rx_request: mpsc::Receiver<ProcessManagerRequest>,
     shutdown_signal: ShutdownSignal,
     skip_registration: bool,
-    disable_template_auto_register: bool,
     enable_manual_connect: bool,
-    base_dir: PathBuf,
-    web_server_port: u16,
     network: Network,
 }
 
@@ -76,13 +65,7 @@ impl ProcessManager {
             ),
             rx_request,
             shutdown_signal,
-            disable_template_auto_register: !config.auto_register_previous_templates,
             enable_manual_connect: config.enable_manual_validator_connect,
-            base_dir: config.base_dir.clone(),
-            web_server_port: match config.webserver.bind_address {
-                SocketAddr::V4(addr) => addr.port(),
-                SocketAddr::V6(addr) => addr.port(),
-            },
             network: config.network,
         };
         (this, ProcessManagerHandle::new(tx_request))
@@ -137,8 +120,22 @@ impl ProcessManager {
 
     async fn register_nodes_and_templates_as_required(
         &mut self,
-        layer_one_transaction_service: &mut LayerOneTransactionService,
+        layer_one_transaction_service: Option<&mut LayerOneTransactionService>,
     ) -> anyhow::Result<()> {
+        if self.skip_registration {
+            return Ok(());
+        }
+
+        let layer_one_transaction_service = match layer_one_transaction_service {
+            Some(service) => service,
+            None => {
+                return Err(anyhow!(
+                    "No MinotariConsoleWallet available. Please start a wallet before registering validator nodes and \
+                     templates or use --skip-registration flag to skip this.",
+                ))
+            },
+        };
+
         // Add the watchers
         for vn in self.instance_manager.validator_nodes() {
             let l1_tx_path = vn.layer_one_transaction_path();
@@ -146,35 +143,7 @@ impl ProcessManager {
             layer_one_transaction_service.add_watch(l1_tx_path);
         }
 
-        if self.skip_registration {
-            return Ok(());
-        }
-        let mut templates_to_register = vec![];
-        if !self.disable_template_auto_register {
-            let registered_templates = self.registered_templates().await?;
-            let registered_template_names = registered_templates
-                .iter()
-                .map(|template_data| template_data.name.as_str())
-                .collect::<HashSet<_>>();
-            let fs_templates = self.file_system_templates().await?;
-            for template_data in fs_templates
-                .iter()
-                .filter(|fs_template_data| !registered_template_names.contains(fs_template_data.name.as_str()))
-            {
-                info!(
-                    "🟡 Register missing template from local file system: {}",
-                    template_data.name
-                );
-                templates_to_register.push(TemplateData {
-                    name: template_data.name.clone(),
-                    version: template_data.version,
-                    contents_hash: template_data.contents_hash,
-                    contents_url: template_data.contents_url.clone(),
-                });
-            }
-        }
-
-        let num_blocks = self.instance_manager.num_validator_nodes() + templates_to_register.len();
+        let num_blocks = self.instance_manager.num_validator_nodes();
 
         if num_blocks > 0 {
             // Mine some initial funds, guessing 10 blocks extra is sufficient for coinbase maturity
@@ -186,9 +155,6 @@ impl ProcessManager {
             self.register_all_validator_nodes()
                 .await
                 .context("registering validator node via GRPC")?;
-            for templates in templates_to_register {
-                self.register_template(templates).await?;
-            }
 
             // We need to process these now so that we can automatically mine once the transactions are submitted
             let num_validator_nodes = self.instance_manager.num_validator_nodes();
@@ -225,60 +191,6 @@ impl ProcessManager {
         }
 
         Ok(())
-    }
-
-    /// Loads all the file system templates from the standard `<BASE_DIR>/templates` dir.
-    async fn file_system_templates(&self) -> anyhow::Result<Vec<TemplateData>> {
-        let templates_dir = self.base_dir.join("templates");
-        let mut templates_dir_content = tokio::fs::read_dir(templates_dir).await?;
-        let mut result = vec![];
-        while let Some(dir_entry) = templates_dir_content.next_entry().await? {
-            if dir_entry.path().is_file() {
-                if let Some(extension) = dir_entry.path().extension() {
-                    if extension == "wasm" {
-                        let file_name = dir_entry.file_name();
-                        let file_name = file_name.to_str().unwrap();
-                        let file_content = tokio::fs::read(dir_entry.path()).await?;
-                        let loaded = WasmModule::load_template_from_code(file_content.as_slice())?;
-                        let name = loaded.template_def().template_name().to_string();
-                        let hash = calculate_template_binary_hash(&file_content);
-                        result.push(TemplateData {
-                            name,
-                            version: 0,
-                            contents_hash: hash,
-                            contents_url: Some(Url::parse(
-                                format!("http://localhost:{}/templates/{}", self.web_server_port, file_name).as_str(),
-                            )?),
-                        })
-                    }
-                }
-            }
-        }
-
-        Ok(result)
-    }
-
-    /// Loads all already registered templates.
-    async fn registered_templates(&self) -> anyhow::Result<Vec<TemplateData>> {
-        let process = self.instance_manager.validator_nodes().next().ok_or_else(|| {
-            anyhow!(
-                "No MinoTariConsoleWallet instances found. Please start a wallet before trying to get active templates"
-            )
-        })?;
-
-        let mut client = process.connect_client()?;
-        Ok(client
-            .get_active_templates(GetTemplatesRequest { limit: 10_000 })
-            .await?
-            .templates
-            .iter()
-            .map(|metadata| TemplateData {
-                name: metadata.name.clone(),
-                version: 0,
-                contents_hash: FixedHash::try_from(metadata.binary_sha.as_slice()).unwrap_or_default(),
-                contents_url: None,
-            })
-            .collect())
     }
 
     fn check_instances_running(&mut self) -> anyhow::Result<()> {
@@ -350,8 +262,6 @@ impl ProcessManager {
             }
         }
 
-        let mut layer_one_transaction_service = self.create_layer_one_transaction_service().await?;
-
         if self.enable_manual_connect {
             {
                 info!("Connecting all validator nodes manually");
@@ -368,8 +278,10 @@ impl ProcessManager {
             }
         }
 
+        let mut layer_one_transaction_service = self.create_layer_one_transaction_service().await?;
+
         {
-            let fut = pin!(self.register_nodes_and_templates_as_required(&mut layer_one_transaction_service));
+            let fut = pin!(self.register_nodes_and_templates_as_required(layer_one_transaction_service.as_mut()));
             match shutdown_signal.clone().select(fut).await {
                 Either::Left(_) => {
                     info!("Shutting down process manager");
@@ -389,13 +301,13 @@ impl ProcessManager {
         loop {
             tokio::select! {
                 Some(req) = self.rx_request.recv() => {
-                    if let Err(err) = self.handle_request(req, &mut layer_one_transaction_service).await {
+                    if let Err(err) = self.handle_request(req, layer_one_transaction_service.as_mut()).await {
                         log::error!("Error handling request: {:?}", err);
                     }
                 },
 
                 _ = interval.tick() => {
-                    if let Err(err) = self.on_tick(&mut layer_one_transaction_service).await {
+                    if let Err(err) = self.on_tick(layer_one_transaction_service.as_mut()).await {
                         log::error!("(on_tick) Error: {:?}", err);
                     }
                 },
@@ -410,8 +322,16 @@ impl ProcessManager {
         Ok(())
     }
 
-    async fn on_tick(&mut self, layer_one_transaction_service: &mut LayerOneTransactionService) -> anyhow::Result<()> {
+    async fn on_tick(
+        &mut self,
+        layer_one_transaction_service: Option<&mut LayerOneTransactionService>,
+    ) -> anyhow::Result<()> {
         self.clear_terminated_instances()?;
+
+        let Some(layer_one_transaction_service) = layer_one_transaction_service else {
+            debug!("🫙 No MinotariConsoleWallet available. Skipping layer one transaction processing");
+            return Ok(());
+        };
 
         // Check for layer one transactions
         let processed = layer_one_transaction_service.process_any().await?;
@@ -429,22 +349,22 @@ impl ProcessManager {
         Ok(())
     }
 
-    async fn create_layer_one_transaction_service(&self) -> anyhow::Result<LayerOneTransactionService> {
-        let wallet = self
-            .instance_manager
-            .minotari_wallets()
-            .next()
-            .ok_or_else(|| anyhow!("No MinoTariConsoleWallet instances found"))?;
+    async fn create_layer_one_transaction_service(&self) -> anyhow::Result<Option<LayerOneTransactionService>> {
+        let wallet = self.instance_manager.minotari_wallets().next();
+        let Some(wallet) = wallet else {
+            return Ok(None);
+        };
+
         let client = wallet.connect_client().await?;
         let service = LayerOneTransactionService::init(client)?;
-        Ok(service)
+        Ok(Some(service))
     }
 
     #[allow(clippy::too_many_lines)]
     async fn handle_request(
         &mut self,
         req: ProcessManagerRequest,
-        layer_one_transaction_service: &mut LayerOneTransactionService,
+        layer_one_transaction_service: Option<&mut LayerOneTransactionService>,
     ) -> anyhow::Result<()> {
         use ProcessManagerRequest::*;
         match req {
@@ -530,19 +450,20 @@ impl ProcessManager {
                     log::warn!("Request cancelled before response could be sent")
                 }
             },
-            RegisterTemplate { data, reply } => {
-                if let Err(err) = self.register_template(data).await {
-                    if reply.send(Err(err)).is_err() {
-                        log::warn!("Request cancelled before response could be sent")
-                    }
-                } else {
-                    let result = self.mine(10).await;
-                    if reply.send(result).is_err() {
-                        log::warn!("Request cancelled before response could be sent")
-                    }
-                }
-            },
+
             RegisterValidatorNode { instance_id, reply } => {
+                let Some(layer_one_transaction_service) = layer_one_transaction_service else {
+                    if reply
+                        .send(Err(anyhow!(
+                            "No MinotariConsoleWallet available. Please start a wallet before registering validator \
+                             nodes",
+                        )))
+                        .is_err()
+                    {
+                        log::warn!("Request cancelled before response could be sent")
+                    }
+                    return Ok(());
+                };
                 let result = self
                     .register_validator_node(instance_id, layer_one_transaction_service)
                     .await;
@@ -611,15 +532,19 @@ impl ProcessManager {
             .next()
             .ok_or_else(|| anyhow!("No MinoTariConsoleWallet instances found"))?;
 
-        let proof = wallet.burn_funds(amount, claim_public_key).await?;
+        let burn_resp = wallet.burn_funds(amount, claim_public_key).await?;
 
-        let file_name = PathBuf::from(format!("burn_proof-{}.json", proof.tx_id));
+        let file_name = PathBuf::from(format!("burn_proof-{}.json", burn_resp.tx_id));
+
+        let client = wallet.connect_client().await?;
         let path = out_path.join(&file_name);
-        let mut file = File::create(path)?;
-        serde_json::to_writer_pretty(&mut file, &ExtClaimBurnProof {
-            claim_proof: proof.claim_proof,
-            owner_nonce_key_index: nonce_key_index,
-        })?;
+        tokio::spawn(MinoTariWalletProcess::wait_for_claim_burn_proof_task(
+            client,
+            path,
+            burn_resp.commitment,
+            amount,
+            nonce_key_index,
+        ));
 
         info!("🔥 Burned {amount} Tari to account {account_name}");
         Ok(file_name)
@@ -755,42 +680,6 @@ impl ProcessManager {
         if !status.success() {
             return Err(anyhow!("Failed to mine blocks. Process exited with {status}"));
         }
-
-        Ok(())
-    }
-
-    async fn register_template(&mut self, data: TemplateData) -> anyhow::Result<()> {
-        let wallet = self.instance_manager.minotari_wallets().next().ok_or_else(|| {
-            anyhow!("No MinoTariConsoleWallet instances found. Please start a wallet before uploading a template")
-        })?;
-
-        let mut client = wallet.connect_client().await?;
-        let resp = client
-            .create_template_registration(grpc::CreateTemplateRegistrationRequest {
-                fee_per_gram: 10,
-                template_name: data.name,
-                template_version: data.version,
-                template_type: Some(grpc::TemplateType {
-                    template_type: Some(grpc::template_type::TemplateType::Wasm(grpc::WasmInfo {
-                        abi_version: 0,
-                    })),
-                }),
-                build_info: Some(grpc::BuildInfo {
-                    repo_url: "".to_string(),
-                    commit_hash: vec![],
-                }),
-                binary_sha: data.contents_hash.to_vec(),
-                binary_url: data
-                    .contents_url
-                    .ok_or(anyhow!("WASM download URL is missing!"))?
-                    .to_string(),
-                sidechain_deployment_key: vec![],
-            })
-            .await?
-            .into_inner();
-        let template_address = TemplateAddress::try_from_slice(&resp.template_address)
-            .map_err(|e| anyhow!("Invalid template_address returned by wallet: {e}"))?;
-        info!("🟢 Registered template {template_address}.");
 
         Ok(())
     }

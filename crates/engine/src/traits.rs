@@ -20,8 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_engine_types::instruction_result::InstructionResult;
+use tari_engine_types::{confidential::MinotariBurnClaimProof, instruction_result::InstructionResult};
+use tari_ootle_common_types::Epoch;
 use tari_template_abi::FunctionDef;
+use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 
 pub trait Invokable<S> {
     type Error;
@@ -32,4 +34,19 @@ pub trait Invokable<S> {
         def: &FunctionDef,
         args: Vec<tari_bor::Value>,
     ) -> Result<InstructionResult, Self::Error>;
+}
+
+/// Verifier for claim proofs (MinotariBurnClaimProof).
+///
+/// Implementors of this trait should provide the logic to verify the authenticity and validity of the claim proof.
+/// If the claim proof is invalid, the failure reason should be returned.
+///
+/// NOTE: This trait must be deterministic, as it is used in consensus-critical code paths.
+pub trait ClaimProofVerifier {
+    fn verify_claim_proof(
+        &self,
+        epoch: Epoch,
+        claimant: &RistrettoPublicKeyBytes,
+        claim: &MinotariBurnClaimProof,
+    ) -> Result<(), String>;
 }

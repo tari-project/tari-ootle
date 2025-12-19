@@ -7,8 +7,6 @@ mod handler;
 mod rpc;
 mod server;
 
-mod templates;
-
 use std::future::Future;
 
 use context::HandlerContext;

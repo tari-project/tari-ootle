@@ -17,7 +17,6 @@ tari_ootle_storage_sqlite = { workspace = true }
 tari_engine_types = { workspace = true }
 tari_epoch_manager = { workspace = true }
 tari_template_lib = { workspace = true }
-tari_utilities = { workspace = true }
 tari_hashing = { workspace = true }
 
 anyhow = { workspace = true }

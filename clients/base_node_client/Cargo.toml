@@ -22,7 +22,6 @@ thiserror = { workspace = true }
 tonic = { workspace = true }
 futures-util = { workspace = true }
 ts-rs = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["sync"] }
 url = { workspace = true }
 
 [features]
